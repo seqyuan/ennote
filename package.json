@@ -1,0 +1,56 @@
+{
+  "name": "@seqyuan/ennote",
+  "version": "0.1.0",
+  "description": "AI-native bioinformatics agent workspace",
+  "license": "MIT",
+  "bin": {
+    "ennote": "bin/ennote.js"
+  },
+  "files": [
+    "bin",
+    "out",
+    "worker"
+  ],
+  "scripts": {
+    "dev": "make dev",
+    "build:web": "next build",
+    "build:go": "cd ennoworker && go build -o ennogate ./cmd/ennogate && go build -o ennoworker ./cmd/ennoworker",
+    "build": "npm run build:web && npm run build:go",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:go": "cd ennoworker && go test ./...",
+    "test:e2e": "playwright test",
+    "generate:api": "openapi-typescript contracts/openapi.yaml -o lib/worker-api.gen.ts",
+    "release:build-worker": "node scripts/build-workers.mjs",
+    "release:prepare": "npm run build:web && npm run release:build-worker && npm run pack:check",
+    "pack:check": "node scripts/check-npm-pack.mjs",
+    "smoke:installed": "node scripts/smoke-installed-package.mjs"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "lucide-react": "^1.27.0",
+    "next": "16.2.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^22.20.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.2.1",
+    "openapi-typescript": "^7.10.1",
+    "postcss": "^8.5.25",
+    "shiki": "^4.3.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}

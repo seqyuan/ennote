@@ -1,0 +1,117 @@
+package providerdoctor
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/llm"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+type providerStoreStub struct{ profile *domain.ProviderProfile }
+
+func (s providerStoreStub) FindByID(context.Context, string) (*domain.ProviderProfile, error) {
+	return s.profile, nil
+}
+
+type modelStoreStub struct {
+	model *domain.ModelProfile
+	byID  *domain.ModelProfile
+}
+
+func (s modelStoreStub) FindByID(context.Context, string) (*domain.ModelProfile, error) {
+	return s.byID, nil
+}
+func (s modelStoreStub) FirstByProvider(context.Context, string) (*domain.ModelProfile, error) {
+	return s.model, nil
+}
+
+func TestDoctorCompletesMinimalGeneration(t *testing.T) {
+	var receivedAuthorization string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuthorization = r.Header.Get("Authorization")
+		assert.Equal(t, "/v1/chat/completions", r.URL.Path)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"id\":\"probe\",\"model\":\"test-model\",\"choices\":[{\"delta\":{\"content\":\"OK\"},\"finish_reason\":null}]}\n\n")
+		fmt.Fprint(w, "data: {\"id\":\"probe\",\"model\":\"test-model\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	service := testService(server.URL + "/v1")
+	diagnostic, err := service.Diagnose(context.Background(), "provider", "")
+	require.NoError(t, err)
+	assert.Equal(t, "ready", diagnostic.Status)
+	assert.Equal(t, "model", diagnostic.ModelProfileID)
+	assert.Nil(t, diagnostic.Failure)
+	require.Len(t, diagnostic.Stages, 4)
+	assert.Equal(t, "generation", diagnostic.Stages[3].Name)
+	assert.Equal(t, "passed", diagnostic.Stages[3].Status)
+	assert.Equal(t, "Bearer secret", receivedAuthorization)
+}
+
+func TestDoctorClassifiesProviderFailureSafely(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("x-request-id", "req-doctor")
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"error":{"message":"credential secret was rejected","code":"invalid_api_key"}}`)
+	}))
+	defer server.Close()
+
+	service := testService(server.URL)
+	diagnostic, err := service.Diagnose(context.Background(), "provider", "")
+	require.NoError(t, err)
+	assert.Equal(t, "failed", diagnostic.Status)
+	require.NotNil(t, diagnostic.Failure)
+	assert.Equal(t, domain.ProviderFailureAuthentication, diagnostic.Failure.Category)
+	assert.Equal(t, "req-doctor", diagnostic.Failure.RequestID)
+	assert.NotContains(t, diagnostic.Failure.Message, "secret")
+}
+
+func TestDoctorReportsCredentialAndModelConfigurationFailures(t *testing.T) {
+	service := testService("https://provider.test")
+	service.Credentials.LookupEnv = func(string) (string, bool) { return "", false }
+	diagnostic, err := service.Diagnose(context.Background(), "provider", "")
+	require.NoError(t, err)
+	require.NotNil(t, diagnostic.Failure)
+	assert.Equal(t, domain.ProviderFailureCredentialUnavailable, diagnostic.Failure.Category)
+	require.Len(t, diagnostic.Stages, 2)
+
+	service = testService("https://provider.test")
+	service.Models = modelStoreStub{byID: &domain.ModelProfile{ID: "other", ProviderID: "other-provider"}}
+	_, err = service.Diagnose(context.Background(), "provider", "other")
+	assert.ErrorIs(t, err, ErrModelMismatch)
+}
+
+func TestDoctorBoundsProbeTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		w.WriteHeader(http.StatusGatewayTimeout)
+	}))
+	defer server.Close()
+	service := testService(server.URL)
+	service.Timeout = 20 * time.Millisecond
+	diagnostic, err := service.Diagnose(context.Background(), "provider", "")
+	require.NoError(t, err)
+	require.NotNil(t, diagnostic.Failure)
+	assert.Equal(t, domain.ProviderFailureTimeout, diagnostic.Failure.Category)
+	assert.True(t, diagnostic.Failure.Retryable)
+}
+
+func testService(baseURL string) *Service {
+	return &Service{
+		Providers: providerStoreStub{profile: &domain.ProviderProfile{ID: "provider", ProviderType: domain.ProviderOpenAICompatible,
+			BaseURL: baseURL, CredentialRef: "env:TEST_KEY", Status: "active"}},
+		Models: modelStoreStub{model: &domain.ModelProfile{ID: "model", ProviderID: "provider", ModelName: "test-model", MaxOutputTokens: 100}},
+		Credentials: llm.CredentialResolver{LookupEnv: func(name string) (string, bool) {
+			return "secret", name == "TEST_KEY"
+		}},
+		Timeout: time.Second,
+	}
+}

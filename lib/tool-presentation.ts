@@ -1,0 +1,102 @@
+export type DisplayRiskClass = "read_only" | "local_write" | "shell" | "external" | "sensitive";
+export type ToolActivityState = "pending" | "running" | "completed" | "failed" | "rejected" | "interrupted";
+
+const readOnlyTools = new Set(["read", "ls", "list", "grep", "search", "find", "search_compacted_history"]);
+const writeTools = new Set(["write", "edit", "publish_artifact"]);
+const shellTools = new Set(["bash", "exec"]);
+const externalTools = new Set(["http", "http_request", "fetch", "web_search"]);
+const secretKey = /api[_-]?key|token|secret|password|credential|authorization|cookie/i;
+
+export interface ToolSummary {
+  label: string;
+  target: string;
+  detail?: string;
+}
+
+export function classifyDisplayRisk(toolName: string): DisplayRiskClass {
+  const name = toolName.toLowerCase();
+  if (readOnlyTools.has(name)) return "read_only";
+  if (writeTools.has(name)) return "local_write";
+  if (shellTools.has(name)) return "shell";
+  if (externalTools.has(name)) return "external";
+  return "sensitive";
+}
+
+export function redactToolArguments(value: unknown, depth = 0): unknown {
+  if (depth > 8) return "[nested value omitted]";
+  if (Array.isArray(value)) return value.slice(0, 50).map(item => redactToolArguments(item, depth + 1));
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 80).map(([key, item]) => [
+    key,
+    secretKey.test(key) ? "[redacted]" : redactToolArguments(item, depth + 1),
+  ]));
+}
+
+export function summarizeToolCall(toolName: string, rawArguments: unknown): ToolSummary {
+  const args = objectArguments(redactToolArguments(rawArguments));
+  const path = stringValue(args.path ?? args.filePath ?? args.directory ?? args.cwd);
+  switch (toolName.toLowerCase()) {
+    case "read": {
+      const offset = numberValue(args.offset);
+      const limit = numberValue(args.limit);
+      const detail = offset !== undefined && limit !== undefined ? `lines ${offset}-${offset + limit - 1}` : undefined;
+      return { label: "Read file", target: path || "Workspace file", detail };
+    }
+    case "ls":
+    case "list":
+      return { label: "List directory", target: path || "Workspace" };
+    case "grep":
+    case "search":
+      return { label: "Search text", target: stringValue(args.query ?? args.pattern) || "Search", detail: path || undefined };
+    case "find":
+      return { label: "Find files", target: stringValue(args.pattern ?? args.name) || "Files", detail: path || undefined };
+    case "write":
+      return { label: "Write file", target: path || "Workspace file", detail: contentSize(args.content) };
+    case "edit":
+      return { label: "Edit file", target: path || "Workspace file", detail: contentSize(args.newText ?? args.replacement) };
+    case "publish_artifact":
+      return { label: "Publish artifact", target: stringValue(args.name) || path || "Workspace file" };
+    case "bash":
+    case "exec":
+      return { label: "Run command", target: oneLine(stringValue(args.command ?? args.cmd) || "Shell command", 180), detail: path || undefined };
+    case "http":
+    case "http_request":
+    case "fetch":
+      return { label: "External request", target: oneLine(stringValue(args.url) || "External service", 180) };
+    case "search_compacted_history":
+      return { label: "Search compacted history", target: oneLine(stringValue(args.query) || "Session history", 180) };
+    default:
+      return { label: toolName || "Unknown tool", target: "Sensitive tool call" };
+  }
+}
+
+export function boundedToolOutput(value: string, limit = 4000): string {
+  if (value.length <= limit) return value;
+  return `${value.slice(0, limit)}\n[${value.length - limit} characters omitted]`;
+}
+
+export function defaultToolExpanded(risk: DisplayRiskClass, state: ToolActivityState): boolean {
+  if (state !== "completed") return true;
+  return risk !== "read_only";
+}
+
+function objectArguments(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function contentSize(value: unknown): string | undefined {
+  return typeof value === "string" ? `${value.length.toLocaleString()} characters` : undefined;
+}
+
+function oneLine(value: string, limit: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length <= limit ? normalized : `${normalized.slice(0, limit - 1)}…`;
+}

@@ -1,0 +1,1691 @@
+openapi: 3.1.0
+info:
+  title: Ennote ennoworker API
+  version: 0.1.0
+servers:
+  - url: http://127.0.0.1:{port}
+    variables:
+      port:
+        default: "0"
+security:
+  - bearerAuth: []
+paths:
+  /v1/health/live:
+    get:
+      security: []
+      operationId: getLiveness
+      responses:
+        "200":
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthEnvelope"
+  /v1/health/ready:
+    get:
+      security: []
+      operationId: getReadiness
+      responses:
+        "200":
+          description: Worker is ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthEnvelope"
+        "503":
+          $ref: "#/components/responses/Error"
+  /v1/provider-profiles:
+    get:
+      operationId: listProviderProfiles
+      responses:
+        "200":
+          description: Provider profiles
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/ProviderProfile" }
+    post:
+      operationId: createProviderProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, providerType, baseUrl, credentialRef]
+              additionalProperties: false
+              properties:
+                name: { type: string, minLength: 1 }
+                providerType: { type: string, enum: [openai-compatible] }
+                baseUrl: { type: string, format: uri }
+                credentialRef: { type: string, pattern: "^(env|file|keyring):" }
+                proxy: { type: string }
+      responses:
+        "201":
+          description: Provider profile created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ProviderProfile" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/provider-profiles/{providerID}/test:
+    parameters:
+      - name: providerID
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: testProviderProfile
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                modelProfileId: { type: string }
+      responses:
+        "200":
+          description: Ephemeral Provider diagnostic result
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ProviderDiagnostic" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/model-profiles:
+    get:
+      operationId: listModelProfiles
+      responses:
+        "200":
+          description: Model profiles, with the explicit global default first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/ModelProfile" }
+    post:
+      operationId: createModelProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [providerId, modelName, contextWindow, maxOutputTokens]
+              additionalProperties: false
+              properties:
+                providerId: { type: string }
+                modelName: { type: string, minLength: 1 }
+                displayName: { type: string }
+                contextWindow: { type: integer, minimum: 1 }
+                maxOutputTokens: { type: integer, minimum: 1 }
+                supportsVision: { type: boolean }
+                supportsToolUse: { type: boolean }
+                supportsThinking: { type: boolean }
+                isDefault: { type: boolean }
+      responses:
+        "201":
+          description: Model profile created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ModelProfile" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/model-profiles/{modelID}/default:
+    parameters:
+      - name: modelID
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      operationId: setDefaultModelProfile
+      responses:
+        "200":
+          description: Explicit global default model profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ModelProfile" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/policy-profiles:
+    get:
+      operationId: listPolicyProfiles
+      parameters:
+        - name: kind
+          in: query
+          schema: { type: string, enum: [tool, turn, vision, compaction] }
+      responses:
+        "200":
+          description: Versioned policy profiles
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/PolicyProfile" }
+    post:
+      operationId: createPolicyProfileVersion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, kind, config]
+              additionalProperties: false
+              properties:
+                name: { type: string, minLength: 1 }
+                kind: { type: string, enum: [tool, turn, vision, compaction] }
+                config: { type: object, additionalProperties: true }
+      responses:
+        "201":
+          description: Policy profile version created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/PolicyProfile" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/policy-profiles/{policyID}/default:
+    parameters:
+      - name: policyID
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      operationId: setDefaultPolicyProfile
+      responses:
+        "200":
+          description: Global default policy for its kind
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/PolicyProfile" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/policy-profiles/{policyID}:
+    parameters:
+      - name: policyID
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      operationId: deactivatePolicyProfile
+      responses:
+        "204": { description: Policy profile deactivated }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/projects:
+    get:
+      operationId: listProjects
+      responses:
+        "200":
+          description: Projects
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Project"
+    post:
+      operationId: createProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, hostPath]
+              additionalProperties: false
+              properties:
+                name: { type: string, minLength: 1 }
+                description: { type: string }
+                hostPath: { type: string, minLength: 1 }
+      responses:
+        "201":
+          description: Project created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [project, workspace]
+                        properties:
+                          project: { $ref: "#/components/schemas/Project" }
+                          workspace: { $ref: "#/components/schemas/ProjectWorkspace" }
+        "400":
+          $ref: "#/components/responses/Error"
+  /v1/projects/{projectID}/workspace:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: getProjectWorkspace
+      responses:
+        "200":
+          description: Active project workspace
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ProjectWorkspace" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/projects/{projectID}/files:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: listProjectFiles
+      parameters:
+        - name: path
+          in: query
+          description: Project-relative virtual path rooted at /workspace
+          schema: { type: string, default: /workspace }
+      responses:
+        "200":
+          description: Directory entries, with directories first and names sorted case-insensitively
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/WorkspaceFileEntry" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/projects/{projectID}/files/content:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: readProjectFile
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Project-relative virtual file path rooted at /workspace
+          schema: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: File bytes with detected MIME type and Range support
+          headers:
+            X-Content-Type-Options:
+              schema: { type: string, const: nosniff }
+            Cache-Control:
+              schema: { type: string }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "206":
+          description: Requested byte range
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+  /v1/projects/{projectID}/sessions:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: listSessions
+      parameters:
+        - name: status
+          in: query
+          description: Session lifecycle view; defaults to active
+          schema: { type: string, enum: [active, archived], default: active }
+        - name: q
+          in: query
+          description: Case-insensitive literal title substring within the selected Project
+          schema: { type: string, maxLength: 120 }
+      responses:
+        "200":
+          description: Sessions in the requested lifecycle state, ordered by recent update
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/Session" }
+        "400": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                title: { type: string }
+                defaultModelProfileId: { type: string }
+                compactionPolicyProfileId: { type: string }
+      responses:
+        "201":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Session" }
+        "400":
+          $ref: "#/components/responses/Error"
+  /v1/sessions/{sessionID}:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    get:
+      operationId: getSession
+      responses:
+        "200":
+          description: Session
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Session" }
+        "404":
+          $ref: "#/components/responses/Error"
+    patch:
+      operationId: updateSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              additionalProperties: false
+              properties:
+                title: { type: string, minLength: 1, maxLength: 200 }
+                defaultModelProfileId:
+                  oneOf:
+                    - { type: string }
+                    - { type: "null" }
+                compactionPolicyProfileId:
+                  oneOf:
+                    - { type: string }
+                    - { type: "null" }
+      responses:
+        "200":
+          description: Session defaults updated; already frozen runs are unaffected
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Session" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/archive:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    post:
+      operationId: archiveSession
+      responses:
+        "200":
+          description: Active Session archived without changing canonical history
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Session" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/restore:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    post:
+      operationId: restoreSession
+      responses:
+        "200":
+          description: Archived Session restored as active
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Session" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/messages:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    get:
+      operationId: listSessionMessages
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: before
+          in: query
+          description: Opaque cursor returned by the previous page; bound to the current Session and active branch
+          schema: { type: string }
+      responses:
+        "200":
+          description: Canonical messages from the active Session branch, ordered oldest to newest within the page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SessionMessagePage" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/artifacts/{artifactID}:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+      - name: artifactID
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getArtifact
+      responses:
+        "200":
+          description: Session-authorized immutable artifact metadata
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Artifact" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/artifacts/{artifactID}/preview:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+      - name: artifactID
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: previewArtifact
+      parameters:
+        - name: sheet
+          in: query
+          description: Exact XLSX worksheet name; ignored for other artifact kinds
+          schema: { type: string }
+      responses:
+        "200":
+          description: Safe preview selected by the stored artifact kind
+          headers:
+            X-Content-Type-Options:
+              schema: { type: string, const: nosniff }
+            Cache-Control:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        oneOf:
+                          - $ref: "#/components/schemas/TablePreview"
+                          - $ref: "#/components/schemas/TextPreview"
+            text/html:
+              schema: { type: string }
+            image/png:
+              schema: { type: string, format: binary }
+            image/jpeg:
+              schema: { type: string, format: binary }
+            image/gif:
+              schema: { type: string, format: binary }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "415": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/artifacts/{artifactID}/download:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+      - name: artifactID
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: downloadArtifact
+      responses:
+        "200":
+          description: Original immutable artifact bytes served as an attachment
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+            X-Content-Type-Options:
+              schema: { type: string, const: nosniff }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/branches:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    get:
+      operationId: listSessionBranches
+      responses:
+        "200":
+          description: Stable branch identities for this Session
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/SessionBranch" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createSessionBranch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fromMessageId]
+              additionalProperties: false
+              properties:
+                fromMessageId: { type: string, minLength: 1 }
+                label: { type: string, maxLength: 120 }
+      responses:
+        "201":
+          description: Branch created from the active lineage and activated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/BranchNavigation" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/branches/{branchID}/activate:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+      - name: branchID
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: activateSessionBranch
+      responses:
+        "200":
+          description: Existing branch activated without rewriting messages
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/BranchNavigation" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/recovery:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    get:
+      operationId: getSessionRecovery
+      responses:
+        "200":
+          description: Latest active-lineage failed or interrupted Run recovery state, or null
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        oneOf:
+                          - $ref: "#/components/schemas/RunRecovery"
+                          - type: "null"
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/active-run:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    get:
+      operationId: getSessionActiveRun
+      responses:
+        "200":
+          description: Current non-terminal Run and its pending approval, or null
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        oneOf:
+                          - $ref: "#/components/schemas/ActiveRunState"
+                          - type: "null"
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/projects/{projectID}/attachments/images:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    post:
+      operationId: uploadImageAttachment
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [sessionId, file]
+              properties:
+                sessionId: { type: string }
+                file: { type: string, format: binary }
+      responses:
+        "201":
+          description: Managed image artifact
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ImageArtifact" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/turns:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    post:
+      operationId: submitTurn
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              anyOf:
+                - required: [text]
+                - required: [content]
+              properties:
+                text: { type: string, minLength: 1 }
+                content:
+                  type: array
+                  minItems: 1
+                  items: { $ref: "#/components/schemas/TurnContentPart" }
+                baseMessageId: { type: string }
+                config:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    modelProfileId: { type: string }
+                    candidateModelProfileIds: { type: array, items: { type: string } }
+                    allowAutoRoute: { type: boolean }
+                    toolPolicyProfileId: { type: string }
+                    turnPolicyProfileId: { type: string }
+                    visionPolicyProfileId: { type: string }
+                    compactionPolicyProfileId: { type: string }
+                    maxIterations: { type: integer, minimum: 1 }
+                    toolExecution: { type: string, enum: [sequential, safe_parallel] }
+                    maxConcurrentReadTools: { type: integer, minimum: 1 }
+      responses:
+        "202":
+          description: Turn accepted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TurnSubmission" }
+        "200":
+          description: Existing idempotent submission
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TurnSubmission" }
+        "409":
+          $ref: "#/components/responses/Error"
+  /v1/sessions/{sessionID}/compactions:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    post:
+      operationId: createContextCompaction
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [baseMessageId]
+              additionalProperties: false
+              properties:
+                baseMessageId: { type: string }
+                clientRequestId: { type: string }
+                instructions: { type: string, maxLength: 4000 }
+      responses:
+        "202":
+          description: Manual context compaction accepted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/CompactionSubmission" }
+        "200":
+          description: Existing idempotent submission
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/CompactionSubmission" }
+        "409": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: listContextCompactions
+      responses:
+        "200":
+          description: Session context checkpoints
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/ContextCompaction" }
+  /v1/compactions/{compactionID}:
+    parameters:
+      - name: compactionID
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getContextCompaction
+      responses:
+        "200":
+          description: Context checkpoint detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ContextCompaction" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/runs/{runID}:
+    parameters:
+      - $ref: "#/components/parameters/RunID"
+    get:
+      operationId: getRun
+      responses:
+        "200":
+          description: Run
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentRun" }
+        "404":
+          $ref: "#/components/responses/Error"
+  /v1/runs/{runID}/retry:
+    parameters:
+      - $ref: "#/components/parameters/RunID"
+    post:
+      operationId: retryRun
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                clientRequestId: { type: string }
+      responses:
+        "202":
+          description: Safe retry attempt created and queued
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/RunRetrySubmission" }
+        "200":
+          description: Existing idempotent retry submission
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/RunRetrySubmission" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/runs/{runID}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/RunID"
+    post:
+      operationId: cancelRun
+      responses:
+        "200":
+          description: Run cancelled or already terminal
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentRun" }
+        "404":
+          $ref: "#/components/responses/Error"
+  /v1/runs/{runID}/inputs:
+    parameters:
+      - $ref: "#/components/parameters/RunID"
+    post:
+      operationId: queueRunInput
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, text]
+              additionalProperties: false
+              properties:
+                kind: { type: string, enum: [steer, follow_up] }
+                text: { type: string, minLength: 1 }
+                clientRequestId: { type: string }
+      responses:
+        "202":
+          description: Input queued
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/QueuedInput" }
+        "409":
+          $ref: "#/components/responses/Error"
+  /v1/approval-requests/{approvalID}/decision:
+    parameters:
+      - name: approvalID
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: decideToolApproval
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              additionalProperties: false
+              properties:
+                decision: { type: string, enum: [approved, rejected] }
+                clientRequestId: { type: string }
+      responses:
+        "200":
+          description: Approval decision stored
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ToolApprovalRequest" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/runs/{runID}/events:
+    parameters:
+      - $ref: "#/components/parameters/RunID"
+      - name: after
+        in: query
+        schema: { type: integer, format: int64, minimum: 0 }
+      - name: Last-Event-ID
+        in: header
+        schema: { type: string }
+    get:
+      operationId: streamRunEvents
+      responses:
+        "200":
+          description: Replayable server-sent event stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "404":
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    ProjectID:
+      name: projectID
+      in: path
+      required: true
+      schema: { type: string }
+    SessionID:
+      name: sessionID
+      in: path
+      required: true
+      schema: { type: string }
+    RunID:
+      name: runID
+      in: path
+      required: true
+      schema: { type: string }
+  responses:
+    Error:
+      description: Error response
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+  schemas:
+    Envelope:
+      type: object
+      properties:
+        data: {}
+    HealthEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [status]
+          properties:
+            status: { type: string, enum: [live, ready] }
+            sandbox: { type: string }
+            degraded: { type: boolean }
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId, retryable]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            requestId: { type: string }
+            retryable: { type: boolean }
+    ProviderProfile:
+      type: object
+      required: [id, name, providerType, baseUrl, credentialRef, status, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        providerType: { type: string, enum: [openai-compatible] }
+        baseUrl: { type: string, format: uri }
+        credentialRef: { type: string }
+        proxy: { type: string }
+        status: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ProviderDiagnosticStage:
+      type: object
+      required: [name, status, message, latencyMs]
+      properties:
+        name: { type: string, enum: [configuration, credentials, model, generation] }
+        status: { type: string, enum: [passed, failed] }
+        message: { type: string }
+        latencyMs: { type: integer, format: int64, minimum: 0 }
+    ProviderFailure:
+      type: object
+      required: [category, message, retryable]
+      properties:
+        category:
+          type: string
+          enum:
+            - configuration_invalid
+            - credential_unavailable
+            - endpoint_unreachable
+            - authentication_failed
+            - model_not_found
+            - rate_limited
+            - request_timeout
+            - context_overflow
+            - malformed_response
+            - provider_internal_error
+            - request_rejected
+            - cancelled
+            - unknown
+        message: { type: string }
+        retryable: { type: boolean }
+        requestId: { type: string }
+    ProviderDiagnostic:
+      type: object
+      required: [providerId, status, stages, latencyMs, testedAt]
+      properties:
+        providerId: { type: string }
+        modelProfileId: { type: string }
+        modelName: { type: string }
+        status: { type: string, enum: [ready, failed] }
+        failure: { $ref: "#/components/schemas/ProviderFailure" }
+        stages:
+          type: array
+          items: { $ref: "#/components/schemas/ProviderDiagnosticStage" }
+        latencyMs: { type: integer, format: int64, minimum: 0 }
+        testedAt: { type: string, format: date-time }
+    ModelProfile:
+      type: object
+      required: [id, providerId, modelName, displayName, contextWindow, maxOutputTokens, supportsVision, supportsToolUse, supportsThinking, isDefault, status, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        providerId: { type: string }
+        modelName: { type: string }
+        displayName: { type: string }
+        contextWindow: { type: integer }
+        maxOutputTokens: { type: integer }
+        supportsVision: { type: boolean }
+        supportsToolUse: { type: boolean }
+        supportsThinking: { type: boolean }
+        isDefault: { type: boolean }
+        status: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    PolicyProfile:
+      type: object
+      required: [id, name, kind, version, config, status, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [tool, turn, vision, compaction] }
+        version: { type: integer }
+        config: { type: object, additionalProperties: true }
+        status: { type: string, enum: [active, inactive] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ImageArtifact:
+      type: object
+      required: [id, projectId, name, kind, mimeType, sizeBytes, sha256, createdAt]
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        sessionId: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [image, image_attachment] }
+        mimeType: { type: string, enum: [image/png, image/jpeg, image/gif] }
+        sizeBytes: { type: integer, format: int64 }
+        sha256: { type: string }
+        width: { type: integer }
+        height: { type: integer }
+        createdAt: { type: string, format: date-time }
+    ArtifactReference:
+      type: object
+      required: [artifactId, name, kind, mimeType, sizeBytes, sha256]
+      additionalProperties: false
+      properties:
+        artifactId: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [image, table, static_html, text, file] }
+        mimeType: { type: string }
+        sizeBytes: { type: integer, format: int64, minimum: 0 }
+        sha256: { type: string }
+        width: { type: integer, minimum: 1 }
+        height: { type: integer, minimum: 1 }
+    Artifact:
+      type: object
+      required: [id, projectId, name, kind, mimeType, sizeBytes, sha256, retentionClass, createdAt]
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        sessionId: { type: string }
+        messageId: { type: string }
+        runId: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [image, image_attachment, table, static_html, text, file] }
+        mimeType: { type: string }
+        sizeBytes: { type: integer, format: int64, minimum: 0 }
+        sha256: { type: string }
+        width: { type: integer, minimum: 1 }
+        height: { type: integer, minimum: 1 }
+        sourceToolCallId: { type: string }
+        sourceKind: { type: string }
+        retentionClass: { type: string, enum: [project] }
+        createdAt: { type: string, format: date-time }
+    TablePreview:
+      type: object
+      required: [format, columns, rows, truncatedRows, truncatedColumns, rowLimit, columnLimit]
+      additionalProperties: false
+      properties:
+        format: { type: string, enum: [csv, tsv, xlsx] }
+        sheets:
+          type: array
+          items: { type: string }
+        sheet: { type: string }
+        columns:
+          type: array
+          maxItems: 30
+          items: { type: string }
+        rows:
+          type: array
+          maxItems: 100
+          items:
+            type: array
+            maxItems: 30
+            items: { type: string }
+        truncatedRows: { type: boolean }
+        truncatedColumns: { type: boolean }
+        rowLimit: { type: integer, const: 100 }
+        columnLimit: { type: integer, const: 30 }
+    TextPreview:
+      type: object
+      required: [text, truncated]
+      additionalProperties: false
+      properties:
+        text: { type: string }
+        truncated: { type: boolean }
+    TurnContentPart:
+      oneOf:
+        - type: object
+          required: [type, text]
+          additionalProperties: false
+          properties:
+            type: { type: string, const: text }
+            text: { type: string, minLength: 1 }
+        - type: object
+          required: [type, artifactId]
+          additionalProperties: false
+          properties:
+            type: { type: string, const: image }
+            artifactId: { type: string }
+    Project:
+      type: object
+      required: [id, name, description, status, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        status: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ProjectWorkspace:
+      type: object
+      required: [id, projectId, kind, hostPath, virtualPath, status, pathFingerprint, createdAt]
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        kind: { type: string, enum: [local] }
+        hostPath: { type: string }
+        virtualPath: { type: string, const: /workspace }
+        status: { type: string }
+        pathFingerprint: { type: string }
+        createdAt: { type: string, format: date-time }
+    WorkspaceFileEntry:
+      type: object
+      required: [name, path, isDir, size, modifiedAt]
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        path: { type: string, pattern: ^/workspace(?:/|$) }
+        isDir: { type: boolean }
+        size: { type: integer, format: int64, minimum: 0 }
+        modifiedAt: { type: string, format: date-time }
+    Session:
+      type: object
+      required: [id, projectId, title, status, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        title: { type: string }
+        status: { type: string, enum: [active, archived] }
+        activeLeafMessageId: { type: string }
+        activeBranchId: { type: string }
+        defaultAgentProfileId: { type: string }
+        defaultModelProfileId: { type: string }
+        compactionPolicyProfileId: { type: string }
+        sourceSessionId: { type: string }
+        sourceMessageId: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    SessionBranch:
+      type: object
+      required: [id, sessionId, label, messageCount, active, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        sessionId: { type: string }
+        parentBranchId: { type: string }
+        forkMessageId: { type: string }
+        leafMessageId: { type: string }
+        label: { type: string }
+        messageCount: { type: integer, minimum: 0 }
+        active: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    BranchNavigation:
+      type: object
+      required: [session, branches]
+      properties:
+        session: { $ref: "#/components/schemas/Session" }
+        branches:
+          type: array
+          items: { $ref: "#/components/schemas/SessionBranch" }
+    SessionMessagePage:
+      type: object
+      required: [messages, hasMore]
+      properties:
+        messages:
+          type: array
+          items: { $ref: "#/components/schemas/Message" }
+        nextCursor: { type: string }
+        hasMore: { type: boolean }
+        activeLeafMessageId: { type: string }
+    Message:
+      type: object
+      required: [id, sessionId, role, status, parts, createdAt]
+      properties:
+        id: { type: string }
+        sessionId: { type: string }
+        parentMessageId: { type: string }
+        role: { type: string, enum: [user, assistant, tool] }
+        status: { type: string }
+        runId: { type: string }
+        parts:
+          type: array
+          items: { $ref: "#/components/schemas/MessageContentBlock" }
+        createdAt: { type: string, format: date-time }
+    MessageContentBlock:
+      oneOf:
+        - $ref: "#/components/schemas/TextContentBlock"
+        - $ref: "#/components/schemas/ThinkingContentBlock"
+        - $ref: "#/components/schemas/ToolCallContentBlock"
+        - $ref: "#/components/schemas/ToolResultContentBlock"
+        - $ref: "#/components/schemas/ImageContentBlock"
+        - $ref: "#/components/schemas/ImageDescriptionContentBlock"
+    TextContentBlock:
+      type: object
+      required: [type, text]
+      additionalProperties: false
+      properties:
+        type: { type: string, const: text }
+        text: { type: string }
+    ThinkingContentBlock:
+      type: object
+      required: [type, text]
+      additionalProperties: false
+      properties:
+        type: { type: string, const: thinking }
+        text: { type: string }
+    ToolCallContentBlock:
+      type: object
+      required: [type, toolCall]
+      additionalProperties: false
+      properties:
+        type: { type: string, const: tool_call }
+        toolCall:
+          type: object
+          required: [id, name, arguments]
+          additionalProperties: false
+          properties:
+            id: { type: string }
+            name: { type: string }
+            arguments: { type: object, additionalProperties: true }
+            argumentsFragment: { type: string }
+            partial: { type: boolean }
+    ToolResultContentBlock:
+      type: object
+      required: [type, toolResult]
+      additionalProperties: false
+      properties:
+        type: { type: string, const: tool_result }
+        toolResult:
+          type: object
+          required: [toolCallId, toolName, content, isError]
+          additionalProperties: false
+          properties:
+            toolCallId: { type: string }
+            toolName: { type: string }
+            content: { type: string }
+            isError: { type: boolean }
+            artifacts:
+              type: array
+              items: { $ref: "#/components/schemas/ArtifactReference" }
+    ImageContentBlock:
+      type: object
+      required: [type, image]
+      additionalProperties: false
+      properties:
+        type: { type: string, const: image }
+        image:
+          type: object
+          required: [artifactId, mimeType, sha256, width, height]
+          additionalProperties: false
+          properties:
+            artifactId: { type: string }
+            mimeType: { type: string }
+            sha256: { type: string }
+            width: { type: integer }
+            height: { type: integer }
+    ImageDescriptionContentBlock:
+      type: object
+      required: [type, imageDescription]
+      additionalProperties: false
+      properties:
+        type: { type: string, const: image_description }
+        imageDescription:
+          type: object
+          required: [artifactId, text, modelId, promptVersion]
+          additionalProperties: false
+          properties:
+            artifactId: { type: string }
+            text: { type: string }
+            modelId: { type: string }
+            promptVersion: { type: string }
+    RunEvent:
+      type: object
+      required: [eventId, runId, seq, type, payload, createdAt]
+      properties:
+        eventId: { type: integer, format: int64 }
+        runId: { type: string }
+        seq: { type: integer, format: int64 }
+        type:
+          type: string
+          enum:
+            - run_queued
+            - run_started
+            - context_warning
+            - context_pruned
+            - context_compaction_planned
+            - context_compaction_started
+            - context_compaction_retry_scheduled
+            - context_compaction_retry_started
+            - context_compaction_completed
+            - context_compaction_failed
+            - context_compaction_cancelled
+            - context_checkpoint_selected
+            - context_checkpoint_invalid
+            - context_overflow_recovery_started
+            - context_overflow_recovery_completed
+            - run_context_compaction_planned
+            - run_context_compaction_started
+            - run_context_compaction_retry_scheduled
+            - run_context_compaction_completed
+            - run_context_compaction_failed
+            - run_context_compaction_cancelled
+            - model_route_selected
+            - model_call_started
+            - vision_fallback_started
+            - vision_description_delta
+            - vision_fallback_attempt_failed
+            - vision_fallback_completed
+            - vision_fallback_failed
+            - model_call_attempt_failed
+            - model_call_retry_scheduled
+            - text_delta
+            - thinking_delta
+            - tool_call_delta
+            - usage_updated
+            - model_call_completed
+            - model_call_failed
+            - output_truncated
+            - tool_call_started
+            - tool_call_completed
+            - tool_call_failed
+            - tool_call_skipped
+            - tool_policy_denied
+            - tool_policy_terminated
+            - tool_result_projected
+            - approval_requested
+            - approval_resolved
+            - turn_stop_requested
+            - stuck_tool_loop
+            - message_committed
+            - run_succeeded
+            - run_failed
+            - run_cancelled
+            - run_interrupted
+        payload: { type: object, additionalProperties: true }
+        createdAt: { type: string, format: date-time }
+    AgentRun:
+      type: object
+      required: [id, sessionId, runKind, attempt, status, requestedConfig, effectiveConfig, createdAt]
+      properties:
+        id: { type: string }
+        turnId: { type: string }
+        sessionId: { type: string }
+        runKind: { type: string, enum: [agent, context_compaction] }
+        baseMessageId: { type: string }
+        attempt: { type: integer }
+        status: { type: string, enum: [queued, running, waiting_for_approval, succeeded, failed, cancelled, interrupted] }
+        assistantMessageId: { type: string }
+        retryOfRunId: { type: string }
+        requestedConfig: { type: object, additionalProperties: true }
+        effectiveConfig: { type: object, additionalProperties: true }
+        errorCode: { type: string }
+        errorMessage: { type: string }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+    RunRecovery:
+      type: object
+      required: [run, retryable]
+      properties:
+        run: { $ref: "#/components/schemas/AgentRun" }
+        retryable: { type: boolean }
+        blockedReason:
+          type: string
+          enum: [active_run, inactive_turn, not_latest_attempt, projected_output, side_effect_boundary]
+    RunRetrySubmission:
+      type: object
+      required: [sourceRunId, run, existing]
+      properties:
+        sourceRunId: { type: string }
+        run: { $ref: "#/components/schemas/AgentRun" }
+        existing: { type: boolean }
+    ApprovalItem:
+      type: object
+      required: [callIndex, toolCallId, toolName, riskClass, argumentsPreview]
+      properties:
+        callIndex: { type: integer, minimum: 0 }
+        toolCallId: { type: string }
+        toolName: { type: string }
+        riskClass: { type: string, enum: [read_only, local_write, shell, external, sensitive] }
+        argumentsPreview: { type: string, maxLength: 400 }
+    ToolApprovalRequest:
+      type: object
+      required: [id, runId, sessionId, iteration, batchDigest, status, items, requestedAt]
+      properties:
+        id: { type: string }
+        runId: { type: string }
+        sessionId: { type: string }
+        iteration: { type: integer, minimum: 1 }
+        batchDigest: { type: string }
+        status: { type: string, enum: [pending, approved, rejected, cancelled] }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ApprovalItem" }
+        requestedAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time }
+    ActiveRunState:
+      type: object
+      required: [run]
+      properties:
+        run: { $ref: "#/components/schemas/AgentRun" }
+        pendingApproval: { $ref: "#/components/schemas/ToolApprovalRequest" }
+    TurnSubmission:
+      type: object
+      required: [turnId, userMessageId, run, existing]
+      properties:
+        turnId: { type: string }
+        userMessageId: { type: string }
+        run: { $ref: "#/components/schemas/AgentRun" }
+        existing: { type: boolean }
+    CompactionSubmission:
+      type: object
+      required: [runId, compactionId, status, existing]
+      properties:
+        runId: { type: string }
+        compactionId: { type: string }
+        status: { type: string }
+        existing: { type: boolean }
+    ContextCompaction:
+      type: object
+      required: [id, sessionId, status, reason, requestedConfig, effectiveConfig, baseLeafMessageId,
+        firstKeptMessageId, sourceDigest, summaryContractDigest, summary, summaryDigest, promptVersion,
+        tokensBefore, estimatedTokensAfter, reclaimedTokens, createdAt]
+      properties:
+        id: { type: string }
+        runId: { type: string }
+        sessionId: { type: string }
+        clientRequestId: { type: string }
+        status: { type: string, enum: [planned, running, completed, failed, cancelled] }
+        reason: { type: string, enum: [manual, threshold, overflow] }
+        policyProfileId: { type: string }
+        policyVersion: { type: integer }
+        requestedConfig: { type: object, additionalProperties: true }
+        effectiveConfig: { type: object, additionalProperties: true }
+        baseLeafMessageId: { type: string }
+        previousCompactionId: { type: string }
+        sourceFromMessageId: { type: string }
+        sourceThroughMessageId: { type: string }
+        firstKeptMessageId: { type: string }
+        sourceDigest: { type: string }
+        summaryContractDigest: { type: string }
+        summary: { type: string }
+        summaryDigest: { type: string }
+        promptVersion: { type: string }
+        modelCallId: { type: string }
+        tokensBefore: { type: integer }
+        estimatedTokensAfter: { type: integer }
+        reclaimedTokens: { type: integer }
+        errorCode: { type: string }
+        errorMessage: { type: string }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+    QueuedInput:
+      type: object
+      required: [id, runId, sessionId, clientRequestId, seq, kind, text, status, createdAt]
+      properties:
+        id: { type: string }
+        runId: { type: string }
+        sessionId: { type: string }
+        clientRequestId: { type: string }
+        seq: { type: integer, format: int64 }
+        kind: { type: string, enum: [steer, follow_up] }
+        text: { type: string }
+        status: { type: string, enum: [queued, injected, cancelled] }
+        createdAt: { type: string, format: date-time }
+        injectedAt: { type: string, format: date-time }

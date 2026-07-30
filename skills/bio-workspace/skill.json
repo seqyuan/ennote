@@ -1,0 +1,7 @@
+{
+  "id": "bio-workspace",
+  "version": "0.1.0",
+  "description": "Bioinformatics workspace conventions and tools",
+  "prompt": "SKILL.md",
+  "allowedTools": ["read", "write", "edit", "ls", "grep", "find", "bash"]
+}
