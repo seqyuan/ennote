@@ -105,7 +105,9 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
-          files: worker/ennogate-* worker/ennoworker-*
+          files: |
+            worker/ennogate-*
+            worker/ennoworker-*
           fail_on_unmatched_files: true
 
       - name: Verify Tarball
