@@ -7,7 +7,8 @@ const root = resolve(import.meta.dirname, "../..");
 const require = createRequire(import.meta.url);
 const launcher = require(resolve(root, "bin/ennote.js")) as {
   platformSuffix(platform: string, arch: string): string;
-  runtimePaths(packageDir: string, platform: string, arch: string): {
+  runtimeBinDir(home: string): string;
+  runtimePaths(packageDir: string, home: string, version: string, platform: string, arch: string): {
     gate: string;
     worker: string;
     staticDir: string;
@@ -23,7 +24,8 @@ describe("ennote launcher", () => {
     expect(launcher.platformSuffix("darwin", "arm64")).toBe("darwin-arm64");
     expect(() => launcher.platformSuffix("win32", "x64")).toThrow("Unsupported platform");
 
-    const paths = launcher.runtimePaths("/package", "linux", "arm64");
+    const paths = launcher.runtimePaths("/package", "/home", "1.0.0", "linux", "arm64");
+    // Falls back to bundled worker/ when cache is empty
     expect(paths.gate).toBe("/package/worker/ennogate-linux-arm64");
     expect(paths.worker).toBe("/package/worker/ennoworker-linux-arm64");
     expect(paths.staticDir).toBe("/package/out");
@@ -55,7 +57,8 @@ describe("ennote launcher", () => {
     const help = execFileSync(process.execPath, [resolve(root, "bin/ennote.js"), "--help"], { encoding: "utf8" });
     expect(help).toContain("Start the ennogate service");
     expect(help).not.toContain("Next.js");
+    const pkg = require(resolve(root, "package.json")) as { version: string };
     const version = execFileSync(process.execPath, [resolve(root, "bin/ennote.js"), "--version"], { encoding: "utf8" });
-    expect(version.trim()).toBe("0.1.0");
+    expect(version.trim()).toBe(pkg.version);
   });
 });
