@@ -69,3 +69,5 @@ jobs:
       - run: npm run release:build-worker
       - run: npm run pack:check
       - run: npm run smoke:installed
+        env:
+          ENNOTE_SMOKE_WORKER_DIR: ${{ github.workspace }}/worker

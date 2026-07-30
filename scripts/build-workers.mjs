@@ -17,7 +17,7 @@ await mkdir(workerDir, { recursive: true });
 for (const target of targets) {
   for (const command of ["ennogate", "ennoworker"]) {
     const output = resolve(workerDir, `${command}-${target.platform}-${target.nodeArch}`);
-    const result = spawnSync("go", ["build", "-trimpath", "-o", output, `./cmd/${command}`], {
+    const result = spawnSync("go", ["build", "-ldflags=-s -w", "-trimpath", "-o", output, `./cmd/${command}`], {
       cwd: goDir,
       env: {
         ...process.env,
