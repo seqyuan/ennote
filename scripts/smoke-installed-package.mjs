@@ -111,6 +111,21 @@ try {
   const expectedVersion = installedPkg.version;
   if (version !== expectedVersion) throw new Error(`unexpected installed version: ${version}, expected ${expectedVersion}`);
 
+  // Pre-populate binary cache if smoke test provides pre-built binaries
+  const smokeWorkerDir = process.env.ENNOTE_SMOKE_WORKER_DIR;
+  if (smokeWorkerDir) {
+    const { mkdir, copyFile } = await import("node:fs/promises");
+    const suffix = installedPkg.version;
+    await mkdir(resolve(home, "bin"), { recursive: true });
+    for (const name of ["ennogate", "ennoworker"]) {
+      for (const arch of ["linux-x64", "darwin-arm64", "darwin-x64", "linux-arm64"]) {
+        const src = resolve(smokeWorkerDir, `${name}-${arch}`);
+        const dest = resolve(home, "bin", `${name}-${suffix}-${arch}`);
+        try { await copyFile(src, dest); fs.chmodSync(dest, 0o700); } catch { /* ignore missing platform */ }
+      }
+    }
+  }
+
   const port = await freePort();
   const url = `http://127.0.0.1:${port}`;
   const started = parseLastJSON(cli(["start", "--port", String(port), "--hostname", "127.0.0.1", "--json"]).stdout);

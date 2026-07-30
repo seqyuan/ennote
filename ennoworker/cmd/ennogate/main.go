@@ -79,7 +79,8 @@ func run() error {
 	defer stopManagedWorker(worker, 5*time.Second)
 
 	gate := &Gate{
-		HomeDir: home, WorkerURL: worker.state.URL,
+		HomeDir: home, Port: port,
+		WorkerURL: worker.state.URL,
 		Token: worker.state.BootstrapToken, StaticDir: staticDir,
 	}
 	httpServer := &http.Server{
@@ -312,6 +313,7 @@ func validateLoopbackWorkerURL(raw string) error {
 
 type Gate struct {
 	HomeDir    string
+	Port       string
 	WorkerURL  string
 	Token      string
 	StaticDir  string
@@ -323,6 +325,10 @@ type Gate struct {
 type contextKey struct{ name string }
 
 var authKey = contextKey{"authenticated"}
+
+func (g *Gate) cookieName() string {
+	return fmt.Sprintf("ennote_session_%s", g.Port)
+}
 
 func (g *Gate) handler() http.Handler {
 	mux := http.NewServeMux()
@@ -375,7 +381,7 @@ func (g *Gate) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "authentication state is unavailable"})
 			return
 		}
-		cookie, err := r.Cookie("ennote_session")
+		cookie, err := r.Cookie(g.cookieName())
 		if err != nil || !validateSession(cookie.Value) {
 			if isAPI(r) {
 				writeJSON(w, http.StatusUnauthorized, map[string]any{
@@ -398,7 +404,7 @@ func (g *Gate) authPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "authentication state is unavailable", http.StatusInternalServerError)
 		return
 	}
-	if cookie, err := r.Cookie("ennote_session"); err == nil && validateSession(cookie.Value) {
+	if cookie, err := r.Cookie(g.cookieName()); err == nil && validateSession(cookie.Value) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
@@ -471,7 +477,7 @@ func (g *Gate) login(w http.ResponseWriter, r *http.Request) {
 	}
 	storeSession(token)
 	http.SetCookie(w, &http.Cookie{
-		Name: "ennote_session", Value: token, Path: "/",
+		Name: g.cookieName(), Value: token, Path: "/",
 		HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteLaxMode,
 		MaxAge: 86400 * 7,
 	})
@@ -479,11 +485,11 @@ func (g *Gate) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gate) logout(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie("ennote_session"); err == nil {
+	if cookie, err := r.Cookie(g.cookieName()); err == nil {
 		sessionStore.Delete(cookie.Value)
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name: "ennote_session", Value: "", Path: "/",
+		Name: g.cookieName(), Value: "", Path: "/",
 		MaxAge: -1,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
@@ -494,7 +500,7 @@ func (g *Gate) authStatus(w http.ResponseWriter, r *http.Request) {
 	_, err := os.Stat(authFile)
 	requiresPassword := err == nil
 	authenticated := false
-	if cookie, err := r.Cookie("ennote_session"); err == nil {
+	if cookie, err := r.Cookie(g.cookieName()); err == nil {
 		authenticated = validateSession(cookie.Value)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

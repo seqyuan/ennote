@@ -5,6 +5,7 @@ const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
+const https = require("node:https");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
@@ -15,6 +16,7 @@ const DEFAULT_PORT = "30142";
 const DEFAULT_HOSTNAME = "127.0.0.1";
 const START_TIMEOUT_MS = 45_000;
 const STOP_TIMEOUT_MS = 15_000;
+const GITHUB_RELEASES_BASE = "https://github.com/seqyuan/ennote/releases/download";
 
 function platformSuffix(platform = os.platform(), arch = os.arch()) {
   if (!new Set(["linux", "darwin"]).has(platform)) {
@@ -26,11 +28,20 @@ function platformSuffix(platform = os.platform(), arch = os.arch()) {
   return `${platform}-${arch}`;
 }
 
-function runtimePaths(packageDir, platform = os.platform(), arch = os.arch()) {
+function runtimeBinDir(home) {
+  return path.join(home, "bin");
+}
+
+function runtimePaths(packageDir, home, version, platform = os.platform(), arch = os.arch()) {
   const suffix = platformSuffix(platform, arch);
+  // Check local bin cache first, fallback to npm-installed worker/ directory
+  const cachedGate = path.join(runtimeBinDir(home), `ennogate-${version}-${suffix}`);
+  const cachedWorker = path.join(runtimeBinDir(home), `ennoworker-${version}-${suffix}`);
+  const bundledGate = path.join(packageDir, "worker", `ennogate-${suffix}`);
+  const bundledWorker = path.join(packageDir, "worker", `ennoworker-${suffix}`);
   return {
-    gate: path.join(packageDir, "worker", `ennogate-${suffix}`),
-    worker: path.join(packageDir, "worker", `ennoworker-${suffix}`),
+    gate: fs.existsSync(cachedGate) ? cachedGate : bundledGate,
+    worker: fs.existsSync(cachedWorker) ? cachedWorker : bundledWorker,
     staticDir: path.join(packageDir, "out"),
   };
 }
@@ -149,6 +160,61 @@ function createLogger(logFile, quiet) {
   };
 }
 
+function downloadFile(url, destPath) {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(destPath, { mode: 0o500 });
+    const transport = url.startsWith("https") ? https : http;
+    const request = transport.get(url, (response) => {
+      if (response.statusCode === 302 || response.statusCode === 301) {
+        file.close();
+        fs.unlinkSync(destPath);
+        return downloadFile(response.headers.location, destPath).then(resolve, reject);
+      }
+      if (response.statusCode !== 200) {
+        file.close();
+        fs.unlinkSync(destPath);
+        return reject(new Error(`HTTP ${response.statusCode} for ${url}`));
+      }
+      response.pipe(file);
+      file.once("finish", () => {
+        file.close();
+        fs.chmodSync(destPath, 0o700);
+        resolve();
+      });
+    });
+    request.once("error", (error) => {
+      file.close();
+      try { fs.unlinkSync(destPath); } catch {}
+      reject(error);
+    });
+    request.setTimeout(120_000, () => {
+      request.destroy();
+      file.close();
+      try { fs.unlinkSync(destPath); } catch {}
+      reject(new Error(`Download timed out: ${url}`));
+    });
+  });
+}
+
+async function ensureBinaries(home, pkg, log, platform = os.platform(), arch = os.arch()) {
+  const suffix = platformSuffix(platform, arch);
+  const version = pkg.version;
+  const binDir = runtimeBinDir(home);
+  ensureDirectory(binDir);
+  const gatePath = path.join(binDir, `ennogate-${version}-${suffix}`);
+  const workerPath = path.join(binDir, `ennoworker-${version}-${suffix}`);
+  const needed = [];
+  if (!fs.existsSync(gatePath)) needed.push({ name: "ennogate", path: gatePath });
+  if (!fs.existsSync(workerPath)) needed.push({ name: "ennoworker", path: workerPath });
+  if (needed.length === 0) return;
+  log(`Downloading ${needed.length} binary(s) for ${suffix}...`);
+  for (const { name, path: dest } of needed) {
+    const url = `${GITHUB_RELEASES_BASE}/v${version}/${name}-${suffix}`;
+    await downloadFile(url, dest);
+  }
+  log("Binaries ready.");
+}
+
 async function startService(options) {
   const { home, packageDir, port, hostname, json } = options;
   const files = statePaths(home);
@@ -163,7 +229,9 @@ async function startService(options) {
   if (existing) removeFile(files.state);
   if (!await canBind(port, hostname)) throw new Error(`Port ${port} is already in use on ${hostname}`);
 
-  const runtime = runtimePaths(packageDir);
+  const pkg = JSON.parse(fs.readFileSync(path.join(packageDir, "package.json"), "utf8"));
+  await ensureBinaries(home, pkg, log);
+  const runtime = runtimePaths(packageDir, home, pkg.version);
   validateRuntime(runtime);
   ensureDirectory(home);
   const output = fs.openSync(files.log, "a", 0o600);
@@ -335,12 +403,14 @@ async function main(argv = process.argv.slice(2)) {
 
 module.exports = {
   platformSuffix,
+  runtimeBinDir,
   runtimePaths,
   statePaths,
   serviceURL,
   validateRuntime,
   healthCheck,
   isPidAlive,
+  ensureBinaries,
   startService,
   stopService,
   serviceStatus,

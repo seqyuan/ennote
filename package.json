@@ -8,8 +8,7 @@
   },
   "files": [
     "bin",
-    "out",
-    "worker"
+    "out"
   ],
   "scripts": {
     "dev": "make dev",

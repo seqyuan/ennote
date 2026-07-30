@@ -1,17 +1,12 @@
 import { spawnSync } from "node:child_process";
 
-const targets = ["linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64"];
 const required = new Set([
   "README.md",
   "bin/ennote.js",
   "out/index.html",
   "package.json",
-  ...targets.flatMap((target) => [
-    `worker/ennogate-${target}`,
-    `worker/ennoworker-${target}`,
-  ]),
 ]);
-const allowedRoots = new Set(["README.md", "LICENSE", "bin", "out", "worker", "package.json"]);
+const allowedRoots = new Set(["README.md", "LICENSE", "bin", "out", "package.json"]);
 const forbidden = [
   /(^|\/)\.env(?:\.|$)/i,
   /\.db(?:-|$)/i,
@@ -21,6 +16,7 @@ const forbidden = [
   /(^|\/)ennoworker\//i,
   /(^|\/)docs\//i,
   /(^|\/)\.next\//i,
+  /(^|\/)worker\//i,
   /credential/i,
 ];
 
@@ -51,12 +47,6 @@ for (const file of files) {
   if (!allowedRoots.has(root)) throw new Error(`npm package contains an unexpected root: ${file}`);
   for (const pattern of forbidden) {
     if (pattern.test(file)) throw new Error(`npm package contains forbidden file: ${file}`);
-  }
-}
-for (const target of targets) {
-  for (const executable of [`worker/ennogate-${target}`, `worker/ennoworker-${target}`]) {
-    const entry = reports[0].files.find((candidate) => candidate.path === executable);
-    if ((entry.mode & 0o777) !== 0o755) throw new Error(`runtime binary is not executable: ${executable}`);
   }
 }
 console.log(`npm package layout verified: ${files.length} files, ${reports[0].unpackedSize} bytes unpacked`);
