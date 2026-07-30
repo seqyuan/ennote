@@ -107,7 +107,7 @@ try {
     if (error?.code !== "ENOENT") throw error;
   }
   const version = run(process.execPath, [activeCLI, "--version"]).stdout.trim();
-  if (version !== "0.1.0") throw new Error(`unexpected installed version: ${version}`);
+  const expectedVersion = JSON.parse(readFileSync(resolve(installedPackage, "package.json"), "utf8")).version;\n  if (version !== expectedVersion) throw new Error(`unexpected installed version: ${version}, expected ${expectedVersion}`);
 
   const port = await freePort();
   const url = `http://127.0.0.1:${port}`;
