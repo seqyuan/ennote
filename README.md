@@ -20,6 +20,19 @@ make dev
 
 打开 http://127.0.0.1:30142，首次访问会引导设置密码。`make dev` 会先生成静态前端，再由 ennogate 启动和认证 ennoworker。
 
+## 安装与分发
+
+Ennote 采用「源码私有、产物公开」的分发模式：源码仓库不公开，但 npm 包与运行时二进制均可公开获取。
+
+```bash
+npm install -g @seqyuan/ennote
+ennote start
+```
+
+- npm 包（`@seqyuan/ennote`）只包含 CLI 脚本和编译后的静态前端（约 12 MB）。
+- 首次 `ennote start` 时，CLI 会从 [seqyuan/ennote-bin](https://github.com/seqyuan/ennote-bin) 的 GitHub Release 按当前平台/架构下载 Go 二进制（ennogate + ennoworker），缓存到 `~/.ennote/bin/`，后续启动不再下载。
+- 支持平台：linux-x64 / linux-arm64 / darwin-x64 / darwin-arm64。
+
 ## 目录
 
 ```

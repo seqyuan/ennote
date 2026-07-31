@@ -7,6 +7,7 @@ on:
 
 env:
   ENNOTE_NPM_PACKAGE: "@seqyuan/ennote"
+  ENNOTE_BIN_REPO: "seqyuan/ennote-bin"
 
 jobs:
   publish:
@@ -100,9 +101,20 @@ jobs:
           for f in *-raw; do mv "$f" "${f%-raw}"; done
           ls -lh
 
+      - name: Check binary repo token
+        env:
+          BIN_REPO_TOKEN: ${{ secrets.BIN_REPO_TOKEN }}
+        run: |
+          if [ -z "$BIN_REPO_TOKEN" ]; then
+            echo "missing repository secret BIN_REPO_TOKEN (PAT with repo scope on $ENNOTE_BIN_REPO)" >&2
+            exit 1
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          repository: ${{ env.ENNOTE_BIN_REPO }}
+          token: ${{ secrets.BIN_REPO_TOKEN }}
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           files: |
