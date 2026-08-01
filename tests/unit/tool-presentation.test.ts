@@ -11,6 +11,7 @@ import {
 describe("tool presentation", () => {
   it("classifies known tools and treats unknown tools as sensitive", () => {
     expect(classifyDisplayRisk("read")).toBe("read_only");
+    expect(classifyDisplayRisk("todo")).toBe("read_only");
     expect(classifyDisplayRisk("write")).toBe("local_write");
     expect(classifyDisplayRisk("bash")).toBe("shell");
     expect(classifyDisplayRisk("http_request")).toBe("external");
@@ -36,6 +37,33 @@ describe("tool presentation", () => {
     expect(summarizeToolCall("bash", { command: "npm test -- tests/unit/tool-presentation.test.ts" })).toMatchObject({
       label: "Run command", target: "npm test -- tests/unit/tool-presentation.test.ts",
     });
+  });
+
+  it("classifies and summarizes todo tool calls", () => {
+    expect(summarizeToolCall("todo", {
+      todos: [
+        { content: "inspect data", status: "completed" },
+        { content: "write report", status: "in_progress" },
+      ],
+    })).toMatchObject({
+      label: "Update task list",
+      target: "1/2 completed",
+    });
+    expect(summarizeToolCall("todo", { todos: [] })).toMatchObject({
+      label: "Update task list",
+      target: "0/0 completed",
+    });
+    expect(summarizeToolCall("todo", {
+      todos: [
+        { content: "a", status: "completed" },
+        { content: "b", status: "completed" },
+        { content: "c", status: "completed" },
+      ],
+    })).toMatchObject({
+      label: "Update task list",
+      target: "3/3 completed",
+    });
+    expect(classifyDisplayRisk("todo")).toBe("read_only");
   });
 
   it("bounds long output and uses risk and state for default disclosure", () => {

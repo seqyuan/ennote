@@ -1,7 +1,7 @@
 export type DisplayRiskClass = "read_only" | "local_write" | "shell" | "external" | "sensitive";
 export type ToolActivityState = "pending" | "running" | "completed" | "failed" | "rejected" | "interrupted";
 
-const readOnlyTools = new Set(["read", "ls", "list", "grep", "search", "find", "search_compacted_history"]);
+const readOnlyTools = new Set(["read", "ls", "list", "grep", "search", "find", "search_compacted_history", "todo"]);
 const writeTools = new Set(["write", "edit", "publish_artifact"]);
 const shellTools = new Set(["bash", "exec"]);
 const externalTools = new Set(["http", "http_request", "fetch", "web_search"]);
@@ -65,6 +65,11 @@ export function summarizeToolCall(toolName: string, rawArguments: unknown): Tool
       return { label: "External request", target: oneLine(stringValue(args.url) || "External service", 180) };
     case "search_compacted_history":
       return { label: "Search compacted history", target: oneLine(stringValue(args.query) || "Session history", 180) };
+    case "todo": {
+      const todos = Array.isArray(rawArguments && typeof rawArguments === "object" && "todos" in (rawArguments as Record<string, unknown>) ? (rawArguments as { todos: unknown[] }).todos : undefined) ? (rawArguments as { todos: unknown[] }).todos : [];
+      const completed = todos.filter((item: unknown) => item && typeof item === "object" && (item as Record<string, unknown>).status === "completed").length;
+      return { label: "Update task list", target: `${completed}/${todos.length} completed` };
+    }
     default:
       return { label: toolName || "Unknown tool", target: "Sensitive tool call" };
   }
