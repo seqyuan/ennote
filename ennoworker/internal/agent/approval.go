@@ -16,7 +16,7 @@ const approvalPreviewLimit = 400
 
 var secretKeyPattern = regexp.MustCompile(`(?i)(api.?key|authorization|credential|password|secret|token)`)
 
-const ResumeStateVersion = 2
+const ResumeStateVersion = 3
 
 type ResumeState struct {
 	Version              int                         `json:"version"`
@@ -32,6 +32,7 @@ type ResumeState struct {
 	InitialSteering      []domain.ChatMessage        `json:"initialSteering"`
 	SystemPrompt         string                      `json:"systemPrompt"`
 	MidRunCompaction     MidRunCompactionState       `json:"midRunCompaction"`
+	Todos                []domain.TodoItem           `json:"todos,omitempty"`
 }
 
 type ApprovalResolution struct {

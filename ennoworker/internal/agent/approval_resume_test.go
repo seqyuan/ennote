@@ -163,3 +163,56 @@ func TestLoopResumeRejectsChangedBatchDigest(t *testing.T) {
 		Approval: &ApprovalResolution{Decision: domain.DecisionApproved, BatchDigest: "changed"}})
 	assert.Equal(t, domain.ErrorApprovalCheckpointInvalid, domain.ErrorCodeOf(err))
 }
+
+func TestLoopApprovalResumePreservesTodos(t *testing.T) {
+	provider := llm.NewFakeProvider(
+		llm.FakeStep{Completion: approvalCompletion()},
+		llm.FakeStep{Completion: domain.Completion{StopReason: domain.StopReasonStop,
+			Content: []domain.ContentBlock{textBlock("done")}, ActualModel: "fake"}},
+	)
+	tools := &fakeTools{result: domain.ToolResult{Content: "ok"}}
+	policy := askPolicy(t)
+	snapshot := domain.PolicySnapshot{ID: "ask", Kind: domain.PolicyKindTool, Version: 1, Config: policy.snapshot.Config}
+	todoStore := domain.NewTodoStore()
+	todoStore.Set([]domain.TodoItem{{Content: "survive", Status: domain.TodoPending}})
+	loop := &Loop{Provider: provider, Tools: tools, Events: &memoryWriter{}, ToolPolicy: policy,
+		ToolPolicySnapshot: snapshot, MaxIterations: 4, TodoStore: todoStore}
+	input := RunInput{RunID: "resume-todo", Model: "fake",
+		History: []domain.ChatMessage{{Role: domain.RoleUser, Content: []domain.ContentBlock{textBlock("plan")}}}}
+	_, err := loop.Run(context.Background(), input)
+	var required *ApprovalRequiredError
+	require.True(t, errors.As(err, &required))
+	require.Len(t, required.State.Todos, 1, "checkpoint must carry todo list")
+	assert.Equal(t, "survive", required.State.Todos[0].Content)
+
+	freshStore := domain.NewTodoStore()
+	input.Resume = &required.State
+	input.Approval = &ApprovalResolution{Decision: domain.DecisionApproved, BatchDigest: required.BatchDigest}
+	loop2 := &Loop{Provider: provider, Tools: tools, Events: &memoryWriter{}, ToolPolicy: policy,
+		ToolPolicySnapshot: snapshot, MaxIterations: 4, TodoStore: freshStore}
+	_, err = loop2.Run(context.Background(), input)
+	require.NoError(t, err)
+	require.Len(t, freshStore.Snapshot(), 1)
+	assert.Equal(t, "survive", freshStore.Snapshot()[0].Content)
+}
+
+func TestLoopAcceptsLegacyResumeWithoutTodos(t *testing.T) {
+	provider := llm.NewFakeProvider(
+		llm.FakeStep{Completion: domain.Completion{StopReason: domain.StopReasonStop,
+			Content: []domain.ContentBlock{textBlock("resumed")}, ActualModel: "fake"}},
+	)
+	// Simulate a V1/V2 checkpoint: no Todos field in JSON.
+	state := ResumeState{Version: 1, Iteration: 1, Completion: domain.Completion{
+		StopReason: domain.StopReasonStop, ActualModel: "fake",
+		Content: []domain.ContentBlock{textBlock("old")},
+	}}
+	// Pre-populate the store with stale data; resume must clear it.
+	freshStore := domain.NewTodoStore()
+	freshStore.Set([]domain.TodoItem{{Content: "stale", Status: domain.TodoPending}})
+	loop := &Loop{Provider: provider, Tools: &fakeTools{}, Events: &memoryWriter{},
+		MaxIterations: 4, TodoStore: freshStore}
+	_, err := loop.Run(context.Background(), RunInput{RunID: "v1", Model: "fake", Resume: &state,
+		Approval: &ApprovalResolution{Decision: domain.DecisionApproved, BatchDigest: "any"}})
+	require.NoError(t, err)
+	assert.Empty(t, freshStore.Snapshot(), "legacy resume without todos must clear stale store")
+}

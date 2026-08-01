@@ -62,6 +62,7 @@ type Loop struct {
 	VisionResolver     VisionResolver
 	ImageDescriptions  ImageDescriptionCache
 	Reminders          *ReminderRegistry
+	TodoStore          *domain.TodoStore
 	MaxIterations      int
 	ContextTokens      int
 	MaxOutput          int
@@ -124,6 +125,9 @@ func (l *Loop) Run(ctx context.Context, input RunInput) (RunResult, error) {
 	var err error
 	requestGeneration := 0
 	startIteration := 1
+	if input.Resume != nil && l.TodoStore != nil {
+		l.TodoStore.Set(input.Resume.Todos)
+	}
 	if input.Resume == nil {
 		initialSteering, err = l.drainQueuedInputs(ctx, input.RunID, domain.QueuedInputSteer, steeringMode)
 		if err != nil {
@@ -393,7 +397,7 @@ func (l *Loop) Run(ctx context.Context, input RunInput) (RunResult, error) {
 						Current: current, Routing: routing, RequestGeneration: requestGeneration,
 						TruncationRecoveries: truncationRecoveries, StuckSignatures: guard.Snapshot(),
 						InitialSteering: cloneMessages(initialSteering), SystemPrompt: input.SystemPrompt,
-						MidRunCompaction: midRunState}
+						MidRunCompaction: midRunState, Todos: l.todoSnapshot()}
 				}
 				return runResult(messages, generated, completion, iteration), err
 			}
@@ -982,4 +986,13 @@ func (l *Loop) prepareRequestMessages(ctx context.Context, systemPrompt string,
 		return out
 	}
 	return fallback
+}
+
+// todoSnapshot returns the current run todo list, or nil when no store is
+// attached (so an empty todo never bloats a checkpoint).
+func (l *Loop) todoSnapshot() []domain.TodoItem {
+	if l.TodoStore == nil {
+		return nil
+	}
+	return l.TodoStore.Snapshot()
 }
