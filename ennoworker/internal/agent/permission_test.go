@@ -9,7 +9,7 @@ import (
 
 func TestClassifyToolRisk(t *testing.T) {
 	tests := map[string]domain.RiskClass{
-		"read": domain.RiskReadOnly, "ls": domain.RiskReadOnly, "search_compacted_history": domain.RiskReadOnly,
+		"read": domain.RiskReadOnly, "ls": domain.RiskReadOnly, "search_compacted_history": domain.RiskReadOnly, "todo": domain.RiskReadOnly,
 		"write": domain.RiskLocalWrite, "edit": domain.RiskLocalWrite,
 		"exec": domain.RiskShell, "bash": domain.RiskShell,
 		"web_fetch":   domain.RiskExternal,

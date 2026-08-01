@@ -182,3 +182,27 @@ func TestBuiltinToolPolicyRedactsProjectedResult(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "ok [REDACTED]", decision.Result.Content)
 }
+
+func TestTodoPolicyRespectsExplicitAllowlists(t *testing.T) {
+	ask := permissionPolicy(t, domain.ToolPolicyConfig{Mode: string(domain.PermissionAsk)})
+	auto := permissionPolicy(t, domain.ToolPolicyConfig{Mode: string(domain.PermissionAuto)})
+	restricted := permissionPolicy(t, domain.ToolPolicyConfig{
+		Mode: "restricted", AllowedTools: []string{"read"},
+	})
+
+	assert.Equal(t, ToolAllow, singleDecision(t, ask, "todo").Action)
+	assert.Equal(t, ToolAllow, singleDecision(t, auto, "todo").Action)
+	denied := singleDecision(t, restricted, "todo")
+	assert.Equal(t, ToolDeny, denied.Action)
+	assert.Equal(t, "tool_not_allowed", denied.Code)
+}
+
+func singleDecision(t *testing.T, policy *BuiltinToolPolicy, toolName string) ToolDecision {
+	t.Helper()
+	decisions, err := policy.BeforeToolBatch(context.Background(), ToolBatchContext{}, []domain.ToolCall{{
+		Name: toolName, Arguments: json.RawMessage(`{"todos":[]}`),
+	}})
+	require.NoError(t, err)
+	require.Len(t, decisions, 1)
+	return decisions[0]
+}

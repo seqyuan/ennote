@@ -4,7 +4,7 @@ import "github.com/seqyuan/ennote/ennoworker/internal/domain"
 
 func ClassifyToolRisk(toolName string) domain.RiskClass {
 	switch toolName {
-	case "read", "ls", "grep", "find", "search_compacted_history":
+	case "read", "ls", "grep", "find", "search_compacted_history", "todo":
 		return domain.RiskReadOnly
 	case "write", "edit", "publish_artifact":
 		return domain.RiskLocalWrite

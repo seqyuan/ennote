@@ -38,6 +38,10 @@ func TestMigrateCreatesTables(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM policy_profiles
 		WHERE id IN ('builtin-tool-discuss-v1','builtin-tool-ask-v1','builtin-tool-auto-v1') AND status='active'`).Scan(&permissionProfiles))
 	assert.Equal(t, 3, permissionProfiles)
+	var discussV2 int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM policy_profiles
+		WHERE id = 'builtin-tool-discuss-v2' AND status = 'active'`).Scan(&discussV2))
+	assert.Equal(t, 1, discussV2, "builtin-tool-discuss-v2 should be active after migration 0014")
 	var riskColumn int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('tool_calls') WHERE name='risk_class'`).Scan(&riskColumn))
 	assert.Equal(t, 1, riskColumn)
