@@ -61,6 +61,7 @@ type Loop struct {
 	MidRunCompactor    MidRunCompactor
 	VisionResolver     VisionResolver
 	ImageDescriptions  ImageDescriptionCache
+	Reminders          *ReminderRegistry
 	MaxIterations      int
 	ContextTokens      int
 	MaxOutput          int
@@ -248,9 +249,12 @@ func (l *Loop) Run(ctx context.Context, input RunInput) (RunResult, error) {
 			if model == "" {
 				model = input.Model
 			}
+			toolDefinitions := l.Tools.Definitions()
+			preparedMessages := l.prepareRequestMessages(ctx, input.SystemPrompt, requestMessages,
+				current, iteration, toolDefinitions)
 			request := domain.CompletionRequest{
-				Model: model, Messages: PrepareContext(input.SystemPrompt, requestMessages, contextTokens),
-				Tools: l.Tools.Definitions(), MaxTokens: maxOutput,
+				Model: model, Messages: preparedMessages,
+				Tools: toolDefinitions, MaxTokens: maxOutput,
 			}
 			completion, err = l.streamWithRetry(ctx, input, iteration, request, runtime,
 				modelCallOptions{Purpose: domain.ModelCallAgentTurn, RequestGeneration: requestGeneration})
@@ -886,4 +890,96 @@ func (s *eventSink) Usage(value domain.Usage) error {
 		ID: s.callID, RunID: s.runID, Iteration: s.iteration, Attempt: s.attempt,
 		RequestGeneration: s.requestGeneration, Usage: value,
 	})
+}
+
+// compositionInput returns the input token estimate for a message list and tool
+// definitions without counting system-prompt overhead (the caller supplies a
+// separate system message).
+func compositionInput(messages []domain.ChatMessage, tools []domain.ToolDefinition) int {
+	return EstimateComposition("", tools, messages, 0).InputTokens
+}
+
+// toolDefinitionTokens returns the incremental token cost of tool definitions
+// relative to the fixed overhead of EstimateComposition.
+func toolDefinitionTokens(tools []domain.ToolDefinition) int {
+	base := EstimateComposition("", nil, nil, 0).InputTokens
+	withTools := EstimateComposition("", tools, nil, 0).InputTokens
+	if withTools <= base {
+		return 0
+	}
+	return withTools - base
+}
+
+// effectiveRuntime fills missing context/output values from Loop fallbacks so
+// MainUsableTokens produces a meaningful budget even when the routed snapshot
+// has partial fields.
+func (l *Loop) effectiveRuntime(runtime domain.ModelRuntimeSnapshot) domain.ModelRuntimeSnapshot {
+	if runtime.ContextTokens <= 0 {
+		runtime.ContextTokens = l.ContextTokens
+	}
+	if runtime.MaxOutputTokens <= 0 {
+		runtime.MaxOutputTokens = l.MaxOutput
+	}
+	return runtime
+}
+
+// prepareRequestMessages builds the final message list for the LLM request.
+// It resolves reminders from the registry, reserves their token cost from the
+// usable budget, trims durable history with PrepareContext, and appends
+// reminders only when they fit within the remaining budget. The returned slice
+// is never written back to canonical messages or generated history.
+func (l *Loop) prepareRequestMessages(ctx context.Context, systemPrompt string,
+	requestMessages []domain.ChatMessage, runtime domain.ModelRuntimeSnapshot,
+	iteration int, tools []domain.ToolDefinition) []domain.ChatMessage {
+	effective := l.effectiveRuntime(runtime)
+	usable := MainUsableTokens(effective)
+
+	var reminders []domain.ChatMessage
+	if l.Reminders != nil && !l.Reminders.Empty() {
+		reminders = l.Reminders.Messages(ctx, ReminderContext{
+			Messages: requestMessages, SystemPrompt: systemPrompt, Tools: tools,
+			Runtime: effective, Iteration: iteration, InputTokenBudget: usable,
+		})
+	}
+
+	// Unknown context window: no trimming; just append reminders.
+	if effective.ContextTokens <= 0 || usable <= 0 {
+		prepared := PrepareContext(systemPrompt, requestMessages, 0)
+		if len(reminders) == 0 {
+			return prepared
+		}
+		out := make([]domain.ChatMessage, 0, len(prepared)+len(reminders))
+		out = append(out, prepared...)
+		out = append(out, reminders...)
+		return out
+	}
+
+	// Build the reminder-free fallback request.
+	durableBudget := usable - toolDefinitionTokens(tools)
+	if durableBudget < 0 {
+		durableBudget = 0
+	}
+	fallback := PrepareContext(systemPrompt, requestMessages, durableBudget)
+
+	if len(reminders) == 0 {
+		return fallback
+	}
+
+	// Try to fit reminders: reduce durable budget by reminder cost.
+	reminderTokens := EstimateComposition("", nil, reminders, 0).InputTokens
+	reducedBudget := durableBudget - reminderTokens
+	if reducedBudget < 0 {
+		reducedBudget = 0
+	}
+	candidate := PrepareContext(systemPrompt, requestMessages, reducedBudget)
+	out := make([]domain.ChatMessage, 0, len(candidate)+len(reminders))
+	out = append(out, candidate...)
+	out = append(out, reminders...)
+
+	// Validate the candidate fits within the usable budget.
+	// Pass empty system prompt because PrepareContext already prepends it.
+	if compositionInput(out, tools) <= usable {
+		return out
+	}
+	return fallback
 }

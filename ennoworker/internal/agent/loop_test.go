@@ -55,11 +55,15 @@ type fakeTools struct {
 	mu      sync.Mutex
 	calls   []domain.ToolCall
 	result  domain.ToolResult
+	defs    []domain.ToolDefinition
 	classes map[string]domain.ExecutionClass
 	execute func(context.Context, domain.ToolCall) domain.ToolResult
 }
 
 func (t *fakeTools) Definitions() []domain.ToolDefinition {
+	if len(t.defs) > 0 {
+		return t.defs
+	}
 	return []domain.ToolDefinition{{Name: "read", Parameters: json.RawMessage(`{"type":"object"}`)}}
 }
 func (t *fakeTools) ExecutionClass(name string) domain.ExecutionClass {
