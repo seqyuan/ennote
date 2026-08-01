@@ -138,6 +138,11 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		return domain.RunOutput{}, fmt.Errorf("create tools: %w", err)
 	}
 
+	todoStore := domain.NewTodoStore()
+	if err := toolReg.Register(&tools.TodoTool{Store: todoStore}); err != nil {
+		return domain.RunOutput{}, fmt.Errorf("register todo tool: %w", err)
+	}
+
 	prepared, err := e.compaction.Prepare(ctx, run, history, resolved.Effective, systemPrompt, toolReg.Definitions())
 	if err != nil {
 		return domain.RunOutput{}, err
@@ -185,6 +190,11 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		ContextTokens: resolved.Effective.ContextTokens,
 		MaxOutput:     resolved.Effective.MaxOutputTokens,
 		ToolExecution: resolved.Effective.ToolExecution,
+		TodoStore:     todoStore,
+		Reminders: agent.NewReminderRegistry(
+			&agent.TodoReminderProvider{Store: todoStore},
+			&agent.BudgetReminderProvider{},
+		),
 	}
 	overflowRecovery := func(recoveryCtx context.Context) ([]domain.ChatMessage, error) {
 		result, recoveryErr := e.compaction.RecoverOverflow(recoveryCtx, run, history, resolved.Effective,
