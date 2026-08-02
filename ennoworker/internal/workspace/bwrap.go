@@ -16,37 +16,7 @@ func (m *Manager) Command(shell, command string) (*exec.Cmd, error) {
 		cmd.Dir = m.Jail.Root()
 		return cmd, nil
 	}
-
-	bwrap, err := exec.LookPath("bwrap")
-	if err != nil {
-		return nil, fmt.Errorf("bubblewrap is required for sandbox mode bwrap: %w", err)
-	}
-	args := []string{
-		"--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--unshare-uts",
-		"--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
-	}
-	for _, path := range []string{"/usr", "/bin", "/lib", "/lib64"} {
-		if _, err := os.Stat(path); err == nil {
-			args = append(args, "--ro-bind", path, path)
-		}
-	}
-	args = append(args, "--bind", m.Jail.Root(), "/workspace")
-	if m.SkillsDir != "" {
-		skills, err := filepath.Abs(m.SkillsDir)
-		if err != nil {
-			return nil, err
-		}
-		args = append(args, "--ro-bind", skills, "/skills")
-	}
-	if m.RuntimeDir != "" {
-		runtimeDir, err := filepath.Abs(m.RuntimeDir)
-		if err != nil {
-			return nil, err
-		}
-		args = append(args, "--bind", runtimeDir, "/runtime")
-	}
-	args = append(args, "--chdir", "/workspace", shell, "-lc", command)
-	return exec.Command(bwrap, args...), nil
+	return m.bwrapCommand(shell, command, true)
 }
 
 func (m *Manager) CommandArgs(executable string, commandArgs ...string) (*exec.Cmd, error) {
@@ -58,10 +28,30 @@ func (m *Manager) CommandArgs(executable string, commandArgs ...string) (*exec.C
 		cmd.Dir = m.Jail.Root()
 		return cmd, nil
 	}
+	// Join args for shell -lc
+	quoted := executable
+	for _, a := range commandArgs {
+		quoted += " " + a
+	}
+	return m.bwrapCommand("/bin/sh", quoted, false)
+}
+
+func (m *Manager) bwrapCommand(shell, command string, withShell bool) (*exec.Cmd, error) {
 	bwrap, err := exec.LookPath("bwrap")
 	if err != nil {
 		return nil, fmt.Errorf("bubblewrap is required for sandbox mode bwrap: %w", err)
 	}
+	args := buildBwrapArgs(m)
+	if withShell {
+		args = append(args, shell, "-lc", command)
+	} else {
+		args = append(args, shell)
+	}
+	return exec.Command(bwrap, args...), nil
+}
+
+// buildBwrapArgs builds the shared bwrap argument list for both Command and CommandArgs.
+func buildBwrapArgs(m *Manager) []string {
 	args := []string{
 		"--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--unshare-uts",
 		"--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
@@ -71,22 +61,26 @@ func (m *Manager) CommandArgs(executable string, commandArgs ...string) (*exec.C
 			args = append(args, "--ro-bind", path, path)
 		}
 	}
+
+	// Bind workspace
 	args = append(args, "--bind", m.Jail.Root(), "/workspace")
+
+	// Bind skills read-only
 	if m.SkillsDir != "" {
 		skills, err := filepath.Abs(m.SkillsDir)
-		if err != nil {
-			return nil, err
+		if err == nil {
+			args = append(args, "--ro-bind", skills, "/skills")
 		}
-		args = append(args, "--ro-bind", skills, "/skills")
 	}
-	if m.RuntimeDir != "" {
-		runtimeDir, err := filepath.Abs(m.RuntimeDir)
-		if err != nil {
-			return nil, err
+
+	// Bind runtime I/O
+	if m.RuntimeHostDir != "" {
+		runtimeDir, err := filepath.Abs(m.RuntimeHostDir)
+		if err == nil {
+			args = append(args, "--bind", runtimeDir, "/runtime")
 		}
-		args = append(args, "--bind", runtimeDir, "/runtime")
 	}
-	args = append(args, "--chdir", "/workspace", executable)
-	args = append(args, commandArgs...)
-	return exec.Command(bwrap, args...), nil
+
+	args = append(args, "--chdir", "/workspace")
+	return args
 }

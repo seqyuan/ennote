@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -33,7 +34,9 @@ func (s *recordingSink) all() []domain.ToolOutputUpdate {
 
 func TestBashExecuteStreamingEmitsChunks(t *testing.T) {
 	dir := t.TempDir()
-	manager, err := workspace.NewManager(dir, dir, dir, workspace.SandboxNone)
+	runtimeDir := filepath.Join(t.TempDir(), "io")
+	require.NoError(t, os.MkdirAll(runtimeDir, 0o700))
+	manager, err := workspace.NewManager(dir, runtimeDir, "", workspace.SandboxNone)
 	require.NoError(t, err)
 	tool := &BashTool{Workspace: manager, Shell: "sh", OutputLimit: 1024}
 
@@ -61,7 +64,9 @@ func TestBashExecuteStreamingEmitsChunks(t *testing.T) {
 
 func TestExecExecuteStreamingEmitsChunks(t *testing.T) {
 	dir := t.TempDir()
-	manager, err := workspace.NewManager(dir, dir, dir, workspace.SandboxNone)
+	runtimeDir := filepath.Join(t.TempDir(), "io")
+	require.NoError(t, os.MkdirAll(runtimeDir, 0o700))
+	manager, err := workspace.NewManager(dir, runtimeDir, "", workspace.SandboxNone)
 	require.NoError(t, err)
 	tool := &ExecTool{Workspace: manager, OutputLimit: 1024}
 
@@ -84,7 +89,9 @@ func TestExecExecuteStreamingEmitsChunks(t *testing.T) {
 func TestRegistryExecuteStreamingFallsBack(t *testing.T) {
 	// A non-streaming tool (read) should still work via ExecuteStreaming fallback.
 	dir := t.TempDir()
-	manager, err := workspace.NewManager(dir, dir, dir, workspace.SandboxNone)
+	runtimeDir := filepath.Join(t.TempDir(), "io")
+	require.NoError(t, os.MkdirAll(runtimeDir, 0o700))
+	manager, err := workspace.NewManager(dir, runtimeDir, "", workspace.SandboxNone)
 	require.NoError(t, err)
 	tool, err := NewRegistry(&ReadTool{Jail: manager.Jail, MaxBytes: 4096})
 	require.NoError(t, err)

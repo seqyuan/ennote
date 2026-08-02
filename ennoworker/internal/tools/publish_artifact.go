@@ -40,7 +40,7 @@ func (t *PublishArtifactTool) Execute(ctx context.Context, call domain.ToolCall)
 	if strings.TrimSpace(args.Path) == "" {
 		return errorResult(call, fmt.Errorf("path must not be empty")), nil
 	}
-	resolved, err := t.Jail.ResolveExisting(args.Path)
+	resolved, err := t.Jail.ResolveWorkspaceExisting(args.Path)
 	if err != nil {
 		return errorResult(call, err), nil
 	}
@@ -80,7 +80,7 @@ func openedWorkspacePath(jail *workspace.Jail, file *os.File) (string, error) {
 		if err != nil {
 			continue
 		}
-		return jail.DisplayPath(canonical)
+		return jail.DisplayWorkspacePath(canonical)
 	}
 	return "", fmt.Errorf("secure artifact source verification is unavailable on this platform")
 }

@@ -59,13 +59,13 @@ func (t *ExecTool) execute(ctx context.Context, call domain.ToolCall, sink domai
 	if err != nil {
 		return errorResult(call, err), nil
 	}
-	cmd.Env = safeEnvironment(t.Workspace.RuntimeDir)
-	stdout, err := newOutputCapture(t.Workspace.RuntimeDir, "stdout", t.OutputLimit, t.OutputArtifactLimit)
+	cmd.Env = safeEnvironment(t.Workspace.RuntimeVisibleDir)
+	stdout, err := newOutputCapture(t.Workspace.RuntimeHostDir, "stdout", t.OutputLimit, t.OutputArtifactLimit)
 	if err != nil {
 		return errorResult(call, err), nil
 	}
 	defer stdout.Cleanup()
-	stderr, err := newOutputCapture(t.Workspace.RuntimeDir, "stderr", t.OutputLimit, t.OutputArtifactLimit)
+	stderr, err := newOutputCapture(t.Workspace.RuntimeHostDir, "stderr", t.OutputLimit, t.OutputArtifactLimit)
 	if err != nil {
 		return errorResult(call, err), nil
 	}

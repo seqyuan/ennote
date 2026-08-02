@@ -23,7 +23,7 @@ func (t *ReadTool) RetryPolicy() domain.ToolRetryPolicy {
 }
 
 func (t *ReadTool) Definition() domain.ToolDefinition {
-	return domain.ToolDefinition{Name: "read", Description: "Read a UTF-8 text file inside /workspace", Parameters: schema(`{"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1}},"required":["path"],"additionalProperties":false}`)}
+	return domain.ToolDefinition{Name: "read", Description: "Read a UTF-8 text file inside /workspace or the read-only /skills snapshot", Parameters: schema(`{"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1}},"required":["path"],"additionalProperties":false}`)}
 }
 
 func (t *ReadTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
