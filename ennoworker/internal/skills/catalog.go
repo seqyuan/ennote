@@ -40,6 +40,7 @@ type CatalogNode struct {
 	Description string
 	SourceRoot  string
 	SourcePath  string // canonical absolute source directory path
+	Priority    int    // source priority at discovery time; lower wins
 	Category    *Category
 	Skill       *LoadedSkill
 	Children    []*CatalogNode
@@ -154,35 +155,40 @@ func BuildCatalog(sources []SourceRoot) *Catalog {
 		}
 	}
 
-	// Check for duplicate Manifest IDs across different RelPaths
-	idMap := map[string]*CatalogNode{}
+	// Check for duplicate Manifest IDs across different RelPaths.
+	// Resolution must be deterministic: collect all skills, sort by the
+	// full ordering key (Priority, SourceRoot.Name, canonical Path, RelPath),
+	// and keep the first occurrence of each ID. Never rely on map iteration order.
+	type idCandidate struct {
+		node *CatalogNode
+		key  string // full ordering key (Priority, SourceRoot.Name, SourcePath, RelPath)
+	}
+	var candidates []idCandidate
 	for relPath, node := range merged {
 		if node.Kind == NodeSkill && node.Skill != nil {
-			mid := node.Skill.Manifest.ID
-			if existing, exists := idMap[mid]; exists {
-				// Resolve by (Priority, SourceRoot.Name, Path, RelPath)
-				// Since we process nodes sorted, the first one kept wins
-				catalog.Diagnostics = append(catalog.Diagnostics, Diagnostic{
-					Level:   "skip",
-					Message: fmt.Sprintf("duplicate_skill_id: %s at %s (from %s) conflicts with %s (from %s)",
-						mid, relPath, node.SourceRoot, existing.RelPath, existing.SourceRoot),
-					RelPath: relPath,
-					Source:  node.SourceRoot,
-				})
-				// Remove the lower-priority one
-				// We need to determine which one has lower priority
-				keep := existing.RelPath
-				remove := relPath
-				// Sort by (Priority, SourceRoot.Name, Path, RelPath)
-				// Since merged map has higher priority already, existing should win if same priority
-				// But we need the full priority info. For now, keep the first encountered.
-				if keep != remove {
-					delete(merged, remove)
-				}
-			} else {
-				idMap[mid] = node
-			}
+			key := fmt.Sprintf("%d\x00%s\x00%s\x00%s",
+				node.Priority, node.SourceRoot, node.SourcePath, relPath)
+			candidates = append(candidates, idCandidate{node: node, key: key})
 		}
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].key < candidates[j].key })
+
+	idMap := map[string]*CatalogNode{}
+	for _, c := range candidates {
+		node := c.node
+		mid := node.Skill.Manifest.ID
+		if existing, exists := idMap[mid]; exists {
+			catalog.Diagnostics = append(catalog.Diagnostics, Diagnostic{
+				Level:   "skip",
+				Message: fmt.Sprintf("duplicate_skill_id: %s at %s (from %s) conflicts with %s (from %s)",
+					mid, node.RelPath, node.SourceRoot, existing.RelPath, existing.SourceRoot),
+				RelPath: node.RelPath,
+				Source:  node.SourceRoot,
+			})
+			delete(merged, node.RelPath)
+			continue
+		}
+		idMap[mid] = node
 	}
 
 	// Build the tree structure
@@ -293,6 +299,7 @@ func discoverTree(baseDir, relPath string, src SourceRoot, nodes map[string]*Cat
 				Description: skill.Manifest.Description,
 				SourceRoot:  src.Name,
 				SourcePath:  childDir,
+				Priority:    src.Priority,
 				Skill:       skill,
 			}
 			nodes[childRel] = node
@@ -340,6 +347,7 @@ func discoverTree(baseDir, relPath string, src SourceRoot, nodes map[string]*Cat
 				Description: cat.Description,
 				SourceRoot:  src.Name,
 				SourcePath:  childDir,
+				Priority:    src.Priority,
 				Category:    cat,
 				Children:    []*CatalogNode{},
 			}

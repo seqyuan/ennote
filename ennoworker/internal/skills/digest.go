@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -25,12 +26,16 @@ const (
 // type ('f' or 'd'), octal mode permissions, content length, and file bytes.
 // Directories have zero-length content. Symlinks, devices, FIFOs, and
 // non-regular files cause an error.
+//
+// File contents are hashed in streaming fashion (one file at a time) to keep
+// memory bounded even when attachments are large. Entries are processed in
+// deterministic relative-path order.
 func treeDigest(root string) (string, error) {
 	type entry struct {
 		relPath string
 		isDir   bool
 		mode    os.FileMode
-		content []byte
+		size    int64
 	}
 
 	var entries []entry
@@ -65,16 +70,11 @@ func treeDigest(root string) (string, error) {
 			return fmt.Errorf("non-regular file in tree: %s (mode=%o)", rel, info.Mode())
 		}
 
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-
 		entries = append(entries, entry{
 			relPath: rel,
 			isDir:   false,
 			mode:    info.Mode().Perm(),
-			content: data,
+			size:    info.Size(),
 		})
 		return nil
 	})
@@ -93,12 +93,22 @@ func treeDigest(root string) (string, error) {
 			h.Write([]byte{byte(entryDir), 0})
 			fmt.Fprintf(h, "%o\x00", e.mode)
 			h.Write([]byte{0}) // zero-length content
-		} else {
-			h.Write([]byte{byte(entryFile), 0})
-			fmt.Fprintf(h, "%o\x00", e.mode)
-			fmt.Fprintf(h, "%d\x00", len(e.content))
-			h.Write(e.content)
+			continue
 		}
+		h.Write([]byte{byte(entryFile), 0})
+		fmt.Fprintf(h, "%o\x00", e.mode)
+		fmt.Fprintf(h, "%d\x00", e.size)
+
+		// Stream the file content into the hash without buffering it whole.
+		f, err := os.Open(filepath.Join(root, filepath.FromSlash(e.relPath)))
+		if err != nil {
+			return "", fmt.Errorf("tree digest: open %s: %w", e.relPath, err)
+		}
+		if _, err := io.Copy(h, f); err != nil {
+			f.Close()
+			return "", fmt.Errorf("tree digest: read %s: %w", e.relPath, err)
+		}
+		f.Close()
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }

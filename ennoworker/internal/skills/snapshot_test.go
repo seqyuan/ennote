@@ -22,7 +22,7 @@ func buildTestCatalog(t *testing.T) (*Catalog, string) {
 
 func TestPlanMaterialization_Basic(t *testing.T) {
 	catalog, _ := buildTestCatalog(t)
-	vars := TemplateVars{Workspace: "/workspace", SkillDir: "/skills"}
+	vars := TemplateVars{Mode: "bwrap", Workspace: "/workspace", SkillDir: "/skills"}
 
 	plan, err := PlanMaterialization(catalog, vars)
 	require.NoError(t, err)
@@ -46,7 +46,7 @@ func TestPlanMaterialization_Basic(t *testing.T) {
 
 func TestPlanMaterialization_None(t *testing.T) {
 	catalog, _ := buildTestCatalog(t)
-	vars := TemplateVars{Workspace: ".", SkillDir: "/tmp/test-skills"}
+	vars := TemplateVars{Mode: "none", Workspace: ".", SkillDir: "/tmp/test-skills"}
 
 	plan, err := PlanMaterialization(catalog, vars)
 	require.NoError(t, err)
@@ -66,7 +66,7 @@ func TestPlanMaterialization_EmptyVars(t *testing.T) {
 
 func TestMaterializeCatalog_Basic(t *testing.T) {
 	catalog, _ := buildTestCatalog(t)
-	vars := TemplateVars{Workspace: "/workspace", SkillDir: "/skills"}
+	vars := TemplateVars{Mode: "bwrap", Workspace: "/workspace", SkillDir: "/skills"}
 
 	plan, err := PlanMaterialization(catalog, vars)
 	require.NoError(t, err)
@@ -97,7 +97,7 @@ func TestMaterializeCatalog_Variables(t *testing.T) {
 	makeSkillLeaf(t, base, "s", `{"id":"s","prompt":"SKILL.md"}`, "Workspace: ${workspace}, Skill: ${skill_dir}")
 
 	catalog := BuildCatalog([]SourceRoot{{Name: "user", Path: base, Priority: 0}})
-	vars := TemplateVars{Workspace: "/workspace", SkillDir: "/skills"}
+	vars := TemplateVars{Mode: "bwrap", Workspace: "/workspace", SkillDir: "/skills"}
 
 	plan, err := PlanMaterialization(catalog, vars)
 	require.NoError(t, err)
@@ -114,7 +114,7 @@ func TestMaterializeCatalog_Variables(t *testing.T) {
 
 func TestMaterializeCatalog_StagingFailure(t *testing.T) {
 	catalog, _ := buildTestCatalog(t)
-	vars := TemplateVars{Workspace: "/workspace", SkillDir: "/skills"}
+	vars := TemplateVars{Mode: "bwrap", Workspace: "/workspace", SkillDir: "/skills"}
 
 	plan, err := PlanMaterialization(catalog, vars)
 	require.NoError(t, err)
@@ -131,7 +131,7 @@ func TestMaterializeCatalog_StagingFailure(t *testing.T) {
 
 func TestVerifyMaterializedCatalog_Valid(t *testing.T) {
 	catalog, _ := buildTestCatalog(t)
-	vars := TemplateVars{Workspace: "/workspace", SkillDir: "/skills"}
+	vars := TemplateVars{Mode: "bwrap", Workspace: "/workspace", SkillDir: "/skills"}
 
 	plan, err := PlanMaterialization(catalog, vars)
 	require.NoError(t, err)
@@ -147,7 +147,7 @@ func TestVerifyMaterializedCatalog_Valid(t *testing.T) {
 
 func TestVerifyMaterializedCatalog_TamperedFile(t *testing.T) {
 	catalog, _ := buildTestCatalog(t)
-	vars := TemplateVars{Workspace: "/workspace", SkillDir: "/skills"}
+	vars := TemplateVars{Mode: "bwrap", Workspace: "/workspace", SkillDir: "/skills"}
 
 	plan, err := PlanMaterialization(catalog, vars)
 	require.NoError(t, err)
@@ -167,7 +167,7 @@ func TestVerifyMaterializedCatalog_TamperedFile(t *testing.T) {
 
 func TestVerifyMaterializedCatalog_ExtraFile(t *testing.T) {
 	catalog, _ := buildTestCatalog(t)
-	vars := TemplateVars{Workspace: "/workspace", SkillDir: "/skills"}
+	vars := TemplateVars{Mode: "bwrap", Workspace: "/workspace", SkillDir: "/skills"}
 
 	plan, err := PlanMaterialization(catalog, vars)
 	require.NoError(t, err)
@@ -187,7 +187,7 @@ func TestVerifyMaterializedCatalog_ExtraFile(t *testing.T) {
 
 func TestVerifyMaterializedCatalog_TamperedManifest(t *testing.T) {
 	catalog, _ := buildTestCatalog(t)
-	vars := TemplateVars{Workspace: "/workspace", SkillDir: "/skills"}
+	vars := TemplateVars{Mode: "bwrap", Workspace: "/workspace", SkillDir: "/skills"}
 
 	plan, err := PlanMaterialization(catalog, vars)
 	require.NoError(t, err)
@@ -228,7 +228,7 @@ func TestCategory16KiBLimit(t *testing.T) {
 
 	catalog := BuildCatalog([]SourceRoot{{Name: "user", Path: base, Priority: 0}})
 	t.Logf("Catalog has %d roots, %d skills", len(catalog.Roots), len(catalog.Skills))
-	vars := TemplateVars{Workspace: "/workspace", SkillDir: "/skills"}
+	vars := TemplateVars{Mode: "bwrap", Workspace: "/workspace", SkillDir: "/skills"}
 
 	_, err := PlanMaterialization(catalog, vars)
 	if err != nil {
@@ -238,4 +238,49 @@ func TestCategory16KiBLimit(t *testing.T) {
 	}
 	// If no error, the generated index must be under 16 KiB
 	// This is acceptable if the skill descriptions are short enough
+}
+
+func TestVerify_NestedSubdir(t *testing.T) {
+	// Regression: a skill with nested attachment directories (e.g. scripts/run.R)
+	// must pass verification. See plan §3.1 legal layout.
+	base := t.TempDir()
+	makeSkillLeaf(t, base, "s1", `{"id":"s1","prompt":"SKILL.md"}`, "# S1")
+	require.NoError(t, os.MkdirAll(filepath.Join(base, "s1", "scripts"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(base, "s1", "scripts", "run.R"),
+		[]byte("#!/usr/bin/Rscript"), 0o755))
+
+	catalog := BuildCatalog([]SourceRoot{{Name: "user", Path: base, Priority: 0}})
+	vars := TemplateVars{Mode: "bwrap", Workspace: "/workspace", SkillDir: "/skills"}
+	plan, err := PlanMaterialization(catalog, vars)
+	require.NoError(t, err)
+	runDir := t.TempDir()
+	result, err := MaterializeCatalog(runDir, plan, catalog)
+	require.NoError(t, err)
+	assert.NoError(t, VerifyMaterializedCatalog(result.Root, plan.CatalogDigest))
+}
+
+func TestMaterialize_IdempotentReuse(t *testing.T) {
+	// Regression: when the target snapshot already exists and matches the
+	// current plan, MaterializeCatalog must reuse it without overwriting.
+	// A tampered existing snapshot must fail with a conflict error.
+	base := t.TempDir()
+	makeSkillLeaf(t, base, "s1", `{"id":"s1","prompt":"SKILL.md"}`, "# S1")
+
+	catalog := BuildCatalog([]SourceRoot{{Name: "user", Path: base, Priority: 0}})
+	vars := TemplateVars{Mode: "bwrap", Workspace: "/workspace", SkillDir: "/skills"}
+	plan, err := PlanMaterialization(catalog, vars)
+	require.NoError(t, err)
+
+	runDir := t.TempDir()
+	_, err = MaterializeCatalog(runDir, plan, catalog)
+	require.NoError(t, err)
+
+	result2, err := MaterializeCatalog(runDir, plan, catalog)
+	require.NoError(t, err)
+	assert.Equal(t, plan.CatalogDigest, result2.CatalogDigest)
+
+	require.NoError(t, os.WriteFile(filepath.Join(runDir, "skills", "s1", "SKILL.md"),
+		[]byte("tampered"), 0o644))
+	_, err = MaterializeCatalog(runDir, plan, catalog)
+	assert.Error(t, err, "existing tampered snapshot must conflict")
 }

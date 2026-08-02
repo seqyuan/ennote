@@ -55,7 +55,7 @@ func TestCatalogScale_500Skills25Categories(t *testing.T) {
 	assert.NotContains(t, prompt, "This is skill", "prompt must not contain SKILL.md body text")
 
 	// Materialize and verify
-	vars := TemplateVars{Workspace: "/workspace", SkillDir: "/skills"}
+	vars := TemplateVars{Mode: "bwrap", Workspace: "/workspace", SkillDir: "/skills"}
 	plan, err := PlanMaterialization(catalog, vars)
 	require.NoError(t, err)
 
@@ -90,7 +90,7 @@ func TestCatalogScale_500SkillsSingleCategoryExceedsLimit(t *testing.T) {
 	}
 
 	catalog := BuildCatalog([]SourceRoot{{Name: "user", Path: base, Priority: 0}})
-	vars := TemplateVars{Workspace: "/workspace", SkillDir: "/skills"}
+	vars := TemplateVars{Mode: "bwrap", Workspace: "/workspace", SkillDir: "/skills"}
 
 	_, err := PlanMaterialization(catalog, vars)
 	assert.Error(t, err, "should fail because category.md exceeds 16 KiB")
@@ -143,7 +143,7 @@ func BenchmarkMaterializeCatalog(b *testing.B) {
 	}
 
 	catalog := BuildCatalog([]SourceRoot{{Name: "user", Path: base, Priority: 0}})
-	vars := TemplateVars{Workspace: "/workspace", SkillDir: "/skills"}
+	vars := TemplateVars{Mode: "bwrap", Workspace: "/workspace", SkillDir: "/skills"}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

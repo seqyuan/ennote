@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -31,6 +32,7 @@ type catalogManifest struct {
 
 // TemplateVars holds the trusted template variable values used for rendering.
 type TemplateVars struct {
+	Mode      string // "bwrap" | "none" — explicit, never inferred
 	Workspace string
 	SkillDir  string // virtual /skills/<RelPath>, or host absolute in none mode
 }
@@ -92,9 +94,12 @@ func PlanMaterialization(catalog *Catalog, vars TemplateVars) (*MaterializationP
 	if vars.Workspace == "" || vars.SkillDir == "" {
 		return nil, fmt.Errorf("template vars require non-empty workspace and skill_dir")
 	}
+	if vars.Mode != "bwrap" && vars.Mode != "none" {
+		return nil, fmt.Errorf("template vars require explicit mode (bwrap|none), got %q", vars.Mode)
+	}
 
 	plan := &MaterializationPlan{
-		Mode: vars.Mode(),
+		Mode: vars.Mode,
 	}
 
 	// Collect categories and skills from the tree
@@ -183,7 +188,7 @@ func PlanMaterialization(catalog *Catalog, vars TemplateVars) (*MaterializationP
 		for j := range plan.Entries {
 			if plan.Entries[j].RelPath == lp.relPath && plan.Entries[j].Kind == string(NodeSkill) {
 				plan.Entries[j].SnapshotDigest = snapDigest
-				plan.Entries[j].SnapshotMode = vars.Mode()
+				plan.Entries[j].SnapshotMode = vars.Mode
 				break
 			}
 		}
@@ -193,21 +198,14 @@ func PlanMaterialization(catalog *Catalog, vars TemplateVars) (*MaterializationP
 	for i := range plan.Entries {
 		if plan.Entries[i].Kind == string(NodeCategory) {
 			plan.Entries[i].SnapshotDigest = plan.Entries[i].SourceDigest
-			plan.Entries[i].SnapshotMode = vars.Mode()
+			plan.Entries[i].SnapshotMode = vars.Mode
 		}
 	}
 
-	plan.SnapshotCatalogDigest = SnapshotCatalogDigest(plan.Entries, vars.Mode())
-	plan.CatalogDigest = CatalogDigest(plan.Entries, vars.Mode(), plan.SourceCatalogDigest, plan.SnapshotCatalogDigest)
+	plan.SnapshotCatalogDigest = SnapshotCatalogDigest(plan.Entries, vars.Mode)
+	plan.CatalogDigest = CatalogDigest(plan.Entries, vars.Mode, plan.SourceCatalogDigest, plan.SnapshotCatalogDigest)
 
 	return plan, nil
-}
-
-func (v TemplateVars) Mode() string {
-	if v.Workspace == "/workspace" {
-		return "bwrap"
-	}
-	return "none"
 }
 
 // collectEntries recursively walks the catalog tree to collect categories and leaves.
@@ -340,6 +338,24 @@ func MaterializeCatalog(parentDir string, plan *MaterializationPlan, catalog *Ca
 
 	skillsRoot := filepath.Join(parentDir, "skills")
 
+	// If the target snapshot already exists, never overwrite or RemoveAll it.
+	// Verify against the current plan's full expected digest and reuse only
+	// when the existing tree matches completely; otherwise fail with a
+	// conflict error (the snapshot may be in use by a resume path).
+	if _, err := os.Stat(skillsRoot); err == nil {
+		if verifyErr := VerifyMaterializedCatalog(skillsRoot, plan.CatalogDigest); verifyErr == nil {
+			return &MaterializedCatalog{
+				Root:                  skillsRoot,
+				SourceCatalogDigest:   plan.SourceCatalogDigest,
+				SnapshotCatalogDigest: plan.SnapshotCatalogDigest,
+				CatalogDigest:         plan.CatalogDigest,
+				Records:               nil, // DB rows are already present for this run
+			}, nil
+		} else {
+			return nil, fmt.Errorf("existing skills snapshot conflicts with current plan: %w", verifyErr)
+		}
+	}
+
 	// Stage in a temp directory
 	tmpDir := filepath.Join(parentDir, "skills.tmp-"+uuid.NewString()[:8])
 	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
@@ -403,6 +419,20 @@ func MaterializeCatalog(parentDir string, plan *MaterializationPlan, catalog *Ca
 			return nil, fmt.Errorf("snapshot digest %s: %w", lp.relPath, err)
 		}
 
+		// The materialized snapshot must match the plan's expected snapshot
+		// digest exactly; otherwise the plan and the written tree diverged.
+		expectedSnap := ""
+		for i := range plan.Entries {
+			if plan.Entries[i].Kind == string(NodeSkill) && plan.Entries[i].RelPath == lp.relPath {
+				expectedSnap = plan.Entries[i].SnapshotDigest
+				break
+			}
+		}
+		if expectedSnap != "" && snapDigest != expectedSnap {
+			return nil, fmt.Errorf("snapshot digest mismatch for %s: expected %s, got %s",
+				lp.relPath, expectedSnap, snapDigest)
+		}
+
 		skill := findLoadedSkill(catalog, lp.relPath)
 		skillID := ""
 		version := ""
@@ -436,7 +466,9 @@ func MaterializeCatalog(parentDir string, plan *MaterializationPlan, catalog *Ca
 	if err != nil {
 		return nil, fmt.Errorf("marshal catalog manifest: %w", err)
 	}
-	// Canonical: pretty-print with sorted keys already ensured by struct field order
+	// The manifest is written compactly with struct field order (no map keys),
+	// which is the canonical byte form the verifier re-encodes and compares
+	// byte-for-byte against the on-disk file.
 	manifestFile := filepath.Join(tmpDir, ".catalog.json")
 	if err := os.WriteFile(manifestFile, manifestData, 0o644); err != nil {
 		return nil, fmt.Errorf("write .catalog.json: %w", err)
@@ -523,12 +555,16 @@ func VerifyMaterializedCatalog(root string, expectedCatalogDigest string) error 
 		}
 	}
 
-	// Walk entire tree and check no extra files/dirs
-	manifestPaths := map[string]bool{".catalog.json": true}
+	// Walk entire tree and check no extra files/dirs.
+	// A path is allowed if it equals a manifest entry or is under one
+	// (e.g. skill leaves may contain arbitrary nested attachments like
+	// scripts/run.R). Symlinks and non-regular files are always rejected.
+	manifestPaths := make([]string, 0, len(manifest.Entries)+1)
+	manifestPaths = append(manifestPaths, ".catalog.json")
 	for _, entry := range manifest.Entries {
-		manifestPaths[filepath.ToSlash(entry.RelPath)] = true
+		manifestPaths = append(manifestPaths, filepath.ToSlash(entry.RelPath))
 		if entry.Kind == string(NodeCategory) {
-			manifestPaths[filepath.ToSlash(entry.RelPath)+"/category.md"] = true
+			manifestPaths = append(manifestPaths, filepath.ToSlash(entry.RelPath)+"/category.md")
 		}
 	}
 
@@ -551,13 +587,16 @@ func VerifyMaterializedCatalog(root string, expectedCatalogDigest string) error 
 		if !info.Mode().IsDir() && !info.Mode().IsRegular() {
 			return fmt.Errorf("non-regular file found in snapshot: %s", relSlash)
 		}
-		// Check this path (file or dir) is in manifest
-		if !manifestPaths[relSlash] {
-			// Could be a file inside a skill leaf - check parent
-			parent := filepath.ToSlash(filepath.Dir(relSlash))
-			if !manifestPaths[parent] {
-				return fmt.Errorf("extra entry in snapshot not in manifest: %s", relSlash)
+		// Path must be a manifest entry itself or under one of them.
+		allowed := false
+		for _, prefix := range manifestPaths {
+			if relSlash == prefix || strings.HasPrefix(relSlash, prefix+"/") {
+				allowed = true
+				break
 			}
+		}
+		if !allowed {
+			return fmt.Errorf("extra entry in snapshot not in manifest: %s", relSlash)
 		}
 		return nil
 	})

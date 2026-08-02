@@ -376,3 +376,35 @@ func stringsContains(s, substr string) bool {
 	}
 	return false
 }
+
+func TestCatalog_DuplicateIDDeterministic(t *testing.T) {
+	// Regression: duplicate manifest IDs at different RelPaths must resolve
+	// deterministically regardless of map iteration order.
+	base := t.TempDir()
+	makeSkillLeaf(t, base, "a", `{"id":"dup","prompt":"SKILL.md"}`, "# A")
+	makeSkillLeaf(t, base, "b", `{"id":"dup","prompt":"SKILL.md"}`, "# B")
+
+	winners := map[string]int{}
+	for i := 0; i < 50; i++ {
+		c := BuildCatalog([]SourceRoot{{Name: "user", Path: base, Priority: 0}})
+		require.Len(t, c.Skills, 1)
+		winners[c.Skills[0].RelPath]++
+	}
+	assert.Len(t, winners, 1, "duplicate ID resolution must be deterministic")
+}
+
+func TestCatalog_DuplicateIDCrossRootUserWins(t *testing.T) {
+	// Regression: with user priority < builtin priority, user must win a
+	// duplicate ID even when the two live at different RelPaths.
+	baseUser := t.TempDir()
+	baseBuiltin := t.TempDir()
+	makeSkillLeaf(t, baseUser, "user-skill", `{"id":"dup","prompt":"SKILL.md"}`, "# User")
+	makeSkillLeaf(t, baseBuiltin, "builtin-skill", `{"id":"dup","prompt":"SKILL.md"}`, "# Builtin")
+
+	c := BuildCatalog([]SourceRoot{
+		{Name: "user", Path: baseUser, Priority: 0},
+		{Name: "builtin", Path: baseBuiltin, Priority: 1},
+	})
+	require.Len(t, c.Skills, 1)
+	assert.Equal(t, "user-skill", c.Skills[0].RelPath)
+}

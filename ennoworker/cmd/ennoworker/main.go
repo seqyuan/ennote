@@ -153,9 +153,17 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		skillCatalogDigest = resumeState.SkillCatalogDigest
 		systemPrompt = resumeState.SystemPrompt
 	} else {
+		// Load project context files (AGENTS/MEMORY). This is independent of
+		// skill catalog availability and must always run for a fresh run.
+		projCtx, loadErr := e.loadProjectContext(canonicalRoot, trusted)
+		if loadErr != nil {
+			slog.Warn("load project context failed", "error", loadErr)
+			projCtx = &projectcontext.Context{}
+		}
+
 		// Check if read is allowed by frozen tool policy
 		allowRead := agent.AllowsTool(resolved.Effective.ToolPolicy.Config, "read")
-
+		catalogPrompt := ""
 		if allowRead {
 			// Build catalog from source roots
 			sources := []skills.SourceRoot{
@@ -168,11 +176,11 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 
 			// Determine template vars based on sandbox mode
 			sandboxMode := workspace.SandboxMode(e.sandbox)
-			vars := skills.TemplateVars{Workspace: "/workspace", SkillDir: "/skills"}
+			vars := skills.TemplateVars{Mode: "bwrap", Workspace: "/workspace", SkillDir: "/skills"}
 			if sandboxMode == workspace.SandboxNone {
 				// For none mode, skill_dir uses the absolute host path
 				absSnapDir, _ := filepath.Abs(snapDir)
-				vars = skills.TemplateVars{Workspace: ".", SkillDir: absSnapDir}
+				vars = skills.TemplateVars{Mode: "none", Workspace: ".", SkillDir: absSnapDir}
 			}
 
 			plan, planErr := skills.PlanMaterialization(catalog, vars)
@@ -187,28 +195,27 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 					if saveErr := e.skillRepo.SaveCatalog(ctx, run.ID, result.Records); saveErr != nil {
 						slog.Warn("save catalog failed", "error", saveErr)
 					}
-				skillCatalogState = "materialized"
-				skillCatalogDigest = result.CatalogDigest
-					// Build catalog prompt
-					catalogPrompt := skills.BuildCatalogPrompt(catalog, 16*1024)
-					if catalogPrompt != "" {
-						// Load project context files
-						projCtx, loadErr := e.loadProjectContext(canonicalRoot, trusted)
-						if loadErr != nil {
-							slog.Warn("load project context failed", "error", loadErr)
-						}
-						systemPrompt = projCtx.BuildPrompt("You are a helpful assistant.", catalogPrompt)
-					}
+					skillCatalogState = "materialized"
+					skillCatalogDigest = result.CatalogDigest
 				}
 			}
+			catalogPrompt = skills.BuildCatalogPrompt(catalog, 16*1024)
 		} else {
 			skillCatalogState = "disabled"
 			slog.Info("read tool not allowed by policy, skipping skill catalog")
 		}
+
+		systemPrompt = projCtx.BuildPrompt("You are a helpful assistant.", catalogPrompt)
 	}
 
 	var wManager *workspace.Manager
-	wManager, err = workspace.NewManagerWithSkills(canonicalRoot, ioDir, snapDir, workspace.SandboxMode(e.sandbox))
+	if skillCatalogState == "disabled" {
+		// Read is statically denied: register no /skills mount and do not
+		// create an empty snapshot directory.
+		wManager, err = workspace.NewManager(canonicalRoot, ioDir, "", workspace.SandboxMode(e.sandbox))
+	} else {
+		wManager, err = workspace.NewManagerWithSkills(canonicalRoot, ioDir, snapDir, workspace.SandboxMode(e.sandbox))
+	}
 	if err != nil {
 		return domain.RunOutput{}, fmt.Errorf("create workspace: %w", err)
 	}
