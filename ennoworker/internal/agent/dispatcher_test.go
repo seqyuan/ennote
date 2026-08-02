@@ -18,10 +18,10 @@ func TestSafeParallelStartsAdjacentReadOnlyCallsTogether(t *testing.T) {
 	release := make(chan struct{})
 	tools := &fakeTools{
 		classes: map[string]domain.ExecutionClass{"read": domain.ExecutionReadOnly},
-		execute: func(_ context.Context, call domain.ToolCall) domain.ToolResult {
+		execute: func(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 			entered <- call.ID
 			<-release
-			return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: call.ID}
+			return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: call.ID}, nil
 		},
 	}
 	loop := &Loop{Tools: tools, Events: &memoryWriter{}, ToolExecution: domain.ToolExecutionConfig{
@@ -52,7 +52,7 @@ func TestSafeParallelHonorsReadConcurrencyLimit(t *testing.T) {
 	var current, maximum atomic.Int32
 	tools := &fakeTools{
 		classes: map[string]domain.ExecutionClass{"read": domain.ExecutionReadOnly},
-		execute: func(_ context.Context, call domain.ToolCall) domain.ToolResult {
+		execute: func(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 			value := current.Add(1)
 			for {
 				old := maximum.Load()
@@ -63,7 +63,7 @@ func TestSafeParallelHonorsReadConcurrencyLimit(t *testing.T) {
 			entered <- struct{}{}
 			<-release
 			current.Add(-1)
-			return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name}
+			return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name}, nil
 		},
 	}
 	loop := &Loop{Tools: tools, Events: &memoryWriter{}, ToolExecution: domain.ToolExecutionConfig{
@@ -93,10 +93,10 @@ func TestSafeParallelKeepsExclusiveBarriersInCallOrder(t *testing.T) {
 		classes: map[string]domain.ExecutionClass{
 			"read": domain.ExecutionReadOnly, "write": domain.ExecutionWorkspaceWrite,
 		},
-		execute: func(_ context.Context, call domain.ToolCall) domain.ToolResult {
+		execute: func(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 			entered <- call.ID
 			<-releases[call.ID]
-			return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: call.ID}
+			return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: call.ID}, nil
 		},
 	}
 	loop := &Loop{Tools: tools, Events: &memoryWriter{}, ToolExecution: domain.ToolExecutionConfig{Mode: "safe_parallel", MaxConcurrentReadTools: 4}}
@@ -124,7 +124,7 @@ func TestSafeParallelNeverOverlapsWorkspaceWritesOrBash(t *testing.T) {
 		classes: map[string]domain.ExecutionClass{
 			"write": domain.ExecutionWorkspaceWrite, "bash": domain.ExecutionExclusive,
 		},
-		execute: func(_ context.Context, call domain.ToolCall) domain.ToolResult {
+		execute: func(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 			active := current.Add(1)
 			for {
 				old := maximum.Load()
@@ -134,7 +134,7 @@ func TestSafeParallelNeverOverlapsWorkspaceWritesOrBash(t *testing.T) {
 			}
 			time.Sleep(10 * time.Millisecond)
 			current.Add(-1)
-			return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name}
+			return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name}, nil
 		},
 	}
 	loop := &Loop{Tools: tools, Events: &memoryWriter{}, ToolExecution: domain.ToolExecutionConfig{
@@ -152,14 +152,14 @@ func TestSafeParallelDrainsAllWorkersAfterExternalCancellation(t *testing.T) {
 	var started, exited, active atomic.Int32
 	tools := &fakeTools{
 		classes: map[string]domain.ExecutionClass{"read": domain.ExecutionReadOnly},
-		execute: func(ctx context.Context, call domain.ToolCall) domain.ToolResult {
+		execute: func(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 			started.Add(1)
 			active.Add(1)
 			entered <- struct{}{}
 			<-ctx.Done()
 			active.Add(-1)
 			exited.Add(1)
-			return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, IsError: true}
+			return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, IsError: true}, nil
 		},
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -189,8 +189,8 @@ func TestSafeParallelDrainsAllWorkersAfterExternalCancellation(t *testing.T) {
 func TestSafeParallelDoesNotCancelSiblingOnToolError(t *testing.T) {
 	tools := &fakeTools{
 		classes: map[string]domain.ExecutionClass{"read": domain.ExecutionReadOnly},
-		execute: func(_ context.Context, call domain.ToolCall) domain.ToolResult {
-			return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: call.ID, IsError: call.ID == "bad"}
+		execute: func(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+			return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: call.ID, IsError: call.ID == "bad"}, nil
 		},
 	}
 	loop := &Loop{Tools: tools, Events: &memoryWriter{}, ToolExecution: domain.ToolExecutionConfig{Mode: "safe_parallel", MaxConcurrentReadTools: 2}}
@@ -206,12 +206,12 @@ func TestSafeParallelDoesNotCancelSiblingOnToolError(t *testing.T) {
 func TestSafeParallelCancelsAndDrainsWorkersAfterEventFailure(t *testing.T) {
 	tools := &fakeTools{
 		classes: map[string]domain.ExecutionClass{"read": domain.ExecutionReadOnly},
-		execute: func(ctx context.Context, call domain.ToolCall) domain.ToolResult {
+		execute: func(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 			if call.ID == "first" {
-				return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name}
+				return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name}, nil
 			}
 			<-ctx.Done()
-			return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: ctx.Err().Error(), IsError: true}
+			return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: ctx.Err().Error(), IsError: true}, nil
 		},
 	}
 	writer := &memoryWriter{failTypes: map[string]error{"tool_call_completed": errors.New("disk full")}}

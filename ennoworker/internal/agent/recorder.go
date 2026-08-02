@@ -101,6 +101,7 @@ func (l *Loop) recordToolCompleted(ctx context.Context, call domain.ToolCallFini
 		"recordId": call.ID, "iteration": call.Iteration, "callIndex": call.CallIndex,
 		"toolCallId": call.Result.ToolCallID, "toolName": call.Result.ToolName,
 		"content": call.Result.Content, "isError": call.Result.IsError, "artifacts": call.Result.Artifacts,
+		"attemptCount": call.AttemptCount,
 	})
 }
 

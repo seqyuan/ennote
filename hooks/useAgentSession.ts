@@ -276,6 +276,15 @@ async function streamAgentEvents(
   let buffer = "";
   const assistants = new Map<number, { text: string; thinking: string }>();
   const toolDeltas = new Map<string, { id: string; name: string; argumentsFragment: string }>();
+  // Accumulate live tool stdout/stderr per (toolCallId, stream) so deltas append
+  // instead of overwriting via the upsert merge.
+  const toolOutputs = new Map<string, { text: string; name: string }>();
+  // Track live frames: live deltas (text_delta etc.) arrive with event: live.
+  // Durable frames carry the same event types for legacy compatibility, but
+  // since the worker now dual-writes, we must consume ONLY the live frames for
+  // rendering deltas to avoid duplicate text. Durable delta types are ignored.
+  let currentEventName: string | null = null;
+  let liveFrame = false;
 
   function assistant(iteration: number) {
     const value = assistants.get(iteration) ?? { text: "", thinking: "" };
@@ -313,13 +322,28 @@ async function streamAgentEvents(
       buffer = lines.pop() ?? "";
       for (const rawLine of lines) {
         const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+        if (line.startsWith("event:")) {
+          currentEventName = line.slice(6).trim();
+          liveFrame = currentEventName === "live";
+          continue;
+        }
+        if (line.startsWith(":")) continue; // comment / heartbeat
         if (!line.startsWith("data:")) continue;
         const event = JSON.parse(line.slice(5).trimStart());
+        // liveFrame must be reset after the data line; only deltas use event: live.
+        const wasLive = liveFrame;
+        liveFrame = false;
         const payload = (event.payload ?? {}) as Record<string, unknown>;
         const iteration = typeof payload.iteration === "number" ? payload.iteration : 1;
         switch (event.type) {
-          case "text_delta": assistant(iteration).text += String(payload.text ?? ""); flushAssistant(iteration); break;
-          case "thinking_delta": assistant(iteration).thinking += String(payload.text ?? ""); flushAssistant(iteration); break;
+          case "text_delta": case "thinking_delta": {
+            // Consume only live-frame deltas to avoid duplicates.
+            if (!wasLive) break;
+            if (event.type === "text_delta") assistant(iteration).text += String(payload.text ?? "");
+            else assistant(iteration).thinking += String(payload.text ?? "");
+            flushAssistant(iteration);
+            break;
+          }
           case "model_call_retry_scheduled":
             assistants.set(iteration, { text: "", thinking: "" }); flushAssistant(iteration);
             setStatus(`Retrying model in ${payload.delayMs ?? 0} ms…`); break;
@@ -337,6 +361,7 @@ async function streamAgentEvents(
           case "context_checkpoint_selected": setStatus("Using context checkpoint…"); break;
           case "output_truncated": setStatus(Number(payload.partialToolCallCount ?? 0) > 0 ? "Recovering truncated tool call…" : "Model output truncated"); break;
           case "tool_call_delta": {
+            if (!wasLive) break; // legacy durable deltas ignored
             const key = `${iteration}:${payload.index ?? 0}`;
             const partial = toolDeltas.get(key) ?? { id: "", name: "tool", argumentsFragment: "" };
             if (payload.id) partial.id = String(payload.id);
@@ -347,11 +372,44 @@ async function streamAgentEvents(
               argumentsFragment: partial.argumentsFragment }, "pending", "Collecting tool arguments…");
             break;
           }
+          case "tool_output_delta": {
+            // Live tool stdout/stderr streaming: accumulate per call so text appends.
+            if (!wasLive) break;
+            const callID = String(payload.toolCallId ?? `event-${payload.callIndex ?? "unknown"}`);
+            const stream = String(payload.stream ?? "stdout");
+            const text = String(payload.text ?? "");
+            const entry = toolOutputs.get(callID) ?? { text: "", name: String(payload.toolName ?? "tool") };
+            if (payload.toolName) entry.name = String(payload.toolName);
+            if (stream === "stderr") entry.text += `[stderr] ${text}`;
+            else entry.text += text;
+            toolOutputs.set(callID, entry);
+            upsertMessage({
+              id: `${runId}-tool-${callID}`,
+              role: "tool",
+              kind: "tool",
+              toolCallId: callID,
+              toolName: entry.name,
+              text: entry.text,
+              isError: false,
+              toolState: "running",
+            });
+            break;
+          }
           case "tool_call_started":
             setStatus(`Running: ${payload.toolName ?? "tool"}…`); upsertTool(payload, "running", "Running"); break;
-          case "tool_call_completed":
-            setStatus(""); upsertTool(payload, payload.isError ? "failed" : "completed", "No output"); break;
-          case "tool_call_failed": upsertTool(payload, "failed", "Tool call failed."); break;
+          case "tool_call_completed": {
+            setStatus("");
+            const callID = String(payload.toolCallId ?? payload.recordId ?? `event-${payload.callIndex ?? "unknown"}`);
+            toolOutputs.delete(callID); // final result replaces the live preview
+            upsertTool(payload, payload.isError ? "failed" : "completed", "No output");
+            break;
+          }
+          case "tool_call_failed": {
+            const callID = String(payload.toolCallId ?? payload.recordId ?? `event-${payload.callIndex ?? "unknown"}`);
+            toolOutputs.delete(callID);
+            upsertTool(payload, "failed", "Tool call failed.");
+            break;
+          }
           case "tool_policy_denied":
           case "tool_policy_terminated":
           case "tool_call_skipped":

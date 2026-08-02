@@ -70,3 +70,32 @@ func TestEstimateTokensIncreasesWithContent(t *testing.T) {
 	long := []domain.ChatMessage{{Role: domain.RoleUser, Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: strings.Repeat("long", 100)}}}}
 	assert.Greater(t, EstimateTokens(long), EstimateTokens(short))
 }
+
+func TestBudgetToolResultNeverExceedsBudget(t *testing.T) {
+	// Strict invariant: len(result.Content) <= budget even after marker insertion.
+	for _, budget := range []int{64, 128, 256, 512, 1024, 4096, 16384} {
+		content := strings.Repeat("0123456789", 5000) // ~50KB, well above any budget
+		result := BudgetToolResult(domain.ToolResult{Content: content}, budget)
+		assert.LessOrEqual(t, len(result.Content), budget,
+			"budget=%d but result len=%d", budget, len(result.Content))
+	}
+}
+
+func TestBudgetToolResultSmallBudget(t *testing.T) {
+	// Budget smaller than marker → returns safe prefix only, no broken marker.
+	content := strings.Repeat("hello world ", 100)
+	result := BudgetToolResult(domain.ToolResult{Content: content}, 10)
+	assert.True(t, utf8.ValidString(result.Content))
+	// Budget 10 < marker ~90 bytes → should return a safe prefix.
+	assert.LessOrEqual(t, len(result.Content), 10)
+}
+
+func TestBudgetToolResultOmittedCountIsCorrect(t *testing.T) {
+	content := strings.Repeat("A", 2000) + "UNIQUE_TAIL"
+	result := BudgetToolResult(domain.ToolResult{Content: content}, 500)
+	// Head + tail should form the bulk of the budget.
+	assert.Contains(t, result.Content, "AAAA")
+	assert.Contains(t, result.Content, "UNIQUE_TAIL")
+	assert.Contains(t, result.Content, "omitted")
+	assert.LessOrEqual(t, len(result.Content), 500)
+}

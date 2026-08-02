@@ -29,6 +29,13 @@ type FindTool struct {
 func (t *GrepTool) ExecutionClass() domain.ExecutionClass { return domain.ExecutionReadOnly }
 func (t *FindTool) ExecutionClass() domain.ExecutionClass { return domain.ExecutionReadOnly }
 
+func (t *GrepTool) RetryPolicy() domain.ToolRetryPolicy {
+	return domain.ToolRetryPolicy{Mode: domain.ToolRetryTransient, MaxRetries: 2}
+}
+func (t *FindTool) RetryPolicy() domain.ToolRetryPolicy {
+	return domain.ToolRetryPolicy{Mode: domain.ToolRetryTransient, MaxRetries: 2}
+}
+
 func (t *GrepTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{Name: "grep", Description: "Search text files under /workspace with a regular expression", Parameters: schema(`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"}},"required":["pattern"],"additionalProperties":false}`)}
 }
@@ -36,21 +43,21 @@ func (t *FindTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{Name: "find", Description: "Find files under /workspace by glob pattern", Parameters: schema(`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"}},"required":["pattern"],"additionalProperties":false}`)}
 }
 
-func (t *GrepTool) Execute(ctx context.Context, call domain.ToolCall) domain.ToolResult {
+func (t *GrepTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	var args struct {
 		Pattern string `json:"pattern"`
 		Path    string `json:"path"`
 	}
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
-		return errorResult(call, fmt.Errorf("invalid grep arguments: %w", err))
+		return errorResult(call, fmt.Errorf("invalid grep arguments: %w", err)), nil
 	}
 	expression, err := regexp.Compile(args.Pattern)
 	if err != nil {
-		return errorResult(call, fmt.Errorf("invalid regular expression: %w", err))
+		return errorResult(call, fmt.Errorf("invalid regular expression: %w", err)), nil
 	}
 	root, err := t.Jail.ResolveExisting(args.Path)
 	if err != nil {
-		return errorResult(call, err)
+		return errorResult(call, err), nil
 	}
 	limit := t.MaxResults
 	if limit <= 0 {
@@ -97,22 +104,22 @@ func (t *GrepTool) Execute(ctx context.Context, call domain.ToolCall) domain.Too
 		return nil
 	})
 	if walkErr != nil && !errorsIsSkipAll(walkErr) {
-		return errorResult(call, walkErr)
+		return errorResult(call, walkErr), nil
 	}
-	return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: strings.Join(matches, "\n")}
+	return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: strings.Join(matches, "\n")}, nil
 }
 
-func (t *FindTool) Execute(ctx context.Context, call domain.ToolCall) domain.ToolResult {
+func (t *FindTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	var args struct {
 		Pattern string `json:"pattern"`
 		Path    string `json:"path"`
 	}
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
-		return errorResult(call, fmt.Errorf("invalid find arguments: %w", err))
+		return errorResult(call, fmt.Errorf("invalid find arguments: %w", err)), nil
 	}
 	root, err := t.Jail.ResolveExisting(args.Path)
 	if err != nil {
-		return errorResult(call, err)
+		return errorResult(call, err), nil
 	}
 	limit := t.MaxResults
 	if limit <= 0 {
@@ -147,10 +154,10 @@ func (t *FindTool) Execute(ctx context.Context, call domain.ToolCall) domain.Too
 		return nil
 	})
 	if walkErr != nil && !errorsIsSkipAll(walkErr) {
-		return errorResult(call, walkErr)
+		return errorResult(call, walkErr), nil
 	}
 	sort.Strings(matches)
-	return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: strings.Join(matches, "\n")}
+	return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: strings.Join(matches, "\n")}, nil
 }
 
 func errorsIsSkipAll(err error) bool { return err == fs.SkipAll }

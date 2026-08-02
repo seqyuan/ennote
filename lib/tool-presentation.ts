@@ -4,7 +4,7 @@ export type ToolActivityState = "pending" | "running" | "completed" | "failed" |
 const readOnlyTools = new Set(["read", "ls", "list", "grep", "search", "find", "search_compacted_history", "todo"]);
 const writeTools = new Set(["write", "edit", "publish_artifact"]);
 const shellTools = new Set(["bash", "exec"]);
-const externalTools = new Set(["http", "http_request", "fetch", "web_search"]);
+const externalTools = new Set(["http", "http_request", "fetch", "web_search", "web_fetch"]);
 const secretKey = /api[_-]?key|token|secret|password|credential|authorization|cookie/i;
 
 export interface ToolSummary {
@@ -59,6 +59,8 @@ export function summarizeToolCall(toolName: string, rawArguments: unknown): Tool
     case "bash":
     case "exec":
       return { label: "Run command", target: oneLine(stringValue(args.command ?? args.cmd) || "Shell command", 180), detail: path || undefined };
+    case "web_fetch":
+      return { label: "Fetch external page", target: oneLine(stringValue(args.url) || "External URL", 180) };
     case "http":
     case "http_request":
     case "fetch":

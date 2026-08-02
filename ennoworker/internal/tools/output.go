@@ -68,6 +68,9 @@ type outputCapture struct {
 	limit    int64
 	written  int64
 	overflow bool
+	stream   string
+	callID   string
+	sink     domain.ToolOutputSink
 }
 
 func newOutputCapture(runtimeDir, stream string, previewLimit int, artifactLimit int64) (*outputCapture, error) {
@@ -96,6 +99,14 @@ func (c *outputCapture) Write(value []byte) (int, error) {
 	_, _ = c.preview.Write(value)
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// Non-blocking live streaming to the tool's output sink (if attached).
+	if c.sink != nil {
+		c.sink.TryEmit(domain.ToolOutputUpdate{
+			ToolCallID: c.callID,
+			Stream:     c.stream,
+			Data:       append([]byte(nil), value...),
+		})
+	}
 	original := len(value)
 	if c.overflow {
 		return original, nil
@@ -120,6 +131,14 @@ func (c *outputCapture) Write(value []byte) (int, error) {
 }
 
 func (c *outputCapture) String() string { return c.preview.String() }
+
+// AttachSink wires a live streaming sink to the capture. Called once per
+// capture before the command starts; never concurrent with Write.
+func (c *outputCapture) AttachSink(callID, stream string, sink domain.ToolOutputSink) {
+	c.callID = callID
+	c.stream = stream
+	c.sink = sink
+}
 
 func (c *outputCapture) CloseAndPublish(ctx context.Context, sink *ArtifactSink, callID, stream string) (*domain.ArtifactReference, string, error) {
 	c.mu.Lock()

@@ -19,24 +19,28 @@ type ListTool struct {
 
 func (t *ListTool) ExecutionClass() domain.ExecutionClass { return domain.ExecutionReadOnly }
 
+func (t *ListTool) RetryPolicy() domain.ToolRetryPolicy {
+	return domain.ToolRetryPolicy{Mode: domain.ToolRetryTransient, MaxRetries: 2}
+}
+
 func (t *ListTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{Name: "ls", Description: "List a directory inside /workspace", Parameters: schema(pathSchema)}
 }
 
-func (t *ListTool) Execute(ctx context.Context, call domain.ToolCall) domain.ToolResult {
+func (t *ListTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	var args struct {
 		Path string `json:"path"`
 	}
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
-		return errorResult(call, fmt.Errorf("invalid ls arguments: %w", err))
+		return errorResult(call, fmt.Errorf("invalid ls arguments: %w", err)), nil
 	}
 	path, err := t.Jail.ResolveExisting(args.Path)
 	if err != nil {
-		return errorResult(call, err)
+		return errorResult(call, err), nil
 	}
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		return errorResult(call, err)
+		return errorResult(call, err), nil
 	}
 	limit := t.MaxEntries
 	if limit <= 0 {
@@ -58,7 +62,7 @@ func (t *ListTool) Execute(ctx context.Context, call domain.ToolCall) domain.Too
 		lines = append(lines, entry.Name()+suffix)
 	}
 	if err := ctx.Err(); err != nil {
-		return errorResult(call, err)
+		return errorResult(call, err), nil
 	}
-	return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: strings.Join(lines, "\n")}
+	return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: strings.Join(lines, "\n")}, nil
 }

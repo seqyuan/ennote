@@ -67,14 +67,15 @@ type ToolCallStart struct {
 }
 
 type ToolCallFinish struct {
-	ID        string
-	RunID     string
-	Iteration int
-	CallIndex int
-	Call      ToolCall
-	RawResult ToolResult
-	Result    ToolResult
-	Status    string
-	Reason    string
-	Policy    ToolPolicyMetadata
+	ID           string
+	RunID        string
+	Iteration    int
+	CallIndex    int
+	Call         ToolCall
+	RawResult    ToolResult
+	Result       ToolResult
+	Status       string
+	Reason       string
+	Policy       ToolPolicyMetadata
+	AttemptCount int
 }

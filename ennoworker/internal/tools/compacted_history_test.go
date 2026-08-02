@@ -25,19 +25,22 @@ func TestCompactedHistoryLookupEnforcesBoundsAndExcludesResultBodies(t *testing.
 	})
 	assert.Equal(t, domain.ExecutionReadOnly, tool.ExecutionClass())
 
-	result := tool.Execute(context.Background(), domain.ToolCall{ID: "lookup", Name: "search_compacted_history",
+	result, err := tool.Execute(context.Background(), domain.ToolCall{ID: "lookup", Name: "search_compacted_history",
 		Arguments: json.RawMessage(`{"query":"S-100"}`)})
+	require.NoError(t, err)
 	require.False(t, result.IsError)
 	assert.Contains(t, result.Content, "S-100")
 	assert.NotContains(t, result.Content, "RAW-SECRET-RESULT")
 
-	bodyExcluded := tool.Execute(context.Background(), domain.ToolCall{ID: "lookup2", Name: "search_compacted_history",
+	bodyExcluded, err := tool.Execute(context.Background(), domain.ToolCall{ID: "lookup2", Name: "search_compacted_history",
 		Arguments: json.RawMessage(`{"query":"tool result"}`)})
+	require.NoError(t, err)
 	assert.Contains(t, bodyExcluded.Content, "body excluded")
 	assert.NotContains(t, bodyExcluded.Content, "RAW-SECRET-RESULT")
 
-	outside := tool.Execute(context.Background(), domain.ToolCall{ID: "lookup3", Name: "search_compacted_history",
+	outside, err := tool.Execute(context.Background(), domain.ToolCall{ID: "lookup3", Name: "search_compacted_history",
 		Arguments: json.RawMessage(`{"fromMessageId":"m3"}`)})
+	require.NoError(t, err)
 	assert.True(t, outside.IsError)
 	assert.Contains(t, outside.Content, string(domain.ErrorHistoryLookupOutOfRange))
 }
@@ -56,14 +59,16 @@ func TestCompactedHistoryLookupIncludesSafeRunLocalMessages(t *testing.T) {
 	}
 	tool.UseRunLocal("run-1", generated, 2)
 
-	found := tool.Execute(context.Background(), domain.ToolCall{ID: "lookup", Name: "search_compacted_history",
+	found, err := tool.Execute(context.Background(), domain.ToolCall{ID: "lookup", Name: "search_compacted_history",
 		Arguments: json.RawMessage(`{"query":"S-42"}`)})
+	require.NoError(t, err)
 	require.False(t, found.IsError)
 	assert.Contains(t, found.Content, "run:run-1:1")
 	assert.Contains(t, found.Content, "S-42")
 
-	artifact := tool.Execute(context.Background(), domain.ToolCall{ID: "lookup2", Name: "search_compacted_history",
+	artifact, err := tool.Execute(context.Background(), domain.ToolCall{ID: "lookup2", Name: "search_compacted_history",
 		Arguments: json.RawMessage(`{"query":"artifact-42"}`)})
+	require.NoError(t, err)
 	require.False(t, artifact.IsError)
 	assert.Contains(t, artifact.Content, "artifact-42")
 	assert.Contains(t, artifact.Content, "body excluded")
@@ -80,8 +85,9 @@ func TestCompactedHistoryLookupCapsUTF8OutputAndPaginates(t *testing.T) {
 	}
 	messages[24].ID = through
 	tool := NewCompactedHistoryTool(messages, domain.ContextCompaction{SourceFromMessageID: &from, SourceThroughMessageID: &through})
-	result := tool.Execute(context.Background(), domain.ToolCall{ID: "lookup", Name: "search_compacted_history",
+	result, err := tool.Execute(context.Background(), domain.ToolCall{ID: "lookup", Name: "search_compacted_history",
 		Arguments: json.RawMessage(`{"limit":20}`)})
+	require.NoError(t, err)
 	require.False(t, result.IsError)
 	assert.LessOrEqual(t, len(result.Content), historyLookupMaxOutput+historyLookupMaxExcerpt)
 	assert.Contains(t, result.Content, `"truncated":true`)

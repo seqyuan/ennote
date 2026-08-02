@@ -16,7 +16,7 @@ import (
 
 type Tool interface {
 	Definition() domain.ToolDefinition
-	Execute(context.Context, domain.ToolCall) domain.ToolResult
+	Execute(context.Context, domain.ToolCall) (domain.ToolResult, error)
 }
 
 type ClassifiedTool interface {
@@ -24,15 +24,16 @@ type ClassifiedTool interface {
 }
 
 type Registry struct {
-	mu         sync.RWMutex
-	tools      map[string]Tool
-	classes    map[string]domain.ExecutionClass
-	validators map[string]*jsonschema.Schema
+	mu          sync.RWMutex
+	tools       map[string]Tool
+	classes     map[string]domain.ExecutionClass
+	validators  map[string]*jsonschema.Schema
+	retryPolicy map[string]domain.ToolRetryPolicy
 }
 
 func NewRegistry(tools ...Tool) (*Registry, error) {
 	registry := &Registry{tools: make(map[string]Tool), classes: make(map[string]domain.ExecutionClass),
-		validators: make(map[string]*jsonschema.Schema)}
+		validators: make(map[string]*jsonschema.Schema), retryPolicy: make(map[string]domain.ToolRetryPolicy)}
 	for _, tool := range tools {
 		if err := registry.Register(tool); err != nil {
 			return nil, err
@@ -70,6 +71,11 @@ func (r *Registry) Register(tool Tool) error {
 		class = classified.ExecutionClass()
 	}
 	r.classes[definition.Name] = class
+	policy := domain.ToolRetryPolicy{Mode: domain.ToolRetryNever, MaxRetries: 0}
+	if rp, ok := tool.(domain.RetryPolicyProvider); ok {
+		policy = rp.RetryPolicy()
+	}
+	r.retryPolicy[definition.Name] = policy
 	return nil
 }
 
@@ -116,17 +122,48 @@ func (r *Registry) ValidateArguments(toolName string, arguments json.RawMessage)
 	return nil
 }
 
-func (r *Registry) Execute(ctx context.Context, call domain.ToolCall) domain.ToolResult {
+// RetryPolicy implements domain.ToolRetryClassifier.
+func (r *Registry) RetryPolicy(toolName string) domain.ToolRetryPolicy {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if policy, ok := r.retryPolicy[toolName]; ok {
+		return policy
+	}
+	return domain.ToolRetryPolicy{Mode: domain.ToolRetryNever, MaxRetries: 0}
+}
+
+func (r *Registry) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	r.mu.RLock()
 	tool := r.tools[call.Name]
 	r.mu.RUnlock()
 	if tool == nil {
-		return errorResult(call, fmt.Errorf("unknown tool: %s", call.Name))
+		err := fmt.Errorf("unknown tool: %s", call.Name)
+		return errorResult(call, err), nil
 	}
-	result := tool.Execute(ctx, call)
+	result, err := tool.Execute(ctx, call)
 	result.ToolCallID = call.ID
 	result.ToolName = call.Name
-	return result
+	return result, err
+}
+
+// ExecuteStreaming implements domain.StreamingToolRunner: it forwards to the
+// concrete tool when the tool itself supports streaming, otherwise it falls
+// back to the standard Execute path.
+func (r *Registry) ExecuteStreaming(ctx context.Context, call domain.ToolCall, sink domain.ToolOutputSink) (domain.ToolResult, error) {
+	r.mu.RLock()
+	tool := r.tools[call.Name]
+	r.mu.RUnlock()
+	if tool == nil {
+		err := fmt.Errorf("unknown tool: %s", call.Name)
+		return errorResult(call, err), nil
+	}
+	if streaming, ok := tool.(domain.StreamingToolRunner); ok {
+		result, err := streaming.ExecuteStreaming(ctx, call, sink)
+		result.ToolCallID = call.ID
+		result.ToolName = call.Name
+		return result, err
+	}
+	return r.Execute(ctx, call)
 }
 
 func errorResult(call domain.ToolCall, err error) domain.ToolResult {

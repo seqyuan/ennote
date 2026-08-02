@@ -23,6 +23,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/config"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
+	"github.com/seqyuan/ennote/ennoworker/internal/hooks"
 	"github.com/seqyuan/ennote/ennoworker/internal/llm"
 	"github.com/seqyuan/ennote/ennoworker/internal/providerdoctor"
 	"github.com/seqyuan/ennote/ennoworker/internal/runs"
@@ -34,19 +35,23 @@ import (
 )
 
 type agentExecutor struct {
-	db         *sql.DB
-	writer     *events.Writer
-	runs       *store.RunRepo
-	calls      *store.CallRepo
-	sessionDB  *store.SessionRepo
-	msgRepo    *store.MessageRepo
-	skillRepo  *store.SkillSnapshotRepo
-	skillsDir  string
-	builtinDir string
-	sandbox    string
-	artifacts  *artifacts.Service
-	compaction *compaction.Service
-	approvals  *store.ApprovalRepo
+	db          *sql.DB
+	writer      *events.Writer
+	hub         *events.Hub
+	homeDir     string
+	trustStore  *workspace.TrustStore
+	outboxStore *hooks.OutboxStore
+	runs        *store.RunRepo
+	calls       *store.CallRepo
+	sessionDB   *store.SessionRepo
+	msgRepo     *store.MessageRepo
+	skillRepo   *store.SkillSnapshotRepo
+	skillsDir   string
+	builtinDir  string
+	sandbox     string
+	artifacts   *artifacts.Service
+	compaction  *compaction.Service
+	approvals   *store.ApprovalRepo
 }
 
 func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (domain.RunOutput, error) {
@@ -80,6 +85,12 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	wSpace, err := loadProjectWorkspace(ctx, e.db, run.SessionID)
 	if err != nil {
 		return domain.RunOutput{}, fmt.Errorf("load project: %w", err)
+	}
+	// Resolve hooks config (Phase 2): global + workspace layers, trust-gated.
+	// The resolved set is frozen into the effective config so later Phase 3
+	// lifecycle wiring reads a stable snapshot.
+	if err := e.resolveAndFreezeHooks(ctx, run, wSpace, &resolved.Effective); err != nil {
+		return domain.RunOutput{}, fmt.Errorf("hooks config: %w", err)
 	}
 	if run.BaseMessageID == "" {
 		if session.ActiveLeafMessageID == nil {
@@ -119,7 +130,26 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 			if _, err := e.skillRepo.Save(ctx, run.ID, skill, snapPath); err != nil {
 				slog.Warn("save skill snapshot failed", "skill", skill.Manifest.ID, "error", err)
 			}
-			skillPrompt.WriteString(skill.PromptText)
+
+			// Reload skill from the immutable snapshot path and render trusted variables.
+			snapSkill, loadErr := skills.Load(snapPath)
+			if loadErr != nil {
+				slog.Warn("reload skill snapshot failed", "skill", skill.Manifest.ID, "error", loadErr)
+				// Fall back to the original (unrendered) PromptText.
+				skillPrompt.WriteString(skill.PromptText)
+				skillPrompt.WriteString("\n\n")
+				continue
+			}
+
+			// Build trusted variables from sandbox mode.
+			trustedVars := buildTrustedSkillVars(workspace.SandboxMode(e.sandbox), snapPath)
+			rendered, renderErr := skills.RenderTrustedTemplate(snapSkill.PromptText, trustedVars)
+			if renderErr != nil {
+				slog.Warn("render skill template failed", "skill", skill.Manifest.ID, "error", renderErr)
+				skillPrompt.WriteString(skill.PromptText)
+			} else {
+				skillPrompt.WriteString(rendered)
+			}
 			skillPrompt.WriteString("\n\n")
 		}
 		if s := skillPrompt.String(); s != "" {
@@ -183,7 +213,7 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		VisionResolver:    &agent.BuiltinVisionResolver{Loader: e.artifacts},
 		ImageDescriptions: &store.ImageDescriptionRepo{DB: e.db},
 		Tools:             toolReg, ToolPolicy: toolPolicy, ToolPolicySnapshot: resolved.Effective.ToolPolicy,
-		WorkspaceID: wSpace.ID, Events: e.writer, Recorder: e.calls,
+		WorkspaceID: wSpace.ID, Events: e.writer, Hub: e.hub, Recorder: e.calls,
 		QueuedInputs: &queueAdapter{repo: &store.QueueRepo{DB: e.db}},
 		SteeringMode: domain.QueueOneAtATime, FollowUpMode: domain.QueueOneAtATime,
 		MaxIterations: resolved.Effective.MaxIterations,
@@ -195,6 +225,23 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 			&agent.TodoReminderProvider{Store: todoStore},
 			&agent.BudgetReminderProvider{},
 		),
+	}
+	if e.hub != nil {
+		loop.LivePublisher = e.hub
+	}
+	var runStartContext string
+	if !resolved.Effective.HookConfig.IsEmpty() {
+		loop.HookLife = agent.NewHookLifecycle(resolved.Effective.HookConfig).WithRun(run.ID, session.ID)
+		// RunStart hook: inject additionalContext as a one-shot reminder for
+		// iteration 1 only (never repeated on later iterations or resumes).
+		runStartSource := "initial"
+		if resumeState != nil {
+			runStartSource = "retry"
+		}
+		runStartContext = loop.HookLife.RunStart(ctx, runStartSource)
+	}
+	if runStartContext != "" {
+		loop.Reminders.Register(&agent.RunStartReminderProvider{Context: runStartContext})
 	}
 	overflowRecovery := func(recoveryCtx context.Context) ([]domain.ChatMessage, error) {
 		result, recoveryErr := e.compaction.RecoverOverflow(recoveryCtx, run, history, resolved.Effective,
@@ -229,6 +276,10 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		SystemPrompt: systemPrompt, History: chatHistory, OverflowRecovery: overflowRecovery,
 		Resume: resumeState, Approval: approvalResolution,
 	})
+
+	// Queue observer hooks (RunEnd / SessionEnd) via durable outbox.
+	e.queueRunEndObserver(ctx, run, session, wSpace, resolved.Effective, err, result.Iterations)
+
 	if err != nil {
 		var approvalRequired *agent.ApprovalRequiredError
 		if errors.As(err, &approvalRequired) && e.approvals != nil {
@@ -305,10 +356,205 @@ func (e *agentExecutor) resolveRuntimeProvider(runtime domain.ModelRuntimeSnapsh
 	return provider, nil
 }
 
+// buildTrustedSkillVars returns the trusted template variables for Skill
+// prompt rendering based on the current sandbox mode and snapshot path.
+func buildTrustedSkillVars(mode workspace.SandboxMode, snapPath string) map[string]string {
+	vars := map[string]string{
+		"skill_dir": snapPath,
+	}
+	switch mode {
+	case workspace.SandboxBubblewrap:
+		vars["workspace"] = "/workspace"
+	case workspace.SandboxNone:
+		vars["workspace"] = "."
+	}
+	return vars
+}
+
 type queueAdapter struct{ repo *store.QueueRepo }
 
 func (a *queueAdapter) Drain(ctx context.Context, runID string, kind domain.QueuedInputKind, mode domain.QueueMode) ([]domain.QueuedInput, error) {
 	return a.repo.Drain(ctx, runID, kind, mode)
+}
+
+func (e *agentExecutor) resolveAndFreezeHooks(ctx context.Context, run *domain.AgentRun, wSpace *domain.ProjectWorkspace, effective *domain.EffectiveRunConfig) error {
+	canonicalRoot, err := filepath.Abs(wSpace.HostPath)
+	if err != nil {
+		return fmt.Errorf("resolve workspace root: %w", err)
+	}
+
+	// Load configuration layers.
+	globalLayer, err := hooks.LoadGlobalHookLayer(e.homeDir)
+	if err != nil {
+		return err
+	}
+	envLayer, err := hooks.LoadEnvHookLayer(e.homeDir)
+	if err != nil {
+		return err
+	}
+
+	// Workspace hooks only when trusted.
+	var wsLayer *hooks.HookLayer
+	trusted, trustErr := e.trustStore.IsTrusted(wSpace.ID, canonicalRoot)
+	if trustErr != nil {
+		return fmt.Errorf("check workspace trust: %w", trustErr)
+	}
+	if trusted {
+		wsLayer, err = hooks.LoadWorkspaceHookLayer(canonicalRoot)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Resolve the merged hook set.
+	resolved, err := hooks.ResolveHookSet(globalLayer, envLayer, wsLayer)
+	if err != nil {
+		return err
+	}
+
+	// Compute frozen hook config.
+	var trustedAt time.Time
+	if trusted && e.trustStore != nil {
+		records, _ := e.trustStore.List()
+		for _, r := range records {
+			if r.WorkspaceID == wSpace.ID && r.CanonicalRoot == canonicalRoot {
+				trustedAt = r.TrustedAt
+				break
+			}
+		}
+	}
+	digest, _ := resolved.Digest()
+	encoded, err := json.Marshal(resolved)
+	if err != nil {
+		return fmt.Errorf("encode resolved hooks: %w", err)
+	}
+
+	effective.HookConfig = domain.EffectiveHookConfig{
+		ResolvedHookSet: encoded,
+		HookSetDigest:   fmt.Sprintf("%x", digest),
+		WorkspaceID:     wSpace.ID,
+		WorkspaceRoot:   canonicalRoot,
+		TrustedAt:       trustedAt,
+	}
+
+	// Persist the updated effective config with hooks frozen.
+	updatedConfig, err := json.Marshal(effective)
+	if err != nil {
+		return fmt.Errorf("encode effective config with hooks: %w", err)
+	}
+	_, err = e.db.ExecContext(ctx, `UPDATE agent_runs SET effective_config_json = ? WHERE id = ?`,
+		string(updatedConfig), run.ID)
+	if err != nil {
+		return fmt.Errorf("freeze hooks in effective config: %w", err)
+	}
+	run.EffectiveConfig = updatedConfig
+
+	return nil
+}
+
+func (e *agentExecutor) queueRunEndObserver(ctx context.Context, run *domain.AgentRun, session *domain.Session,
+	wSpace *domain.ProjectWorkspace, effective domain.EffectiveRunConfig, runErr error, iterations int) {
+	if e.outboxStore == nil || effective.HookConfig.IsEmpty() {
+		return
+	}
+
+	status := "succeeded"
+	errCode := ""
+	if runErr != nil {
+		status = "failed"
+		errCode = string(domain.ErrorCodeOf(runErr))
+	}
+
+	payloadJSON, _ := json.Marshal(map[string]any{
+		"status":     status,
+		"error_code": errCode,
+		"iterations": iterations,
+	})
+
+	canonicalRoot, _ := filepath.Abs(wSpace.HostPath)
+	deliveryID := fmt.Sprintf("runend_%s", run.ID)
+	entry := hooks.OutboxEntry{
+		DeliveryID:    deliveryID,
+		EventID:       0, // event_id is UNIQUE; we use delivery_id as primary
+		RunID:         run.ID,
+		SessionID:     session.ID,
+		EventType:     "RunEnd",
+		PayloadJSON:   string(payloadJSON),
+		WorkspaceID:   wSpace.ID,
+		WorkspaceRoot: canonicalRoot,
+		Status:        hooks.OutboxStatusPending,
+		CreatedAt:     time.Now(),
+	}
+	// Use a background context so the outbox write is not cancelled with the run.
+	tx, err := e.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		slog.Warn("outbox: begin tx for RunEnd", "run_id", run.ID, "error", err)
+		return
+	}
+	if err := e.outboxStore.InsertOutbox(ctx, tx, entry); err != nil {
+		slog.Warn("outbox: insert RunEnd", "run_id", run.ID, "error", err)
+		tx.Rollback()
+		return
+	}
+	tx.Commit()
+}
+
+// CheckPrompt implements api.PromptHookGate: evaluates UserPromptSubmit hooks
+// before a new run is created. Fail-open on any infrastructure error.
+func (e *agentExecutor) CheckPrompt(ctx context.Context, sessionID, prompt string, parts []domain.ContentBlock) api.PromptHookOutcome {
+	wSpace, err := loadProjectWorkspace(ctx, e.db, sessionID)
+	if err != nil {
+		return api.PromptHookOutcome{Error: fmt.Errorf("load workspace for prompt hook: %w", err)}
+	}
+	canonicalRoot, err := filepath.Abs(wSpace.HostPath)
+	if err != nil {
+		return api.PromptHookOutcome{Error: fmt.Errorf("resolve workspace root: %w", err)}
+	}
+
+	globalLayer, err := hooks.LoadGlobalHookLayer(e.homeDir)
+	if err != nil {
+		return api.PromptHookOutcome{Error: err}
+	}
+	envLayer, err := hooks.LoadEnvHookLayer(e.homeDir)
+	if err != nil {
+		return api.PromptHookOutcome{Error: err}
+	}
+	trusted, trustErr := e.trustStore.IsTrusted(wSpace.ID, canonicalRoot)
+	if trustErr != nil {
+		return api.PromptHookOutcome{Error: fmt.Errorf("check workspace trust: %w", trustErr)}
+	}
+	var wsLayer *hooks.HookLayer
+	if trusted {
+		wsLayer, err = hooks.LoadWorkspaceHookLayer(canonicalRoot)
+		if err != nil {
+			return api.PromptHookOutcome{Error: err}
+		}
+	}
+	set, err := hooks.ResolveHookSet(globalLayer, envLayer, wsLayer)
+	if err != nil {
+		return api.PromptHookOutcome{Error: err}
+	}
+	if set.IsEmpty() || len(set["UserPromptSubmit"].Matchers) == 0 {
+		return api.PromptHookOutcome{}
+	}
+
+	d := hooks.NewDispatcher(set, canonicalRoot, nil)
+	if d == nil {
+		return api.PromptHookOutcome{}
+	}
+	dec := d.Dispatch(ctx, "UserPromptSubmit", "", hooks.HookInput{
+		DeliveryID:    "prompt_" + sessionID,
+		EventType:     "UserPromptSubmit",
+		SessionID:     sessionID,
+		WorkspaceID:   wSpace.ID,
+		WorkspaceRoot: canonicalRoot,
+		Prompt:        prompt,
+	})
+	return api.PromptHookOutcome{
+		Blocked:           dec.Block,
+		Reason:            dec.Reason,
+		AdditionalContext: dec.AdditionalContext,
+	}
 }
 
 func loadProjectWorkspace(ctx context.Context, db *sql.DB, sessionID string) (*domain.ProjectWorkspace, error) {
@@ -383,8 +629,13 @@ func run() error {
 	compactionRepo := &store.CompactionRepo{DB: db, Publisher: hub}
 	runCompactionRepo := &store.RunCompactionRepo{DB: db, Publisher: hub}
 	approvalRepo := &store.ApprovalRepo{DB: db, Publisher: hub}
+	trustStore, err := workspace.NewTrustStore(cfg.HomeDir)
+	if err != nil {
+		return fmt.Errorf("init trust store: %w", err)
+	}
+	outboxStore := &hooks.OutboxStore{DB: db}
 	executor := &agentExecutor{
-		db: db, writer: eventWriter, runs: runRepo,
+		db: db, writer: eventWriter, hub: hub, homeDir: cfg.HomeDir, trustStore: trustStore, outboxStore: outboxStore, runs: runRepo,
 		calls:     callRepo,
 		sessionDB: &store.SessionRepo{DB: db}, msgRepo: &store.MessageRepo{DB: db},
 		skillRepo: &store.SkillSnapshotRepo{DB: db},
@@ -393,6 +644,34 @@ func run() error {
 	}
 	executor.compaction = &compaction.Service{Repo: compactionRepo, RunRepo: runCompactionRepo, Calls: callRepo,
 		Messages: executor.msgRepo, Events: eventWriter, Providers: executor.resolveRuntimeProvider}
+
+	// Background observer-hook outbox worker: at-least-once delivery of
+	// RunEnd / ApprovalRequested / Notification hooks across restarts.
+	outboxWorker := &hooks.OutboxWorker{
+		Store: outboxStore,
+		Resolver: func(ctx context.Context, runID string) (hooks.HookSet, string, string, error) {
+			stored, err := runRepo.Get(ctx, runID)
+			if err != nil {
+				return nil, "", "", err
+			}
+			var effective domain.EffectiveRunConfig
+			if err := json.Unmarshal(stored.EffectiveConfig, &effective); err != nil {
+				return nil, "", "", err
+			}
+			if effective.HookConfig.IsEmpty() {
+				return hooks.HookSet{}, effective.HookConfig.WorkspaceID, effective.HookConfig.WorkspaceRoot, nil
+			}
+			var set hooks.HookSet
+			if err := json.Unmarshal(effective.HookConfig.ResolvedHookSet, &set); err != nil {
+				return nil, "", "", err
+			}
+			return set, effective.HookConfig.WorkspaceID, effective.HookConfig.WorkspaceRoot, nil
+		},
+	}
+	outboxCtx, outboxCancel := context.WithCancel(context.Background())
+	defer outboxCancel()
+	go outboxWorker.Start(outboxCtx)
+
 	coordinator := runs.NewCoordinator(runRepo, executor, cfg.MaxConcurrentRuns)
 	for _, runID := range queuedRuns {
 		if err := coordinator.Enqueue(context.Background(), runID); err != nil {
@@ -418,6 +697,7 @@ func run() error {
 		Messages: executor.msgRepo, Compactions: compactionRepo,
 		Approvals: approvalRepo, Runs: runRepo, Queue: &store.QueueRepo{DB: db}, Events: &store.EventRepo{DB: db},
 		Hub: hub, Control: api.CoordinatorController{Coordinator: coordinator}, InstanceID: instanceID,
+		PromptGate: executor,
 	}
 
 	listener, err := net.Listen("tcp", cfg.ListenAddr)

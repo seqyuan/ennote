@@ -19,8 +19,8 @@ type persistHelperTools struct {
 }
 
 func (t *persistHelperTools) Definitions() []domain.ToolDefinition { return t.defs }
-func (t *persistHelperTools) Execute(ctx context.Context, call domain.ToolCall) domain.ToolResult {
-	return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: "ok"}
+func (t *persistHelperTools) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+	return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: "ok"}, nil
 }
 
 type persistHelperEvents struct{}

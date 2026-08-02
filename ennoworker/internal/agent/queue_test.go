@@ -49,9 +49,9 @@ func TestSteerIsInjectedAfterCompleteToolBatchBeforeNextModelCall(t *testing.T) 
 		llm.FakeStep{Completion: domain.Completion{Content: []domain.ContentBlock{textBlock("redirected")}, StopReason: "stop"}},
 	)
 	order := []string{}
-	tools := &fakeTools{execute: func(_ context.Context, call domain.ToolCall) domain.ToolResult {
+	tools := &fakeTools{execute: func(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 		order = append(order, "tool")
-		return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: "done"}
+		return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: "done"}, nil
 	}}
 	queue := &scriptedQueue{steerAt: 2, order: &order}
 	loop := &Loop{

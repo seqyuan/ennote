@@ -22,9 +22,9 @@ func (integrationToolRunner) Definitions() []domain.ToolDefinition {
 		Parameters: json.RawMessage(`{"type":"object","additionalProperties":false}`)}}
 }
 
-func (integrationToolRunner) Execute(_ context.Context, call domain.ToolCall) domain.ToolResult {
+func (integrationToolRunner) Execute(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name,
-		Content: strings.Repeat("sample S-42 exact path /data/run/value.tsv\n", 1000)}
+		Content: strings.Repeat("sample S-42 exact path /data/run/value.tsv\n", 1000)}, nil
 }
 
 func integrationToolCompletion(id string) domain.Completion {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/events"
 	"github.com/seqyuan/ennote/ennoworker/internal/llm"
 )
 
@@ -17,6 +18,10 @@ var (
 	ErrMaxIterations = errors.New("agent reached maximum iterations")
 	ErrStuckToolLoop = errors.New("agent repeated an identical tool call without progress")
 )
+
+// maxStopHookBlocks is the hard cap on consecutive Stop-hook blocks before the
+// run ends anyway (FR-12 in the pigo design; v2 §7.5).
+const maxStopHookBlocks = 5
 
 type EventWriter interface {
 	Append(context.Context, string, ...domain.PendingEvent) ([]domain.RunEvent, error)
@@ -47,6 +52,7 @@ type Loop struct {
 	Provider           llm.Provider
 	Tools              domain.ToolRunner
 	Events             EventWriter
+	LivePublisher      events.LivePublisher // non-blocking live delta delivery
 	Recorder           CallRecorder
 	QueuedInputs       QueuedInputSource
 	SteeringMode       domain.QueueMode
@@ -56,6 +62,7 @@ type Loop struct {
 	ToolPolicy         ToolPolicy
 	ToolPolicySnapshot domain.PolicySnapshot
 	WorkspaceID        string
+	Hub                *events.Hub
 	TurnPlanner        TurnPlanner
 	ModelRouter        ModelRouter
 	MidRunCompactor    MidRunCompactor
@@ -63,9 +70,14 @@ type Loop struct {
 	ImageDescriptions  ImageDescriptionCache
 	Reminders          *ReminderRegistry
 	TodoStore          *domain.TodoStore
-	MaxIterations      int
-	ContextTokens      int
-	MaxOutput          int
+	HookLife           *HookLifecycle
+	// stopHookBlocks counts consecutive Stop-hook blocks for this run. When it
+	// reaches maxStopHookBlocks, the run ends anyway and a
+	// hook_stop_limit_reached durable event is recorded. Any allow resets it.
+	stopHookBlocks int
+	MaxIterations  int
+	ContextTokens  int
+	MaxOutput      int
 }
 
 type RunInput struct {
@@ -209,6 +221,9 @@ func (l *Loop) Run(ctx context.Context, input RunInput) (RunResult, error) {
 				}
 			}
 			if l.MidRunCompactor != nil && iteration > 1 && !requestCompacted {
+				if l.HookLife != nil {
+					l.HookLife.PreCompact(ctx, iteration, "threshold")
+				}
 				compacted, compactErr := l.MidRunCompactor.CompactRunContext(ctx, MidRunCompactionRequest{
 					RunID: input.RunID, Iteration: iteration, RequestGeneration: requestGeneration + 1,
 					Reason: MidRunCompactionThreshold, SystemPrompt: input.SystemPrompt,
@@ -276,6 +291,9 @@ func (l *Loop) Run(ctx context.Context, input RunInput) (RunResult, error) {
 				if l.MidRunCompactor == nil {
 					return runResult(messages, generated, final, iteration),
 						domain.NewCodedError(domain.ErrorContextOverflowInRun, err)
+				}
+				if l.HookLife != nil {
+					l.HookLife.PreCompact(ctx, iteration, "overflow")
 				}
 				compacted, compactErr := l.MidRunCompactor.CompactRunContext(ctx, MidRunCompactionRequest{
 					RunID: input.RunID, Iteration: iteration, RequestGeneration: requestGeneration + 1,
@@ -417,6 +435,39 @@ func (l *Loop) Run(ctx context.Context, input RunInput) (RunResult, error) {
 			steeringMode, followUpMode)
 		if err != nil {
 			return runResult(messages, generated, completion, iteration), err
+		}
+		if !continueTurn {
+			// Stop hook: the run would end naturally. A hook may block and force
+			// continuation, bounded by maxStopHookBlocks consecutive blocks.
+			if l.HookLife != nil {
+				dec := l.HookLife.Stop(ctx, iteration, "natural")
+				if dec.Block {
+					l.stopHookBlocks++
+					if l.stopHookBlocks > maxStopHookBlocks {
+						// Hard cap: force end and record a durable event.
+						if eventErr := l.appendEvent(context.WithoutCancel(ctx), input.RunID,
+							"hook_stop_limit_reached", map[string]any{
+								"iteration": iteration, "limit": maxStopHookBlocks,
+							}); eventErr != nil {
+							return runResult(messages, generated, completion, iteration), eventErr
+						}
+						return runResult(messages, generated, completion, iteration), nil
+					}
+					guidance := dec.Reason
+					if guidance == "" {
+						guidance = "Stop hook requested continuation."
+					}
+					messages = append(messages, domain.ChatMessage{
+						Role:    domain.RoleUser,
+						Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: guidance}},
+					})
+					generated = append(generated, messages[len(messages)-1])
+					continueTurn = true
+				} else {
+					// Any allow resets the consecutive-block counter.
+					l.stopHookBlocks = 0
+				}
+			}
 		}
 		if !continueTurn {
 			return runResult(messages, generated, completion, iteration), nil
@@ -872,17 +923,23 @@ func (s *eventSink) TextDelta(value string) error {
 	if s.purpose == domain.ModelCallImageDescription {
 		eventType = "vision_description_delta"
 	}
+	s.publishLive(eventType, map[string]any{"text": value})
 	return s.loop.appendEvent(s.ctx, s.runID, eventType, map[string]any{
 		"iteration": s.iteration, "attempt": s.attempt, "requestGeneration": s.requestGeneration,
 		"text": value, "sourceArtifactId": s.sourceArtifactID,
 	})
 }
 func (s *eventSink) ThinkingDelta(value string) error {
+	s.publishLive("thinking_delta", map[string]any{"text": value})
 	return s.loop.appendEvent(s.ctx, s.runID, "thinking_delta", map[string]any{
 		"iteration": s.iteration, "attempt": s.attempt, "requestGeneration": s.requestGeneration, "text": value,
 	})
 }
 func (s *eventSink) ToolCallDelta(value llm.ToolCallDelta) error {
+	s.publishLive("tool_call_delta", map[string]any{
+		"index": value.Index, "id": value.ID,
+		"name": value.Name, "argumentsFragment": value.ArgumentsFragment,
+	})
 	return s.loop.appendEvent(s.ctx, s.runID, "tool_call_delta", map[string]any{
 		"iteration": s.iteration, "attempt": s.attempt, "requestGeneration": s.requestGeneration,
 		"index": value.Index, "id": value.ID,
@@ -893,6 +950,24 @@ func (s *eventSink) Usage(value domain.Usage) error {
 	return s.loop.recordModelUsage(s.ctx, domain.ModelCallFinish{
 		ID: s.callID, RunID: s.runID, Iteration: s.iteration, Attempt: s.attempt,
 		RequestGeneration: s.requestGeneration, Usage: value,
+	})
+}
+
+// publishLive sends a non-blocking live delta event when a LivePublisher is configured.
+func (s *eventSink) publishLive(eventType string, payload map[string]any) {
+	if s.loop.LivePublisher == nil {
+		return
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	s.loop.LivePublisher.PublishLive(domain.LiveRunEvent{
+		RunID:     s.runID,
+		Type:      eventType,
+		StreamID:  s.callID,
+		Payload:   encoded,
+		CreatedAt: time.Now(),
 	})
 }
 

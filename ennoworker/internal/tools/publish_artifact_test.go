@@ -20,8 +20,9 @@ func TestPublishArtifactCopiesOnlyExplicitRegularFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(manager.Jail.Root(), "results.csv"), []byte("gene,value\nA,1\n"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(manager.Jail.Root(), "private.tmp"), []byte("secret"), 0o600))
 	tool := &PublishArtifactTool{Jail: manager.Jail, Sink: sink}
-	result := tool.Execute(context.Background(), domain.ToolCall{ID: "call-1", Name: "publish_artifact",
+	result, err := tool.Execute(context.Background(), domain.ToolCall{ID: "call-1", Name: "publish_artifact",
 		Arguments: json.RawMessage(`{"path":"/workspace/results.csv"}`)})
+	require.NoError(t, err)
 	require.False(t, result.IsError, result.Content)
 	require.Len(t, result.Artifacts, 1)
 	assert.Equal(t, domain.ArtifactKindTable, result.Artifacts[0].Kind)
@@ -35,7 +36,8 @@ func TestPublishArtifactRejectsWorkspaceEscapeAndDirectory(t *testing.T) {
 	manager, sink := setupArtifactTool(t)
 	tool := &PublishArtifactTool{Jail: manager.Jail, Sink: sink}
 	for _, raw := range []string{`{"path":"/etc/passwd"}`, `{"path":"/workspace"}`} {
-		result := tool.Execute(context.Background(), domain.ToolCall{ID: "call", Name: "publish_artifact", Arguments: json.RawMessage(raw)})
+		result, err := tool.Execute(context.Background(), domain.ToolCall{ID: "call", Name: "publish_artifact", Arguments: json.RawMessage(raw)})
+		require.NoError(t, err)
 		assert.True(t, result.IsError)
 		assert.Empty(t, result.Artifacts)
 	}
@@ -44,8 +46,9 @@ func TestPublishArtifactRejectsWorkspaceEscapeAndDirectory(t *testing.T) {
 func TestExecRetainsCompleteStdoutWhenPreviewTruncates(t *testing.T) {
 	manager, sink := setupArtifactTool(t)
 	tool := &ExecTool{Workspace: manager, Artifacts: sink, OutputLimit: 32, OutputArtifactLimit: 1024}
-	result := tool.Execute(context.Background(), domain.ToolCall{ID: "call-output", Name: "exec",
+	result, err := tool.Execute(context.Background(), domain.ToolCall{ID: "call-output", Name: "exec",
 		Arguments: json.RawMessage(`{"argv":["/bin/sh","-c","printf 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'"]}`)})
+	require.NoError(t, err)
 	require.False(t, result.IsError, result.Content)
 	require.Len(t, result.Artifacts, 1)
 	assert.Equal(t, "stdout.txt", result.Artifacts[0].Name)
@@ -59,8 +62,9 @@ func TestExecRetainsCompleteStdoutWhenPreviewTruncates(t *testing.T) {
 func TestExecReportsOversizedOutputWithoutPartialArtifact(t *testing.T) {
 	manager, sink := setupArtifactTool(t)
 	tool := &ExecTool{Workspace: manager, Artifacts: sink, OutputLimit: 8, OutputArtifactLimit: 16}
-	result := tool.Execute(context.Background(), domain.ToolCall{ID: "call-output", Name: "exec",
+	result, err := tool.Execute(context.Background(), domain.ToolCall{ID: "call-output", Name: "exec",
 		Arguments: json.RawMessage(`{"argv":["/bin/sh","-c","printf 'abcdefghijklmnopqrstuvwxyz'"]}`)})
+	require.NoError(t, err)
 	require.False(t, result.IsError, result.Content)
 	assert.Empty(t, result.Artifacts)
 	assert.Contains(t, result.Content, "exceeded the 16-byte artifact limit")

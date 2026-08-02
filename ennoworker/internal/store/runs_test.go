@@ -103,9 +103,9 @@ func TestRunTransitionsAppendEventsAndTerminalIsImmutable(t *testing.T) {
 
 	replayed, err := events.After(context.Background(), run.ID, 0, 10)
 	require.NoError(t, err)
-	require.Len(t, replayed, 3)
-	assert.Equal(t, []string{"run_queued", "run_started", "run_succeeded"}, []string{
-		replayed[0].EventType, replayed[1].EventType, replayed[2].EventType,
+	require.Len(t, replayed, 4)
+	assert.Equal(t, []string{"run_queued", "run_started", "run_telemetry", "run_succeeded"}, []string{
+		replayed[0].EventType, replayed[1].EventType, replayed[2].EventType, replayed[3].EventType,
 	})
 	assert.ErrorIs(t, repo.Fail(context.Background(), run.ID, "late", "late"), store.ErrInvalidRunState)
 }

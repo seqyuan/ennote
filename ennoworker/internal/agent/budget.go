@@ -120,10 +120,23 @@ func BudgetToolResult(result domain.ToolResult, budget int) domain.ToolResult {
 	if len(result.Content) <= budget {
 		return result
 	}
-	half := budget / 2
-	omitted := len(result.Content) - budget
+	// Reserve worst-case marker bytes so the final len(Content) <= budget.
+	// The marker includes a variable digit count; reserve 8 extra bytes for
+	// up to "99999999" (80 MB) omitted.
+	markerBase := len("\n[...  bytes omitted; use a narrower command or read the saved output ...]\n")
+	markerReserved := markerBase + 8
+	avail := budget - markerReserved
+	if avail < 4 {
+		// Budget is too small for a meaningful marker; return a safe prefix.
+		result.Content = validPrefix(result.Content, budget)
+		return result
+	}
+	half := avail / 2
+	head := validPrefix(result.Content, half)
+	tail := validSuffix(result.Content, half)
+	omitted := len(result.Content) - len(head) - len(tail)
 	marker := fmt.Sprintf("\n[... %d bytes omitted; use a narrower command or read the saved output ...]\n", omitted)
-	result.Content = validPrefix(result.Content, half) + marker + validSuffix(result.Content, half)
+	result.Content = head + marker + tail
 	return result
 }
 

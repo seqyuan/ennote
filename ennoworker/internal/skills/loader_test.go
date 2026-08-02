@@ -47,6 +47,49 @@ func TestLoadRejectsMissingId(t *testing.T) {
 	assert.ErrorContains(t, err, "skill id is required")
 }
 
+func TestLoadRejectsInvalidPrompt(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("other filename", func(t *testing.T) {
+		d := filepath.Join(dir, "other")
+		require.NoError(t, os.MkdirAll(d, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(d, "skill.json"),
+			[]byte(`{"id":"s","prompt":"other.md"}`), 0o644))
+		_, err := Load(d)
+		assert.ErrorContains(t, err, "must be empty or \"SKILL.md\"")
+	})
+
+	t.Run("absolute path", func(t *testing.T) {
+		d := filepath.Join(dir, "abs")
+		require.NoError(t, os.MkdirAll(d, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(d, "skill.json"),
+			[]byte(`{"id":"s","prompt":"/etc/passwd"}`), 0o644))
+		_, err := Load(d)
+		assert.ErrorContains(t, err, "must be empty or \"SKILL.md\"")
+	})
+
+	t.Run("dotdot", func(t *testing.T) {
+		d := filepath.Join(dir, "dotdot")
+		require.NoError(t, os.MkdirAll(d, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(d, "skill.json"),
+			[]byte(`{"id":"s","prompt":"../x.md"}`), 0o644))
+		_, err := Load(d)
+		assert.ErrorContains(t, err, "must be empty or \"SKILL.md\"")
+	})
+}
+
+func TestLoadEmptyPromptDefaultsToSkillMD(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "skill.json"),
+		[]byte(`{"id":"s","prompt":""}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"),
+		[]byte("default prompt"), 0o644))
+
+	skill, err := Load(dir)
+	require.NoError(t, err)
+	assert.Equal(t, "default prompt", skill.PromptText)
+}
+
 func TestDiscoverSkipsInvalidDirs(t *testing.T) {
 	base := t.TempDir()
 	valid := filepath.Join(base, "valid")
@@ -61,4 +104,92 @@ func TestDiscoverSkipsInvalidDirs(t *testing.T) {
 	skills := Discover(base)
 	require.Len(t, skills, 1)
 	assert.Equal(t, "valid", skills[0].Manifest.ID)
+}
+
+func TestIsSkillLeaf(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("valid skill leaf", func(t *testing.T) {
+		d := filepath.Join(dir, "s1")
+		require.NoError(t, os.MkdirAll(d, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(d, "skill.json"),
+			[]byte(`{"id":"s1"}`), 0o644))
+		ok, err := IsSkillLeaf(d)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("not a skill leaf", func(t *testing.T) {
+		d := filepath.Join(dir, "empty")
+		require.NoError(t, os.MkdirAll(d, 0o755))
+		ok, err := IsSkillLeaf(d)
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+
+	t.Run("symlink skill.json", func(t *testing.T) {
+		d := filepath.Join(dir, "sym")
+		require.NoError(t, os.MkdirAll(d, 0o755))
+		target := filepath.Join(dir, "real.json")
+		require.NoError(t, os.WriteFile(target, []byte(`{"id":"sym"}`), 0o644))
+		require.NoError(t, os.Symlink(target, filepath.Join(d, "skill.json")))
+		ok, err := IsSkillLeaf(d)
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+
+	t.Run("both skill.json and category.md", func(t *testing.T) {
+		d := filepath.Join(dir, "both")
+		require.NoError(t, os.MkdirAll(d, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(d, "skill.json"),
+			[]byte(`{"id":"both"}`), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(d, "category.md"),
+			[]byte("---\ndescription: cat\n---\n# Cat"), 0o644))
+		_, err := IsSkillLeaf(d)
+		assert.Error(t, err)
+	})
+}
+
+func TestIsCategoryDir(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("valid category", func(t *testing.T) {
+		d := filepath.Join(dir, "cat")
+		require.NoError(t, os.MkdirAll(d, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(d, "category.md"),
+			[]byte("---\ndescription: Test\n---\n# Test"), 0o644))
+		ok, err := IsCategoryDir(d)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("not a category", func(t *testing.T) {
+		d := filepath.Join(dir, "empty")
+		require.NoError(t, os.MkdirAll(d, 0o755))
+		ok, err := IsCategoryDir(d)
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+
+	t.Run("category with skill.json", func(t *testing.T) {
+		d := filepath.Join(dir, "mixed")
+		require.NoError(t, os.MkdirAll(d, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(d, "category.md"),
+			[]byte("---\ndescription: Test\n---\n# Test"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(d, "skill.json"),
+			[]byte(`{"id":"mixed"}`), 0o644))
+		_, err := IsCategoryDir(d)
+		assert.Error(t, err)
+	})
+
+	t.Run("category with SKILL.md", func(t *testing.T) {
+		d := filepath.Join(dir, "mixed2")
+		require.NoError(t, os.MkdirAll(d, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(d, "category.md"),
+			[]byte("---\ndescription: Test\n---\n# Test"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(d, "SKILL.md"),
+			[]byte("# Nope"), 0o644))
+		_, err := IsCategoryDir(d)
+		assert.Error(t, err)
+	})
 }

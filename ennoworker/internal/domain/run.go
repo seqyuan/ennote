@@ -113,6 +113,55 @@ type EffectiveRunConfig struct {
 	VisionPolicy      PolicySnapshot       `json:"visionPolicy"`
 	CompactionPolicy  PolicySnapshot       `json:"compactionPolicy"`
 	CompactionRuntime ModelRuntimeSnapshot `json:"compactionRuntime"`
+	HookConfig        EffectiveHookConfig  `json:"hookConfig"`
+}
+
+// EffectiveHookConfig is the frozen hooks configuration for a single run.
+// It captures the resolved hook set, workspace trust snapshot, and any
+// additional context injected by the RunStart hook.
+type EffectiveHookConfig struct {
+	ResolvedHookSet  json.RawMessage `json:"resolvedHookSet"`
+	HookSetDigest    string          `json:"hookSetDigest"`
+	WorkspaceID      string          `json:"workspaceId"`
+	WorkspaceRoot    string          `json:"workspaceRoot"`
+	TrustedAt        time.Time       `json:"trustedAt"`
+	RunStartContext  string          `json:"runStartContext,omitempty"`
+}
+
+// RunTelemetryPayload is the structured run summary emitted as the durable
+// run_telemetry event immediately before any terminal run event, so SSE
+// consumers always receive it before the stream closes.
+type RunTelemetryPayload struct {
+	Iterations            int                   `json:"iterations"`
+	ModelCalls            int                   `json:"modelCalls"`
+	InputTokens           int                   `json:"inputTokens"`
+	OutputTokens          int                   `json:"outputTokens"`
+	CachedTokens          int                   `json:"cachedTokens"`
+	MaxContextUtilization float64               `json:"maxContextUtilization"`
+	ToolTimings           map[string]ToolTiming `json:"toolTimings"`
+	DurationMS            int64                 `json:"durationMs"`
+	Partial               bool                  `json:"partial,omitempty"`
+}
+
+// ToolTiming aggregates per-tool execution statistics for telemetry.
+type ToolTiming struct {
+	Count       int   `json:"count"`
+	ErrorCount  int   `json:"errorCount"`
+	Attempts    int   `json:"attempts"`
+	TotalMS     int64 `json:"totalMs"`
+}
+
+// HookOutcome records the result of a decision-style hook execution.
+type HookOutcome struct {
+	HookID            string
+	Blocked           bool
+	Reason            string
+	AdditionalContext string
+}
+
+// IsEmpty reports whether the hook config has no configured hooks.
+func (c EffectiveHookConfig) IsEmpty() bool {
+	return len(c.ResolvedHookSet) == 0 || string(c.ResolvedHookSet) == "null" || string(c.ResolvedHookSet) == "{}"
 }
 
 type RunOutput struct {
@@ -227,6 +276,29 @@ type RunEvent struct {
 	Payload   json.RawMessage
 	CreatedAt time.Time
 }
+
+// LiveRunEvent is a transient rendering delta delivered over live channels
+// (SSE event: live frame, WS durability: live). It has no EventID, never
+// advances the client cursor, and is never stored in the durable event log.
+// Lost live events are acceptable — the final durable state (message_committed,
+// tool_call_completed) always covers the gap on reconnect.
+type LiveRunEvent struct {
+	RunID     string          `json:"runId"`
+	Type      string          `json:"type"`
+	StreamID  string          `json:"streamId"`  // tool call id + stream, e.g. "call-1:stdout"
+	LiveSeq   int64           `json:"liveSeq"`   // connection-local sequence, not durable
+	Payload   json.RawMessage `json:"payload"`
+	CreatedAt time.Time       `json:"createdAt"`
+}
+
+// Live event type constants — these are rendering deltas, not state transitions.
+const (
+	LiveTextDelta               = "text_delta"
+	LiveThinkingDelta           = "thinking_delta"
+	LiveToolCallDelta           = "tool_call_delta"
+	LiveVisionDescriptionDelta  = "vision_description_delta"
+	LiveToolOutputDelta         = "tool_output_delta"
+)
 
 type PendingEvent struct {
 	EventType string

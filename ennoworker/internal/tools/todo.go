@@ -61,39 +61,39 @@ func (t *TodoTool) ExecutionClass() domain.ExecutionClass {
 
 // Execute implements Tool. It validates every item before storing and returns
 // the rendered progress as the result content.
-func (t *TodoTool) Execute(ctx context.Context, call domain.ToolCall) domain.ToolResult {
+func (t *TodoTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if t.Store == nil {
-		return errorResult(call, fmt.Errorf("todo store is not configured"))
+		return errorResult(call, fmt.Errorf("todo store is not configured")), nil
 	}
 
 	var args struct {
 		Todos []domain.TodoItem `json:"todos"`
 	}
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
-		return errorResult(call, fmt.Errorf("invalid todo arguments: %w", err))
+		return errorResult(call, fmt.Errorf("invalid todo arguments: %w", err)), nil
 	}
 
 	if len(args.Todos) > domain.MaxTodoItems {
-		return errorResult(call, fmt.Errorf("at most %d todo items allowed", domain.MaxTodoItems))
+		return errorResult(call, fmt.Errorf("at most %d todo items allowed", domain.MaxTodoItems)), nil
 	}
 
 	inProgress := 0
 	for i, item := range args.Todos {
 		if strings.TrimSpace(item.Content) == "" {
-			return errorResult(call, fmt.Errorf("todo item %d has empty content", i+1))
+			return errorResult(call, fmt.Errorf("todo item %d has empty content", i+1)), nil
 		}
 		if utf8.RuneCountInString(item.Content) > domain.MaxTodoContentRunes {
-			return errorResult(call, fmt.Errorf("todo item %d content exceeds %d characters", i+1, domain.MaxTodoContentRunes))
+			return errorResult(call, fmt.Errorf("todo item %d content exceeds %d characters", i+1, domain.MaxTodoContentRunes)), nil
 		}
 		if !domain.ValidTodoStatus(item.Status) {
-			return errorResult(call, fmt.Errorf("todo item %d has invalid status %q (want pending|in_progress|completed)", i+1, item.Status))
+			return errorResult(call, fmt.Errorf("todo item %d has invalid status %q (want pending|in_progress|completed)", i+1, item.Status)), nil
 		}
 		if item.Status == domain.TodoInProgress {
 			inProgress++
 		}
 	}
 	if inProgress > 1 {
-		return errorResult(call, fmt.Errorf("at most one todo item can be in_progress, found %d", inProgress))
+		return errorResult(call, fmt.Errorf("at most one todo item can be in_progress, found %d", inProgress)), nil
 	}
 
 	t.Store.Set(args.Todos)
@@ -102,5 +102,5 @@ func (t *TodoTool) Execute(ctx context.Context, call domain.ToolCall) domain.Too
 		ToolCallID: call.ID,
 		ToolName:   call.Name,
 		Content:    domain.RenderTodoList(args.Todos),
-	}
+	}, nil
 }

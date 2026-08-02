@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/events"
 )
 
 type plannedToolCall struct {
@@ -131,6 +133,44 @@ func (l *Loop) executeToolBatchWithPolicy(ctx context.Context, runID string, ite
 }
 
 func (l *Loop) preflightToolBatch(ctx context.Context, runID string, iteration int, calls []domain.ToolCall) ([]plannedToolCall, bool, error) {
+	// PreToolUse hooks run BEFORE ToolPolicy: they may block a call (recorded
+	// as skipped) or rewrite its arguments. Rewritten arguments flow through
+	// the full ToolPolicy + approval path below, so a hook can never smuggle
+	// schema-invalid or approval-worthy arguments past the policy gate.
+	if l.HookLife != nil {
+		filtered := make([]domain.ToolCall, 0, len(calls))
+		for index, call := range calls {
+			dec := l.HookLife.PreToolUse(ctx, call.Name, call.Arguments)
+			if dec.Block {
+				reason := dec.Reason
+				if reason == "" {
+					reason = "tool " + call.Name + " blocked by PreToolUse hook"
+				}
+				result := domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: reason, IsError: true}
+				metadata := l.policyMetadata(ToolDecision{Action: ToolDeny, Code: "hook_blocked", Reason: reason}, false)
+				if err := l.recordToolSkipped(ctx, runID, iteration, index, call, result, "hook_blocked", metadata); err != nil {
+					return nil, false, err
+				}
+				continue
+			}
+			if len(dec.UpdatedInput) > 0 {
+				call.Arguments = append(json.RawMessage(nil), dec.UpdatedInput...)
+				// Validate the rewritten args before they reach ToolPolicy.
+				if err := l.validateToolArguments(call); err != nil {
+					return nil, false, domain.NewCodedError(domain.ErrorToolPolicyFailed,
+						fmt.Errorf("hook rewritten arguments for %s failed schema validation: %w", call.Name, err))
+				}
+			}
+			filtered = append(filtered, call)
+		}
+		// Always replace the batch with the hook-processed list: even a rewrite
+		// changes the argument bytes, so the original `calls` slice is stale.
+		calls = filtered
+		if len(calls) == 0 {
+			return nil, false, nil
+		}
+	}
+
 	decisions := make([]ToolDecision, len(calls))
 	for index := range decisions {
 		decisions[index].Action = ToolAllow
@@ -215,17 +255,42 @@ func (l *Loop) executeOneTool(ctx context.Context, runID string, iteration, call
 
 func (l *Loop) executeOneToolPlan(ctx context.Context, runID string, iteration, callIndex int, plan plannedToolCall) (domain.ToolResult, bool, error) {
 	recordID := uuid.NewString()
+
 	start := l.toolCallStart(recordID, runID, iteration, callIndex, plan)
 	if err := l.recordToolStarted(ctx, start); err != nil {
 		return domain.ToolResult{}, false, err
 	}
-	raw := BudgetToolResult(l.Tools.Execute(ctx, plan.effective), defaultToolResultBudget)
+	outcome := l.executeToolAttempts(ctx, runID, plan.effective)
+	raw, attemptCount := outcome.Result, outcome.AttemptCount
+	raw = BudgetToolResult(raw, defaultToolResultBudget)
+
+	// When the tool panics or is cancelled, record a failed event (not completed).
+	if outcome.Kind == domain.ToolPanicked || outcome.Kind == domain.ToolCancelled {
+		metadata := l.policyMetadata(plan.decision, false)
+		finish := domain.ToolCallFinish{ID: recordID, RunID: runID, Iteration: iteration, CallIndex: callIndex,
+			Call: plan.effective, RawResult: raw, Result: raw, Status: "failed", Policy: metadata, AttemptCount: attemptCount}
+		if err := l.recordToolFailed(context.WithoutCancel(ctx), finish); err != nil {
+			return raw, false, err
+		}
+		return raw, false, nil
+	}
+
 	projected, stop, policyCode, policyErr := l.projectToolResult(context.WithoutCancel(ctx), runID, iteration, callIndex, plan, raw)
+
+	// PostToolUse hook: feedback appended to the projected result (cannot undo execution).
+	if l.HookLife != nil {
+		resultJSON, _ := json.Marshal(raw)
+		feedback := l.HookLife.PostToolUse(ctx, plan.effective.Name, plan.effective.Arguments, resultJSON, raw.IsError)
+		if feedback != "" {
+			projected.Content = projected.Content + "\n" + feedback
+		}
+	}
+
 	metadata := l.policyMetadata(plan.decision, stop)
 	metadata.Code = firstNonEmptyString(policyCode, metadata.Code)
 	if policyErr != nil {
 		finish := domain.ToolCallFinish{ID: recordID, RunID: runID, Iteration: iteration, CallIndex: callIndex,
-			Call: plan.effective, RawResult: raw, Result: raw, Status: "failed", Policy: metadata}
+			Call: plan.effective, RawResult: raw, Result: raw, Status: "failed", Policy: metadata, AttemptCount: attemptCount}
 		if err := l.recordToolFailed(context.WithoutCancel(ctx), finish); err != nil {
 			return raw, false, errors.Join(policyErr, err)
 		}
@@ -233,7 +298,7 @@ func (l *Loop) executeOneToolPlan(ctx context.Context, runID string, iteration, 
 	}
 	finish := domain.ToolCallFinish{ID: recordID, RunID: runID, Iteration: iteration,
 		CallIndex: callIndex, Call: plan.effective, RawResult: raw, Result: projected,
-		Status: "completed", Policy: metadata}
+		Status: "completed", Policy: metadata, AttemptCount: attemptCount}
 	if err := l.recordToolCompleted(context.WithoutCancel(ctx), finish); err != nil {
 		return projected, stop, err
 	}
@@ -267,18 +332,23 @@ func (l *Loop) executeReadPlanGroup(ctx context.Context, runID string, iteration
 	batchCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	semaphore := make(chan struct{}, limit)
-	rawResults := make([]chan domain.ToolResult, len(plans))
+	type parallelResult struct {
+		result       domain.ToolResult
+		attemptCount int
+	}
+	rawResults := make([]chan parallelResult, len(plans))
 	for index, plan := range plans {
-		rawResults[index] = make(chan domain.ToolResult, 1)
+		rawResults[index] = make(chan parallelResult, 1)
 		go func(index int, plan plannedToolCall) {
 			select {
 			case semaphore <- struct{}{}:
 				defer func() { <-semaphore }()
 			case <-batchCtx.Done():
-				rawResults[index] <- policyDeniedResult(plan.effective, batchCtx.Err().Error())
+				rawResults[index] <- parallelResult{result: policyDeniedResult(plan.effective, batchCtx.Err().Error()), attemptCount: 0}
 				return
 			}
-			rawResults[index] <- BudgetToolResult(l.Tools.Execute(batchCtx, plan.effective), defaultToolResultBudget)
+			outcome := l.executeToolAttempts(batchCtx, runID, plan.effective)
+			rawResults[index] <- parallelResult{result: BudgetToolResult(outcome.Result, defaultToolResultBudget), attemptCount: outcome.AttemptCount}
 		}(index, plan)
 	}
 
@@ -286,15 +356,17 @@ func (l *Loop) executeReadPlanGroup(ctx context.Context, runID string, iteration
 	stopAfterBatch := false
 	var firstErr error
 	for index, plan := range plans {
-		raw := <-rawResults[index]
+		pr := <-rawResults[index]
+		raw := pr.result
 		projected, stop, policyCode, policyErr := l.projectToolResult(context.WithoutCancel(ctx), runID,
 			iteration, baseIndex+index, plan, raw)
 		metadata := l.policyMetadata(plan.decision, stop)
 		metadata.Code = firstNonEmptyString(policyCode, metadata.Code)
+		attemptCount := pr.attemptCount
 		if policyErr != nil {
 			finish := domain.ToolCallFinish{ID: recordIDs[index], RunID: runID, Iteration: iteration,
 				CallIndex: baseIndex + index, Call: plan.effective, RawResult: raw, Result: raw,
-				Status: "failed", Policy: metadata}
+				Status: "failed", Policy: metadata, AttemptCount: attemptCount}
 			if err := l.recordToolFailed(context.WithoutCancel(ctx), finish); err != nil && firstErr == nil {
 				firstErr = err
 			}
@@ -307,7 +379,7 @@ func (l *Loop) executeReadPlanGroup(ctx context.Context, runID string, iteration
 		}
 		finish := domain.ToolCallFinish{ID: recordIDs[index], RunID: runID, Iteration: iteration,
 			CallIndex: baseIndex + index, Call: plan.effective, RawResult: raw, Result: projected,
-			Status: "completed", Policy: metadata}
+			Status: "completed", Policy: metadata, AttemptCount: attemptCount}
 		if err := l.recordToolCompleted(context.WithoutCancel(ctx), finish); err != nil && firstErr == nil {
 			firstErr = err
 			cancel()
@@ -403,4 +475,141 @@ func firstNonEmptyString(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// executeToolAttempts executes a single tool call with automatic retry on
+// typed transient errors when the tool opts into retry. It returns a
+// ToolExecutionOutcome that distinguishes returned / failed / panicked / cancelled.
+func (l *Loop) executeToolAttempts(ctx context.Context, runID string, call domain.ToolCall) domain.ToolExecutionOutcome {
+	policy := l.toolRetryPolicy(call.Name)
+	retries := maxToolRetries(l.ToolExecution.MaxToolRetries, policy.MaxRetries)
+
+	var lastErr error
+	for attempt := 1; attempt <= retries+1; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return domain.ToolExecutionOutcome{
+				Result: domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name,
+					Content: fmt.Sprintf("tool execution cancelled: %v", err), IsError: true},
+				AttemptCount: attempt, Kind: domain.ToolCancelled, Cause: err,
+			}
+		}
+
+		// Support streaming output via ToolOutputSink.
+		var result domain.ToolResult
+		var execErr error
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					result = domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name,
+						Content: fmt.Sprintf("tool panic: %v", recovered), IsError: true}
+					execErr = nil
+				}
+			}()
+			// If the tool implements StreamingToolRunner, provide a LiveCoalescer sink.
+			if l.Hub != nil && l.LivePublisher != nil {
+				if streaming, ok := l.Tools.(domain.StreamingToolRunner); ok {
+					sink := &liveToolSink{
+						// Scope the coalescer to the RUN so SSE subscribers keyed by
+						// runID receive the live deltas.
+						coalescer: events.NewLiveCoalescer(runID, l.Hub),
+					}
+					defer sink.coalescer.Close()
+					result, execErr = streaming.ExecuteStreaming(ctx, call, sink)
+					return
+				}
+			}
+			result, execErr = l.Tools.Execute(ctx, call)
+		}()
+
+		if execErr == nil {
+			return domain.ToolExecutionOutcome{
+				Result:       result,
+				AttemptCount: attempt,
+				Kind:         domain.ToolReturned,
+			}
+		}
+
+		lastErr = execErr
+
+		if domain.IsToolErrorTerminal(execErr) {
+			return domain.ToolExecutionOutcome{
+				Result: domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name,
+					Content: fmt.Sprintf("tool execution failed: %v", execErr), IsError: true},
+				AttemptCount: attempt, Kind: domain.ToolInfrastructureFailed, Cause: execErr,
+			}
+		}
+
+		if policy.Mode != domain.ToolRetryTransient {
+			return domain.ToolExecutionOutcome{
+				Result: domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name,
+					Content: fmt.Sprintf("tool execution failed: %v", execErr), IsError: true},
+				AttemptCount: attempt, Kind: domain.ToolInfrastructureFailed, Cause: execErr,
+			}
+		}
+
+		if !domain.IsToolErrorTransient(execErr) {
+			return domain.ToolExecutionOutcome{
+				Result: domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name,
+					Content: fmt.Sprintf("tool execution failed: %v", execErr), IsError: true},
+				AttemptCount: attempt, Kind: domain.ToolInfrastructureFailed, Cause: execErr,
+			}
+		}
+
+		if attempt <= retries {
+			delay := time.Duration(100*attempt) * time.Millisecond
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return domain.ToolExecutionOutcome{
+					Result: domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name,
+						Content: fmt.Sprintf("tool execution cancelled during retry backoff: %v", ctx.Err()),
+						IsError: true},
+					AttemptCount: attempt, Kind: domain.ToolCancelled, Cause: ctx.Err(),
+				}
+			case <-timer.C:
+			}
+		}
+	}
+	// Retries exhausted.
+	return domain.ToolExecutionOutcome{
+		Result: domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name,
+			Content: fmt.Sprintf("tool execution failed after %d attempts: %v", retries+1, lastErr),
+			IsError: true},
+		AttemptCount: retries + 1, Kind: domain.ToolInfrastructureFailed, Cause: lastErr,
+	}
+}
+
+// liveToolSink adapts a LiveCoalescer to the ToolOutputSink interface for
+// per-tool-call live streaming.
+type liveToolSink struct {
+	coalescer *events.LiveCoalescer
+}
+
+func (s *liveToolSink) TryEmit(u domain.ToolOutputUpdate) bool {
+	streamID := u.ToolCallID + ":" + u.Stream
+	s.coalescer.Push(streamID, u.Data, time.Now())
+	return true
+}
+
+// toolRetryPolicy resolves the retry policy for a tool by name.
+func (l *Loop) toolRetryPolicy(toolName string) domain.ToolRetryPolicy {
+	classifier, ok := l.Tools.(domain.ToolRetryClassifier)
+	if !ok {
+		return domain.ToolRetryPolicy{Mode: domain.ToolRetryNever, MaxRetries: 0}
+	}
+	return classifier.RetryPolicy(toolName)
+}
+
+// maxToolRetries returns the effective retry cap, respecting both the run
+// config and the per-tool hard cap.
+func maxToolRetries(configCap, toolCap int) int {
+	cap := configCap
+	if cap <= 0 {
+		cap = 2
+	}
+	if toolCap > 0 && toolCap < cap {
+		cap = toolCap
+	}
+	return cap
 }

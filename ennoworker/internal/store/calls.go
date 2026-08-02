@@ -163,6 +163,7 @@ func (r *CallRepo) ToolCompleted(ctx context.Context, call domain.ToolCallFinish
 		"content": call.Result.Content, "isError": call.Result.IsError,
 		"artifacts": nonNilArtifactReferences(call.Result.Artifacts),
 		"policyId":  call.Policy.PolicyID, "policyCode": call.Policy.Code, "riskClass": call.Policy.RiskClass,
+		"attemptCount": call.AttemptCount,
 	})
 	return r.transact(ctx, call.RunID, domain.PendingEvent{EventType: "tool_call_completed", Payload: payload}, func(tx *sql.Tx, now string) error {
 		result, err := tx.ExecContext(ctx, `UPDATE tool_calls SET status = 'completed', result_preview = ?,

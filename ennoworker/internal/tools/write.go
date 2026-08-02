@@ -19,29 +19,29 @@ func (t *WriteTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{Name: "write", Description: "Atomically write a UTF-8 text file inside /workspace", Parameters: schema(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}`)}
 }
 
-func (t *WriteTool) Execute(ctx context.Context, call domain.ToolCall) domain.ToolResult {
+func (t *WriteTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	var args struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`
 	}
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
-		return errorResult(call, fmt.Errorf("invalid write arguments: %w", err))
+		return errorResult(call, fmt.Errorf("invalid write arguments: %w", err)), nil
 	}
 	path, err := t.Jail.ResolveForWrite(args.Path)
 	if err != nil {
-		return errorResult(call, err)
+		return errorResult(call, err), nil
 	}
 	if err := ctx.Err(); err != nil {
-		return errorResult(call, err)
+		return errorResult(call, err), nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return errorResult(call, err)
+		return errorResult(call, err), nil
 	}
 	if err := atomicWrite(path, []byte(args.Content), 0o644); err != nil {
-		return errorResult(call, err)
+		return errorResult(call, err), nil
 	}
 	display, _ := t.Jail.DisplayPath(path)
-	return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: fmt.Sprintf("wrote %d bytes to %s", len(args.Content), display)}
+	return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: fmt.Sprintf("wrote %d bytes to %s", len(args.Content), display)}, nil
 }
 
 func atomicWrite(path string, content []byte, defaultMode os.FileMode) error {

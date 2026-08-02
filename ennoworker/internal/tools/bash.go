@@ -27,16 +27,26 @@ func (t *BashTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{Name: "bash", Description: "Execute a shell command in the current workspace", Parameters: schema(`{"type":"object","properties":{"command":{"type":"string"},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":3600}},"required":["command"],"additionalProperties":false}`)}
 }
 
-func (t *BashTool) Execute(ctx context.Context, call domain.ToolCall) domain.ToolResult {
+func (t *BashTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+	return t.execute(ctx, call, nil)
+}
+
+// ExecuteStreaming implements domain.StreamingToolRunner: executes the shell
+// command and streams stdout/stderr chunks to the sink in real time.
+func (t *BashTool) ExecuteStreaming(ctx context.Context, call domain.ToolCall, sink domain.ToolOutputSink) (domain.ToolResult, error) {
+	return t.execute(ctx, call, sink)
+}
+
+func (t *BashTool) execute(ctx context.Context, call domain.ToolCall, sink domain.ToolOutputSink) (domain.ToolResult, error) {
 	var args struct {
 		Command        string `json:"command"`
 		TimeoutSeconds int    `json:"timeoutSeconds"`
 	}
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
-		return errorResult(call, fmt.Errorf("invalid bash arguments: %w", err))
+		return errorResult(call, fmt.Errorf("invalid bash arguments: %w", err)), nil
 	}
 	if strings.TrimSpace(args.Command) == "" {
-		return errorResult(call, fmt.Errorf("command must not be empty"))
+		return errorResult(call, fmt.Errorf("command must not be empty")), nil
 	}
 	timeout := t.Timeout
 	if timeout <= 0 {
@@ -49,19 +59,23 @@ func (t *BashTool) Execute(ctx context.Context, call domain.ToolCall) domain.Too
 	defer cancel()
 	cmd, err := t.Workspace.Command(t.Shell, args.Command)
 	if err != nil {
-		return errorResult(call, err)
+		return errorResult(call, err), nil
 	}
 	cmd.Env = safeEnvironment(t.Workspace.RuntimeDir)
 	stdout, err := newOutputCapture(t.Workspace.RuntimeDir, "stdout", t.OutputLimit, t.OutputArtifactLimit)
 	if err != nil {
-		return errorResult(call, err)
+		return errorResult(call, err), nil
 	}
 	defer stdout.Cleanup()
 	stderr, err := newOutputCapture(t.Workspace.RuntimeDir, "stderr", t.OutputLimit, t.OutputArtifactLimit)
 	if err != nil {
-		return errorResult(call, err)
+		return errorResult(call, err), nil
 	}
 	defer stderr.Cleanup()
+	if sink != nil {
+		stdout.AttachSink(call.ID, "stdout", sink)
+		stderr.AttachSink(call.ID, "stderr", sink)
+	}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	runErr := runProcessGroup(runCtx, cmd)
@@ -86,7 +100,7 @@ func (t *BashTool) Execute(ctx context.Context, call domain.ToolCall) domain.Too
 		content += artifactErr.Error()
 	}
 	return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: content,
-		IsError: runErr != nil || artifactErr != nil, Artifacts: references}
+		IsError: runErr != nil || artifactErr != nil, Artifacts: references}, nil
 }
 
 func safeEnvironment(runtimeDir string) []string {

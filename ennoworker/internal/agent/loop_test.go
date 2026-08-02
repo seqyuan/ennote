@@ -57,7 +57,7 @@ type fakeTools struct {
 	result  domain.ToolResult
 	defs    []domain.ToolDefinition
 	classes map[string]domain.ExecutionClass
-	execute func(context.Context, domain.ToolCall) domain.ToolResult
+	execute func(context.Context, domain.ToolCall) (domain.ToolResult, error)
 }
 
 func (t *fakeTools) Definitions() []domain.ToolDefinition {
@@ -72,7 +72,7 @@ func (t *fakeTools) ExecutionClass(name string) domain.ExecutionClass {
 	}
 	return domain.ExecutionExclusive
 }
-func (t *fakeTools) Execute(ctx context.Context, call domain.ToolCall) domain.ToolResult {
+func (t *fakeTools) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	t.mu.Lock()
 	t.calls = append(t.calls, call)
 	t.mu.Unlock()
@@ -82,7 +82,7 @@ func (t *fakeTools) Execute(ctx context.Context, call domain.ToolCall) domain.To
 	result := t.result
 	result.ToolCallID = call.ID
 	result.ToolName = call.Name
-	return result
+	return result, nil
 }
 
 func textBlock(value string) domain.ContentBlock {
@@ -168,10 +168,10 @@ func TestLoopEnforcesMaxIterations(t *testing.T) {
 func TestLoopPropagatesToolCancellation(t *testing.T) {
 	provider := llm.NewFakeProvider(llm.FakeStep{Completion: toolCompletion("cancel", `{}`)})
 	started := make(chan struct{})
-	tools := &fakeTools{execute: func(ctx context.Context, call domain.ToolCall) domain.ToolResult {
+	tools := &fakeTools{execute: func(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 		close(started)
 		<-ctx.Done()
-		return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: ctx.Err().Error(), IsError: true}
+		return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: ctx.Err().Error(), IsError: true}, nil
 	}}
 	loop := &Loop{Provider: provider, Tools: tools, Events: &memoryWriter{}}
 	ctx, cancel := context.WithCancel(context.Background())

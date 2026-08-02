@@ -141,9 +141,9 @@ func (p scriptedToolPolicy) AfterToolCall(_ context.Context, call ToolCallContex
 
 func TestToolPolicyTerminatePreflightStartsNoTool(t *testing.T) {
 	var executions atomic.Int32
-	tools := &fakeTools{execute: func(context.Context, domain.ToolCall) domain.ToolResult {
+	tools := &fakeTools{execute: func(context.Context, domain.ToolCall) (domain.ToolResult, error) {
 		executions.Add(1)
-		return domain.ToolResult{}
+		return domain.ToolResult{}, nil
 	}}
 	loop := &Loop{Tools: tools, Events: &memoryWriter{}, ToolPolicy: scriptedToolPolicy{before: []ToolDecision{
 		{Action: ToolAllow}, {Action: ToolTerminateBatch, Code: "blocked", Reason: "blocked"},
@@ -162,11 +162,11 @@ func TestSafeParallelAfterPolicyRunsInCallIndexOrder(t *testing.T) {
 		mu.Unlock()
 		return AfterToolDecision{Result: result}
 	}}
-	tools := &fakeTools{classes: map[string]domain.ExecutionClass{"read": domain.ExecutionReadOnly}, execute: func(_ context.Context, call domain.ToolCall) domain.ToolResult {
+	tools := &fakeTools{classes: map[string]domain.ExecutionClass{"read": domain.ExecutionReadOnly}, execute: func(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 		if call.ID == "0" {
 			time.Sleep(20 * time.Millisecond)
 		}
-		return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name}
+		return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name}, nil
 	}}
 	loop := &Loop{Tools: tools, Events: &memoryWriter{}, ToolPolicy: policy,
 		ToolExecution: domain.ToolExecutionConfig{Mode: "safe_parallel", MaxConcurrentReadTools: 2}}

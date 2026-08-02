@@ -14,6 +14,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
+	"github.com/seqyuan/ennote/ennoworker/internal/workspace"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -72,11 +73,14 @@ func TestLiveDeepSeekExecutorFreezesProfileAndCommitsProjections(t *testing.T) {
 	compactionRepo := &store.CompactionRepo{DB: db, Publisher: hub}
 	emptySkills := t.TempDir()
 	executor := &agentExecutor{
-		db: db, writer: writer, runs: runRepo, calls: callRepo,
+		db: db, writer: writer, homeDir: t.TempDir(), runs: runRepo, calls: callRepo,
 		sessionDB: sessionRepo, msgRepo: messageRepo,
 		skillRepo: &store.SkillSnapshotRepo{DB: db}, skillsDir: emptySkills,
 		builtinDir: emptySkills, sandbox: "none",
 	}
+	trustStore, err := workspace.NewTrustStore(executor.homeDir)
+	require.NoError(t, err)
+	executor.trustStore = trustStore
 	executor.compaction = &compaction.Service{Repo: compactionRepo,
 		RunRepo: &store.RunCompactionRepo{DB: db}, Calls: callRepo,
 		Messages: messageRepo, Events: writer, Providers: executor.resolveRuntimeProvider}

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"strconv"
@@ -50,6 +51,7 @@ type Server struct {
 	Hub         *events.Hub
 	Control     RunController
 	InstanceID  string
+	PromptGate  PromptHookGate
 }
 
 func (s *Server) Handler() http.Handler {
@@ -688,6 +690,18 @@ func (s *Server) submitTurn(w http.ResponseWriter, r *http.Request) {
 			parts = append(parts, domain.ContentBlock{Kind: domain.ContentImage, Image: &domain.ImageRef{ArtifactID: part.ArtifactID}})
 		default:
 			writeError(w, r, http.StatusBadRequest, "invalid_turn_content", "unsupported content part type", false)
+			return
+		}
+	}
+	// UserPromptSubmit hook gate: may block the submission before any run is
+	// created. On infrastructure failure we fail-open (allow) but log.
+	if s.PromptGate != nil {
+		outcome := s.PromptGate.CheckPrompt(r.Context(), r.PathValue("sessionID"), input.Text, parts)
+		if outcome.Error != nil {
+			slog.Warn("prompt hook gate failed (fail-open)", "session_id", r.PathValue("sessionID"), "error", outcome.Error)
+		}
+		if outcome.Blocked {
+			writeError(w, r, http.StatusForbidden, "prompt_blocked_by_hook", outcome.Reason, false)
 			return
 		}
 	}

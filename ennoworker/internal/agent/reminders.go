@@ -20,6 +20,27 @@ func WrapSystemReminder(body string) string {
 	return "<system-reminder>\n" + systemReminderPreamble + "\n\n" + body + "\n</system-reminder>"
 }
 
+// RunStartReminderProvider injects a one-shot reminder on iteration 1 from the
+// RunStart hook's additionalContext. It fires exactly once per run and never
+// again on later iterations, approval resumes, or restarts.
+type RunStartReminderProvider struct {
+	Context string
+	Fired   bool
+}
+
+// Name implements ReminderProvider.
+func (p *RunStartReminderProvider) Name() string { return "runstart" }
+
+// Reminder implements ReminderProvider: fires on iteration 1 only, then
+// permanently goes silent.
+func (p *RunStartReminderProvider) Reminder(_ context.Context, rc ReminderContext) (string, bool) {
+	if p.Fired || p.Context == "" || rc.Iteration != 1 {
+		return "", false
+	}
+	p.Fired = true
+	return p.Context, true
+}
+
 // ReminderContext carries the per-turn state available to reminder providers.
 type ReminderContext struct {
 	Messages         []domain.ChatMessage

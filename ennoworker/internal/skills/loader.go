@@ -25,6 +25,55 @@ type LoadedSkill struct {
 	PromptText   string
 	ManifestHash string
 	ContentHash  string
+	RelPath      string // directory locator, e.g. scRNA/pseudotime
+	SourceRoot   string // "user" | "builtin"
+}
+
+// IsSkillLeaf returns true if the directory contains a regular-file skill.json.
+// It uses Lstat so symlinks are not followed and can be diagnosed upstream.
+func IsSkillLeaf(dir string) (bool, error) {
+	manifestPath := filepath.Join(dir, "skill.json")
+	fi, err := os.Lstat(manifestPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if !fi.Mode().IsRegular() {
+		return false, nil
+	}
+	// Also check there's no category.md (mutual exclusion)
+	catPath := filepath.Join(dir, "category.md")
+	catFi, catErr := os.Lstat(catPath)
+	if catErr == nil && catFi.Mode().IsRegular() {
+		return false, fmt.Errorf("directory contains both skill.json and category.md")
+	}
+	return true, nil
+}
+
+// IsCategoryDir returns true if the directory contains a regular-file category.md
+// and does NOT contain skill.json or SKILL.md.
+func IsCategoryDir(dir string) (bool, error) {
+	catPath := filepath.Join(dir, "category.md")
+	catFi, err := os.Lstat(catPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if !catFi.Mode().IsRegular() {
+		return false, nil
+	}
+	// Must not contain skill.json or SKILL.md
+	for _, name := range []string{"skill.json", "SKILL.md"} {
+		fi, err := os.Lstat(filepath.Join(dir, name))
+		if err == nil && fi.Mode().IsRegular() {
+			return false, fmt.Errorf("category directory %q must not contain %s", dir, name)
+		}
+	}
+	return true, nil
 }
 
 func Load(dir string) (*LoadedSkill, error) {
@@ -45,6 +94,11 @@ func Load(dir string) (*LoadedSkill, error) {
 	}
 	if m.Version == "" {
 		m.Version = "0.1.0"
+	}
+
+	// Validate prompt: must be empty or exactly "SKILL.md"
+	if m.Prompt != "" && m.Prompt != "SKILL.md" {
+		return nil, fmt.Errorf("skill.json prompt must be empty or \"SKILL.md\", got %q", m.Prompt)
 	}
 
 	promptFile := m.Prompt

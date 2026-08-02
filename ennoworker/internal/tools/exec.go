@@ -26,16 +26,25 @@ func (t *ExecTool) Definition() domain.ToolDefinition {
 		Parameters: schema(`{"type":"object","properties":{"argv":{"type":"array","items":{"type":"string"},"minItems":1},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":3600}},"required":["argv"],"additionalProperties":false}`)}
 }
 
-func (t *ExecTool) Execute(ctx context.Context, call domain.ToolCall) domain.ToolResult {
+func (t *ExecTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+	return t.execute(ctx, call, nil)
+}
+
+// ExecuteStreaming implements domain.StreamingToolRunner.
+func (t *ExecTool) ExecuteStreaming(ctx context.Context, call domain.ToolCall, sink domain.ToolOutputSink) (domain.ToolResult, error) {
+	return t.execute(ctx, call, sink)
+}
+
+func (t *ExecTool) execute(ctx context.Context, call domain.ToolCall, sink domain.ToolOutputSink) (domain.ToolResult, error) {
 	var args struct {
 		Argv           []string `json:"argv"`
 		TimeoutSeconds int      `json:"timeoutSeconds"`
 	}
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
-		return errorResult(call, fmt.Errorf("invalid exec arguments: %w", err))
+		return errorResult(call, fmt.Errorf("invalid exec arguments: %w", err)), nil
 	}
 	if len(args.Argv) == 0 || strings.TrimSpace(args.Argv[0]) == "" {
-		return errorResult(call, fmt.Errorf("argv must contain an executable"))
+		return errorResult(call, fmt.Errorf("argv must contain an executable")), nil
 	}
 	timeout := t.Timeout
 	if timeout <= 0 {
@@ -48,19 +57,23 @@ func (t *ExecTool) Execute(ctx context.Context, call domain.ToolCall) domain.Too
 	defer cancel()
 	cmd, err := t.Workspace.CommandArgs(args.Argv[0], args.Argv[1:]...)
 	if err != nil {
-		return errorResult(call, err)
+		return errorResult(call, err), nil
 	}
 	cmd.Env = safeEnvironment(t.Workspace.RuntimeDir)
 	stdout, err := newOutputCapture(t.Workspace.RuntimeDir, "stdout", t.OutputLimit, t.OutputArtifactLimit)
 	if err != nil {
-		return errorResult(call, err)
+		return errorResult(call, err), nil
 	}
 	defer stdout.Cleanup()
 	stderr, err := newOutputCapture(t.Workspace.RuntimeDir, "stderr", t.OutputLimit, t.OutputArtifactLimit)
 	if err != nil {
-		return errorResult(call, err)
+		return errorResult(call, err), nil
 	}
 	defer stderr.Cleanup()
+	if sink != nil {
+		stdout.AttachSink(call.ID, "stdout", sink)
+		stderr.AttachSink(call.ID, "stderr", sink)
+	}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	runErr := runProcessGroup(runCtx, cmd)
@@ -85,5 +98,5 @@ func (t *ExecTool) Execute(ctx context.Context, call domain.ToolCall) domain.Too
 		content += artifactErr.Error()
 	}
 	return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: content,
-		IsError: runErr != nil || artifactErr != nil, Artifacts: references}
+		IsError: runErr != nil || artifactErr != nil, Artifacts: references}, nil
 }

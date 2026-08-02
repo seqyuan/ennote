@@ -111,6 +111,9 @@ func TestEffectiveConfigPriorityAndFreezeAcrossDefaultChanges(t *testing.T) {
 	refrozen, err := runs.ResolveAndFreezeConfig(ctx, secondRun)
 	require.NoError(t, err)
 	assert.Equal(t, globalReplacement.ID, refrozen.Effective.ModelProfileID)
+	// HookConfig may differ in nil vs `null` due to JSON round-trip; ignore for config comparison.
+	secondResolved.Effective.HookConfig = domain.EffectiveHookConfig{}
+	refrozen.Effective.HookConfig = domain.EffectiveHookConfig{}
 	assert.Equal(t, secondResolved.Effective, refrozen.Effective)
 
 	sessionOverride := agentModel.ID

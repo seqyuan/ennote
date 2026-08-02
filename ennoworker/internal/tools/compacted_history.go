@@ -65,7 +65,7 @@ func (t *CompactedHistoryTool) ExecutionClass() domain.ExecutionClass {
 	return domain.ExecutionReadOnly
 }
 
-func (t *CompactedHistoryTool) Execute(_ context.Context, call domain.ToolCall) domain.ToolResult {
+func (t *CompactedHistoryTool) Execute(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	var input struct {
 		Query            string `json:"query"`
 		FromMessageID    string `json:"fromMessageId"`
@@ -74,24 +74,24 @@ func (t *CompactedHistoryTool) Execute(_ context.Context, call domain.ToolCall) 
 		Cursor           string `json:"cursor"`
 	}
 	if err := json.Unmarshal(call.Arguments, &input); err != nil {
-		return errorResult(call, fmt.Errorf("%s: invalid arguments", domain.ErrorHistoryLookupForbidden))
+		return errorResult(call, fmt.Errorf("%s: invalid arguments", domain.ErrorHistoryLookupForbidden)), nil
 	}
 	messages := t.searchableMessages()
 	if len(messages) == 0 {
-		return errorResult(call, fmt.Errorf("%s: selected compaction source is unavailable", domain.ErrorHistoryLookupForbidden))
+		return errorResult(call, fmt.Errorf("%s: selected compaction source is unavailable", domain.ErrorHistoryLookupForbidden)), nil
 	}
 	start, end := 0, len(messages)-1
 	if input.FromMessageID != "" {
 		position := historyMessagePosition(messages, input.FromMessageID)
 		if position < start || position > end {
-			return errorResult(call, fmt.Errorf("%s: fromMessageId is outside compaction sources", domain.ErrorHistoryLookupOutOfRange))
+			return errorResult(call, fmt.Errorf("%s: fromMessageId is outside compaction sources", domain.ErrorHistoryLookupOutOfRange)), nil
 		}
 		start = position
 	}
 	if input.ThroughMessageID != "" {
 		position := historyMessagePosition(messages, input.ThroughMessageID)
 		if position < start || position > end {
-			return errorResult(call, fmt.Errorf("%s: throughMessageId is outside compaction sources", domain.ErrorHistoryLookupOutOfRange))
+			return errorResult(call, fmt.Errorf("%s: throughMessageId is outside compaction sources", domain.ErrorHistoryLookupOutOfRange)), nil
 		}
 		end = position
 	}
@@ -101,7 +101,7 @@ func (t *CompactedHistoryTool) Execute(_ context.Context, call domain.ToolCall) 
 	}
 	offset, err := decodeHistoryCursor(input.Cursor)
 	if err != nil {
-		return errorResult(call, fmt.Errorf("%s: invalid cursor", domain.ErrorHistoryLookupForbidden))
+		return errorResult(call, fmt.Errorf("%s: invalid cursor", domain.ErrorHistoryLookupForbidden)), nil
 	}
 
 	type match struct {
@@ -123,7 +123,7 @@ func (t *CompactedHistoryTool) Execute(_ context.Context, call domain.ToolCall) 
 			Excerpt:   excerpt, Artifacts: artifacts})
 	}
 	if offset > len(candidates) {
-		return errorResult(call, fmt.Errorf("%s: cursor is outside result set", domain.ErrorHistoryLookupOutOfRange))
+		return errorResult(call, fmt.Errorf("%s: cursor is outside result set", domain.ErrorHistoryLookupOutOfRange)), nil
 	}
 	selected := make([]match, 0, limit)
 	outputBytes := 0
@@ -143,7 +143,7 @@ func (t *CompactedHistoryTool) Execute(_ context.Context, call domain.ToolCall) 
 	}
 	payload, _ := json.Marshal(map[string]any{"matches": selected, "noMatch": len(selected) == 0,
 		"truncated": nextCursor != "", "nextCursor": nextCursor})
-	return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: string(payload)}
+	return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: string(payload)}, nil
 }
 
 func (t *CompactedHistoryTool) searchableMessages() []domain.Message {

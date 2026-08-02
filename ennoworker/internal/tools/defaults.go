@@ -18,6 +18,7 @@ func NewDefaultRegistry(manager *workspace.Manager, artifactSinks ...*ArtifactSi
 		&FindTool{Jail: manager.Jail},
 		&ExecTool{Workspace: manager, Artifacts: artifactSink},
 		&BashTool{Workspace: manager, Artifacts: artifactSink},
+		&WebFetchTool{},
 	}
 	if artifactSink != nil {
 		registered = append(registered, &PublishArtifactTool{Jail: manager.Jail, Sink: artifactSink})
