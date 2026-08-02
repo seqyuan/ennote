@@ -95,6 +95,8 @@ type RunInput struct {
 	OverflowRecovery  func(context.Context) ([]domain.ChatMessage, error)
 	Resume            *ResumeState
 	Approval          *ApprovalResolution
+	SkillCatalogState  string // "disabled" | "materialized" | "" (legacy)
+	SkillCatalogDigest string
 }
 
 type RunResult struct {
@@ -415,7 +417,8 @@ func (l *Loop) Run(ctx context.Context, input RunInput) (RunResult, error) {
 						Current: current, Routing: routing, RequestGeneration: requestGeneration,
 						TruncationRecoveries: truncationRecoveries, StuckSignatures: guard.Snapshot(),
 						InitialSteering: cloneMessages(initialSteering), SystemPrompt: input.SystemPrompt,
-						MidRunCompaction: midRunState, Todos: l.todoSnapshot()}
+						MidRunCompaction: midRunState, Todos: l.todoSnapshot(),
+					SkillCatalogState: input.SkillCatalogState, SkillCatalogDigest: input.SkillCatalogDigest}
 				}
 				return runResult(messages, generated, completion, iteration), err
 			}

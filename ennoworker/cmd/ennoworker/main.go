@@ -141,7 +141,16 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	snapDir := filepath.Join(wDir, "skills")
 
 	systemPrompt := "You are a helpful assistant."
+	var skillCatalogState string
+	var skillCatalogDigest string
 	if resumeState != nil {
+		skillCatalogState = resumeState.SkillCatalogState
+		if resumeState.SkillCatalogState == "materialized" && resumeState.SkillCatalogDigest != "" {
+			if err := skills.VerifyMaterializedCatalog(snapDir, resumeState.SkillCatalogDigest); err != nil {
+				return domain.RunOutput{}, domain.NewCodedError(domain.ErrorApprovalCheckpointInvalid, fmt.Errorf("catalog verification failed: %w", err))
+			}
+		}
+		skillCatalogDigest = resumeState.SkillCatalogDigest
 		systemPrompt = resumeState.SystemPrompt
 	} else {
 		// Check if read is allowed by frozen tool policy
@@ -178,6 +187,8 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 					if saveErr := e.skillRepo.SaveCatalog(ctx, run.ID, result.Records); saveErr != nil {
 						slog.Warn("save catalog failed", "error", saveErr)
 					}
+				skillCatalogState = "materialized"
+				skillCatalogDigest = result.CatalogDigest
 					// Build catalog prompt
 					catalogPrompt := skills.BuildCatalogPrompt(catalog, 16*1024)
 					if catalogPrompt != "" {
@@ -191,6 +202,7 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 				}
 			}
 		} else {
+			skillCatalogState = "disabled"
 			slog.Info("read tool not allowed by policy, skipping skill catalog")
 		}
 	}
@@ -314,6 +326,7 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		VisionPolicy: resolved.Effective.VisionPolicy,
 		SystemPrompt: systemPrompt, History: chatHistory, OverflowRecovery: overflowRecovery,
 		Resume: resumeState, Approval: approvalResolution,
+		SkillCatalogState: skillCatalogState, SkillCatalogDigest: skillCatalogDigest,
 	})
 
 	// Queue observer hooks (RunEnd / SessionEnd) via durable outbox.
