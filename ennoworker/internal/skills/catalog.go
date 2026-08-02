@@ -39,6 +39,7 @@ type CatalogNode struct {
 	Name        string
 	Description string
 	SourceRoot  string
+	SourcePath  string // canonical absolute source directory path
 	Category    *Category
 	Skill       *LoadedSkill
 	Children    []*CatalogNode
@@ -291,6 +292,7 @@ func discoverTree(baseDir, relPath string, src SourceRoot, nodes map[string]*Cat
 				Name:        skill.Manifest.ID,
 				Description: skill.Manifest.Description,
 				SourceRoot:  src.Name,
+				SourcePath:  childDir,
 				Skill:       skill,
 			}
 			nodes[childRel] = node
@@ -337,6 +339,7 @@ func discoverTree(baseDir, relPath string, src SourceRoot, nodes map[string]*Cat
 				Name:        cat.Name,
 				Description: cat.Description,
 				SourceRoot:  src.Name,
+				SourcePath:  childDir,
 				Category:    cat,
 				Children:    []*CatalogNode{},
 			}
