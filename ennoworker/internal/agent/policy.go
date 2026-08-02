@@ -195,6 +195,20 @@ func denyDecision(code, reason string) ToolDecision {
 	return ToolDecision{Action: ToolDeny, Code: code, Reason: reason}
 }
 
+// AllowsTool checks whether a tool name is statically allowed by the tool
+// policy config. An empty AllowedTools list means all tools are allowed.
+func AllowsTool(config domain.ToolPolicyConfig, toolName string) bool {
+	if len(config.AllowedTools) == 0 {
+		return true
+	}
+	for _, name := range config.AllowedTools {
+		if name == toolName {
+			return true
+		}
+	}
+	return false
+}
+
 func containsString(values []string, value string) bool {
 	for _, candidate := range values {
 		if candidate == value {
