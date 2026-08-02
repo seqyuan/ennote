@@ -195,9 +195,16 @@ func denyDecision(code, reason string) ToolDecision {
 	return ToolDecision{Action: ToolDeny, Code: code, Reason: reason}
 }
 
-// AllowsTool checks whether a tool name is statically allowed by the tool
-// policy config. An empty AllowedTools list means all tools are allowed.
-func AllowsTool(config domain.ToolPolicyConfig, toolName string) bool {
+// AllowsTool checks whether a tool name is statically allowed by the frozen
+// tool policy config. An empty AllowedTools list means all tools are allowed.
+func AllowsTool(configJSON json.RawMessage, toolName string) bool {
+	if len(configJSON) == 0 {
+		return true
+	}
+	var config domain.ToolPolicyConfig
+	if err := json.Unmarshal(configJSON, &config); err != nil {
+		return true // fail open for unparseable config
+	}
 	if len(config.AllowedTools) == 0 {
 		return true
 	}

@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -25,6 +24,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
 	"github.com/seqyuan/ennote/ennoworker/internal/hooks"
 	"github.com/seqyuan/ennote/ennoworker/internal/llm"
+	"github.com/seqyuan/ennote/ennoworker/internal/projectcontext"
 	"github.com/seqyuan/ennote/ennoworker/internal/providerdoctor"
 	"github.com/seqyuan/ennote/ennoworker/internal/runs"
 	"github.com/seqyuan/ennote/ennoworker/internal/runtimeinfo"
@@ -86,10 +86,30 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	if err != nil {
 		return domain.RunOutput{}, fmt.Errorf("load project: %w", err)
 	}
+	// Compute canonical workspace root and trust before hooks.
+	canonicalRoot, err := workspace.CanonicalWorkspaceRoot(wSpace.HostPath)
+	if err != nil {
+		return domain.RunOutput{}, fmt.Errorf("canonical workspace root: %w", err)
+	}
+	trusted, trustErr := e.trustStore.IsTrusted(wSpace.ID, canonicalRoot)
+	if trustErr != nil {
+		return domain.RunOutput{}, fmt.Errorf("check workspace trust: %w", trustErr)
+	}
+	var trustedAt time.Time
+	if trusted && e.trustStore != nil {
+		records, _ := e.trustStore.List()
+		for _, r := range records {
+			if r.WorkspaceID == wSpace.ID && r.CanonicalRoot == canonicalRoot {
+				trustedAt = r.TrustedAt
+				break
+			}
+		}
+	}
+
 	// Resolve hooks config (Phase 2): global + workspace layers, trust-gated.
 	// The resolved set is frozen into the effective config so later Phase 3
 	// lifecycle wiring reads a stable snapshot.
-	if err := e.resolveAndFreezeHooks(ctx, run, wSpace, &resolved.Effective); err != nil {
+	if err := e.resolveAndFreezeHooks(ctx, run, wSpace, &resolved.Effective, canonicalRoot, trusted, trustedAt); err != nil {
 		return domain.RunOutput{}, fmt.Errorf("hooks config: %w", err)
 	}
 	if run.BaseMessageID == "" {
@@ -114,50 +134,69 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	router := &agent.SnapshotModelRouter{Factory: e.resolveRuntimeProvider}
 
 	wDir := filepath.Join(os.Getenv("ENNOTE_HOME"), "runtime", "runs", run.ID)
+	ioDir := filepath.Join(wDir, "io")
+	if err := os.MkdirAll(ioDir, 0o700); err != nil {
+		return domain.RunOutput{}, fmt.Errorf("create runtime io dir: %w", err)
+	}
 	snapDir := filepath.Join(wDir, "skills")
 
 	systemPrompt := "You are a helpful assistant."
 	if resumeState != nil {
 		systemPrompt = resumeState.SystemPrompt
 	} else {
-		var skillPrompt strings.Builder
-		for _, skill := range skills.Discover(e.skillsDir, e.builtinDir) {
-			snapPath, err := skill.CopyToSnapshot(snapDir)
-			if err != nil {
-				slog.Warn("skill snapshot failed", "skill", skill.Manifest.ID, "error", err)
-				continue
+		// Check if read is allowed by frozen tool policy
+		allowRead := agent.AllowsTool(resolved.Effective.ToolPolicy.Config, "read")
+
+		if allowRead {
+			// Build catalog from source roots
+			sources := []skills.SourceRoot{
+				{Name: "user", Path: e.skillsDir, Priority: 0},
 			}
-			if _, err := e.skillRepo.Save(ctx, run.ID, skill, snapPath); err != nil {
-				slog.Warn("save skill snapshot failed", "skill", skill.Manifest.ID, "error", err)
+			if e.builtinDir != "" {
+				sources = append(sources, skills.SourceRoot{Name: "builtin", Path: e.builtinDir, Priority: 1})
+			}
+			catalog := skills.BuildCatalog(sources)
+
+			// Determine template vars based on sandbox mode
+			sandboxMode := workspace.SandboxMode(e.sandbox)
+			vars := skills.TemplateVars{Workspace: "/workspace", SkillDir: "/skills"}
+			if sandboxMode == workspace.SandboxNone {
+				// For none mode, skill_dir uses the absolute host path
+				absSnapDir, _ := filepath.Abs(snapDir)
+				vars = skills.TemplateVars{Workspace: ".", SkillDir: absSnapDir}
 			}
 
-			// Reload skill from the immutable snapshot path and render trusted variables.
-			snapSkill, loadErr := skills.Load(snapPath)
-			if loadErr != nil {
-				slog.Warn("reload skill snapshot failed", "skill", skill.Manifest.ID, "error", loadErr)
-				// Fall back to the original (unrendered) PromptText.
-				skillPrompt.WriteString(skill.PromptText)
-				skillPrompt.WriteString("\n\n")
-				continue
-			}
-
-			// Build trusted variables from sandbox mode.
-			trustedVars := buildTrustedSkillVars(workspace.SandboxMode(e.sandbox), snapPath)
-			rendered, renderErr := skills.RenderTrustedTemplate(snapSkill.PromptText, trustedVars)
-			if renderErr != nil {
-				slog.Warn("render skill template failed", "skill", skill.Manifest.ID, "error", renderErr)
-				skillPrompt.WriteString(skill.PromptText)
+			plan, planErr := skills.PlanMaterialization(catalog, vars)
+			if planErr != nil {
+				slog.Warn("plan materialization failed", "error", planErr)
 			} else {
-				skillPrompt.WriteString(rendered)
+				result, matErr := skills.MaterializeCatalog(wDir, plan, catalog)
+				if matErr != nil {
+					slog.Warn("materialize catalog failed", "error", matErr)
+				} else {
+					// Save snapshot records to DB
+					if saveErr := e.skillRepo.SaveCatalog(ctx, run.ID, result.Records); saveErr != nil {
+						slog.Warn("save catalog failed", "error", saveErr)
+					}
+					// Build catalog prompt
+					catalogPrompt := skills.BuildCatalogPrompt(catalog, 16*1024)
+					if catalogPrompt != "" {
+						// Load project context files
+						projCtx, loadErr := e.loadProjectContext(canonicalRoot, trusted)
+						if loadErr != nil {
+							slog.Warn("load project context failed", "error", loadErr)
+						}
+						systemPrompt = projCtx.BuildPrompt("You are a helpful assistant.", catalogPrompt)
+					}
+				}
 			}
-			skillPrompt.WriteString("\n\n")
-		}
-		if s := skillPrompt.String(); s != "" {
-			systemPrompt = s + "\n" + systemPrompt
+		} else {
+			slog.Info("read tool not allowed by policy, skipping skill catalog")
 		}
 	}
 
-	wManager, err := workspace.NewManager(wSpace.HostPath, wDir, snapDir, workspace.SandboxMode(e.sandbox))
+	var wManager *workspace.Manager
+	wManager, err = workspace.NewManagerWithSkills(canonicalRoot, ioDir, snapDir, workspace.SandboxMode(e.sandbox))
 	if err != nil {
 		return domain.RunOutput{}, fmt.Errorf("create workspace: %w", err)
 	}
@@ -314,7 +353,11 @@ func (e *agentExecutor) executeContextCompaction(ctx context.Context, run *domai
 		return domain.RunOutput{}, err
 	}
 	workDir := filepath.Join(os.Getenv("ENNOTE_HOME"), "runtime", "runs", run.ID)
-	manager, err := workspace.NewManager(workspaceRecord.HostPath, workDir, filepath.Join(workDir, "skills"), workspace.SandboxMode(e.sandbox))
+	ioDir := filepath.Join(workDir, "io")
+	if err := os.MkdirAll(ioDir, 0o700); err != nil {
+		return domain.RunOutput{}, err
+	}
+	manager, err := workspace.NewManager(workspaceRecord.HostPath, ioDir, filepath.Join(workDir, "skills"), workspace.SandboxMode(e.sandbox))
 	if err != nil {
 		return domain.RunOutput{}, err
 	}
@@ -377,12 +420,7 @@ func (a *queueAdapter) Drain(ctx context.Context, runID string, kind domain.Queu
 	return a.repo.Drain(ctx, runID, kind, mode)
 }
 
-func (e *agentExecutor) resolveAndFreezeHooks(ctx context.Context, run *domain.AgentRun, wSpace *domain.ProjectWorkspace, effective *domain.EffectiveRunConfig) error {
-	canonicalRoot, err := filepath.Abs(wSpace.HostPath)
-	if err != nil {
-		return fmt.Errorf("resolve workspace root: %w", err)
-	}
-
+func (e *agentExecutor) resolveAndFreezeHooks(ctx context.Context, run *domain.AgentRun, wSpace *domain.ProjectWorkspace, effective *domain.EffectiveRunConfig, canonicalRoot string, trusted bool, trustedAt time.Time) error {
 	// Load configuration layers.
 	globalLayer, err := hooks.LoadGlobalHookLayer(e.homeDir)
 	if err != nil {
@@ -395,10 +433,6 @@ func (e *agentExecutor) resolveAndFreezeHooks(ctx context.Context, run *domain.A
 
 	// Workspace hooks only when trusted.
 	var wsLayer *hooks.HookLayer
-	trusted, trustErr := e.trustStore.IsTrusted(wSpace.ID, canonicalRoot)
-	if trustErr != nil {
-		return fmt.Errorf("check workspace trust: %w", trustErr)
-	}
 	if trusted {
 		wsLayer, err = hooks.LoadWorkspaceHookLayer(canonicalRoot)
 		if err != nil {
@@ -413,16 +447,6 @@ func (e *agentExecutor) resolveAndFreezeHooks(ctx context.Context, run *domain.A
 	}
 
 	// Compute frozen hook config.
-	var trustedAt time.Time
-	if trusted && e.trustStore != nil {
-		records, _ := e.trustStore.List()
-		for _, r := range records {
-			if r.WorkspaceID == wSpace.ID && r.CanonicalRoot == canonicalRoot {
-				trustedAt = r.TrustedAt
-				break
-			}
-		}
-	}
 	digest, _ := resolved.Digest()
 	encoded, err := json.Marshal(resolved)
 	if err != nil {
@@ -435,6 +459,14 @@ func (e *agentExecutor) resolveAndFreezeHooks(ctx context.Context, run *domain.A
 		WorkspaceID:     wSpace.ID,
 		WorkspaceRoot:   canonicalRoot,
 		TrustedAt:       trustedAt,
+	}
+
+	// Freeze workspace security snapshot (independent of hooks)
+	effective.WorkspaceSecurity = &domain.WorkspaceSecuritySnapshot{
+		WorkspaceID:   wSpace.ID,
+		CanonicalRoot: canonicalRoot,
+		Trusted:       trusted,
+		TrustedAt:     trustedAt,
 	}
 
 	// Persist the updated effective config with hooks frozen.
@@ -555,6 +587,15 @@ func (e *agentExecutor) CheckPrompt(ctx context.Context, sessionID, prompt strin
 		Reason:            dec.Reason,
 		AdditionalContext: dec.AdditionalContext,
 	}
+}
+
+func (e *agentExecutor) loadProjectContext(canonicalRoot string, trusted bool) (*projectcontext.Context, error) {
+	sec := projectcontext.SecurityContext{
+		WorkspaceID:   "", // not needed for context loading
+		CanonicalRoot: canonicalRoot,
+		Trusted:       trusted,
+	}
+	return projectcontext.Load(sec, e.homeDir)
 }
 
 func loadProjectWorkspace(ctx context.Context, db *sql.DB, sessionID string) (*domain.ProjectWorkspace, error) {

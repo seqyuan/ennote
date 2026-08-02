@@ -113,7 +113,15 @@ type EffectiveRunConfig struct {
 	VisionPolicy      PolicySnapshot       `json:"visionPolicy"`
 	CompactionPolicy  PolicySnapshot       `json:"compactionPolicy"`
 	CompactionRuntime ModelRuntimeSnapshot `json:"compactionRuntime"`
-	HookConfig        EffectiveHookConfig  `json:"hookConfig"`
+	HookConfig        EffectiveHookConfig         `json:"hookConfig"`
+	WorkspaceSecurity *WorkspaceSecuritySnapshot   `json:"workspaceSecurity,omitempty"`
+}
+
+type WorkspaceSecuritySnapshot struct {
+	WorkspaceID   string    `json:"workspaceId"`
+	CanonicalRoot string    `json:"canonicalRoot"`
+	Trusted       bool      `json:"trusted"`
+	TrustedAt     time.Time `json:"trustedAt"`
 }
 
 // EffectiveHookConfig is the frozen hooks configuration for a single run.
