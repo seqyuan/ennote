@@ -736,6 +736,18 @@ type CreateChildRunInput struct {
 	ParentRunID string
 	ItemID      string
 	SessionID   string
+	// Generation and RetryOfAttemptID are zero/NULL for generation 0 and set
+	// for retry/follow-up generations.
+	Generation       int
+	RetryOfAttemptID string
+	// BudgetOverride, when set, is the authorization-visible budget for a
+	// retry/follow-up attempt. The frozen delegation_items.budget_json is never
+	// rewritten.
+	BudgetOverride *domain.BudgetCeilingJSON
+	// AllowTerminalParent permits materialization after the parent Run ended
+	// (retry/follow-up). Generation 0 blocking materialization still requires a
+	// running parent.
+	AllowTerminalParent bool
 }
 
 // CreateChildRun atomically: validates the parent is running and owns the item,
@@ -811,7 +823,8 @@ func createChildRunTx(ctx context.Context, tx *sql.Tx, input CreateChildRunInput
 		}
 		return nil, err
 	}
-	if parentStatus != string(domain.RunRunning) && parentStatus != string(domain.RunWaitingChildren) {
+	if !input.AllowTerminalParent && parentStatus != string(domain.RunRunning) &&
+		parentStatus != string(domain.RunWaitingChildren) {
 		return nil, fmt.Errorf("delegation parent must be running or materializing children")
 	}
 	if parentSessionID != input.SessionID {
@@ -827,8 +840,12 @@ func createChildRunTx(ctx context.Context, tx *sql.Tx, input CreateChildRunInput
 		BudgetJSON     string
 		CurrentStatus  domain.DelegationItemStatus
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT group_id,name,role_version_id,assignment_json,output_contract,budget_json,status
-		FROM delegation_items WHERE id=? AND child_run_id IS NULL`, input.ItemID).
+	itemQuery := `SELECT group_id,name,role_version_id,assignment_json,output_contract,budget_json,status
+		FROM delegation_items WHERE id=?`
+	if input.Generation <= 0 {
+		itemQuery += ` AND child_run_id IS NULL`
+	}
+	if err := tx.QueryRowContext(ctx, itemQuery, input.ItemID).
 		Scan(&item.GroupID, &item.Name, &item.RoleVersionID, &item.AssignmentJSON, &item.OutputContract,
 			&item.BudgetJSON, &item.CurrentStatus); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -878,12 +895,24 @@ func createChildRunTx(ctx context.Context, tx *sql.Tx, input CreateChildRunInput
 		childID, input.SessionID, string(speakerJSON), rootRunID, input.ParentRunID, parentDepth+1, timestamp); err != nil {
 		return nil, fmt.Errorf("create child run: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE delegation_items SET child_run_id=?, status='running' WHERE id=?`,
-		childID, input.ItemID); err != nil {
-		return nil, fmt.Errorf("assign child run: %w", err)
+	if input.Generation <= 0 {
+		// Generation 0 owns the substrate columns; later generations never
+		// rewrite the frozen child_run_id/status/result of the item.
+		if _, err := tx.ExecContext(ctx, `UPDATE delegation_items SET child_run_id=?, status='running' WHERE id=?`,
+			childID, input.ItemID); err != nil {
+			return nil, fmt.Errorf("assign child run: %w", err)
+		}
 	}
 	var ceiling domain.BudgetCeilingJSON
-	if err := json.Unmarshal([]byte(item.BudgetJSON), &ceiling); err != nil {
+	reservedBudgetJSON := item.BudgetJSON
+	if input.BudgetOverride != nil {
+		ceiling = *input.BudgetOverride
+		encoded, marshalErr := json.Marshal(ceiling)
+		if marshalErr != nil {
+			return nil, marshalErr
+		}
+		reservedBudgetJSON = string(encoded)
+	} else if err := json.Unmarshal([]byte(item.BudgetJSON), &ceiling); err != nil {
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO run_budgets
@@ -896,8 +925,9 @@ func createChildRunTx(ctx context.Context, tx *sql.Tx, input CreateChildRunInput
 		}
 		return nil, fmt.Errorf("reserve child budget: %w", err)
 	}
-	// Record the immutable generation-0 attempt row so every terminal path can
-	// settle the attempt state machine, not just the substrate columns.
+	// Record the immutable attempt row so every terminal path can settle the
+	// attempt state machine, not just the substrate columns. Generation 0 keeps
+	// the original folding contract; later generations are explicit retries.
 	authSnapshot := attemptAuthorizationSnapshot{
 		ItemID: input.ItemID, Name: item.Name, RoleVersionID: item.RoleVersionID,
 		RoleObjectID: objectID, Handle: handle, DisplayName: displayName,
@@ -911,13 +941,18 @@ func createChildRunTx(ctx context.Context, tx *sql.Tx, input CreateChildRunInput
 	if err != nil {
 		return nil, err
 	}
+	generation := input.Generation
+	if generation < 0 {
+		generation = 0
+	}
+	retryOf := nullableBackfillString(sql.NullString{Valid: input.RetryOfAttemptID != "", String: input.RetryOfAttemptID})
 	if _, err := tx.ExecContext(ctx, `INSERT INTO delegation_item_attempts
 		(id,item_id,generation,retry_of_attempt_id,child_run_id,
 		 authorization_snapshot_json,authorization_snapshot_digest,reserved_budget_json,actual_usage_json,
 		 status,created_at)
-		VALUES(?,?,0,NULL,?,?,?,?,?,?,?)`,
-		uuid.NewString(), input.ItemID, childID, string(authJSON), authDigest,
-		item.BudgetJSON, `{"modelCalls":0,"toolCalls":0,"tokens":0,"outputTokens":0,"costMicros":0}`, "queued", timestamp); err != nil {
+		VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+		uuid.NewString(), input.ItemID, generation, retryOf, childID, string(authJSON), authDigest,
+		reservedBudgetJSON, `{"modelCalls":0,"toolCalls":0,"tokens":0,"outputTokens":0,"costMicros":0}`, "queued", timestamp); err != nil {
 		return nil, fmt.Errorf("create delegation attempt: %w", err)
 	}
 	// Every child reservation contends on the root ledger of the top-level

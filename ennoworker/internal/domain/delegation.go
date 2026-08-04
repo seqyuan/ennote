@@ -309,3 +309,18 @@ type RetryDelegationInput struct {
 	BudgetOverrides    map[string]BudgetCeilingJSON `json:"budgetOverrides,omitempty"`
 	ClientRequestID    string                       `json:"clientRequestId"`
 }
+
+// DelegationApprovalRequest is a durable, parent-independent authorization for
+// a delegation retry budget increase. It is separate from tool-approval
+// checkpoints because the original parent may already be terminal.
+type DelegationApprovalRequest struct {
+	ID          string          `json:"id"`
+	GroupID     string          `json:"groupId"`
+	Generation  int             `json:"generation"`
+	Kind        string          `json:"kind"`
+	ParentRunID string          `json:"parentRunId"`
+	SessionID   string          `json:"sessionId"`
+	Status      string          `json:"status"`
+	ItemsJSON   json.RawMessage `json:"items"`
+	RequestedAt time.Time       `json:"requestedAt"`
+}
