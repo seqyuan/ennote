@@ -29,6 +29,7 @@ func TestMigrateCreatesTables(t *testing.T) {
 		"run_context_compactions", "run_execution_checkpoints", "tool_approval_requests", "session_branches",
 		"room_member_instances", "run_messages", "agent_profile_versions",
 		"delegation_groups", "delegation_items", "run_budgets", "delegation_root_budgets",
+		"delegation_group_generations", "delegation_item_attempts", "delegation_approval_requests",
 	}
 	for _, name := range tables {
 		var exists int
@@ -64,6 +65,8 @@ func TestMigrateCreatesTables(t *testing.T) {
 		"model_profiles": {"thinking_dialect", "supported_thinking_efforts_json", "input_cost_usd_micros_per_million", "output_cost_usd_micros_per_million"},
 		"run_budgets":    {"consumed_output_tokens", "consumed_cost_usd_micros", "started_at", "root_reconciled_at"},
 		"agent_profiles": {"object_kind", "handle", "scope", "project_id", "draft_json", "draft_revision", "current_version_id"},
+		"delegation_groups": {"current_generation", "updated_at", "completed_at"},
+		"delegation_item_attempts": {"retry_of_attempt_id", "child_run_id", "authorization_snapshot_json", "actual_usage_json", "result_digest", "root_reconciled_at"},
 	} {
 		for _, column := range columns {
 			var count int

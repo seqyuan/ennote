@@ -607,6 +607,15 @@ func freezeDelegationPolicyTx(ctx context.Context, tx *sql.Tx, runID, sessionID 
 
 // digestDelegationPolicy derives the canonical snapshot digest. The digest is
 // computed in Go only; SQL never duplicates this logic.
+func digestJSON(value any) (string, error) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(encoded)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
 func digestDelegationPolicy(snapshot *domain.DelegationPolicySnapshot) (string, error) {
 	input := struct {
 		ID                    string                   `json:"id"`
