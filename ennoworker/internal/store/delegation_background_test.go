@@ -66,7 +66,7 @@ func TestBackgroundMutationRoleDeniedAtomically(t *testing.T) {
 			PermissionCeiling: domain.PermissionAsk, AllowedTools: []string{"write"},
 			ModelBinding: domain.RoleModelBinding{Mode: domain.RoleModelFixed, ModelProfileID: modelID},
 			ContextPolicy: domain.RoleContextPolicy{DefaultMode: domain.RoleContextTask,
-				AllowedModes: []domain.RoleContextMode{domain.RoleContextTask},
+				AllowedModes:           []domain.RoleContextMode{domain.RoleContextTask},
 				OwnExecutionContinuity: domain.RoleContinuityNone},
 			DelegationPolicy: domain.RoleDelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
 				AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
