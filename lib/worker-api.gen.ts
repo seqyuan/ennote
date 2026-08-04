@@ -733,6 +733,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/delegations/{groupID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                groupID: string;
+            };
+            cookie?: never;
+        };
+        get: operations["inspectDelegation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/delegations/{groupID}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                groupID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["retryDelegation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/delegations/{groupID}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                groupID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancelDelegation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/delegation-approvals/{approvalID}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                approvalID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["decideDelegationApproval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/runs/{runID}/retry": {
         parameters: {
             query?: never;
@@ -1332,6 +1404,13 @@ export interface components {
             /** @enum {string} */
             mode: "preload" | "available";
         };
+        SubmitResult: {
+            /** @enum {string} */
+            status: "completed" | "blocked" | "needs_input";
+            summary: string;
+            artifactRefs?: Record<string, never>[];
+            payload?: Record<string, never>;
+        };
         DelegationBudgetCeiling: {
             maxModelCalls: number;
             maxToolCalls: number;
@@ -1556,6 +1635,99 @@ export interface components {
         DelegationActivityPage: {
             parentRunId: string;
             groups: components["schemas"]["DelegationActivityGroup"][];
+        };
+        DelegationInspection: {
+            group: components["schemas"]["DelegationGroup"];
+            currentGeneration: number;
+            items: components["schemas"]["DelegationInspectionItem"][];
+            generations: components["schemas"]["DelegationGeneration"][];
+            pendingApproval?: components["schemas"]["DelegationApprovalRequest"];
+            validActions: ("retry" | "cancel" | "decide_approval")[];
+        };
+        DelegationInspectionItem: {
+            itemId: string;
+            name: string;
+            /** @enum {string} */
+            status: "pending" | "running" | "succeeded" | "failed" | "cancelled" | "not_authorized";
+            attempts: components["schemas"]["DelegationAttemptSummary"][];
+        };
+        DelegationAttemptSummary: {
+            attemptId: string;
+            generation: number;
+            childRunId: string;
+            /** @enum {string} */
+            status: "queued" | "running" | "succeeded" | "blocked" | "needs_input" | "not_authorized" | "failed" | "cancelled" | "interrupted";
+            result?: components["schemas"]["SubmitResult"];
+            resultDigest?: string;
+            usage: components["schemas"]["RunBudgetUsage"];
+            errorCode?: string;
+        };
+        RunBudgetUsage: {
+            modelCalls: number;
+            toolCalls: number;
+            tokens: number;
+            outputTokens: number;
+            costMicros: number;
+        };
+        DelegationGeneration: {
+            id: string;
+            groupId: string;
+            generation: number;
+            /** @enum {string} */
+            kind: "initial" | "retry" | "input" | "follow_up";
+            /** @enum {string} */
+            status: "awaiting_authorization" | "queued" | "running" | "settled" | "failed" | "cancelled";
+            retrySelection: string[];
+            reusedAttempts: components["schemas"]["DelegationAttemptReference"][];
+            authorizationSnapshot?: Record<string, never>;
+            budgetSnapshot?: Record<string, never>;
+            clientRequestId: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            completedAt?: string;
+        };
+        DelegationAttemptReference: {
+            itemId: string;
+            attemptId: string;
+            generation: number;
+            childRunId: string;
+            resultDigest?: string;
+        };
+        RetryDelegationInput: {
+            expectedGeneration: number;
+            itemIds: string[];
+            budgetOverrides?: {
+                [key: string]: components["schemas"]["DelegationBudgetCeiling"];
+            };
+            clientRequestId: string;
+        };
+        DelegationApprovalRequest: {
+            id: string;
+            groupId: string;
+            generation: number;
+            /** @enum {string} */
+            kind: "retry_budget";
+            parentRunId: string;
+            sessionId: string;
+            /** @enum {string} */
+            status: "pending" | "approved" | "rejected" | "cancelled";
+            items: Record<string, never>[];
+            /** Format: date-time */
+            requestedAt: string;
+            /** Format: date-time */
+            resolvedAt?: string;
+        };
+        DelegationGroup: {
+            id: string;
+            parentRunId: string;
+            parentToolCallId: string;
+            /** @enum {string} */
+            strategy: "single" | "parallel";
+            /** @enum {string} */
+            status: "pending" | "waiting_admission" | "waiting_children" | "settled" | "cancelled";
+            /** Format: date-time */
+            createdAt: string;
         };
         ApprovalItem: {
             callIndex: number;
@@ -3219,6 +3391,133 @@ export interface operations {
             404: components["responses"]["Error"];
             500: components["responses"]["Error"];
             503: components["responses"]["Error"];
+        };
+    };
+    inspectDelegation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                groupID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Parent-visible delegation projection */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["DelegationInspection"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            500: components["responses"]["Error"];
+        };
+    };
+    retryDelegation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                groupID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetryDelegationInput"];
+            };
+        };
+        responses: {
+            /** @description New retry generation, its child Runs, and optional pending approval */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        generation: components["schemas"]["DelegationGeneration"];
+                        childRunIds: string[];
+                        approval?: components["schemas"]["DelegationApprovalRequest"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            500: components["responses"]["Error"];
+        };
+    };
+    cancelDelegation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                groupID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active attempts of the current generation cancelled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            status?: string;
+                        };
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            500: components["responses"]["Error"];
+        };
+    };
+    decideDelegationApproval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                approvalID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    decision: "approved" | "rejected";
+                    clientRequestId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Committed decision and materialized child Runs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        approval: components["schemas"]["DelegationApprovalRequest"];
+                        childRunIds: string[];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            500: components["responses"]["Error"];
         };
     };
     retryRun: {

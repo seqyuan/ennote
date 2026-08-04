@@ -1191,6 +1191,119 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "500": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /v1/delegations/{groupID}:
+    parameters:
+      - name: groupID
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: inspectDelegation
+      responses:
+        "200":
+          description: Parent-visible delegation projection
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/DelegationInspection" }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /v1/delegations/{groupID}/retry:
+    parameters:
+      - name: groupID
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: retryDelegation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RetryDelegationInput" }
+      responses:
+        "200":
+          description: New retry generation, its child Runs, and optional pending approval
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    additionalProperties: false
+                    required: [generation, childRunIds]
+                    properties:
+                      generation: { $ref: "#/components/schemas/DelegationGeneration" }
+                      childRunIds: { type: array, items: { type: string } }
+                      approval: { $ref: "#/components/schemas/DelegationApprovalRequest" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /v1/delegations/{groupID}/cancel:
+    parameters:
+      - name: groupID
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: cancelDelegation
+      responses:
+        "200":
+          description: Active attempts of the current generation cancelled
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { type: object, properties: { status: { type: string } } }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /v1/delegation-approvals/{approvalID}/decision:
+    parameters:
+      - name: approvalID
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: decideDelegationApproval
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [decision, clientRequestId]
+              properties:
+                decision: { type: string, enum: [approved, rejected] }
+                clientRequestId: { type: string }
+      responses:
+        "200":
+          description: Committed decision and materialized child Runs
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    additionalProperties: false
+                    required: [approval, childRunIds]
+                    properties:
+                      approval: { $ref: "#/components/schemas/DelegationApprovalRequest" }
+                      childRunIds: { type: array, items: { type: string } }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
   /v1/runs/{runID}/retry:
     parameters:
       - $ref: "#/components/parameters/RunID"
@@ -2099,6 +2212,17 @@ components:
       properties:
         skillId: { type: string }
         mode: { type: string, enum: [preload, available] }
+    SubmitResult:
+      type: object
+      additionalProperties: false
+      required: [status, summary]
+      properties:
+        status: { type: string, enum: [completed, blocked, needs_input] }
+        summary: { type: string }
+        artifactRefs:
+          type: array
+          items: { type: object }
+        payload: { type: object }
     DelegationBudgetCeiling:
       type: object
       additionalProperties: false
@@ -2369,6 +2493,130 @@ components:
         groups:
           type: array
           items: { $ref: "#/components/schemas/DelegationActivityGroup" }
+    DelegationInspection:
+      type: object
+      additionalProperties: false
+      required: [group, currentGeneration, items, generations, validActions]
+      properties:
+        group: { $ref: "#/components/schemas/DelegationGroup" }
+        currentGeneration: { type: integer, minimum: 0 }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/DelegationInspectionItem" }
+        generations:
+          type: array
+          items: { $ref: "#/components/schemas/DelegationGeneration" }
+        pendingApproval: { $ref: "#/components/schemas/DelegationApprovalRequest" }
+        validActions:
+          type: array
+          items: { type: string, enum: [retry, cancel, decide_approval] }
+    DelegationInspectionItem:
+      type: object
+      additionalProperties: false
+      required: [itemId, name, status, attempts]
+      properties:
+        itemId: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [pending, running, succeeded, failed, cancelled, not_authorized] }
+        attempts:
+          type: array
+          items: { $ref: "#/components/schemas/DelegationAttemptSummary" }
+    DelegationAttemptSummary:
+      type: object
+      additionalProperties: false
+      required: [attemptId, generation, childRunId, status, usage]
+      properties:
+        attemptId: { type: string }
+        generation: { type: integer, minimum: 0 }
+        childRunId: { type: string }
+        status: { type: string, enum: [queued, running, succeeded, blocked, needs_input, not_authorized, failed, cancelled, interrupted] }
+        result: { $ref: "#/components/schemas/SubmitResult" }
+        resultDigest: { type: string }
+        usage: { $ref: "#/components/schemas/RunBudgetUsage" }
+        errorCode: { type: string }
+    RunBudgetUsage:
+      type: object
+      additionalProperties: false
+      required: [modelCalls, toolCalls, tokens, outputTokens, costMicros]
+      properties:
+        modelCalls: { type: integer }
+        toolCalls: { type: integer }
+        tokens: { type: integer }
+        outputTokens: { type: integer }
+        costMicros: { type: integer }
+    DelegationGeneration:
+      type: object
+      additionalProperties: false
+      required: [id, groupId, generation, kind, status, retrySelection, reusedAttempts, clientRequestId, createdAt]
+      properties:
+        id: { type: string }
+        groupId: { type: string }
+        generation: { type: integer, minimum: 0 }
+        kind: { type: string, enum: [initial, retry, input, follow_up] }
+        status: { type: string, enum: [awaiting_authorization, queued, running, settled, failed, cancelled] }
+        retrySelection:
+          type: array
+          items: { type: string }
+        reusedAttempts:
+          type: array
+          items: { $ref: "#/components/schemas/DelegationAttemptReference" }
+        authorizationSnapshot: { type: object }
+        budgetSnapshot: { type: object }
+        clientRequestId: { type: string }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time }
+    DelegationAttemptReference:
+      type: object
+      additionalProperties: false
+      required: [itemId, attemptId, generation, childRunId]
+      properties:
+        itemId: { type: string }
+        attemptId: { type: string }
+        generation: { type: integer }
+        childRunId: { type: string }
+        resultDigest: { type: string }
+    RetryDelegationInput:
+      type: object
+      additionalProperties: false
+      required: [expectedGeneration, itemIds, clientRequestId]
+      properties:
+        expectedGeneration: { type: integer, minimum: 0 }
+        itemIds:
+          type: array
+          minItems: 1
+          items: { type: string }
+        budgetOverrides:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/DelegationBudgetCeiling" }
+        clientRequestId: { type: string }
+    DelegationApprovalRequest:
+      type: object
+      additionalProperties: false
+      required: [id, groupId, generation, kind, parentRunId, sessionId, status, items, requestedAt]
+      properties:
+        id: { type: string }
+        groupId: { type: string }
+        generation: { type: integer }
+        kind: { type: string, enum: [retry_budget] }
+        parentRunId: { type: string }
+        sessionId: { type: string }
+        status: { type: string, enum: [pending, approved, rejected, cancelled] }
+        items:
+          type: array
+          items: { type: object }
+        requestedAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time }
+    DelegationGroup:
+      type: object
+      additionalProperties: false
+      required: [id, parentRunId, parentToolCallId, strategy, status, createdAt]
+      properties:
+        id: { type: string }
+        parentRunId: { type: string }
+        parentToolCallId: { type: string }
+        strategy: { type: string, enum: [single, parallel] }
+        status: { type: string, enum: [pending, waiting_admission, waiting_children, settled, cancelled] }
+        createdAt: { type: string, format: date-time }
     ApprovalItem:
       type: object
       required: [callIndex, toolCallId, toolName, riskClass, argumentsPreview]

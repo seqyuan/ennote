@@ -113,6 +113,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/runs/{runID}", s.getRun)
 	mux.HandleFunc("GET /v1/runs/{runID}/messages", s.listRunMessages)
 	mux.HandleFunc("GET /v1/runs/{runID}/children", s.listRunChildren)
+	mux.HandleFunc("GET /v1/delegations/{groupID}", s.inspectDelegation)
+	mux.HandleFunc("POST /v1/delegations/{groupID}/retry", s.retryDelegation)
+	mux.HandleFunc("POST /v1/delegations/{groupID}/cancel", s.cancelDelegation)
 	mux.HandleFunc("POST /v1/delegation-approvals/{approvalID}/decision", s.decideDelegationApproval)
 	mux.HandleFunc("POST /v1/runs/{runID}/retry", s.retryRun)
 	mux.HandleFunc("POST /v1/runs/{runID}/cancel", s.cancelRun)
@@ -1030,6 +1033,12 @@ func (s *Server) writeStoreError(w http.ResponseWriter, r *http.Request, err err
 		writeError(w, r, http.StatusConflict, string(domain.ErrorCommitFormatNotEnabled), err.Error(), false)
 	case errors.Is(err, store.ErrRunNotActive), errors.Is(err, store.ErrInvalidRunState):
 		writeError(w, r, http.StatusConflict, "run_not_active", err.Error(), false)
+	case errors.Is(err, store.ErrDelegationGroupNotFound):
+		writeError(w, r, http.StatusNotFound, "delegation_group_not_found", err.Error(), false)
+	case errors.Is(err, store.ErrDelegationItemNotFound):
+		writeError(w, r, http.StatusNotFound, "delegation_item_not_found", err.Error(), false)
+	case errors.Is(err, store.ErrDelegationConflict):
+		writeError(w, r, http.StatusConflict, "delegation_conflict", err.Error(), false)
 	default:
 		writeInternal(w, r, err)
 	}

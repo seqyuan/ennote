@@ -325,3 +325,35 @@ type DelegationApprovalRequest struct {
 	RequestedAt time.Time       `json:"requestedAt"`
 	ResolvedAt  *time.Time      `json:"resolvedAt,omitempty"`
 }
+
+// DelegationAttemptSummary is the parent-visible projection of one attempt.
+// It intentionally excludes the private transcript and credentials.
+type DelegationAttemptSummary struct {
+	AttemptID    string                  `json:"attemptId"`
+	Generation   int                     `json:"generation"`
+	ChildRunID   string                  `json:"childRunId"`
+	Status       DelegationAttemptStatus `json:"status"`
+	Result       *SubmitResult           `json:"result,omitempty"`
+	ResultDigest string                  `json:"resultDigest,omitempty"`
+	Usage        RunBudgetUsage          `json:"usage"`
+	ErrorCode    string                  `json:"errorCode,omitempty"`
+}
+
+// DelegationInspectionItem is one logical item with its full attempt history.
+type DelegationInspectionItem struct {
+	ItemID   string                     `json:"itemId"`
+	Name     string                     `json:"name"`
+	Status   DelegationItemStatus       `json:"status"`
+	Attempts []DelegationAttemptSummary `json:"attempts"`
+}
+
+// DelegationInspection is the parent-visible, read-only group projection used
+// by the nested activity UI and the generation inspection API.
+type DelegationInspection struct {
+	Group             DelegationGroup            `json:"group"`
+	CurrentGeneration int                        `json:"currentGeneration"`
+	Items             []DelegationInspectionItem `json:"items"`
+	Generations       []DelegationGeneration     `json:"generations"`
+	PendingApproval   *DelegationApprovalRequest `json:"pendingApproval,omitempty"`
+	ValidActions      []string                   `json:"validActions"`
+}
