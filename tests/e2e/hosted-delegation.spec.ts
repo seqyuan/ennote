@@ -172,3 +172,73 @@ test.describe("mobile admission approval", () => {
     expect(approved).toBe(true);
   });
 });
+
+test("retries an eligible child and renders generation history", async ({ page }) => {
+  const groupID = "group-retry";
+  let retryRequested = false;
+  const inspection = { group: { id: groupID, parentRunId: parentRun.id, parentToolCallId: "delegate-call",
+    strategy: "single", status: "settled", createdAt: "2026-08-04T00:00:02Z" },
+    currentGeneration: 0,
+    items: [{ itemId: "item-ok", name: "inspect", status: "succeeded", attempts: [
+      { attemptId: "att-ok", generation: 0, childRunId: "child-ok", status: "succeeded", usage: { modelCalls: 2, toolCalls: 3, tokens: 1000, outputTokens: 500, costMicros: 50 },
+        result: { status: "completed", summary: "found README" }, resultDigest: "sha256:aa" }] },
+      { itemId: "item-fail", name: "review", status: "failed", attempts: [
+        { attemptId: "att-fail", generation: 0, childRunId: "child-fail", status: "failed", usage: { modelCalls: 1, toolCalls: 1, tokens: 200, outputTokens: 100, costMicros: 10 },
+          errorCode: "provider_unavailable", result: { status: "blocked", summary: "review failed" } }] }],
+    generations: [{ id: "gen-0", groupId: groupID, generation: 0, kind: "initial", status: "settled",
+      retrySelection: [], reusedAttempts: [], authorizationSnapshot: {}, budgetSnapshot: {},
+      clientRequestId: "gen-0", createdAt: "2026-08-04T00:00:02Z" }],
+    validActions: ["retry"] };
+  const messages = [
+    message("m1", undefined, "user", [{ type: "text", text: "Delegate a review." }]),
+    message("m2", "m1", "assistant", [{ type: "tool_call", toolCall: { id: "delegate-call", name: "delegate_roles",
+      arguments: { delegations: [{ name: "inspect", roleHandle: "workspace-explorer", assignment: "Review",
+        budget: { maxModelCalls: 4, maxToolCalls: 8 } }] } } }], parentRun.id),
+    message("m3", "m2", "tool", [{ type: "tool_result", toolResult: { toolCallId: "delegate-call", toolName: "delegate_roles",
+      content: "{\"status\":\"settled\"}", isError: false } }], parentRun.id),
+    message("m4", "m3", "assistant", [{ type: "text", text: "Delegation settled." }], parentRun.id),
+  ];
+  await page.route("**/api/worker/v1/**", async route => {
+    const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    const common = commonRoute(path, route);
+    if (common) return common;
+    if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, null);
+    if (path === `/v1/sessions/${session.id}/messages`) return fulfill(route, { messages, hasMore: false, activeLeafMessageId: "m4" });
+    if (path === `/v1/runs/${parentRun.id}/children`) {
+      return fulfill(route, { parentRunId: parentRun.id, groups: [{ id: groupID, parentToolCallId: "delegate-call",
+        strategy: "parallel", status: "settled", createdAt: "2026-08-04T00:00:02Z",
+        children: [{ itemId: "item-ok", childRunId: "child-ok", name: "inspect", roleHandle: "workspace-explorer",
+          roleDisplayName: "Workspace Explorer", itemStatus: "succeeded", runStatus: "succeeded", createdAt: "2026-08-04T00:00:02Z" },
+          { itemId: "item-fail", childRunId: "child-fail", name: "review", roleHandle: "workspace-explorer",
+            roleDisplayName: "Workspace Explorer", itemStatus: "failed", runStatus: "failed", createdAt: "2026-08-04T00:00:02Z",
+            errorCode: "provider_unavailable", errorMessage: "review failed" }] }] });
+    }
+    if (path === `/v1/delegations/${groupID}`) return fulfill(route, inspection);
+    if (path === `/v1/delegations/${groupID}/retry`) {
+      expect(route.request().postDataJSON()).toMatchObject({
+        expectedGeneration: 0, itemIds: ["item-fail"],
+      });
+      retryRequested = true;
+      return fulfill(route, { generation: { id: "gen-1", groupId: groupID, generation: 1, kind: "retry",
+        status: "running", retrySelection: ["item-fail"], reusedAttempts: [{ itemId: "item-ok", attemptId: "att-ok",
+          generation: 0, childRunId: "child-ok", resultDigest: "sha256:aa" }],
+        authorizationSnapshot: {}, budgetSnapshot: {}, clientRequestId: "req", createdAt: "2026-08-04T00:00:03Z" },
+        childRunIds: ["child-retry"], approval: null });
+    }
+    return route.abort();
+  });
+
+  await selectSession(page);
+  await expect(page.locator(".nested-activity")).toBeVisible();
+  // The failed row exposes the icon Retry command.
+  await expect(page.locator('[data-child-run-id="child-fail"] .child-run-retry')).toBeVisible();
+  await page.locator('[data-child-run-id="child-fail"] .child-run-retry').hover();
+  await page.locator('[data-child-run-id="child-fail"] .child-run-retry').click();
+  expect(retryRequested).toBe(true);
+
+  // Generation history renders generation 0 with settled status.
+  await page.locator(".generation-history summary").first().click();
+  await expect(page.getByText("Generation 0 (current)", { exact: true })).toBeVisible();
+  await expect(page.getByText("settled", { exact: true }).first()).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+});

@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, CircleAlert, CircleCheck, Clock3, PauseCircle, XCircle } from "lucide-react";
+import { Bot, CircleAlert, CircleCheck, Clock3, PauseCircle, RotateCcw, XCircle } from "lucide-react";
 import type { components } from "@/lib/worker-api.gen";
 import { boundedToolOutput } from "@/lib/tool-presentation";
 
@@ -8,16 +8,33 @@ type ChildActivity = components["schemas"]["DelegationChildActivity"];
 
 type ChildState = "queued" | "running" | "approval" | "completed" | "failed" | "interrupted" | "cancelled";
 
-export function ChildRunRow({ child }: { child: ChildActivity }) {
+// ChildRunRow renders one delegated child. When onRetry is provided and the
+// child is retry-eligible, an icon Retry command is exposed with a tooltip.
+// reused marks a sibling reused by a later generation without re-execution.
+export function ChildRunRow({ child, reused = false, onRetry }: {
+  child: ChildActivity;
+  reused?: boolean;
+  onRetry?: (itemId: string) => void;
+}) {
   const state = childState(child);
   const result = child.result?.summary || child.errorMessage || "";
+  const retryable = onRetry !== undefined &&
+    (state === "failed" || state === "interrupted" || state === "cancelled");
   return <div className="child-run-row" data-child-run-id={child.childRunId} data-state={state} role="listitem">
     <span className="child-run-icon"><Bot size={14} aria-hidden="true" /></span>
     <span className="child-run-identity">
       <strong>{child.name}</strong>
       <span>@{child.roleHandle}</span>
+      {reused && <span className="child-run-reused">Reused</span>}
     </span>
-    <span className="child-run-status">{stateIcon(state)}{stateLabel(state)}</span>
+    <span className="child-run-actions">
+      {retryable && <button type="button" className="child-run-retry"
+        aria-label={`Retry ${child.name}`} title="Retry this delegated task"
+        onClick={() => onRetry(child.itemId)}>
+        <RotateCcw size={13} aria-hidden="true" />
+      </button>}
+      <span className="child-run-status">{stateIcon(state)}{stateLabel(state)}</span>
+    </span>
     {result && <details className="child-run-result">
       <summary>{child.result ? "Result" : "Failure"}</summary>
       <div>{boundedToolOutput(result, 1200)}</div>

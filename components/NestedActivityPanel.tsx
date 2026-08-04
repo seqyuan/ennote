@@ -1,23 +1,27 @@
 "use client";
 
-import { RefreshCw, Users } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Check, RefreshCw, Users, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChildRunRow } from "@/components/ChildRunRow";
+import { DelegationGenerationHistory } from "@/components/DelegationGenerationHistory";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
 
 type ActivityPage = components["schemas"]["DelegationActivityPage"];
 type ActivityGroup = components["schemas"]["DelegationActivityGroup"];
+type DelegationInspection = components["schemas"]["DelegationInspection"];
 
 const pollIntervalMs = 1200;
 const emptyPollLimit = 20;
 
 export function NestedActivityPanel({ parentRunId, toolCallId }: { parentRunId: string; toolCallId: string }) {
   const [page, setPage] = useState<ActivityPage | null>(null);
+  const [inspections, setInspections] = useState<Record<string, DelegationInspection>>({});
   const [error, setError] = useState<string | null>(null);
   const [emptyPolling, setEmptyPolling] = useState(true);
   const [retry, setRetry] = useState(0);
   const [open, setOpen] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -55,8 +59,69 @@ export function NestedActivityPanel({ parentRunId, toolCallId }: { parentRunId: 
     () => page?.groups.filter(group => group.parentToolCallId === toolCallId) ?? [],
     [page, toolCallId],
   );
+  const groupIDs = useMemo(() => groups.map(group => group.id).join(","), [groups]);
+
+  // Load the inspection projection (generations, valid actions, pending
+  // authorization) for each visible group.
+  useEffect(() => {
+    const controller = new AbortController();
+    for (const groupID of groupIDs.split(",").filter(Boolean)) {
+      void apiFetch<DelegationInspection>(`/v1/delegations/${encodeURIComponent(groupID)}`, {
+        signal: controller.signal,
+      }).then(inspection => {
+        if (!controller.signal.aborted) {
+          setInspections(previous => ({ ...previous, [groupID]: inspection }));
+        }
+      }).catch(() => {
+        // Inspection is a progressive enhancement; children polling is source.
+      });
+    }
+    return () => controller.abort();
+  }, [groupIDs]);
+
   const children = groups.flatMap(group => group.children);
   const activeCount = children.filter(child => child.runStatus && !isTerminalStatus(child.runStatus)).length;
+
+  const retryItem = useCallback(async (group: ActivityGroup, itemId: string) => {
+    if (busy) return;
+    const inspection = inspections[group.id];
+    const expectedGeneration = inspection?.currentGeneration ?? 0;
+    setBusy(itemId);
+    try {
+      await apiFetch<{ generation: unknown }>(`/v1/delegations/${encodeURIComponent(group.id)}/retry`, {
+        method: "POST",
+        body: JSON.stringify({
+          expectedGeneration,
+          itemIds: [itemId],
+          clientRequestId: crypto.randomUUID(),
+        }),
+      });
+      setRetry(value => value + 1); // refresh children + inspections
+    } catch (reason) {
+      // Stale expected generation simply refreshes: the poll below re-reads the
+      // authoritative state instead of overwriting anything locally.
+      setError((reason as Error).message);
+      setRetry(value => value + 1);
+    } finally {
+      setBusy(null);
+    }
+  }, [busy, inspections]);
+
+  const decideApproval = useCallback(async (groupID: string, decision: "approved" | "rejected") => {
+    if (busy) return;
+    setBusy(groupID + decision);
+    try {
+      await apiFetch(`/v1/delegation-approvals/${encodeURIComponent(groupID)}/decision`, {
+        method: "POST",
+        body: JSON.stringify({ decision, clientRequestId: crypto.randomUUID() }),
+      });
+      setRetry(value => value + 1);
+    } catch (reason) {
+      setError((reason as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }, [busy]);
 
   return <details className="nested-activity" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>
@@ -74,11 +139,59 @@ export function NestedActivityPanel({ parentRunId, toolCallId }: { parentRunId: 
           <RefreshCw size={14} aria-hidden="true" />
         </button>
       </div>}
-      {groups.map(group => <div className="child-run-list" role="list" key={group.id}>
-        {group.children.map(child => <ChildRunRow child={child} key={child.itemId} />)}
-      </div>)}
+      {groups.map(group => <GroupBlock
+        key={group.id}
+        group={group}
+        inspection={inspections[group.id]}
+        busy={busy}
+        onRetry={retryItem}
+        onDecide={decideApproval}
+      />)}
     </div>
   </details>;
+}
+
+function GroupBlock({ group, inspection, busy, onRetry, onDecide }: {
+  group: ActivityGroup;
+  inspection?: DelegationInspection;
+  busy: string | null;
+  onRetry: (group: ActivityGroup, itemId: string) => void;
+  onDecide: (groupID: string, decision: "approved" | "rejected") => void;
+}) {
+  const reusedChildRunIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const generation of inspection?.generations ?? []) {
+      for (const reference of generation.reusedAttempts ?? []) {
+        if (reference.childRunId) ids.add(reference.childRunId);
+      }
+    }
+    return ids;
+  }, [inspection]);
+  const pendingApproval = inspection?.pendingApproval;
+  return <>
+    <div className="child-run-list" role="list">
+      {group.children.map(child => <ChildRunRow
+        child={child}
+        key={child.itemId}
+        reused={reusedChildRunIds.has(child.childRunId ?? "")}
+        onRetry={itemId => onRetry(group, itemId)}
+      />)}
+    </div>
+    {pendingApproval && <div className="delegation-approval-banner" role="status">
+      <span>Retry budget increase awaits approval</span>
+      <span className="banner-actions">
+        <button type="button" className="child-run-approve" aria-label="Approve retry budget" title="Approve"
+          disabled={busy !== null} onClick={() => onDecide(group.id, "approved")}>
+          <Check size={13} aria-hidden="true" /> Approve
+        </button>
+        <button type="button" className="child-run-reject" aria-label="Reject retry budget" title="Reject"
+          disabled={busy !== null} onClick={() => onDecide(group.id, "rejected")}>
+          <X size={13} aria-hidden="true" /> Reject
+        </button>
+      </span>
+    </div>}
+    {inspection && <DelegationGenerationHistory inspection={inspection} />}
+  </>;
 }
 
 function groupIsActive(group: ActivityGroup): boolean {
