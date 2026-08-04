@@ -1339,13 +1339,20 @@ func settleAttemptTx(ctx context.Context, tx *sql.Tx, childRunID string, status 
 	}
 	// Settle the generation when every attempt of THIS generation is terminal.
 	// Item substrate columns are frozen at generation 0 and must never gate
-	// later generations.
-	if _, err := tx.ExecContext(ctx, `UPDATE delegation_group_generations SET status='settled',completed_at=?
+	// later generations. The first (and only) transition to settled creates the
+	// logical completion and its durable delivery event in the same transaction.
+	result, err := tx.ExecContext(ctx, `UPDATE delegation_group_generations SET status='settled',completed_at=?
 		WHERE group_id=? AND generation=? AND status IN ('queued','running')
 		  AND NOT EXISTS (SELECT 1 FROM delegation_item_attempts a JOIN delegation_items i ON i.id=a.item_id
 			WHERE i.group_id=? AND a.generation=? AND a.status IN ('queued','running'))`,
-		now, groupID, generation, groupID, generation); err != nil {
+		now, groupID, generation, groupID, generation)
+	if err != nil {
 		return err
+	}
+	if changed, _ := result.RowsAffected(); changed == 1 {
+		if _, err := createCompletionTx(ctx, tx, groupID, generation); err != nil {
+			return err
+		}
 	}
 	return nil
 }

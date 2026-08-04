@@ -1237,6 +1237,14 @@ func run() error {
 	if _, err := (&store.DelegationRepo{DB: db}).RecoverDelegation(context.Background()); err != nil {
 		return fmt.Errorf("recover delegation state: %w", err)
 	}
+	// Reconstruct any lost completion/delivery projections from terminal facts.
+	delegationRepo := &store.DelegationRepo{DB: db}
+	if _, err := delegationRepo.RebuildMissingCompletions(context.Background(), 100); err != nil {
+		return fmt.Errorf("rebuild delegation completions: %w", err)
+	}
+	if _, err := delegationRepo.RebuildMissingDeliveryEvents(context.Background(), 100); err != nil {
+		return fmt.Errorf("rebuild delivery events: %w", err)
+	}
 
 	eventWriter := events.NewWriter(&store.EventRepo{DB: db}, hub)
 	artifactService := &artifacts.Service{DB: db, Root: filepath.Join(cfg.HomeDir, "artifacts")}

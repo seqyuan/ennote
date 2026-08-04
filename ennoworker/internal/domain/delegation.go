@@ -23,16 +23,16 @@ const (
 
 // DelegationHandle is the stable delivery identity of one delegation group.
 type DelegationHandle struct {
-	ID               string                 `json:"id"`
-	GroupID          string                 `json:"groupId"`
-	SessionID        string                 `json:"sessionId"`
-	SourceParentRunID string                `json:"sourceParentRunId"`
-	SourceBranchID   string                 `json:"sourceBranchId"`
-	ExecutionMode    DelegationExecutionMode `json:"executionMode"`
-	AutoResume       bool                   `json:"autoResume"`
-	Status           string                 `json:"status"`
-	CreatedAt        time.Time              `json:"createdAt"`
-	UpdatedAt        time.Time              `json:"updatedAt"`
+	ID                string                  `json:"id"`
+	GroupID           string                  `json:"groupId"`
+	SessionID         string                  `json:"sessionId"`
+	SourceParentRunID string                  `json:"sourceParentRunId"`
+	SourceBranchID    string                  `json:"sourceBranchId"`
+	ExecutionMode     DelegationExecutionMode `json:"executionMode"`
+	AutoResume        bool                    `json:"autoResume"`
+	Status            string                  `json:"status"`
+	CreatedAt         time.Time               `json:"createdAt"`
+	UpdatedAt         time.Time               `json:"updatedAt"`
 }
 
 // DelegationGroupStatus tracks the lifecycle of a delegation group.
@@ -330,6 +330,22 @@ type RetryDelegationInput struct {
 	ItemIDs            []string                     `json:"itemIds"`
 	BudgetOverrides    map[string]BudgetCeilingJSON `json:"budgetOverrides,omitempty"`
 	ClientRequestID    string                       `json:"clientRequestId"`
+}
+
+// DelegationCompletion is the logical terminal fact of one handle/generation.
+// It is a projection of terminal attempt facts, never an alternate execution
+// or authorization state machine.
+type DelegationCompletion struct {
+	ID             string    `json:"id"`
+	HandleID       string    `json:"handleId"`
+	SessionID      string    `json:"sessionId"`
+	Generation     int       `json:"generation"`
+	Kind           string    `json:"kind"`
+	ResultJSON     string    `json:"result"`
+	ResultDigest   string    `json:"resultDigest"`
+	Sequence       int       `json:"sequence"`
+	DeliveryStatus string    `json:"deliveryStatus"`
+	CreatedAt      time.Time `json:"createdAt"`
 }
 
 // DelegationApprovalRequest is a durable, parent-independent authorization for
