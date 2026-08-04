@@ -145,14 +145,20 @@ func (r *DelegationRepo) Inspect(ctx context.Context, groupID string) (*domain.D
 				rows2.Close()
 				return nil, err
 			}
-			found, err = approvalRepo.loadApproval(ctx, id)
-			if err != nil {
-				rows2.Close()
+			if err := rows2.Close(); err != nil {
 				return nil, err
 			}
-		}
-		if err := rows2.Close(); err != nil {
-			return nil, err
+			found, err = approvalRepo.loadApproval(ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			if err := rows2.Err(); err != nil {
+				return nil, err
+			}
+		} else {
+			if err := rows2.Close(); err != nil {
+				return nil, err
+			}
 		}
 		approval = found
 	}
