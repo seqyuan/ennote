@@ -2,6 +2,7 @@
 
 import { ArrowLeft } from "lucide-react";
 import { useState, useCallback, useRef, useEffect, useSyncExternalStore } from "react";
+import { AttentionPanel } from "@/components/AttentionPanel";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import type { TextAttachment } from "./Composer";
@@ -644,7 +645,17 @@ export function AppShell() {
 
   // Sidebar content
   const sidebar = (
-    <SessionSidebar
+    <>
+      <div style={{ padding: "10px 12px 0", borderBottom: "1px solid var(--border)" }}>
+        <AttentionPanel
+          projectId={selectedProject ?? currentProjectId ?? undefined}
+          onNavigate={item => {
+            if (item.sessionId && item.sessionId !== selectedSession) switchSession(item.sessionId);
+            closeMobileNavigation();
+          }}
+        />
+      </div>
+      <SessionSidebar
       projects={projects}
       sessions={sessionNavigation.visibleSessions}
       selectedProject={selectedProject}
@@ -667,6 +678,7 @@ export function AppShell() {
       closeNavigation={closeMobileNavigation}
       runningSessionIds={runningSessionIds}
     />
+    </>
   );
 
   const combinedError = error ?? branches.error ?? recovery.error ?? sessionNavigation.error;
