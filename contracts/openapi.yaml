@@ -1304,6 +1304,82 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "500": { $ref: "#/components/responses/Error" }
+  /v1/delegation-handles/{handleID}:
+    parameters:
+      - name: handleID
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getDelegationHandle
+      responses:
+        "200":
+          description: Durable delegation handle with its latest completion
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    additionalProperties: false
+                    required: [handle]
+                    properties:
+                      handle: { $ref: "#/components/schemas/DelegationHandle" }
+                      completion: { $ref: "#/components/schemas/DelegationCompletion" }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/delegation-handles:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    get:
+      operationId: listSessionDelegationHandles
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, completed, cancelled] }
+        - name: before
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        "200":
+          description: Cursor-paginated handles
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/DelegationHandlePage" }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /v1/delivery-events:
+    get:
+      operationId: streamDeliveryEvents
+      parameters:
+        - name: sessionId
+          in: query
+          required: true
+          schema: { type: string }
+        - name: after
+          in: query
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: Replay-safe durable delivery event stream
+          content:
+            text/event-stream:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer, format: int64 }
+                  data: { $ref: "#/components/schemas/DeliveryEvent" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
   /v1/runs/{runID}/retry:
     parameters:
       - $ref: "#/components/parameters/RunID"
@@ -2606,6 +2682,58 @@ components:
           items: { type: object }
         requestedAt: { type: string, format: date-time }
         resolvedAt: { type: string, format: date-time }
+    DelegationHandle:
+      type: object
+      additionalProperties: false
+      required: [id, groupId, sessionId, sourceParentRunId, sourceBranchId, executionMode, autoResume, status, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        groupId: { type: string }
+        sessionId: { type: string }
+        sourceParentRunId: { type: string }
+        sourceBranchId: { type: string }
+        executionMode: { type: string, enum: [blocking, background] }
+        autoResume: { type: boolean }
+        status: { type: string, enum: [active, completed, cancelled] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    DelegationHandlePage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/DelegationHandle" }
+        nextCursor: { type: string }
+    DelegationCompletion:
+      type: object
+      additionalProperties: false
+      required: [id, handleId, sessionId, generation, kind, result, resultDigest, sequence, deliveryStatus, createdAt]
+      properties:
+        id: { type: string }
+        handleId: { type: string }
+        sessionId: { type: string }
+        generation: { type: integer }
+        kind: { type: string, enum: [completed, partial, failed, cancelled] }
+        result: { type: object }
+        resultDigest: { type: string }
+        sequence: { type: integer }
+        deliveryStatus: { type: string, enum: [pending, consumed_by_parent, notified, resume_queued, resume_completed] }
+        createdAt: { type: string, format: date-time }
+    DeliveryEvent:
+      type: object
+      additionalProperties: false
+      required: [eventId, sessionId, sourceKind, sourceId, sourceGeneration, eventType, payload, createdAt]
+      properties:
+        eventId: { type: integer, format: int64 }
+        sessionId: { type: string }
+        sourceKind: { type: string }
+        sourceId: { type: string }
+        sourceGeneration: { type: integer }
+        eventType: { type: string }
+        payload: { type: object }
+        createdAt: { type: string, format: date-time }
     DelegationGroup:
       type: object
       additionalProperties: false

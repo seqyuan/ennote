@@ -332,6 +332,18 @@ type RetryDelegationInput struct {
 	ClientRequestID    string                       `json:"clientRequestId"`
 }
 
+// DeliveryEvent is a durable, replay-safe delivery projection fact.
+type DeliveryEvent struct {
+	EventID          int64           `json:"eventId"`
+	SessionID        string          `json:"sessionId"`
+	SourceKind       string          `json:"sourceKind"`
+	SourceID         string          `json:"sourceId"`
+	SourceGeneration int             `json:"sourceGeneration"`
+	EventType        string          `json:"eventType"`
+	Payload          json.RawMessage `json:"payload"`
+	CreatedAt        time.Time       `json:"createdAt"`
+}
+
 // DelegationCompletion is the logical terminal fact of one handle/generation.
 // It is a projection of terminal attempt facts, never an alternate execution
 // or authorization state machine.

@@ -805,6 +805,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/delegation-handles/{handleID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                handleID: string;
+            };
+            cookie?: never;
+        };
+        get: operations["getDelegationHandle"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{sessionID}/delegation-handles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+            };
+            cookie?: never;
+        };
+        get: operations["listSessionDelegationHandles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/delivery-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["streamDeliveryEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/runs/{runID}/retry": {
         parameters: {
             query?: never;
@@ -1717,6 +1769,53 @@ export interface components {
             requestedAt: string;
             /** Format: date-time */
             resolvedAt?: string;
+        };
+        DelegationHandle: {
+            id: string;
+            groupId: string;
+            sessionId: string;
+            sourceParentRunId: string;
+            sourceBranchId: string;
+            /** @enum {string} */
+            executionMode: "blocking" | "background";
+            autoResume: boolean;
+            /** @enum {string} */
+            status: "active" | "completed" | "cancelled";
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        DelegationHandlePage: {
+            items: components["schemas"]["DelegationHandle"][];
+            nextCursor?: string;
+        };
+        DelegationCompletion: {
+            id: string;
+            handleId: string;
+            sessionId: string;
+            generation: number;
+            /** @enum {string} */
+            kind: "completed" | "partial" | "failed" | "cancelled";
+            result: Record<string, never>;
+            resultDigest: string;
+            sequence: number;
+            /** @enum {string} */
+            deliveryStatus: "pending" | "consumed_by_parent" | "notified" | "resume_queued" | "resume_completed";
+            /** Format: date-time */
+            createdAt: string;
+        };
+        DeliveryEvent: {
+            /** Format: int64 */
+            eventId: number;
+            sessionId: string;
+            sourceKind: string;
+            sourceId: string;
+            sourceGeneration: number;
+            eventType: string;
+            payload: Record<string, never>;
+            /** Format: date-time */
+            createdAt: string;
         };
         DelegationGroup: {
             id: string;
@@ -3517,6 +3616,93 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+            500: components["responses"]["Error"];
+        };
+    };
+    getDelegationHandle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                handleID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Durable delegation handle with its latest completion */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        handle: components["schemas"]["DelegationHandle"];
+                        completion?: components["schemas"]["DelegationCompletion"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            500: components["responses"]["Error"];
+        };
+    };
+    listSessionDelegationHandles: {
+        parameters: {
+            query?: {
+                status?: "active" | "completed" | "cancelled";
+                before?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cursor-paginated handles */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["DelegationHandlePage"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            500: components["responses"]["Error"];
+        };
+    };
+    streamDeliveryEvents: {
+        parameters: {
+            query: {
+                sessionId: string;
+                after?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Replay-safe durable delivery event stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": {
+                        /** Format: int64 */
+                        id?: number;
+                        data?: components["schemas"]["DeliveryEvent"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
             500: components["responses"]["Error"];
         };
     };
