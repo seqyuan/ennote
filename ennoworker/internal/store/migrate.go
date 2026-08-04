@@ -32,7 +32,7 @@ func Migrate(db *sql.DB) error {
 			continue
 		}
 		pending = append(pending, migration)
-		if migration.Version == 7 || migration.Version == 21 || migration.Version == 23 {
+		if migration.Version == 7 || migration.Version == 21 || migration.Version == 23 || migration.Version == 26 {
 			rebuildsTables = true
 		}
 	}

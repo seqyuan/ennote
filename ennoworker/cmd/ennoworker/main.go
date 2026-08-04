@@ -1319,6 +1319,11 @@ func run() error {
 	if len(queuedRuns) > 0 {
 		slog.Info("queued runs recovered", "count", len(queuedRuns))
 	}
+	// Deliver any pending auto-resume completions for idle sessions, in
+	// sequence order. Each tick creates at most one continuation Run.
+	if err := tickIdleAutoResume(context.Background(), db, coordinator); err != nil {
+		return fmt.Errorf("deliver auto-resume completions: %w", err)
+	}
 	instanceID, err := runtimeinfo.NewInstanceID()
 	if err != nil {
 		return err
@@ -1407,4 +1412,39 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return httpServer.Shutdown(shutdownCtx)
+}
+
+// tickIdleAutoResume delivers one pending auto-resume completion per idle
+// active session, in completion sequence order, and enqueues the resulting
+// continuation Runs.
+func tickIdleAutoResume(ctx context.Context, db *sql.DB, coordinator *runs.Coordinator) error {
+	delegationRepo := &store.DelegationRepo{DB: db}
+	rows, err := db.QueryContext(ctx, `SELECT id FROM sessions WHERE status='active' ORDER BY updated_at`)
+	if err != nil {
+		return err
+	}
+	var sessionIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		sessionIDs = append(sessionIDs, id)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, sessionID := range sessionIDs {
+		continuation, err := delegationRepo.TickSession(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if continuation != nil {
+			if err := coordinator.Enqueue(context.Background(), continuation.ID); err != nil {
+				slog.Warn("enqueue continuation run failed", "runID", continuation.ID, "error", err)
+			}
+		}
+	}
+	return nil
 }
