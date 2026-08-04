@@ -24,7 +24,21 @@ var (
 	ErrDelegationNoOwnedChildren = errors.New("parent owns no non-terminal children")
 	ErrDelegationNotAuthorized   = errors.New("delegation is not authorized")
 	ErrDelegationRoleUnavailable = errors.New("delegation Role is unavailable")
+	ErrDelegationAttemptNotFound = errors.New("delegation attempt not found")
 )
+
+// attemptAuthorizationSnapshot freezes the Role facts an attempt runs under.
+// It is immutable once the attempt row exists.
+type attemptAuthorizationSnapshot struct {
+	ItemID         string `json:"itemId"`
+	Name           string `json:"name"`
+	RoleVersionID  string `json:"roleVersionId"`
+	RoleObjectID   string `json:"roleObjectId"`
+	Handle         string `json:"handle"`
+	DisplayName    string `json:"displayName"`
+	ConfigDigest   string `json:"configDigest"`
+	OutputContract string `json:"outputContract"`
+}
 
 type DelegationRepo struct{ DB *sql.DB }
 
@@ -664,6 +678,58 @@ func (r *DelegationRepo) AssignChild(ctx context.Context, itemID, childRunID str
 	return nil
 }
 
+// createInitialGenerationTx writes the generation 0 row with explicit ordinal
+// selection and frozen authorization/budget snapshots. Selection is never
+// inferred by timestamp; reused attempts are empty for the initial round.
+func createInitialGenerationTx(ctx context.Context, tx *sql.Tx, groupID, clientRequestID string,
+	items []domain.DelegationItem) error {
+	selection := make([]map[string]string, 0, len(items))
+	var budget domain.BudgetCeilingJSON
+	for _, item := range items {
+		selection = append(selection, map[string]string{
+			"itemId": item.ID, "roleVersionId": item.RoleVersionID,
+		})
+		var ceiling domain.BudgetCeilingJSON
+		if len(item.BudgetJSON) > 0 {
+			if err := json.Unmarshal(item.BudgetJSON, &ceiling); err != nil {
+				return fmt.Errorf("decode item budget %s: %w", item.ID, err)
+			}
+		}
+		budget.MaxModelCalls += ceiling.MaxModelCalls
+		budget.MaxToolCalls += ceiling.MaxToolCalls
+		budget.MaxTotalTokens += ceiling.MaxTotalTokens
+		budget.MaxOutputTokens += ceiling.MaxOutputTokens
+		budget.MaxCostMicros += ceiling.MaxCostMicros
+	}
+	authJSON, err := json.Marshal(selection)
+	if err != nil {
+		return err
+	}
+	authDigest, err := digestJSON(selection)
+	if err != nil {
+		return err
+	}
+	budgetJSON, err := json.Marshal(budget)
+	if err != nil {
+		return err
+	}
+	budgetDigest, err := digestJSON(budget)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO delegation_group_generations
+		(id,group_id,generation,kind,status,retry_selection_json,reused_attempts_json,
+		 authorization_snapshot_json,authorization_snapshot_digest,budget_snapshot_json,budget_snapshot_digest,
+		 client_request_id,created_at)
+		VALUES(?,?,0,'initial','running','[]','[]',?,?,?,?,?,?)`,
+		uuid.NewString(), groupID, string(authJSON), authDigest, string(budgetJSON), budgetDigest,
+		clientRequestID, now); err != nil {
+		return fmt.Errorf("create initial generation: %w", err)
+	}
+	return nil
+}
+
 // CreateChildRunInput describes the materialization of one delegation item
 // into a queued delegated_agent Run.
 type CreateChildRunInput struct {
@@ -704,6 +770,11 @@ func (r *DelegationRepo) CreateGroupWithChildren(ctx context.Context, input Crea
 	defer tx.Rollback()
 	group, items, err := createDelegationGroupTx(ctx, tx, input)
 	if err != nil {
+		return nil, nil, nil, err
+	}
+	// Create generation 0 before any child Run: attempts reference it and the
+	// original folding contract stays tied to generation 0.
+	if err := createInitialGenerationTx(ctx, tx, group.ID, input.ParentToolCallID, items); err != nil {
 		return nil, nil, nil, err
 	}
 	children := make([]*domain.AgentRun, 0, len(items))
@@ -749,15 +820,16 @@ func createChildRunTx(ctx context.Context, tx *sql.Tx, input CreateChildRunInput
 
 	var item struct {
 		GroupID        string
+		Name           string
 		RoleVersionID  string
 		AssignmentJSON string
 		OutputContract string
 		BudgetJSON     string
 		CurrentStatus  domain.DelegationItemStatus
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT group_id,role_version_id,assignment_json,output_contract,budget_json,status
+	if err := tx.QueryRowContext(ctx, `SELECT group_id,name,role_version_id,assignment_json,output_contract,budget_json,status
 		FROM delegation_items WHERE id=? AND child_run_id IS NULL`, input.ItemID).
-		Scan(&item.GroupID, &item.RoleVersionID, &item.AssignmentJSON, &item.OutputContract,
+		Scan(&item.GroupID, &item.Name, &item.RoleVersionID, &item.AssignmentJSON, &item.OutputContract,
 			&item.BudgetJSON, &item.CurrentStatus); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("%w: item is not assignable", ErrDelegationItemNotFound)
@@ -823,6 +895,30 @@ func createChildRunTx(ctx context.Context, tx *sql.Tx, input CreateChildRunInput
 			return nil, ErrDelegationBudgetReserved
 		}
 		return nil, fmt.Errorf("reserve child budget: %w", err)
+	}
+	// Record the immutable generation-0 attempt row so every terminal path can
+	// settle the attempt state machine, not just the substrate columns.
+	authSnapshot := attemptAuthorizationSnapshot{
+		ItemID: input.ItemID, Name: item.Name, RoleVersionID: item.RoleVersionID,
+		RoleObjectID: objectID, Handle: handle, DisplayName: displayName,
+		ConfigDigest: configDigest, OutputContract: item.OutputContract,
+	}
+	authJSON, err := json.Marshal(authSnapshot)
+	if err != nil {
+		return nil, err
+	}
+	authDigest, err := digestJSON(authSnapshot)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO delegation_item_attempts
+		(id,item_id,generation,retry_of_attempt_id,child_run_id,
+		 authorization_snapshot_json,authorization_snapshot_digest,reserved_budget_json,actual_usage_json,
+		 status,created_at)
+		VALUES(?,?,0,NULL,?,?,?,?,?,?,?)`,
+		uuid.NewString(), input.ItemID, childID, string(authJSON), authDigest,
+		item.BudgetJSON, `{"modelCalls":0,"toolCalls":0,"tokens":0,"outputTokens":0,"costMicros":0}`, "queued", timestamp); err != nil {
+		return nil, fmt.Errorf("create delegation attempt: %w", err)
 	}
 	// Every child reservation contends on the root ledger of the top-level
 	// Host Run. Two concurrent groups cannot each fit by accident: the losing
@@ -1104,6 +1200,54 @@ func (r *DelegationRepo) RecordBudgetUsage(ctx context.Context, runID string, mo
 	return nil
 }
 
+// settleAttemptTx terminalizes the attempt row of a child Run (idempotent via
+// the active-status guard) and settles the owning generation when the whole
+// group is terminal. Generation settlement never selects by timestamp.
+func settleAttemptTx(ctx context.Context, tx *sql.Tx, childRunID string, status domain.DelegationAttemptStatus,
+	resultJSON json.RawMessage, terminalKind, errorCode, errorMessage string) error {
+	var attemptID, groupID string
+	if err := tx.QueryRowContext(ctx, `SELECT a.id,g.id FROM delegation_item_attempts a
+		JOIN delegation_items i ON i.id=a.item_id
+		JOIN delegation_groups g ON g.id=i.group_id
+		WHERE a.child_run_id=?`, childRunID).Scan(&attemptID, &groupID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrDelegationAttemptNotFound
+		}
+		return err
+	}
+	resultDigest := ""
+	if len(resultJSON) > 0 {
+		digest, err := digestJSON(json.RawMessage(resultJSON))
+		if err != nil {
+			return err
+		}
+		resultDigest = digest
+	}
+	usage := readChildUsageTx(ctx, tx, childRunID)
+	usageJSON, err := json.Marshal(usage)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := tx.ExecContext(ctx, `UPDATE delegation_item_attempts SET status=?,result_json=?,result_digest=?,
+		terminal_kind=?,actual_usage_json=?,root_reconciled_at=?,finished_at=?,error_code=?,error_message=?
+		WHERE id=? AND status IN ('queued','running')`,
+		string(status), nullableBackfillJSON(string(resultJSON)), resultDigest, terminalKind,
+		string(usageJSON), now, now, errorCode, errorMessage, attemptID); err != nil {
+		return err
+	}
+	// Settle the generation when every item in the group is terminal.
+	if _, err := tx.ExecContext(ctx, `UPDATE delegation_group_generations SET status='settled',completed_at=?
+		WHERE group_id=? AND generation=(SELECT current_generation FROM delegation_groups WHERE id=?)
+		  AND status IN ('queued','running')
+		  AND NOT EXISTS (SELECT 1 FROM delegation_items i WHERE i.group_id=?
+			AND i.status IN ('pending','running'))`,
+		now, groupID, groupID, groupID); err != nil {
+		return err
+	}
+	return nil
+}
+
 // FinalizeChildSuccess terminalizes a delegated_agent Run: it writes the
 // complete private transcript to run_messages (no canonical message), folds the
 // submit_result contract into the delegation item, settles the group when all
@@ -1173,6 +1317,11 @@ func (r *RunRepo) FinalizeChildSuccess(ctx context.Context, runID string, output
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE delegation_items SET status='succeeded', result_json=?
 		WHERE child_run_id=? AND status IN ('pending','running')`, string(resultJSON), runID); err != nil {
+		return err
+	}
+	// Terminalize the attempt state machine (idempotent) before settling.
+	if err := settleAttemptTx(ctx, tx, runID, domain.DelegationAttemptSucceeded,
+		resultJSON, string(output.Terminal.Status), "", ""); err != nil {
 		return err
 	}
 	// Fold the child's reservation back: release the reserved ceiling and
@@ -1293,6 +1442,11 @@ func (r *RunRepo) FinalizeChildFailure(ctx context.Context, runID, code, message
 	}
 	if changed, _ := itemUpdate.RowsAffected(); changed != 1 {
 		return "", false, fmt.Errorf("%w: child delegation item is already terminal", ErrDelegationConflict)
+	}
+	// Terminalize the attempt state machine (idempotent) before settling.
+	if err := settleAttemptTx(ctx, tx, runID, domain.DelegationAttemptFailed,
+		resultJSON, string(domain.SubmitBlocked), code, message); err != nil {
+		return "", false, err
 	}
 	// Fold the child's reservation back: release the reserved ceiling and
 	// record actual usage exactly once (idempotent via root_reconciled_at).
@@ -1504,6 +1658,26 @@ func (r *DelegationRepo) ReapOrphans(ctx context.Context) ([]string, error) {
 		ELSE 'failed' END
 		WHERE status IN ('pending','running') AND child_run_id IN (
 			SELECT id FROM agent_runs WHERE status IN ('succeeded','failed','cancelled','interrupted'))`); err != nil {
+		return nil, err
+	}
+	// Mirror the same facts into the attempt state machine.
+	if _, err := tx.ExecContext(ctx, `UPDATE delegation_item_attempts SET status=CASE
+		WHEN (SELECT status FROM agent_runs WHERE id=child_run_id)='succeeded' THEN 'succeeded'
+		WHEN (SELECT status FROM agent_runs WHERE id=child_run_id)='cancelled' THEN 'cancelled'
+		WHEN (SELECT status FROM agent_runs WHERE id=child_run_id)='interrupted' THEN 'interrupted'
+		ELSE 'failed' END
+		WHERE status IN ('queued','running') AND child_run_id IN (
+			SELECT id FROM agent_runs WHERE status IN ('succeeded','failed','cancelled','interrupted'))`); err != nil {
+		return nil, err
+	}
+	// Settle generations whose groups are fully terminal, regardless of whether
+	// the group status update below has run yet.
+	if _, err := tx.ExecContext(ctx, `UPDATE delegation_group_generations SET status='settled',completed_at=?
+		WHERE status IN ('queued','running')
+		  AND group_id IN (SELECT g.id FROM delegation_groups g
+			WHERE NOT EXISTS (SELECT 1 FROM delegation_items i WHERE i.group_id=g.id
+				AND i.status IN ('pending','running')))`,
+		now); err != nil {
 		return nil, err
 	}
 	// Reconcile every terminal child reservation, including children that were

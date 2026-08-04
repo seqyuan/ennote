@@ -758,6 +758,10 @@ func (r *RunRepo) Cancel(ctx context.Context, runID string) error {
 			WHERE id=? AND status IN ('queued','running','waiting_for_approval')`, now, childID); err != nil {
 			return err
 		}
+		if _, err := tx.ExecContext(ctx, `UPDATE delegation_item_attempts SET status='cancelled',finished_at=?,error_code='run_cancelled'
+			WHERE child_run_id=? AND status IN ('queued','running')`, now, childID); err != nil {
+			return err
+		}
 		if err := reconcileRootBudgetTx(ctx, tx, childID); err != nil {
 			return err
 		}
@@ -768,6 +772,11 @@ func (r *RunRepo) Cancel(ctx context.Context, runID string) error {
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE delegation_groups SET status='cancelled'
 		WHERE parent_run_id=? AND status IN ('pending','waiting_children')`, runID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE delegation_group_generations SET status='cancelled',completed_at=?
+		WHERE group_id IN (SELECT id FROM delegation_groups WHERE parent_run_id=? AND status='cancelled')
+		  AND status IN ('queued','running','awaiting_authorization')`, now, runID); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
