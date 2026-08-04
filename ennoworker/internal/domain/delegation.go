@@ -323,4 +323,5 @@ type DelegationApprovalRequest struct {
 	Status      string          `json:"status"`
 	ItemsJSON   json.RawMessage `json:"items"`
 	RequestedAt time.Time       `json:"requestedAt"`
+	ResolvedAt  *time.Time      `json:"resolvedAt,omitempty"`
 }

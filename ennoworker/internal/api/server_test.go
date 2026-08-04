@@ -71,7 +71,8 @@ func setupServer(t *testing.T, control RunController) (*Server, http.Handler) {
 		Artifacts: &artifacts.Service{DB: db, Root: t.TempDir()}, Sessions: &store.SessionRepo{DB: db},
 		Branches: &store.BranchRepo{DB: db}, Messages: &store.MessageRepo{DB: db}, Compactions: &store.CompactionRepo{DB: db},
 		Approvals: &store.ApprovalRepo{DB: db}, Delegations: &store.DelegationRepo{DB: db}, Runs: &store.RunRepo{DB: db},
-		Queue: &store.QueueRepo{DB: db}, Events: &store.EventRepo{DB: db},
+		DelegationApprovals: &store.DelegationApprovalRepo{DB: db},
+		Queue:               &store.QueueRepo{DB: db}, Events: &store.EventRepo{DB: db},
 		Hub: hub, Control: control,
 	}
 	return server, server.Handler()

@@ -32,31 +32,32 @@ type RunController interface {
 }
 
 type Server struct {
-	DB                *sql.DB
-	Token             string
-	Sandbox           string
-	Projects          *store.ProjectRepo
-	Providers         *store.ProviderRepo
-	Models            *store.ModelRepo
-	Roles             *store.RoleRepo
-	Doctor            ProviderDiagnoser
-	Policies          *store.PolicyRepo
-	Artifacts         *artifacts.Service
-	Sessions          *store.SessionRepo
-	Branches          *store.BranchRepo
-	Messages          *store.MessageRepo
-	Compactions       *store.CompactionRepo
-	Approvals         *store.ApprovalRepo
-	StandingApprovals *store.StandingApprovalRepo
-	Delegations       *store.DelegationRepo
-	Runs              *store.RunRepo
-	Queue             *store.QueueRepo
-	Events            *store.EventRepo
-	Hub               *events.Hub
-	Control           RunController
-	InstanceID        string
-	PromptGate        PromptHookGate
-	Prompts           *prompts.Service
+	DB                  *sql.DB
+	Token               string
+	Sandbox             string
+	Projects            *store.ProjectRepo
+	Providers           *store.ProviderRepo
+	Models              *store.ModelRepo
+	Roles               *store.RoleRepo
+	Doctor              ProviderDiagnoser
+	Policies            *store.PolicyRepo
+	Artifacts           *artifacts.Service
+	Sessions            *store.SessionRepo
+	Branches            *store.BranchRepo
+	Messages            *store.MessageRepo
+	Compactions         *store.CompactionRepo
+	Approvals           *store.ApprovalRepo
+	StandingApprovals   *store.StandingApprovalRepo
+	Delegations         *store.DelegationRepo
+	DelegationApprovals *store.DelegationApprovalRepo
+	Runs                *store.RunRepo
+	Queue               *store.QueueRepo
+	Events              *store.EventRepo
+	Hub                 *events.Hub
+	Control             RunController
+	InstanceID          string
+	PromptGate          PromptHookGate
+	Prompts             *prompts.Service
 }
 
 func (s *Server) Handler() http.Handler {
@@ -112,6 +113,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/runs/{runID}", s.getRun)
 	mux.HandleFunc("GET /v1/runs/{runID}/messages", s.listRunMessages)
 	mux.HandleFunc("GET /v1/runs/{runID}/children", s.listRunChildren)
+	mux.HandleFunc("POST /v1/delegation-approvals/{approvalID}/decision", s.decideDelegationApproval)
 	mux.HandleFunc("POST /v1/runs/{runID}/retry", s.retryRun)
 	mux.HandleFunc("POST /v1/runs/{runID}/cancel", s.cancelRun)
 	mux.HandleFunc("POST /v1/runs/{runID}/inputs", s.queueInput)
