@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 )
@@ -384,6 +385,16 @@ func (r *RunRepo) ResolveAndFreezeConfig(ctx context.Context, run *domain.AgentR
 		CompactionPolicy: compactionPolicy, CompactionRuntime: compactionRuntime,
 		Role: frozenRole,
 	}
+	if run.ParentRunID == "" && run.RunKind == domain.RunKindAgent {
+		// Top-level Host Runs freeze the Session's delegation policy and create
+		// their root budget ledger in the same transaction as the effective
+		// config, so every later delegation reservation contends on it.
+		snapshot, err := freezeDelegationPolicyTx(ctx, tx, run.ID, run.SessionID)
+		if err != nil {
+			return nil, domain.NewCodedError(domain.ErrorDelegationBudgetExceeded, err)
+		}
+		effective.Delegation = snapshot
+	}
 	encoded, err := json.Marshal(effective)
 	if err != nil {
 		return nil, fmt.Errorf("encode effective config: %w", err)
@@ -525,6 +536,90 @@ func nullString(value sql.NullString) string {
 		return value.String
 	}
 	return ""
+}
+
+// delegationPolicyConfig is the wire shape of a 'delegation' kind policy
+// profile. It is a ceiling applied to the whole top-level Run, never a grant.
+type delegationPolicyConfig struct {
+	MaxConcurrentChildren int                      `json:"maxConcurrentChildren"`
+	Budget                domain.BudgetCeilingJSON `json:"budget"`
+}
+
+// freezeDelegationPolicyTx resolves the Session's delegation policy, computes
+// the canonical digest, and creates the root budget ledger row. It runs inside
+// the effective-config transaction so snapshot and ledger freeze together.
+func freezeDelegationPolicyTx(ctx context.Context, tx *sql.Tx, runID, sessionID string) (*domain.DelegationPolicySnapshot, error) {
+	var policyID string
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(delegation_policy_profile_id,'') FROM sessions WHERE id=?`,
+		sessionID).Scan(&policyID); err != nil {
+		return nil, fmt.Errorf("load session delegation policy: %w", err)
+	}
+	if policyID == "" {
+		policyID = "builtin-hosted-delegation-v1"
+	}
+	var configText, status string
+	var version int
+	if err := tx.QueryRowContext(ctx, `SELECT version,config_json,status FROM policy_profiles
+		WHERE id=? AND kind='delegation'`, policyID).Scan(&version, &configText, &status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("delegation policy %s is not configured", policyID)
+		}
+		return nil, fmt.Errorf("load delegation policy %s: %w", policyID, err)
+	}
+	if status != "active" {
+		return nil, fmt.Errorf("delegation policy %s is not active", policyID)
+	}
+	var config delegationPolicyConfig
+	if err := json.Unmarshal([]byte(configText), &config); err != nil {
+		return nil, fmt.Errorf("decode delegation policy %s: %w", policyID, err)
+	}
+	if config.MaxConcurrentChildren < 1 || config.Budget.MaxModelCalls < 1 || config.Budget.MaxToolCalls < 1 ||
+		config.Budget.MaxTotalTokens < 1 || config.Budget.MaxOutputTokens < 1 {
+		return nil, fmt.Errorf("delegation policy %s has invalid ceilings", policyID)
+	}
+	snapshot := &domain.DelegationPolicySnapshot{
+		ID: policyID, Version: version,
+		MaxConcurrentChildren: config.MaxConcurrentChildren,
+		Budget:                config.Budget,
+	}
+	digest, err := digestDelegationPolicy(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	snapshot.Digest = digest
+	snapshotJSON, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO delegation_root_budgets
+		(root_run_id,policy_snapshot_json,policy_snapshot_digest,
+		 max_model_calls,max_tool_calls,max_total_tokens,max_output_tokens,max_cost_usd_micros,max_concurrent_children,
+		 created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+		runID, string(snapshotJSON), digest, config.Budget.MaxModelCalls, config.Budget.MaxToolCalls,
+		config.Budget.MaxTotalTokens, config.Budget.MaxOutputTokens, config.Budget.MaxCostMicros,
+		config.MaxConcurrentChildren, now, now); err != nil {
+		return nil, fmt.Errorf("create root budget ledger: %w", err)
+	}
+	return snapshot, nil
+}
+
+// digestDelegationPolicy derives the canonical snapshot digest. The digest is
+// computed in Go only; SQL never duplicates this logic.
+func digestDelegationPolicy(snapshot *domain.DelegationPolicySnapshot) (string, error) {
+	input := struct {
+		ID                    string                   `json:"id"`
+		Version               int                      `json:"version"`
+		MaxConcurrentChildren int                      `json:"maxConcurrentChildren"`
+		Budget                domain.BudgetCeilingJSON `json:"budget"`
+	}{snapshot.ID, snapshot.Version, snapshot.MaxConcurrentChildren, snapshot.Budget}
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(encoded)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
 func newSystemPromptSnapshot(agentProfileID, prompt string) (domain.SystemPromptSnapshot, error) {

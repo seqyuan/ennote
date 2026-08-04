@@ -350,6 +350,138 @@ func validateDelegationBudget(request domain.BudgetCeilingJSON, ceiling domain.D
 	return nil
 }
 
+// ensureRootDelegationBudgetTx lazily creates the root budget ledger row for
+// the top-level root of a parent Run. It is idempotent and safe to call from
+// every materialization path, including Runs that never froze an effective
+// config snapshot (tests and legacy recovery paths).
+func ensureRootDelegationBudgetTx(ctx context.Context, tx *sql.Tx, parentRunID string) error {
+	var rootRunID, sessionID string
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(root_run_id,id),session_id FROM agent_runs WHERE id=?`,
+		parentRunID).Scan(&rootRunID, &sessionID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrRunNotFound
+		}
+		return err
+	}
+	var exists int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM delegation_root_budgets WHERE root_run_id=?`,
+		rootRunID).Scan(&exists); err != nil {
+		return err
+	}
+	if exists > 0 {
+		return nil
+	}
+	_, err := freezeDelegationPolicyTx(ctx, tx, rootRunID, sessionID)
+	return err
+}
+
+// reserveRootBudgetTx CAS-reserves one delegation group's total ceiling and
+// concurrent-child count against the root ledger. The UPDATE only affects one
+// row when every dimension stays within the frozen maximum, so concurrent
+// groups contend on the same envelope and the loser creates nothing.
+func reserveRootBudgetTx(ctx context.Context, tx *sql.Tx, parentRunID string, itemCount int, total domain.BudgetCeilingJSON) error {
+	var rootRunID string
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(root_run_id,id) FROM agent_runs WHERE id=?`,
+		parentRunID).Scan(&rootRunID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrRunNotFound
+		}
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := tx.ExecContext(ctx, `UPDATE delegation_root_budgets SET
+		reserved_model_calls=reserved_model_calls+?,
+		reserved_tool_calls=reserved_tool_calls+?,
+		reserved_total_tokens=reserved_total_tokens+?,
+		reserved_output_tokens=reserved_output_tokens+?,
+		reserved_cost_usd_micros=reserved_cost_usd_micros+?,
+		active_children=active_children+?,
+		version=version+1,
+		updated_at=?
+		WHERE root_run_id=?
+		  AND consumed_model_calls+reserved_model_calls+?<=max_model_calls
+		  AND consumed_tool_calls+reserved_tool_calls+?<=max_tool_calls
+		  AND consumed_total_tokens+reserved_total_tokens+?<=max_total_tokens
+		  AND consumed_output_tokens+reserved_output_tokens+?<=max_output_tokens
+		  AND (max_cost_usd_micros=0 OR consumed_cost_usd_micros+reserved_cost_usd_micros+?<=max_cost_usd_micros)
+		  AND active_children+?<=max_concurrent_children`,
+		total.MaxModelCalls, total.MaxToolCalls, total.MaxTotalTokens, total.MaxOutputTokens, total.MaxCostMicros,
+		itemCount, now, rootRunID,
+		total.MaxModelCalls, total.MaxToolCalls, total.MaxTotalTokens, total.MaxOutputTokens, total.MaxCostMicros,
+		itemCount)
+	if err != nil {
+		return err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return fmt.Errorf("%w: root budget cannot admit the requested delegation", ErrDelegationBudgetExceeded)
+	}
+	return nil
+}
+
+// reconcileRootBudgetTx releases one child's reservation and folds its actual
+// usage into the root ledger at most once. The child's run_budgets row is the
+// idempotency key: replaying reconciliation never double-charges.
+func reconcileRootBudgetTx(ctx context.Context, tx *sql.Tx, childRunID string) error {
+	var reconciled sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT root_reconciled_at FROM run_budgets WHERE run_id=?`,
+		childRunID).Scan(&reconciled); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil // no child budget row: nothing was reserved
+		}
+		return err
+	}
+	if reconciled.Valid {
+		return nil
+	}
+	var rootRunID string
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(root_run_id,parent_run_id) FROM agent_runs WHERE id=?`,
+		childRunID).Scan(&rootRunID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrRunNotFound
+		}
+		return err
+	}
+	var maxModel, maxTool, consumedModel, consumedTool int
+	var maxTokens, maxOutput, maxCost, consumedTokens, consumedOutput, consumedCost int64
+	if err := tx.QueryRowContext(ctx, `SELECT max_model_calls,max_tool_calls,max_total_tokens,max_output_tokens,max_cost_usd_micros,
+		consumed_model_calls,consumed_tool_calls,consumed_tokens,consumed_output_tokens,consumed_cost_usd_micros
+		FROM run_budgets WHERE run_id=?`, childRunID).Scan(
+		&maxModel, &maxTool, &maxTokens, &maxOutput, &maxCost,
+		&consumedModel, &consumedTool, &consumedTokens, &consumedOutput, &consumedCost); err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := tx.ExecContext(ctx, `UPDATE delegation_root_budgets SET
+		reserved_model_calls=MAX(0,reserved_model_calls-?),
+		reserved_tool_calls=MAX(0,reserved_tool_calls-?),
+		reserved_total_tokens=MAX(0,reserved_total_tokens-?),
+		reserved_output_tokens=MAX(0,reserved_output_tokens-?),
+		reserved_cost_usd_micros=MAX(0,reserved_cost_usd_micros-?),
+		consumed_model_calls=consumed_model_calls+?,
+		consumed_tool_calls=consumed_tool_calls+?,
+		consumed_total_tokens=consumed_total_tokens+?,
+		consumed_output_tokens=consumed_output_tokens+?,
+		consumed_cost_usd_micros=consumed_cost_usd_micros+?,
+		active_children=MAX(0,active_children-1),
+		version=version+1,
+		updated_at=?
+		WHERE root_run_id=?`,
+		maxModel, maxTool, maxTokens, maxOutput, maxCost,
+		consumedModel, consumedTool, consumedTokens, consumedOutput, consumedCost,
+		now, rootRunID)
+	if err != nil {
+		return err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return fmt.Errorf("root budget ledger is missing for %s", rootRunID)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE run_budgets SET root_reconciled_at=? WHERE run_id=? AND root_reconciled_at IS NULL`,
+		now, childRunID); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (r *DelegationRepo) GetGroup(ctx context.Context, groupID string) (*domain.DelegationGroup, error) {
 	var group domain.DelegationGroup
 	var createdAt string
@@ -691,6 +823,15 @@ func createChildRunTx(ctx context.Context, tx *sql.Tx, input CreateChildRunInput
 			return nil, ErrDelegationBudgetReserved
 		}
 		return nil, fmt.Errorf("reserve child budget: %w", err)
+	}
+	// Every child reservation contends on the root ledger of the top-level
+	// Host Run. Two concurrent groups cannot each fit by accident: the losing
+	// CAS rolls back this transaction entirely.
+	if err := ensureRootDelegationBudgetTx(ctx, tx, input.ParentRunID); err != nil {
+		return nil, err
+	}
+	if err := reserveRootBudgetTx(ctx, tx, input.ParentRunID, 1, ceiling); err != nil {
+		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE delegation_groups SET status='waiting_children' WHERE id=? AND status='pending'`,
 		item.GroupID); err != nil {
@@ -1034,6 +1175,11 @@ func (r *RunRepo) FinalizeChildSuccess(ctx context.Context, runID string, output
 		WHERE child_run_id=? AND status IN ('pending','running')`, string(resultJSON), runID); err != nil {
 		return err
 	}
+	// Fold the child's reservation back: release the reserved ceiling and
+	// record actual usage exactly once (idempotent via root_reconciled_at).
+	if err := reconcileRootBudgetTx(ctx, tx, runID); err != nil {
+		return err
+	}
 	var remaining int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM delegation_items WHERE group_id=? AND status IN ('pending','running')`,
 		groupID).Scan(&remaining); err != nil {
@@ -1147,6 +1293,11 @@ func (r *RunRepo) FinalizeChildFailure(ctx context.Context, runID, code, message
 	}
 	if changed, _ := itemUpdate.RowsAffected(); changed != 1 {
 		return "", false, fmt.Errorf("%w: child delegation item is already terminal", ErrDelegationConflict)
+	}
+	// Fold the child's reservation back: release the reserved ceiling and
+	// record actual usage exactly once (idempotent via root_reconciled_at).
+	if err := reconcileRootBudgetTx(ctx, tx, runID); err != nil {
+		return "", false, err
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT group_id FROM delegation_items WHERE child_run_id=?`, runID).Scan(&groupID); err != nil {
 		return "", false, err
@@ -1354,6 +1505,31 @@ func (r *DelegationRepo) ReapOrphans(ctx context.Context) ([]string, error) {
 		WHERE status IN ('pending','running') AND child_run_id IN (
 			SELECT id FROM agent_runs WHERE status IN ('succeeded','failed','cancelled','interrupted'))`); err != nil {
 		return nil, err
+	}
+	// Reconcile every terminal child reservation, including children that were
+	// never selected by the orphan scan above. Idempotent via root_reconciled_at.
+	terminalRows, err := tx.QueryContext(ctx, `SELECT child_run_id FROM delegation_items
+		WHERE child_run_id IS NOT NULL AND child_run_id IN (
+			SELECT id FROM agent_runs WHERE status IN ('succeeded','failed','cancelled','interrupted'))`)
+	if err != nil {
+		return nil, err
+	}
+	terminalChildIDs := make([]string, 0)
+	for terminalRows.Next() {
+		var id string
+		if err := terminalRows.Scan(&id); err != nil {
+			terminalRows.Close()
+			return nil, err
+		}
+		terminalChildIDs = append(terminalChildIDs, id)
+	}
+	if err := terminalRows.Close(); err != nil {
+		return nil, err
+	}
+	for _, id := range terminalChildIDs {
+		if err := reconcileRootBudgetTx(ctx, tx, id); err != nil {
+			return nil, err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE delegation_groups SET status=CASE
 		WHEN (SELECT status FROM agent_runs WHERE id=parent_run_id)='cancelled' THEN 'cancelled'

@@ -728,18 +728,49 @@ func (r *RunRepo) Fail(ctx context.Context, runID, code, message string) error {
 
 func (r *RunRepo) Cancel(ctx context.Context, runID string) error {
 	// Structured concurrency: propagate cancel to children, items, and the
-	// group before the parent itself terminalizes. Over-cancellation is safe.
+	// group before the parent itself terminalizes. Child budget reservations
+	// are reconciled in the same transaction; over-cancellation is safe.
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := r.DB.ExecContext(ctx, `UPDATE agent_runs SET status='cancelled', finished_at=?
-		WHERE parent_run_id=? AND status IN ('queued','running','waiting_for_approval')`, now, runID); err != nil {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
 		return err
 	}
-	if _, err := r.DB.ExecContext(ctx, `UPDATE delegation_items SET status='cancelled'
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM agent_runs WHERE parent_run_id=?
+		AND status IN ('queued','running','waiting_for_approval')`, runID)
+	if err != nil {
+		return err
+	}
+	childIDs := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		childIDs = append(childIDs, id)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, childID := range childIDs {
+		if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status='cancelled', finished_at=?
+			WHERE id=? AND status IN ('queued','running','waiting_for_approval')`, now, childID); err != nil {
+			return err
+		}
+		if err := reconcileRootBudgetTx(ctx, tx, childID); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE delegation_items SET status='cancelled'
 		WHERE child_run_id IN (SELECT id FROM agent_runs WHERE parent_run_id=? AND status='cancelled')`, runID); err != nil {
 		return err
 	}
-	if _, err := r.DB.ExecContext(ctx, `UPDATE delegation_groups SET status='cancelled'
+	if _, err := tx.ExecContext(ctx, `UPDATE delegation_groups SET status='cancelled'
 		WHERE parent_run_id=? AND status IN ('pending','waiting_children')`, runID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 	return r.transition(ctx, runID, domain.RunCancelled, "run_cancelled", nil, nil)

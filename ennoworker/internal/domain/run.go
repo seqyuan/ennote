@@ -142,6 +142,20 @@ type EffectiveRunConfig struct {
 	HookConfig        EffectiveHookConfig        `json:"hookConfig"`
 	WorkspaceSecurity *WorkspaceSecuritySnapshot `json:"workspaceSecurity,omitempty"`
 	Role              *FrozenRoleExecution       `json:"role,omitempty"`
+	// Delegation is the frozen root budget policy snapshot for a top-level Host
+	// Run. Children inherit the root policy fact but cannot replace it.
+	Delegation *DelegationPolicySnapshot `json:"delegation,omitempty"`
+}
+
+// DelegationPolicySnapshot is the frozen ceiling applied to every delegation
+// reservation of one top-level Host Run. It is resolved from the Session's
+// delegation policy profile once, when the Run's effective config freezes.
+type DelegationPolicySnapshot struct {
+	ID                    string            `json:"id"`
+	Version               int               `json:"version"`
+	MaxConcurrentChildren int               `json:"maxConcurrentChildren"`
+	Budget                BudgetCeilingJSON `json:"budget"`
+	Digest                string            `json:"digest"`
 }
 
 type WorkspaceSecuritySnapshot struct {

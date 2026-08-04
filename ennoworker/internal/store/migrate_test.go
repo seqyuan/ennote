@@ -28,6 +28,7 @@ func TestMigrateCreatesTables(t *testing.T) {
 		"policy_profiles", "image_descriptions", "context_compactions", "session_compaction_state",
 		"run_context_compactions", "run_execution_checkpoints", "tool_approval_requests", "session_branches",
 		"room_member_instances", "run_messages", "agent_profile_versions",
+		"delegation_groups", "delegation_items", "run_budgets", "delegation_root_budgets",
 	}
 	for _, name := range tables {
 		var exists int
@@ -39,6 +40,10 @@ func TestMigrateCreatesTables(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM policy_profiles
 		WHERE id IN ('builtin-tool-discuss-v1','builtin-tool-ask-v1','builtin-tool-auto-v1') AND status='active'`).Scan(&permissionProfiles))
 	assert.Equal(t, 3, permissionProfiles)
+	var hostedDelegationPolicy int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM policy_profiles
+		WHERE id='builtin-hosted-delegation-v1' AND kind='delegation' AND status='active'`).Scan(&hostedDelegationPolicy))
+	assert.Equal(t, 1, hostedDelegationPolicy, "builtin-hosted-delegation-v1 should be active after migration 0023")
 	var discussV2 int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM policy_profiles
 		WHERE id = 'builtin-tool-discuss-v2' AND status = 'active'`).Scan(&discussV2))
@@ -52,12 +57,12 @@ func TestMigrateCreatesTables(t *testing.T) {
 	for table, columns := range map[string][]string{
 		"artifacts":      {"source_tool_call_id", "source_kind", "source_workspace_path", "retention_class"},
 		"tool_calls":     {"raw_artifact_refs_json", "projected_artifact_refs_json"},
-		"sessions":       {"mode"},
+		"sessions":       {"mode", "delegation_policy_profile_id"},
 		"messages":       {"speaker_kind", "speaker_snapshot_json", "addressee_kind", "visibility", "originated_at"},
 		"turns":          {"input_message_id", "input_kind", "target_kind", "context_mode", "reply_to_json"},
 		"agent_runs":     {"speaker_snapshot_json", "context_snapshot_json", "commit_format_version", "system_prompt_snapshot_json"},
 		"model_profiles": {"thinking_dialect", "supported_thinking_efforts_json", "input_cost_usd_micros_per_million", "output_cost_usd_micros_per_million"},
-		"run_budgets":    {"consumed_output_tokens", "consumed_cost_usd_micros", "started_at"},
+		"run_budgets":    {"consumed_output_tokens", "consumed_cost_usd_micros", "started_at", "root_reconciled_at"},
 		"agent_profiles": {"object_kind", "handle", "scope", "project_id", "draft_json", "draft_revision", "current_version_id"},
 	} {
 		for _, column := range columns {
