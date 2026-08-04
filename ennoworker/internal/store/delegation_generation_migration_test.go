@@ -60,6 +60,9 @@ func seedMigration22DelegationDB(t *testing.T) *sql.DB {
 	}
 	exec(`INSERT INTO projects (id,name,created_at,updated_at) VALUES ('p1','p',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
 	exec(`INSERT INTO sessions (id,project_id,title,created_at,updated_at) VALUES ('s1','p1','s',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
+	exec(`INSERT INTO session_branches (id,session_id,label,created_at,updated_at)
+		VALUES ('b1','s1','main',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
+	exec(`UPDATE sessions SET active_branch_id='b1' WHERE id='s1'`)
 	exec(`INSERT INTO messages (id,session_id,role,status,created_at) VALUES ('m1','s1','user','complete',CURRENT_TIMESTAMP)`)
 	exec(`INSERT INTO turns (id,session_id,client_request_id,user_message_id,status,created_at,updated_at)
 		VALUES ('t1','s1','req','m1','pending',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)

@@ -61,7 +61,7 @@ func TestMigrateCreatesTables(t *testing.T) {
 		"sessions":                 {"mode", "delegation_policy_profile_id"},
 		"messages":                 {"speaker_kind", "speaker_snapshot_json", "addressee_kind", "visibility", "originated_at"},
 		"turns":                    {"input_message_id", "input_kind", "target_kind", "context_mode", "reply_to_json"},
-		"agent_runs":               {"speaker_snapshot_json", "context_snapshot_json", "commit_format_version", "system_prompt_snapshot_json"},
+		"agent_runs":               {"speaker_snapshot_json", "context_snapshot_json", "commit_format_version", "system_prompt_snapshot_json", "source_completion_id"},
 		"model_profiles":           {"thinking_dialect", "supported_thinking_efforts_json", "input_cost_usd_micros_per_million", "output_cost_usd_micros_per_million"},
 		"run_budgets":              {"consumed_output_tokens", "consumed_cost_usd_micros", "started_at", "root_reconciled_at"},
 		"agent_profiles":           {"object_kind", "handle", "scope", "project_id", "draft_json", "draft_revision", "current_version_id"},

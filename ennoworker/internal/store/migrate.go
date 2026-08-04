@@ -71,6 +71,11 @@ func Migrate(db *sql.DB) error {
 				return fmt.Errorf("migration 24 delegation generation backfill: %w", err)
 			}
 		}
+		if migration.Version == 25 {
+			if err := BackfillDelegationHandles(context.Background(), tx); err != nil {
+				return fmt.Errorf("migration 25 delegation handle backfill: %w", err)
+			}
+		}
 		if _, err := tx.Exec(
 			"INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
 			migration.Version, time.Now().UTC().Format(time.RFC3339),
@@ -355,4 +360,141 @@ func nullableBackfillString(value sql.NullString) any {
 		return value.String
 	}
 	return nil
+}
+
+// BackfillDelegationHandles creates one stable handle per delegation group and
+// one logical completion per terminal generation 0, both in blocking mode and
+// marked consumed by the original parent. Deterministic IDs make a retried
+// migration startup idempotent.
+func BackfillDelegationHandles(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `SELECT g.id,g.parent_run_id,g.status,g.created_at,
+		s.id,COALESCE(s.active_branch_id,'')
+		FROM delegation_groups g
+		JOIN agent_runs ar ON ar.id=g.parent_run_id
+		JOIN sessions s ON s.id=ar.session_id
+		ORDER BY g.created_at,g.id`)
+	if err != nil {
+		return err
+	}
+	type groupRow struct {
+		groupID, parentRunID, groupStatus, groupCreatedAt, sessionID, branchID string
+	}
+	groups := make([]groupRow, 0)
+	for rows.Next() {
+		var entry groupRow
+		if err := rows.Scan(&entry.groupID, &entry.parentRunID, &entry.groupStatus,
+			&entry.groupCreatedAt, &entry.sessionID, &entry.branchID); err != nil {
+			rows.Close()
+			return err
+		}
+		groups = append(groups, entry)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, group := range groups {
+		if group.branchID == "" {
+			continue // no stable branch: skip (defensive)
+		}
+		handleID := "backfill-handle-" + group.groupID
+		handleStatus := "active"
+		switch group.groupStatus {
+		case "settled":
+			handleStatus = "completed"
+		case "cancelled":
+			handleStatus = "cancelled"
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO delegation_handles
+			(id,group_id,session_id,source_parent_run_id,source_branch_id,execution_mode,auto_resume,status,created_at,updated_at)
+			VALUES(?,?,?,?,?, 'blocking',0,?,?,?)`,
+			handleID, group.groupID, group.sessionID, group.parentRunID, group.branchID,
+			handleStatus, group.groupCreatedAt, group.groupCreatedAt); err != nil {
+			return fmt.Errorf("backfill handle %s: %w", handleID, err)
+		}
+		if group.groupStatus != "settled" && group.groupStatus != "cancelled" {
+			continue
+		}
+		// Terminal generation 0 gets exactly one consumed-by-parent completion.
+		resultJSON, err := foldGenerationZeroResult(ctx, tx, group.groupID, group.groupStatus)
+		if err != nil {
+			return err
+		}
+		digest, err := digestJSON(json.RawMessage(resultJSON))
+		if err != nil {
+			return err
+		}
+		sequence, err := nextDeliverySequenceTx(ctx, tx, group.sessionID)
+		if err != nil {
+			return err
+		}
+		completionID := "backfill-completion-" + group.groupID + "-0"
+		kind := "completed"
+		if group.groupStatus == "cancelled" {
+			kind = "cancelled"
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO delegation_completions
+			(id,handle_id,session_id,generation,kind,result_json,result_digest,sequence,delivery_status,created_at)
+			VALUES(?,?,?,0,?,?,?,?, 'consumed_by_parent',?)`,
+			completionID, handleID, group.sessionID, kind, resultJSON, digest, sequence,
+			group.groupCreatedAt); err != nil {
+			return fmt.Errorf("backfill completion %s: %w", completionID, err)
+		}
+	}
+	return nil
+}
+
+// foldGenerationZeroResult aggregates generation-0 items into the completion
+// result payload, mirroring the folded tool result shape.
+func foldGenerationZeroResult(ctx context.Context, tx *sql.Tx, groupID, groupStatus string) (string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT name,COALESCE(result_json,''),status FROM delegation_items
+		WHERE group_id=? ORDER BY ordinal`, groupID)
+	if err != nil {
+		return "", err
+	}
+	type childResult struct {
+		Name   string          `json:"name"`
+		Status string          `json:"status"`
+		Result json.RawMessage `json:"result"`
+	}
+	children := make([]childResult, 0)
+	for rows.Next() {
+		var name, status string
+		var result sql.NullString
+		if err := rows.Scan(&name, &result, &status); err != nil {
+			rows.Close()
+			return "", err
+		}
+		res := json.RawMessage("null")
+		if result.Valid && result.String != "" {
+			res = json.RawMessage(result.String)
+		}
+		children = append(children, childResult{Name: name, Status: status, Result: res})
+	}
+	if err := rows.Close(); err != nil {
+		return "", err
+	}
+	payload := map[string]any{"status": groupStatus, "children": children}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
+// nextDeliverySequenceTx allocates the next session-wide delivery sequence.
+func nextDeliverySequenceTx(ctx context.Context, tx *sql.Tx, sessionID string) (int, error) {
+	var next int
+	if err := tx.QueryRowContext(ctx, `SELECT next_sequence FROM session_delivery_sequences
+		WHERE session_id=?`, sessionID).Scan(&next); err != nil {
+		if err != sql.ErrNoRows {
+			return 0, err
+		}
+		next = 1
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO session_delivery_sequences (session_id,next_sequence)
+		VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET next_sequence=next_sequence+1`,
+		sessionID, next+1); err != nil {
+		return 0, err
+	}
+	return next, nil
 }
