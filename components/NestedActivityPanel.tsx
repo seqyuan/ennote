@@ -3,6 +3,7 @@
 import { Check, RefreshCw, Users, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChildRunRow } from "@/components/ChildRunRow";
+import { DelegationFollowUpDialog } from "@/components/DelegationFollowUpDialog";
 import { DelegationGenerationHistory } from "@/components/DelegationGenerationHistory";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
@@ -22,6 +23,7 @@ export function NestedActivityPanel({ parentRunId, toolCallId }: { parentRunId: 
   const [retry, setRetry] = useState(0);
   const [open, setOpen] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  const [continuation, setContinuation] = useState<{ itemID: string; itemName: string; kind: "input" | "follow_up" } | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -146,17 +148,23 @@ export function NestedActivityPanel({ parentRunId, toolCallId }: { parentRunId: 
         busy={busy}
         onRetry={retryItem}
         onDecide={decideApproval}
+        onContinue={(itemID, itemName, kind) => setContinuation({ itemID, itemName, kind })}
       />)}
     </div>
+    {continuation && <DelegationFollowUpDialog
+      itemID={continuation.itemID} itemName={continuation.itemName} kind={continuation.kind}
+      expectedGeneration={inspections[groups[0]?.id ?? ""]?.currentGeneration ?? 0}
+      onDone={() => { setContinuation(null); setRetry(value => value + 1); }} />}
   </details>;
 }
 
-function GroupBlock({ group, inspection, busy, onRetry, onDecide }: {
+function GroupBlock({ group, inspection, busy, onRetry, onDecide, onContinue }: {
   group: ActivityGroup;
   inspection?: DelegationInspection;
   busy: string | null;
   onRetry: (group: ActivityGroup, itemId: string) => void;
   onDecide: (groupID: string, decision: "approved" | "rejected") => void;
+  onContinue: (itemID: string, itemName: string, kind: "input" | "follow_up") => void;
 }) {
   const reusedChildRunIds = useMemo(() => {
     const ids = new Set<string>();
@@ -175,6 +183,7 @@ function GroupBlock({ group, inspection, busy, onRetry, onDecide }: {
         key={child.itemId}
         reused={reusedChildRunIds.has(child.childRunId ?? "")}
         onRetry={itemId => onRetry(group, itemId)}
+        onContinue={(itemId, kind) => onContinue(itemId, child.name, kind)}
       />)}
     </div>
     {pendingApproval && <div className="delegation-approval-banner" role="status">

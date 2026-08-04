@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, CircleAlert, CircleCheck, Clock3, PauseCircle, RotateCcw, XCircle } from "lucide-react";
+import { Bot, CircleAlert, CircleCheck, Clock3, MessageSquareMore, PauseCircle, RotateCcw, XCircle } from "lucide-react";
 import type { components } from "@/lib/worker-api.gen";
 import { boundedToolOutput } from "@/lib/tool-presentation";
 
@@ -8,18 +8,20 @@ type ChildActivity = components["schemas"]["DelegationChildActivity"];
 
 type ChildState = "queued" | "running" | "approval" | "completed" | "failed" | "interrupted" | "cancelled";
 
-// ChildRunRow renders one delegated child. When onRetry is provided and the
-// child is retry-eligible, an icon Retry command is exposed with a tooltip.
-// reused marks a sibling reused by a later generation without re-execution.
-export function ChildRunRow({ child, reused = false, onRetry }: {
+// ChildRunRow renders one delegated child. Retry-eligible rows expose an icon
+// Retry command; needs_input rows expose Reply; completed/blocked rows expose
+// a private Follow up command. reused marks a sibling reused without rerun.
+export function ChildRunRow({ child, reused = false, onRetry, onContinue }: {
   child: ChildActivity;
   reused?: boolean;
   onRetry?: (itemId: string) => void;
+  onContinue?: (itemId: string, kind: "input" | "follow_up") => void;
 }) {
   const state = childState(child);
   const result = child.result?.summary || child.errorMessage || "";
   const retryable = onRetry !== undefined &&
     (state === "failed" || state === "interrupted" || state === "cancelled");
+  const continuationKind = onContinue !== undefined ? continuationState(child) : null;
   return <div className="child-run-row" data-child-run-id={child.childRunId} data-state={state} role="listitem">
     <span className="child-run-icon"><Bot size={14} aria-hidden="true" /></span>
     <span className="child-run-identity">
@@ -32,6 +34,12 @@ export function ChildRunRow({ child, reused = false, onRetry }: {
         aria-label={`Retry ${child.name}`} title="Retry this delegated task"
         onClick={() => onRetry(child.itemId)}>
         <RotateCcw size={13} aria-hidden="true" />
+      </button>}
+      {continuationKind && onContinue && <button type="button" className="child-run-retry"
+        aria-label={`${continuationKind === "input" ? "Reply" : "Follow up"} ${child.name}`}
+        title={continuationKind === "input" ? "Reply to this delegated task" : "Follow up privately"}
+        onClick={() => onContinue(child.itemId, continuationKind)}>
+        <MessageSquareMore size={13} aria-hidden="true" />
       </button>}
       <span className="child-run-status">{stateIcon(state)}{stateLabel(state)}</span>
     </span>
@@ -56,6 +64,14 @@ function childState(child: ChildActivity): ChildState {
   if (child.itemStatus === "failed" || child.itemStatus === "not_authorized") return "failed";
   if (child.itemStatus === "cancelled") return "cancelled";
   return "queued";
+}
+
+function continuationState(child: ChildActivity): "input" | "follow_up" | null {
+  const result = child.result;
+  if (result?.status === "needs_input") return "input";
+  if (result?.status === "blocked") return "follow_up";
+  if (child.itemStatus === "succeeded") return "follow_up";
+  return null;
 }
 
 function stateIcon(state: ChildState) {

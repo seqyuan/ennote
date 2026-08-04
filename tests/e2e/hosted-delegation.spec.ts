@@ -278,3 +278,65 @@ test("shows background delegation completion without blocking the composer", asy
   await expect(page.getByPlaceholder(/message/i).or(page.locator("[contenteditable=true]")).first()).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });
+
+
+test("replies to a needs_input delegated task via the private dialog", async ({ page }) => {
+  const groupID = "group-ni";
+  const inspection = { group: { id: groupID, parentRunId: parentRun.id, parentToolCallId: "delegate-call",
+    strategy: "single", status: "settled", createdAt: "2026-08-04T00:00:02Z" },
+    currentGeneration: 0,
+    items: [{ itemId: "item-ni", name: "inspect", status: "succeeded", attempts: [
+      { attemptId: "att-ni", generation: 0, childRunId: "child-ni", status: "needs_input",
+        usage: { modelCalls: 2, toolCalls: 3, tokens: 1000, outputTokens: 500, costMicros: 50 },
+        result: { status: "needs_input", summary: "Which files should I inspect?" } }] }],
+    generations: [{ id: "gen-0", groupId: groupID, generation: 0, kind: "initial", status: "settled",
+      retrySelection: [], reusedAttempts: [], authorizationSnapshot: {}, budgetSnapshot: {},
+      clientRequestId: "gen-0", createdAt: "2026-08-04T00:00:02Z" }],
+    validActions: ["retry"] };
+  const messages = [
+    message("m1", undefined, "user", [{ type: "text", text: "Delegate an inspection." }]),
+    message("m2", "m1", "assistant", [{ type: "tool_call", toolCall: { id: "delegate-call", name: "delegate_roles",
+      arguments: { delegations: [{ name: "inspect", roleHandle: "workspace-explorer", assignment: "Inspect",
+        budget: { maxModelCalls: 4, maxToolCalls: 8 } }] } } }], parentRun.id),
+    message("m3", "m2", "tool", [{ type: "tool_result", toolResult: { toolCallId: "delegate-call", toolName: "delegate_roles",
+      content: "{\"status\":\"settled\"}", isError: false } }], parentRun.id),
+    message("m4", "m3", "assistant", [{ type: "text", text: "Delegation settled." }], parentRun.id),
+  ];
+  let continuationSubmitted = false;
+  await page.route("**/api/worker/v1/**", async route => {
+    const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    const common = commonRoute(path, route);
+    if (common) return common;
+    if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, null);
+    if (path === `/v1/sessions/${session.id}/messages`) return fulfill(route, { messages, hasMore: false, activeLeafMessageId: "m4" });
+    if (path === `/v1/runs/${parentRun.id}/children`) {
+      return fulfill(route, { parentRunId: parentRun.id, groups: [{ id: groupID, parentToolCallId: "delegate-call",
+        strategy: "single", status: "settled", createdAt: "2026-08-04T00:00:02Z",
+        children: [{ itemId: "item-ni", childRunId: "child-ni", name: "inspect", roleHandle: "workspace-explorer",
+          roleDisplayName: "Workspace Explorer", itemStatus: "succeeded", runStatus: "succeeded", createdAt: "2026-08-04T00:00:02Z",
+          result: { status: "needs_input", summary: "Which files should I inspect?" } }] }] });
+    }
+    if (path === `/v1/delegations/${groupID}`) return fulfill(route, inspection);
+    if (path === `/v1/delegation-items/item-ni/input`) {
+      const body = route.request().postDataJSON();
+      expect(body).toMatchObject({ expectedGeneration: 0 });
+      expect(body.text).toContain("src/");
+      continuationSubmitted = true;
+      return fulfill(route, { generation: { id: "gen-1", groupId: groupID, generation: 1, kind: "input",
+        status: "running", retrySelection: ["item-ni"], reusedAttempts: [],
+        authorizationSnapshot: {}, budgetSnapshot: {}, clientRequestId: "c", createdAt: "2026-08-04T00:00:03Z" },
+        childRunId: "child-ni-2" });
+    }
+    return route.abort();
+  });
+
+  await selectSession(page);
+  await expect(page.locator('[data-child-run-id="child-ni"] .child-run-retry')).toBeVisible();
+  await page.locator('[data-child-run-id="child-ni"] .child-run-retry').click();
+  await expect(page.getByRole("dialog", { name: /Reply/ })).toBeVisible();
+  await page.locator(".follow-up-input").fill("Inspect src/ only.");
+  await page.locator(".follow-up-submit").click();
+  expect(continuationSubmitted).toBe(true);
+  await expect(page.getByRole("dialog", { name: /Reply/ })).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+});
