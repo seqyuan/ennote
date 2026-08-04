@@ -587,14 +587,34 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 	}
 
 	systemPrompt := agent.RoleSystemPrompt(*resolved.Effective.Role, resolved.SystemPrompt.AgentPrompt)
-	// task_only context: the frozen assignment is the only history.
-	chatHistory := []domain.ChatMessage{{
-		Role: domain.RoleUser,
-		Content: []domain.ContentBlock{{
-			Kind: domain.ContentText,
-			Text: "Task assignment: " + string(assignment),
-		}},
-	}}
+	// task_only context: the frozen assignment is the only history, except for
+	// continuation children, which replay the exact source attempt's private
+	// transcript plus one explicit user instruction.
+	delegationRepo := &store.DelegationRepo{DB: e.db}
+	seed, seedErr := delegationRepo.ContinuationSeedForChild(ctx, run.ID)
+	if seedErr != nil {
+		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorTranscriptCorrupt,
+			fmt.Errorf("load continuation seed: %w", seedErr))
+	}
+	var chatHistory []domain.ChatMessage
+	if seed != nil {
+		chatHistory = append(chatHistory, seed.Transcript...)
+		chatHistory = append(chatHistory, domain.ChatMessage{
+			Role: domain.RoleUser,
+			Content: []domain.ContentBlock{{
+				Kind: domain.ContentText,
+				Text: "Continue the previous work. Additional instruction: " + seed.Instruction,
+			}},
+		})
+	} else {
+		chatHistory = []domain.ChatMessage{{
+			Role: domain.RoleUser,
+			Content: []domain.ContentBlock{{
+				Kind: domain.ContentText,
+				Text: "Task assignment: " + string(assignment),
+			}},
+		}}
+	}
 
 	loop := &agent.Loop{
 		Provider: provider, ModelRouter: router, TurnPlanner: agent.ContextTurnPlanner{},

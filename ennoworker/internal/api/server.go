@@ -123,6 +123,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/attention", s.listAttention)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/attention", s.listSessionAttention)
 	mux.HandleFunc("POST /v1/attention/{attentionID}/dismiss", s.dismissAttention)
+	mux.HandleFunc("POST /v1/delegation-items/{itemID}/{command}", s.continueDelegationItem)
 	mux.HandleFunc("POST /v1/delegation-approvals/{approvalID}/decision", s.decideDelegationApproval)
 	mux.HandleFunc("POST /v1/runs/{runID}/retry", s.retryRun)
 	mux.HandleFunc("POST /v1/runs/{runID}/cancel", s.cancelRun)

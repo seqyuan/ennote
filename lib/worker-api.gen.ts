@@ -1754,6 +1754,13 @@ export interface components {
             };
             clientRequestId: string;
         };
+        DelegationInputCommand: {
+            sourceAttemptId?: string;
+            expectedGeneration: number;
+            text: string;
+            budget?: components["schemas"]["DelegationBudgetCeiling"];
+            clientRequestId: string;
+        };
         DelegationApprovalRequest: {
             id: string;
             groupId: string;

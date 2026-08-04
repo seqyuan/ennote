@@ -1437,8 +1437,17 @@ func (r *RunRepo) FinalizeChildSuccess(ctx context.Context, runID string, output
 			return err
 		}
 	}
-	// Terminalize the attempt state machine (idempotent) before settling.
-	if err := settleAttemptTx(ctx, tx, runID, domain.DelegationAttemptSucceeded,
+	// Terminalize the attempt state machine (idempotent) before settling. The
+	// attempt status mirrors the submit_result contract so needs_input and
+	// blocked attempts are addressable by the continuation commands.
+	attemptStatus := domain.DelegationAttemptSucceeded
+	switch output.Terminal.Status {
+	case domain.SubmitBlocked:
+		attemptStatus = domain.DelegationAttemptBlocked
+	case domain.SubmitNeedsInput:
+		attemptStatus = domain.DelegationAttemptNeedsInput
+	}
+	if err := settleAttemptTx(ctx, tx, runID, attemptStatus,
 		resultJSON, string(output.Terminal.Status), "", ""); err != nil {
 		return err
 	}

@@ -2665,6 +2665,16 @@ components:
           type: object
           additionalProperties: { $ref: "#/components/schemas/DelegationBudgetCeiling" }
         clientRequestId: { type: string }
+    DelegationInputCommand:
+      type: object
+      additionalProperties: false
+      required: [expectedGeneration, text, clientRequestId]
+      properties:
+        sourceAttemptId: { type: string }
+        expectedGeneration: { type: integer, minimum: 0 }
+        text: { type: string, minLength: 1, maxLength: 16384 }
+        budget: { $ref: "#/components/schemas/DelegationBudgetCeiling" }
+        clientRequestId: { type: string }
     DelegationApprovalRequest:
       type: object
       additionalProperties: false
@@ -2995,6 +3005,42 @@ components:
         globalRecoveryMode: { type: boolean }
         diagnostics: { type: array, items: { $ref: '#/components/schemas/PromptTemplateDiagnostic' } }
 
+  /v1/delegation-items/{itemID}/{command}:
+    parameters:
+      - name: itemID
+        in: path
+        required: true
+        schema: { type: string }
+      - name: command
+        in: path
+        required: true
+        schema: { type: string, enum: [input, follow-up] }
+    post:
+      operationId: continueDelegationItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DelegationInputCommand" }
+      responses:
+        "200":
+          description: New continuation generation and child Run
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    additionalProperties: false
+                    required: [generation]
+                    properties:
+                      generation: { $ref: "#/components/schemas/DelegationGeneration" }
+                      childRunId: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
   /v1/attention:
     get:
       operationId: listAttention

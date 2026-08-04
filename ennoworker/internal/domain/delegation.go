@@ -360,6 +360,17 @@ type DelegationCompletion struct {
 	CreatedAt      time.Time `json:"createdAt"`
 }
 
+// DelegationInputCommand is the explicit continuation request for one item.
+// ExpectedGeneration must match the current group generation; the source
+// attempt must be the current selected attempt of the item.
+type DelegationInputCommand struct {
+	SourceAttemptID    string             `json:"sourceAttemptId"`
+	ExpectedGeneration int                `json:"expectedGeneration"`
+	Text               string             `json:"text"`
+	Budget             *BudgetCeilingJSON `json:"budget,omitempty"`
+	ClientRequestID    string             `json:"clientRequestId"`
+}
+
 // DelegationApprovalRequest is a durable, parent-independent authorization for
 // a delegation retry budget increase. It is separate from tool-approval
 // checkpoints because the original parent may already be terminal.
