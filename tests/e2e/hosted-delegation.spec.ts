@@ -242,3 +242,39 @@ test("retries an eligible child and renders generation history", async ({ page }
   await expect(page.getByText("settled", { exact: true }).first()).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });
+
+test("shows background delegation completion without blocking the composer", async ({ page }) => {
+  const handle = { id: "handle-bg", groupId: "group-bg", sessionId: session.id, sourceParentRunId: parentRun.id,
+    sourceBranchId: "branch", executionMode: "background", autoResume: false, status: "completed",
+    createdAt: "2026-08-04T00:00:03Z", updatedAt: "2026-08-04T00:00:04Z" };
+  const completion = { id: "completion-bg", handleId: "handle-bg", sessionId: session.id, generation: 0,
+    kind: "completed", result: { status: "settled", children: [{ name: "inspect", status: "succeeded" }] },
+    resultDigest: "sha256:aa", sequence: 1, deliveryStatus: "consumed_by_parent",
+    createdAt: "2026-08-04T00:00:04Z" };
+  const messages = [
+    message("m1", undefined, "user", [{ type: "text", text: "Start a background inspection." }]),
+    message("m2", "m1", "assistant", [{ type: "text", text: "Delegation accepted in the background." }]),
+  ];
+  await page.route("**/api/worker/v1/**", async route => {
+    const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    const common = commonRoute(path, route);
+    if (common) return common;
+    if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, null);
+    if (path === `/v1/sessions/${session.id}/messages`) return fulfill(route, { messages, hasMore: false, activeLeafMessageId: "m2" });
+    if (path === `/v1/sessions/${session.id}/delegation-handles`) {
+      return fulfill(route, { items: [handle], nextCursor: "" });
+    }
+    if (path === `/v1/delegation-handles/${handle.id}`) {
+      return fulfill(route, { handle, completion });
+    }
+    return route.abort();
+  });
+
+  await selectSession(page);
+  await expect(page.locator(".background-delegation-strip")).toBeVisible();
+  await expect(page.getByText("Background delegation", { exact: false }).first()).toBeVisible();
+  await expect(page.getByText("consumed by parent", { exact: false })).toBeVisible();
+  // The composer remains usable.
+  await expect(page.getByPlaceholder(/message/i).or(page.locator("[contenteditable=true]")).first()).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+});

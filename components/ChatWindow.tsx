@@ -3,6 +3,7 @@
 import { X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Composer, type TextAttachment } from "@/components/Composer";
+import { BackgroundDelegationStrip } from "@/components/BackgroundDelegationStrip";
 import { ConversationTimeline } from "@/components/ConversationTimeline";
 import { StreamingStatusBar } from "@/components/StreamingStatusBar";
 import type { ModelProfile, RoleSummary } from "@/components/settings/types";
@@ -163,6 +164,7 @@ export function ChatWindow({
       <span>{pendingImage.name} · {pendingImage.width}×{pendingImage.height}</span>
       <button onClick={clearPendingImage} aria-label="Remove image"><X size={14} aria-hidden="true" /></button>
     </div>}
+    <BackgroundDelegationStrip sessionId={selectedSession ?? undefined} />
     <Composer selectedSession={selectedSession} activeLeafMessageId={activeLeafMessageId} input={input} setInput={setInput}
       activeRun={Boolean(activeRun)} compacting={compacting} hasPendingImage={Boolean(pendingImage)} reconnecting={reconnecting}
       permissionMode={permissionMode} permissionReady={permissionReady} setPermissionMode={setPermissionMode}
