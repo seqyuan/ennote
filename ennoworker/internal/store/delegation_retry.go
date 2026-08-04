@@ -86,7 +86,15 @@ func (r *DelegationRepo) RetryGeneration(ctx context.Context, groupID string,
 		return nil, nil, nil, domain.NewCodedError(domain.ErrorDelegationGenerationConflict,
 			fmt.Errorf("expected generation %d, current is %d", input.ExpectedGeneration, currentGeneration))
 	}
-	nextGeneration := currentGeneration + 1
+	// Generation numbers are append-only and never recycled: a rejected
+	// authorization keeps its failed generation row for audit, so the next
+	// usable number is one past the highest ever created.
+	var maxGeneration int
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(generation),0) FROM delegation_group_generations
+		WHERE group_id=?`, groupID).Scan(&maxGeneration); err != nil {
+		return nil, nil, nil, err
+	}
+	nextGeneration := maxGeneration + 1
 
 	// The current generation must be terminal before retry is possible.
 	var currentStatus domain.DelegationGenerationStatus
@@ -233,7 +241,7 @@ func (r *DelegationRepo) RetryGeneration(ctx context.Context, groupID string,
 		return nil, nil, nil, err
 	}
 
-	generationStatus := domain.DelegationGenerationQueued
+	generationStatus := domain.DelegationGenerationRunning
 	if approvalRequired {
 		generationStatus = domain.DelegationGenerationAwaitingAuthorization
 	}
@@ -249,7 +257,11 @@ func (r *DelegationRepo) RetryGeneration(ctx context.Context, groupID string,
 		authDigest, string(budgetJSON), budgetDigest, input.ClientRequestID, now.Format(time.RFC3339Nano)); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			// Either the same client request id (idempotent replay) or a
-			// concurrent retry raced us on the generation slot.
+			// concurrent retry raced us on the generation slot. Release the
+			// single connection before loading outside the transaction.
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				return nil, nil, nil, rollbackErr
+			}
 			existing, children, approval, loadErr := r.loadRetryResult(ctx, groupID, input.ClientRequestID)
 			if loadErr != nil {
 				return nil, nil, nil, loadErr

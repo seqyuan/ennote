@@ -1211,6 +1211,11 @@ func run() error {
 	if _, err := (&store.DelegationRepo{DB: db}).ReapOrphans(context.Background()); err != nil {
 		return fmt.Errorf("reap orphaned children: %w", err)
 	}
+	// Settle any generation whose attempts are all terminal and re-reconcile
+	// terminal child budgets (idempotent).
+	if _, err := (&store.DelegationRepo{DB: db}).RecoverDelegation(context.Background()); err != nil {
+		return fmt.Errorf("recover delegation state: %w", err)
+	}
 
 	eventWriter := events.NewWriter(&store.EventRepo{DB: db}, hub)
 	artifactService := &artifacts.Service{DB: db, Root: filepath.Join(cfg.HomeDir, "artifacts")}

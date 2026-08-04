@@ -1241,10 +1241,11 @@ func (r *DelegationRepo) RecordBudgetUsage(ctx context.Context, runID string, mo
 func settleAttemptTx(ctx context.Context, tx *sql.Tx, childRunID string, status domain.DelegationAttemptStatus,
 	resultJSON json.RawMessage, terminalKind, errorCode, errorMessage string) error {
 	var attemptID, groupID string
-	if err := tx.QueryRowContext(ctx, `SELECT a.id,g.id FROM delegation_item_attempts a
+	var generation int
+	if err := tx.QueryRowContext(ctx, `SELECT a.id,g.id,a.generation FROM delegation_item_attempts a
 		JOIN delegation_items i ON i.id=a.item_id
 		JOIN delegation_groups g ON g.id=i.group_id
-		WHERE a.child_run_id=?`, childRunID).Scan(&attemptID, &groupID); err != nil {
+		WHERE a.child_run_id=?`, childRunID).Scan(&attemptID, &groupID, &generation); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrDelegationAttemptNotFound
 		}
@@ -1271,13 +1272,14 @@ func settleAttemptTx(ctx context.Context, tx *sql.Tx, childRunID string, status 
 		string(usageJSON), now, now, errorCode, errorMessage, attemptID); err != nil {
 		return err
 	}
-	// Settle the generation when every item in the group is terminal.
+	// Settle the generation when every attempt of THIS generation is terminal.
+	// Item substrate columns are frozen at generation 0 and must never gate
+	// later generations.
 	if _, err := tx.ExecContext(ctx, `UPDATE delegation_group_generations SET status='settled',completed_at=?
-		WHERE group_id=? AND generation=(SELECT current_generation FROM delegation_groups WHERE id=?)
-		  AND status IN ('queued','running')
-		  AND NOT EXISTS (SELECT 1 FROM delegation_items i WHERE i.group_id=?
-			AND i.status IN ('pending','running'))`,
-		now, groupID, groupID, groupID); err != nil {
+		WHERE group_id=? AND generation=? AND status IN ('queued','running')
+		  AND NOT EXISTS (SELECT 1 FROM delegation_item_attempts a JOIN delegation_items i ON i.id=a.item_id
+			WHERE i.group_id=? AND a.generation=? AND a.status IN ('queued','running'))`,
+		now, groupID, generation, groupID, generation); err != nil {
 		return err
 	}
 	return nil
@@ -1343,16 +1345,25 @@ func (r *RunRepo) FinalizeChildSuccess(ctx context.Context, runID string, output
 	if err != nil {
 		return err
 	}
-	var groupID string
-	if err := tx.QueryRowContext(ctx, `SELECT group_id FROM delegation_items WHERE child_run_id=?`, runID).Scan(&groupID); err != nil {
+	// Locate the attempt and its generation. Retry children live only in the
+	// attempt table; generation-0 children also own the substrate columns.
+	var itemID, groupID string
+	var generation int
+	if err := tx.QueryRowContext(ctx, `SELECT i.id,i.group_id,a.generation FROM delegation_item_attempts a
+		JOIN delegation_items i ON i.id=a.item_id
+		WHERE a.child_run_id=?`, runID).Scan(&itemID, &groupID, &generation); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("child Run has no delegation item")
+			return fmt.Errorf("child Run has no delegation attempt")
 		}
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE delegation_items SET status='succeeded', result_json=?
-		WHERE child_run_id=? AND status IN ('pending','running')`, string(resultJSON), runID); err != nil {
-		return err
+	if generation == 0 {
+		// Generation 0 owns the folded item columns; later generations never
+		// rewrite the frozen substrate.
+		if _, err := tx.ExecContext(ctx, `UPDATE delegation_items SET status='succeeded', result_json=?
+			WHERE id=? AND status IN ('pending','running')`, string(resultJSON), itemID); err != nil {
+			return err
+		}
 	}
 	// Terminalize the attempt state machine (idempotent) before settling.
 	if err := settleAttemptTx(ctx, tx, runID, domain.DelegationAttemptSucceeded,
@@ -1369,7 +1380,7 @@ func (r *RunRepo) FinalizeChildSuccess(ctx context.Context, runID string, output
 		groupID).Scan(&remaining); err != nil {
 		return err
 	}
-	if remaining == 0 {
+	if generation == 0 && remaining == 0 {
 		if _, err := tx.ExecContext(ctx, `UPDATE delegation_groups SET status='settled' WHERE id=?`, groupID); err != nil {
 			return err
 		}
@@ -1469,14 +1480,25 @@ func (r *RunRepo) FinalizeChildFailure(ctx context.Context, runID, code, message
 	if err != nil {
 		return "", false, err
 	}
-	var groupID string
-	itemUpdate, err := tx.ExecContext(ctx, `UPDATE delegation_items SET status='failed',result_json=?
-		WHERE child_run_id=? AND status IN ('pending','running')`, string(resultJSON), runID)
-	if err != nil {
+	var itemID, groupID string
+	var generation int
+	if err := tx.QueryRowContext(ctx, `SELECT i.id,i.group_id,a.generation FROM delegation_item_attempts a
+		JOIN delegation_items i ON i.id=a.item_id
+		WHERE a.child_run_id=?`, runID).Scan(&itemID, &groupID, &generation); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false, fmt.Errorf("child Run has no delegation attempt")
+		}
 		return "", false, err
 	}
-	if changed, _ := itemUpdate.RowsAffected(); changed != 1 {
-		return "", false, fmt.Errorf("%w: child delegation item is already terminal", ErrDelegationConflict)
+	if generation == 0 {
+		itemUpdate, updateErr := tx.ExecContext(ctx, `UPDATE delegation_items SET status='failed',result_json=?
+			WHERE id=? AND status IN ('pending','running')`, string(resultJSON), itemID)
+		if updateErr != nil {
+			return "", false, updateErr
+		}
+		if changed, _ := itemUpdate.RowsAffected(); changed != 1 {
+			return "", false, fmt.Errorf("%w: child delegation item is already terminal", ErrDelegationConflict)
+		}
 	}
 	// Terminalize the attempt state machine (idempotent) before settling.
 	if err := settleAttemptTx(ctx, tx, runID, domain.DelegationAttemptFailed,
@@ -1497,7 +1519,7 @@ func (r *RunRepo) FinalizeChildFailure(ctx context.Context, runID, code, message
 		return "", false, err
 	}
 	wakeParent := false
-	if remaining == 0 {
+	if generation == 0 && remaining == 0 {
 		if _, err := tx.ExecContext(ctx, `UPDATE delegation_groups SET status='settled' WHERE id=? AND status='waiting_children'`, groupID); err != nil {
 			return "", false, err
 		}
@@ -1705,20 +1727,22 @@ func (r *DelegationRepo) ReapOrphans(ctx context.Context) ([]string, error) {
 			SELECT id FROM agent_runs WHERE status IN ('succeeded','failed','cancelled','interrupted'))`); err != nil {
 		return nil, err
 	}
-	// Settle generations whose groups are fully terminal, regardless of whether
-	// the group status update below has run yet.
+	// Settle generations whose generation-scoped attempts are all terminal,
+	// regardless of whether the group status update below has run yet. Item
+	// substrate columns are frozen at generation 0 and never gate later rounds.
 	if _, err := tx.ExecContext(ctx, `UPDATE delegation_group_generations SET status='settled',completed_at=?
 		WHERE status IN ('queued','running')
-		  AND group_id IN (SELECT g.id FROM delegation_groups g
-			WHERE NOT EXISTS (SELECT 1 FROM delegation_items i WHERE i.group_id=g.id
-				AND i.status IN ('pending','running')))`,
+		  AND NOT EXISTS (SELECT 1 FROM delegation_item_attempts a JOIN delegation_items i ON i.id=a.item_id
+			WHERE i.group_id=delegation_group_generations.group_id
+			  AND a.generation=delegation_group_generations.generation
+			  AND a.status IN ('queued','running'))`,
 		now); err != nil {
 		return nil, err
 	}
 	// Reconcile every terminal child reservation, including children that were
 	// never selected by the orphan scan above. Idempotent via root_reconciled_at.
-	terminalRows, err := tx.QueryContext(ctx, `SELECT child_run_id FROM delegation_items
-		WHERE child_run_id IS NOT NULL AND child_run_id IN (
+	terminalRows, err := tx.QueryContext(ctx, `SELECT child_run_id FROM delegation_item_attempts
+		WHERE child_run_id IN (
 			SELECT id FROM agent_runs WHERE status IN ('succeeded','failed','cancelled','interrupted'))`)
 	if err != nil {
 		return nil, err
@@ -1752,6 +1776,65 @@ func (r *DelegationRepo) ReapOrphans(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	return ids, nil
+}
+
+// RecoverDelegation settles every generation whose attempts are all terminal
+// and re-reconciles terminal child budgets. It runs after RecoverActive and
+// ReapOrphans in the startup sequence and is fully idempotent.
+func (r *DelegationRepo) RecoverDelegation(ctx context.Context) ([]string, error) {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := tx.ExecContext(ctx, `UPDATE delegation_group_generations SET status='settled',completed_at=?
+		WHERE status IN ('queued','running')
+		  AND NOT EXISTS (SELECT 1 FROM delegation_item_attempts a JOIN delegation_items i ON i.id=a.item_id
+			WHERE i.group_id=delegation_group_generations.group_id
+			  AND a.generation=delegation_group_generations.generation
+			  AND a.status IN ('queued','running'))`,
+		now); err != nil {
+		return nil, err
+	}
+	// Approved authorizations whose generation never materialized (a crash
+	// between the generation insert and child creation) fail the generation
+	// closed so the operator can retry from the previous selection.
+	if _, err := tx.ExecContext(ctx, `UPDATE delegation_group_generations SET status='failed',completed_at=?
+		WHERE status='awaiting_authorization' AND group_id IN (
+			SELECT ar.group_id FROM delegation_approval_requests ar
+			WHERE ar.status='rejected' AND ar.generation=delegation_group_generations.generation)`,
+		now); err != nil {
+		return nil, err
+	}
+	// Reconcile every terminal child reservation exactly once.
+	terminalRows, err := tx.QueryContext(ctx, `SELECT child_run_id FROM delegation_item_attempts
+		WHERE child_run_id IN (
+			SELECT id FROM agent_runs WHERE status IN ('succeeded','failed','cancelled','interrupted'))`)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0)
+	for terminalRows.Next() {
+		var id string
+		if err := terminalRows.Scan(&id); err != nil {
+			terminalRows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := terminalRows.Close(); err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		if err := reconcileRootBudgetTx(ctx, tx, id); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return nil, nil
 }
 
 // injectFoldedResultsTx updates the parent's delegate_roles tool_calls row with

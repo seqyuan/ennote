@@ -73,7 +73,7 @@ func TestRetryReusesSuccessAndRerunsOnlyFailedItem(t *testing.T) {
 	require.NotNil(t, generation)
 	assert.Equal(t, 1, generation.Generation)
 	assert.Equal(t, domain.DelegationGenerationRetry, generation.Kind)
-	assert.Equal(t, domain.DelegationGenerationQueued, generation.Status)
+	assert.Equal(t, domain.DelegationGenerationRunning, generation.Status)
 	require.Len(t, children, 1, "only the failed item gets a new child Run")
 
 	// The successful sibling is reused with the exact frozen attempt reference.
