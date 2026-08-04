@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,20 +21,37 @@ func (m *Manager) Command(shell, command string) (*exec.Cmd, error) {
 }
 
 func (m *Manager) CommandArgs(executable string, commandArgs ...string) (*exec.Cmd, error) {
+	return m.commandArgs(context.Background(), executable, false, commandArgs...)
+}
+
+// CommandArgsReadOnly executes argv with a read-only workspace mount when the
+// sandbox is enabled. SandboxNone still relies on the caller's command-level
+// validation, but retains direct argv execution with no shell interpolation.
+func (m *Manager) CommandArgsReadOnly(executable string, commandArgs ...string) (*exec.Cmd, error) {
+	return m.commandArgs(context.Background(), executable, true, commandArgs...)
+}
+
+func (m *Manager) CommandArgsReadOnlyContext(ctx context.Context, executable string, commandArgs ...string) (*exec.Cmd, error) {
+	return m.commandArgs(ctx, executable, true, commandArgs...)
+}
+
+func (m *Manager) commandArgs(ctx context.Context, executable string, readOnly bool, commandArgs ...string) (*exec.Cmd, error) {
 	if executable == "" {
 		return nil, fmt.Errorf("executable is required")
 	}
 	if m.Mode == SandboxNone {
-		cmd := exec.Command(executable, commandArgs...)
+		cmd := exec.CommandContext(ctx, executable, commandArgs...)
 		cmd.Dir = m.Jail.Root()
 		return cmd, nil
 	}
-	// Join args for shell -lc
-	quoted := executable
-	for _, a := range commandArgs {
-		quoted += " " + a
+	bwrap, err := exec.LookPath("bwrap")
+	if err != nil {
+		return nil, fmt.Errorf("bubblewrap is required for sandbox mode bwrap: %w", err)
 	}
-	return m.bwrapCommand("/bin/sh", quoted, false)
+	args := buildBwrapArgsMode(m, readOnly)
+	args = append(args, executable)
+	args = append(args, commandArgs...)
+	return exec.CommandContext(ctx, bwrap, args...), nil
 }
 
 func (m *Manager) bwrapCommand(shell, command string, withShell bool) (*exec.Cmd, error) {
@@ -52,6 +70,10 @@ func (m *Manager) bwrapCommand(shell, command string, withShell bool) (*exec.Cmd
 
 // buildBwrapArgs builds the shared bwrap argument list for both Command and CommandArgs.
 func buildBwrapArgs(m *Manager) []string {
+	return buildBwrapArgsMode(m, false)
+}
+
+func buildBwrapArgsMode(m *Manager, readOnlyWorkspace bool) []string {
 	args := []string{
 		"--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--unshare-uts",
 		"--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
@@ -62,8 +84,13 @@ func buildBwrapArgs(m *Manager) []string {
 		}
 	}
 
-	// Bind workspace
-	args = append(args, "--bind", m.Jail.Root(), "/workspace")
+	// Bind workspace. Inspection-only tools use a separate read-only command
+	// path even when the same Manager also serves mutation-capable tools.
+	workspaceBind := "--bind"
+	if readOnlyWorkspace {
+		workspaceBind = "--ro-bind"
+	}
+	args = append(args, workspaceBind, m.Jail.Root(), "/workspace")
 
 	// Bind skills read-only
 	if m.SkillsDir != "" {

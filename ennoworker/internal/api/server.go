@@ -22,6 +22,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/artifacts"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
+	"github.com/seqyuan/ennote/ennoworker/internal/prompts"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 )
 
@@ -31,27 +32,31 @@ type RunController interface {
 }
 
 type Server struct {
-	DB          *sql.DB
-	Token       string
-	Sandbox     string
-	Projects    *store.ProjectRepo
-	Providers   *store.ProviderRepo
-	Models      *store.ModelRepo
-	Doctor      ProviderDiagnoser
-	Policies    *store.PolicyRepo
-	Artifacts   *artifacts.Service
-	Sessions    *store.SessionRepo
-	Branches    *store.BranchRepo
-	Messages    *store.MessageRepo
-	Compactions *store.CompactionRepo
-	Approvals   *store.ApprovalRepo
-	Runs        *store.RunRepo
-	Queue       *store.QueueRepo
-	Events      *store.EventRepo
-	Hub         *events.Hub
-	Control     RunController
-	InstanceID  string
-	PromptGate  PromptHookGate
+	DB                *sql.DB
+	Token             string
+	Sandbox           string
+	Projects          *store.ProjectRepo
+	Providers         *store.ProviderRepo
+	Models            *store.ModelRepo
+	Roles             *store.RoleRepo
+	Doctor            ProviderDiagnoser
+	Policies          *store.PolicyRepo
+	Artifacts         *artifacts.Service
+	Sessions          *store.SessionRepo
+	Branches          *store.BranchRepo
+	Messages          *store.MessageRepo
+	Compactions       *store.CompactionRepo
+	Approvals         *store.ApprovalRepo
+	StandingApprovals *store.StandingApprovalRepo
+	Delegations       *store.DelegationRepo
+	Runs              *store.RunRepo
+	Queue             *store.QueueRepo
+	Events            *store.EventRepo
+	Hub               *events.Hub
+	Control           RunController
+	InstanceID        string
+	PromptGate        PromptHookGate
+	Prompts           *prompts.Service
 }
 
 func (s *Server) Handler() http.Handler {
@@ -66,6 +71,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/model-profiles", s.createModelProfile)
 	mux.HandleFunc("PUT /v1/model-profiles/{modelID}/default", s.setDefaultModelProfile)
 	mux.HandleFunc("GET /v1/policy-profiles", s.listPolicyProfiles)
+	mux.HandleFunc("GET /v1/roles", s.listRoles)
+	mux.HandleFunc("POST /v1/roles", s.createRole)
+	mux.HandleFunc("GET /v1/roles/{roleID}", s.getRole)
+	mux.HandleFunc("PATCH /v1/roles/{roleID}/draft", s.updateRoleDraft)
+	mux.HandleFunc("POST /v1/roles/{roleID}/validate", s.validateRole)
+	mux.HandleFunc("POST /v1/roles/{roleID}/publish", s.publishRole)
+	mux.HandleFunc("POST /v1/roles/{roleID}/archive", s.archiveRole)
+	mux.HandleFunc("GET /v1/roles/{roleID}/versions", s.listRoleVersions)
+	mux.HandleFunc("GET /v1/roles/{roleID}/versions/{versionID}", s.getRoleVersion)
 	mux.HandleFunc("POST /v1/policy-profiles", s.createPolicyProfile)
 	mux.HandleFunc("PUT /v1/policy-profiles/{policyID}/default", s.setDefaultPolicyProfile)
 	mux.HandleFunc("DELETE /v1/policy-profiles/{policyID}", s.deactivatePolicyProfile)
@@ -91,15 +105,30 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/recovery", s.getSessionRecovery)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/active-run", s.getSessionActiveRun)
 	mux.HandleFunc("POST /v1/sessions/{sessionID}/turns", s.submitTurn)
+	mux.HandleFunc("POST /v1/sessions/{sessionID}/invocations", s.submitInvocation)
 	mux.HandleFunc("POST /v1/sessions/{sessionID}/compactions", s.createCompaction)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/compactions", s.listCompactions)
 	mux.HandleFunc("GET /v1/compactions/{compactionID}", s.getCompaction)
 	mux.HandleFunc("GET /v1/runs/{runID}", s.getRun)
+	mux.HandleFunc("GET /v1/runs/{runID}/messages", s.listRunMessages)
+	mux.HandleFunc("GET /v1/runs/{runID}/children", s.listRunChildren)
 	mux.HandleFunc("POST /v1/runs/{runID}/retry", s.retryRun)
 	mux.HandleFunc("POST /v1/runs/{runID}/cancel", s.cancelRun)
 	mux.HandleFunc("POST /v1/runs/{runID}/inputs", s.queueInput)
 	mux.HandleFunc("POST /v1/approval-requests/{approvalID}/decision", s.decideApproval)
+	mux.HandleFunc("GET /v1/sessions/{sessionID}/standing-approvals", s.listStandingApprovals)
+	mux.HandleFunc("POST /v1/sessions/{sessionID}/standing-approvals/{ruleID}/revoke", s.revokeStandingApproval)
 	mux.HandleFunc("GET /v1/runs/{runID}/events", s.streamEvents)
+
+	// Prompt templates.
+	mux.HandleFunc("GET /v1/projects/{projectID}/prompt-templates", s.listPromptTemplates)
+	mux.HandleFunc("POST /v1/projects/{projectID}/prompt-templates/expand", s.expandPromptTemplate)
+	mux.HandleFunc("GET /v1/prompt-templates", s.listGlobalPromptTemplates)
+	mux.HandleFunc("POST /v1/prompt-templates", s.createPromptTemplate)
+	mux.HandleFunc("GET /v1/prompt-templates/{name}", s.getPromptTemplate)
+	mux.HandleFunc("PUT /v1/prompt-templates/{name}", s.updatePromptTemplate)
+	mux.HandleFunc("DELETE /v1/prompt-templates/{name}", s.deletePromptTemplate)
+
 	return s.middleware(mux)
 }
 
@@ -183,15 +212,19 @@ func (s *Server) listModelProfiles(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createModelProfile(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		ProviderID       string `json:"providerId"`
-		ModelName        string `json:"modelName"`
-		DisplayName      string `json:"displayName"`
-		ContextWindow    int    `json:"contextWindow"`
-		MaxOutputTokens  int    `json:"maxOutputTokens"`
-		SupportsVision   bool   `json:"supportsVision"`
-		SupportsToolUse  bool   `json:"supportsToolUse"`
-		SupportsThinking bool   `json:"supportsThinking"`
-		IsDefault        bool   `json:"isDefault"`
+		ProviderID                    string                  `json:"providerId"`
+		ModelName                     string                  `json:"modelName"`
+		DisplayName                   string                  `json:"displayName"`
+		ContextWindow                 int                     `json:"contextWindow"`
+		MaxOutputTokens               int                     `json:"maxOutputTokens"`
+		InputCostUSDMicrosPerMillion  int64                   `json:"inputCostUsdMicrosPerMillion"`
+		OutputCostUSDMicrosPerMillion int64                   `json:"outputCostUsdMicrosPerMillion"`
+		SupportsVision                bool                    `json:"supportsVision"`
+		SupportsToolUse               bool                    `json:"supportsToolUse"`
+		SupportsThinking              bool                    `json:"supportsThinking"`
+		ThinkingDialect               domain.ThinkingDialect  `json:"thinkingDialect"`
+		SupportedThinkingEfforts      []domain.ThinkingEffort `json:"supportedThinkingEfforts"`
+		IsDefault                     bool                    `json:"isDefault"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
@@ -199,8 +232,11 @@ func (s *Server) createModelProfile(w http.ResponseWriter, r *http.Request) {
 	profile, err := s.Models.Create(r.Context(), store.CreateModelInput{
 		ProviderID: input.ProviderID, ModelName: input.ModelName, DisplayName: input.DisplayName,
 		ContextWindow: input.ContextWindow, MaxOutputTokens: input.MaxOutputTokens,
-		SupportsVision: input.SupportsVision, SupportsToolUse: input.SupportsToolUse,
-		SupportsThinking: input.SupportsThinking, IsDefault: input.IsDefault,
+		InputCostUSDMicrosPerMillion:  input.InputCostUSDMicrosPerMillion,
+		OutputCostUSDMicrosPerMillion: input.OutputCostUSDMicrosPerMillion,
+		SupportsVision:                input.SupportsVision, SupportsToolUse: input.SupportsToolUse,
+		SupportsThinking: input.SupportsThinking, ThinkingDialect: input.ThinkingDialect,
+		SupportedThinkingEfforts: input.SupportedThinkingEfforts, IsDefault: input.IsDefault,
 	})
 	if err != nil {
 		writeError(w, r, http.StatusBadRequest, "invalid_model_profile", err.Error(), false)
@@ -727,6 +763,90 @@ func (s *Server) submitTurn(w http.ResponseWriter, r *http.Request) {
 	writeData(w, status, submission)
 }
 
+func (s *Server) submitInvocation(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Text    string `json:"text"`
+		Content []struct {
+			Type       string `json:"type"`
+			Text       string `json:"text"`
+			ArtifactID string `json:"artifactId"`
+		} `json:"content"`
+		BaseMessageID string          `json:"baseMessageId"`
+		Config        json.RawMessage `json:"config"`
+		Target        struct {
+			Kind        domain.InvocationTargetKind  `json:"kind"`
+			ObjectID    string                       `json:"objectId"`
+			VersionID   string                       `json:"versionId"`
+			ContextMode domain.InvocationContextMode `json:"contextMode"`
+			ReplyTo     []string                     `json:"replyTo"`
+		} `json:"target"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	requestID := r.Header.Get("Idempotency-Key")
+	if requestID == "" {
+		requestID = newID()
+	}
+	parts := make([]domain.ContentBlock, 0, len(input.Content))
+	for _, part := range input.Content {
+		switch part.Type {
+		case "text":
+			parts = append(parts, domain.ContentBlock{Kind: domain.ContentText, Text: part.Text})
+		case "image":
+			parts = append(parts, domain.ContentBlock{Kind: domain.ContentImage, Image: &domain.ImageRef{ArtifactID: part.ArtifactID}})
+		default:
+			writeError(w, r, http.StatusBadRequest, "invalid_invocation_content", "unsupported content part type", false)
+			return
+		}
+	}
+	if s.PromptGate != nil {
+		outcome := s.PromptGate.CheckPrompt(r.Context(), r.PathValue("sessionID"), input.Text, parts)
+		if outcome.Error != nil {
+			slog.Warn("prompt hook gate failed (fail-open)", "session_id", r.PathValue("sessionID"), "error", outcome.Error)
+		}
+		if outcome.Blocked {
+			writeError(w, r, http.StatusForbidden, "prompt_blocked_by_hook", outcome.Reason, false)
+			return
+		}
+	}
+	var submission *domain.TurnSubmission
+	var err error
+	switch input.Target.Kind {
+	case domain.InvocationTargetHost:
+		submission, err = s.Runs.SubmitTurn(r.Context(), domain.SubmitTurnInput{
+			SessionID: r.PathValue("sessionID"), ClientRequestID: requestID, BaseMessageID: input.BaseMessageID,
+			Text: input.Text, Parts: parts, RequestedConfig: input.Config,
+		})
+	case domain.InvocationTargetRole:
+		submission, err = s.Runs.SubmitInvocation(r.Context(), domain.SubmitInvocationInput{
+			SessionID: r.PathValue("sessionID"), ClientRequestID: requestID, BaseMessageID: input.BaseMessageID,
+			Text: input.Text, Parts: parts, RequestedConfig: input.Config,
+			Target: domain.RoleInvocationTarget{Kind: input.Target.Kind, ObjectID: input.Target.ObjectID,
+				VersionID: input.Target.VersionID, ContextMode: input.Target.ContextMode, ReplyTo: input.Target.ReplyTo},
+		})
+	default:
+		writeError(w, r, http.StatusBadRequest, string(domain.ErrorInvocationTargetInvalid), "unsupported invocation target", false)
+		return
+	}
+	if err != nil {
+		s.writeStoreError(w, r, err)
+		return
+	}
+	if !submission.Existing && s.Control != nil {
+		if err := s.Control.Enqueue(context.Background(), submission.Run.ID); err != nil {
+			_ = s.Runs.Fail(context.Background(), submission.Run.ID, "run_enqueue_failed", err.Error())
+			writeError(w, r, http.StatusInternalServerError, "run_enqueue_failed", "run could not be scheduled", true)
+			return
+		}
+	}
+	status := http.StatusAccepted
+	if submission.Existing {
+		status = http.StatusOK
+	}
+	writeData(w, status, submission)
+}
+
 func (s *Server) createCompaction(w http.ResponseWriter, r *http.Request) {
 	if s.Compactions == nil {
 		writeError(w, r, http.StatusServiceUnavailable, "compaction_unavailable", "context compaction is unavailable", true)
@@ -902,6 +1022,10 @@ func (s *Server) writeStoreError(w http.ResponseWriter, r *http.Request, err err
 		writeError(w, r, http.StatusBadRequest, string(domain.ErrorCodeOf(err)), err.Error(), false)
 	case domain.ErrorCodeOf(err) == domain.ErrorCompactionCheckpointInvalid:
 		writeError(w, r, http.StatusConflict, string(domain.ErrorCompactionCheckpointInvalid), err.Error(), false)
+	case domain.ErrorCodeOf(err) == domain.ErrorInvocationTargetInvalid:
+		writeError(w, r, http.StatusBadRequest, string(domain.ErrorInvocationTargetInvalid), err.Error(), false)
+	case domain.ErrorCodeOf(err) == domain.ErrorCommitFormatNotEnabled:
+		writeError(w, r, http.StatusConflict, string(domain.ErrorCommitFormatNotEnabled), err.Error(), false)
 	case errors.Is(err, store.ErrRunNotActive), errors.Is(err, store.ErrInvalidRunState):
 		writeError(w, r, http.StatusConflict, "run_not_active", err.Error(), false)
 	default:

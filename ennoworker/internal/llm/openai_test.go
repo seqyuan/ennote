@@ -102,6 +102,29 @@ func TestOpenAIStreamTextThinkingToolsAndUsage(t *testing.T) {
 	assert.Equal(t, "effective-api-model", requestBody["model"])
 }
 
+func TestOpenAIReasoningEffortWireMappingAndDefaultOmission(t *testing.T) {
+	provider, err := NewOpenAIProvider(OpenAIConfig{BaseURL: "https://example.test", Model: "m"})
+	require.NoError(t, err)
+	defaultWire, err := provider.buildRequest(domain.CompletionRequest{Model: "m"})
+	require.NoError(t, err)
+	defaultJSON, err := json.Marshal(defaultWire)
+	require.NoError(t, err)
+	assert.NotContains(t, string(defaultJSON), "reasoning_effort")
+
+	wire, err := provider.buildRequest(domain.CompletionRequest{Model: "m", Reasoning: &domain.ReasoningConfig{
+		Dialect: domain.ThinkingDialectOpenAIReasoningEffort, Effort: domain.ThinkingMedium,
+	}})
+	require.NoError(t, err)
+	encoded, err := json.Marshal(wire)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"model":"m","messages":null,"stream":true,"stream_options":{"include_usage":true},"reasoning_effort":"medium"}`, string(encoded))
+
+	_, err = provider.buildRequest(domain.CompletionRequest{Reasoning: &domain.ReasoningConfig{
+		Dialect: domain.ThinkingDialectNone, Effort: domain.ThinkingHigh,
+	}})
+	require.Error(t, err)
+}
+
 func TestOpenAIIncompleteStream(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -246,4 +269,41 @@ func TestOpenAIRequestMapsToolResult(t *testing.T) {
 	assert.Equal(t, "assistant", request.Messages[0].Role)
 	assert.Equal(t, "tool", request.Messages[1].Role)
 	assert.Equal(t, "c1", request.Messages[1].ToolCallID)
+	encoded, err := json.Marshal(request.Messages)
+	require.NoError(t, err)
+	assert.JSONEq(t, `[
+		{"role":"assistant","tool_calls":[{"id":"c1","type":"function","function":{"name":"read","arguments":"{}"}}]},
+		{"role":"tool","content":"ok","tool_call_id":"c1","name":"read"}
+	]`, string(encoded))
+}
+
+func TestOpenAIRequestRejectsOrphanAndMismatchedToolResults(t *testing.T) {
+	provider, _ := NewOpenAIProvider(OpenAIConfig{BaseURL: "http://localhost", Model: "m"})
+	tests := []struct {
+		name     string
+		messages []domain.ChatMessage
+		contains string
+	}{
+		{name: "orphan", messages: []domain.ChatMessage{
+			{Role: domain.RoleTool, Content: []domain.ContentBlock{{Kind: domain.ContentToolResult,
+				ToolResult: &domain.ToolResult{ToolCallID: "internal-uuid", ToolName: "read", Content: "ok"}}}},
+		}, contains: "unknown tool call id"},
+		{name: "internal id substituted for provider id", messages: []domain.ChatMessage{
+			{Role: domain.RoleAssistant, Content: []domain.ContentBlock{{Kind: domain.ContentToolCall,
+				ToolCall: &domain.ToolCall{ID: "call_provider", Name: "read", Arguments: json.RawMessage(`{}`)}}}},
+			{Role: domain.RoleTool, Content: []domain.ContentBlock{{Kind: domain.ContentToolResult,
+				ToolResult: &domain.ToolResult{ToolCallID: "internal-uuid", ToolName: "read", Content: "ok"}}}},
+		}, contains: "unknown tool call id"},
+		{name: "non-adjacent", messages: []domain.ChatMessage{
+			{Role: domain.RoleAssistant, Content: []domain.ContentBlock{{Kind: domain.ContentToolCall,
+				ToolCall: &domain.ToolCall{ID: "call_provider", Name: "read", Arguments: json.RawMessage(`{}`)}}}},
+			{Role: domain.RoleUser, Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: "interrupt"}}},
+		}, contains: "before all preceding tool calls have results"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := provider.buildRequest(domain.CompletionRequest{Messages: test.messages})
+			require.ErrorContains(t, err, test.contains)
+		})
+	}
 }

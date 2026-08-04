@@ -60,9 +60,48 @@ func (l *Loop) executeToolBatchWithPolicy(ctx context.Context, runID string, ite
 		requiresApproval = requiresApproval || plan.requiresApproval
 	}
 	if requiresApproval {
-		digest := approvalBatchDigest(plans, l.ToolPolicySnapshot)
+		// Digest version: resume states pin the exact version; fresh runs fall
+		// back to V1 only when no standing infrastructure is wired.
+		digestVersion := l.ApprovalDigestVersion
+		if digestVersion == 0 {
+			digestVersion = ApprovalDigestV2
+			if l.StandingScopeResolver == nil || l.StandingApprovals == nil {
+				digestVersion = ApprovalDigestV1
+			}
+		}
+		digest := approvalBatchDigest(plans, l.ToolPolicySnapshot, digestVersion)
 		if len(resolutions) == 0 {
-			return nil, false, &ApprovalRequiredError{BatchDigest: digest, Items: approvalItems(plans, l.ToolPolicy)}
+			var candidates []domain.StandingGrantCandidate
+			// Collect standing candidates for require_approval + external calls.
+			for index, plan := range plans {
+				if !plan.requiresApproval || plan.decision.RiskClass != domain.RiskExternal {
+					continue
+				}
+				if l.StandingScopeResolver != nil {
+					scope, ok, _ := l.StandingScopeResolver.ResolveStandingApprovalScope(plan.effective.Name, plan.effective.Arguments)
+					if ok {
+						candidates = append(candidates, domain.StandingGrantCandidate{
+							CallIndex:    index,
+							ToolCallID:   plan.effective.ID,
+							ToolName:     plan.effective.Name,
+							ScopeKind:    scope.Kind,
+							ScopeVersion: scope.ScopeVersion,
+							ScopeKey:     scope.Key,
+							ScopeDisplay: scope.Display,
+							RiskClass:    plan.decision.RiskClass,
+						})
+					}
+				}
+			}
+			items := approvalItems(plans, l.ToolPolicy)
+			attachStandingScopes(items, plans, l.StandingScopeResolver)
+			return nil, false, &ApprovalRequiredError{
+				BatchDigest:            digest,
+				ApprovalDigestVersion:  digestVersion,
+				Items:                  items,
+				StandingCandidates:     candidates,
+				StandingAuthorizations: standingAuthorizationSnapshot(plans),
+			}
 		}
 		resolution := resolutions[0]
 		if resolution.BatchDigest != digest {
@@ -98,6 +137,18 @@ func (l *Loop) executeToolBatchWithPolicy(ctx context.Context, runID string, ite
 		if err := l.recordToolSkipped(ctx, runID, iteration, index, plan.original, result, plan.decision.Reason,
 			l.policyMetadata(plan.decision, false)); err != nil {
 			return results, false, err
+		}
+	}
+
+	allowedCount := 0
+	for _, plan := range plans {
+		if plan.allowed {
+			allowedCount++
+		}
+	}
+	if l.BudgetController != nil && allowedCount > 0 {
+		if err := l.BudgetController.AdmitToolCalls(ctx, runID, allowedCount); err != nil {
+			return results, false, domain.NewCodedError(domain.ErrorDelegationBudgetExceeded, err)
 		}
 	}
 
@@ -244,6 +295,94 @@ func (l *Loop) preflightToolBatch(ctx context.Context, runID string, iteration i
 		}
 		plans[index] = plan
 	}
+
+	// Standing approval gate: for require_approval + external risk calls, try to
+	// match against active standing rules.  On resume, the frozen checkpoint
+	// snapshot is replayed instead of querying live rules (so grants/revokes
+	// that happened while the batch waited never change this batch).
+	if l.StandingApprovals != nil && l.StandingScopeResolver != nil {
+		if len(l.StandingAuthorizationSnapshot) > 0 {
+			// Resume mode: replay the frozen snapshot. Validate every entry
+			// (non-empty identity fields, unique CallIndex/ToolCallID) and
+			// apply only exact CallIndex+ToolCallID+ToolName matches.
+			seenIndex := make(map[int]bool, len(l.StandingAuthorizationSnapshot))
+			seenCallID := make(map[string]bool, len(l.StandingAuthorizationSnapshot))
+			for _, snap := range l.StandingAuthorizationSnapshot {
+				if snap.RuleID == "" || snap.ToolCallID == "" || snap.ToolName == "" || snap.ScopeKind == "" ||
+					snap.ScopeVersion < 1 || snap.ScopeKey == "" || snap.CallIndex < 0 {
+					return nil, false, domain.NewCodedError(domain.ErrorApprovalCheckpointInvalid,
+						fmt.Errorf("standing authorization snapshot contains an invalid entry"))
+				}
+				if seenIndex[snap.CallIndex] || seenCallID[snap.ToolCallID] {
+					return nil, false, domain.NewCodedError(domain.ErrorApprovalCheckpointInvalid,
+						fmt.Errorf("standing authorization snapshot has duplicate call index or tool call id"))
+				}
+				seenIndex[snap.CallIndex] = true
+				seenCallID[snap.ToolCallID] = true
+			}
+			for _, snap := range l.StandingAuthorizationSnapshot {
+				if snap.CallIndex >= len(plans) {
+					continue
+				}
+				plan := &plans[snap.CallIndex]
+				if !plan.requiresApproval || plan.decision.RiskClass != domain.RiskExternal {
+					continue
+				}
+				if plan.effective.ID != snap.ToolCallID || plan.effective.Name != snap.ToolName {
+					continue
+				}
+				plan.allowed = true
+				plan.requiresApproval = false
+				plan.decision.Action = ToolAllow
+				plan.decision.Code = "standing_approval"
+				plan.decision.RuleID = snap.RuleID
+				plan.decision.StandingScopeKind = snap.ScopeKind
+				plan.decision.StandingScopeVersion = snap.ScopeVersion
+				plan.decision.StandingScopeKey = snap.ScopeKey
+			}
+		} else {
+			scopes := make([]domain.StandingScopeRef, 0)
+			scopePlanIndexes := make([]int, 0)
+			for index := range plans {
+				if !plans[index].requiresApproval || plans[index].decision.RiskClass != domain.RiskExternal {
+					continue
+				}
+				scope, ok, _ := l.StandingScopeResolver.ResolveStandingApprovalScope(
+					plans[index].effective.Name, plans[index].effective.Arguments)
+				if !ok {
+					continue
+				}
+				scopes = append(scopes, domain.StandingScopeRef{
+					ToolName:     plans[index].effective.Name,
+					Kind:         scope.Kind,
+					ScopeVersion: scope.ScopeVersion,
+					Key:          scope.Key,
+				})
+				scopePlanIndexes = append(scopePlanIndexes, index)
+			}
+			if len(scopes) > 0 {
+				matched, err := l.StandingApprovals.MatchActive(ctx, l.SessionID, scopes)
+				if err != nil {
+					// Fail safe: keep require_approval for all.
+				} else {
+					for i, ref := range scopes {
+						if rule, ok := matched[ref]; ok {
+							planIndex := scopePlanIndexes[i]
+							plans[planIndex].allowed = true
+							plans[planIndex].requiresApproval = false
+							plans[planIndex].decision.Action = ToolAllow
+							plans[planIndex].decision.Code = "standing_approval"
+							plans[planIndex].decision.RuleID = rule.ID
+							plans[planIndex].decision.StandingScopeKind = rule.ScopeKind
+							plans[planIndex].decision.StandingScopeVersion = rule.ScopeVersion
+							plans[planIndex].decision.StandingScopeKey = rule.ScopeKey
+						}
+					}
+				}
+			}
+		}
+	}
+
 	return plans, terminate, nil
 }
 
@@ -418,7 +557,8 @@ func (l *Loop) projectToolResult(ctx context.Context, runID string, iteration, c
 
 func (l *Loop) policyMetadata(decision ToolDecision, stop bool) domain.ToolPolicyMetadata {
 	return domain.ToolPolicyMetadata{PolicyID: l.ToolPolicySnapshot.ID, PolicyVersion: l.ToolPolicySnapshot.Version,
-		Action: string(decision.Action), Code: decision.Code, RiskClass: decision.RiskClass, StopAfterBatch: stop}
+		Action: string(decision.Action), Code: decision.Code, RiskClass: decision.RiskClass,
+		StopAfterBatch: stop, StandingRuleID: decision.RuleID}
 }
 
 func (l *Loop) validateToolArguments(call domain.ToolCall) error {

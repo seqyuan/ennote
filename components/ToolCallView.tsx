@@ -2,9 +2,10 @@
 
 import {
   CircleAlert, CircleCheck, Clock3, FilePenLine, FileText, FolderOpen, Globe2,
-  Search, ShieldAlert, Terminal, XCircle,
+  Search, ShieldAlert, Terminal, Users, XCircle,
 } from "lucide-react";
 import { ArtifactView } from "@/components/ArtifactView";
+import { NestedActivityPanel } from "@/components/NestedActivityPanel";
 import type { ToolActivity } from "@/lib/chat-messages";
 import {
   boundedToolOutput, defaultToolExpanded, redactToolArguments, summarizeToolCall,
@@ -15,6 +16,7 @@ const riskLabels = {
   local_write: "Local write",
   shell: "Shell",
   external: "External",
+  delegation: "Delegation",
   sensitive: "Sensitive",
 };
 
@@ -49,6 +51,8 @@ export function ToolCallView({ activity, sessionId }: { activity: ToolActivity; 
       </details>}
       </div>
     </details>
+    {activity.toolName === "delegate_roles" && activity.runId &&
+      <NestedActivityPanel parentRunId={activity.runId} toolCallId={activity.toolCallId} />}
     {(activity.result?.artifacts.length ?? 0) > 0 && <div className="tool-artifact-results">
       {activity.result?.artifacts.map(artifact => <ArtifactView sessionId={sessionId} artifact={artifact} key={artifact.artifactId} />)}
     </div>}
@@ -70,6 +74,7 @@ function toolIcon(name: string) {
     case "publish_artifact": return <FilePenLine {...props} />;
     case "bash":
     case "exec": return <Terminal {...props} />;
+    case "delegate_roles": return <Users {...props} />;
     case "http":
     case "http_request":
     case "fetch":

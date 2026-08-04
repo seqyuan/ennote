@@ -14,9 +14,10 @@ import (
 )
 
 var (
-	ErrApprovalNotFound = errors.New("approval request not found")
-	ErrApprovalConflict = errors.New("approval decision conflicts with the stored decision")
-	ErrApprovalStale    = errors.New("approval request is no longer pending for this run")
+	ErrApprovalNotFound     = errors.New("approval request not found")
+	ErrApprovalConflict     = errors.New("approval decision conflicts with the stored decision")
+	ErrApprovalStale        = errors.New("approval request is no longer pending for this run")
+	ErrStandingGrantInvalid = errors.New("invalid standing grant selection")
 )
 
 type ApprovalRepo struct {
@@ -25,7 +26,8 @@ type ApprovalRepo struct {
 }
 
 func (r *ApprovalRepo) Suspend(ctx context.Context, runID string, schemaVersion, iteration int,
-	batchDigest string, state json.RawMessage, items []domain.ApprovalItem) (*domain.ToolApprovalRequest, error) {
+	batchDigest string, state json.RawMessage, items []domain.ApprovalItem,
+	candidates []domain.StandingGrantCandidate) (*domain.ToolApprovalRequest, error) {
 	if schemaVersion < 1 || iteration < 1 || strings.TrimSpace(batchDigest) == "" || !json.Valid(state) || len(items) == 0 {
 		return nil, fmt.Errorf("valid checkpoint version, iteration, digest, state, and approval items are required")
 	}
@@ -79,8 +81,20 @@ func (r *ApprovalRepo) Suspend(ctx context.Context, runID string, schemaVersion,
 		iteration, batchDigest, string(encodedItems), timestamp); err != nil {
 		return nil, fmt.Errorf("insert approval request: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status='waiting_for_approval',error_code=NULL,error_message=NULL
-		WHERE id=? AND status='running'`, runID); err != nil {
+	// Persist standing candidates for the Decide transaction.
+	standingRepo := &StandingApprovalRepo{DB: r.DB}
+	if err := standingRepo.SaveCandidatesTx(ctx, tx, approvalID, candidates); err != nil {
+		return nil, fmt.Errorf("save standing candidates: %w", err)
+	}
+	waitingStatus := domain.RunWaitingForApproval
+	for _, item := range items {
+		if item.ToolName == "delegate_roles" {
+			waitingStatus = domain.RunWaitingDelegationAdmit
+			break
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status=?,error_code=NULL,error_message=NULL
+		WHERE id=? AND status='running'`, waitingStatus, runID); err != nil {
 		return nil, err
 	}
 	if turnID.Valid {
@@ -100,9 +114,11 @@ func (r *ApprovalRepo) Suspend(ctx context.Context, runID string, schemaVersion,
 	if r.Publisher != nil {
 		r.Publisher.Publish(committed...)
 	}
-	return &domain.ToolApprovalRequest{ID: approvalID, RunID: runID, SessionID: sessionID,
+	approval := &domain.ToolApprovalRequest{ID: approvalID, RunID: runID, SessionID: sessionID,
 		CheckpointID: checkpointID, Iteration: iteration, BatchDigest: batchDigest,
-		Status: domain.ApprovalPending, Items: append([]domain.ApprovalItem(nil), items...), RequestedAt: now}, nil
+		Status: domain.ApprovalPending, Items: append([]domain.ApprovalItem(nil), items...), RequestedAt: now}
+	approval.Attribution, _ = loadApprovalAttribution(ctx, r.DB, runID)
+	return approval, nil
 }
 
 func (r *ApprovalRepo) FindPendingBySession(ctx context.Context, sessionID string) (*domain.ToolApprovalRequest, error) {
@@ -110,6 +126,9 @@ func (r *ApprovalRepo) FindPendingBySession(ctx context.Context, sessionID strin
 	approval, err := scanApproval(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
+	}
+	if err == nil {
+		approval.Attribution, _ = loadApprovalAttribution(ctx, r.DB, approval.RunID)
 	}
 	return approval, err
 }
@@ -120,16 +139,23 @@ func (r *ApprovalRepo) FindPendingByRun(ctx context.Context, runID string) (*dom
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
+	if err == nil {
+		approval.Attribution, _ = loadApprovalAttribution(ctx, r.DB, approval.RunID)
+	}
 	return approval, err
 }
 
 func (r *ApprovalRepo) Decide(ctx context.Context, approvalID string, decision domain.ApprovalDecision,
-	clientRequestID string) (*domain.ToolApprovalRequest, error) {
+	clientRequestID string, standingGrantCallIndexes []int) (*domain.ToolApprovalRequest, error) {
 	if decision != domain.DecisionApproved && decision != domain.DecisionRejected {
 		return nil, fmt.Errorf("unsupported approval decision: %s", decision)
 	}
 	if strings.TrimSpace(clientRequestID) == "" {
 		return nil, fmt.Errorf("client request id is required")
+	}
+	// Rejected decisions must not carry standing grant selections.
+	if decision == domain.DecisionRejected && len(standingGrantCallIndexes) > 0 {
+		return nil, ErrStandingGrantInvalid
 	}
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -143,11 +169,22 @@ func (r *ApprovalRepo) Decide(ctx context.Context, approvalID string, decision d
 	desired := domain.ApprovalStatus(decision)
 	if approval.Status != domain.ApprovalPending {
 		if approval.Status == desired {
+			// Idempotency: same decision must carry the same standing selection
+			// set. Compare the persisted grants against the submitted selection.
+			standingRepo := &StandingApprovalRepo{DB: r.DB}
+			persisted, err := standingRepo.GetGrantsTx(ctx, tx, approvalID)
+			if err != nil {
+				return nil, fmt.Errorf("get persisted grants: %w", err)
+			}
+			if !sameStandingSelection(persisted, standingGrantCallIndexes) {
+				return nil, ErrApprovalConflict
+			}
+			approval.Attribution, _ = loadApprovalAttribution(ctx, tx, approval.RunID)
 			return approval, nil
 		}
 		return nil, ErrApprovalConflict
 	}
-	if runStatus != domain.RunWaitingForApproval {
+	if runStatus != domain.RunWaitingForApproval && runStatus != domain.RunWaitingDelegationAdmit {
 		return nil, ErrApprovalStale
 	}
 	now := time.Now().UTC()
@@ -160,12 +197,66 @@ func (r *ApprovalRepo) Decide(ctx context.Context, approvalID string, decision d
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return nil, ErrApprovalConflict
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status='queued' WHERE id=? AND status='waiting_for_approval'`, approval.RunID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status='queued' WHERE id=? AND status=?`,
+		approval.RunID, runStatus); err != nil {
 		return nil, err
 	}
 	if turnID.Valid {
 		if _, err := tx.ExecContext(ctx, `UPDATE turns SET status='pending',updated_at=? WHERE id=?`, timestamp, turnID.String); err != nil {
 			return nil, err
+		}
+	}
+	// Process standing grant selections (approved decisions only).
+	var grantResults []domain.StandingGrantResult
+	if decision == domain.DecisionApproved && len(standingGrantCallIndexes) > 0 {
+		standingRepo := &StandingApprovalRepo{DB: r.DB}
+		candidates, err := standingRepo.GetCandidatesTx(ctx, tx, approvalID)
+		if err != nil {
+			return nil, fmt.Errorf("get standing candidates: %w", err)
+		}
+		candidateMap := make(map[int]domain.StandingGrantCandidate, len(candidates))
+		for _, c := range candidates {
+			candidateMap[c.CallIndex] = c
+		}
+		// Validate and deduplicate selected indexes.
+		seen := make(map[int]bool)
+		var selected []int
+		for _, ci := range standingGrantCallIndexes {
+			if ci < 0 {
+				return nil, ErrStandingGrantInvalid
+			}
+			if _, ok := candidateMap[ci]; !ok {
+				return nil, ErrStandingGrantInvalid
+			}
+			if seen[ci] {
+				return nil, ErrStandingGrantInvalid
+			}
+			seen[ci] = true
+			selected = append(selected, ci)
+		}
+		// Deduplicate by scope.
+		scopeSeen := make(map[string]bool)
+		for _, ci := range selected {
+			c := candidateMap[ci]
+			scopeKey := fmt.Sprintf("%s/%s/%d/%s", c.ToolName, c.ScopeKind, c.ScopeVersion, c.ScopeKey)
+			if scopeSeen[scopeKey] {
+				continue
+			}
+			scopeSeen[scopeKey] = true
+			rule, _, err := standingRepo.GetOrCreateActiveTx(ctx, tx, c, approval)
+			if err != nil {
+				if errors.Is(err, ErrStandingApprovalLimit) {
+					return nil, ErrStandingApprovalLimit
+				}
+				return nil, fmt.Errorf("create standing rule: %w", err)
+			}
+			grantResults = append(grantResults, domain.StandingGrantResult{
+				CallIndex: ci,
+				RuleID:    rule.ID,
+			})
+		}
+		if err := standingRepo.SaveGrantsTx(ctx, tx, approvalID, grantResults); err != nil {
+			return nil, fmt.Errorf("save standing grants: %w", err)
 		}
 	}
 	resolvedPayload, _ := json.Marshal(map[string]any{"approvalId": approval.ID, "decision": decision,
@@ -183,6 +274,7 @@ func (r *ApprovalRepo) Decide(ctx context.Context, approvalID string, decision d
 	approval.Status = desired
 	approval.DecisionClientRequestID = clientRequestID
 	approval.ResolvedAt = &now
+	approval.Attribution, _ = loadApprovalAttribution(ctx, r.DB, approval.RunID)
 	if r.Publisher != nil {
 		r.Publisher.Publish(committed...)
 	}
@@ -234,6 +326,44 @@ func (r *ApprovalRepo) CompleteExecuting(ctx context.Context, runID string) erro
 	_, err := r.DB.ExecContext(ctx, `UPDATE run_execution_checkpoints SET status='consumed',finished_at=?
 		WHERE run_id=? AND status='executing'`, now, runID)
 	return err
+}
+
+type approvalAttributionReader interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func loadApprovalAttribution(ctx context.Context, reader approvalAttributionReader, runID string) (*domain.ApprovalAttribution, error) {
+	var snapshotJSON, effectiveJSON string
+	if err := reader.QueryRowContext(ctx, `SELECT speaker_snapshot_json,effective_config_json FROM agent_runs WHERE id=?`, runID).
+		Scan(&snapshotJSON, &effectiveJSON); err != nil {
+		return nil, err
+	}
+	var speaker struct {
+		Kind        domain.SpeakerKind `json:"kind"`
+		ObjectID    string             `json:"objectId"`
+		VersionID   string             `json:"versionId"`
+		Handle      string             `json:"handle"`
+		DisplayName string             `json:"displayName"`
+	}
+	if err := json.Unmarshal([]byte(snapshotJSON), &speaker); err != nil {
+		return nil, err
+	}
+	attribution := &domain.ApprovalAttribution{SpeakerKind: speaker.Kind, ObjectID: speaker.ObjectID,
+		VersionID: speaker.VersionID, Handle: speaker.Handle, DisplayName: speaker.DisplayName}
+	if attribution.DisplayName == "" {
+		attribution.DisplayName = "Host"
+	}
+	if strings.TrimSpace(effectiveJSON) != "" && effectiveJSON != "{}" {
+		var effective domain.EffectiveRunConfig
+		if err := json.Unmarshal([]byte(effectiveJSON), &effective); err != nil {
+			return nil, err
+		}
+		if effective.Role != nil {
+			attribution.PermissionCeiling = effective.Role.PermissionCeiling
+			attribution.Authority = effective.Role.Authority
+		}
+	}
+	return attribution, nil
 }
 
 const approvalSelect = `SELECT a.id,a.run_id,a.session_id,a.checkpoint_id,a.iteration,a.batch_digest,
@@ -339,4 +469,26 @@ func scanApprovalResume(scanner interface{ Scan(...any) error }) (*domain.Approv
 	}
 	resume.Decision = domain.ApprovalDecision(resume.Approval.Status)
 	return &resume, runStatus, nil
+}
+
+// sameStandingSelection reports whether the persisted grant call-index set
+// exactly matches the submitted selection (order-insensitive).
+func sameStandingSelection(persisted []domain.StandingGrantResult, submitted []int) bool {
+	persistedSet := make(map[int]bool, len(persisted))
+	for _, g := range persisted {
+		persistedSet[g.CallIndex] = true
+	}
+	submittedSet := make(map[int]bool, len(submitted))
+	for _, ci := range submitted {
+		submittedSet[ci] = true
+	}
+	if len(persistedSet) != len(submittedSet) {
+		return false
+	}
+	for ci := range submittedSet {
+		if !persistedSet[ci] {
+			return false
+		}
+	}
+	return true
 }

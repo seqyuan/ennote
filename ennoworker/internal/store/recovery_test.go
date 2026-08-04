@@ -15,6 +15,8 @@ import (
 func setupFailedRun(t *testing.T, requestID string) (*store.RunRepo, *domain.TurnSubmission) {
 	t.Helper()
 	db := store.SetupDB(t)
+	_, err := db.Exec(`UPDATE settings SET value='1' WHERE key='hosted_commit_format_version'`)
+	require.NoError(t, err)
 	runs := &store.RunRepo{DB: db}
 	sessionID := createRunTestSession(t, runs)
 	submission, err := runs.SubmitTurn(context.Background(), domain.SubmitTurnInput{
@@ -44,6 +46,9 @@ func TestRunRecoveryRetriesFailedAttemptIdempotentlyWithoutDuplicatingUserMessag
 	assert.False(t, first.Existing)
 	assert.Equal(t, 2, first.Run.Attempt)
 	assert.Equal(t, submission.Run.ID, first.Run.RetryOfRunID)
+	assert.Equal(t, domain.CommitFormatLegacyV1, first.Run.CommitFormatVersion)
+	assert.Equal(t, domain.PublishPublicFinal, first.Run.PublishMode)
+	assert.NotEmpty(t, first.Run.RootRunID)
 	assert.JSONEq(t, `{"maxIterations":4}`, string(first.Run.RequestedConfig))
 	assert.JSONEq(t, `{}`, string(first.Run.EffectiveConfig))
 

@@ -1,11 +1,15 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 const project = { id: "project", name: "History project", description: "", status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" };
-const session = { id: "session", projectId: project.id, title: "Restored session", status: "active", activeLeafMessageId: "m3", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:03Z" };
+const session = { id: "session", projectId: project.id, title: "Restored session", status: "active", mode: "hosted", activeLeafMessageId: "m3", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:03Z" };
 
 function message(id: string, parentMessageId: string | undefined, role: "user" | "assistant", text: string) {
   return {
     id, sessionId: session.id, parentMessageId, role, status: "complete",
+    speakerKind: role === "user" ? "user" : "host",
+    speakerSnapshot: role === "user" ? { kind: "user", displayName: "You" } : { kind: "host", displayName: "Host" },
+    addresseeKind: role === "user" ? "host" : undefined,
+    visibility: "public",
     parts: [{ type: "text", text }], createdAt: `2026-07-28T00:00:0${id.slice(-1)}Z`,
   };
 }
@@ -54,6 +58,19 @@ test("opening a session restores and paginates its active message branch", async
   const ids = await page.locator("[data-message-id]").evaluateAll(elements => elements.map(element => element.getAttribute("data-message-id")));
   expect(ids).toEqual(["m1", "m2", "m3"]);
   await expect(page.getByRole("button", { name: "Load earlier messages" })).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+});
+
+test("restores hosted history at 390x844 without horizontal overflow", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockHistoryAPI(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await page.getByTitle("Select project").click();
+  await page.getByText(project.name, { exact: true }).click();
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await page.getByText(session.title, { exact: true }).click();
+  await expect(page.getByText("middle restored message", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });
 

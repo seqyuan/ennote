@@ -34,6 +34,170 @@ paths:
                 $ref: "#/components/schemas/HealthEnvelope"
         "503":
           $ref: "#/components/responses/Error"
+  /v1/roles:
+    get:
+      operationId: listRoles
+      parameters:
+        - { name: q, in: query, schema: { type: string, maxLength: 120 } }
+        - { name: scope, in: query, schema: { $ref: "#/components/schemas/RoleScope" } }
+        - { name: projectId, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [active, archived], default: active } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        "200":
+          description: Effective Role catalog without draft or prompt bodies
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/RoleCatalogPage" } }
+    post:
+      operationId: createRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateRoleInput" }
+      responses:
+        "201":
+          description: Role draft created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/RoleIdentity" } }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/roles/{roleID}:
+    parameters:
+      - { name: roleID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getRole
+      responses:
+        "200":
+          description: Role authoring detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/RoleIdentity" } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/roles/{roleID}/draft:
+    parameters:
+      - { name: roleID, in: path, required: true, schema: { type: string } }
+    patch:
+      operationId: updateRoleDraft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateRoleDraftInput" }
+      responses:
+        "200":
+          description: Updated Role draft
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/RoleIdentity" } }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/roles/{roleID}/validate:
+    parameters:
+      - { name: roleID, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: validateRole
+      responses:
+        "200":
+          description: Role draft validation diagnostics
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/RoleValidationResult" } }
+  /v1/roles/{roleID}/publish:
+    parameters:
+      - { name: roleID, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: publishRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedRevision]
+              properties: { expectedRevision: { type: integer, minimum: 0 } }
+      responses:
+        "201":
+          description: Immutable Role version published
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/RoleVersion" } }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/roles/{roleID}/archive:
+    parameters:
+      - { name: roleID, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: archiveRole
+      responses:
+        "200":
+          description: Archived Role identity
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/RoleIdentity" } }
+  /v1/roles/{roleID}/versions:
+    parameters:
+      - { name: roleID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listRoleVersions
+      responses:
+        "200":
+          description: Immutable Role version history
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/RoleVersion" } }
+  /v1/roles/{roleID}/versions/{versionID}:
+    parameters:
+      - { name: roleID, in: path, required: true, schema: { type: string } }
+      - { name: versionID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getRoleVersion
+      responses:
+        "200":
+          description: Exact immutable Role version
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/RoleVersion" } }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/provider-profiles:
     get:
       operationId: listProviderProfiles
@@ -141,9 +305,16 @@ paths:
                 displayName: { type: string }
                 contextWindow: { type: integer, minimum: 1 }
                 maxOutputTokens: { type: integer, minimum: 1 }
+                inputCostUsdMicrosPerMillion: { type: integer, minimum: 0, maximum: 1000000000, default: 0 }
+                outputCostUsdMicrosPerMillion: { type: integer, minimum: 0, maximum: 1000000000, default: 0 }
                 supportsVision: { type: boolean }
                 supportsToolUse: { type: boolean }
                 supportsThinking: { type: boolean }
+                thinkingDialect: { $ref: "#/components/schemas/ThinkingDialect" }
+                supportedThinkingEfforts:
+                  type: array
+                  uniqueItems: true
+                  items: { $ref: "#/components/schemas/ThinkingEffort" }
                 isDefault: { type: boolean }
       responses:
         "201":
@@ -827,6 +998,58 @@ paths:
                       data: { $ref: "#/components/schemas/TurnSubmission" }
         "409":
           $ref: "#/components/responses/Error"
+  /v1/sessions/{sessionID}/invocations:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    post:
+      operationId: submitInvocation
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [target]
+              anyOf:
+                - required: [text]
+                - required: [content]
+              properties:
+                text: { type: string, minLength: 1 }
+                content:
+                  type: array
+                  minItems: 1
+                  items: { $ref: "#/components/schemas/TurnContentPart" }
+                baseMessageId: { type: string }
+                target: { $ref: "#/components/schemas/InvocationTarget" }
+                config: { type: object, additionalProperties: true }
+      responses:
+        "202":
+          description: Invocation accepted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TurnSubmission" }
+        "200":
+          description: Existing idempotent submission
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TurnSubmission" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /v1/sessions/{sessionID}/compactions:
     parameters:
       - $ref: "#/components/parameters/SessionID"
@@ -923,6 +1146,51 @@ paths:
                       data: { $ref: "#/components/schemas/AgentRun" }
         "404":
           $ref: "#/components/responses/Error"
+  /v1/runs/{runID}/messages:
+    parameters:
+      - $ref: "#/components/parameters/RunID"
+    get:
+      operationId: listRunMessages
+      parameters:
+        - name: beforeOrdinal
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 100 }
+      responses:
+        "200":
+          description: Private Run transcript or deterministic legacy fallback
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/RunMessagePage" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /v1/runs/{runID}/children:
+    parameters:
+      - $ref: "#/components/parameters/RunID"
+    get:
+      operationId: listRunChildren
+      responses:
+        "200":
+          description: Parent-visible delegated child activity
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/DelegationActivityPage" }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /v1/runs/{runID}/retry:
     parameters:
       - $ref: "#/components/parameters/RunID"
@@ -1073,6 +1341,145 @@ paths:
               schema: { type: string }
         "404":
           $ref: "#/components/responses/Error"
+
+  # ——— Prompt Templates ———
+
+  /v1/projects/{projectID}/prompt-templates:
+    get:
+      operationId: listPromptTemplates
+      tags: [Prompt Templates]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectID" }
+      responses:
+        "200":
+          description: Effective template catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/PromptTemplateCatalog" }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
+  /v1/projects/{projectID}/prompt-templates/expand:
+    post:
+      operationId: expandPromptTemplate
+      tags: [Prompt Templates]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectID" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExpandPromptTemplateInput" }
+      responses:
+        "200":
+          description: Expand result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/ExpandPromptTemplateResult" }
+        "404": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
+  /v1/prompt-templates:
+    get:
+      operationId: listGlobalPromptTemplates
+      tags: [Prompt Templates]
+      responses:
+        "200":
+          description: Management catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/PromptTemplateManagementCatalog" }
+        "500": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createPromptTemplate
+      tags: [Prompt Templates]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePromptTemplateInput" }
+      responses:
+        "201": { description: Created }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
+  /v1/prompt-templates/{name}:
+    get:
+      operationId: getPromptTemplate
+      tags: [Prompt Templates]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Template record
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      name: { type: string }
+                      description: { type: string }
+                      argumentHint: { type: string }
+                      body: { type: string }
+                      source: { type: string }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updatePromptTemplate
+      tags: [Prompt Templates]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdatePromptTemplateInput" }
+      responses:
+        "200": { description: Updated }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deletePromptTemplate
+      tags: [Prompt Templates]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1187,9 +1594,16 @@ components:
           items: { $ref: "#/components/schemas/ProviderDiagnosticStage" }
         latencyMs: { type: integer, format: int64, minimum: 0 }
         testedAt: { type: string, format: date-time }
+    ThinkingEffort:
+      type: string
+      enum: [default, low, medium, high]
+    ThinkingDialect:
+      type: string
+      enum: [none, openai_reasoning_effort]
     ModelProfile:
       type: object
-      required: [id, providerId, modelName, displayName, contextWindow, maxOutputTokens, supportsVision, supportsToolUse, supportsThinking, isDefault, status, createdAt, updatedAt]
+      additionalProperties: false
+      required: [id, providerId, modelName, displayName, contextWindow, maxOutputTokens, inputCostUsdMicrosPerMillion, outputCostUsdMicrosPerMillion, supportsVision, supportsToolUse, supportsThinking, thinkingDialect, supportedThinkingEfforts, isDefault, status, createdAt, updatedAt]
       properties:
         id: { type: string }
         providerId: { type: string }
@@ -1197,9 +1611,15 @@ components:
         displayName: { type: string }
         contextWindow: { type: integer }
         maxOutputTokens: { type: integer }
+        inputCostUsdMicrosPerMillion: { type: integer, minimum: 0, maximum: 1000000000 }
+        outputCostUsdMicrosPerMillion: { type: integer, minimum: 0, maximum: 1000000000 }
         supportsVision: { type: boolean }
         supportsToolUse: { type: boolean }
         supportsThinking: { type: boolean }
+        thinkingDialect: { $ref: "#/components/schemas/ThinkingDialect" }
+        supportedThinkingEfforts:
+          type: array
+          items: { $ref: "#/components/schemas/ThinkingEffort" }
         isDefault: { type: boolean }
         status: { type: string }
         createdAt: { type: string, format: date-time }
@@ -1311,6 +1731,34 @@ components:
           properties:
             type: { type: string, const: image }
             artifactId: { type: string }
+    InvocationTarget:
+      oneOf:
+        - $ref: "#/components/schemas/HostInvocationTarget"
+        - $ref: "#/components/schemas/RoleInvocationTarget"
+      discriminator:
+        propertyName: kind
+        mapping:
+          host: "#/components/schemas/HostInvocationTarget"
+          role: "#/components/schemas/RoleInvocationTarget"
+    HostInvocationTarget:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: { type: string, const: host }
+    RoleInvocationTarget:
+      type: object
+      additionalProperties: false
+      required: [kind, objectId, versionId, contextMode]
+      properties:
+        kind: { type: string, const: role }
+        objectId: { type: string }
+        versionId: { type: string }
+        contextMode: { type: string, enum: [room, fresh, reply_to] }
+        replyTo:
+          type: array
+          uniqueItems: true
+          items: { type: string }
     Project:
       type: object
       required: [id, name, description, status, createdAt, updatedAt]
@@ -1345,12 +1793,14 @@ components:
         modifiedAt: { type: string, format: date-time }
     Session:
       type: object
-      required: [id, projectId, title, status, createdAt, updatedAt]
+      additionalProperties: false
+      required: [id, projectId, title, status, mode, createdAt, updatedAt]
       properties:
         id: { type: string }
         projectId: { type: string }
         title: { type: string }
         status: { type: string, enum: [active, archived] }
+        mode: { type: string, enum: [hosted, room] }
         activeLeafMessageId: { type: string }
         activeBranchId: { type: string }
         defaultAgentProfileId: { type: string }
@@ -1392,16 +1842,41 @@ components:
         nextCursor: { type: string }
         hasMore: { type: boolean }
         activeLeafMessageId: { type: string }
+    SpeakerSnapshot:
+      type: object
+      additionalProperties: false
+      properties:
+        kind: { type: string, enum: [user, host, role, workflow, room, system] }
+        objectId: { type: string }
+        versionId: { type: string }
+        handle: { type: string }
+        displayName: { type: string }
+        icon: { type: string }
+        color: { type: string }
+        positioning: { type: string }
+        configDigest: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
     Message:
       type: object
-      required: [id, sessionId, role, status, parts, createdAt]
+      additionalProperties: false
+      required: [id, sessionId, role, status, speakerKind, speakerSnapshot, visibility, parts, createdAt]
       properties:
         id: { type: string }
         sessionId: { type: string }
         parentMessageId: { type: string }
-        role: { type: string, enum: [user, assistant, tool] }
+        role: { type: string, enum: [system, user, assistant, tool] }
         status: { type: string }
         runId: { type: string }
+        speakerKind: { type: string, enum: [user, host, role, workflow, room, system] }
+        speakerObjectId: { type: string }
+        speakerVersionId: { type: string }
+        participantInstanceId: { type: string }
+        speakerSnapshot: { $ref: "#/components/schemas/SpeakerSnapshot" }
+        addresseeKind: { type: string, enum: [host, room, role, graph, workflow] }
+        addresseeObjectId: { type: string }
+        addresseeVersionId: { type: string }
+        replyToMessageId: { type: string }
+        visibility: { type: string, enum: [public, private, room_control, legacy_execution] }
+        originatedAt: { type: string, format: date-time }
         parts:
           type: array
           items: { $ref: "#/components/schemas/MessageContentBlock" }
@@ -1414,6 +1889,23 @@ components:
         - $ref: "#/components/schemas/ToolResultContentBlock"
         - $ref: "#/components/schemas/ImageContentBlock"
         - $ref: "#/components/schemas/ImageDescriptionContentBlock"
+        - $ref: "#/components/schemas/RoomControlContentBlock"
+    RoomControlContentBlock:
+      type: object
+      required: [type, roomControl]
+      additionalProperties: false
+      properties:
+        type: { type: string, const: room_control }
+        roomControl:
+          type: object
+          required: [action, participantInstanceId, objectId, objectVersionId, displaySnapshot]
+          additionalProperties: false
+          properties:
+            action: { type: string, enum: [participant_invited] }
+            participantInstanceId: { type: string }
+            objectId: { type: string }
+            objectVersionId: { type: string }
+            displaySnapshot: { $ref: "#/components/schemas/SpeakerSnapshot" }
     TextContentBlock:
       type: object
       required: [type, text]
@@ -1552,25 +2044,249 @@ components:
             - turn_stop_requested
             - stuck_tool_loop
             - message_committed
+            - run_transcript_committed
             - run_succeeded
             - run_failed
             - run_cancelled
             - run_interrupted
         payload: { type: object, additionalProperties: true }
         createdAt: { type: string, format: date-time }
+    RunMessage:
+      type: object
+      additionalProperties: false
+      required: [id, runId, ordinal, role, content, visibility, createdAt]
+      properties:
+        id: { type: string }
+        runId: { type: string }
+        ordinal: { type: integer, minimum: 0 }
+        role: { type: string, enum: [system, user, assistant, tool] }
+        content:
+          type: array
+          items: { $ref: "#/components/schemas/MessageContentBlock" }
+        visibility: { type: string, enum: [private, public] }
+        createdAt: { type: string, format: date-time }
+    RunMessagePage:
+      type: object
+      additionalProperties: false
+      required: [runId, formatVersion, source, digest, messages, hasMore]
+      properties:
+        runId: { type: string }
+        formatVersion: { type: integer, enum: [1, 2] }
+        source: { type: string, enum: [shadow, legacy] }
+        digest: { type: string }
+        messages:
+          type: array
+          items: { $ref: "#/components/schemas/RunMessage" }
+        hasMore: { type: boolean }
+        nextBeforeOrdinal: { type: integer, minimum: 0 }
+    RoleScope:
+      type: string
+      enum: [builtin, global, project]
+    RoleModelBinding:
+      type: object
+      additionalProperties: false
+      required: [mode, thinkingEffort, fallbackModelProfileIds, overridableFields]
+      properties:
+        mode: { type: string, enum: [fixed, overridable, inherit] }
+        modelProfileId: { type: string }
+        thinkingEffort: { $ref: "#/components/schemas/ThinkingEffort" }
+        fallbackModelProfileIds: { type: array, uniqueItems: true, items: { type: string } }
+        overridableFields: { type: array, uniqueItems: true, items: { type: string } }
+    RoleSkillEntry:
+      type: object
+      additionalProperties: false
+      required: [skillId, mode]
+      properties:
+        skillId: { type: string }
+        mode: { type: string, enum: [preload, available] }
+    DelegationBudgetCeiling:
+      type: object
+      additionalProperties: false
+      required: [maxModelCalls, maxToolCalls, maxTotalTokens, maxOutputTokens, maxCostUsdMicros, maxWallTimeMs]
+      properties:
+        maxModelCalls: { type: integer, minimum: 0 }
+        maxToolCalls: { type: integer, minimum: 0 }
+        maxTotalTokens: { type: integer, format: int64, minimum: 0 }
+        maxOutputTokens: { type: integer, format: int64, minimum: 0 }
+        maxCostUsdMicros: { type: integer, format: int64, minimum: 0 }
+        maxWallTimeMs: { type: integer, format: int64, minimum: 0 }
+    RoleDelegationPolicy:
+      type: object
+      additionalProperties: false
+      required: [admission, allowedCallerKinds, allowedStrategies, maxInvocationsPerParentRun, maxConcurrentInstances, budgetCeiling]
+      properties:
+        admission: { type: string, enum: [denied, approval_required, auto_within_budget] }
+        allowedCallerKinds:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [host] }
+        allowedStrategies:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [single, parallel] }
+        maxInvocationsPerParentRun: { type: integer, minimum: 0 }
+        maxConcurrentInstances: { type: integer, minimum: 0 }
+        budgetCeiling: { $ref: "#/components/schemas/DelegationBudgetCeiling" }
+    RoleContextPolicy:
+      type: object
+      additionalProperties: false
+      required: [defaultMode, allowedModes, ownExecutionContinuity]
+      properties:
+        defaultMode: { type: string, enum: [room, reply, fresh] }
+        allowedModes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string, enum: [room, reply, fresh] }
+        ownExecutionContinuity: { type: string, enum: [none] }
+    RoleDefinition:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, rolePrompt, modelBinding, skills, authority, permissionCeiling, allowedTools,
+        contextPolicy, delegationPolicy, outputContract, maxLoopIterations]
+      properties:
+        schemaVersion: { type: integer, enum: [1] }
+        rolePrompt: { type: string, minLength: 1, maxLength: 65536 }
+        modelBinding: { $ref: "#/components/schemas/RoleModelBinding" }
+        skills:
+          type: object
+          additionalProperties: false
+          required: [entries]
+          properties:
+            entries: { type: array, items: { $ref: "#/components/schemas/RoleSkillEntry" } }
+        authority: { type: string, enum: [read_only, mutation] }
+        permissionCeiling: { type: string, enum: [discuss, ask, auto] }
+        allowedTools: { type: array, uniqueItems: true, items: { type: string } }
+        contextPolicy: { $ref: "#/components/schemas/RoleContextPolicy" }
+        delegationPolicy: { $ref: "#/components/schemas/RoleDelegationPolicy" }
+        outputContract: { type: string, minLength: 1 }
+        maxLoopIterations: { type: integer, minimum: 1, maximum: 64 }
+    RoleSummary:
+      type: object
+      additionalProperties: false
+      required: [id, handle, name, description, positioning, icon, color, scope, status, updatedAt]
+      properties:
+        id: { type: string }
+        handle: { type: string }
+        name: { type: string }
+        description: { type: string }
+        positioning: { type: string }
+        icon: { type: string }
+        color: { type: string }
+        scope: { $ref: "#/components/schemas/RoleScope" }
+        projectId: { type: string }
+        status: { type: string, enum: [active, archived] }
+        currentVersionId: { type: string }
+        currentVersion: { type: integer, minimum: 1 }
+        updatedAt: { type: string, format: date-time }
+    RoleIdentity:
+      unevaluatedProperties: false
+      allOf:
+        - $ref: "#/components/schemas/RoleSummary"
+        - type: object
+          required: [draft, draftRevision, delegationEnabled, delegationRevocationEpoch, createdAt]
+          properties:
+            draft: { $ref: "#/components/schemas/RoleDefinition" }
+            draftRevision: { type: integer, minimum: 0 }
+            delegationEnabled: { type: boolean }
+            delegationRevocationEpoch: { type: integer, minimum: 0 }
+            delegationDisabledAt: { type: string, format: date-time }
+            createdAt: { type: string, format: date-time }
+    RoleVersion:
+      type: object
+      additionalProperties: false
+      required: [id, roleId, version, definition, configDigest, status, createdAt]
+      properties:
+        id: { type: string }
+        roleId: { type: string }
+        version: { type: integer, minimum: 1 }
+        definition: { $ref: "#/components/schemas/RoleDefinition" }
+        configDigest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+        status: { type: string, enum: [published] }
+        createdAt: { type: string, format: date-time }
+    RoleCatalogPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/RoleSummary" } }
+        nextCursor: { type: string }
+    RoleValidationDiagnostic:
+      type: object
+      additionalProperties: false
+      required: [level, code, message]
+      properties:
+        level: { type: string, enum: [error, warning] }
+        code: { type: string }
+        message: { type: string }
+        field: { type: string }
+    RoleValidationResult:
+      type: object
+      additionalProperties: false
+      required: [valid, diagnostics]
+      properties:
+        valid: { type: boolean }
+        diagnostics: { type: array, items: { $ref: "#/components/schemas/RoleValidationDiagnostic" } }
+        configDigest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+    CreateRoleInput:
+      type: object
+      additionalProperties: false
+      required: [handle, name, scope, definition]
+      properties:
+        handle: { type: string, pattern: "^[a-z][a-z0-9_-]{1,31}$" }
+        name: { type: string, minLength: 1 }
+        description: { type: string }
+        positioning: { type: string }
+        icon: { type: string }
+        color: { type: string }
+        scope: { $ref: "#/components/schemas/RoleScope" }
+        projectId: { type: string }
+        definition: { $ref: "#/components/schemas/RoleDefinition" }
+    UpdateRoleDraftInput:
+      type: object
+      additionalProperties: false
+      required: [expectedRevision, definition]
+      properties:
+        expectedRevision: { type: integer, minimum: 0 }
+        handle: { type: string, pattern: "^[a-z][a-z0-9_-]{1,31}$" }
+        name: { type: string, minLength: 1 }
+        description: { type: string }
+        positioning: { type: string }
+        icon: { type: string }
+        color: { type: string }
+        definition: { $ref: "#/components/schemas/RoleDefinition" }
+    SystemPromptMetadata:
+      type: object
+      additionalProperties: false
+      required: [version, platformVersion, digest]
+      properties:
+        version: { type: integer, minimum: 1 }
+        agentProfileId: { type: string }
+        platformVersion: { type: string }
+        digest: { type: string, minLength: 1 }
     AgentRun:
       type: object
-      required: [id, sessionId, runKind, attempt, status, requestedConfig, effectiveConfig, createdAt]
+      additionalProperties: false
+      required: [id, sessionId, runKind, attempt, status, commitFormatVersion, executionDepth, publishMode, speakerSnapshot, contextSnapshot, requestedConfig, effectiveConfig, createdAt]
       properties:
         id: { type: string }
         turnId: { type: string }
         sessionId: { type: string }
-        runKind: { type: string, enum: [agent, context_compaction] }
+        runKind: { type: string, enum: [agent, context_compaction, delegated_agent] }
         baseMessageId: { type: string }
         attempt: { type: integer }
-        status: { type: string, enum: [queued, running, waiting_for_approval, succeeded, failed, cancelled, interrupted] }
+        status: { type: string, enum: [queued, running, waiting_for_approval, waiting_delegation_admission, waiting_children, succeeded, failed, cancelled, interrupted] }
         assistantMessageId: { type: string }
         retryOfRunId: { type: string }
+        commitFormatVersion: { type: integer, enum: [1, 2] }
+        systemPrompt: { $ref: "#/components/schemas/SystemPromptMetadata" }
+        parentRunId: { type: string }
+        rootRunId: { type: string }
+        executionDepth: { type: integer, minimum: 0 }
+        publishMode: { type: string, enum: [public_final, private_to_parent] }
+        speakerSnapshot: { $ref: "#/components/schemas/SpeakerSnapshot" }
+        contextSnapshot: { type: object, additionalProperties: true }
+        contextSnapshotDigest: { type: string }
         requestedConfig: { type: object, additionalProperties: true }
         effectiveConfig: { type: object, additionalProperties: true }
         errorCode: { type: string }
@@ -1594,6 +2310,65 @@ components:
         sourceRunId: { type: string }
         run: { $ref: "#/components/schemas/AgentRun" }
         existing: { type: boolean }
+    DelegationApprovalPreview:
+      type: object
+      additionalProperties: false
+      required: [name, roleHandle, assignmentPreview, outputContract, budget]
+      properties:
+        name: { type: string }
+        roleHandle: { type: string }
+        assignmentPreview: { type: string, maxLength: 240 }
+        outputContract: { type: string }
+        budget: { $ref: "#/components/schemas/DelegationBudgetCeiling" }
+    DelegationTerminalResult:
+      type: object
+      additionalProperties: false
+      required: [status, summary]
+      properties:
+        status: { type: string, enum: [completed, blocked, needs_input] }
+        summary: { type: string }
+        artifactRefs:
+          type: array
+          items: { $ref: "#/components/schemas/ArtifactReference" }
+        payload: { type: object, additionalProperties: true }
+    DelegationChildActivity:
+      type: object
+      additionalProperties: false
+      required: [itemId, name, roleHandle, roleDisplayName, itemStatus, createdAt]
+      properties:
+        itemId: { type: string }
+        childRunId: { type: string }
+        name: { type: string }
+        roleHandle: { type: string }
+        roleDisplayName: { type: string }
+        itemStatus: { type: string, enum: [pending, running, succeeded, failed, cancelled, not_authorized] }
+        runStatus: { type: string, enum: [queued, running, waiting_for_approval, waiting_delegation_admission, waiting_children, succeeded, failed, cancelled, interrupted] }
+        result: { $ref: "#/components/schemas/DelegationTerminalResult" }
+        errorCode: { type: string }
+        errorMessage: { type: string }
+        createdAt: { type: string, format: date-time }
+    DelegationActivityGroup:
+      type: object
+      additionalProperties: false
+      required: [id, parentToolCallId, strategy, status, children, createdAt]
+      properties:
+        id: { type: string }
+        parentToolCallId: { type: string }
+        strategy: { type: string, enum: [single, parallel] }
+        status: { type: string, enum: [pending, waiting_admission, waiting_children, settled, cancelled] }
+        children:
+          type: array
+          items: { $ref: "#/components/schemas/DelegationChildActivity" }
+        createdAt: { type: string, format: date-time }
+    DelegationActivityPage:
+      type: object
+      additionalProperties: false
+      required: [parentRunId, groups]
+      properties:
+        parentRunId: { type: string }
+        groups:
+          type: array
+          items: { $ref: "#/components/schemas/DelegationActivityGroup" }
     ApprovalItem:
       type: object
       required: [callIndex, toolCallId, toolName, riskClass, argumentsPreview]
@@ -1601,8 +2376,23 @@ components:
         callIndex: { type: integer, minimum: 0 }
         toolCallId: { type: string }
         toolName: { type: string }
-        riskClass: { type: string, enum: [read_only, local_write, shell, external, sensitive] }
+        riskClass: { type: string, enum: [read_only, local_write, shell, external, delegation, sensitive] }
         argumentsPreview: { type: string, maxLength: 400 }
+        delegations:
+          type: array
+          items: { $ref: "#/components/schemas/DelegationApprovalPreview" }
+    ApprovalAttribution:
+      type: object
+      additionalProperties: false
+      required: [speakerKind, displayName]
+      properties:
+        speakerKind: { type: string, enum: [user, host, role, workflow, room, system] }
+        objectId: { type: string }
+        versionId: { type: string }
+        handle: { type: string }
+        displayName: { type: string }
+        permissionCeiling: { type: string, enum: [discuss, ask, auto] }
+        authority: { type: string, enum: [read_only, mutation] }
     ToolApprovalRequest:
       type: object
       required: [id, runId, sessionId, iteration, batchDigest, status, items, requestedAt]
@@ -1618,6 +2408,7 @@ components:
           items: { $ref: "#/components/schemas/ApprovalItem" }
         requestedAt: { type: string, format: date-time }
         resolvedAt: { type: string, format: date-time }
+        attribution: { $ref: "#/components/schemas/ApprovalAttribution" }
     ActiveRunState:
       type: object
       required: [run]
@@ -1689,3 +2480,103 @@ components:
         status: { type: string, enum: [queued, injected, cancelled] }
         createdAt: { type: string, format: date-time }
         injectedAt: { type: string, format: date-time }
+    # ——— Prompt Templates ———
+    PromptTemplateSummary:
+      type: object
+      required: [name, description, argumentHint, source, editable]
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        description: { type: string }
+        argumentHint: { type: string }
+        source: { type: string, enum: [builtin, settings, global, project] }
+        editable: { type: boolean }
+    PromptTemplateDiagnostic:
+      type: object
+      additionalProperties: false
+      properties:
+        level: { type: string, enum: [info, warning] }
+        code: { type: string }
+        source: { type: string }
+        path: { type: string }
+        name: { type: string }
+        message: { type: string }
+    GlobalPromptTemplateEntry:
+      type: object
+      required: [name, valid, editable]
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        description: { type: string }
+        argumentHint: { type: string }
+        valid: { type: boolean }
+        editable: { type: boolean }
+        diagnostic: { $ref: '#/components/schemas/PromptTemplateDiagnostic' }
+    ExpandPromptTemplateInput:
+      type: object
+      required: [invocation]
+      additionalProperties: false
+      properties:
+        invocation: { type: string }
+    ExpandPromptTemplateMatched:
+      type: object
+      required: [case, name, text, diagnostics]
+      additionalProperties: false
+      properties:
+        case: { type: string, const: matched }
+        name: { type: string }
+        text: { type: string }
+        diagnostics: { type: array, items: { $ref: '#/components/schemas/PromptTemplateDiagnostic' } }
+    ExpandPromptTemplateNotFound:
+      type: object
+      required: [case, name, diagnostics]
+      additionalProperties: false
+      properties:
+        case: { type: string, const: not_found }
+        name: { type: string }
+        diagnostics: { type: array, items: { $ref: '#/components/schemas/PromptTemplateDiagnostic' } }
+    ExpandPromptTemplateInvalid:
+      type: object
+      required: [case, diagnostics]
+      additionalProperties: false
+      properties:
+        case: { type: string, const: invalid_invocation }
+        diagnostics: { type: array, items: { $ref: '#/components/schemas/PromptTemplateDiagnostic' }, maxItems: 0 }
+    ExpandPromptTemplateResult:
+      oneOf:
+        - { $ref: '#/components/schemas/ExpandPromptTemplateMatched' }
+        - { $ref: '#/components/schemas/ExpandPromptTemplateNotFound' }
+        - { $ref: '#/components/schemas/ExpandPromptTemplateInvalid' }
+    CreatePromptTemplateInput:
+      type: object
+      required: [name, body]
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        description: { type: string }
+        argumentHint: { type: string }
+        body: { type: string }
+    UpdatePromptTemplateInput:
+      type: object
+      required: [body]
+      additionalProperties: false
+      properties:
+        description: { type: string }
+        argumentHint: { type: string }
+        body: { type: string }
+    PromptTemplateCatalog:
+      type: object
+      required: [templates, diagnostics]
+      additionalProperties: false
+      properties:
+        templates: { type: array, items: { $ref: '#/components/schemas/PromptTemplateSummary' } }
+        diagnostics: { type: array, items: { $ref: '#/components/schemas/PromptTemplateDiagnostic' } }
+    PromptTemplateManagementCatalog:
+      type: object
+      required: [templates, globalTemplates, globalRecoveryMode, diagnostics]
+      additionalProperties: false
+      properties:
+        templates: { type: array, items: { $ref: '#/components/schemas/PromptTemplateSummary' } }
+        globalTemplates: { type: array, items: { $ref: '#/components/schemas/GlobalPromptTemplateEntry' } }
+        globalRecoveryMode: { type: boolean }
+        diagnostics: { type: array, items: { $ref: '#/components/schemas/PromptTemplateDiagnostic' } }

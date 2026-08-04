@@ -33,11 +33,15 @@ type ToolCallContext struct {
 }
 
 type ToolDecision struct {
-	Action    ToolAction
-	Arguments json.RawMessage
-	Code      string
-	Reason    string
-	RiskClass domain.RiskClass
+	Action               ToolAction
+	Arguments            json.RawMessage
+	Code                 string
+	Reason               string
+	RiskClass            domain.RiskClass
+	RuleID               string `json:"ruleId,omitempty"`               // standing rule ID that authorized this call
+	StandingScopeKind    string `json:"standingScopeKind,omitempty"`    // for snapshot replay
+	StandingScopeVersion int    `json:"standingScopeVersion,omitempty"` // for snapshot replay
+	StandingScopeKey     string `json:"standingScopeKey,omitempty"`     // for snapshot replay
 }
 
 type AfterToolDecision struct {

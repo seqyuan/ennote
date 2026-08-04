@@ -27,6 +27,7 @@ func TestMigrateCreatesTables(t *testing.T) {
 		"skill_snapshots", "artifacts", "settings", "run_input_queue",
 		"policy_profiles", "image_descriptions", "context_compactions", "session_compaction_state",
 		"run_context_compactions", "run_execution_checkpoints", "tool_approval_requests", "session_branches",
+		"room_member_instances", "run_messages", "agent_profile_versions",
 	}
 	for _, name := range tables {
 		var exists int
@@ -49,8 +50,15 @@ func TestMigrateCreatesTables(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_sessions_project_status_updated'`).Scan(&sessionLifecycleIndex))
 	assert.Equal(t, 1, sessionLifecycleIndex)
 	for table, columns := range map[string][]string{
-		"artifacts":  {"source_tool_call_id", "source_kind", "source_workspace_path", "retention_class"},
-		"tool_calls": {"raw_artifact_refs_json", "projected_artifact_refs_json"},
+		"artifacts":      {"source_tool_call_id", "source_kind", "source_workspace_path", "retention_class"},
+		"tool_calls":     {"raw_artifact_refs_json", "projected_artifact_refs_json"},
+		"sessions":       {"mode"},
+		"messages":       {"speaker_kind", "speaker_snapshot_json", "addressee_kind", "visibility", "originated_at"},
+		"turns":          {"input_message_id", "input_kind", "target_kind", "context_mode", "reply_to_json"},
+		"agent_runs":     {"speaker_snapshot_json", "context_snapshot_json", "commit_format_version", "system_prompt_snapshot_json"},
+		"model_profiles": {"thinking_dialect", "supported_thinking_efforts_json", "input_cost_usd_micros_per_million", "output_cost_usd_micros_per_million"},
+		"run_budgets":    {"consumed_output_tokens", "consumed_cost_usd_micros", "started_at"},
+		"agent_profiles": {"object_kind", "handle", "scope", "project_id", "draft_json", "draft_revision", "current_version_id"},
 	} {
 		for _, column := range columns {
 			var count int

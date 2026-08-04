@@ -132,6 +132,7 @@ func (r *CallRepo) ToolStarted(ctx context.Context, call domain.ToolCallStart) e
 		"recordId": call.ID, "iteration": call.Iteration, "callIndex": call.CallIndex,
 		"toolCallId": call.Call.ID, "toolName": call.Call.Name, "arguments": effective,
 		"policyId": call.Policy.PolicyID, "policyCode": call.Policy.Code, "riskClass": call.Policy.RiskClass,
+		"standingRuleId": call.Policy.StandingRuleID,
 	})
 	return r.transact(ctx, call.RunID, domain.PendingEvent{EventType: "tool_call_started", Payload: payload}, func(tx *sql.Tx, now string) error {
 		var seq int
@@ -141,11 +142,12 @@ func (r *CallRepo) ToolStarted(ctx context.Context, call domain.ToolCallStart) e
 		_, err := tx.ExecContext(ctx, `INSERT INTO tool_calls
 			(id, run_id, seq, tool_call_id, tool_name, arguments_json, status, started_at,
 			iteration, call_index, arguments_fragment, original_arguments_json, effective_arguments_json,
-			policy_id, policy_version, policy_action, policy_code, risk_class)
-			VALUES (?, ?, ?, ?, ?, ?, 'started', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, call.ID, call.RunID, seq,
+			policy_id, policy_version, policy_action, policy_code, risk_class, standing_rule_id)
+			VALUES (?, ?, ?, ?, ?, ?, 'started', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, call.ID, call.RunID, seq,
 			call.Call.ID, call.Call.Name, string(effective), now, call.Iteration, call.CallIndex,
 			nullableStr(call.Call.ArgumentsFragment), string(original), string(effective), call.Policy.PolicyID,
-			call.Policy.PolicyVersion, call.Policy.Action, call.Policy.Code, call.Policy.RiskClass)
+			call.Policy.PolicyVersion, call.Policy.Action, call.Policy.Code, call.Policy.RiskClass,
+			call.Policy.StandingRuleID)
 		return err
 	})
 }

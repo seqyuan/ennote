@@ -97,6 +97,12 @@ func encodeContentBlock(block domain.ContentBlock) (json.RawMessage, error) {
 			return nil, fmt.Errorf("image description block is missing payload")
 		}
 		return json.Marshal(block.ImageDescription)
+	case domain.ContentRoomControl:
+		if block.RoomControl == nil || block.RoomControl.Action == "" || block.RoomControl.ParticipantInstanceID == "" ||
+			block.RoomControl.ObjectID == "" || block.RoomControl.ObjectVersionID == "" || !json.Valid(block.RoomControl.DisplaySnapshot) {
+			return nil, fmt.Errorf("room control block is missing participant identity")
+		}
+		return json.Marshal(block.RoomControl)
 	default:
 		return nil, fmt.Errorf("unsupported content block kind: %s", block.Kind)
 	}
@@ -167,6 +173,16 @@ func decodeContentBlock(kind domain.ContentKind, payload json.RawMessage) (domai
 			return block, err
 		}
 		block.ImageDescription = &description
+	case domain.ContentRoomControl:
+		var control domain.RoomControl
+		if err := json.Unmarshal(payload, &control); err != nil {
+			return block, err
+		}
+		if control.Action == "" || control.ParticipantInstanceID == "" || control.ObjectID == "" ||
+			control.ObjectVersionID == "" || !json.Valid(control.DisplaySnapshot) {
+			return block, fmt.Errorf("invalid room control participant identity")
+		}
+		block.RoomControl = &control
 	default:
 		return block, fmt.Errorf("unsupported content block kind: %s", kind)
 	}

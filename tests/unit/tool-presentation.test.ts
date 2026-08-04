@@ -15,6 +15,7 @@ describe("tool presentation", () => {
     expect(classifyDisplayRisk("write")).toBe("local_write");
     expect(classifyDisplayRisk("bash")).toBe("shell");
     expect(classifyDisplayRisk("http_request")).toBe("external");
+    expect(classifyDisplayRisk("delegate_roles")).toBe("delegation");
     expect(classifyDisplayRisk("unregistered_tool")).toBe("sensitive");
   });
 
@@ -36,6 +37,15 @@ describe("tool presentation", () => {
     });
     expect(summarizeToolCall("bash", { command: "npm test -- tests/unit/tool-presentation.test.ts" })).toMatchObject({
       label: "Run command", target: "npm test -- tests/unit/tool-presentation.test.ts",
+    });
+  });
+
+  it("summarizes delegated Role assignments", () => {
+    expect(summarizeToolCall("delegate_roles", { delegations: [
+      { roleHandle: "explorer", assignment: "Inspect files" },
+      { roleHandle: "reviewer", assignment: "Review findings" },
+    ] })).toEqual({
+      label: "Delegate roles", target: "2 assignments", detail: "@explorer, @reviewer",
     });
   });
 

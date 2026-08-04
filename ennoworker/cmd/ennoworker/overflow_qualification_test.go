@@ -139,7 +139,7 @@ func TestExecutorRecoversControlledFirstRequestOverflow(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, domain.RunSucceeded, storedRun.Status)
 	require.NotNil(t, storedRun.AssistantMessageID)
-	lineage, err := messageRepo.Lineage(ctx, session.ID, *storedRun.AssistantMessageID)
+	lineage, err := messageRepo.HostedContextLineage(ctx, session.ID, *storedRun.AssistantMessageID)
 	require.NoError(t, err)
 	assert.Contains(t, messageTextForQualification(lineage[len(lineage)-1]), "ENNOTE_OVERFLOW_RECOVERED")
 

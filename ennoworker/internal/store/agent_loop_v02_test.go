@@ -131,7 +131,15 @@ func TestFinalizeSuccessCommitsReplayableMessageChainAndEvents(t *testing.T) {
 
 	events, err := (&store.EventRepo{DB: repo.DB}).After(ctx, run.ID, 0, 100)
 	require.NoError(t, err)
-	assert.Contains(t, eventTypes(events), "message_committed")
+	types := eventTypes(events)
+	messageIndex := indexOf(types, "message_committed")
+	transcriptIndex := indexOf(types, "run_transcript_committed")
+	telemetryIndex := indexOf(types, "run_telemetry")
+	assert.NotEqual(t, -1, messageIndex)
+	assert.NotEqual(t, -1, transcriptIndex)
+	assert.NotEqual(t, -1, telemetryIndex)
+	assert.Greater(t, transcriptIndex, messageIndex)
+	assert.Greater(t, telemetryIndex, transcriptIndex)
 	assert.Equal(t, "run_succeeded", events[len(events)-1].EventType)
 }
 
@@ -409,6 +417,8 @@ func setupSubmittedRun(t *testing.T, requestID string) (*store.RunRepo, *domain.
 	t.Helper()
 	db := store.SetupDB(t)
 	ctx := context.Background()
+	_, err := db.Exec(`UPDATE settings SET value='1' WHERE key='hosted_commit_format_version'`)
+	require.NoError(t, err)
 	project, _, err := (&store.ProjectRepo{DB: db}).CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: requestID, HostPath: t.TempDir()})
 	require.NoError(t, err)
 	session, err := (&store.SessionRepo{DB: db}).Create(ctx, domain.CreateSessionInput{ProjectID: project.ID, Title: requestID})

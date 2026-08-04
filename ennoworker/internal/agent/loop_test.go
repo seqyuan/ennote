@@ -119,7 +119,11 @@ func TestLoopCompletesTextToolTextFlow(t *testing.T) {
 	loop := &Loop{Provider: provider, Tools: tools, Events: writer, MaxIterations: 4, ContextTokens: 4096}
 	result, err := loop.Run(context.Background(), RunInput{
 		RunID: "run-1", Model: "fake-model", SystemPrompt: "You are precise.",
-		History: []domain.ChatMessage{{Role: domain.RoleUser, Content: []domain.ContentBlock{textBlock("Inspect sample")}}},
+		InitialRuntime: domain.ModelRuntimeSnapshot{ModelProfileID: "fake-profile", APIModel: "fake-model",
+			ContextTokens: 4096, MaxOutputTokens: 2048,
+			ThinkingDialect: domain.ThinkingDialectOpenAIReasoningEffort},
+		ThinkingEffort: domain.ThinkingMedium,
+		History:        []domain.ChatMessage{{Role: domain.RoleUser, Content: []domain.ContentBlock{textBlock("Inspect sample")}}},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, 2, result.Iterations)
@@ -127,6 +131,12 @@ func TestLoopCompletesTextToolTextFlow(t *testing.T) {
 	require.Len(t, tools.calls, 1)
 	assert.Equal(t, "read", tools.calls[0].Name)
 	require.Len(t, provider.Requests, 2)
+	require.NotEmpty(t, provider.Requests[0].Messages)
+	assert.Equal(t, domain.RoleSystem, provider.Requests[0].Messages[0].Role)
+	assert.Equal(t, "You are precise.", provider.Requests[0].Messages[0].Content[0].Text)
+	require.NotNil(t, provider.Requests[0].Reasoning)
+	assert.Equal(t, domain.ThinkingMedium, provider.Requests[0].Reasoning.Effort)
+	assert.Equal(t, domain.ThinkingDialectOpenAIReasoningEffort, provider.Requests[0].Reasoning.Dialect)
 	secondRequest := provider.Requests[1]
 	assert.Equal(t, domain.RoleTool, secondRequest.Messages[len(secondRequest.Messages)-1].Role)
 	assert.Contains(t, writer.types(), "text_delta")

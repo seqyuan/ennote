@@ -65,10 +65,12 @@ func setupServer(t *testing.T, control RunController) (*Server, http.Handler) {
 	server := &Server{
 		DB: db, Token: "test-token", Sandbox: "none",
 		Projects: &store.ProjectRepo{DB: db}, Providers: &store.ProviderRepo{DB: db},
-		Models: &store.ModelRepo{DB: db}, Policies: &store.PolicyRepo{DB: db},
+		Models: &store.ModelRepo{DB: db}, Roles: &store.RoleRepo{DB: db, KnownTools: map[string]bool{
+			"read": true, "ls": true, "grep": true, "find": true, "bash": true, "write": true,
+		}}, Policies: &store.PolicyRepo{DB: db},
 		Artifacts: &artifacts.Service{DB: db, Root: t.TempDir()}, Sessions: &store.SessionRepo{DB: db},
 		Branches: &store.BranchRepo{DB: db}, Messages: &store.MessageRepo{DB: db}, Compactions: &store.CompactionRepo{DB: db},
-		Approvals: &store.ApprovalRepo{DB: db}, Runs: &store.RunRepo{DB: db},
+		Approvals: &store.ApprovalRepo{DB: db}, Delegations: &store.DelegationRepo{DB: db}, Runs: &store.RunRepo{DB: db},
 		Queue: &store.QueueRepo{DB: db}, Events: &store.EventRepo{DB: db},
 		Hub: hub, Control: control,
 	}
@@ -183,7 +185,7 @@ func TestApprovalAPIRehydratesAndResolvesPendingBatch(t *testing.T) {
 		json.RawMessage(`{"version":1,"secret":"internal-only"}`), []domain.ApprovalItem{{
 			ToolCallID: "call", ToolName: "write", RiskClass: domain.RiskLocalWrite,
 			ArgumentsPreview: `{"path":"notes.txt"}`,
-		}})
+		}}, nil)
 	require.NoError(t, err)
 
 	activeResponse := request(t, handler, http.MethodGet, "/v1/sessions/"+session.ID+"/active-run", nil, true)
@@ -207,6 +209,78 @@ func TestApprovalAPIRehydratesAndResolvesPendingBatch(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, conflict.Code)
 	missing := request(t, handler, http.MethodGet, "/v1/sessions/missing/active-run", nil, true)
 	assert.Equal(t, http.StatusNotFound, missing.Code)
+}
+
+func TestActiveParentProjectsDepthOneChildApproval(t *testing.T) {
+	control := &fakeController{}
+	server, handler := setupServer(t, control)
+	ctx := context.Background()
+	project, _, err := server.Projects.CreateWithWorkspace(ctx, domain.CreateProjectInput{
+		Name: "child approval", HostPath: t.TempDir(),
+	})
+	require.NoError(t, err)
+	session, err := server.Sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID})
+	require.NoError(t, err)
+	submission, err := server.Runs.SubmitTurn(ctx, domain.SubmitTurnInput{
+		SessionID: session.ID, ClientRequestID: "parent", Text: "delegate",
+	})
+	require.NoError(t, err)
+	_, err = server.Runs.Claim(ctx, submission.Run.ID)
+	require.NoError(t, err)
+
+	delegations := &store.DelegationRepo{DB: server.DB}
+	group, err := delegations.CreateGroup(ctx, store.CreateDelegationGroupInput{
+		ParentRunID: submission.Run.ID, ParentToolCallID: "delegate-call", Strategy: domain.DelegationStrategySingle,
+		Items: []store.CreateDelegationItemInput{{Name: "inspect", RoleVersionID: "builtin-workspace-explorer-v2",
+			AssignmentJSON: json.RawMessage(`{"task":"inspect"}`), OutputContract: "text-v1",
+			Budget: domain.BudgetCeilingJSON{MaxModelCalls: 4, MaxToolCalls: 8, MaxTotalTokens: 20000,
+				MaxOutputTokens: 4000, MaxWallTimeMS: 120000}}},
+	})
+	require.NoError(t, err)
+	items, err := delegations.ListItems(ctx, group.ID)
+	require.NoError(t, err)
+	child, err := delegations.CreateChildRun(ctx, store.CreateChildRunInput{
+		ParentRunID: submission.Run.ID, ItemID: items[0].ID, SessionID: session.ID,
+	})
+	require.NoError(t, err)
+	activityResponse := request(t, handler, http.MethodGet, "/v1/runs/"+submission.Run.ID+"/children", nil, true)
+	require.Equal(t, http.StatusOK, activityResponse.Code, activityResponse.Body.String())
+	var activity domain.DelegationActivityPage
+	decodeData(t, activityResponse, &activity)
+	require.Len(t, activity.Groups, 1)
+	assert.Equal(t, "delegate-call", activity.Groups[0].ParentToolCallID)
+	require.Len(t, activity.Groups[0].Children, 1)
+	assert.Equal(t, child.ID, activity.Groups[0].Children[0].ChildRunID)
+	assert.Equal(t, "workspace-explorer", activity.Groups[0].Children[0].RoleHandle)
+	missingActivity := request(t, handler, http.MethodGet, "/v1/runs/missing/children", nil, true)
+	assert.Equal(t, http.StatusNotFound, missingActivity.Code)
+
+	_, err = server.Runs.Claim(ctx, child.ID)
+	require.NoError(t, err)
+	approval, err := server.Approvals.Suspend(ctx, child.ID, 1, 1, "child-digest",
+		json.RawMessage(`{"version":1}`), []domain.ApprovalItem{{
+			CallIndex: 0, ToolCallID: "write-call", ToolName: "write", RiskClass: domain.RiskLocalWrite,
+			ArgumentsPreview: `{"path":"notes.txt"}`,
+		}}, nil)
+	require.NoError(t, err)
+
+	response := request(t, handler, http.MethodGet, "/v1/sessions/"+session.ID+"/active-run", nil, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var active domain.ActiveRunState
+	decodeData(t, response, &active)
+	assert.Equal(t, submission.Run.ID, active.Run.ID)
+	assert.Equal(t, domain.RunWaitingChildren, active.Run.Status)
+	require.NotNil(t, active.PendingApproval)
+	assert.Equal(t, child.ID, active.PendingApproval.RunID)
+	require.NotNil(t, active.PendingApproval.Attribution)
+	assert.Equal(t, "workspace-explorer", active.PendingApproval.Attribution.Handle)
+
+	decision := request(t, handler, http.MethodPost, "/v1/approval-requests/"+approval.ID+"/decision",
+		map[string]any{"decision": "approved", "clientRequestId": "child-decision"}, true)
+	require.Equal(t, http.StatusOK, decision.Code, decision.Body.String())
+	control.mu.Lock()
+	assert.Equal(t, []string{child.ID}, control.enqueued)
+	control.mu.Unlock()
 }
 
 func TestHealthIsUnauthenticatedAndReportsDegradedSandbox(t *testing.T) {
@@ -265,6 +339,106 @@ func TestProviderDoctorAPIIsUnavailableWithoutService(t *testing.T) {
 	_, handler := setupServer(t, nil)
 	response := request(t, handler, http.MethodPost, "/v1/provider-profiles/provider/test", map[string]any{}, true)
 	assert.Equal(t, http.StatusServiceUnavailable, response.Code)
+}
+
+func apiRoleDefinition(modelID string) domain.RoleDefinition {
+	return domain.RoleDefinition{
+		SchemaVersion: 1, RolePrompt: "Review evidence independently.",
+		ModelBinding: domain.RoleModelBinding{Mode: domain.RoleModelFixed, ModelProfileID: modelID,
+			ThinkingEffort: domain.ThinkingDefault, FallbackModelProfileIDs: []string{}, OverridableFields: []string{}},
+		Skills: domain.RoleSkills{Entries: []domain.RoleSkillEntry{}}, Authority: domain.RoleAuthorityReadOnly,
+		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read"},
+		ContextPolicy: domain.RoleContextPolicy{DefaultMode: domain.RoleContextRoom,
+			AllowedModes: []domain.RoleContextMode{domain.RoleContextRoom}, OwnExecutionContinuity: domain.RoleContinuityNone},
+		DelegationPolicy: domain.RoleDelegationPolicy{Admission: domain.DelegationApprovalRequired,
+			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
+			MaxInvocationsPerParentRun: 1, MaxConcurrentInstances: 1,
+			BudgetCeiling: domain.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
+				MaxTotalTokens: 20000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 120000}},
+		OutputContract: "text-v1", MaxLoopIterations: 8,
+	}
+}
+
+func TestRoleCRUDPublishAndCatalogAPI(t *testing.T) {
+	server, handler := setupServer(t, nil)
+	ctx := context.Background()
+	project, _, err := server.Projects.CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: "Roles", HostPath: t.TempDir()})
+	require.NoError(t, err)
+	provider, err := server.Providers.Create(ctx, store.CreateProviderInput{Name: "Provider",
+		ProviderType: domain.ProviderOpenAICompatible, BaseURL: "https://provider.test", CredentialRef: "env:ROLE_KEY"})
+	require.NoError(t, err)
+	model, err := server.Models.Create(ctx, store.CreateModelInput{ProviderID: provider.ID, ModelName: "role-model",
+		ContextWindow: 32000, MaxOutputTokens: 2048, SupportsToolUse: true})
+	require.NoError(t, err)
+	definition := apiRoleDefinition(model.ID)
+	created := request(t, handler, http.MethodPost, "/v1/roles", map[string]any{
+		"handle": "security-reviewer", "name": "Security Reviewer", "description": "Independent review",
+		"positioning": "Use after trust-boundary changes.", "icon": "shield-check", "color": "red",
+		"scope": "project", "projectId": project.ID, "definition": definition,
+	}, true)
+	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
+	var role domain.RoleIdentity
+	decodeData(t, created, &role)
+
+	catalog := request(t, handler, http.MethodGet, "/v1/roles?projectId="+project.ID+"&status=active", nil, true)
+	require.Equal(t, http.StatusOK, catalog.Code, catalog.Body.String())
+	assert.NotContains(t, catalog.Body.String(), "Review evidence independently")
+	var page struct {
+		Items []domain.RoleSummary `json:"items"`
+	}
+	decodeData(t, catalog, &page)
+	require.Len(t, page.Items, 2)
+
+	validated := request(t, handler, http.MethodPost, "/v1/roles/"+role.ID+"/validate", map[string]any{}, true)
+	require.Equal(t, http.StatusOK, validated.Code, validated.Body.String())
+	var validation domain.RoleValidationResult
+	decodeData(t, validated, &validation)
+	assert.True(t, validation.Valid)
+
+	published := request(t, handler, http.MethodPost, "/v1/roles/"+role.ID+"/publish",
+		map[string]any{"expectedRevision": 0}, true)
+	require.Equal(t, http.StatusCreated, published.Code, published.Body.String())
+	var version domain.RoleVersion
+	decodeData(t, published, &version)
+	assert.Equal(t, 1, version.Version)
+
+	session, err := server.Sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID, Title: "Direct Role"})
+	require.NoError(t, err)
+	_, err = server.DB.Exec(`UPDATE settings SET value='2' WHERE key='hosted_commit_format_version'`)
+	require.NoError(t, err)
+	invoked := request(t, handler, http.MethodPost, "/v1/sessions/"+session.ID+"/invocations", map[string]any{
+		"text":   "Review authorization boundaries.",
+		"target": map[string]any{"kind": "role", "objectId": role.ID, "versionId": version.ID, "contextMode": "room"},
+	}, true)
+	require.Equal(t, http.StatusAccepted, invoked.Code, invoked.Body.String())
+	var invocation domain.TurnSubmission
+	decodeData(t, invoked, &invocation)
+	assert.Equal(t, domain.CommitFormatSpeakerV2, invocation.Run.CommitFormatVersion)
+	assert.Contains(t, string(invocation.Run.SpeakerSnapshot), `"handle":"security-reviewer"`)
+	var addresseeKind, addresseeObjectID string
+	require.NoError(t, server.DB.QueryRow(`SELECT addressee_kind,addressee_object_id FROM messages WHERE id=?`,
+		invocation.UserMessageID).Scan(&addresseeKind, &addresseeObjectID))
+	assert.Equal(t, "role", addresseeKind)
+	assert.Equal(t, role.ID, addresseeObjectID)
+
+	definition.RolePrompt = "Review authorization boundaries."
+	updated := request(t, handler, http.MethodPatch, "/v1/roles/"+role.ID+"/draft", map[string]any{
+		"expectedRevision": 0, "positioning": "Updated positioning", "definition": definition,
+	}, true)
+	require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
+	decodeData(t, updated, &role)
+	assert.Equal(t, 1, role.DraftRevision)
+	assert.Equal(t, "Updated positioning", role.Positioning)
+
+	history := request(t, handler, http.MethodGet, "/v1/roles/"+role.ID+"/versions", nil, true)
+	require.Equal(t, http.StatusOK, history.Code, history.Body.String())
+	var versions []domain.RoleVersion
+	decodeData(t, history, &versions)
+	require.Len(t, versions, 1)
+	assert.Equal(t, version.ID, versions[0].ID)
+
+	archived := request(t, handler, http.MethodPost, "/v1/roles/"+role.ID+"/archive", map[string]any{}, true)
+	assert.Equal(t, http.StatusOK, archived.Code, archived.Body.String())
 }
 
 func TestProfileManagementAndSessionDefaultModel(t *testing.T) {
@@ -668,6 +842,10 @@ func TestSessionMessagesAPIIsBranchAwareAndPaginated(t *testing.T) {
 	assert.NotEmpty(t, firstPage.NextCursor)
 	assert.Equal(t, lineage[2].ID, firstPage.ActiveLeafMessageID)
 	assert.Equal(t, domain.ContentText, firstPage.Messages[0].Parts[0].Kind)
+	assert.Equal(t, domain.SpeakerUser, firstPage.Messages[0].SpeakerKind)
+	assert.Equal(t, domain.VisibilityPublic, firstPage.Messages[0].Visibility)
+	require.NotNil(t, firstPage.Messages[0].AddresseeKind)
+	assert.Equal(t, "host", *firstPage.Messages[0].AddresseeKind)
 	assert.Contains(t, first.Body.String(), `"type":"text"`)
 	assert.NotContains(t, first.Body.String(), `"Kind"`)
 
@@ -716,6 +894,95 @@ func TestSessionMessagesAPIRejectsCursorFromSiblingBranch(t *testing.T) {
 	response := request(t, handler, http.MethodGet, "/v1/sessions/"+session.ID+"/messages?before="+cursor, nil, true)
 	assert.Equal(t, http.StatusBadRequest, response.Code)
 	assert.Contains(t, response.Body.String(), "invalid_message_cursor")
+}
+
+func TestRunAPIExposesSafeFrozenPromptMetadata(t *testing.T) {
+	server, handler := setupServer(t, nil)
+	project, _, err := server.Projects.CreateWithWorkspace(context.Background(), domain.CreateProjectInput{
+		Name: "Prompt metadata", HostPath: t.TempDir(),
+	})
+	require.NoError(t, err)
+	session, err := server.Sessions.Create(context.Background(), domain.CreateSessionInput{ProjectID: project.ID})
+	require.NoError(t, err)
+	submission, err := server.Runs.SubmitTurn(context.Background(), domain.SubmitTurnInput{
+		SessionID: session.ID, ClientRequestID: "prompt-metadata", Text: "hello",
+	})
+	require.NoError(t, err)
+	_, err = server.DB.Exec(`UPDATE agent_runs SET system_prompt_snapshot_json=?,system_prompt_digest=? WHERE id=?`,
+		`{"version":1,"agentProfileId":"agent-safe","agentPrompt":"private prompt body","platformVersion":"host-v1","digest":"digest-safe"}`,
+		"digest-safe", submission.Run.ID)
+	require.NoError(t, err)
+
+	response := request(t, handler, http.MethodGet, "/v1/runs/"+submission.Run.ID, nil, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var envelope struct {
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &envelope))
+	metadata, ok := envelope.Data["systemPrompt"].(map[string]any)
+	require.True(t, ok, response.Body.String())
+	assert.Equal(t, "digest-safe", metadata["digest"])
+	assert.Equal(t, "agent-safe", metadata["agentProfileId"])
+	assert.Equal(t, "host-v1", metadata["platformVersion"])
+	assert.NotContains(t, response.Body.String(), "private prompt body")
+	assert.NotContains(t, response.Body.String(), "agentPrompt")
+	assert.NotContains(t, response.Body.String(), "system_prompt_snapshot_json")
+}
+
+func TestRunMessagesAPIExposesPrivateShadowAndLegacyFallback(t *testing.T) {
+	server, handler := setupServer(t, nil)
+	project, _, err := server.Projects.CreateWithWorkspace(context.Background(), domain.CreateProjectInput{Name: "Transcript", HostPath: t.TempDir()})
+	require.NoError(t, err)
+	session, err := server.Sessions.Create(context.Background(), domain.CreateSessionInput{ProjectID: project.ID})
+	require.NoError(t, err)
+	assert.Equal(t, domain.SessionModeHosted, session.Mode)
+	_, err = server.DB.Exec(`UPDATE settings SET value='1' WHERE key='hosted_commit_format_version'`)
+	require.NoError(t, err)
+	submission, err := server.Runs.SubmitTurn(context.Background(), domain.SubmitTurnInput{
+		SessionID: session.ID, ClientRequestID: "transcript", Text: "run",
+	})
+	require.NoError(t, err)
+	_, err = server.Runs.Claim(context.Background(), submission.Run.ID)
+	require.NoError(t, err)
+	require.NoError(t, server.Runs.FinalizeSuccess(context.Background(), submission.Run.ID, domain.RunOutput{Messages: []domain.ChatMessage{
+		{Role: domain.RoleAssistant, Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: "first"}}},
+		{Role: domain.RoleAssistant, Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: "final"}}},
+	}}))
+
+	response := request(t, handler, http.MethodGet, "/v1/runs/"+submission.Run.ID+"/messages?limit=1", nil, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var page struct {
+		RunID             string              `json:"runId"`
+		FormatVersion     int                 `json:"formatVersion"`
+		Source            string              `json:"source"`
+		Messages          []domain.RunMessage `json:"messages"`
+		HasMore           bool                `json:"hasMore"`
+		NextBeforeOrdinal int                 `json:"nextBeforeOrdinal"`
+	}
+	decodeData(t, response, &page)
+	assert.Equal(t, submission.Run.ID, page.RunID)
+	assert.Equal(t, 1, page.FormatVersion)
+	assert.Equal(t, "shadow", page.Source)
+	require.Len(t, page.Messages, 1)
+	assert.Equal(t, 1, page.Messages[0].Ordinal)
+	assert.True(t, page.HasMore)
+
+	_, err = server.DB.Exec(`DELETE FROM run_messages WHERE run_id=?`, submission.Run.ID)
+	require.NoError(t, err)
+	legacy := request(t, handler, http.MethodGet, "/v1/runs/"+submission.Run.ID+"/messages", nil, true)
+	require.Equal(t, http.StatusOK, legacy.Code, legacy.Body.String())
+	decodeData(t, legacy, &page)
+	assert.Equal(t, "legacy", page.Source)
+
+	_, err = server.DB.Exec(`INSERT INTO run_messages(id,run_id,ordinal,role,payload_json,visibility,created_at)
+		VALUES('corrupt',?,0,'assistant','[{"type":"text","text":"private-secret"}]','private','2026-08-03T00:00:00Z')`, submission.Run.ID)
+	require.NoError(t, err)
+	corrupt := request(t, handler, http.MethodGet, "/v1/runs/"+submission.Run.ID+"/messages", nil, true)
+	assert.Equal(t, http.StatusInternalServerError, corrupt.Code)
+	assert.NotContains(t, corrupt.Body.String(), "private-secret")
+
+	missing := request(t, handler, http.MethodGet, "/v1/runs/missing/messages", nil, true)
+	assert.Equal(t, http.StatusNotFound, missing.Code)
 }
 
 func messageIDsForAPI(messages []domain.Message) []string {

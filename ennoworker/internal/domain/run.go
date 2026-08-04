@@ -13,18 +13,21 @@ type RunKind string
 const (
 	RunKindAgent             RunKind = "agent"
 	RunKindContextCompaction RunKind = "context_compaction"
+	RunKindDelegatedAgent    RunKind = "delegated_agent"
 )
 
 type RunStatus string
 
 const (
-	RunQueued             RunStatus = "queued"
-	RunRunning            RunStatus = "running"
-	RunWaitingForApproval RunStatus = "waiting_for_approval"
-	RunSucceeded          RunStatus = "succeeded"
-	RunFailed             RunStatus = "failed"
-	RunCancelled          RunStatus = "cancelled"
-	RunInterrupted        RunStatus = "interrupted"
+	RunQueued                 RunStatus = "queued"
+	RunRunning                RunStatus = "running"
+	RunWaitingForApproval     RunStatus = "waiting_for_approval"
+	RunWaitingDelegationAdmit RunStatus = "waiting_delegation_admission"
+	RunWaitingChildren        RunStatus = "waiting_children"
+	RunSucceeded              RunStatus = "succeeded"
+	RunFailed                 RunStatus = "failed"
+	RunCancelled              RunStatus = "cancelled"
+	RunInterrupted            RunStatus = "interrupted"
 )
 
 func (s RunStatus) Terminal() bool {
@@ -41,8 +44,14 @@ func CanTransitionRun(from, to RunStatus) bool {
 	case RunQueued:
 		return to == RunRunning || to == RunCancelled || to == RunInterrupted
 	case RunRunning:
-		return to == RunWaitingForApproval || to == RunSucceeded || to == RunFailed || to == RunCancelled || to == RunInterrupted
+		return to == RunWaitingForApproval || to == RunWaitingDelegationAdmit ||
+			to == RunWaitingChildren || to == RunSucceeded || to == RunFailed ||
+			to == RunCancelled || to == RunInterrupted
 	case RunWaitingForApproval:
+		return to == RunQueued || to == RunCancelled || to == RunInterrupted
+	case RunWaitingDelegationAdmit:
+		return to == RunQueued || to == RunWaitingChildren || to == RunCancelled || to == RunInterrupted
+	case RunWaitingChildren:
 		return to == RunQueued || to == RunCancelled || to == RunInterrupted
 	default:
 		return false
@@ -78,17 +87,19 @@ type PolicySnapshot struct {
 }
 
 type ModelRuntimeSnapshot struct {
-	ProviderProfileID string `json:"providerProfileId"`
-	ModelProfileID    string `json:"modelProfileId"`
-	APIModel          string `json:"apiModel"`
-	BaseURL           string `json:"baseUrl"`
-	CredentialRef     string `json:"credentialRef"`
-	Proxy             string `json:"proxy,omitempty"`
-	ContextTokens     int    `json:"contextTokens"`
-	MaxOutputTokens   int    `json:"maxOutputTokens"`
-	SupportsVision    bool   `json:"supportsVision"`
-	SupportsToolUse   bool   `json:"supportsToolUse"`
-	SupportsThinking  bool   `json:"supportsThinking"`
+	ProviderProfileID        string           `json:"providerProfileId"`
+	ModelProfileID           string           `json:"modelProfileId"`
+	APIModel                 string           `json:"apiModel"`
+	BaseURL                  string           `json:"baseUrl"`
+	CredentialRef            string           `json:"credentialRef"`
+	Proxy                    string           `json:"proxy,omitempty"`
+	ContextTokens            int              `json:"contextTokens"`
+	MaxOutputTokens          int              `json:"maxOutputTokens"`
+	SupportsVision           bool             `json:"supportsVision"`
+	SupportsToolUse          bool             `json:"supportsToolUse"`
+	SupportsThinking         bool             `json:"supportsThinking"`
+	ThinkingDialect          ThinkingDialect  `json:"thinkingDialect"`
+	SupportedThinkingEfforts []ThinkingEffort `json:"supportedThinkingEfforts"`
 }
 
 type FrozenRoutingConfig struct {
@@ -98,23 +109,39 @@ type FrozenRoutingConfig struct {
 	AllowAutoRoute bool                   `json:"allowAutoRoute"`
 }
 
+type FrozenRoleExecution struct {
+	ObjectID          string         `json:"objectId"`
+	VersionID         string         `json:"versionId"`
+	Version           int            `json:"version"`
+	Handle            string         `json:"handle"`
+	DisplayName       string         `json:"displayName"`
+	ConfigDigest      string         `json:"configDigest"`
+	Authority         RoleAuthority  `json:"authority"`
+	PermissionCeiling PermissionMode `json:"permissionCeiling"`
+	AllowedTools      []string       `json:"allowedTools"`
+	Skills            RoleSkills     `json:"skills"`
+	OutputContract    string         `json:"outputContract"`
+}
+
 type EffectiveRunConfig struct {
-	ProviderProfileID string               `json:"providerProfileId"`
-	ModelProfileID    string               `json:"modelProfileId"`
-	APIModel          string               `json:"apiModel"`
-	ContextTokens     int                  `json:"contextTokens"`
-	MaxOutputTokens   int                  `json:"maxOutputTokens"`
-	MaxIterations     int                  `json:"maxIterations"`
-	ToolExecution     ToolExecutionConfig  `json:"toolExecution"`
-	InitialRuntime    ModelRuntimeSnapshot `json:"initialRuntime"`
-	Routing           FrozenRoutingConfig  `json:"routing"`
-	ToolPolicy        PolicySnapshot       `json:"toolPolicy"`
-	TurnPolicy        PolicySnapshot       `json:"turnPolicy"`
-	VisionPolicy      PolicySnapshot       `json:"visionPolicy"`
-	CompactionPolicy  PolicySnapshot       `json:"compactionPolicy"`
-	CompactionRuntime ModelRuntimeSnapshot `json:"compactionRuntime"`
-	HookConfig        EffectiveHookConfig         `json:"hookConfig"`
-	WorkspaceSecurity *WorkspaceSecuritySnapshot   `json:"workspaceSecurity,omitempty"`
+	ProviderProfileID string                     `json:"providerProfileId"`
+	ModelProfileID    string                     `json:"modelProfileId"`
+	APIModel          string                     `json:"apiModel"`
+	ContextTokens     int                        `json:"contextTokens"`
+	MaxOutputTokens   int                        `json:"maxOutputTokens"`
+	MaxIterations     int                        `json:"maxIterations"`
+	ThinkingEffort    ThinkingEffort             `json:"thinkingEffort"`
+	ToolExecution     ToolExecutionConfig        `json:"toolExecution"`
+	InitialRuntime    ModelRuntimeSnapshot       `json:"initialRuntime"`
+	Routing           FrozenRoutingConfig        `json:"routing"`
+	ToolPolicy        PolicySnapshot             `json:"toolPolicy"`
+	TurnPolicy        PolicySnapshot             `json:"turnPolicy"`
+	VisionPolicy      PolicySnapshot             `json:"visionPolicy"`
+	CompactionPolicy  PolicySnapshot             `json:"compactionPolicy"`
+	CompactionRuntime ModelRuntimeSnapshot       `json:"compactionRuntime"`
+	HookConfig        EffectiveHookConfig        `json:"hookConfig"`
+	WorkspaceSecurity *WorkspaceSecuritySnapshot `json:"workspaceSecurity,omitempty"`
+	Role              *FrozenRoleExecution       `json:"role,omitempty"`
 }
 
 type WorkspaceSecuritySnapshot struct {
@@ -128,12 +155,12 @@ type WorkspaceSecuritySnapshot struct {
 // It captures the resolved hook set, workspace trust snapshot, and any
 // additional context injected by the RunStart hook.
 type EffectiveHookConfig struct {
-	ResolvedHookSet  json.RawMessage `json:"resolvedHookSet"`
-	HookSetDigest    string          `json:"hookSetDigest"`
-	WorkspaceID      string          `json:"workspaceId"`
-	WorkspaceRoot    string          `json:"workspaceRoot"`
-	TrustedAt        time.Time       `json:"trustedAt"`
-	RunStartContext  string          `json:"runStartContext,omitempty"`
+	ResolvedHookSet json.RawMessage `json:"resolvedHookSet"`
+	HookSetDigest   string          `json:"hookSetDigest"`
+	WorkspaceID     string          `json:"workspaceId"`
+	WorkspaceRoot   string          `json:"workspaceRoot"`
+	TrustedAt       time.Time       `json:"trustedAt"`
+	RunStartContext string          `json:"runStartContext,omitempty"`
 }
 
 // RunTelemetryPayload is the structured run summary emitted as the durable
@@ -153,10 +180,10 @@ type RunTelemetryPayload struct {
 
 // ToolTiming aggregates per-tool execution statistics for telemetry.
 type ToolTiming struct {
-	Count       int   `json:"count"`
-	ErrorCount  int   `json:"errorCount"`
-	Attempts    int   `json:"attempts"`
-	TotalMS     int64 `json:"totalMs"`
+	Count      int   `json:"count"`
+	ErrorCount int   `json:"errorCount"`
+	Attempts   int   `json:"attempts"`
+	TotalMS    int64 `json:"totalMs"`
 }
 
 // HookOutcome records the result of a decision-style hook execution.
@@ -175,6 +202,11 @@ func (c EffectiveHookConfig) IsEmpty() bool {
 type RunOutput struct {
 	Messages  []ChatMessage
 	Suspended bool
+	// Adding RunOutput
+	Waiting bool
+	// Terminal carries the child's submit_result contract. Only set for
+	// delegated_agent Runs; the child finalizer stores it instead of publishing.
+	Terminal *SubmitResult
 }
 
 type ErrorCode string
@@ -222,6 +254,15 @@ const (
 	ErrorHistoryLookupForbidden         ErrorCode = "history_lookup_forbidden"
 	ErrorHistoryLookupOutOfRange        ErrorCode = "history_lookup_out_of_range"
 	ErrorApprovalCheckpointInvalid      ErrorCode = "approval_checkpoint_invalid"
+	ErrorCommitFormatNotEnabled         ErrorCode = "commit_format_not_enabled"
+	ErrorContextProjectionNotEnabled    ErrorCode = "context_projection_not_enabled"
+	ErrorInvocationTargetInvalid        ErrorCode = "invocation_target_invalid"
+	ErrorIncompleteTerminalContract     ErrorCode = "incomplete_terminal_contract"
+	ErrorDelegationBudgetExceeded       ErrorCode = "delegation_budget_exceeded"
+	ErrorDelegationNotAuthorized        ErrorCode = "delegation_not_authorized"
+	ErrorTranscriptShadowMissing        ErrorCode = "transcript_shadow_missing"
+	ErrorTranscriptShadowMismatch       ErrorCode = "transcript_shadow_mismatch"
+	ErrorTranscriptCorrupt              ErrorCode = "transcript_corrupt"
 )
 
 type CodedError struct {
@@ -257,23 +298,105 @@ func ErrorCodeOf(err error) ErrorCode {
 	return ErrorToolBatchFailed
 }
 
+type CommitFormatVersion int
+
+const (
+	CommitFormatLegacyV1  CommitFormatVersion = 1
+	CommitFormatSpeakerV2 CommitFormatVersion = 2
+)
+
+type PublishMode string
+
+const (
+	PublishPublicFinal     PublishMode = "public_final"
+	PublishPrivateToParent PublishMode = "private_to_parent"
+)
+
+type SystemPromptSnapshot struct {
+	Version         int    `json:"version"`
+	AgentProfileID  string `json:"agentProfileId,omitempty"`
+	AgentPrompt     string `json:"agentPrompt"`
+	PlatformVersion string `json:"platformVersion"`
+	Digest          string `json:"digest"`
+}
+
+type SystemPromptMetadata struct {
+	Version         int    `json:"version"`
+	AgentProfileID  string `json:"agentProfileId,omitempty"`
+	PlatformVersion string `json:"platformVersion"`
+	Digest          string `json:"digest"`
+}
+
 type AgentRun struct {
-	ID                 string          `json:"id"`
-	TurnID             string          `json:"turnId,omitempty"`
-	SessionID          string          `json:"sessionId"`
-	RunKind            RunKind         `json:"runKind"`
-	BaseMessageID      string          `json:"baseMessageId,omitempty"`
-	Attempt            int             `json:"attempt"`
-	Status             RunStatus       `json:"status"`
-	AssistantMessageID *string         `json:"assistantMessageId,omitempty"`
-	RetryOfRunID       string          `json:"retryOfRunId,omitempty"`
-	RequestedConfig    json.RawMessage `json:"requestedConfig"`
-	EffectiveConfig    json.RawMessage `json:"effectiveConfig"`
-	ErrorCode          *string         `json:"errorCode,omitempty"`
-	ErrorMessage       *string         `json:"errorMessage,omitempty"`
-	StartedAt          *time.Time      `json:"startedAt,omitempty"`
-	FinishedAt         *time.Time      `json:"finishedAt,omitempty"`
-	CreatedAt          time.Time       `json:"createdAt"`
+	ID                    string                `json:"id"`
+	TurnID                string                `json:"turnId,omitempty"`
+	SessionID             string                `json:"sessionId"`
+	RunKind               RunKind               `json:"runKind"`
+	BaseMessageID         string                `json:"baseMessageId,omitempty"`
+	Attempt               int                   `json:"attempt"`
+	Status                RunStatus             `json:"status"`
+	AssistantMessageID    *string               `json:"assistantMessageId,omitempty"`
+	RetryOfRunID          string                `json:"retryOfRunId,omitempty"`
+	CommitFormatVersion   CommitFormatVersion   `json:"commitFormatVersion"`
+	SystemPrompt          *SystemPromptMetadata `json:"systemPrompt,omitempty"`
+	ParentRunID           string                `json:"parentRunId,omitempty"`
+	RootRunID             string                `json:"rootRunId,omitempty"`
+	ExecutionDepth        int                   `json:"executionDepth"`
+	PublishMode           PublishMode           `json:"publishMode"`
+	SpeakerSnapshot       json.RawMessage       `json:"speakerSnapshot"`
+	ContextSnapshot       json.RawMessage       `json:"contextSnapshot"`
+	ContextSnapshotDigest string                `json:"contextSnapshotDigest,omitempty"`
+	RequestedConfig       json.RawMessage       `json:"requestedConfig"`
+	EffectiveConfig       json.RawMessage       `json:"effectiveConfig"`
+	ErrorCode             *string               `json:"errorCode,omitempty"`
+	ErrorMessage          *string               `json:"errorMessage,omitempty"`
+	StartedAt             *time.Time            `json:"startedAt,omitempty"`
+	FinishedAt            *time.Time            `json:"finishedAt,omitempty"`
+	CreatedAt             time.Time             `json:"createdAt"`
+}
+
+func (r AgentRun) MarshalJSON() ([]byte, error) {
+	type plain AgentRun
+	encoded, err := json.Marshal(plain(r))
+	if err != nil {
+		return nil, err
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		return nil, err
+	}
+	if effective, ok := payload["effectiveConfig"]; ok {
+		redactRunConfig(effective)
+	}
+	return json.Marshal(payload)
+}
+
+func redactRunConfig(value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			switch key {
+			case "credentialRef", "apiKey", "systemPrompt", "agentPrompt":
+				delete(typed, key)
+			default:
+				redactRunConfig(child)
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			redactRunConfig(child)
+		}
+	}
+}
+
+type RunMessage struct {
+	ID         string            `json:"id"`
+	RunID      string            `json:"runId"`
+	Ordinal    int               `json:"ordinal"`
+	Role       Role              `json:"role"`
+	Content    []ContentBlock    `json:"content"`
+	Visibility MessageVisibility `json:"visibility"`
+	CreatedAt  time.Time         `json:"createdAt"`
 }
 
 type RunEvent struct {
@@ -293,24 +416,48 @@ type RunEvent struct {
 type LiveRunEvent struct {
 	RunID     string          `json:"runId"`
 	Type      string          `json:"type"`
-	StreamID  string          `json:"streamId"`  // tool call id + stream, e.g. "call-1:stdout"
-	LiveSeq   int64           `json:"liveSeq"`   // connection-local sequence, not durable
+	StreamID  string          `json:"streamId"` // tool call id + stream, e.g. "call-1:stdout"
+	LiveSeq   int64           `json:"liveSeq"`  // connection-local sequence, not durable
 	Payload   json.RawMessage `json:"payload"`
 	CreatedAt time.Time       `json:"createdAt"`
 }
 
 // Live event type constants — these are rendering deltas, not state transitions.
 const (
-	LiveTextDelta               = "text_delta"
-	LiveThinkingDelta           = "thinking_delta"
-	LiveToolCallDelta           = "tool_call_delta"
-	LiveVisionDescriptionDelta  = "vision_description_delta"
-	LiveToolOutputDelta         = "tool_output_delta"
+	LiveTextDelta              = "text_delta"
+	LiveThinkingDelta          = "thinking_delta"
+	LiveToolCallDelta          = "tool_call_delta"
+	LiveVisionDescriptionDelta = "vision_description_delta"
+	LiveToolOutputDelta        = "tool_output_delta"
 )
 
 type PendingEvent struct {
 	EventType string
 	Payload   json.RawMessage
+}
+
+type InvocationTargetKind string
+
+const (
+	InvocationTargetHost InvocationTargetKind = "host"
+	InvocationTargetRole InvocationTargetKind = "role"
+)
+
+type InvocationContextMode string
+
+const (
+	InvocationContextRoom    InvocationContextMode = "room"
+	InvocationContextFresh   InvocationContextMode = "fresh"
+	InvocationContextReplyTo InvocationContextMode = "reply_to"
+	InvocationContextTask    InvocationContextMode = "task_only"
+)
+
+type RoleInvocationTarget struct {
+	Kind        InvocationTargetKind  `json:"kind"`
+	ObjectID    string                `json:"objectId"`
+	VersionID   string                `json:"versionId"`
+	ContextMode InvocationContextMode `json:"contextMode"`
+	ReplyTo     []string              `json:"replyTo,omitempty"`
 }
 
 type SubmitTurnInput struct {
@@ -319,6 +466,16 @@ type SubmitTurnInput struct {
 	BaseMessageID   string
 	Text            string
 	Parts           []ContentBlock
+	RequestedConfig json.RawMessage
+}
+
+type SubmitInvocationInput struct {
+	SessionID       string
+	ClientRequestID string
+	BaseMessageID   string
+	Text            string
+	Parts           []ContentBlock
+	Target          RoleInvocationTarget
 	RequestedConfig json.RawMessage
 }
 

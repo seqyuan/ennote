@@ -10,12 +10,14 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"golang.org/x/net/html/charset"
+	"golang.org/x/net/idna"
 )
 
 const (
@@ -26,6 +28,7 @@ const (
 	webFetchMaxRedirects        = 10
 	webFetchMaxURLBytes         = 8 << 10
 	webFetchBodySniffBytes      = 512
+	webFetchOriginScopeVersion  = 1
 )
 
 // WebFetchTool fetches public HTTPS pages and converts them to Markdown text.
@@ -56,6 +59,57 @@ func (t *WebFetchTool) ExecutionClass() domain.ExecutionClass { return domain.Ex
 
 func (t *WebFetchTool) RetryPolicy() domain.ToolRetryPolicy {
 	return domain.ToolRetryPolicy{Mode: domain.ToolRetryTransient, MaxRetries: 2}
+}
+
+// StandingApprovalScope implements domain.StandingApprovalScopeProvider.
+// It resolves the web_fetch URL argument into an origin/v1 standing scope.
+// Only valid HTTPS origins with canonical hostnames pass; legacy numeric IP
+// forms, blocked IP literals, userinfo, non-443 ports, and IDNA failures
+// all return errors (fail-closed).
+func (t *WebFetchTool) StandingApprovalScope(arguments json.RawMessage) (domain.StandingApprovalScope, error) {
+	var args struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(arguments, &args); err != nil {
+		return domain.StandingApprovalScope{}, fmt.Errorf("invalid web_fetch arguments: %w", err)
+	}
+	normalized, err := normalizeFetchURL(args.URL)
+	if err != nil {
+		return domain.StandingApprovalScope{}, err
+	}
+	host := normalized.Hostname()
+	// Direct IP literal: only provide standing scope for non-blocked IPs.
+	if ip, err := netip.ParseAddr(host); err == nil {
+		ip = ip.Unmap()
+		if isBlockedIPLiteral(ip) {
+			return domain.StandingApprovalScope{}, fmt.Errorf("IP %s is blocked for standing approval", ip)
+		}
+		keyHost := host
+		if ip.Is6() {
+			keyHost = "[" + ip.String() + "]"
+		}
+		return domain.StandingApprovalScope{
+			Kind:         "origin",
+			ScopeVersion: webFetchOriginScopeVersion,
+			Key:          "https://" + keyHost + ":443",
+			Display:      host + " (all paths)",
+		}, nil
+	}
+	// Hostname: reject legacy numeric forms before IDNA.
+	if looksLikeLegacyIPv4Literal(host) {
+		return domain.StandingApprovalScope{}, fmt.Errorf("legacy numeric IPv4 forms are not supported")
+	}
+	// IDNA canonicalization.
+	canonical, err := idnaLookupHost(host)
+	if err != nil {
+		return domain.StandingApprovalScope{}, fmt.Errorf("cannot canonicalize hostname %s: %w", host, err)
+	}
+	return domain.StandingApprovalScope{
+		Kind:         "origin",
+		ScopeVersion: webFetchOriginScopeVersion,
+		Key:          "https://" + canonical + ":443",
+		Display:      canonical + " (all paths)",
+	}, nil
 }
 
 func (t *WebFetchTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
@@ -192,8 +246,13 @@ func normalizeFetchURL(raw string) (*url.URL, error) {
 	// Remove fragment.
 	parsed.Fragment = ""
 	// Reject empty hostname.
-	if parsed.Hostname() == "" {
+	hostname := parsed.Hostname()
+	if hostname == "" {
 		return nil, fmt.Errorf("hostname must not be empty")
+	}
+	// Reject legacy numeric IPv4 forms before they reach DNS or standing scope.
+	if looksLikeLegacyIPv4Literal(hostname) {
+		return nil, fmt.Errorf("legacy numeric IPv4 forms are not supported")
 	}
 	return parsed, nil
 }
@@ -493,4 +552,84 @@ func formatFetchResult(sourceURL string, statusCode int, contentType string, tru
 func readLimited(r io.Reader, limit int) string {
 	data, _ := io.ReadAll(io.LimitReader(r, int64(limit)))
 	return string(data)
+}
+
+// looksLikeLegacyIPv4Literal checks whether host looks like a legacy numeric
+// IPv4 form that Go's netip.ParseAddr would not accept but some URL parsers
+// or resolvers might interpret (single integer, octal, hex, or mixed forms).
+// These are explicitly rejected to prevent scope canonicalization ambiguity.
+//
+// Examples that return true: 2130706433, 127.1, 0177.0.0.1, 0x7f000001, 0x7f.0.0.1.
+func looksLikeLegacyIPv4Literal(host string) bool {
+	if host == "" {
+		return false
+	}
+	// Quick reject: if netip.ParseAddr accepts it, it's not "legacy" — it's a
+	// standard IP literal (IPv4 dotted-decimal or canonical IPv6).
+	if _, err := netip.ParseAddr(host); err == nil {
+		return false
+	}
+	// If the host is a valid hostname according to Go's net.Parse (no hex/octal
+	// IP forms), it's also not legacy. This fast path covers most cases.
+	return looksLikeIPv4Form(host)
+}
+
+var legacyIPv4Hex = regexp.MustCompile(`^0[xX][0-9a-fA-F]+(\.[0-9a-fA-F]+)*$`)
+var legacyIPv4Oct = regexp.MustCompile(`^0[0-7]+(\.[0-7]+)*$`)
+var legacyIPv4LeadingZero = regexp.MustCompile(`^0[0-9]+`)
+
+// looksLikeIPv4Form returns true if host resembles a non-standard IPv4
+// representation: single decimal integer (no dots), hex form, octal form,
+// or mixed dotted forms with fewer than four segments.
+func looksLikeIPv4Form(host string) bool {
+	// Single integer: "2130706433"
+	if singleIntRe.MatchString(host) {
+		return true
+	}
+	// Hex with 0x prefix: "0x7f000001", "0x7f.0.0.1"
+	if legacyIPv4Hex.MatchString(host) {
+		return true
+	}
+	// Octal: "0177.0.0.1"
+	if legacyIPv4Oct.MatchString(host) {
+		return true
+	}
+	// Dotted form with fewer than 4 segments and only decimal digits.
+	// Covers "127.1", "10.0"; excludes "example.com" and hex-letter domains
+	// such as "cafe.f00" or "dead.beef".
+	segments := strings.Count(host, ".") + 1
+	if segments >= 2 && segments < 4 && decimalSegRe.MatchString(host) {
+		return true
+	}
+	// Leading-zero decimal segment (ambiguous octal in some parsers).
+	if decimalSegRe.MatchString(host) {
+		for _, part := range strings.Split(host, ".") {
+			if legacyIPv4LeadingZero.MatchString(part) && len(part) > 1 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+var singleIntRe = regexp.MustCompile(`^[0-9]+$`)
+var decimalSegRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)*$`)
+
+// isBlockedIPLiteral checks whether an IP is in blocked ranges using the
+// same blockedIPPrefixes as the execution path, but without doing DNS.
+// This is used in the standing scope path where we only know the IP literal.
+func isBlockedIPLiteral(ip netip.Addr) bool {
+	return isBlockedIP(ip)
+}
+
+// idnaLookupHost converts a Unicode hostname to ASCII (Punycode) using
+// IDNA Lookup profile. This is a pure string transformation — no DNS.
+func idnaLookupHost(host string) (string, error) {
+	ascii, err := idna.Lookup.ToASCII(host)
+	if err != nil {
+		return "", err
+	}
+	// Remove trailing dot (DNS root).
+	ascii = strings.TrimSuffix(ascii, ".")
+	return strings.ToLower(ascii), nil
 }

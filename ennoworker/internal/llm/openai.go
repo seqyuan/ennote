@@ -116,6 +116,18 @@ func (p *OpenAIProvider) buildRequest(request domain.CompletionRequest) (openAIR
 		Temperature:   request.Temperature,
 		StreamOptions: map[string]bool{"include_usage": true},
 	}
+	if request.Reasoning != nil {
+		if request.Reasoning.Dialect != domain.ThinkingDialectOpenAIReasoningEffort {
+			return openAIRequest{}, fmt.Errorf("unsupported thinking dialect %q", request.Reasoning.Dialect)
+		}
+		switch request.Reasoning.Effort {
+		case domain.ThinkingLow, domain.ThinkingMedium, domain.ThinkingHigh:
+			effort := string(request.Reasoning.Effort)
+			wire.ReasoningEffort = &effort
+		default:
+			return openAIRequest{}, fmt.Errorf("unsupported thinking effort %q", request.Reasoning.Effort)
+		}
+	}
 	for _, tool := range request.Tools {
 		parameters := tool.Parameters
 		if len(parameters) == 0 {
@@ -192,13 +204,14 @@ func isRetryableTransportError(err error) bool {
 }
 
 type openAIRequest struct {
-	Model         string          `json:"model"`
-	Messages      []openAIMessage `json:"messages"`
-	Tools         []openAITool    `json:"tools,omitempty"`
-	Stream        bool            `json:"stream"`
-	StreamOptions map[string]bool `json:"stream_options,omitempty"`
-	MaxTokens     int             `json:"max_tokens,omitempty"`
-	Temperature   *float64        `json:"temperature,omitempty"`
+	Model           string          `json:"model"`
+	Messages        []openAIMessage `json:"messages"`
+	Tools           []openAITool    `json:"tools,omitempty"`
+	Stream          bool            `json:"stream"`
+	StreamOptions   map[string]bool `json:"stream_options,omitempty"`
+	MaxTokens       int             `json:"max_tokens,omitempty"`
+	Temperature     *float64        `json:"temperature,omitempty"`
+	ReasoningEffort *string         `json:"reasoning_effort,omitempty"`
 }
 
 type openAIMessage struct {
@@ -242,6 +255,9 @@ type openAIFunctionCall struct {
 }
 
 func toOpenAIMessages(messages []domain.ChatMessage) ([]openAIMessage, error) {
+	if err := validateOpenAIToolMessageSequence(messages); err != nil {
+		return nil, err
+	}
 	var result []openAIMessage
 	for _, message := range messages {
 		wire := openAIMessage{Role: string(message.Role)}
@@ -312,4 +328,57 @@ func toOpenAIMessages(messages []domain.ChatMessage) ([]openAIMessage, error) {
 		}
 	}
 	return result, nil
+}
+
+// validateOpenAIToolMessageSequence enforces the chat-completions protocol
+// before making a network request. Every tool result must immediately follow
+// the assistant tool_calls message and reference one of its LLM-assigned IDs.
+func validateOpenAIToolMessageSequence(messages []domain.ChatMessage) error {
+	pending := make(map[string]struct{})
+	for messageIndex, message := range messages {
+		if message.Role != domain.RoleTool && len(pending) != 0 {
+			return fmt.Errorf("message %d has role %q before all preceding tool calls have results",
+				messageIndex, message.Role)
+		}
+
+		toolCallCount := 0
+		toolResultCount := 0
+		for _, block := range message.Content {
+			switch block.Kind {
+			case domain.ContentToolCall:
+				if message.Role != domain.RoleAssistant || block.ToolCall == nil || block.ToolCall.ID == "" {
+					return fmt.Errorf("message %d has an invalid assistant tool call", messageIndex)
+				}
+				if _, duplicate := pending[block.ToolCall.ID]; duplicate {
+					return fmt.Errorf("message %d repeats tool call id %q", messageIndex, block.ToolCall.ID)
+				}
+				pending[block.ToolCall.ID] = struct{}{}
+				toolCallCount++
+			case domain.ContentToolResult:
+				if message.Role != domain.RoleTool || block.ToolResult == nil || block.ToolResult.ToolCallID == "" {
+					return fmt.Errorf("message %d has an invalid tool result", messageIndex)
+				}
+				if _, ok := pending[block.ToolResult.ToolCallID]; !ok {
+					return fmt.Errorf("message %d tool result references unknown tool call id %q",
+						messageIndex, block.ToolResult.ToolCallID)
+				}
+				delete(pending, block.ToolResult.ToolCallID)
+				toolResultCount++
+			default:
+				if message.Role == domain.RoleTool {
+					return fmt.Errorf("message %d with role tool contains %q content", messageIndex, block.Kind)
+				}
+			}
+		}
+		if message.Role == domain.RoleTool && toolResultCount == 0 {
+			return fmt.Errorf("message %d with role tool has no tool result", messageIndex)
+		}
+		if message.Role == domain.RoleAssistant && toolCallCount == 0 && len(pending) != 0 {
+			return fmt.Errorf("message %d leaves an invalid pending tool call set", messageIndex)
+		}
+	}
+	for toolCallID := range pending {
+		return fmt.Errorf("assistant tool call %q has no following tool result", toolCallID)
+	}
+	return nil
 }

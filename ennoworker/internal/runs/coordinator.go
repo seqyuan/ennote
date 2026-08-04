@@ -3,6 +3,7 @@ package runs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
@@ -29,6 +30,22 @@ func (f ExecutorFunc) Execute(ctx context.Context, run *domain.AgentRun) (domain
 
 type successfulRunFinalizer interface {
 	FinalizeSuccess(context.Context, string, domain.RunOutput) error
+}
+
+// childRunFinalizer terminalizes a delegated_agent Run with its structured
+// submit_result contract and wakes the parent group when it settles.
+type childRunFinalizer interface {
+	FinalizeChildSuccess(context.Context, string, domain.RunOutput) error
+	FinalizeChildFailure(context.Context, string, string, string) (string, bool, error)
+}
+
+// parentResolver finds a run's parent id (empty for top-level runs).
+type parentResolver interface {
+	ParentOfRun(context.Context, string) (string, error)
+}
+
+type childRunResolver interface {
+	OwnedChildIDs(context.Context, string) ([]string, error)
 }
 
 type activeRun struct {
@@ -106,28 +123,95 @@ func (c *Coordinator) execute(ctx context.Context, runID string, state *activeRu
 		state.err = c.lifecycle.Cancel(context.Background(), runID)
 	case err != nil:
 		code := domain.ErrorCodeOf(err)
+		if run.RunKind == domain.RunKindDelegatedAgent {
+			if finalizer, ok := c.lifecycle.(childRunFinalizer); ok {
+				parentID, wakeParent, finalizeErr := finalizer.FinalizeChildFailure(
+					context.Background(), runID, string(code), err.Error())
+				state.err = finalizeErr
+				if finalizeErr == nil && wakeParent {
+					state.err = c.enqueueSettledParent(parentID)
+				}
+				return
+			}
+		}
 		state.err = c.lifecycle.Fail(context.Background(), runID, string(code), err.Error())
 	case output.Suspended:
 		return
+	case output.Waiting:
+		// Run deliberately yielded (e.g. waiting for delegated children).
+		// Do not finalize or fail; the run is waiting_children in DB.
+		return
 	default:
 		var finalizeErr error
-		if finalizer, ok := c.lifecycle.(successfulRunFinalizer); ok && len(output.Messages) > 0 {
+		if output.Terminal != nil {
+			if childFinalizer, ok := c.lifecycle.(childRunFinalizer); ok {
+				finalizeErr = childFinalizer.FinalizeChildSuccess(context.Background(), runID, output)
+			} else {
+				finalizeErr = fmt.Errorf("child finalizer unavailable")
+			}
+			if finalizeErr == nil {
+				// Only wake the parent when child finalization settled the group and
+				// atomically moved the parent back to queued.
+				if resolver, ok := c.lifecycle.(parentResolver); ok {
+					if parentID, parentErr := resolver.ParentOfRun(context.Background(), runID); parentErr == nil {
+						finalizeErr = c.enqueueSettledParent(parentID)
+					}
+				}
+			}
+		} else if finalizer, ok := c.lifecycle.(successfulRunFinalizer); ok && len(output.Messages) > 0 {
 			finalizeErr = finalizer.FinalizeSuccess(context.Background(), runID, output)
 		} else {
 			finalizeErr = c.lifecycle.Succeed(context.Background(), runID)
 		}
 		if finalizeErr != nil {
+			if run.RunKind == domain.RunKindDelegatedAgent {
+				if finalizer, ok := c.lifecycle.(childRunFinalizer); ok {
+					parentID, wakeParent, childErr := finalizer.FinalizeChildFailure(context.Background(), runID,
+						string(domain.ErrorEventPersistence), finalizeErr.Error())
+					state.err = childErr
+					if childErr == nil && wakeParent {
+						state.err = c.enqueueSettledParent(parentID)
+					}
+					return
+				}
+			}
 			state.err = c.lifecycle.Fail(context.Background(), runID,
 				string(domain.ErrorEventPersistence), finalizeErr.Error())
 		}
 	}
 }
 
+func (c *Coordinator) enqueueSettledParent(parentID string) error {
+	if parentID == "" {
+		return nil
+	}
+	parentRun, err := c.lifecycle.Get(context.Background(), parentID)
+	if err != nil {
+		return err
+	}
+	if parentRun.Status != domain.RunQueued {
+		return nil
+	}
+	if err := c.Enqueue(context.Background(), parentID); err != nil && !errors.Is(err, store.ErrRunNotFound) {
+		return err
+	}
+	return nil
+}
+
 func (c *Coordinator) Cancel(ctx context.Context, runID string) error {
+	ids := []string{runID}
+	if resolver, ok := c.lifecycle.(childRunResolver); ok {
+		children, err := resolver.OwnedChildIDs(ctx, runID)
+		if err != nil {
+			return err
+		}
+		ids = append(ids, children...)
+	}
 	c.mu.Lock()
-	state := c.active[runID]
-	if state != nil {
-		state.cancel()
+	for _, id := range ids {
+		if state := c.active[id]; state != nil {
+			state.cancel()
+		}
 	}
 	c.mu.Unlock()
 

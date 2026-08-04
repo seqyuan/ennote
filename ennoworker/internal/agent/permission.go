@@ -12,6 +12,8 @@ func ClassifyToolRisk(toolName string) domain.RiskClass {
 		return domain.RiskShell
 	case "http", "web_fetch", "send_message", "mcp_call":
 		return domain.RiskExternal
+	case "delegate_roles":
+		return domain.RiskDelegation
 	case "process", "credential", "secret":
 		return domain.RiskSensitive
 	default:

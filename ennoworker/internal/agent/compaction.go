@@ -19,9 +19,10 @@ const (
 )
 
 type CompositionEstimate struct {
-	InputTokens       int
-	OutputReservation int
-	TotalTokens       int
+	InputTokens           int
+	InputUpperBoundTokens int
+	OutputReservation     int
+	TotalTokens           int
 }
 
 type CompactionPlan struct {
@@ -70,8 +71,12 @@ func EstimateComposition(systemPrompt string, tools []domain.ToolDefinition, mes
 		}
 	}
 	input := (bytes+3)/4 + images*compactionImageTokens + 16
-	return CompositionEstimate{InputTokens: input, OutputReservation: maxOutputTokens,
-		TotalTokens: input + maxOutputTokens}
+	// Every text token consumes at least one serialized byte. This deliberately
+	// conservative bound is used only for hard delegated-budget admission; the
+	// normal context planner continues to use the calibrated estimate above.
+	upperBound := bytes + images*compactionImageTokens + 16
+	return CompositionEstimate{InputTokens: input, InputUpperBoundTokens: upperBound,
+		OutputReservation: maxOutputTokens, TotalTokens: input + maxOutputTokens}
 }
 
 func MainUsableTokens(runtime domain.ModelRuntimeSnapshot) int {

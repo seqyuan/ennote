@@ -1,8 +1,20 @@
 "use client";
 
 import type { FormEvent } from "react";
+import { useEffect, useState, useCallback } from "react";
 import type { ModelProfile, PolicyProfile, Session } from "@/components/settings/types";
 import { apiFetch } from "@/lib/worker-api.client";
+
+interface StandingApprovalItem {
+  id: string;
+  sessionId: string;
+  toolName: string;
+  scopeKind: string;
+  scopeVersion: number;
+  scopeDisplay: string;
+  riskClass: string;
+  createdAt: string;
+}
 
 export function ContextSettings({ policies, models, session, refresh, setError, onSessionUpdated }: {
   policies: PolicyProfile[];
@@ -66,6 +78,7 @@ export function ContextSettings({ policies, models, session, refresh, setError, 
         </select></label>
       </div>
     </section>
+    <StandingApprovalsSection sessionId={session?.id ?? null} />
   </section>;
 }
 
@@ -132,5 +145,63 @@ function CompactionPolicyEditor({ policies, models, onCreate, onDefault }: {
       <div><strong>{policy.name}</strong><span>v{policy.version} · {String(policy.config.mode ?? "configured")}</span></div>
       <button className="secondary-btn" disabled={policy.status !== "active"} onClick={() => onDefault(policy.id)}>Use as default</button>
     </div>)}</div>
+  </section>;
+}
+
+function StandingApprovalsSection({ sessionId }: { sessionId: string | null }) {
+  const [rules, setRules] = useState<StandingApprovalItem[]>([]);
+  const [loadedSessionID, setLoadedSessionID] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+    void apiFetch<{ items: StandingApprovalItem[] }>(`/v1/sessions/${encodeURIComponent(sessionId)}/standing-approvals`)
+      .then((data) => {
+        if (cancelled) return;
+        setRules(data?.items ?? []);
+        setLoadError(null);
+        setLoadedSessionID(sessionId);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setRules([]);
+        setLoadError((err as Error).message);
+        setLoadedSessionID(sessionId);
+      });
+    return () => { cancelled = true; };
+  }, [sessionId]);
+
+  const loaded = loadedSessionID === sessionId;
+  const visibleRules = loaded ? rules : [];
+  const loading = !loaded;
+  const error = loaded ? loadError : null;
+
+  const revoke = useCallback(async (ruleId: string) => {
+    if (!sessionId) return;
+    try {
+      await apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/standing-approvals/${encodeURIComponent(ruleId)}/revoke`, { method: "POST" });
+      setRules(prev => prev.filter(r => r.id !== ruleId));
+      setLoadError(null);
+    } catch (err) {
+      setLoadError((err as Error).message);
+    }
+  }, [sessionId]);
+
+  if (!sessionId) return null;
+
+  return <section className="settings-subsection standing-approvals-section">
+    <header><h3>Standing approvals</h3>
+      <p>Tools automatically authorised for this session. Revoke to require approval again.</p></header>
+    {loading && <div className="settings-empty">Loading…</div>}
+    {!loading && error && <div className="settings-error">{error}</div>}
+    {!loading && !error && visibleRules.length === 0 &&
+      <div className="settings-empty">No standing approvals for this session.</div>}
+    {!loading && visibleRules.length > 0 && <div className="settings-list">
+      {visibleRules.map(rule => <div className="settings-row" key={rule.id}>
+        <div><strong>{rule.toolName}</strong><span>{rule.scopeDisplay}</span></div>
+        <button className="secondary-btn" onClick={() => revoke(rule.id)}>Revoke</button>
+      </div>)}
+    </div>}
   </section>;
 }

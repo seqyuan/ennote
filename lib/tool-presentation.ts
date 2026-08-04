@@ -1,4 +1,4 @@
-export type DisplayRiskClass = "read_only" | "local_write" | "shell" | "external" | "sensitive";
+export type DisplayRiskClass = "read_only" | "local_write" | "shell" | "external" | "delegation" | "sensitive";
 export type ToolActivityState = "pending" | "running" | "completed" | "failed" | "rejected" | "interrupted";
 
 const readOnlyTools = new Set(["read", "ls", "list", "grep", "search", "find", "search_compacted_history", "todo"]);
@@ -19,6 +19,7 @@ export function classifyDisplayRisk(toolName: string): DisplayRiskClass {
   if (writeTools.has(name)) return "local_write";
   if (shellTools.has(name)) return "shell";
   if (externalTools.has(name)) return "external";
+  if (name === "delegate_roles") return "delegation";
   return "sensitive";
 }
 
@@ -67,6 +68,15 @@ export function summarizeToolCall(toolName: string, rawArguments: unknown): Tool
       return { label: "External request", target: oneLine(stringValue(args.url) || "External service", 180) };
     case "search_compacted_history":
       return { label: "Search compacted history", target: oneLine(stringValue(args.query) || "Session history", 180) };
+    case "delegate_roles": {
+      const delegations = Array.isArray(args.delegations) ? args.delegations : [];
+      const handles = delegations.map(item => objectArguments(item)).map(item => stringValue(item.roleHandle)).filter(Boolean);
+      return {
+        label: "Delegate roles",
+        target: delegations.length === 1 ? "1 assignment" : `${delegations.length} assignments`,
+        detail: handles.length ? handles.map(handle => `@${handle}`).join(", ") : undefined,
+      };
+    }
     case "todo": {
       const todos = Array.isArray(rawArguments && typeof rawArguments === "object" && "todos" in (rawArguments as Record<string, unknown>) ? (rawArguments as { todos: unknown[] }).todos : undefined) ? (rawArguments as { todos: unknown[] }).todos : [];
       const completed = todos.filter((item: unknown) => item && typeof item === "object" && (item as Record<string, unknown>).status === "completed").length;

@@ -18,6 +18,8 @@ export function ModelsSettings({ providers, models, refresh, setError }: {
       await apiFetch("/v1/model-profiles", { method: "POST", body: JSON.stringify({
         providerId: data.get("providerId"), modelName: data.get("modelName"), displayName: data.get("displayName"),
         contextWindow: Number(data.get("contextWindow")), maxOutputTokens: Number(data.get("maxOutputTokens")),
+        inputCostUsdMicrosPerMillion: Number(data.get("inputCostUsdMicrosPerMillion")),
+        outputCostUsdMicrosPerMillion: Number(data.get("outputCostUsdMicrosPerMillion")),
         supportsVision: data.get("supportsVision") === "on", supportsToolUse: data.get("supportsToolUse") === "on",
         supportsThinking: data.get("supportsThinking") === "on", isDefault: data.get("isDefault") === "on",
       }) });
@@ -49,6 +51,8 @@ export function ModelsSettings({ providers, models, refresh, setError }: {
       <label>Display name<input name="displayName" /></label>
       <label>Context window<input name="contextWindow" type="number" min="1" required defaultValue="128000" /></label>
       <label>Max output<input name="maxOutputTokens" type="number" min="1" required defaultValue="8192" /></label>
+      <label>Input USD micros / 1M tokens<input name="inputCostUsdMicrosPerMillion" type="number" min="0" max="1000000000" required defaultValue="0" /></label>
+      <label>Output USD micros / 1M tokens<input name="outputCostUsdMicrosPerMillion" type="number" min="0" max="1000000000" required defaultValue="0" /></label>
       <div className="settings-toggles">
         <label><input name="supportsToolUse" type="checkbox" defaultChecked /> Tool use</label>
         <label><input name="supportsThinking" type="checkbox" /> Thinking</label>
@@ -59,7 +63,7 @@ export function ModelsSettings({ providers, models, refresh, setError }: {
     </form>
     <div className="settings-list">{models.map(model => <div className="settings-row" key={model.id}>
       <div><strong>{model.displayName || model.modelName}</strong>
-        <span>{providers.find(provider => provider.id === model.providerId)?.name ?? "Missing provider"} · {model.modelName} · {model.contextWindow.toLocaleString()} ctx</span></div>
+        <span>{providers.find(provider => provider.id === model.providerId)?.name ?? "Missing provider"} · {model.modelName} · {model.contextWindow.toLocaleString()} ctx · {model.inputCostUsdMicrosPerMillion.toLocaleString()}/{model.outputCostUsdMicrosPerMillion.toLocaleString()} uUSD per 1M</span></div>
       <button className="secondary-btn" disabled={model.isDefault} onClick={() => setDefault(model.id)}>
         {model.isDefault ? "Default" : "Make default"}
       </button>

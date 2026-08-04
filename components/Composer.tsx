@@ -2,8 +2,10 @@
 
 import { Bot, CornerDownRight, ImagePlus, Minimize2, Paperclip, Send, Square, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
-import type { ModelProfile } from "@/components/settings/types";
+import { RoleTargetPicker } from "@/components/RoleTargetPicker";
+import type { ModelProfile, RoleSummary } from "@/components/settings/types";
 import type { PermissionMode } from "@/lib/permission-mode";
+import { PromptCommandMenu } from "./PromptCommandMenu";
 
 export interface TextAttachment {
   id: string;
@@ -27,6 +29,9 @@ interface ComposerProps {
   models: ModelProfile[];
   selectedModelId: string | null;
   setSelectedModelId: (modelId: string) => void;
+  roles: RoleSummary[];
+  selectedRoleId: string | null;
+  setSelectedRoleId: (roleId: string | null) => void;
   textAttachments: TextAttachment[];
   removeTextAttachment: (id: string) => void;
   attachFiles: (files: File[]) => void;
@@ -35,12 +40,20 @@ interface ComposerProps {
   steer: () => void;
   cancel: () => void;
   compactSession: () => void;
+  // Prompt templates panel.
+  promptTemplates: { name: string; description: string; argumentHint: string; source: string; editable: boolean }[];
+  showPromptPanel: boolean;
+  onPromptSelect: (name: string) => void;
+  onPromptPanelClose: () => void;
+  expanding: boolean;
+  expandDiag: string | null;
 }
 
 export function Composer({
   selectedSession, activeLeafMessageId, input, setInput, activeRun, compacting, hasPendingImage, reconnecting,
   permissionMode, permissionReady, setPermissionMode, models, selectedModelId, setSelectedModelId,
-  textAttachments, removeTextAttachment, attachFiles, uploadImage, submit, steer, cancel, compactSession,
+  roles, selectedRoleId, setSelectedRoleId, textAttachments, removeTextAttachment, attachFiles, uploadImage, submit, steer, cancel, compactSession,
+  promptTemplates, showPromptPanel, onPromptSelect, onPromptPanelClose, expanding, expandDiag,
 }: ComposerProps) {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const form = useRef<HTMLFormElement>(null);
@@ -118,6 +131,8 @@ export function Composer({
       )}
 
       <div className="composer-toolbar">
+        <RoleTargetPicker roles={roles} selectedRoleId={selectedRoleId} onSelect={setSelectedRoleId}
+          disabled={!selectedSession || activeRun || compacting} />
         <div className="permission-control">
           <span className="toolbar-label">Permission</span>
           <div className="permission-segment" role="group" aria-label="Permission mode">
@@ -126,7 +141,7 @@ export function Composer({
                 key={mode}
                 type="button"
                 aria-pressed={permissionMode === mode}
-                disabled={!selectedSession || activeRun || !permissionReady}
+                disabled={!selectedSession || activeRun || !permissionReady || Boolean(selectedRoleId)}
                 onClick={() => setPermissionMode(mode)}
               >
                 {mode === "discuss" ? "Discuss" : mode === "ask" ? "Ask" : "Auto"}
@@ -140,7 +155,7 @@ export function Composer({
           <span className="sr-only">Model</span>
           <select
             value={selectedModelId ?? ""}
-            disabled={!selectedSession || activeRun || models.length === 0}
+            disabled={!selectedSession || activeRun || models.length === 0 || Boolean(selectedRoleId)}
             onChange={(event) => setSelectedModelId(event.target.value)}
             title="Model for the next run"
           >
@@ -150,11 +165,19 @@ export function Composer({
         </label>
 
         {activeRun && <span className="permission-frozen">{permissionMode} is frozen for this run</span>}
-        {!permissionReady && selectedSession && <span className="permission-unavailable">Policy unavailable</span>}
+        {!permissionReady && selectedSession && !selectedRoleId && <span className="permission-unavailable">Policy unavailable</span>}
       </div>
 
       <form className="composer" onSubmit={onSubmit} ref={form}>
         <div className="composer-editor">
+          {showPromptPanel && (
+            <PromptCommandMenu
+              templates={promptTemplates}
+              input={input}
+              onSelect={onPromptSelect}
+              onClose={onPromptPanelClose}
+            />
+          )}
           <textarea
             ref={textarea}
             value={input}
@@ -211,12 +234,14 @@ export function Composer({
               </button>
             </>
           ) : (
-            <button type="submit" className="command-button send-command" aria-label="Send" disabled={!selectedSession || !permissionReady || (!input.trim() && !hasPendingImage && textAttachments.length === 0)}>
+            <button type="submit" className="command-button send-command" aria-label="Send" disabled={!selectedSession || (!permissionReady && !selectedRoleId) || (!input.trim() && !hasPendingImage && textAttachments.length === 0)}>
               <Send size={16} aria-hidden="true" /><span>Send</span>
             </button>
           )}
         </div>
       </form>
+      {expanding && <div className="composer-status" aria-live="polite">Expanding prompt…</div>}
+      {expandDiag && <div className="composer-status diag-warning" aria-live="polite">{expandDiag}</div>}
     </div>
   );
 }

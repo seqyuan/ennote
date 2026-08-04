@@ -5,7 +5,7 @@ import { useEffect, useRef } from "react";
 import { Composer, type TextAttachment } from "@/components/Composer";
 import { ConversationTimeline } from "@/components/ConversationTimeline";
 import { StreamingStatusBar } from "@/components/StreamingStatusBar";
-import type { ModelProfile } from "@/components/settings/types";
+import type { ModelProfile, RoleSummary } from "@/components/settings/types";
 import type { ApprovalDecision, ToolApprovalRequest } from "@/lib/approval";
 import type { ConversationNode } from "@/lib/chat-messages";
 import type { PermissionMode } from "@/lib/permission-mode";
@@ -56,6 +56,9 @@ interface ChatWindowProps {
   models: ModelProfile[];
   selectedModelId: string | null;
   setSelectedModelId: (modelId: string) => void;
+  roles: RoleSummary[];
+  selectedRoleId: string | null;
+  setSelectedRoleId: (roleId: string | null) => void;
   textAttachments: TextAttachment[];
   removeTextAttachment: (id: string) => void;
   attachFiles: (files: File[]) => void;
@@ -63,6 +66,13 @@ interface ChatWindowProps {
   steer: () => void;
   cancel: () => void;
   compactSession: () => void;
+  // Prompt templates.
+  promptTemplates: { name: string; description: string; argumentHint: string; source: string; editable: boolean }[];
+  showPromptPanel: boolean;
+  onPromptSelect: (name: string) => void;
+  onPromptPanelClose: () => void;
+  expanding: boolean;
+  expandDiag: string | null;
 }
 
 export function ChatWindow({
@@ -71,13 +81,15 @@ export function ChatWindow({
   hasMoreHistory, loadOlderHistory, error, clearError, status, input, setInput, activeRun, activeRunStatus, compacting,
   permissionMode, permissionReady, setPermissionMode, pendingApproval, resolvingApproval, decideApproval,
   pendingImage, clearPendingImage, uploadImage, models, selectedModelId, setSelectedModelId,
-  textAttachments, removeTextAttachment, attachFiles, submit, steer, cancel, compactSession,
+  roles, selectedRoleId, setSelectedRoleId, textAttachments, removeTextAttachment, attachFiles, submit, steer, cancel, compactSession,
+  promptTemplates, showPromptPanel, onPromptSelect, onPromptPanelClose, expanding, expandDiag,
 }: ChatWindowProps) {
   const messagesRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const preserveScroll = useRef(false);
   const previousMessageCount = useRef(0);
-  const waiting = activeRunStatus === "waiting_for_approval" || Boolean(pendingApproval);
+  const waiting = activeRunStatus === "waiting_for_approval" ||
+    activeRunStatus === "waiting_delegation_admission" || Boolean(pendingApproval);
   const reconnecting = status === "Run connection interrupted" && !waiting;
 
   useEffect(() => {
@@ -155,8 +167,12 @@ export function ChatWindow({
       activeRun={Boolean(activeRun)} compacting={compacting} hasPendingImage={Boolean(pendingImage)} reconnecting={reconnecting}
       permissionMode={permissionMode} permissionReady={permissionReady} setPermissionMode={setPermissionMode}
       models={models} selectedModelId={selectedModelId} setSelectedModelId={setSelectedModelId}
+      roles={roles} selectedRoleId={selectedRoleId} setSelectedRoleId={setSelectedRoleId}
       textAttachments={textAttachments} removeTextAttachment={removeTextAttachment} attachFiles={attachFiles}
-      uploadImage={uploadImage} submit={submit} steer={steer} cancel={cancel} compactSession={compactSession} />
+      uploadImage={uploadImage} submit={submit} steer={steer} cancel={cancel} compactSession={compactSession}
+      promptTemplates={promptTemplates} showPromptPanel={showPromptPanel} onPromptSelect={onPromptSelect}
+      onPromptPanelClose={onPromptPanelClose}
+      expanding={expanding} expandDiag={expandDiag} />
   </main>;
 }
 

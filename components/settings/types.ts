@@ -5,5 +5,10 @@ export type ProviderDiagnostic = components["schemas"]["ProviderDiagnostic"];
 export type ModelProfile = components["schemas"]["ModelProfile"];
 export type PolicyProfile = components["schemas"]["PolicyProfile"];
 export type Session = components["schemas"]["Session"];
+export type RoleDefinition = components["schemas"]["RoleDefinition"];
+export type RoleIdentity = components["schemas"]["RoleIdentity"];
+export type RoleSummary = components["schemas"]["RoleSummary"];
+export type RoleVersion = components["schemas"]["RoleVersion"];
+export type RoleValidationResult = components["schemas"]["RoleValidationResult"];
 
-export type SettingsTab = "providers" | "models" | "policies" | "context";
+export type SettingsTab = "providers" | "models" | "roles" | "policies" | "context" | "templates";

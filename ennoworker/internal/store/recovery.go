@@ -74,6 +74,17 @@ func (r *RunRepo) Retry(ctx context.Context, sourceRunID, clientRequestID string
 	if source.RunKind != domain.RunKindAgent || source.TurnID == "" {
 		return nil, ErrRunRetryStale
 	}
+	if source.CommitFormatVersion != domain.CommitFormatLegacyV1 && source.CommitFormatVersion != domain.CommitFormatSpeakerV2 {
+		return nil, domain.NewCodedError(domain.ErrorCommitFormatNotEnabled,
+			fmt.Errorf("retry source uses unsupported commit format %d", source.CommitFormatVersion))
+	}
+	if source.CommitFormatVersion == domain.CommitFormatSpeakerV2 {
+		var writerSetting string
+		if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='hosted_commit_format_version'`).Scan(&writerSetting); err != nil || writerSetting != "2" {
+			return nil, domain.NewCodedError(domain.ErrorCommitFormatNotEnabled,
+				fmt.Errorf("format 2 writer is not enabled"))
+		}
+	}
 	var userMessageID string
 	if err := tx.QueryRowContext(ctx, `SELECT user_message_id FROM turns WHERE id=?`, source.TurnID).Scan(&userMessageID); err != nil {
 		return nil, err
@@ -119,9 +130,14 @@ func (r *RunRepo) Retry(ctx context.Context, sourceRunID, clientRequestID string
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_runs
 		(id,turn_id,session_id,run_kind,base_message_id,attempt,status,requested_config_json,
-		effective_config_json,retry_of_run_id,retry_client_request_id,created_at)
-		VALUES(?,?,?,'agent',?,?,'queued',?,'{}',?,?,?)`, runID, source.TurnID, source.SessionID,
-		userMessageID, attempt, string(requested), sourceRunID, clientRequestID, timestamp); err != nil {
+		effective_config_json,retry_of_run_id,retry_client_request_id,commit_format_version,
+		parent_run_id,root_run_id,execution_depth,publish_mode,speaker_snapshot_json,
+		context_snapshot_json,context_snapshot_digest,created_at)
+		VALUES(?,?,?,'agent',?,?,'queued',?,'{}',?,?,?, ?,?,?,?, ?,?,?,?)`,
+		runID, source.TurnID, source.SessionID, userMessageID, attempt, string(requested),
+		sourceRunID, clientRequestID, source.CommitFormatVersion, nullableStr(source.ParentRunID),
+		firstNonEmpty(source.RootRunID, runID), source.ExecutionDepth, source.PublishMode,
+		string(source.SpeakerSnapshot), string(source.ContextSnapshot), source.ContextSnapshotDigest, timestamp); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return nil, ErrSessionRunActive
 		}
@@ -145,6 +161,10 @@ func (r *RunRepo) Retry(ctx context.Context, sourceRunID, clientRequestID string
 	return &domain.RunRetrySubmission{SourceRunID: sourceRunID, Run: domain.AgentRun{
 		ID: runID, TurnID: source.TurnID, SessionID: source.SessionID, RunKind: domain.RunKindAgent,
 		BaseMessageID: userMessageID, Attempt: attempt, Status: domain.RunQueued, RetryOfRunID: sourceRunID,
+		CommitFormatVersion: source.CommitFormatVersion, ParentRunID: source.ParentRunID,
+		RootRunID: firstNonEmpty(source.RootRunID, runID), ExecutionDepth: source.ExecutionDepth,
+		PublishMode: source.PublishMode, SpeakerSnapshot: append(json.RawMessage(nil), source.SpeakerSnapshot...),
+		ContextSnapshot: append(json.RawMessage(nil), source.ContextSnapshot...), ContextSnapshotDigest: source.ContextSnapshotDigest,
 		RequestedConfig: requested, EffectiveConfig: json.RawMessage(`{}`), CreatedAt: now,
 	}}, nil
 }
@@ -163,7 +183,8 @@ func retryBlockedReasonTx(ctx context.Context, tx *sql.Tx, run domain.AgentRun, 
 	}
 	var activeRuns int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_runs WHERE session_id=?
-		AND status IN ('queued','running','waiting_for_approval')`, run.SessionID).Scan(&activeRuns); err != nil {
+		AND parent_run_id IS NULL
+		AND status IN ('queued','running','waiting_for_approval','waiting_delegation_admission','waiting_children')`, run.SessionID).Scan(&activeRuns); err != nil {
 		return "", err
 	}
 	if activeRuns != 0 {

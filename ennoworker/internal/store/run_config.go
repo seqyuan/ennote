@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,22 +20,24 @@ const (
 )
 
 type ResolvedRunConfig struct {
-	Effective domain.EffectiveRunConfig
-	Provider  domain.ProviderProfile
-	Model     domain.ModelProfile
+	Effective    domain.EffectiveRunConfig
+	Provider     domain.ProviderProfile
+	Model        domain.ModelProfile
+	SystemPrompt domain.SystemPromptSnapshot
 }
 
 type requestedRunConfig struct {
-	ModelProfileID            string   `json:"modelProfileId"`
-	CandidateModelProfileIDs  []string `json:"candidateModelProfileIds"`
-	AllowAutoRoute            bool     `json:"allowAutoRoute"`
-	ToolPolicyProfileID       string   `json:"toolPolicyProfileId"`
-	TurnPolicyProfileID       string   `json:"turnPolicyProfileId"`
-	VisionPolicyProfileID     string   `json:"visionPolicyProfileId"`
-	CompactionPolicyProfileID string   `json:"compactionPolicyProfileId"`
-	MaxIterations             int      `json:"maxIterations"`
-	ToolExecution             string   `json:"toolExecution"`
-	MaxConcurrentReadTools    int      `json:"maxConcurrentReadTools"`
+	ModelProfileID            string                `json:"modelProfileId"`
+	CandidateModelProfileIDs  []string              `json:"candidateModelProfileIds"`
+	AllowAutoRoute            bool                  `json:"allowAutoRoute"`
+	ToolPolicyProfileID       string                `json:"toolPolicyProfileId"`
+	TurnPolicyProfileID       string                `json:"turnPolicyProfileId"`
+	VisionPolicyProfileID     string                `json:"visionPolicyProfileId"`
+	CompactionPolicyProfileID string                `json:"compactionPolicyProfileId"`
+	MaxIterations             int                   `json:"maxIterations"`
+	ToolExecution             string                `json:"toolExecution"`
+	MaxConcurrentReadTools    int                   `json:"maxConcurrentReadTools"`
+	ThinkingEffort            domain.ThinkingEffort `json:"thinkingEffort"`
 }
 
 func (r *RunRepo) ResolveAndFreezeConfig(ctx context.Context, run *domain.AgentRun) (*ResolvedRunConfig, error) {
@@ -44,12 +48,13 @@ func (r *RunRepo) ResolveAndFreezeConfig(ctx context.Context, run *domain.AgentR
 	defer tx.Rollback()
 
 	var currentStatus domain.RunStatus
-	var storedEffective, requested string
+	var storedEffective, storedPromptSnapshot, storedPromptDigest, requested string
 	var sessionModelID, sessionAgentID, sessionCompactionPolicyID sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT ar.status, ar.effective_config_json, ar.requested_config_json,
+	if err := tx.QueryRowContext(ctx, `SELECT ar.status, ar.effective_config_json,
+		ar.system_prompt_snapshot_json, ar.system_prompt_digest, ar.requested_config_json,
 		s.default_model_profile_id, s.default_agent_profile_id, s.compaction_policy_profile_id
 		FROM agent_runs ar JOIN sessions s ON s.id = ar.session_id WHERE ar.id = ?`, run.ID).
-		Scan(&currentStatus, &storedEffective, &requested, &sessionModelID, &sessionAgentID, &sessionCompactionPolicyID); err != nil {
+		Scan(&currentStatus, &storedEffective, &storedPromptSnapshot, &storedPromptDigest, &requested, &sessionModelID, &sessionAgentID, &sessionCompactionPolicyID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrRunNotFound
 		}
@@ -68,6 +73,11 @@ func (r *RunRepo) ResolveAndFreezeConfig(ctx context.Context, run *domain.AgentR
 		if err != nil {
 			return nil, err
 		}
+		promptSnapshot, err := decodeSystemPromptSnapshot(storedPromptSnapshot, storedPromptDigest)
+		if err != nil {
+			return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid, err)
+		}
+		resolved.SystemPrompt = promptSnapshot
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
@@ -81,14 +91,134 @@ func (r *RunRepo) ResolveAndFreezeConfig(ctx context.Context, run *domain.AgentR
 		}
 	}
 
+	var frozenRole *domain.FrozenRoleExecution
+	var roleDefinition domain.RoleDefinition
+	var rolePrompt string
+	invocationTargetKind := "host"
+	var roleID, versionID, definitionJSON, configDigest, contextMode string
+	var roleVersion int
+	if run.CommitFormatVersion == domain.CommitFormatSpeakerV2 {
+		if run.RunKind == domain.RunKindDelegatedAgent {
+			// Private children resolve the exact Role version from the frozen
+			// delegation item; there is no public Turn target.
+			invocationTargetKind = "role"
+			if err := tx.QueryRowContext(ctx, `SELECT v.agent_profile_id,v.id,v.version,v.definition_json,v.config_digest
+				FROM delegation_items di JOIN agent_profile_versions v ON v.id=di.role_version_id
+				WHERE di.child_run_id=?`, run.ID).
+				Scan(&roleID, &versionID, &roleVersion, &definitionJSON, &configDigest); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
+						errors.New("child Run has no frozen delegation Role version"))
+				}
+				return nil, err
+			}
+			contextMode = string(domain.InvocationContextTask)
+		} else {
+			if err := tx.QueryRowContext(ctx, `SELECT target_kind FROM turns WHERE id=?`, run.TurnID).Scan(&invocationTargetKind); err != nil {
+				return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("load Run target: %w", err))
+			}
+			if invocationTargetKind != "host" && invocationTargetKind != "role" {
+				return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("unsupported Run target %q", invocationTargetKind))
+			}
+		}
+	}
+	if invocationTargetKind == "role" {
+		if roleID == "" {
+			if err := tx.QueryRowContext(ctx, `SELECT t.target_object_id,t.target_version_id,
+				v.version,v.definition_json,v.config_digest,t.context_mode
+				FROM turns t JOIN agent_profiles p ON p.id=t.target_object_id
+				JOIN agent_profile_versions v ON v.id=t.target_version_id AND v.agent_profile_id=p.id
+				WHERE t.id=? AND t.target_kind='role' AND p.object_kind='role'`, run.TurnID).
+				Scan(&roleID, &versionID, &roleVersion, &definitionJSON, &configDigest, &contextMode); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, errors.New("frozen Role version is unavailable"))
+				}
+				return nil, fmt.Errorf("load frozen Role version: %w", err)
+			}
+		}
+		if err := json.Unmarshal([]byte(definitionJSON), &roleDefinition); err != nil {
+			return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid, fmt.Errorf("decode frozen Role definition: %w", err))
+		}
+		if roleDefinition.Authority == domain.RoleAuthorityReadOnly {
+			for _, tool := range roleDefinition.AllowedTools {
+				if roleToolRequiresMutation(tool) {
+					return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
+						fmt.Errorf("read-only Role version contains mutation tool %s", tool))
+				}
+			}
+		}
+		var frozenSpeaker struct {
+			ObjectID     string `json:"objectId"`
+			VersionID    string `json:"versionId"`
+			Handle       string `json:"handle"`
+			DisplayName  string `json:"displayName"`
+			ConfigDigest string `json:"configDigest"`
+		}
+		if err := json.Unmarshal(run.SpeakerSnapshot, &frozenSpeaker); err != nil || frozenSpeaker.ObjectID != roleID ||
+			frozenSpeaker.VersionID != versionID || frozenSpeaker.ConfigDigest != configDigest || frozenSpeaker.Handle == "" {
+			return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
+				errors.New("Role speaker snapshot does not match the published version"))
+		}
+		allowedContext := false
+		for _, allowed := range roleDefinition.ContextPolicy.AllowedModes {
+			if string(allowed) == contextMode || (allowed == domain.RoleContextReply && contextMode == string(domain.InvocationContextReplyTo)) {
+				allowedContext = true
+				break
+			}
+		}
+		if !allowedContext {
+			return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
+				fmt.Errorf("Role version does not allow %s context", contextMode))
+		}
+		if requestedConfig.ModelProfileID != "" || len(requestedConfig.CandidateModelProfileIDs) != 0 ||
+			requestedConfig.AllowAutoRoute || requestedConfig.ThinkingEffort != "" || requestedConfig.MaxIterations != 0 ||
+			requestedConfig.ToolPolicyProfileID != "" {
+			return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
+				errors.New("direct Role execution does not allow runtime identity, model, loop, or permission overrides"))
+		}
+		frozenRole = &domain.FrozenRoleExecution{ObjectID: roleID, VersionID: versionID, Version: roleVersion,
+			Handle: frozenSpeaker.Handle, DisplayName: frozenSpeaker.DisplayName, ConfigDigest: configDigest, Authority: roleDefinition.Authority,
+			PermissionCeiling: roleDefinition.PermissionCeiling,
+			AllowedTools:      append([]string(nil), roleDefinition.AllowedTools...), Skills: roleDefinition.Skills,
+			OutputContract: roleDefinition.OutputContract}
+		rolePrompt = roleDefinition.RolePrompt
+	}
+
 	var agentModelID, agentToolPolicyID, agentTurnPolicyID, agentVisionPolicyID, agentCompactionPolicyID sql.NullString
-	if sessionAgentID.Valid {
-		_ = tx.QueryRowContext(ctx, `SELECT default_model_id,tool_policy_profile_id,
-			turn_policy_profile_id,vision_policy_profile_id,compaction_policy_profile_id FROM agent_profiles
-			WHERE id=? AND status='active'`, sessionAgentID.String).Scan(
-			&agentModelID, &agentToolPolicyID, &agentTurnPolicyID, &agentVisionPolicyID, &agentCompactionPolicyID)
+	var agentPrompt string
+	if frozenRole == nil && sessionAgentID.Valid {
+		err := tx.QueryRowContext(ctx, `SELECT default_model_id,tool_policy_profile_id,
+			turn_policy_profile_id,vision_policy_profile_id,compaction_policy_profile_id,system_prompt
+			FROM agent_profiles WHERE id=? AND status='active'`, sessionAgentID.String).Scan(
+			&agentModelID, &agentToolPolicyID, &agentTurnPolicyID, &agentVisionPolicyID, &agentCompactionPolicyID, &agentPrompt)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
+				fmt.Errorf("active agent profile not found: %s", sessionAgentID.String))
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 	modelID := strings.TrimSpace(requestedConfig.ModelProfileID)
+	if frozenRole != nil {
+		modelID = roleDefinition.ModelBinding.ModelProfileID
+		if modelID == "" && roleDefinition.ModelBinding.Mode == domain.RoleModelInherit && run.ParentRunID != "" {
+			// A child Run with mode=inherit resolves the parent's frozen model at
+			// runtime; the child never re-parses a live draft or current profile.
+			var parentEffective string
+			if err := tx.QueryRowContext(ctx, `SELECT effective_config_json FROM agent_runs WHERE id=?`, run.ParentRunID).
+				Scan(&parentEffective); err != nil {
+				return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
+					fmt.Errorf("load parent frozen config for inherit binding: %w", err))
+			}
+			var parentConfig domain.EffectiveRunConfig
+			if err := json.Unmarshal([]byte(parentEffective), &parentConfig); err != nil || parentConfig.ModelProfileID == "" {
+				return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
+					fmt.Errorf("parent Run has no frozen model for inherit binding"))
+			}
+			modelID = parentConfig.ModelProfileID
+		}
+	}
 	if modelID == "" && sessionModelID.Valid {
 		modelID = sessionModelID.String
 	}
@@ -115,8 +245,30 @@ func (r *RunRepo) ResolveAndFreezeConfig(ctx context.Context, run *domain.AgentR
 		return nil, err
 	}
 	initialRuntime := runtimeSnapshot(model, provider)
+	thinkingEffort := requestedConfig.ThinkingEffort
+	if frozenRole != nil {
+		thinkingEffort = roleDefinition.ModelBinding.ThinkingEffort
+	}
+	if thinkingEffort == "" {
+		thinkingEffort = domain.ThinkingDefault
+	}
+	if err := validateThinkingSelection(initialRuntime, thinkingEffort); err != nil {
+		return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid, err)
+	}
 
 	toolPolicyID := firstNonEmpty(requestedConfig.ToolPolicyProfileID, nullString(agentToolPolicyID))
+	if frozenRole != nil {
+		switch roleDefinition.PermissionCeiling {
+		case domain.PermissionDiscuss:
+			toolPolicyID = "builtin-tool-discuss-v2"
+		case domain.PermissionAsk:
+			toolPolicyID = "builtin-tool-ask-v1"
+		case domain.PermissionAuto:
+			toolPolicyID = "builtin-tool-auto-v1"
+		default:
+			return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid, errors.New("invalid Role permission ceiling"))
+		}
+	}
 	turnPolicyID := firstNonEmpty(requestedConfig.TurnPolicyProfileID, nullString(agentTurnPolicyID))
 	visionPolicyID := firstNonEmpty(requestedConfig.VisionPolicyProfileID, nullString(agentVisionPolicyID))
 	compactionPolicyID := firstNonEmpty(requestedConfig.CompactionPolicyProfileID,
@@ -158,7 +310,9 @@ func (r *RunRepo) ResolveAndFreezeConfig(ctx context.Context, run *domain.AgentR
 		return nil, domain.NewCodedError(domain.ErrorTurnPolicyFailed, fmt.Errorf("decode frozen turn policy: %w", err))
 	}
 	candidateIDs := append([]string(nil), requestedConfig.CandidateModelProfileIDs...)
-	if len(candidateIDs) == 0 {
+	if frozenRole != nil {
+		candidateIDs = append([]string(nil), roleDefinition.ModelBinding.FallbackModelProfileIDs...)
+	} else if len(candidateIDs) == 0 {
 		candidateIDs = append(candidateIDs, turnConfig.CandidateModelProfileIDs...)
 	}
 	var visionConfig domain.VisionPolicyConfig
@@ -170,13 +324,26 @@ func (r *RunRepo) ResolveAndFreezeConfig(ctx context.Context, run *domain.AgentR
 	if err != nil {
 		return nil, err
 	}
+	if thinkingEffort != domain.ThinkingDefault {
+		for _, candidate := range candidates {
+			if err := validateThinkingSelection(candidate, thinkingEffort); err != nil {
+				return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid, err)
+			}
+		}
+	}
 	threshold := turnConfig.Threshold
 	if threshold == 0 {
 		threshold = 0.7
 	}
 	allowAutoRoute := requestedConfig.AllowAutoRoute || (turnConfig.Mode == "context_upgrade" && requestedConfig.ModelProfileID == "")
+	if frozenRole != nil {
+		allowAutoRoute = false
+	}
 
 	maxIterations := requestedConfig.MaxIterations
+	if frozenRole != nil {
+		maxIterations = roleDefinition.MaxLoopIterations
+	}
 	if maxIterations == 0 {
 		maxIterations = defaultMaxIterations
 	}
@@ -205,22 +372,40 @@ func (r *RunRepo) ResolveAndFreezeConfig(ctx context.Context, run *domain.AgentR
 		ContextTokens:     model.ContextWindow,
 		MaxOutputTokens:   model.MaxOutputTokens,
 		MaxIterations:     maxIterations,
+		ThinkingEffort:    thinkingEffort,
 		ToolExecution: domain.ToolExecutionConfig{
 			Mode: mode, MaxConcurrentReadTools: maxReadTools,
 		},
 		InitialRuntime: initialRuntime,
 		Routing: domain.FrozenRoutingConfig{Candidates: candidates, Threshold: threshold,
-			Pinned:         requestedConfig.ModelProfileID != "" && !requestedConfig.AllowAutoRoute,
+			Pinned:         frozenRole != nil || (requestedConfig.ModelProfileID != "" && !requestedConfig.AllowAutoRoute),
 			AllowAutoRoute: allowAutoRoute},
 		ToolPolicy: toolPolicy, TurnPolicy: turnPolicy, VisionPolicy: visionPolicy,
 		CompactionPolicy: compactionPolicy, CompactionRuntime: compactionRuntime,
+		Role: frozenRole,
 	}
 	encoded, err := json.Marshal(effective)
 	if err != nil {
 		return nil, fmt.Errorf("encode effective config: %w", err)
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE agent_runs SET effective_config_json = ?
-		WHERE id = ? AND status = 'running' AND effective_config_json = '{}'`, string(encoded), run.ID)
+	promptProfileID := nullString(sessionAgentID)
+	promptText := agentPrompt
+	if frozenRole != nil {
+		promptProfileID = frozenRole.ObjectID
+		promptText = rolePrompt
+	}
+	promptSnapshot, err := newSystemPromptSnapshot(promptProfileID, promptText)
+	if err != nil {
+		return nil, fmt.Errorf("encode system prompt snapshot: %w", err)
+	}
+	encodedPrompt, err := json.Marshal(promptSnapshot)
+	if err != nil {
+		return nil, fmt.Errorf("encode system prompt snapshot: %w", err)
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE agent_runs SET effective_config_json = ?,
+		system_prompt_snapshot_json = ?, system_prompt_digest = ?
+		WHERE id = ? AND status = 'running' AND effective_config_json = '{}'`,
+		string(encoded), string(encodedPrompt), promptSnapshot.Digest, run.ID)
 	if err != nil {
 		return nil, fmt.Errorf("freeze effective config: %w", err)
 	}
@@ -231,7 +416,7 @@ func (r *RunRepo) ResolveAndFreezeConfig(ctx context.Context, run *domain.AgentR
 		return nil, fmt.Errorf("commit effective config: %w", err)
 	}
 	run.EffectiveConfig = append(json.RawMessage(nil), encoded...)
-	return &ResolvedRunConfig{Effective: effective, Provider: provider, Model: model}, nil
+	return &ResolvedRunConfig{Effective: effective, Provider: provider, Model: model, SystemPrompt: promptSnapshot}, nil
 }
 
 func loadResolvedProfilesTx(ctx context.Context, tx *sql.Tx, effective domain.EffectiveRunConfig) (*ResolvedRunConfig, error) {
@@ -240,7 +425,9 @@ func loadResolvedProfilesTx(ctx context.Context, tx *sql.Tx, effective domain.Ef
 		model := domain.ModelProfile{ID: runtime.ModelProfileID, ProviderID: runtime.ProviderProfileID,
 			ModelName: runtime.APIModel, DisplayName: runtime.APIModel, ContextWindow: runtime.ContextTokens,
 			MaxOutputTokens: runtime.MaxOutputTokens, SupportsVision: runtime.SupportsVision,
-			SupportsToolUse: runtime.SupportsToolUse, SupportsThinking: runtime.SupportsThinking, Status: "frozen"}
+			SupportsToolUse: runtime.SupportsToolUse, SupportsThinking: runtime.SupportsThinking,
+			ThinkingDialect:          runtime.ThinkingDialect,
+			SupportedThinkingEfforts: append([]domain.ThinkingEffort(nil), runtime.SupportedThinkingEfforts...), Status: "frozen"}
 		provider := domain.ProviderProfile{ID: runtime.ProviderProfileID, Name: runtime.ProviderProfileID,
 			ProviderType: domain.ProviderOpenAICompatible, BaseURL: runtime.BaseURL,
 			CredentialRef: runtime.CredentialRef, Proxy: runtime.Proxy, Status: "frozen"}
@@ -263,7 +450,8 @@ func runtimeSnapshot(model domain.ModelProfile, provider domain.ProviderProfile)
 		BaseURL: provider.BaseURL, CredentialRef: provider.CredentialRef, Proxy: provider.Proxy,
 		ContextTokens: model.ContextWindow, MaxOutputTokens: model.MaxOutputTokens,
 		SupportsVision: model.SupportsVision, SupportsToolUse: model.SupportsToolUse,
-		SupportsThinking: model.SupportsThinking,
+		SupportsThinking: model.SupportsThinking, ThinkingDialect: model.ThinkingDialect,
+		SupportedThinkingEfforts: append([]domain.ThinkingEffort(nil), model.SupportedThinkingEfforts...),
 	}
 }
 
@@ -339,19 +527,74 @@ func nullString(value sql.NullString) string {
 	return ""
 }
 
+func newSystemPromptSnapshot(agentProfileID, prompt string) (domain.SystemPromptSnapshot, error) {
+	snapshot := domain.SystemPromptSnapshot{
+		Version: 1, AgentProfileID: agentProfileID, AgentPrompt: prompt, PlatformVersion: "hosted-v1",
+	}
+	digestInput := struct {
+		Version         int    `json:"version"`
+		AgentProfileID  string `json:"agentProfileId,omitempty"`
+		AgentPrompt     string `json:"agentPrompt"`
+		PlatformVersion string `json:"platformVersion"`
+	}{snapshot.Version, snapshot.AgentProfileID, snapshot.AgentPrompt, snapshot.PlatformVersion}
+	encoded, err := json.Marshal(digestInput)
+	if err != nil {
+		return snapshot, err
+	}
+	sum := sha256.Sum256(encoded)
+	snapshot.Digest = hex.EncodeToString(sum[:])
+	return snapshot, nil
+}
+
+func decodeSystemPromptSnapshot(encoded, expectedDigest string) (domain.SystemPromptSnapshot, error) {
+	var snapshot domain.SystemPromptSnapshot
+	if strings.TrimSpace(encoded) == "" || strings.TrimSpace(encoded) == "{}" {
+		return snapshot, errors.New("frozen effective config has no system prompt snapshot")
+	}
+	if err := json.Unmarshal([]byte(encoded), &snapshot); err != nil {
+		return snapshot, fmt.Errorf("decode frozen system prompt snapshot: %w", err)
+	}
+	calculated, err := newSystemPromptSnapshot(snapshot.AgentProfileID, snapshot.AgentPrompt)
+	if err != nil {
+		return snapshot, err
+	}
+	if snapshot.Version != 1 || snapshot.PlatformVersion != "hosted-v1" || snapshot.Digest == "" ||
+		snapshot.Digest != calculated.Digest || expectedDigest != snapshot.Digest {
+		return snapshot, errors.New("frozen system prompt snapshot digest mismatch")
+	}
+	return snapshot, nil
+}
+
+func validateThinkingSelection(runtime domain.ModelRuntimeSnapshot, effort domain.ThinkingEffort) error {
+	if effort == domain.ThinkingDefault {
+		return nil
+	}
+	if runtime.ThinkingDialect == domain.ThinkingDialectNone {
+		return fmt.Errorf("thinking effort %q is not supported by model %s", effort, runtime.ModelProfileID)
+	}
+	for _, supported := range runtime.SupportedThinkingEfforts {
+		if supported == effort {
+			return nil
+		}
+	}
+	return fmt.Errorf("thinking effort %q is not supported by model %s", effort, runtime.ModelProfileID)
+}
+
 func loadModelAndProviderTx(ctx context.Context, tx *sql.Tx, modelID string) (domain.ModelProfile, domain.ProviderProfile, error) {
 	var model domain.ModelProfile
 	var provider domain.ProviderProfile
 	var vision, tools, thinking int
+	var effortsJSON string
 	err := tx.QueryRowContext(ctx, `SELECT m.id, m.provider_id, m.model_name, m.display_name,
 		m.context_window, m.max_output_tokens, m.supports_vision, m.supports_tool_use,
-		m.supports_thinking, m.status, p.id, p.name, p.provider_type, p.base_url,
+		m.supports_thinking, m.thinking_dialect, m.supported_thinking_efforts_json,
+		m.status, p.id, p.name, p.provider_type, p.base_url,
 		p.credential_ref, p.proxy, p.status
 		FROM model_profiles m JOIN provider_profiles p ON p.id = m.provider_id
 		WHERE m.id = ? AND m.status = 'active' AND p.status = 'active'`, modelID).Scan(
 		&model.ID, &model.ProviderID, &model.ModelName, &model.DisplayName,
 		&model.ContextWindow, &model.MaxOutputTokens, &vision, &tools, &thinking,
-		&model.Status, &provider.ID, &provider.Name, &provider.ProviderType,
+		&model.ThinkingDialect, &effortsJSON, &model.Status, &provider.ID, &provider.Name, &provider.ProviderType,
 		&provider.BaseURL, &provider.CredentialRef, &provider.Proxy, &provider.Status,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -366,5 +609,9 @@ func loadModelAndProviderTx(ctx context.Context, tx *sql.Tx, modelID string) (do
 	model.SupportsVision = vision != 0
 	model.SupportsToolUse = tools != 0
 	model.SupportsThinking = thinking != 0
+	if err := json.Unmarshal([]byte(effortsJSON), &model.SupportedThinkingEfforts); err != nil {
+		return model, provider, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
+			fmt.Errorf("decode model thinking capabilities: %w", err))
+	}
 	return model, provider, nil
 }

@@ -88,7 +88,7 @@ func (r *CompactionRepo) CreateManual(ctx context.Context, input domain.ManualCo
 	}
 	var activeKind sql.NullString
 	_ = tx.QueryRowContext(ctx, `SELECT run_kind FROM agent_runs WHERE session_id=?
-		AND status IN ('queued','running','waiting_for_approval') LIMIT 1`, input.SessionID).Scan(&activeKind)
+		AND status IN ('queued','running','waiting_for_approval','waiting_delegation_admission','waiting_children') AND parent_run_id IS NULL LIMIT 1`, input.SessionID).Scan(&activeKind)
 	if activeKind.Valid {
 		if activeKind.String == string(domain.RunKindContextCompaction) {
 			return nil, ErrSessionCompacting
@@ -120,9 +120,12 @@ func (r *CompactionRepo) CreateManual(ctx context.Context, input domain.ManualCo
 		requested = input.RequestedConfig
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_runs
-		(id,turn_id,session_id,run_kind,base_message_id,attempt,status,requested_config_json,effective_config_json,created_at)
-		VALUES (?,NULL,?,'context_compaction',?,1,'queued',?,'{}',?)`, runID, input.SessionID,
-		input.BaseMessageID, string(requested), now); err != nil {
+		(id,turn_id,session_id,run_kind,base_message_id,attempt,status,requested_config_json,
+		 effective_config_json,speaker_snapshot_json,root_run_id,execution_depth,publish_mode,
+		 commit_format_version,context_snapshot_json,created_at)
+		VALUES (?,NULL,?,'context_compaction',?,1,'queued',?,'{}',
+		 '{"kind":"host","displayName":"Host"}',?,0,'public_final',1,'{}',?)`, runID, input.SessionID,
+		input.BaseMessageID, string(requested), runID, now); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return nil, ErrSessionCompacting
 		}

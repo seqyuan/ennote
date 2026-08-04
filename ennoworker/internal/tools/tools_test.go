@@ -138,5 +138,5 @@ func TestRegistryUnknownToolAndDefinitions(t *testing.T) {
 		names = append(names, definition.Name)
 		assert.True(t, json.Valid(definition.Parameters), definition.Name)
 	}
-	assert.Equal(t, "bash,edit,exec,find,grep,ls,read,web_fetch,write", strings.Join(names, ","))
+	assert.Equal(t, "bash,edit,exec,find,git_readonly,grep,ls,read,web_fetch,write", strings.Join(names, ","))
 }

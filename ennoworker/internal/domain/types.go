@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Project represents a logical research project.
 type Project struct {
@@ -30,20 +33,48 @@ type CreateProjectInput struct {
 	HostPath    string
 }
 
+type SessionMode string
+
+const (
+	SessionModeHosted SessionMode = "hosted"
+	SessionModeRoom   SessionMode = "room"
+)
+
+type SpeakerKind string
+
+const (
+	SpeakerUser     SpeakerKind = "user"
+	SpeakerHost     SpeakerKind = "host"
+	SpeakerRole     SpeakerKind = "role"
+	SpeakerWorkflow SpeakerKind = "workflow"
+	SpeakerRoom     SpeakerKind = "room"
+	SpeakerSystem   SpeakerKind = "system"
+)
+
+type MessageVisibility string
+
+const (
+	VisibilityPublic          MessageVisibility = "public"
+	VisibilityPrivate         MessageVisibility = "private"
+	VisibilityRoomControl     MessageVisibility = "room_control"
+	VisibilityLegacyExecution MessageVisibility = "legacy_execution"
+)
+
 type Session struct {
-	ID                        string    `json:"id"`
-	ProjectID                 string    `json:"projectId"`
-	Title                     string    `json:"title"`
-	Status                    string    `json:"status"`
-	ActiveLeafMessageID       *string   `json:"activeLeafMessageId,omitempty"`
-	ActiveBranchID            *string   `json:"activeBranchId,omitempty"`
-	DefaultAgentProfileID     *string   `json:"defaultAgentProfileId,omitempty"`
-	DefaultModelProfileID     *string   `json:"defaultModelProfileId,omitempty"`
-	CompactionPolicyProfileID *string   `json:"compactionPolicyProfileId,omitempty"`
-	SourceSessionID           *string   `json:"sourceSessionId,omitempty"`
-	SourceMessageID           *string   `json:"sourceMessageId,omitempty"`
-	CreatedAt                 time.Time `json:"createdAt"`
-	UpdatedAt                 time.Time `json:"updatedAt"`
+	ID                        string      `json:"id"`
+	ProjectID                 string      `json:"projectId"`
+	Title                     string      `json:"title"`
+	Status                    string      `json:"status"`
+	Mode                      SessionMode `json:"mode"`
+	ActiveLeafMessageID       *string     `json:"activeLeafMessageId,omitempty"`
+	ActiveBranchID            *string     `json:"activeBranchId,omitempty"`
+	DefaultAgentProfileID     *string     `json:"defaultAgentProfileId,omitempty"`
+	DefaultModelProfileID     *string     `json:"defaultModelProfileId,omitempty"`
+	CompactionPolicyProfileID *string     `json:"compactionPolicyProfileId,omitempty"`
+	SourceSessionID           *string     `json:"sourceSessionId,omitempty"`
+	SourceMessageID           *string     `json:"sourceMessageId,omitempty"`
+	CreatedAt                 time.Time   `json:"createdAt"`
+	UpdatedAt                 time.Time   `json:"updatedAt"`
 }
 
 type CreateSessionInput struct {
@@ -57,14 +88,25 @@ type CreateSessionInput struct {
 }
 
 type Message struct {
-	ID              string         `json:"id"`
-	SessionID       string         `json:"sessionId"`
-	ParentMessageID *string        `json:"parentMessageId,omitempty"`
-	Role            string         `json:"role"`
-	Status          string         `json:"status"`
-	RunID           *string        `json:"runId,omitempty"`
-	Parts           []ContentBlock `json:"parts"`
-	CreatedAt       time.Time      `json:"createdAt"`
+	ID                    string            `json:"id"`
+	SessionID             string            `json:"sessionId"`
+	ParentMessageID       *string           `json:"parentMessageId,omitempty"`
+	Role                  string            `json:"role"`
+	Status                string            `json:"status"`
+	RunID                 *string           `json:"runId,omitempty"`
+	SpeakerKind           SpeakerKind       `json:"speakerKind"`
+	SpeakerObjectID       *string           `json:"speakerObjectId,omitempty"`
+	SpeakerVersionID      *string           `json:"speakerVersionId,omitempty"`
+	ParticipantInstanceID *string           `json:"participantInstanceId,omitempty"`
+	SpeakerSnapshot       json.RawMessage   `json:"speakerSnapshot"`
+	AddresseeKind         *string           `json:"addresseeKind,omitempty"`
+	AddresseeObjectID     *string           `json:"addresseeObjectId,omitempty"`
+	AddresseeVersionID    *string           `json:"addresseeVersionId,omitempty"`
+	ReplyToMessageID      *string           `json:"replyToMessageId,omitempty"`
+	Visibility            MessageVisibility `json:"visibility"`
+	OriginatedAt          *time.Time        `json:"originatedAt,omitempty"`
+	Parts                 []ContentBlock    `json:"parts"`
+	CreatedAt             time.Time         `json:"createdAt"`
 }
 
 type SessionBranch struct {

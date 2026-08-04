@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -25,6 +27,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/hooks"
 	"github.com/seqyuan/ennote/ennoworker/internal/llm"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectcontext"
+	"github.com/seqyuan/ennote/ennoworker/internal/prompts"
 	"github.com/seqyuan/ennote/ennoworker/internal/providerdoctor"
 	"github.com/seqyuan/ennote/ennoworker/internal/runs"
 	"github.com/seqyuan/ennote/ennoworker/internal/runtimeinfo"
@@ -35,28 +38,35 @@ import (
 )
 
 type agentExecutor struct {
-	db          *sql.DB
-	writer      *events.Writer
-	hub         *events.Hub
-	homeDir     string
-	trustStore  *workspace.TrustStore
-	outboxStore *hooks.OutboxStore
-	runs        *store.RunRepo
-	calls       *store.CallRepo
-	sessionDB   *store.SessionRepo
-	msgRepo     *store.MessageRepo
-	skillRepo   *store.SkillSnapshotRepo
-	skillsDir   string
-	builtinDir  string
-	sandbox     string
-	artifacts   *artifacts.Service
-	compaction  *compaction.Service
-	approvals   *store.ApprovalRepo
+	db                *sql.DB
+	writer            *events.Writer
+	hub               *events.Hub
+	homeDir           string
+	trustStore        *workspace.TrustStore
+	outboxStore       *hooks.OutboxStore
+	runs              *store.RunRepo
+	calls             *store.CallRepo
+	sessionDB         *store.SessionRepo
+	msgRepo           *store.MessageRepo
+	skillRepo         *store.SkillSnapshotRepo
+	skillsDir         string
+	builtinDir        string
+	sandbox           string
+	artifacts         *artifacts.Service
+	compaction        *compaction.Service
+	approvals         *store.ApprovalRepo
+	standingApprovals *store.StandingApprovalRepo
+	// OnChildRunsCreated is called after delegate_roles creates children.
+	// The coordinator provides this to enqueue child runs.
+	OnChildRunsCreated func(ctx context.Context, runIDs []string)
 }
 
 func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (domain.RunOutput, error) {
 	if run.RunKind == domain.RunKindContextCompaction {
 		return e.executeContextCompaction(ctx, run)
+	}
+	if run.RunKind == domain.RunKindDelegatedAgent {
+		return e.executeDelegatedChild(ctx, run)
 	}
 	var resumeRecord *domain.ApprovalResume
 	if e.approvals != nil {
@@ -71,6 +81,25 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		resumeState = &agent.ResumeState{}
 		if err := json.Unmarshal(resumeRecord.Checkpoint.State, resumeState); err != nil {
 			return domain.RunOutput{}, domain.NewCodedError(domain.ErrorApprovalCheckpointInvalid, err)
+		}
+		// Validate the digest-version matrix (v3/v4 legacy → V1, v5 → V2).
+		switch {
+		case resumeState.Version <= 4:
+			if resumeState.ApprovalDigestVersion != 0 && resumeState.ApprovalDigestVersion != agent.ApprovalDigestV1 {
+				return domain.RunOutput{}, domain.NewCodedError(domain.ErrorApprovalCheckpointInvalid,
+					fmt.Errorf("legacy checkpoint %d carries unsupported digest version %d",
+						resumeState.Version, resumeState.ApprovalDigestVersion))
+			}
+			resumeState.ApprovalDigestVersion = agent.ApprovalDigestV1
+		case resumeState.Version == agent.ResumeStateVersion:
+			if resumeState.ApprovalDigestVersion != agent.ApprovalDigestV2 {
+				return domain.RunOutput{}, domain.NewCodedError(domain.ErrorApprovalCheckpointInvalid,
+					fmt.Errorf("checkpoint version %d requires digest version %d, got %d",
+						resumeState.Version, agent.ApprovalDigestV2, resumeState.ApprovalDigestVersion))
+			}
+		default:
+			return domain.RunOutput{}, domain.NewCodedError(domain.ErrorApprovalCheckpointInvalid,
+				fmt.Errorf("unsupported checkpoint version %d", resumeState.Version))
 		}
 	}
 
@@ -118,9 +147,18 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		}
 		run.BaseMessageID = *session.ActiveLeafMessageID
 	}
-	history, err := e.msgRepo.Lineage(ctx, run.SessionID, run.BaseMessageID)
-	if err != nil {
-		return domain.RunOutput{}, fmt.Errorf("load message history: %w", err)
+	var history []domain.Message
+	if run.CommitFormatVersion == domain.CommitFormatSpeakerV2 {
+		projected, projectErr := (&store.ContextProjector{DB: e.db}).ProjectAndFreeze(ctx, *run)
+		if projectErr != nil {
+			return domain.RunOutput{}, fmt.Errorf("project target-aware context: %w", projectErr)
+		}
+		history = projected.Messages
+	} else {
+		history, err = e.msgRepo.Lineage(ctx, run.SessionID, run.BaseMessageID)
+		if err != nil {
+			return domain.RunOutput{}, fmt.Errorf("load message history: %w", err)
+		}
 	}
 
 	provider, err := e.resolveProvider(resolved)
@@ -140,7 +178,11 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	}
 	snapDir := filepath.Join(wDir, "skills")
 
-	systemPrompt := "You are a helpful assistant."
+	baseSystemPrompt := agent.BaseSystemPrompt(resolved.SystemPrompt.AgentPrompt)
+	if resolved.Effective.Role != nil {
+		baseSystemPrompt = agent.RoleSystemPrompt(*resolved.Effective.Role, resolved.SystemPrompt.AgentPrompt)
+	}
+	systemPrompt := baseSystemPrompt
 	var skillCatalogState string
 	var skillCatalogDigest string
 	if resumeState != nil {
@@ -162,7 +204,8 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		}
 
 		// Check if read is allowed by frozen tool policy
-		allowRead := agent.AllowsTool(resolved.Effective.ToolPolicy.Config, "read")
+		allowRead := agent.AllowsTool(resolved.Effective.ToolPolicy.Config, "read") &&
+			(resolved.Effective.Role == nil || slices.Contains(resolved.Effective.Role.AllowedTools, "read"))
 		catalogPrompt := ""
 		if allowRead {
 			// Build catalog from source roots
@@ -205,7 +248,10 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 			slog.Info("read tool not allowed by policy, skipping skill catalog")
 		}
 
-		systemPrompt = projCtx.BuildPrompt("You are a helpful assistant.", catalogPrompt)
+		systemPrompt = projCtx.BuildPrompt(baseSystemPrompt, catalogPrompt)
+		if preloaded := e.rolePreloadPrompt(resolved.Effective.Role); preloaded != "" {
+			systemPrompt += preloaded
+		}
 	}
 
 	var wManager *workspace.Manager
@@ -230,18 +276,33 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	if err := toolReg.Register(&tools.TodoTool{Store: todoStore}); err != nil {
 		return domain.RunOutput{}, fmt.Errorf("register todo tool: %w", err)
 	}
+	// Register delegate_roles with the Host delegation provider.
+	delegateRoles := &tools.DelegateRolesTool{Provider: e.delegateProvider(run), RunID: run.ID, SessionID: run.SessionID}
+	if err := toolReg.Register(delegateRoles); err != nil {
+		return domain.RunOutput{}, fmt.Errorf("register delegate_roles: %w", err)
+	}
+	if resolved.Effective.Role != nil {
+		toolReg.Restrict(resolved.Effective.Role.AllowedTools)
+	}
 
 	prepared, err := e.compaction.Prepare(ctx, run, history, resolved.Effective, systemPrompt, toolReg.Definitions())
 	if err != nil {
 		return domain.RunOutput{}, err
 	}
 	chatHistory := prepared.Messages
+	// Restore the private parent transcript after delegated children settle.
+	// It carries the original assistant tool_call followed by the folded result.
+	chatHistory, resumeMessages, err := e.injectToolCallResults(ctx, run.ID, chatHistory)
+	if err != nil {
+		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorTranscriptCorrupt, err)
+	}
 	var compactionConfig domain.CompactionPolicyConfig
 	if err := json.Unmarshal(resolved.Effective.CompactionPolicy.Config, &compactionConfig); err != nil {
 		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorCompactionConfigInvalid, err)
 	}
 	var historyTool *tools.CompactedHistoryTool
-	if compactionConfig.AllowHistoryLookup &&
+	roleAllowsHistory := resolved.Effective.Role == nil || slices.Contains(resolved.Effective.Role.AllowedTools, "search_compacted_history")
+	if roleAllowsHistory && compactionConfig.AllowHistoryLookup &&
 		(prepared.Checkpoint != nil || compactionConfig.Mode == domain.CompactionManualAndAuto) {
 		checkpoint := domain.ContextCompaction{}
 		if prepared.Checkpoint != nil {
@@ -265,24 +326,37 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	if err != nil {
 		return domain.RunOutput{}, err
 	}
+	var effectiveToolPolicy agent.ToolPolicy = toolPolicy
+	if resolved.Effective.Role == nil {
+		effectiveToolPolicy = &delegationAdmissionToolPolicy{Base: toolPolicy,
+			Delegations: &store.DelegationRepo{DB: e.db}, SessionID: run.SessionID}
+	}
 	loop := &agent.Loop{
 		Provider: provider, ModelRouter: router, TurnPlanner: agent.ContextTurnPlanner{},
 		MidRunCompactor:   runCompactor,
 		VisionResolver:    &agent.BuiltinVisionResolver{Loader: e.artifacts},
 		ImageDescriptions: &store.ImageDescriptionRepo{DB: e.db},
-		Tools:             toolReg, ToolPolicy: toolPolicy, ToolPolicySnapshot: resolved.Effective.ToolPolicy,
-		WorkspaceID: wSpace.ID, Events: e.writer, Hub: e.hub, Recorder: e.calls,
+		Tools:             toolReg, ToolPolicy: effectiveToolPolicy, ToolPolicySnapshot: resolved.Effective.ToolPolicy,
+		StandingScopeResolver: toolReg, StandingApprovals: e.standingApprovals,
+		WorkspaceID: wSpace.ID, SessionID: session.ID, Events: e.writer, Hub: e.hub, Recorder: e.calls,
 		QueuedInputs: &queueAdapter{repo: &store.QueueRepo{DB: e.db}},
 		SteeringMode: domain.QueueOneAtATime, FollowUpMode: domain.QueueOneAtATime,
-		MaxIterations: resolved.Effective.MaxIterations,
-		ContextTokens: resolved.Effective.ContextTokens,
-		MaxOutput:     resolved.Effective.MaxOutputTokens,
-		ToolExecution: resolved.Effective.ToolExecution,
-		TodoStore:     todoStore,
+		MaxIterations:      resolved.Effective.MaxIterations,
+		ContextTokens:      resolved.Effective.ContextTokens,
+		MaxOutput:          resolved.Effective.MaxOutputTokens,
+		ToolExecution:      resolved.Effective.ToolExecution,
+		TodoStore:          todoStore,
+		DelegationDetector: e.runs,
 		Reminders: agent.NewReminderRegistry(
 			&agent.TodoReminderProvider{Store: todoStore},
 			&agent.BudgetReminderProvider{},
 		),
+	}
+	if resumeState != nil {
+		// Resume pins the digest version and replays the frozen standing
+		// authorization snapshot instead of querying live rules.
+		loop.ApprovalDigestVersion = resumeState.ApprovalDigestVersion
+		loop.StandingAuthorizationSnapshot = resumeState.StandingAuthorizations
 	}
 	if e.hub != nil {
 		loop.LivePublisher = e.hub
@@ -324,16 +398,28 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		approvalResolution = &agent.ApprovalResolution{Decision: resumeRecord.Decision,
 			BatchDigest: resumeRecord.Approval.BatchDigest}
 	}
+	// Determine request generation: Claim count on this run from run_started
+	// events. Re-claims (e.g. parent resume after waiting_children) must start
+	// at generation = count-1 to avoid duplicate model_calls entries.
+	var claimCount int
+	if err := e.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM run_events WHERE run_id=? AND event_type='run_started'`,
+		run.ID).Scan(&claimCount); err != nil {
+		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorEventPersistence, err)
+	}
+	claimGen := max(0, claimCount-1)
+
 	result, err := loop.Run(ctx, agent.RunInput{
 		RunID: run.ID, Model: resolved.Effective.APIModel,
 		ProviderProfileID: resolved.Effective.ProviderProfileID,
 		ModelProfileID:    resolved.Effective.ModelProfileID,
 		RequestedConfig:   run.RequestedConfig, EffectiveConfig: run.EffectiveConfig,
 		InitialRuntime: resolved.Effective.InitialRuntime, Routing: resolved.Effective.Routing,
-		VisionPolicy: resolved.Effective.VisionPolicy,
+		VisionPolicy: resolved.Effective.VisionPolicy, ThinkingEffort: resolved.Effective.ThinkingEffort,
 		SystemPrompt: systemPrompt, History: chatHistory, OverflowRecovery: overflowRecovery,
 		Resume: resumeState, Approval: approvalResolution,
 		SkillCatalogState: skillCatalogState, SkillCatalogDigest: skillCatalogDigest,
+		RequestGeneration: claimGen,
 	})
 
 	// Queue observer hooks (RunEnd / SessionEnd) via durable outbox.
@@ -348,7 +434,7 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 			}
 			if _, suspendErr := e.approvals.Suspend(context.WithoutCancel(ctx), run.ID,
 				agent.ResumeStateVersion, approvalRequired.State.Iteration, approvalRequired.BatchDigest,
-				encoded, approvalRequired.Items); suspendErr != nil {
+				encoded, approvalRequired.Items, approvalRequired.StandingCandidates); suspendErr != nil {
 				return domain.RunOutput{}, domain.NewCodedError(domain.ErrorEventPersistence, suspendErr)
 			}
 			return domain.RunOutput{Suspended: true}, nil
@@ -360,7 +446,220 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 			return domain.RunOutput{}, domain.NewCodedError(domain.ErrorEventPersistence, err)
 		}
 	}
-	return domain.RunOutput{Messages: result.Generated}, nil
+	outputMessages := result.Generated
+	if len(resumeMessages) != 0 {
+		outputMessages = make([]domain.ChatMessage, 0, len(resumeMessages)+len(result.Generated))
+		outputMessages = append(outputMessages, resumeMessages...)
+		outputMessages = append(outputMessages, result.Generated...)
+	}
+	if result.Waiting {
+		// Persist the complete generated transcript so parent resume preserves the
+		// provider protocol: assistant tool_call immediately followed by tool result.
+		persistCtx := context.WithoutCancel(ctx)
+		tx, txErr := e.db.BeginTx(persistCtx, nil)
+		if txErr != nil {
+			return domain.RunOutput{}, domain.NewCodedError(domain.ErrorEventPersistence, txErr)
+		}
+		if _, _, appendErr := store.AppendRunMessagesTx(persistCtx, tx, run.ID,
+			run.CommitFormatVersion, outputMessages, time.Now().UTC()); appendErr != nil {
+			_ = tx.Rollback()
+			return domain.RunOutput{}, domain.NewCodedError(domain.ErrorEventPersistence, appendErr)
+		}
+		if commitErr := tx.Commit(); commitErr != nil {
+			return domain.RunOutput{}, domain.NewCodedError(domain.ErrorEventPersistence, commitErr)
+		}
+		e.enqueueQueuedChildren(persistCtx, run.ID)
+	}
+	return domain.RunOutput{Messages: outputMessages, Waiting: result.Waiting}, nil
+}
+
+// enqueueQueuedChildren finds queued child runs for this parent and notifies
+// the coordinator so children start executing.
+func (e *agentExecutor) enqueueQueuedChildren(ctx context.Context, parentRunID string) {
+	if e.OnChildRunsCreated == nil {
+		return
+	}
+	rows, err := e.db.QueryContext(ctx,
+		`SELECT id FROM agent_runs WHERE parent_run_id=? AND status='queued'`, parentRunID)
+	if err != nil {
+		return
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	rowErr := rows.Err()
+	closeErr := rows.Close()
+	if rowErr != nil || closeErr != nil {
+		return
+	}
+	if len(ids) > 0 {
+		e.OnChildRunsCreated(ctx, ids)
+	}
+}
+
+// executeDelegatedChild runs a private delegated_agent child: it resolves the
+// frozen Role version from the delegation item, builds a task_only context from
+// the assignment, restricts tools to the Role allowlist plus submit_result, and
+// requires the terminal contract to end the Run.
+func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.AgentRun) (domain.RunOutput, error) {
+	budget := &store.DelegationRepo{DB: e.db}
+	remainingWall, err := budget.BeginBudget(ctx, run.ID)
+	if err != nil {
+		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorDelegationBudgetExceeded, err)
+	}
+	if remainingWall > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, remainingWall)
+		defer cancel()
+	}
+	resolved, err := e.runs.ResolveAndFreezeConfig(ctx, run)
+	if err != nil {
+		return domain.RunOutput{}, err
+	}
+	if resolved.Effective.Role == nil {
+		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
+			errors.New("child Run has no frozen Role execution"))
+	}
+	assignment, err := (&store.DelegationRepo{DB: e.db}).AssignmentForChild(ctx, run.ID)
+	if err != nil {
+		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
+			fmt.Errorf("load child assignment: %w", err))
+	}
+
+	session, err := e.sessionDB.FindByID(ctx, run.SessionID)
+	if err != nil || session == nil {
+		return domain.RunOutput{}, fmt.Errorf("load session: %w", err)
+	}
+	wSpace, err := loadProjectWorkspace(ctx, e.db, run.SessionID)
+	if err != nil {
+		return domain.RunOutput{}, fmt.Errorf("load project: %w", err)
+	}
+	canonicalRoot, err := workspace.CanonicalWorkspaceRoot(wSpace.HostPath)
+	if err != nil {
+		return domain.RunOutput{}, fmt.Errorf("canonical workspace root: %w", err)
+	}
+	trusted, trustErr := e.trustStore.IsTrusted(wSpace.ID, canonicalRoot)
+	if trustErr != nil {
+		return domain.RunOutput{}, fmt.Errorf("check workspace trust: %w", trustErr)
+	}
+
+	provider, err := e.resolveProvider(resolved)
+	if err != nil {
+		return domain.RunOutput{}, err
+	}
+	toolPolicy, err := agent.NewBuiltinToolPolicy(resolved.Effective.ToolPolicy)
+	if err != nil {
+		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorToolPolicyFailed, err)
+	}
+	router := &agent.SnapshotModelRouter{Factory: e.resolveRuntimeProvider}
+
+	wDir := filepath.Join(os.Getenv("ENNOTE_HOME"), "runtime", "runs", run.ID)
+	ioDir := filepath.Join(wDir, "io")
+	if err := os.MkdirAll(ioDir, 0o700); err != nil {
+		return domain.RunOutput{}, fmt.Errorf("create runtime io dir: %w", err)
+	}
+	var wManager *workspace.Manager
+	if trusted {
+		wManager, err = workspace.NewManager(canonicalRoot, ioDir, "", workspace.SandboxMode(e.sandbox))
+	} else {
+		wManager, err = workspace.NewManager(canonicalRoot, ioDir, "", workspace.SandboxMode(e.sandbox))
+	}
+	if err != nil {
+		return domain.RunOutput{}, fmt.Errorf("create workspace: %w", err)
+	}
+	artifactSink := &tools.ArtifactSink{Service: e.artifacts, ProjectID: session.ProjectID,
+		SessionID: run.SessionID, RunID: run.ID}
+	toolReg, err := tools.NewDefaultRegistry(wManager, artifactSink)
+	if err != nil {
+		return domain.RunOutput{}, fmt.Errorf("create tools: %w", err)
+	}
+	todoStore := domain.NewTodoStore()
+	if err := toolReg.Register(&tools.TodoTool{Store: todoStore}); err != nil {
+		return domain.RunOutput{}, fmt.Errorf("register todo tool: %w", err)
+	}
+	toolReg.Restrict(resolved.Effective.Role.AllowedTools)
+	if err := toolReg.Register(&tools.SubmitResultTool{}); err != nil {
+		return domain.RunOutput{}, fmt.Errorf("register submit_result: %w", err)
+	}
+
+	systemPrompt := agent.RoleSystemPrompt(*resolved.Effective.Role, resolved.SystemPrompt.AgentPrompt)
+	// task_only context: the frozen assignment is the only history.
+	chatHistory := []domain.ChatMessage{{
+		Role: domain.RoleUser,
+		Content: []domain.ContentBlock{{
+			Kind: domain.ContentText,
+			Text: "Task assignment: " + string(assignment),
+		}},
+	}}
+
+	loop := &agent.Loop{
+		Provider: provider, ModelRouter: router, TurnPlanner: agent.ContextTurnPlanner{},
+		VisionResolver:    &agent.BuiltinVisionResolver{Loader: e.artifacts},
+		ImageDescriptions: &store.ImageDescriptionRepo{DB: e.db},
+		Tools:             toolReg, ToolPolicy: toolPolicy, ToolPolicySnapshot: resolved.Effective.ToolPolicy,
+		StandingScopeResolver: toolReg, StandingApprovals: e.standingApprovals,
+		WorkspaceID: wSpace.ID, SessionID: session.ID, Events: e.writer, Hub: e.hub, Recorder: e.calls,
+		QueuedInputs: &queueAdapter{repo: &store.QueueRepo{DB: e.db}},
+		SteeringMode: domain.QueueOneAtATime, FollowUpMode: domain.QueueOneAtATime,
+		MaxIterations: resolved.Effective.MaxIterations,
+		ContextTokens: resolved.Effective.ContextTokens,
+		MaxOutput:     resolved.Effective.MaxOutputTokens,
+		ToolExecution: resolved.Effective.ToolExecution,
+		TodoStore:     todoStore,
+		Reminders: agent.NewReminderRegistry(
+			&agent.TodoReminderProvider{Store: todoStore},
+			&agent.BudgetReminderProvider{},
+		),
+		SubmitResultGate: &agent.SubmitResultGate{}, BudgetController: budget,
+	}
+	if e.hub != nil {
+		loop.LivePublisher = e.hub
+	}
+
+	result, runErr := loop.Run(ctx, agent.RunInput{
+		RunID: run.ID, Model: resolved.Effective.APIModel,
+		ProviderProfileID: resolved.Effective.ProviderProfileID,
+		ModelProfileID:    resolved.Effective.ModelProfileID,
+		RequestedConfig:   run.RequestedConfig, EffectiveConfig: run.EffectiveConfig,
+		InitialRuntime: resolved.Effective.InitialRuntime, Routing: resolved.Effective.Routing,
+		VisionPolicy: resolved.Effective.VisionPolicy, ThinkingEffort: resolved.Effective.ThinkingEffort,
+		SystemPrompt: systemPrompt, History: chatHistory,
+	})
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorDelegationBudgetExceeded,
+			errors.New("delegated child wall-time budget exceeded"))
+	}
+	if runErr != nil {
+		var approvalRequired *agent.ApprovalRequiredError
+		if errors.As(runErr, &approvalRequired) && e.approvals != nil {
+			encoded, encodeErr := json.Marshal(approvalRequired.State)
+			if encodeErr != nil {
+				return domain.RunOutput{}, domain.NewCodedError(domain.ErrorApprovalCheckpointInvalid, encodeErr)
+			}
+			if _, suspendErr := e.approvals.Suspend(context.WithoutCancel(ctx), run.ID,
+				agent.ResumeStateVersion, approvalRequired.State.Iteration, approvalRequired.BatchDigest,
+				encoded, approvalRequired.Items, approvalRequired.StandingCandidates); suspendErr != nil {
+				return domain.RunOutput{}, domain.NewCodedError(domain.ErrorEventPersistence, suspendErr)
+			}
+			return domain.RunOutput{Suspended: true}, nil
+		}
+		return domain.RunOutput{}, runErr
+	}
+	if loop.SubmitResultGate.Result == nil {
+		// The model stopped without calling submit_result: the terminal contract
+		// is incomplete. V1 fails closed; the parent sees a failed child item.
+		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorIncompleteTerminalContract,
+			errors.New("child Run ended without calling submit_result"))
+	}
+	if resolved.Effective.Role.OutputContract == "structured-v1" && len(loop.SubmitResultGate.Result.Payload) == 0 {
+		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorIncompleteTerminalContract,
+			errors.New("structured-v1 child result requires an object payload"))
+	}
+	return domain.RunOutput{Messages: result.Generated, Terminal: loop.SubmitResultGate.Result}, nil
 }
 
 func (e *agentExecutor) executeContextCompaction(ctx context.Context, run *domain.AgentRun) (domain.RunOutput, error) {
@@ -389,6 +688,18 @@ func (e *agentExecutor) executeContextCompaction(ctx context.Context, run *domai
 	return domain.RunOutput{}, err
 }
 
+// injectToolCallResults appends the Waiting run's private transcript after the
+// canonical history. RunMessageRepo performs the folded-result projection by
+// provider-visible tool_call_id and closes SQLite rows between queries.
+func (e *agentExecutor) injectToolCallResults(ctx context.Context, runID string,
+	history []domain.ChatMessage) ([]domain.ChatMessage, []domain.ChatMessage, error) {
+	resumeMessages, err := (&store.RunMessageRepo{DB: e.db}).ResumeMessages(ctx, runID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return append(history, resumeMessages...), resumeMessages, nil
+}
+
 func (e *agentExecutor) resolveProvider(resolved *store.ResolvedRunConfig) (llm.Provider, error) {
 	runtime := resolved.Effective.InitialRuntime
 	if runtime.ModelProfileID == "" {
@@ -400,6 +711,220 @@ func (e *agentExecutor) resolveProvider(resolved *store.ResolvedRunConfig) (llm.
 			SupportsToolUse: resolved.Model.SupportsToolUse, SupportsThinking: resolved.Model.SupportsThinking}
 	}
 	return e.resolveRuntimeProvider(runtime)
+}
+
+// delegateProvider creates a DelegateRolesProvider that executes delegation
+// via the Store's DelegationRepo and RunRepo.
+func (e *agentExecutor) delegateProvider(run *domain.AgentRun) *agentExecutorDelegationProvider {
+	return &agentExecutorDelegationProvider{
+		db: e.db, runs: e.runs, sessions: e.sessionDB,
+		runID: run.ID, sessionID: run.SessionID,
+	}
+}
+
+type delegationAdmissionToolPolicy struct {
+	Base        agent.ToolPolicy
+	Delegations *store.DelegationRepo
+	SessionID   string
+}
+
+func (p *delegationAdmissionToolPolicy) BeforeToolBatch(ctx context.Context, batch agent.ToolBatchContext,
+	calls []domain.ToolCall) ([]agent.ToolDecision, error) {
+	decisions, err := p.Base.BeforeToolBatch(ctx, batch, calls)
+	if err != nil {
+		return nil, err
+	}
+	for index, call := range calls {
+		if call.Name != "delegate_roles" || index >= len(decisions) || decisions[index].Action == agent.ToolTerminateBatch {
+			continue
+		}
+		var input struct {
+			Delegations []tools.DelegationSpec `json:"delegations"`
+		}
+		effectiveArguments := call.Arguments
+		if len(decisions[index].Arguments) > 0 {
+			effectiveArguments = decisions[index].Arguments
+		}
+		if json.Unmarshal(effectiveArguments, &input) != nil || len(input.Delegations) == 0 {
+			continue // Registry schema validation reports malformed arguments.
+		}
+		requiresApproval := false
+		denial := ""
+		for specIndex := range input.Delegations {
+			spec := &input.Delegations[specIndex]
+			snapshot, resolveErr := p.Delegations.ResolveRoleForDelegation(ctx, p.SessionID, spec.RoleHandle)
+			if errors.Is(resolveErr, store.ErrDelegationRoleUnavailable) {
+				denial = fmt.Sprintf("Role %q is unavailable in this project", spec.RoleHandle)
+				break
+			}
+			if resolveErr != nil {
+				return nil, resolveErr
+			}
+			if !snapshot.DelegationEnabled || snapshot.Definition.DelegationPolicy.Admission == domain.DelegationDenied {
+				denial = fmt.Sprintf("Role %q does not allow Host delegation", spec.RoleHandle)
+				break
+			}
+			spec.RoleVersionID = snapshot.VersionID
+			requiresApproval = requiresApproval ||
+				snapshot.Definition.DelegationPolicy.Admission == domain.DelegationApprovalRequired
+		}
+		if denial != "" {
+			decisions[index] = agent.ToolDecision{Action: agent.ToolDeny, Code: string(domain.ErrorDelegationNotAuthorized),
+				Reason: denial, RiskClass: domain.RiskDelegation}
+			continue
+		}
+		encodedArguments, err := json.Marshal(input)
+		if err != nil {
+			return nil, err
+		}
+		decisions[index].Arguments = encodedArguments
+		if requiresApproval && decisions[index].Action == agent.ToolAllow {
+			decisions[index].Action = agent.ToolRequireApproval
+			decisions[index].Code = "role_delegation_approval_required"
+			decisions[index].Reason = "The selected Role requires delegation approval"
+			decisions[index].RiskClass = domain.RiskDelegation
+		}
+	}
+	return decisions, nil
+}
+
+func (p *delegationAdmissionToolPolicy) AfterToolCall(ctx context.Context, callCtx agent.ToolCallContext,
+	call domain.ToolCall, result domain.ToolResult) (agent.AfterToolDecision, error) {
+	return p.Base.AfterToolCall(ctx, callCtx, call, result)
+}
+
+type agentExecutorDelegationProvider struct {
+	db        *sql.DB
+	runs      *store.RunRepo
+	sessions  *store.SessionRepo
+	runID     string
+	sessionID string
+}
+
+func delegationStrategy(itemCount int) domain.DelegationStrategy {
+	if itemCount > 1 {
+		return domain.DelegationStrategyParallel
+	}
+	return domain.DelegationStrategySingle
+}
+
+func effectiveDelegationBudget(request domain.BudgetCeilingJSON, ceiling domain.DelegationBudgetCeiling) domain.BudgetCeilingJSON {
+	if request.MaxModelCalls == 0 {
+		request.MaxModelCalls = ceiling.MaxModelCalls
+	}
+	if request.MaxToolCalls == 0 {
+		request.MaxToolCalls = ceiling.MaxToolCalls
+	}
+	if request.MaxTotalTokens == 0 {
+		request.MaxTotalTokens = ceiling.MaxTotalTokens
+	}
+	if request.MaxOutputTokens == 0 {
+		request.MaxOutputTokens = ceiling.MaxOutputTokens
+	}
+	if request.MaxWallTimeMS == 0 {
+		request.MaxWallTimeMS = ceiling.MaxWallTimeMS
+	}
+	// A zero cost request means no monetary cap. Unlike token and wall limits,
+	// it cannot safely inherit when the chosen model has no pricing metadata.
+	return request
+}
+
+func (p *agentExecutorDelegationProvider) ExecuteDelegation(ctx context.Context, runID, sessionID, toolCallID string, specs []tools.DelegationSpec) (*tools.DelegateRolesResult, error) {
+	delegations := &store.DelegationRepo{DB: p.db}
+
+	type resolvedSpec struct {
+		spec     tools.DelegationSpec
+		snapshot *store.DelegationRoleSnapshot
+	}
+	var resolved []resolvedSpec
+	for _, spec := range specs {
+		snapshot, err := delegations.ResolveRoleForDelegation(ctx, sessionID, spec.RoleHandle)
+		if err != nil {
+			return nil, fmt.Errorf("resolve role %q: %w", spec.RoleHandle, err)
+		}
+		if spec.RoleVersionID == "" || spec.RoleVersionID != snapshot.VersionID {
+			return nil, fmt.Errorf("role %q version changed after delegation admission", spec.RoleHandle)
+		}
+		spec.Budget = effectiveDelegationBudget(spec.Budget, snapshot.Definition.DelegationPolicy.BudgetCeiling)
+		if spec.OutputContract == "" {
+			spec.OutputContract = snapshot.Definition.OutputContract
+		}
+		resolved = append(resolved, resolvedSpec{spec: spec, snapshot: snapshot})
+	}
+	admissionApproved, err := delegations.DelegationToolCallApproved(ctx, runID, toolCallID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve delegation approval: %w", err)
+	}
+
+	items := make([]store.CreateDelegationItemInput, len(resolved))
+	for i, r := range resolved {
+		outputContract := r.spec.OutputContract
+		if outputContract == "" {
+			outputContract = "text-v1"
+		}
+		items[i] = store.CreateDelegationItemInput{
+			Name:           r.spec.Name,
+			RoleVersionID:  r.snapshot.VersionID,
+			AssignmentJSON: json.RawMessage(fmt.Sprintf(`{"task":%q}`, r.spec.Assignment)),
+			OutputContract: outputContract,
+			Budget:         r.spec.Budget,
+		}
+	}
+
+	group, groupItems, children, err := delegations.CreateGroupWithChildren(ctx, store.CreateDelegationGroupInput{
+		ParentRunID: runID, ParentToolCallID: toolCallID,
+		Strategy:          delegationStrategy(len(items)),
+		Items:             items,
+		AdmissionApproved: admissionApproved,
+	}, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("materialize delegation tree: %w", err)
+	}
+	result := &tools.DelegateRolesResult{Status: "delegated", GroupID: group.ID}
+	for index, item := range groupItems {
+		result.Items = append(result.Items, tools.DelegateRolesItemResult{
+			Name: item.Name, ItemID: item.ID, ChildRunID: children[index].ID,
+		})
+	}
+	return result, nil
+}
+
+// rolePreloadPrompt returns the frozen preload Skill prompts for a Role as an
+// inline system-prompt fragment. Preload Skills are data injected at execution
+// time and do not require filesystem access, so they remain available even when
+// the read tool is not in the Role allowlist.
+func (e *agentExecutor) rolePreloadPrompt(role *domain.FrozenRoleExecution) string {
+	if role == nil {
+		return ""
+	}
+	var preloads []string
+	for _, entry := range role.Skills.Entries {
+		if entry.Mode == domain.RoleSkillPreload {
+			preloads = append(preloads, entry.SkillID)
+		}
+	}
+	if len(preloads) == 0 {
+		return ""
+	}
+	loaded := make(map[string]*skills.LoadedSkill)
+	for _, skill := range skills.Discover(e.skillsDir, e.builtinDir) {
+		loaded[skill.Manifest.ID] = skill
+	}
+	var builder strings.Builder
+	for _, id := range preloads {
+		skill, ok := loaded[id]
+		if !ok {
+			// Publish validation already guarantees the Skill exists; skip
+			// defensively if the on-disk catalog changed since publication.
+			continue
+		}
+		builder.WriteString("\n\n<preloaded_skill id=\"")
+		builder.WriteString(id)
+		builder.WriteString("\">\n")
+		builder.WriteString(skill.PromptText)
+		builder.WriteString("\n</preloaded_skill>")
+	}
+	return builder.String()
 }
 
 func (e *agentExecutor) resolveRuntimeProvider(runtime domain.ModelRuntimeSnapshot) (llm.Provider, error) {
@@ -523,7 +1048,7 @@ func (e *agentExecutor) queueRunEndObserver(ctx context.Context, run *domain.Age
 		"iterations": iterations,
 	})
 
-	canonicalRoot, _ := filepath.Abs(wSpace.HostPath)
+	canonicalRoot, _ := workspace.CanonicalWorkspaceRoot(wSpace.HostPath)
 	deliveryID := fmt.Sprintf("runend_%s", run.ID)
 	entry := hooks.OutboxEntry{
 		DeliveryID:    deliveryID,
@@ -558,7 +1083,7 @@ func (e *agentExecutor) CheckPrompt(ctx context.Context, sessionID, prompt strin
 	if err != nil {
 		return api.PromptHookOutcome{Error: fmt.Errorf("load workspace for prompt hook: %w", err)}
 	}
-	canonicalRoot, err := filepath.Abs(wSpace.HostPath)
+	canonicalRoot, err := workspace.CanonicalWorkspaceRoot(wSpace.HostPath)
 	if err != nil {
 		return api.PromptHookOutcome{Error: fmt.Errorf("resolve workspace root: %w", err)}
 	}
@@ -680,6 +1205,12 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("recover active runs: %w", err)
 	}
+	// Reap orphans AFTER RecoverActive: parents terminated by the recovery scan
+	// (e.g. interrupted waiting_children) may leave children with a terminal
+	// parent that this pass catches.
+	if _, err := (&store.DelegationRepo{DB: db}).ReapOrphans(context.Background()); err != nil {
+		return fmt.Errorf("reap orphaned children: %w", err)
+	}
 
 	eventWriter := events.NewWriter(&store.EventRepo{DB: db}, hub)
 	artifactService := &artifacts.Service{DB: db, Root: filepath.Join(cfg.HomeDir, "artifacts")}
@@ -702,6 +1233,7 @@ func run() error {
 		skillRepo: &store.SkillSnapshotRepo{DB: db},
 		skillsDir: cfg.SkillsDir, builtinDir: cfg.BuiltinSkillsDir,
 		sandbox: cfg.SandboxMode, artifacts: artifactService, approvals: approvalRepo,
+		standingApprovals: &store.StandingApprovalRepo{DB: db},
 	}
 	executor.compaction = &compaction.Service{Repo: compactionRepo, RunRepo: runCompactionRepo, Calls: callRepo,
 		Messages: executor.msgRepo, Events: eventWriter, Providers: executor.resolveRuntimeProvider}
@@ -734,6 +1266,17 @@ func run() error {
 	go outboxWorker.Start(outboxCtx)
 
 	coordinator := runs.NewCoordinator(runRepo, executor, cfg.MaxConcurrentRuns)
+	// Wire child run enqueuing: when delegate_roles creates children,
+	// the executor notifies the coordinator to start executing them.
+	executor.OnChildRunsCreated = func(_ context.Context, ids []string) {
+		for _, id := range ids {
+			// A child is durable work. Do not derive its scheduler lifetime from
+			// the parent claim context, which is cancelled when the parent yields.
+			if err := coordinator.Enqueue(context.Background(), id); err != nil {
+				slog.Warn("enqueue child run failed", "runID", id, "error", err)
+			}
+		}
+	}
 	for _, runID := range queuedRuns {
 		if err := coordinator.Enqueue(context.Background(), runID); err != nil {
 			return fmt.Errorf("re-enqueue recovered run %s: %w", runID, err)
@@ -748,17 +1291,47 @@ func run() error {
 	}
 	providerRepo := &store.ProviderRepo{DB: db}
 	modelRepo := &store.ModelRepo{DB: db}
+	knownSkills := make(map[string]bool)
+	for _, skill := range skills.Discover(cfg.SkillsDir, cfg.BuiltinSkillsDir) {
+		knownSkills[skill.Manifest.ID] = true
+	}
+	roleRepo := &store.RoleRepo{DB: db, KnownTools: map[string]bool{
+		"read": true, "write": true, "edit": true, "ls": true, "grep": true, "find": true,
+		"exec": true, "bash": true, "web_fetch": true, "publish_artifact": true,
+		"todo": true, "search_compacted_history": true, "git_readonly": true,
+		"submit_result": true, "delegate_roles": true,
+	}, KnownSkills: knownSkills}
 	doctor := &providerdoctor.Service{Providers: providerRepo, Models: modelRepo,
 		Credentials: llm.CredentialResolver{}, Timeout: 15 * time.Second}
+
+	// Initialize prompts subsystem.
+	builtins, err := prompts.LoadBuiltins()
+	if err != nil {
+		return fmt.Errorf("load builtin prompts: %w", err)
+	}
+	globalStore, err := prompts.OpenGlobalStore(os.Getenv("ENNOTE_HOME"))
+	if err != nil {
+		return fmt.Errorf("open global prompt store: %w", err)
+	}
+	promptService := &prompts.Service{
+		HomeDir:     os.Getenv("ENNOTE_HOME"),
+		Projects:    &store.ProjectRepo{DB: db},
+		TrustStore:  trustStore,
+		Builtins:    builtins,
+		GlobalStore: globalStore,
+	}
+
 	server := &api.Server{
 		DB: db, Token: cfg.BootstrapToken, Sandbox: cfg.SandboxMode,
 		Projects: &store.ProjectRepo{DB: db}, Providers: providerRepo,
-		Models: modelRepo, Doctor: doctor, Policies: &store.PolicyRepo{DB: db}, Artifacts: artifactService,
+		Models: modelRepo, Roles: roleRepo, Doctor: doctor, Policies: &store.PolicyRepo{DB: db}, Artifacts: artifactService,
 		Sessions: &store.SessionRepo{DB: db}, Branches: &store.BranchRepo{DB: db},
 		Messages: executor.msgRepo, Compactions: compactionRepo,
-		Approvals: approvalRepo, Runs: runRepo, Queue: &store.QueueRepo{DB: db}, Events: &store.EventRepo{DB: db},
+		Approvals: approvalRepo, StandingApprovals: executor.standingApprovals, Delegations: &store.DelegationRepo{DB: db},
+		Runs: runRepo, Queue: &store.QueueRepo{DB: db}, Events: &store.EventRepo{DB: db},
 		Hub: hub, Control: api.CoordinatorController{Coordinator: coordinator}, InstanceID: instanceID,
 		PromptGate: executor,
+		Prompts:    promptService,
 	}
 
 	listener, err := net.Listen("tcp", cfg.ListenAddr)

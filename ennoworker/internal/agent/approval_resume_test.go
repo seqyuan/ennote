@@ -21,6 +21,10 @@ func askPolicy(t *testing.T) *BuiltinToolPolicy {
 	return policy
 }
 
+type alwaysWaitingChildren struct{}
+
+func (alwaysWaitingChildren) IsWaitingChildren(context.Context, string) bool { return true }
+
 func approvalCompletion() domain.Completion {
 	return domain.Completion{StopReason: domain.StopReasonToolCalls, ActualModel: "fake", ToolCalls: []domain.ToolCall{
 		{ID: "read-call", Name: "read", Arguments: json.RawMessage(`{"path":"notes.txt"}`)},
@@ -77,6 +81,37 @@ func TestLoopResumeApproveExecutesSavedBatchWithoutRepeatingModelCall(t *testing
 	assert.Equal(t, []string{"read", "write"}, []string{tools.calls[0].Name, tools.calls[1].Name})
 	require.Len(t, provider.Requests, 2, "resume must use only the next model request")
 	assert.Equal(t, "done", messageText(result.Messages[len(result.Messages)-1]))
+}
+
+func TestLoopApprovalResumeYieldsImmediatelyAfterDelegation(t *testing.T) {
+	completion := domain.Completion{StopReason: domain.StopReasonToolCalls, ActualModel: "fake", ToolCalls: []domain.ToolCall{{
+		ID: "delegate-call", Name: "delegate_roles", Arguments: json.RawMessage(`{"delegations":[{"name":"inspect","roleHandle":"explorer","assignment":"inspect","budget":{"maxModelCalls":4,"maxToolCalls":8}}]}`),
+	}}}
+	provider := llm.NewFakeProvider(llm.FakeStep{Completion: completion})
+	tools := &fakeTools{result: domain.ToolResult{Content: `{"status":"delegated"}`}}
+	policy := askPolicy(t)
+	snapshot := domain.PolicySnapshot{ID: "ask", Kind: domain.PolicyKindTool, Version: 1, Config: policy.snapshot.Config}
+	loop := &Loop{Provider: provider, Tools: tools, Events: &memoryWriter{}, ToolPolicy: policy,
+		ToolPolicySnapshot: snapshot, DelegationDetector: alwaysWaitingChildren{}, MaxIterations: 4}
+	input := RunInput{RunID: "approval-delegation", Model: "fake", History: []domain.ChatMessage{{
+		Role: domain.RoleUser, Content: []domain.ContentBlock{textBlock("delegate")},
+	}}}
+	_, err := loop.Run(context.Background(), input)
+	var required *ApprovalRequiredError
+	require.True(t, errors.As(err, &required))
+	require.Len(t, required.Items, 1)
+	assert.Equal(t, domain.RiskDelegation, required.Items[0].RiskClass)
+
+	input.History = nil
+	input.Resume = &required.State
+	input.Approval = &ApprovalResolution{Decision: domain.DecisionApproved, BatchDigest: required.BatchDigest}
+	result, err := loop.Run(context.Background(), input)
+	require.NoError(t, err)
+	assert.True(t, result.Waiting)
+	require.Len(t, tools.calls, 1)
+	require.Len(t, provider.Requests, 1, "approval resume must yield before another model call")
+	require.Len(t, result.Generated, 2)
+	assert.Equal(t, domain.RoleTool, result.Generated[1].Role)
 }
 
 func TestLoopResumeRejectRunsReadOnlyAndContinuesWithDeniedToolResult(t *testing.T) {

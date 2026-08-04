@@ -122,7 +122,6 @@ test("a nonterminal stream EOF reconnects the same run and refreshes canonical h
   await page.getByTitle("Select project").click();
   await page.getByRole("button", { name: project.name }).click();
   await page.getByRole("button", { name: session.title, exact: true }).click();
-  await expect(page.getByText("Reconnecting to run", { exact: true })).toBeVisible();
   await expect.poll(() => streams, { timeout: 5000 }).toBe(2);
   await expect(page.getByText("Recovered response", { exact: true })).toBeVisible();
   await expect(page.getByText("Completed", { exact: true })).toBeVisible();

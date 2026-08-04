@@ -21,9 +21,10 @@ import { useAgentSession } from "@/hooks/useAgentSession";
 import { useRunRecovery } from "@/hooks/useRunRecovery";
 import { useRunningSessionIds } from "@/hooks/useRunningSessionIds";
 import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
+import { usePromptTemplates } from "@/hooks/usePromptTemplates";
 import { permissionModeForPolicyID, permissionPolicyID, withRunConfig, type PermissionMode } from "@/lib/permission-mode";
 import { apiFetch } from "@/lib/worker-api.client";
-import type { Session } from "@/components/settings/types";
+import type { RoleSummary, Session } from "@/components/settings/types";
 import type { AgentRun } from "@/lib/approval";
 import type { components } from "@/lib/worker-api.gen";
 
@@ -54,6 +55,8 @@ export function AppShell() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedSession, setSelectedSessionState] = useState<string | null>(null);
+  const [roles, setRoles] = useState<RoleSummary[]>([]);
+  const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -63,13 +66,46 @@ export function AppShell() {
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("discuss");
   const selectedSessionRef = useRef<string | null>(selectedSession);
 
+  // Prompt template expansion state.
+  const [draftVersion, setDraftVersion] = useState(0);
+  const [expandedVersion, setExpandedVersion] = useState<number | null>(null);
+  const [expanding, setExpanding] = useState(false);
+  const [expandDiag, setExpandDiag] = useState<string | null>(null);
+  const [promptPanelDismissed, setPromptPanelDismissed] = useState(false);
+  const expandAbortRef = useRef<AbortController | null>(null);
+  const promptCatalog = usePromptTemplates(selectedProject);
+
+  // Refresh the catalog whenever the command panel transitions from closed to
+  // open, so external file changes are visible (design §9.1).
+  const commandPanelOpen = Boolean(
+    selectedProject && input.startsWith("/") && !input.slice(1).match(/[\s]/) && promptCatalog.templates.length > 0,
+  );
+  const wasPanelOpen = useRef(false);
+  useEffect(() => {
+    if (commandPanelOpen && !wasPanelOpen.current) {
+      void promptCatalog.refresh();
+    }
+    wasPanelOpen.current = commandPanelOpen;
+  }, [commandPanelOpen, promptCatalog]);
+
+  const setInputVersioned = useCallback((value: string) => {
+    setInput(value);
+    setDraftVersion((v) => v + 1);
+    setExpandedVersion(null);
+    // Keep an explicit dismissal while editing one slash token, then re-arm
+    // once the input is no longer eligible for the command panel.
+    if (!value.startsWith("/") || /\s/.test(value.slice(1))) {
+      setPromptPanelDismissed(false);
+    }
+  }, []);
+
   const selectSession = useCallback((sessionId: string | null) => {
     selectedSessionRef.current = sessionId;
     setSelectedSessionState(sessionId);
-    setInput("");
+    setInputVersioned("");
     setPendingImage(null);
     setTextAttachments([]);
-  }, []);
+  }, [setInputVersioned]);
 
   // Resizable panels
   const sidebarResize = useResizable({ initialWidth: 260, minWidth: 180, maxWidth: 500, storageKey: "--ennote-sidebar-width" });
@@ -180,6 +216,21 @@ export function AppShell() {
     return permissionModeForPolicyID(settings.policies, requested?.toolPolicyProfileId) ?? permissionMode;
   }, [activeRunRecord, permissionMode, settings.policies]);
 
+  useEffect(() => {
+    if (!selectedProject) return;
+    let cancelled = false;
+    const params = new URLSearchParams({ projectId: selectedProject, status: "active", limit: "100" });
+    void apiFetch<{ items: RoleSummary[] }>(`/v1/roles?${params}`)
+      .then((page) => {
+        if (cancelled) return;
+        const published = page.items.filter((role) => Boolean(role.currentVersionId));
+        setRoles(published);
+        setSelectedRoleId((current) => published.some((role) => role.id === current) ? current : null);
+      })
+      .catch(() => { if (!cancelled) setRoles([]); });
+    return () => { cancelled = true; };
+  }, [selectedProject]);
+
   const refreshSettings = settings.refresh;
   const openSettings = useCallback(() => {
     setSettingsOpen(true);
@@ -189,6 +240,7 @@ export function AppShell() {
 
   const switchProject = useCallback((projectId: string) => {
     setSettingsOpen(false);
+    setSelectedRoleId(null);
     setSelectedProject(projectId);
     selectSession(null);
     sessionNavigation.setView("active");
@@ -234,7 +286,7 @@ export function AppShell() {
     const attachments = textAttachments;
     const contextualText = appendTextAttachments(text, attachments);
     const attachmentSummary = attachments.length ? `[Files: ${attachments.map((item) => item.name).join(", ")}]` : "";
-    setInput("");
+    setInputVersioned("");
     setPendingImage(null);
     setTextAttachments([]);
     setStatus("sending...");
@@ -243,9 +295,14 @@ export function AppShell() {
       const payload = image ? {
         content: [...(contextualText ? [{ type: "text", text: contextualText }] : []), { type: "image", artifactId: image.id }],
       } : { text: contextualText };
-      const turn = await apiFetch<TurnSubmission>(`/v1/sessions/${encodeURIComponent(sessionAtSend)}/turns`, {
-        method: "POST", headers: { "Idempotency-Key": genId() },
-        body: JSON.stringify(withRunConfig(payload, toolPolicyProfileId, selectedModelId)),
+      const selectedRole = roles.find((role) => role.id === selectedRoleId) ?? null;
+      const endpoint = `/v1/sessions/${encodeURIComponent(sessionAtSend)}/invocations`;
+      const body = selectedRole && selectedRole.currentVersionId
+        ? { ...payload, target: { kind: "role", objectId: selectedRole.id,
+            versionId: selectedRole.currentVersionId, contextMode: "room" } }
+        : { ...withRunConfig(payload, toolPolicyProfileId, selectedModelId), target: { kind: "host" } };
+      const turn = await apiFetch<TurnSubmission>(endpoint, {
+        method: "POST", headers: { "Idempotency-Key": genId() }, body: JSON.stringify(body),
       });
       if (selectedSessionRef.current !== sessionAtSend) return;
       setError(null);
@@ -257,7 +314,137 @@ export function AppShell() {
         setError((reason as Error).message);
       }
     }
-  }, [selectedSession, pendingImage, textAttachments, addMsg, setError, setStatus, watchRun, selectedModelId]);
+  }, [selectedSession, pendingImage, textAttachments, addMsg, setError, setStatus, watchRun, selectedModelId,
+    selectedRoleId, roles, setInputVersioned]);
+
+  // ——— Prompt template expansion ———
+
+  const policyId = selectedPermissionPolicyID();
+
+  type ExpandResponse = {
+    case: "matched"; name: string; text: string; diagnostics: { level: string; code: string; message: string }[];
+  } | {
+    case: "not_found"; name: string; diagnostics: { level: string; code: string; message: string }[];
+  } | {
+    case: "invalid_invocation"; diagnostics: never[];
+  };
+
+  const handleExpand = useCallback(async (invocation: string, projectId: string): Promise<ExpandResponse | null> => {
+    expandAbortRef.current?.abort();
+    const controller = new AbortController();
+    expandAbortRef.current = controller;
+    try {
+      const data = await apiFetch<ExpandResponse>(
+        `/v1/projects/${encodeURIComponent(projectId)}/prompt-templates/expand`,
+        { method: "POST", body: JSON.stringify({ invocation }), signal: controller.signal },
+      );
+      if (controller.signal.aborted) return null;
+      return data;
+    } catch (err: unknown) {
+      if (controller.signal.aborted) return null;
+      throw err;
+    }
+  }, []);
+
+  const submit = useCallback(async () => {
+    if (!selectedSession || (!input.trim() && !pendingImage && textAttachments.length === 0) || activeRun) return;
+    if (!policyId && !selectedRoleId) {
+      setError(`The ${permissionMode} permission policy is unavailable.`);
+      return;
+    }
+
+    // Slash expansion gate: intercept drafts starting with "/".
+    if (input.startsWith("/") && expandedVersion !== draftVersion && selectedProject) {
+      setExpanding(true);
+      setExpandDiag(null);
+      const actionProject = selectedProject;
+      const actionDraftVer = draftVersion;
+      const actionSession = selectedSession;
+      try {
+        const result = await handleExpand(input, selectedProject);
+        if (!result) return; // aborted
+        // Stale-guard: context changed during request.
+        if (selectedProject !== actionProject || selectedSession !== actionSession || draftVersion !== actionDraftVer) {
+          return;
+        }
+        switch (result.case) {
+          case "matched": {
+            const text = result.text.trim();
+            if (!text) {
+              setError("Expanded prompt is empty.");
+              break;
+            }
+            setInput(text);
+            setDraftVersion((v) => v + 1);
+            setExpandedVersion(draftVersion + 1);
+            if (result.diagnostics.some((d) => d.code === "arguments_fallback")) {
+              setExpandDiag("Arguments could not be fully parsed; using raw input.");
+            }
+            break;
+          }
+          case "not_found":
+          case "invalid_invocation":
+            // Fall through: send the original draft as a normal message.
+            void sendTurn(input, policyId ?? "");
+            break;
+        }
+      } catch (err: unknown) {
+        setError((err as Error).message ?? "Failed to expand prompt template");
+      } finally {
+        setExpanding(false);
+      }
+      return;
+    }
+
+    void sendTurn(input, policyId ?? "");
+  }, [selectedSession, input, pendingImage, textAttachments.length, activeRun, policyId, permissionMode, sendTurn, setError,
+     selectedProject, selectedRoleId, expandedVersion, draftVersion, handleExpand]);
+
+  const steer = useCallback(async () => {
+    if (!activeRun || !input.trim()) return;
+
+    // Same slash expansion gate for steer.
+    if (input.startsWith("/") && expandedVersion !== draftVersion && selectedProject) {
+      setExpanding(true);
+      setExpandDiag(null);
+      const actionProject = selectedProject;
+      const actionDraftVer = draftVersion;
+      const actionSession = selectedSession;
+      try {
+        const result = await handleExpand(input, selectedProject);
+        if (!result) return;
+        if (selectedProject !== actionProject || selectedSession !== actionSession || draftVersion !== actionDraftVer) return;
+        switch (result.case) {
+          case "matched": {
+            const text = result.text.trim();
+            if (!text) { setError("Expanded prompt is empty."); break; }
+            setInput(text);
+            setDraftVersion((v) => v + 1);
+            setExpandedVersion(draftVersion + 1);
+            break;
+          }
+          case "not_found":
+          case "invalid_invocation": {
+            const text = input;
+            setInputVersioned("");
+            const queued = await queueSteer(text);
+            if (!queued) setInputVersioned(text);
+            break;
+          }
+        }
+      } catch (err: unknown) {
+        setError((err as Error).message ?? "Failed to expand");
+      } finally {
+        setExpanding(false);
+      }
+      return;
+    }
+
+    const text = input;
+    setInputVersioned("");
+    const queued = await queueSteer(text);
+    if (!queued) setInputVersioned(text);
+  }, [activeRun, input, queueSteer, selectedProject, expandedVersion, draftVersion, handleExpand, selectedSession, setError, setInputVersioned]);
 
   const uploadImage = useCallback(async (file: File) => {
     if (!selectedProject || !selectedSession) return;
@@ -311,24 +498,6 @@ export function AppShell() {
     if (!selectedSession) return;
     setModelOverrides((current) => ({ ...current, [selectedSession]: modelId }));
   }, [selectedSession]);
-
-  const policyId = selectedPermissionPolicyID();
-  const submit = useCallback(() => {
-    if (!selectedSession || (!input.trim() && !pendingImage && textAttachments.length === 0) || activeRun) return;
-    if (!policyId) {
-      setError(`The ${permissionMode} permission policy is unavailable.`);
-      return;
-    }
-    void sendTurn(input, policyId);
-  }, [selectedSession, input, pendingImage, textAttachments.length, activeRun, policyId, permissionMode, sendTurn, setError]);
-
-  const steer = useCallback(async () => {
-    if (!activeRun || !input.trim()) return;
-    const text = input;
-    setInput("");
-    const queued = await queueSteer(text);
-    if (!queued) setInput(text);
-  }, [activeRun, input, queueSteer]);
 
   const compactSession = useCallback(async () => {
     if (!selectedSession || activeRun) return;
@@ -717,7 +886,7 @@ export function AppShell() {
             clearError={clearCombinedError}
             status={status}
             input={input}
-            setInput={setInput}
+            setInput={setInputVersioned}
             activeRun={activeRun}
             activeRunStatus={activeRunRecord?.status}
             compacting={compacting}
@@ -733,6 +902,9 @@ export function AppShell() {
             models={settings.models.filter((model) => model.status === "active")}
             selectedModelId={selectedModelId}
             setSelectedModelId={selectModel}
+            roles={roles}
+            selectedRoleId={selectedRoleId}
+            setSelectedRoleId={setSelectedRoleId}
             textAttachments={textAttachments}
             removeTextAttachment={removeTextAttachment}
             attachFiles={files => void attachFiles(files)}
@@ -740,6 +912,15 @@ export function AppShell() {
             steer={steer}
             cancel={cancel}
             compactSession={compactSession}
+            promptTemplates={promptCatalog.templates}
+            showPromptPanel={commandPanelOpen && !promptPanelDismissed}
+            onPromptSelect={(name: string) => {
+              setPromptPanelDismissed(false);
+              setInputVersioned(`/${name} `);
+            }}
+            onPromptPanelClose={() => setPromptPanelDismissed(true)}
+            expanding={expanding}
+            expandDiag={expandDiag}
           />
         </div>
 
@@ -837,6 +1018,7 @@ export function AppShell() {
         error={settings.error}
         setError={settings.setError}
         onSessionUpdated={sessionNavigation.replaceSession}
+        projectId={selectedProject}
       />
     </>
   );

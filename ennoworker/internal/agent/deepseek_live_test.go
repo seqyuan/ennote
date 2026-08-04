@@ -27,8 +27,8 @@ type liveToolRunner struct {
 type liveNoTools struct{}
 
 func (liveNoTools) Definitions() []domain.ToolDefinition { return nil }
-func (liveNoTools) Execute(_ context.Context, call domain.ToolCall) domain.ToolResult {
-	return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: "unexpected tool call", IsError: true}
+func (liveNoTools) Execute(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+	return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: "unexpected tool call", IsError: true}, nil
 }
 
 func (r *liveToolRunner) Definitions() []domain.ToolDefinition {
@@ -38,11 +38,11 @@ func (r *liveToolRunner) Definitions() []domain.ToolDefinition {
 	}}
 }
 
-func (r *liveToolRunner) Execute(_ context.Context, call domain.ToolCall) domain.ToolResult {
+func (r *liveToolRunner) Execute(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	r.calls++
 	return domain.ToolResult{
 		ToolCallID: call.ID, ToolName: call.Name, Content: "ENNOTE_TOOL_RESULT", IsError: false,
-	}
+	}, nil
 }
 
 type liveEventWriter struct {

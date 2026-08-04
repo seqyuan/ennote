@@ -45,9 +45,11 @@ func (r *MessageRepo) CreateUserMessage(ctx context.Context, sessionID, parentID
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO messages (id, session_id, parent_message_id, role, status, created_at)
-		 VALUES (?, ?, ?, 'user', 'complete', ?)`,
-		messageID, sessionID, nullableStr(parentID), timestamp.Format(time.RFC3339Nano),
+		`INSERT INTO messages (id, session_id, parent_message_id, role, status,
+		 speaker_kind, speaker_snapshot_json, addressee_kind, visibility, originated_at, created_at)
+		 VALUES (?, ?, ?, 'user', 'complete', 'user', '{"kind":"user","displayName":"You"}',
+		 'host', 'public', ?, ?)`,
+		messageID, sessionID, nullableStr(parentID), timestamp.Format(time.RFC3339Nano), timestamp.Format(time.RFC3339Nano),
 	); err != nil {
 		return nil, fmt.Errorf("create message: %w", err)
 	}
@@ -70,21 +72,72 @@ func (r *MessageRepo) CreateUserMessage(ctx context.Context, sessionID, parentID
 		ParentMessageID: strPtr(parentID),
 		Role:            "user",
 		Status:          "complete",
+		SpeakerKind:     domain.SpeakerUser,
+		SpeakerSnapshot: json.RawMessage(`{"kind":"user","displayName":"You"}`),
+		AddresseeKind:   strPtr("host"),
+		Visibility:      domain.VisibilityPublic,
+		OriginatedAt:    &timestamp,
 		CreatedAt:       timestamp,
 	}, nil
 }
 
 func (r *MessageRepo) Lineage(ctx context.Context, sessionID, leafID string) ([]domain.Message, error) {
-	const query = `WITH RECURSIVE chain(id, session_id, parent_message_id, role, status, run_id, created_at, depth) AS (
-		SELECT id, session_id, parent_message_id, role, status, run_id, created_at, 0
+	var unsupported int
+	if err := r.DB.QueryRowContext(ctx, `WITH RECURSIVE chain(id,parent_message_id,run_id,depth) AS (
+		SELECT id,parent_message_id,run_id,0 FROM messages WHERE id=? AND session_id=?
+		UNION ALL SELECT m.id,m.parent_message_id,m.run_id,c.depth+1 FROM messages m
+		JOIN chain c ON m.id=c.parent_message_id WHERE m.session_id=? AND c.depth<500
+	) SELECT COUNT(*) FROM chain c JOIN agent_runs ar ON ar.id=c.run_id
+	WHERE ar.commit_format_version=2`, leafID, sessionID, sessionID).Scan(&unsupported); err != nil {
+		return nil, fmt.Errorf("validate lineage format: %w", err)
+	}
+	if unsupported != 0 {
+		return nil, domain.NewCodedError(domain.ErrorContextProjectionNotEnabled,
+			fmt.Errorf("lineage contains %d format 2 run messages", unsupported))
+	}
+	return r.loadLineage(ctx, sessionID, leafID)
+}
+
+// HostedContextLineage reads canonical mixed-format history for target-aware
+// execution and compaction. Private execution rows and room protocol facts are
+// intentionally not projected into model context.
+func (r *MessageRepo) HostedContextLineage(ctx context.Context, sessionID, leafID string) ([]domain.Message, error) {
+	lineage, err := r.loadLineage(ctx, sessionID, leafID)
+	if err != nil {
+		return nil, err
+	}
+	visible := make([]domain.Message, 0, len(lineage))
+	for _, message := range lineage {
+		if message.Visibility == domain.VisibilityPublic || message.Visibility == domain.VisibilityLegacyExecution {
+			visible = append(visible, message)
+		}
+	}
+	return visible, nil
+}
+
+func (r *MessageRepo) loadLineage(ctx context.Context, sessionID, leafID string) ([]domain.Message, error) {
+	const query = `WITH RECURSIVE chain(id, session_id, parent_message_id, role, status, run_id,
+		speaker_kind, speaker_object_id, speaker_version_id, participant_instance_id, speaker_snapshot_json,
+		addressee_kind, addressee_object_id, addressee_version_id, reply_to_message_id, visibility,
+		originated_at, created_at, depth) AS (
+		SELECT id, session_id, parent_message_id, role, status, run_id,
+			speaker_kind, speaker_object_id, speaker_version_id, participant_instance_id, speaker_snapshot_json,
+			addressee_kind, addressee_object_id, addressee_version_id, reply_to_message_id, visibility,
+			originated_at, created_at, 0
 		FROM messages WHERE id = ? AND session_id = ?
 		UNION ALL
-		SELECT m.id, m.session_id, m.parent_message_id, m.role, m.status, m.run_id, m.created_at, c.depth + 1
+		SELECT m.id, m.session_id, m.parent_message_id, m.role, m.status, m.run_id,
+			m.speaker_kind, m.speaker_object_id, m.speaker_version_id, m.participant_instance_id, m.speaker_snapshot_json,
+			m.addressee_kind, m.addressee_object_id, m.addressee_version_id, m.reply_to_message_id, m.visibility,
+			m.originated_at, m.created_at, c.depth + 1
 		FROM messages m JOIN chain c
 		  ON m.id = c.parent_message_id AND m.session_id = c.session_id
 		WHERE c.depth < 500
 	)
-	SELECT id, session_id, parent_message_id, role, status, run_id, created_at
+	SELECT id, session_id, parent_message_id, role, status, run_id,
+		speaker_kind, speaker_object_id, speaker_version_id, participant_instance_id, speaker_snapshot_json,
+		addressee_kind, addressee_object_id, addressee_version_id, reply_to_message_id, visibility,
+		originated_at, created_at
 	FROM chain ORDER BY depth DESC`
 
 	rows, err := r.DB.QueryContext(ctx, query, leafID, sessionID)
@@ -94,21 +147,48 @@ func (r *MessageRepo) Lineage(ctx context.Context, sessionID, leafID string) ([]
 	var messages []domain.Message
 	for rows.Next() {
 		var message domain.Message
-		var createdAt string
-		var runID sql.NullString
+		var createdAt, speakerSnapshot string
+		var runID, speakerObjectID, speakerVersionID, participantInstanceID sql.NullString
+		var addresseeKind, addresseeObjectID, addresseeVersionID, replyToMessageID, originatedAt sql.NullString
 		if err := rows.Scan(
-			&message.ID,
-			&message.SessionID,
-			&message.ParentMessageID,
-			&message.Role,
-			&message.Status,
-			&runID,
-			&createdAt,
+			&message.ID, &message.SessionID, &message.ParentMessageID, &message.Role, &message.Status, &runID,
+			&message.SpeakerKind, &speakerObjectID, &speakerVersionID, &participantInstanceID, &speakerSnapshot,
+			&addresseeKind, &addresseeObjectID, &addresseeVersionID, &replyToMessageID, &message.Visibility,
+			&originatedAt, &createdAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan lineage message: %w", err)
 		}
 		if runID.Valid {
 			message.RunID = &runID.String
+		}
+		if speakerObjectID.Valid {
+			message.SpeakerObjectID = &speakerObjectID.String
+		}
+		if speakerVersionID.Valid {
+			message.SpeakerVersionID = &speakerVersionID.String
+		}
+		if participantInstanceID.Valid {
+			message.ParticipantInstanceID = &participantInstanceID.String
+		}
+		message.SpeakerSnapshot = json.RawMessage(speakerSnapshot)
+		if addresseeKind.Valid {
+			message.AddresseeKind = &addresseeKind.String
+		}
+		if addresseeObjectID.Valid {
+			message.AddresseeObjectID = &addresseeObjectID.String
+		}
+		if addresseeVersionID.Valid {
+			message.AddresseeVersionID = &addresseeVersionID.String
+		}
+		if replyToMessageID.Valid {
+			message.ReplyToMessageID = &replyToMessageID.String
+		}
+		if originatedAt.Valid {
+			value, parseErr := time.Parse(time.RFC3339Nano, originatedAt.String)
+			if parseErr != nil {
+				return nil, fmt.Errorf("parse message originated_at: %w", parseErr)
+			}
+			message.OriginatedAt = &value
 		}
 		message.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
 		if err != nil {
@@ -168,19 +248,32 @@ func (r *MessageRepo) Page(ctx context.Context, sessionID, leafID, beforeMessage
 		anchorID = parent.String
 	}
 
-	const pageQuery = `WITH RECURSIVE page_chain(id,session_id,parent_message_id,role,status,run_id,created_at,depth,path) AS (
-		SELECT id,session_id,parent_message_id,role,status,run_id,created_at,0,'|' || id || '|'
+	const pageQuery = `WITH RECURSIVE page_chain(id,session_id,parent_message_id,role,status,run_id,
+		speaker_kind,speaker_object_id,speaker_version_id,participant_instance_id,speaker_snapshot_json,
+		addressee_kind,addressee_object_id,addressee_version_id,reply_to_message_id,visibility,
+		originated_at,created_at,depth,path) AS (
+		SELECT id,session_id,parent_message_id,role,status,run_id,
+			speaker_kind,speaker_object_id,speaker_version_id,participant_instance_id,speaker_snapshot_json,
+			addressee_kind,addressee_object_id,addressee_version_id,reply_to_message_id,visibility,
+			originated_at,created_at,0,'|' || id || '|'
 		FROM messages WHERE id=? AND session_id=?
 		UNION ALL
-		SELECT m.id,m.session_id,m.parent_message_id,m.role,m.status,m.run_id,m.created_at,c.depth+1,c.path || m.id || '|'
+		SELECT m.id,m.session_id,m.parent_message_id,m.role,m.status,m.run_id,
+			m.speaker_kind,m.speaker_object_id,m.speaker_version_id,m.participant_instance_id,m.speaker_snapshot_json,
+			m.addressee_kind,m.addressee_object_id,m.addressee_version_id,m.reply_to_message_id,m.visibility,
+			m.originated_at,m.created_at,c.depth+1,c.path || m.id || '|'
 		FROM messages m JOIN page_chain c ON m.id=c.parent_message_id AND m.session_id=c.session_id
 		WHERE c.depth < ? AND instr(c.path,'|' || m.id || '|')=0
 	)
-	SELECT c.id,c.session_id,c.parent_message_id,c.role,c.status,c.run_id,c.created_at,
-		p.ordinal,p.block_kind,p.payload_json
+	SELECT c.id,c.session_id,c.parent_message_id,c.role,c.status,c.run_id,
+		c.speaker_kind,c.speaker_object_id,c.speaker_version_id,c.participant_instance_id,c.speaker_snapshot_json,
+		c.addressee_kind,c.addressee_object_id,c.addressee_version_id,c.reply_to_message_id,c.visibility,
+		c.originated_at,c.created_at,p.ordinal,p.block_kind,p.payload_json
 	FROM page_chain c LEFT JOIN message_parts p ON p.message_id=c.id
+	LEFT JOIN agent_runs ar ON ar.id=c.run_id
+	WHERE ar.commit_format_version IS NULL OR ar.commit_format_version=1 OR c.visibility IN ('public','room_control')
 	ORDER BY c.depth ASC,p.ordinal ASC`
-	rows, err := r.DB.QueryContext(ctx, pageQuery, anchorID, sessionID, limit)
+	rows, err := r.DB.QueryContext(ctx, pageQuery, anchorID, sessionID, 500)
 	if err != nil {
 		return page, fmt.Errorf("message page query: %w", err)
 	}
@@ -188,12 +281,15 @@ func (r *MessageRepo) Page(ctx context.Context, sessionID, leafID, beforeMessage
 
 	newestFirst := make([]domain.Message, 0, limit+1)
 	for rows.Next() {
-		var id, rowSessionID, role, status, createdAt string
-		var parentID, runID sql.NullString
+		var id, rowSessionID, role, status, speakerKind, speakerSnapshot, visibility, createdAt string
+		var parentID, runID, speakerObjectID, speakerVersionID, participantInstanceID sql.NullString
+		var addresseeKind, addresseeObjectID, addresseeVersionID, replyToMessageID, originatedAt sql.NullString
 		var ordinal sql.NullInt64
 		var kind, payload sql.NullString
-		if err := rows.Scan(&id, &rowSessionID, &parentID, &role, &status, &runID, &createdAt,
-			&ordinal, &kind, &payload); err != nil {
+		if err := rows.Scan(&id, &rowSessionID, &parentID, &role, &status, &runID,
+			&speakerKind, &speakerObjectID, &speakerVersionID, &participantInstanceID, &speakerSnapshot,
+			&addresseeKind, &addresseeObjectID, &addresseeVersionID, &replyToMessageID, &visibility,
+			&originatedAt, &createdAt, &ordinal, &kind, &payload); err != nil {
 			return page, fmt.Errorf("scan message page: %w", err)
 		}
 		if len(newestFirst) == 0 || newestFirst[len(newestFirst)-1].ID != id {
@@ -202,12 +298,41 @@ func (r *MessageRepo) Page(ctx context.Context, sessionID, leafID, beforeMessage
 				return page, fmt.Errorf("parse message timestamp: %w", parseErr)
 			}
 			message := domain.Message{ID: id, SessionID: rowSessionID, Role: role, Status: status,
-				Parts: []domain.ContentBlock{}, CreatedAt: created}
+				SpeakerKind: domain.SpeakerKind(speakerKind), SpeakerSnapshot: json.RawMessage(speakerSnapshot),
+				Visibility: domain.MessageVisibility(visibility), Parts: []domain.ContentBlock{}, CreatedAt: created}
 			if parentID.Valid {
 				message.ParentMessageID = &parentID.String
 			}
 			if runID.Valid {
 				message.RunID = &runID.String
+			}
+			if speakerObjectID.Valid {
+				message.SpeakerObjectID = &speakerObjectID.String
+			}
+			if speakerVersionID.Valid {
+				message.SpeakerVersionID = &speakerVersionID.String
+			}
+			if participantInstanceID.Valid {
+				message.ParticipantInstanceID = &participantInstanceID.String
+			}
+			if addresseeKind.Valid {
+				message.AddresseeKind = &addresseeKind.String
+			}
+			if addresseeObjectID.Valid {
+				message.AddresseeObjectID = &addresseeObjectID.String
+			}
+			if addresseeVersionID.Valid {
+				message.AddresseeVersionID = &addresseeVersionID.String
+			}
+			if replyToMessageID.Valid {
+				message.ReplyToMessageID = &replyToMessageID.String
+			}
+			if originatedAt.Valid {
+				originated, parseErr := time.Parse(time.RFC3339Nano, originatedAt.String)
+				if parseErr != nil {
+					return page, fmt.Errorf("parse message originated_at: %w", parseErr)
+				}
+				message.OriginatedAt = &originated
 			}
 			newestFirst = append(newestFirst, message)
 		}

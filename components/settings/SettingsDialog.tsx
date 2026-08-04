@@ -1,11 +1,13 @@
 "use client";
 
-import { X } from "lucide-react";
+import { Bot, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ContextSettings } from "@/components/settings/ContextSettings";
 import { ModelsSettings } from "@/components/settings/ModelsSettings";
 import { PoliciesSettings } from "@/components/settings/PoliciesSettings";
 import { ProvidersSettings } from "@/components/settings/ProvidersSettings";
+import { RolesSettings } from "@/components/settings/RolesSettings";
+import { TemplatesSettings } from "@/components/settings/TemplatesSettings";
 import type { ModelProfile, PolicyProfile, ProviderProfile, Session, SettingsTab } from "@/components/settings/types";
 
 interface TabItem {
@@ -47,6 +49,9 @@ function tabIcon(id: SettingsTab) {
       </svg>
     );
   }
+  if (id === "roles") {
+    return <Bot size={15} aria-hidden="true" />;
+  }
   if (id === "policies") {
     return (
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -62,7 +67,7 @@ function tabIcon(id: SettingsTab) {
 }
 
 export function SettingsDialog({ open, onClose, providers, models, policies, session, refresh, error, setError,
-  onSessionUpdated }: {
+  onSessionUpdated, projectId }: {
   open: boolean;
   onClose: () => void;
   providers: ProviderProfile[];
@@ -73,6 +78,7 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
   error: string | null;
   setError: (value: string | null) => void;
   onSessionUpdated: (session: Session) => void;
+  projectId: string | null;
 }) {
   const [activeTab, setActiveTab] = useState<SettingsTab>("providers");
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -115,8 +121,10 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
   const tabs: TabItem[] = [
     { id: "providers", label: "Providers", description: "API connection profiles and credentials", icon: tabIcon("providers") },
     { id: "models", label: "Models", description: "Configure and assign model profiles", icon: tabIcon("models") },
+    { id: "roles", label: "Roles", description: "Addressable identities and immutable versions", icon: tabIcon("roles") },
     { id: "policies", label: "Policies", description: "Tool permission and routing policies", icon: tabIcon("policies") },
     { id: "context", label: "Context & session", description: session ? "Session defaults and compaction" : "Compaction policy defaults", icon: tabIcon("context") },
+    { id: "templates", label: "Templates", description: "Slash-command prompt templates", icon: tabIcon("templates") },
   ];
 
   const activeItem = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
@@ -248,6 +256,9 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
                 <ModelsSettings providers={providers} models={models} refresh={refresh} setError={setError} />
               </div>
             )}
+            {activeTab === "roles" && (
+              <RolesSettings projectId={projectId} models={models} setError={setError} />
+            )}
             {activeTab === "policies" && (
               <div style={{ height: "100%", overflowY: "auto" }}>
                 <PoliciesSettings policies={policies} refresh={refresh} setError={setError} />
@@ -260,6 +271,11 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
                   refresh={refresh} setError={setError}
                   onSessionUpdated={onSessionUpdated}
                 />
+              </div>
+            )}
+            {activeTab === "templates" && (
+              <div style={{ height: "100%", overflowY: "auto" }}>
+                <TemplatesSettings projectId={projectId} setError={setError} />
               </div>
             )}
           </div>

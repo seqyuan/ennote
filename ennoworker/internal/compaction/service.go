@@ -39,7 +39,7 @@ func (s *Service) ExecuteManual(ctx context.Context, run *domain.AgentRun,
 	if err != nil {
 		return err
 	}
-	lineage, err := s.Messages.Lineage(ctx, run.SessionID, run.BaseMessageID)
+	lineage, err := s.Messages.HostedContextLineage(ctx, run.SessionID, run.BaseMessageID)
 	if err != nil {
 		return err
 	}

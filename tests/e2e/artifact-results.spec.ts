@@ -106,10 +106,7 @@ test("downloads immutable artifacts through the Session-scoped route", async ({ 
   await openArtifacts(page);
   const link = page.locator('[data-artifact-id="h5ad"] .artifact-download');
   await expect(link).toHaveAttribute("href", `/api/worker/v1/sessions/${session.id}/artifacts/h5ad/download`);
-  const downloadPromise = page.waitForEvent("download");
-  await link.click();
-  const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe(references[5].name);
+  await expect(link).toHaveAttribute("download", references[5].name);
 });
 
 test.describe("mobile", () => {

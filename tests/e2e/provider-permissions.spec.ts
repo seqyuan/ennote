@@ -21,12 +21,13 @@ async function mockApp(page: Page, onTurn?: (body: Record<string, unknown>) => v
     if (path === "/v1/policy-profiles") return fulfill(route, policies);
     if (path === "/v1/provider-profiles") return fulfill(route, [provider]);
     if (path === "/v1/model-profiles") return fulfill(route, []);
+    if (path === "/v1/roles") return fulfill(route, { items: [], nextCursor: "" });
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
     if (path === `/v1/sessions/${session.id}`) return fulfill(route, session);
     if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, null);
     if (path === `/v1/sessions/${session.id}/messages`) return fulfill(route, { messages: [], hasMore: false });
     if (path === `/v1/sessions/${session.id}/compactions`) return fulfill(route, []);
-    if (path === `/v1/sessions/${session.id}/turns`) {
+    if (path === `/v1/sessions/${session.id}/invocations`) {
       onTurn?.(route.request().postDataJSON());
       return fulfill(route, { turnId: "turn", userMessageId: "message", existing: false, run: { id: "run", sessionId: session.id, runKind: "agent", attempt: 1, status: "queued" } }, 202);
     }
@@ -52,7 +53,8 @@ test("each turn freezes the selected permission profile", async ({ page }) => {
   await page.getByPlaceholder("Type a message…").fill("run this turn");
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect.poll(() => turnBody).toBeTruthy();
-  expect(turnBody).toMatchObject({ text: "run this turn", config: { toolPolicyProfileId: "builtin-tool-ask-v1" } });
+  expect(turnBody).toMatchObject({ text: "run this turn", target: { kind: "host" },
+    config: { toolPolicyProfileId: "builtin-tool-ask-v1" } });
 });
 
 test("a late Provider diagnostic cannot replace a newer result", async ({ page }) => {

@@ -45,10 +45,10 @@ func (r *SessionRepo) Create(ctx context.Context, input domain.CreateSessionInpu
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO sessions (id, project_id, title, status, active_leaf_message_id, active_branch_id,
+		`INSERT INTO sessions (id, project_id, title, status, mode, active_leaf_message_id, active_branch_id,
 		 default_agent_profile_id, default_model_profile_id, compaction_policy_profile_id,
 		 source_session_id, source_message_id, created_at, updated_at)
-		 VALUES (?, ?, ?, 'active', NULL, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, 'active', 'hosted', NULL, NULL, ?, ?, ?, ?, ?, ?, ?)`,
 		id, input.ProjectID, input.Title, defaultAgent, defaultModel, compactionPolicy,
 		input.SourceSessionID, input.SourceMessageID, timestamp, timestamp,
 	); err != nil {
@@ -67,7 +67,7 @@ func (r *SessionRepo) Create(ctx context.Context, input domain.CreateSessionInpu
 	}
 
 	return &domain.Session{
-		ID: id, ProjectID: input.ProjectID, Title: input.Title, Status: "active", ActiveBranchID: &branchID,
+		ID: id, ProjectID: input.ProjectID, Title: input.Title, Status: "active", Mode: domain.SessionModeHosted, ActiveBranchID: &branchID,
 		DefaultAgentProfileID:     input.DefaultAgentProfileID,
 		DefaultModelProfileID:     input.DefaultModelProfileID,
 		CompactionPolicyProfileID: input.CompactionPolicyProfileID,
@@ -90,7 +90,7 @@ func (r *SessionRepo) SearchByProject(ctx context.Context, projectID, status, qu
 		return nil, fmt.Errorf("%w: query exceeds 120 characters", ErrSessionSearchInvalid)
 	}
 	arguments := []any{projectID, status}
-	statement := `SELECT id, project_id, title, status, active_leaf_message_id, active_branch_id,
+	statement := `SELECT id, project_id, title, status, mode, active_leaf_message_id, active_branch_id,
 		default_agent_profile_id, default_model_profile_id, compaction_policy_profile_id,
 		source_session_id, source_message_id, created_at, updated_at
 		FROM sessions WHERE project_id=? AND status=?`
@@ -113,7 +113,7 @@ func scanSessionRows(rows *sql.Rows) ([]domain.Session, error) {
 	for rows.Next() {
 		var session domain.Session
 		var createdAt, updatedAt string
-		if err := rows.Scan(&session.ID, &session.ProjectID, &session.Title, &session.Status,
+		if err := rows.Scan(&session.ID, &session.ProjectID, &session.Title, &session.Status, &session.Mode,
 			&session.ActiveLeafMessageID, &session.ActiveBranchID, &session.DefaultAgentProfileID,
 			&session.DefaultModelProfileID, &session.CompactionPolicyProfileID, &session.SourceSessionID,
 			&session.SourceMessageID, &createdAt, &updatedAt); err != nil {
@@ -151,7 +151,7 @@ func (r *SessionRepo) transitionStatus(ctx context.Context, sessionID, expected,
 	result, err := tx.ExecContext(ctx, `UPDATE sessions SET status=?,updated_at=?
 		WHERE id=? AND status=? AND NOT EXISTS (
 			SELECT 1 FROM agent_runs WHERE session_id=?
-			AND status IN ('queued','running','waiting_for_approval')
+			AND status IN ('queued','running','waiting_for_approval','waiting_delegation_admission','waiting_children') AND parent_run_id IS NULL
 		)`, target, timestamp, sessionID, expected, sessionID)
 	if err != nil {
 		return nil, err

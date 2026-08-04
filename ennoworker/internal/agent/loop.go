@@ -49,28 +49,45 @@ type RetryPolicy struct {
 }
 
 type Loop struct {
-	Provider           llm.Provider
-	Tools              domain.ToolRunner
-	Events             EventWriter
-	LivePublisher      events.LivePublisher // non-blocking live delta delivery
-	Recorder           CallRecorder
-	QueuedInputs       QueuedInputSource
-	SteeringMode       domain.QueueMode
-	FollowUpMode       domain.QueueMode
-	Retry              RetryPolicy
-	ToolExecution      domain.ToolExecutionConfig
-	ToolPolicy         ToolPolicy
-	ToolPolicySnapshot domain.PolicySnapshot
-	WorkspaceID        string
-	Hub                *events.Hub
-	TurnPlanner        TurnPlanner
-	ModelRouter        ModelRouter
-	MidRunCompactor    MidRunCompactor
-	VisionResolver     VisionResolver
-	ImageDescriptions  ImageDescriptionCache
-	Reminders          *ReminderRegistry
-	TodoStore          *domain.TodoStore
-	HookLife           *HookLifecycle
+	Provider              llm.Provider
+	Tools                 domain.ToolRunner
+	Events                EventWriter
+	LivePublisher         events.LivePublisher // non-blocking live delta delivery
+	Recorder              CallRecorder
+	QueuedInputs          QueuedInputSource
+	SteeringMode          domain.QueueMode
+	FollowUpMode          domain.QueueMode
+	Retry                 RetryPolicy
+	ToolExecution         domain.ToolExecutionConfig
+	ToolPolicy            ToolPolicy
+	ToolPolicySnapshot    domain.PolicySnapshot
+	WorkspaceID           string
+	Hub                   *events.Hub
+	TurnPlanner           TurnPlanner
+	ModelRouter           ModelRouter
+	MidRunCompactor       MidRunCompactor
+	VisionResolver        VisionResolver
+	ImageDescriptions     ImageDescriptionCache
+	Reminders             *ReminderRegistry
+	TodoStore             *domain.TodoStore
+	HookLife              *HookLifecycle
+	StandingScopeResolver domain.StandingApprovalScopeResolver // optional
+	StandingApprovals     StandingApprovalMatcher              // optional
+	SessionID             string                               // populated at construction; used by standing gate
+	// ApprovalDigestVersion pins the batch digest algorithm for resume. Zero on
+	// fresh runs (falls back to V1/V2 by wiring); set explicitly on resume.
+	ApprovalDigestVersion int
+	// BudgetController is wired only for delegated children. It performs durable
+	// admission before Provider/tool execution and reconciles Provider usage.
+	BudgetController RunBudgetController
+	// DelegationDetector checks whether the run has entered a delegation-waiting
+	// state (e.g. waiting_children after delegate_roles). When set, the loop
+	// checks after each tool batch and exits with Waiting=true when detected.
+	DelegationDetector RunDelegationDetector
+	// StandingAuthorizationSnapshot is the frozen standing-authorization set from
+	// the checkpoint. Non-nil only on resume; when set, the standing gate replays
+	// it instead of querying live rules.
+	StandingAuthorizationSnapshot []domain.StandingAuthorizationSnapshot
 	// stopHookBlocks counts consecutive Stop-hook blocks for this run. When it
 	// reaches maxStopHookBlocks, the run ends anyway and a
 	// hook_stop_limit_reached durable event is recorded. Any allow resets it.
@@ -78,6 +95,11 @@ type Loop struct {
 	MaxIterations  int
 	ContextTokens  int
 	MaxOutput      int
+
+	// SubmitResultGate captures the child terminal contract. Non-nil only for
+	// delegated_agent Runs; when the model calls submit_result, the loop ends
+	// the Run successfully with the structured result instead of continuing.
+	SubmitResultGate *SubmitResultGate
 }
 
 type RunInput struct {
@@ -90,11 +112,16 @@ type RunInput struct {
 	InitialRuntime    domain.ModelRuntimeSnapshot
 	Routing           domain.FrozenRoutingConfig
 	VisionPolicy      domain.PolicySnapshot
-	SystemPrompt      string
-	History           []domain.ChatMessage
-	OverflowRecovery  func(context.Context) ([]domain.ChatMessage, error)
-	Resume            *ResumeState
-	Approval          *ApprovalResolution
+	ThinkingEffort    domain.ThinkingEffort
+	// RequestGeneration distinguishes re-claims of the same Run (e.g. parent
+	// resume after waiting_children). Zero on first claim, incremented by the
+	// executor for re-claims so model_calls unique constraint is satisfied.
+	RequestGeneration  int
+	SystemPrompt       string
+	History            []domain.ChatMessage
+	OverflowRecovery   func(context.Context) ([]domain.ChatMessage, error)
+	Resume             *ResumeState
+	Approval           *ApprovalResolution
 	SkillCatalogState  string // "disabled" | "materialized" | "" (legacy)
 	SkillCatalogDigest string
 }
@@ -104,6 +131,20 @@ type RunResult struct {
 	Generated  []domain.ChatMessage
 	Completion domain.Completion
 	Iterations int
+	Waiting    bool
+}
+
+// RunDelegationDetector checks whether a run has entered a delegation-waiting
+// state after a tool call (e.g. delegate_roles placed the parent in
+// waiting_children).
+type RunDelegationDetector interface {
+	IsWaitingChildren(ctx context.Context, runID string) bool
+}
+
+type RunBudgetController interface {
+	AdmitModelCall(ctx context.Context, runID, modelProfileID string, estimatedInput int64, requestedMaxOutput int) (int, error)
+	CompleteModelCall(ctx context.Context, runID, modelProfileID string, usage domain.Usage) error
+	AdmitToolCalls(ctx context.Context, runID string, count int) error
 }
 
 func (l *Loop) Run(ctx context.Context, input RunInput) (RunResult, error) {
@@ -137,7 +178,7 @@ func (l *Loop) Run(ctx context.Context, input RunInput) (RunResult, error) {
 
 	var initialSteering []domain.ChatMessage
 	var err error
-	requestGeneration := 0
+	requestGeneration := input.RequestGeneration
 	startIteration := 1
 	if input.Resume != nil && l.TodoStore != nil {
 		l.TodoStore.Set(input.Resume.Todos)
@@ -180,6 +221,12 @@ func (l *Loop) Run(ctx context.Context, input RunInput) (RunResult, error) {
 			}}}
 			messages = append(messages, toolMessage)
 			generated = append(generated, toolMessage)
+		}
+		// Approval resume executes the saved batch outside the normal iteration
+		// path, so it must apply the same delegation yield boundary explicitly.
+		if l.DelegationDetector != nil && l.DelegationDetector.IsWaitingChildren(ctx, input.RunID) {
+			return RunResult{Messages: messages, Generated: generated, Completion: final,
+				Iterations: resume.Iteration, Waiting: true}, nil
 		}
 		var continueTurn bool
 		messages, generated, pendingPlan, continueTurn, err = l.finishCompletedIteration(ctx, input,
@@ -276,6 +323,9 @@ func (l *Loop) Run(ctx context.Context, input RunInput) (RunResult, error) {
 			request := domain.CompletionRequest{
 				Model: model, Messages: preparedMessages,
 				Tools: toolDefinitions, MaxTokens: maxOutput,
+			}
+			if input.ThinkingEffort != "" && input.ThinkingEffort != domain.ThinkingDefault {
+				request.Reasoning = &domain.ReasoningConfig{Dialect: current.ThinkingDialect, Effort: input.ThinkingEffort}
 			}
 			completion, err = l.streamWithRetry(ctx, input, iteration, request, runtime,
 				modelCallOptions{Purpose: domain.ModelCallAgentTurn, RequestGeneration: requestGeneration})
@@ -399,6 +449,45 @@ func (l *Loop) Run(ctx context.Context, input RunInput) (RunResult, error) {
 		hasToolCalls := len(completion.ToolCalls) > 0
 		stopAfterToolBatch := false
 		var toolResults []domain.ToolResult
+		if hasToolCalls && l.SubmitResultGate != nil {
+			result, intercepted, err := interceptSubmitResult(completion.ToolCalls)
+			if intercepted {
+				if err != nil {
+					return runResult(messages, generated, completion, iteration),
+						fmt.Errorf("%w: %v", ErrInvalidTerminalContract, err)
+				}
+				l.SubmitResultGate.Result = result
+				// Record the terminal tool call as an executed tool so the child
+				// transcript is complete.
+				toolResult := domain.ToolResult{ToolCallID: completion.ToolCalls[0].ID, ToolName: "submit_result",
+					Content: result.Summary, IsError: false}
+				if l.BudgetController != nil {
+					if err := l.BudgetController.AdmitToolCalls(ctx, input.RunID, 1); err != nil {
+						return runResult(messages, generated, completion, iteration),
+							domain.NewCodedError(domain.ErrorDelegationBudgetExceeded, err)
+					}
+				}
+				startID := uuid.NewString()
+				// Start + complete in one step (bypasses the dispatcher).
+				if err := l.recordToolStarted(ctx, domain.ToolCallStart{
+					ID: startID, RunID: input.RunID, Iteration: iteration, CallIndex: 0, Call: completion.ToolCalls[0],
+				}); err != nil {
+					return runResult(messages, generated, completion, iteration), err
+				}
+				if err := l.recordToolCompleted(ctx, domain.ToolCallFinish{
+					ID: startID, RunID: input.RunID, Iteration: iteration, CallIndex: 0,
+					Call: completion.ToolCalls[0], Result: toolResult, Status: "completed", AttemptCount: 1,
+				}); err != nil {
+					return runResult(messages, generated, completion, iteration), err
+				}
+				toolMessage := domain.ChatMessage{Role: domain.RoleTool, Content: []domain.ContentBlock{{
+					Kind: domain.ContentToolResult, ToolResult: &toolResult,
+				}}}
+				messages = append(messages, toolMessage)
+				generated = append(generated, toolMessage)
+				return runResult(messages, generated, completion, iteration), nil
+			}
+		}
 		if hasToolCalls && guard.Repeated(completion.ToolCalls) {
 			if err := l.appendEvent(context.WithoutCancel(ctx), input.RunID, "stuck_tool_loop", map[string]any{"iteration": iteration}); err != nil {
 				return runResult(messages, generated, completion, iteration), err
@@ -418,7 +507,12 @@ func (l *Loop) Run(ctx context.Context, input RunInput) (RunResult, error) {
 						TruncationRecoveries: truncationRecoveries, StuckSignatures: guard.Snapshot(),
 						InitialSteering: cloneMessages(initialSteering), SystemPrompt: input.SystemPrompt,
 						MidRunCompaction: midRunState, Todos: l.todoSnapshot(),
-					SkillCatalogState: input.SkillCatalogState, SkillCatalogDigest: input.SkillCatalogDigest}
+						SkillCatalogState: input.SkillCatalogState, SkillCatalogDigest: input.SkillCatalogDigest}
+					// Freeze the standing authorizations and digest version into the
+					// checkpoint state so resume replays them instead of re-querying
+					// live rules.
+					approvalRequired.State.StandingAuthorizations = approvalRequired.StandingAuthorizations
+					approvalRequired.State.ApprovalDigestVersion = approvalRequired.ApprovalDigestVersion
 				}
 				return runResult(messages, generated, completion, iteration), err
 			}
@@ -429,6 +523,11 @@ func (l *Loop) Run(ctx context.Context, input RunInput) (RunResult, error) {
 				}}}
 				messages = append(messages, toolMessage)
 				generated = append(generated, toolMessage)
+			}
+			// If delegation moved the run to waiting_children, yield
+			// gracefully so the Coordinator does not finalize it.
+			if l.DelegationDetector != nil && l.DelegationDetector.IsWaitingChildren(ctx, input.RunID) {
+				return RunResult{Messages: messages, Generated: generated, Completion: completion, Iterations: iteration, Waiting: true}, nil
 			}
 		}
 
@@ -674,6 +773,15 @@ func (l *Loop) streamWithRetry(ctx context.Context, input RunInput, iteration in
 			ProviderProfileID: providerID, ModelProfileID: modelID,
 			RouteReason: runtime.RouteReason, RequestedConfig: input.RequestedConfig, EffectiveConfig: effectiveConfig,
 		}
+		if l.BudgetController != nil {
+			estimate := EstimateComposition("", request.Tools, request.Messages, request.MaxTokens)
+			allowedOutput, budgetErr := l.BudgetController.AdmitModelCall(ctx, input.RunID, modelID,
+				int64(estimate.InputUpperBoundTokens), request.MaxTokens)
+			if budgetErr != nil {
+				return domain.Completion{}, domain.NewCodedError(domain.ErrorDelegationBudgetExceeded, budgetErr)
+			}
+			request.MaxTokens = allowedOutput
+		}
 		if err := l.recordModelStarted(ctx, started); err != nil {
 			return domain.Completion{}, err
 		}
@@ -684,6 +792,9 @@ func (l *Loop) streamWithRetry(ctx context.Context, input RunInput, iteration in
 		sink := &attemptSink{inner: baseSink}
 		completion, streamErr := provider.Stream(ctx, request, sink)
 		if streamErr == nil {
+			if usageEmpty(completion.Usage) && sink.usageReported {
+				completion.Usage = sink.usage
+			}
 			finished := domain.ModelCallFinish{ID: callID, RunID: input.RunID, Iteration: iteration,
 				Attempt: attempt, RequestGeneration: callOptions.RequestGeneration, Purpose: callOptions.Purpose,
 				SourceArtifactID: callOptions.SourceArtifactID, CompactionID: callOptions.CompactionID,
@@ -692,6 +803,11 @@ func (l *Loop) streamWithRetry(ctx context.Context, input RunInput, iteration in
 			}
 			if err := l.recordModelCompleted(ctx, finished); err != nil {
 				return domain.Completion{}, err
+			}
+			if l.BudgetController != nil {
+				if err := l.BudgetController.CompleteModelCall(ctx, input.RunID, modelID, completion.Usage); err != nil {
+					return domain.Completion{}, domain.NewCodedError(domain.ErrorDelegationBudgetExceeded, err)
+				}
 			}
 			completion.CallID = callID
 			return completion, nil
@@ -712,7 +828,11 @@ func (l *Loop) streamWithRetry(ctx context.Context, input RunInput, iteration in
 			}
 			return domain.Completion{}, sink.sinkErr
 		}
-		retryable := ctx.Err() == nil && !sink.committed && llm.IsRetryable(streamErr) && attempt <= len(delays)
+		var budgetUsageErr error
+		if l.BudgetController != nil && sink.usageReported {
+			budgetUsageErr = l.BudgetController.CompleteModelCall(context.WithoutCancel(ctx), input.RunID, modelID, sink.usage)
+		}
+		retryable := budgetUsageErr == nil && ctx.Err() == nil && !sink.committed && llm.IsRetryable(streamErr) && attempt <= len(delays)
 		code := modelErrorCode(streamErr)
 		failed := domain.ModelCallFinish{ID: callID, RunID: input.RunID, Iteration: iteration,
 			Attempt: attempt, RequestGeneration: callOptions.RequestGeneration, Purpose: callOptions.Purpose,
@@ -722,6 +842,9 @@ func (l *Loop) streamWithRetry(ctx context.Context, input RunInput, iteration in
 		}
 		if err := l.recordModelFailed(context.WithoutCancel(ctx), failed); err != nil {
 			return domain.Completion{}, err
+		}
+		if budgetUsageErr != nil {
+			return domain.Completion{}, domain.NewCodedError(domain.ErrorDelegationBudgetExceeded, budgetUsageErr)
 		}
 		if !retryable {
 			return domain.Completion{}, domain.NewCodedError(code, streamErr)
@@ -882,9 +1005,11 @@ func classifyAgentError(err error) error {
 }
 
 type attemptSink struct {
-	inner     llm.StreamSink
-	committed bool
-	sinkErr   error
+	inner         llm.StreamSink
+	committed     bool
+	sinkErr       error
+	usage         domain.Usage
+	usageReported bool
 }
 
 func (s *attemptSink) TextDelta(value string) error {
@@ -897,7 +1022,16 @@ func (s *attemptSink) ToolCallDelta(value llm.ToolCallDelta) error {
 	return s.commit(func() error { return s.inner.ToolCallDelta(value) })
 }
 func (s *attemptSink) Usage(value domain.Usage) error {
-	return s.commit(func() error { return s.inner.Usage(value) })
+	err := s.commit(func() error { return s.inner.Usage(value) })
+	if err == nil {
+		s.usage = value
+		s.usageReported = true
+	}
+	return err
+}
+
+func usageEmpty(value domain.Usage) bool {
+	return value.InputTokens == 0 && value.OutputTokens == 0 && value.CachedTokens == 0 && value.ReasoningTokens == 0
 }
 
 func (s *attemptSink) commit(callback func() error) error {

@@ -147,7 +147,7 @@ func (r *BranchRepo) Activate(ctx context.Context, sessionID, branchID string) (
 func requireSessionIdleTx(ctx context.Context, tx *sql.Tx, sessionID string) error {
 	var active int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_runs WHERE session_id=?
-		AND status IN ('queued','running','waiting_for_approval')`, sessionID).Scan(&active); err != nil {
+		AND status IN ('queued','running','waiting_for_approval','waiting_delegation_admission','waiting_children') AND parent_run_id IS NULL`, sessionID).Scan(&active); err != nil {
 		return err
 	}
 	if active != 0 {
@@ -191,10 +191,10 @@ func branchNavigation(ctx context.Context, reader sqlReader, sessionID string) (
 func findSession(ctx context.Context, reader sqlReader, id string) (*domain.Session, error) {
 	var session domain.Session
 	var createdAt, updatedAt string
-	err := reader.QueryRowContext(ctx, `SELECT id,project_id,title,status,active_leaf_message_id,active_branch_id,
+	err := reader.QueryRowContext(ctx, `SELECT id,project_id,title,status,mode,active_leaf_message_id,active_branch_id,
 		default_agent_profile_id,default_model_profile_id,compaction_policy_profile_id,
 		source_session_id,source_message_id,created_at,updated_at FROM sessions WHERE id=?`, id).Scan(
-		&session.ID, &session.ProjectID, &session.Title, &session.Status, &session.ActiveLeafMessageID,
+		&session.ID, &session.ProjectID, &session.Title, &session.Status, &session.Mode, &session.ActiveLeafMessageID,
 		&session.ActiveBranchID, &session.DefaultAgentProfileID, &session.DefaultModelProfileID,
 		&session.CompactionPolicyProfileID, &session.SourceSessionID, &session.SourceMessageID,
 		&createdAt, &updatedAt)

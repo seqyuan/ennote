@@ -25,6 +25,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
   const [activeRun, setActiveRun] = useState<AgentRun | null>(null);
   const [pendingApproval, setPendingApproval] = useState<ToolApprovalRequest | null>(null);
   const [resolvingApproval, setResolvingApproval] = useState<ApprovalDecision | null>(null);
+  const [delegationActive, setDelegationActive] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
   const streamController = useRef<AbortController | null>(null);
@@ -46,6 +47,10 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
         active?.run.id !== expectedRunID) return;
       setActiveRun(active.run);
       setPendingApproval(active.pendingApproval ?? null);
+      if (active.run.status === "waiting_children") setDelegationActive(true);
+      if (active.pendingApproval) setStatus("Waiting for approval");
+      else if (active.run.status === "waiting_children") setStatus("Delegated roles are working…");
+      else if (active.run.status === "waiting_delegation_admission") setStatus("Waiting for delegation approval");
     } catch (err) {
       if (generation.current === version) setError((err as Error).message);
     }
@@ -60,7 +65,10 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
     streamController.current = controller;
     setActiveRun(run);
     setPendingApproval(restoredApproval ?? null);
-    setStatus(run.runKind === "context_compaction" ? "Compaction queued…" : "Running…");
+    setDelegationActive(run.status === "waiting_children");
+    setStatus(restoredApproval ? "Waiting for approval" : run.runKind === "context_compaction" ? "Compaction queued…" :
+      run.status === "waiting_children" ? "Delegated roles are working…" :
+      run.status === "waiting_delegation_admission" ? "Waiting for delegation approval" : "Running…");
     let terminal = false;
     streamConnected.current = true;
     try {
@@ -70,6 +78,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
         terminal = await streamAgentEvents(run.id, upsertMessage, setStatus, controller.signal, {
           requested: () => void refreshPendingApproval(run.id, version),
           resolved: () => { if (generation.current === version) setPendingApproval(null); },
+          delegated: () => { if (generation.current === version) setDelegationActive(true); },
         });
       }
     } catch (err) {
@@ -84,6 +93,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
         setActiveRun(null);
         setPendingApproval(null);
         setResolvingApproval(null);
+        setDelegationActive(false);
         streamController.current = null;
         await refreshSession().catch(() => null);
         await refreshLatest();
@@ -103,6 +113,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
       setActiveRun(null);
       setPendingApproval(null);
       setResolvingApproval(null);
+      setDelegationActive(false);
       setStatus("");
       setError(null);
     });
@@ -118,6 +129,16 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
       });
     return () => controller.abort();
   }, [lineageId, sessionId, watchRun]);
+
+  useEffect(() => {
+    if (!activeRun || pendingApproval || !sessionId || activeRun.runKind === "context_compaction" ||
+      (!delegationActive && activeRun.status !== "waiting_children")) return;
+    const runID = activeRun.id;
+    const version = generation.current;
+    const poll = () => void refreshPendingApproval(runID, version);
+    const timer = window.setInterval(poll, 1500);
+    return () => window.clearInterval(timer);
+  }, [activeRun, delegationActive, pendingApproval, refreshPendingApproval, sessionId]);
 
   useEffect(() => {
     if (status !== "Run connection interrupted" || !activeRun || pendingApproval || !sessionId) return;
@@ -159,6 +180,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
       setActiveRun(null);
       setPendingApproval(null);
       setResolvingApproval(null);
+      setDelegationActive(false);
       await refreshSession().catch(() => null);
       await refreshLatest();
     } catch (err) {
@@ -181,7 +203,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
     }
   }, [activeRun, appendMessage]);
 
-  const decideApproval = useCallback(async (decision: ApprovalDecision) => {
+  const decideApproval = useCallback(async (decision: ApprovalDecision, standingGrantCallIndexes?: number[]) => {
     const approval = pendingApproval;
     if (!approval || resolvingApproval) return;
     decisionController.current?.abort();
@@ -192,7 +214,10 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
     try {
       await apiFetch<ToolApprovalRequest>(`/v1/approval-requests/${encodeURIComponent(approval.id)}/decision`, {
         method: "POST", headers: { "Idempotency-Key": genId() },
-        body: JSON.stringify({ decision, clientRequestId: genId() }), signal: controller.signal,
+        body: JSON.stringify({
+          decision, clientRequestId: genId(),
+          standingGrantCallIndexes: standingGrantCallIndexes ?? [],
+        }), signal: controller.signal,
       });
       if (controller.signal.aborted || decisionGeneration.current !== version) return;
       setPendingApproval(null);
@@ -266,7 +291,7 @@ async function streamAgentEvents(
   upsertMessage: (message: TurnMessage) => void,
   setStatus: (status: string) => void,
   signal: AbortSignal,
-  approval: { requested: () => void; resolved: () => void },
+  approval: { requested: () => void; resolved: () => void; delegated: () => void },
 ): Promise<boolean> {
   const response = await fetch(`/api/worker/v1/runs/${encodeURIComponent(runId)}/events`, { signal });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -310,6 +335,7 @@ async function streamAgentEvents(
       argumentsFragment: typeof payload.argumentsFragment === "string" ? payload.argumentsFragment : undefined,
       isError: Boolean(payload.isError) || state === "failed",
       toolState: state,
+      runId,
     });
   }
 
@@ -392,6 +418,7 @@ async function streamAgentEvents(
               text: entry.text,
               isError: false,
               toolState: "running",
+              runId,
             });
             break;
           }
@@ -399,6 +426,7 @@ async function streamAgentEvents(
             setStatus(`Running: ${payload.toolName ?? "tool"}…`); upsertTool(payload, "running", "Running"); break;
           case "tool_call_completed": {
             setStatus("");
+            if (payload.toolName === "delegate_roles") approval.delegated();
             const callID = String(payload.toolCallId ?? payload.recordId ?? `event-${payload.callIndex ?? "unknown"}`);
             toolOutputs.delete(callID); // final result replaces the live preview
             upsertTool(payload, payload.isError ? "failed" : "completed", "No output");

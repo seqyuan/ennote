@@ -1,7 +1,13 @@
 import type { components } from "./worker-api.gen";
 
 export type ToolApprovalRequest = components["schemas"]["ToolApprovalRequest"];
-export type ApprovalItem = components["schemas"]["ApprovalItem"];
+export type ApprovalItem = components["schemas"]["ApprovalItem"] & {
+  standingScope?: {
+    kind: string;
+    scopeVersion: number;
+    display: string;
+  };
+};
 export type ActiveRunState = components["schemas"]["ActiveRunState"];
 export type AgentRun = components["schemas"]["AgentRun"];
 export type ApprovalDecision = "approved" | "rejected";
@@ -11,6 +17,7 @@ const riskLabels: Record<ApprovalItem["riskClass"], string> = {
   local_write: "Local write",
   shell: "Shell",
   external: "External",
+  delegation: "Delegation",
   sensitive: "Sensitive",
 };
 

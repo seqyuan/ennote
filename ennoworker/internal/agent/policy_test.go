@@ -60,6 +60,7 @@ func TestAskRequiresApprovalOnlyAfterSafetyChecks(t *testing.T) {
 		{Name: "exec", Arguments: json.RawMessage(`{"argv":["git","status"]}`)},
 		{Name: "exec", Arguments: json.RawMessage(`{"argv":["git","push"]}`)},
 		{Name: "future_tool", Arguments: json.RawMessage(`{}`)},
+		{Name: "delegate_roles", Arguments: json.RawMessage(`{"delegations":[{"name":"inspect","roleHandle":"workspace-explorer","assignment":"Inspect secret=raw","budget":{"maxModelCalls":4,"maxToolCalls":8}}]}`)},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, ToolAllow, decisions[0].Action)
@@ -69,6 +70,22 @@ func TestAskRequiresApprovalOnlyAfterSafetyChecks(t *testing.T) {
 	assert.Equal(t, "process_not_allowed", decisions[3].Code)
 	assert.Equal(t, ToolDeny, decisions[4].Action)
 	assert.Equal(t, "permission_mode_sensitive", decisions[4].Code)
+	assert.Equal(t, ToolRequireApproval, decisions[5].Action)
+	assert.Equal(t, domain.RiskDelegation, decisions[5].RiskClass)
+}
+
+func TestDelegationApprovalPreviewIsStructuredAndRedacted(t *testing.T) {
+	policy := permissionPolicy(t, domain.ToolPolicyConfig{Mode: string(domain.PermissionAsk),
+		RedactPatterns: []string{`secret=[^\s\"]+`}})
+	call := domain.ToolCall{ID: "delegate", Name: "delegate_roles", Arguments: json.RawMessage(
+		`{"delegations":[{"name":"inspect","roleHandle":"workspace-explorer","assignment":"Inspect secret=raw","outputContract":"text-v1","budget":{"maxModelCalls":4,"maxToolCalls":8}}]}`)}
+	items := approvalItems([]plannedToolCall{{original: call, effective: call,
+		decision: ToolDecision{Action: ToolRequireApproval, RiskClass: domain.RiskDelegation}, requiresApproval: true}}, policy)
+	require.Len(t, items, 1)
+	require.Len(t, items[0].Delegations, 1)
+	assert.Equal(t, "workspace-explorer", items[0].Delegations[0].RoleHandle)
+	assert.Equal(t, 4, items[0].Delegations[0].Budget.MaxModelCalls)
+	assert.NotContains(t, items[0].Delegations[0].AssignmentPreview, "raw")
 }
 
 func TestApprovalDigestAndPreviewAreStableAndRedacted(t *testing.T) {
@@ -80,15 +97,15 @@ func TestApprovalDigestAndPreviewAreStableAndRedacted(t *testing.T) {
 		decision:  ToolDecision{Action: ToolRequireApproval, RiskClass: domain.RiskLocalWrite}, requiresApproval: true,
 	}}
 	snapshot := domain.PolicySnapshot{ID: "ask", Version: 1}
-	assert.Equal(t, approvalBatchDigest(plans, snapshot), approvalBatchDigest(plans, snapshot))
+	assert.Equal(t, approvalBatchDigest(plans, snapshot, ApprovalDigestV1), approvalBatchDigest(plans, snapshot, ApprovalDigestV1))
 	items := approvalItems(plans, policy)
 	require.Len(t, items, 1)
 	assert.Contains(t, items[0].ArgumentsPreview, `"path":"a"`)
 	assert.NotContains(t, items[0].ArgumentsPreview, "raw")
 	plans[0].effective.Arguments = json.RawMessage(`{"path":"b"}`)
-	assert.NotEqual(t, approvalBatchDigest(plans, snapshot), approvalBatchDigest([]plannedToolCall{{
+	assert.NotEqual(t, approvalBatchDigest(plans, snapshot, ApprovalDigestV1), approvalBatchDigest([]plannedToolCall{{
 		original: plans[0].original, effective: plans[0].original, decision: plans[0].decision, requiresApproval: true,
-	}}, snapshot))
+	}}, snapshot, ApprovalDigestV1))
 }
 
 func TestAutoStillAppliesProcessSafetyPolicy(t *testing.T) {

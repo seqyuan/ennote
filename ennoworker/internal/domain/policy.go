@@ -31,6 +31,7 @@ const (
 	RiskLocalWrite RiskClass = "local_write"
 	RiskShell      RiskClass = "shell"
 	RiskExternal   RiskClass = "external"
+	RiskDelegation RiskClass = "delegation"
 	RiskSensitive  RiskClass = "sensitive"
 )
 

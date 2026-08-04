@@ -36,6 +36,149 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listRoles"];
+        put?: never;
+        post: operations["createRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/roles/{roleID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        get: operations["getRole"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/roles/{roleID}/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateRoleDraft"];
+        trace?: never;
+    };
+    "/v1/roles/{roleID}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["validateRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/roles/{roleID}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["publishRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/roles/{roleID}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["archiveRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/roles/{roleID}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        get: operations["listRoleVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/roles/{roleID}/versions/{versionID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+                versionID: string;
+            };
+            cookie?: never;
+        };
+        get: operations["getRoleVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/provider-profiles": {
         parameters: {
             query?: never;
@@ -482,6 +625,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sessions/{sessionID}/invocations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["submitInvocation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sessions/{sessionID}/compactions": {
         parameters: {
             query?: never;
@@ -528,6 +689,42 @@ export interface paths {
             cookie?: never;
         };
         get: operations["getRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/runs/{runID}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runID: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        get: operations["listRunMessages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/runs/{runID}/children": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runID: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        get: operations["listRunChildren"];
         put?: never;
         post?: never;
         delete?: never;
@@ -630,6 +827,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/projects/{projectID}/prompt-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listPromptTemplates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/prompt-templates/expand": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["expandPromptTemplate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/prompt-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listGlobalPromptTemplates"];
+        put?: never;
+        post: operations["createPromptTemplate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/prompt-templates/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getPromptTemplate"];
+        put: operations["updatePromptTemplate"];
+        post?: never;
+        delete: operations["deletePromptTemplate"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -697,6 +958,10 @@ export interface components {
             /** Format: date-time */
             testedAt: string;
         };
+        /** @enum {string} */
+        ThinkingEffort: "default" | "low" | "medium" | "high";
+        /** @enum {string} */
+        ThinkingDialect: "none" | "openai_reasoning_effort";
         ModelProfile: {
             id: string;
             providerId: string;
@@ -704,9 +969,13 @@ export interface components {
             displayName: string;
             contextWindow: number;
             maxOutputTokens: number;
+            inputCostUsdMicrosPerMillion: number;
+            outputCostUsdMicrosPerMillion: number;
             supportsVision: boolean;
             supportsToolUse: boolean;
             supportsThinking: boolean;
+            thinkingDialect: components["schemas"]["ThinkingDialect"];
+            supportedThinkingEfforts: components["schemas"]["ThinkingEffort"][];
             isDefault: boolean;
             status: string;
             /** Format: date-time */
@@ -808,6 +1077,26 @@ export interface components {
             type: "image";
             artifactId: string;
         };
+        InvocationTarget: components["schemas"]["HostInvocationTarget"] | components["schemas"]["RoleInvocationTarget"];
+        HostInvocationTarget: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "host";
+        };
+        RoleInvocationTarget: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "role";
+            objectId: string;
+            versionId: string;
+            /** @enum {string} */
+            contextMode: "room" | "fresh" | "reply_to";
+            replyTo?: string[];
+        };
         Project: {
             id: string;
             name: string;
@@ -846,6 +1135,8 @@ export interface components {
             title: string;
             /** @enum {string} */
             status: "active" | "archived";
+            /** @enum {string} */
+            mode: "hosted" | "room";
             activeLeafMessageId?: string;
             activeBranchId?: string;
             defaultAgentProfileId?: string;
@@ -882,19 +1173,58 @@ export interface components {
             hasMore: boolean;
             activeLeafMessageId?: string;
         };
+        SpeakerSnapshot: {
+            /** @enum {string} */
+            kind?: "user" | "host" | "role" | "workflow" | "room" | "system";
+            objectId?: string;
+            versionId?: string;
+            handle?: string;
+            displayName?: string;
+            icon?: string;
+            color?: string;
+            positioning?: string;
+            configDigest?: string;
+        };
         Message: {
             id: string;
             sessionId: string;
             parentMessageId?: string;
             /** @enum {string} */
-            role: "user" | "assistant" | "tool";
+            role: "system" | "user" | "assistant" | "tool";
             status: string;
             runId?: string;
+            /** @enum {string} */
+            speakerKind: "user" | "host" | "role" | "workflow" | "room" | "system";
+            speakerObjectId?: string;
+            speakerVersionId?: string;
+            participantInstanceId?: string;
+            speakerSnapshot: components["schemas"]["SpeakerSnapshot"];
+            /** @enum {string} */
+            addresseeKind?: "host" | "room" | "role" | "graph" | "workflow";
+            addresseeObjectId?: string;
+            addresseeVersionId?: string;
+            replyToMessageId?: string;
+            /** @enum {string} */
+            visibility: "public" | "private" | "room_control" | "legacy_execution";
+            /** Format: date-time */
+            originatedAt?: string;
             parts: components["schemas"]["MessageContentBlock"][];
             /** Format: date-time */
             createdAt: string;
         };
-        MessageContentBlock: components["schemas"]["TextContentBlock"] | components["schemas"]["ThinkingContentBlock"] | components["schemas"]["ToolCallContentBlock"] | components["schemas"]["ToolResultContentBlock"] | components["schemas"]["ImageContentBlock"] | components["schemas"]["ImageDescriptionContentBlock"];
+        MessageContentBlock: components["schemas"]["TextContentBlock"] | components["schemas"]["ThinkingContentBlock"] | components["schemas"]["ToolCallContentBlock"] | components["schemas"]["ToolResultContentBlock"] | components["schemas"]["ImageContentBlock"] | components["schemas"]["ImageDescriptionContentBlock"] | components["schemas"]["RoomControlContentBlock"];
+        RoomControlContentBlock: {
+            /** @constant */
+            type: "room_control";
+            roomControl: {
+                /** @enum {string} */
+                action: "participant_invited";
+                participantInstanceId: string;
+                objectId: string;
+                objectVersionId: string;
+                displaySnapshot: components["schemas"]["SpeakerSnapshot"];
+            };
+        };
         TextContentBlock: {
             /** @constant */
             type: "text";
@@ -957,25 +1287,203 @@ export interface components {
             /** Format: int64 */
             seq: number;
             /** @enum {string} */
-            type: "run_queued" | "run_started" | "context_warning" | "context_pruned" | "context_compaction_planned" | "context_compaction_started" | "context_compaction_retry_scheduled" | "context_compaction_retry_started" | "context_compaction_completed" | "context_compaction_failed" | "context_compaction_cancelled" | "context_checkpoint_selected" | "context_checkpoint_invalid" | "context_overflow_recovery_started" | "context_overflow_recovery_completed" | "run_context_compaction_planned" | "run_context_compaction_started" | "run_context_compaction_retry_scheduled" | "run_context_compaction_completed" | "run_context_compaction_failed" | "run_context_compaction_cancelled" | "model_route_selected" | "model_call_started" | "vision_fallback_started" | "vision_description_delta" | "vision_fallback_attempt_failed" | "vision_fallback_completed" | "vision_fallback_failed" | "model_call_attempt_failed" | "model_call_retry_scheduled" | "text_delta" | "thinking_delta" | "tool_call_delta" | "usage_updated" | "model_call_completed" | "model_call_failed" | "output_truncated" | "tool_call_started" | "tool_call_completed" | "tool_call_failed" | "tool_call_skipped" | "tool_policy_denied" | "tool_policy_terminated" | "tool_result_projected" | "approval_requested" | "approval_resolved" | "turn_stop_requested" | "stuck_tool_loop" | "message_committed" | "run_succeeded" | "run_failed" | "run_cancelled" | "run_interrupted";
+            type: "run_queued" | "run_started" | "context_warning" | "context_pruned" | "context_compaction_planned" | "context_compaction_started" | "context_compaction_retry_scheduled" | "context_compaction_retry_started" | "context_compaction_completed" | "context_compaction_failed" | "context_compaction_cancelled" | "context_checkpoint_selected" | "context_checkpoint_invalid" | "context_overflow_recovery_started" | "context_overflow_recovery_completed" | "run_context_compaction_planned" | "run_context_compaction_started" | "run_context_compaction_retry_scheduled" | "run_context_compaction_completed" | "run_context_compaction_failed" | "run_context_compaction_cancelled" | "model_route_selected" | "model_call_started" | "vision_fallback_started" | "vision_description_delta" | "vision_fallback_attempt_failed" | "vision_fallback_completed" | "vision_fallback_failed" | "model_call_attempt_failed" | "model_call_retry_scheduled" | "text_delta" | "thinking_delta" | "tool_call_delta" | "usage_updated" | "model_call_completed" | "model_call_failed" | "output_truncated" | "tool_call_started" | "tool_call_completed" | "tool_call_failed" | "tool_call_skipped" | "tool_policy_denied" | "tool_policy_terminated" | "tool_result_projected" | "approval_requested" | "approval_resolved" | "turn_stop_requested" | "stuck_tool_loop" | "message_committed" | "run_transcript_committed" | "run_succeeded" | "run_failed" | "run_cancelled" | "run_interrupted";
             payload: {
                 [key: string]: unknown;
             };
             /** Format: date-time */
             createdAt: string;
         };
+        RunMessage: {
+            id: string;
+            runId: string;
+            ordinal: number;
+            /** @enum {string} */
+            role: "system" | "user" | "assistant" | "tool";
+            content: components["schemas"]["MessageContentBlock"][];
+            /** @enum {string} */
+            visibility: "private" | "public";
+            /** Format: date-time */
+            createdAt: string;
+        };
+        RunMessagePage: {
+            runId: string;
+            /** @enum {integer} */
+            formatVersion: 1 | 2;
+            /** @enum {string} */
+            source: "shadow" | "legacy";
+            digest: string;
+            messages: components["schemas"]["RunMessage"][];
+            hasMore: boolean;
+            nextBeforeOrdinal?: number;
+        };
+        /** @enum {string} */
+        RoleScope: "builtin" | "global" | "project";
+        RoleModelBinding: {
+            /** @enum {string} */
+            mode: "fixed" | "overridable" | "inherit";
+            modelProfileId?: string;
+            thinkingEffort: components["schemas"]["ThinkingEffort"];
+            fallbackModelProfileIds: string[];
+            overridableFields: string[];
+        };
+        RoleSkillEntry: {
+            skillId: string;
+            /** @enum {string} */
+            mode: "preload" | "available";
+        };
+        DelegationBudgetCeiling: {
+            maxModelCalls: number;
+            maxToolCalls: number;
+            /** Format: int64 */
+            maxTotalTokens: number;
+            /** Format: int64 */
+            maxOutputTokens: number;
+            /** Format: int64 */
+            maxCostUsdMicros: number;
+            /** Format: int64 */
+            maxWallTimeMs: number;
+        };
+        RoleDelegationPolicy: {
+            /** @enum {string} */
+            admission: "denied" | "approval_required" | "auto_within_budget";
+            allowedCallerKinds: "host"[];
+            allowedStrategies: ("single" | "parallel")[];
+            maxInvocationsPerParentRun: number;
+            maxConcurrentInstances: number;
+            budgetCeiling: components["schemas"]["DelegationBudgetCeiling"];
+        };
+        RoleContextPolicy: {
+            /** @enum {string} */
+            defaultMode: "room" | "reply" | "fresh";
+            allowedModes: ("room" | "reply" | "fresh")[];
+            /** @enum {string} */
+            ownExecutionContinuity: "none";
+        };
+        RoleDefinition: {
+            /** @enum {integer} */
+            schemaVersion: 1;
+            rolePrompt: string;
+            modelBinding: components["schemas"]["RoleModelBinding"];
+            skills: {
+                entries: components["schemas"]["RoleSkillEntry"][];
+            };
+            /** @enum {string} */
+            authority: "read_only" | "mutation";
+            /** @enum {string} */
+            permissionCeiling: "discuss" | "ask" | "auto";
+            allowedTools: string[];
+            contextPolicy: components["schemas"]["RoleContextPolicy"];
+            delegationPolicy: components["schemas"]["RoleDelegationPolicy"];
+            outputContract: string;
+            maxLoopIterations: number;
+        };
+        RoleSummary: {
+            id: string;
+            handle: string;
+            name: string;
+            description: string;
+            positioning: string;
+            icon: string;
+            color: string;
+            scope: components["schemas"]["RoleScope"];
+            projectId?: string;
+            /** @enum {string} */
+            status: "active" | "archived";
+            currentVersionId?: string;
+            currentVersion?: number;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        RoleIdentity: components["schemas"]["RoleSummary"] & {
+            draft: components["schemas"]["RoleDefinition"];
+            draftRevision: number;
+            delegationEnabled: boolean;
+            delegationRevocationEpoch: number;
+            /** Format: date-time */
+            delegationDisabledAt?: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        RoleVersion: {
+            id: string;
+            roleId: string;
+            version: number;
+            definition: components["schemas"]["RoleDefinition"];
+            configDigest: string;
+            /** @enum {string} */
+            status: "published";
+            /** Format: date-time */
+            createdAt: string;
+        };
+        RoleCatalogPage: {
+            items: components["schemas"]["RoleSummary"][];
+            nextCursor: string;
+        };
+        RoleValidationDiagnostic: {
+            /** @enum {string} */
+            level: "error" | "warning";
+            code: string;
+            message: string;
+            field?: string;
+        };
+        RoleValidationResult: {
+            valid: boolean;
+            diagnostics: components["schemas"]["RoleValidationDiagnostic"][];
+            configDigest?: string;
+        };
+        CreateRoleInput: {
+            handle: string;
+            name: string;
+            description?: string;
+            positioning?: string;
+            icon?: string;
+            color?: string;
+            scope: components["schemas"]["RoleScope"];
+            projectId?: string;
+            definition: components["schemas"]["RoleDefinition"];
+        };
+        UpdateRoleDraftInput: {
+            expectedRevision: number;
+            handle?: string;
+            name?: string;
+            description?: string;
+            positioning?: string;
+            icon?: string;
+            color?: string;
+            definition: components["schemas"]["RoleDefinition"];
+        };
+        SystemPromptMetadata: {
+            version: number;
+            agentProfileId?: string;
+            platformVersion: string;
+            digest: string;
+        };
         AgentRun: {
             id: string;
             turnId?: string;
             sessionId: string;
             /** @enum {string} */
-            runKind: "agent" | "context_compaction";
+            runKind: "agent" | "context_compaction" | "delegated_agent";
             baseMessageId?: string;
             attempt: number;
             /** @enum {string} */
-            status: "queued" | "running" | "waiting_for_approval" | "succeeded" | "failed" | "cancelled" | "interrupted";
+            status: "queued" | "running" | "waiting_for_approval" | "waiting_delegation_admission" | "waiting_children" | "succeeded" | "failed" | "cancelled" | "interrupted";
             assistantMessageId?: string;
             retryOfRunId?: string;
+            /** @enum {integer} */
+            commitFormatVersion: 1 | 2;
+            systemPrompt?: components["schemas"]["SystemPromptMetadata"];
+            parentRunId?: string;
+            rootRunId?: string;
+            executionDepth: number;
+            /** @enum {string} */
+            publishMode: "public_final" | "private_to_parent";
+            speakerSnapshot: components["schemas"]["SpeakerSnapshot"];
+            contextSnapshot: {
+                [key: string]: unknown;
+            };
+            contextSnapshotDigest?: string;
             requestedConfig: {
                 [key: string]: unknown;
             };
@@ -1002,13 +1510,73 @@ export interface components {
             run: components["schemas"]["AgentRun"];
             existing: boolean;
         };
+        DelegationApprovalPreview: {
+            name: string;
+            roleHandle: string;
+            assignmentPreview: string;
+            outputContract: string;
+            budget: components["schemas"]["DelegationBudgetCeiling"];
+        };
+        DelegationTerminalResult: {
+            /** @enum {string} */
+            status: "completed" | "blocked" | "needs_input";
+            summary: string;
+            artifactRefs?: components["schemas"]["ArtifactReference"][];
+            payload?: {
+                [key: string]: unknown;
+            };
+        };
+        DelegationChildActivity: {
+            itemId: string;
+            childRunId?: string;
+            name: string;
+            roleHandle: string;
+            roleDisplayName: string;
+            /** @enum {string} */
+            itemStatus: "pending" | "running" | "succeeded" | "failed" | "cancelled" | "not_authorized";
+            /** @enum {string} */
+            runStatus?: "queued" | "running" | "waiting_for_approval" | "waiting_delegation_admission" | "waiting_children" | "succeeded" | "failed" | "cancelled" | "interrupted";
+            result?: components["schemas"]["DelegationTerminalResult"];
+            errorCode?: string;
+            errorMessage?: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        DelegationActivityGroup: {
+            id: string;
+            parentToolCallId: string;
+            /** @enum {string} */
+            strategy: "single" | "parallel";
+            /** @enum {string} */
+            status: "pending" | "waiting_admission" | "waiting_children" | "settled" | "cancelled";
+            children: components["schemas"]["DelegationChildActivity"][];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        DelegationActivityPage: {
+            parentRunId: string;
+            groups: components["schemas"]["DelegationActivityGroup"][];
+        };
         ApprovalItem: {
             callIndex: number;
             toolCallId: string;
             toolName: string;
             /** @enum {string} */
-            riskClass: "read_only" | "local_write" | "shell" | "external" | "sensitive";
+            riskClass: "read_only" | "local_write" | "shell" | "external" | "delegation" | "sensitive";
             argumentsPreview: string;
+            delegations?: components["schemas"]["DelegationApprovalPreview"][];
+        };
+        ApprovalAttribution: {
+            /** @enum {string} */
+            speakerKind: "user" | "host" | "role" | "workflow" | "room" | "system";
+            objectId?: string;
+            versionId?: string;
+            handle?: string;
+            displayName: string;
+            /** @enum {string} */
+            permissionCeiling?: "discuss" | "ask" | "auto";
+            /** @enum {string} */
+            authority?: "read_only" | "mutation";
         };
         ToolApprovalRequest: {
             id: string;
@@ -1023,6 +1591,7 @@ export interface components {
             requestedAt: string;
             /** Format: date-time */
             resolvedAt?: string;
+            attribution?: components["schemas"]["ApprovalAttribution"];
         };
         ActiveRunState: {
             run: components["schemas"]["AgentRun"];
@@ -1097,6 +1666,74 @@ export interface components {
             /** Format: date-time */
             injectedAt?: string;
         };
+        PromptTemplateSummary: {
+            name: string;
+            description: string;
+            argumentHint: string;
+            /** @enum {string} */
+            source: "builtin" | "settings" | "global" | "project";
+            editable: boolean;
+        };
+        PromptTemplateDiagnostic: {
+            /** @enum {string} */
+            level?: "info" | "warning";
+            code?: string;
+            source?: string;
+            path?: string;
+            name?: string;
+            message?: string;
+        };
+        GlobalPromptTemplateEntry: {
+            name: string;
+            description?: string;
+            argumentHint?: string;
+            valid: boolean;
+            editable: boolean;
+            diagnostic?: components["schemas"]["PromptTemplateDiagnostic"];
+        };
+        ExpandPromptTemplateInput: {
+            invocation: string;
+        };
+        ExpandPromptTemplateMatched: {
+            /** @constant */
+            case: "matched";
+            name: string;
+            text: string;
+            diagnostics: components["schemas"]["PromptTemplateDiagnostic"][];
+        };
+        ExpandPromptTemplateNotFound: {
+            /** @constant */
+            case: "not_found";
+            name: string;
+            diagnostics: components["schemas"]["PromptTemplateDiagnostic"][];
+        };
+        ExpandPromptTemplateInvalid: {
+            /** @constant */
+            case: "invalid_invocation";
+            diagnostics: components["schemas"]["PromptTemplateDiagnostic"][];
+        };
+        ExpandPromptTemplateResult: components["schemas"]["ExpandPromptTemplateMatched"] | components["schemas"]["ExpandPromptTemplateNotFound"] | components["schemas"]["ExpandPromptTemplateInvalid"];
+        CreatePromptTemplateInput: {
+            name: string;
+            description?: string;
+            argumentHint?: string;
+            body: string;
+        };
+        UpdatePromptTemplateInput: {
+            description?: string;
+            argumentHint?: string;
+            body: string;
+        };
+        PromptTemplateCatalog: {
+            templates: components["schemas"]["PromptTemplateSummary"][];
+            diagnostics: components["schemas"]["PromptTemplateDiagnostic"][];
+        };
+        PromptTemplateManagementCatalog: {
+            templates: components["schemas"]["PromptTemplateSummary"][];
+            globalTemplates: components["schemas"]["GlobalPromptTemplateEntry"][];
+            globalRecoveryMode: boolean;
+            diagnostics: components["schemas"]["PromptTemplateDiagnostic"][];
+        };
     };
     responses: {
         /** @description Error response */
@@ -1159,6 +1796,246 @@ export interface operations {
                 };
             };
             503: components["responses"]["Error"];
+        };
+    };
+    listRoles: {
+        parameters: {
+            query?: {
+                q?: string;
+                scope?: components["schemas"]["RoleScope"];
+                projectId?: string;
+                status?: "active" | "archived";
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Effective Role catalog without draft or prompt bodies */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RoleCatalogPage"];
+                    };
+                };
+            };
+        };
+    };
+    createRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateRoleInput"];
+            };
+        };
+        responses: {
+            /** @description Role draft created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RoleIdentity"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    getRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Role authoring detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RoleIdentity"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    updateRoleDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRoleDraftInput"];
+            };
+        };
+        responses: {
+            /** @description Updated Role draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RoleIdentity"];
+                    };
+                };
+            };
+            409: components["responses"]["Error"];
+        };
+    };
+    validateRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Role draft validation diagnostics */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RoleValidationResult"];
+                    };
+                };
+            };
+        };
+    };
+    publishRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedRevision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Immutable Role version published */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RoleVersion"];
+                    };
+                };
+            };
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+        };
+    };
+    archiveRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Archived Role identity */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RoleIdentity"];
+                    };
+                };
+            };
+        };
+    };
+    listRoleVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Immutable Role version history */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RoleVersion"][];
+                    };
+                };
+            };
+        };
+    };
+    getRoleVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+                versionID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Exact immutable Role version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RoleVersion"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
         };
     };
     listProviderProfiles: {
@@ -1288,9 +2165,15 @@ export interface operations {
                     displayName?: string;
                     contextWindow: number;
                     maxOutputTokens: number;
+                    /** @default 0 */
+                    inputCostUsdMicrosPerMillion?: number;
+                    /** @default 0 */
+                    outputCostUsdMicrosPerMillion?: number;
                     supportsVision?: boolean;
                     supportsToolUse?: boolean;
                     supportsThinking?: boolean;
+                    thinkingDialect?: components["schemas"]["ThinkingDialect"];
+                    supportedThinkingEfforts?: components["schemas"]["ThinkingEffort"][];
                     isDefault?: boolean;
                 };
             };
@@ -2110,6 +2993,57 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
+    submitInvocation: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    text?: string;
+                    content?: components["schemas"]["TurnContentPart"][];
+                    baseMessageId?: string;
+                    target: components["schemas"]["InvocationTarget"];
+                    config?: {
+                        [key: string]: unknown;
+                    };
+                } | unknown | unknown;
+            };
+        };
+        responses: {
+            /** @description Existing idempotent submission */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TurnSubmission"];
+                    };
+                };
+            };
+            /** @description Invocation accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TurnSubmission"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
     listContextCompactions: {
         parameters: {
             query?: never;
@@ -2228,6 +3162,63 @@ export interface operations {
                 };
             };
             404: components["responses"]["Error"];
+        };
+    };
+    listRunMessages: {
+        parameters: {
+            query?: {
+                beforeOrdinal?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                runID: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Private Run transcript or deterministic legacy fallback */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RunMessagePage"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            500: components["responses"]["Error"];
+        };
+    };
+    listRunChildren: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runID: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Parent-visible delegated child activity */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["DelegationActivityPage"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            500: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
     retryRun: {
@@ -2399,6 +3390,196 @@ export interface operations {
                 };
             };
             404: components["responses"]["Error"];
+        };
+    };
+    listPromptTemplates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Effective template catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PromptTemplateCatalog"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            500: components["responses"]["Error"];
+        };
+    };
+    expandPromptTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpandPromptTemplateInput"];
+            };
+        };
+        responses: {
+            /** @description Expand result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ExpandPromptTemplateResult"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            500: components["responses"]["Error"];
+        };
+    };
+    listGlobalPromptTemplates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Management catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PromptTemplateManagementCatalog"];
+                    };
+                };
+            };
+            500: components["responses"]["Error"];
+        };
+    };
+    createPromptTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePromptTemplateInput"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+            500: components["responses"]["Error"];
+        };
+    };
+    getPromptTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Template record */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            name?: string;
+                            description?: string;
+                            argumentHint?: string;
+                            body?: string;
+                            source?: string;
+                        };
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    updatePromptTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePromptTemplateInput"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+            500: components["responses"]["Error"];
+        };
+    };
+    deletePromptTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            500: components["responses"]["Error"];
         };
     };
 }

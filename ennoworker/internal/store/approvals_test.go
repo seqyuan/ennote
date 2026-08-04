@@ -33,7 +33,7 @@ func approvalItems() []domain.ApprovalItem {
 func TestApprovalSuspendIsAtomicAndSessionRestorable(t *testing.T) {
 	runs, approvals, submission := setupApprovalRun(t)
 	request, err := approvals.Suspend(context.Background(), submission.Run.ID, 1, 2, "digest",
-		json.RawMessage(`{"version":1}`), approvalItems())
+		json.RawMessage(`{"version":1}`), approvalItems(), nil)
 	require.NoError(t, err)
 	assert.Equal(t, domain.ApprovalPending, request.Status)
 
@@ -51,19 +51,45 @@ func TestApprovalSuspendIsAtomicAndSessionRestorable(t *testing.T) {
 	assert.Equal(t, "approval_requested", eventType)
 }
 
+func TestDelegationApprovalUsesAdmissionStatusAndQueuesAfterDecision(t *testing.T) {
+	runs, approvals, submission := setupApprovalRun(t)
+	items := []domain.ApprovalItem{{CallIndex: 0, ToolCallID: "delegate-call", ToolName: "delegate_roles",
+		RiskClass: domain.RiskDelegation, ArgumentsPreview: "delegate to @workspace-explorer",
+		Delegations: []domain.DelegationApprovalPreview{{Name: "inspect", RoleHandle: "workspace-explorer",
+			AssignmentPreview: "Inspect the workspace", Budget: domain.BudgetCeilingJSON{MaxModelCalls: 4, MaxToolCalls: 8}}}}}
+	request, err := approvals.Suspend(context.Background(), submission.Run.ID, 1, 1, "delegation-digest",
+		json.RawMessage(`{"version":1}`), items, nil)
+	require.NoError(t, err)
+
+	run, err := runs.Get(context.Background(), submission.Run.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunWaitingDelegationAdmit, run.Status)
+	pending, err := approvals.FindPendingBySession(context.Background(), submission.Run.SessionID)
+	require.NoError(t, err)
+	require.NotNil(t, pending)
+	require.Len(t, pending.Items[0].Delegations, 1)
+	assert.Equal(t, "workspace-explorer", pending.Items[0].Delegations[0].RoleHandle)
+
+	_, err = approvals.Decide(context.Background(), request.ID, domain.DecisionApproved, "admit", nil)
+	require.NoError(t, err)
+	run, err = runs.Get(context.Background(), submission.Run.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunQueued, run.Status)
+}
+
 func TestApprovalDecisionIsIdempotentAndOppositeDecisionConflicts(t *testing.T) {
 	runs, approvals, submission := setupApprovalRun(t)
 	request, err := approvals.Suspend(context.Background(), submission.Run.ID, 1, 1, "digest",
-		json.RawMessage(`{"version":1}`), approvalItems())
+		json.RawMessage(`{"version":1}`), approvalItems(), nil)
 	require.NoError(t, err)
 
-	resolved, err := approvals.Decide(context.Background(), request.ID, domain.DecisionApproved, "decision-1")
+	resolved, err := approvals.Decide(context.Background(), request.ID, domain.DecisionApproved, "decision-1", nil)
 	require.NoError(t, err)
 	assert.Equal(t, domain.ApprovalApproved, resolved.Status)
-	resolved, err = approvals.Decide(context.Background(), request.ID, domain.DecisionApproved, "decision-2")
+	resolved, err = approvals.Decide(context.Background(), request.ID, domain.DecisionApproved, "decision-2", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "decision-1", resolved.DecisionClientRequestID)
-	_, err = approvals.Decide(context.Background(), request.ID, domain.DecisionRejected, "decision-3")
+	_, err = approvals.Decide(context.Background(), request.ID, domain.DecisionRejected, "decision-3", nil)
 	assert.ErrorIs(t, err, store.ErrApprovalConflict)
 
 	run, err := runs.Get(context.Background(), submission.Run.ID)
@@ -74,9 +100,9 @@ func TestApprovalDecisionIsIdempotentAndOppositeDecisionConflicts(t *testing.T) 
 func TestApprovalBeginResumeClaimsCheckpointOnce(t *testing.T) {
 	runs, approvals, submission := setupApprovalRun(t)
 	request, err := approvals.Suspend(context.Background(), submission.Run.ID, 1, 3, "digest",
-		json.RawMessage(`{"version":1,"messages":[]}`), approvalItems())
+		json.RawMessage(`{"version":1,"messages":[]}`), approvalItems(), nil)
 	require.NoError(t, err)
-	_, err = approvals.Decide(context.Background(), request.ID, domain.DecisionRejected, "decision")
+	_, err = approvals.Decide(context.Background(), request.ID, domain.DecisionRejected, "decision", nil)
 	require.NoError(t, err)
 	_, err = runs.Claim(context.Background(), submission.Run.ID)
 	require.NoError(t, err)
@@ -93,10 +119,40 @@ func TestApprovalBeginResumeClaimsCheckpointOnce(t *testing.T) {
 	require.NoError(t, approvals.CompleteExecuting(context.Background(), submission.Run.ID))
 }
 
+func TestApprovalResumeFinalizationCommitsOneShadowTranscript(t *testing.T) {
+	runs, approvals, submission := setupApprovalRun(t)
+	ctx := context.Background()
+	request, err := approvals.Suspend(ctx, submission.Run.ID, 1, 2, "digest",
+		json.RawMessage(`{"version":1,"messages":[]}`), approvalItems(), nil)
+	require.NoError(t, err)
+	var shadowCount int
+	require.NoError(t, runs.DB.QueryRow(`SELECT COUNT(*) FROM run_messages WHERE run_id=?`, submission.Run.ID).Scan(&shadowCount))
+	assert.Zero(t, shadowCount)
+
+	_, err = approvals.Decide(ctx, request.ID, domain.DecisionApproved, "decision", nil)
+	require.NoError(t, err)
+	_, err = runs.Claim(ctx, submission.Run.ID)
+	require.NoError(t, err)
+	resume, err := approvals.BeginResume(ctx, submission.Run.ID)
+	require.NoError(t, err)
+	require.NotNil(t, resume)
+	require.NoError(t, approvals.CompleteExecuting(ctx, submission.Run.ID))
+
+	require.NoError(t, runs.FinalizeSuccess(ctx, submission.Run.ID, transcriptOutput()))
+	require.NoError(t, runs.FinalizeSuccess(ctx, submission.Run.ID, transcriptOutput()),
+		"terminal replay must be idempotent")
+	require.NoError(t, runs.DB.QueryRow(`SELECT COUNT(*) FROM run_messages WHERE run_id=?`, submission.Run.ID).Scan(&shadowCount))
+	assert.Equal(t, 3, shadowCount)
+	var committedEvents int
+	require.NoError(t, runs.DB.QueryRow(`SELECT COUNT(*) FROM run_events
+		WHERE run_id=? AND event_type='run_transcript_committed'`, submission.Run.ID).Scan(&committedEvents))
+	assert.Equal(t, 1, committedEvents)
+}
+
 func TestWaitingApprovalBlocksTurnAndCompactionButAllowsSteerAndCancel(t *testing.T) {
 	runs, approvals, submission := setupApprovalRun(t)
 	_, err := approvals.Suspend(context.Background(), submission.Run.ID, 1, 1, "digest",
-		json.RawMessage(`{"version":1}`), approvalItems())
+		json.RawMessage(`{"version":1}`), approvalItems(), nil)
 	require.NoError(t, err)
 	_, err = runs.SubmitTurn(context.Background(), domain.SubmitTurnInput{
 		SessionID: submission.Run.SessionID, ClientRequestID: "second", Text: "second",

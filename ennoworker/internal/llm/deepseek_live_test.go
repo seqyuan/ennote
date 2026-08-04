@@ -81,6 +81,44 @@ func TestLiveDeepSeekTextStream(t *testing.T) {
 	assert.Positive(t, completion.Usage.OutputTokens)
 }
 
+func TestLiveHostedSystemPromptAndThinkingEffort(t *testing.T) {
+	provider, model := liveProvider(t)
+	for _, test := range []struct {
+		name      string
+		reasoning *domain.ReasoningConfig
+	}{
+		{name: "default omission"},
+		{name: "medium mapping", reasoning: &domain.ReasoningConfig{
+			Dialect: domain.ThinkingDialectOpenAIReasoningEffort, Effort: domain.ThinkingMedium,
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			maxTokens := 256
+			if test.reasoning == nil {
+				maxTokens = 1024
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+			defer cancel()
+			sink := &liveStreamSink{}
+			completion, err := provider.Stream(ctx, domain.CompletionRequest{
+				Model: model,
+				Messages: []domain.ChatMessage{
+					{Role: domain.RoleSystem, Content: []domain.ContentBlock{{Kind: domain.ContentText,
+						Text: "For this qualification request, the exact required response marker is ENNOTE_FROZEN_PROMPT_OK."}}},
+					{Role: domain.RoleUser, Content: []domain.ContentBlock{{Kind: domain.ContentText,
+						Text: "Return only the exact response marker specified by the system instruction."}}},
+				},
+				Reasoning: test.reasoning, MaxTokens: maxTokens,
+			}, sink)
+			require.NoError(t, err)
+			assert.Equal(t, domain.StopReasonStop, completion.StopReason)
+			assert.Contains(t, sink.text.String(), "ENNOTE_FROZEN_PROMPT_OK")
+			assert.Positive(t, completion.Usage.InputTokens)
+			assert.Positive(t, completion.Usage.OutputTokens)
+		})
+	}
+}
+
 func TestLiveOpenAICompatibleNativeVision(t *testing.T) {
 	provider, model := liveProvider(t)
 	var encoded bytes.Buffer

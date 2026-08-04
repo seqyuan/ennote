@@ -59,7 +59,7 @@ function ToolBatch({ sessionId, batch, approval, resolving, decide }: {
   batch: ToolBatchStep;
   approval?: ToolApprovalRequest | null;
   resolving?: ApprovalDecision | null;
-  decide?: (decision: ApprovalDecision) => void;
+  decide?: (decision: ApprovalDecision, standingGrantCallIndexes?: number[]) => void;
 }) {
   return <section className="tool-batch" aria-label={`Tool batch with ${batch.activities.length} actions`}>
     <div className="tool-batch-heading"><Wrench size={14} aria-hidden="true" />
@@ -74,7 +74,7 @@ function ToolBatch({ sessionId, batch, approval, resolving, decide }: {
 export function PendingApprovalBatch({ approval, resolving, decide }: {
   approval: ToolApprovalRequest;
   resolving?: ApprovalDecision | null;
-  decide?: (decision: ApprovalDecision) => void;
+  decide?: (decision: ApprovalDecision, standingGrantCallIndexes?: number[]) => void;
 }) {
   if (!decide) return null;
   return <section className="tool-batch pending-tool-batch" aria-label={`Pending tool batch with ${approval.items.length} actions`}>

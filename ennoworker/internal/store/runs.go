@@ -30,6 +30,32 @@ type RunRepo struct {
 }
 
 func (r *RunRepo) SubmitTurn(ctx context.Context, input domain.SubmitTurnInput) (*domain.TurnSubmission, error) {
+	return r.submitTurn(ctx, input, nil)
+}
+
+func (r *RunRepo) SubmitInvocation(ctx context.Context, input domain.SubmitInvocationInput) (*domain.TurnSubmission, error) {
+	if input.Target.Kind != domain.InvocationTargetRole || strings.TrimSpace(input.Target.ObjectID) == "" ||
+		strings.TrimSpace(input.Target.VersionID) == "" {
+		return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("a Role object and version are required"))
+	}
+	if strings.TrimSpace(string(input.RequestedConfig)) != "" && string(input.RequestedConfig) != "null" && string(input.RequestedConfig) != "{}" {
+		return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
+			fmt.Errorf("direct Role invocation does not allow runtime model, permission, or loop config overrides"))
+	}
+	if input.Target.ContextMode != domain.InvocationContextRoom && input.Target.ContextMode != domain.InvocationContextFresh &&
+		input.Target.ContextMode != domain.InvocationContextReplyTo {
+		return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("unsupported context mode %q", input.Target.ContextMode))
+	}
+	if input.Target.ContextMode == domain.InvocationContextReplyTo && len(input.Target.ReplyTo) == 0 {
+		return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("reply_to context requires message ids"))
+	}
+	return r.submitTurn(ctx, domain.SubmitTurnInput{
+		SessionID: input.SessionID, ClientRequestID: input.ClientRequestID, BaseMessageID: input.BaseMessageID,
+		Text: input.Text, Parts: input.Parts, RequestedConfig: input.RequestedConfig,
+	}, &input.Target)
+}
+
+func (r *RunRepo) submitTurn(ctx context.Context, input domain.SubmitTurnInput, target *domain.RoleInvocationTarget) (*domain.TurnSubmission, error) {
 	if strings.TrimSpace(input.ClientRequestID) == "" {
 		return nil, fmt.Errorf("client request id is required")
 	}
@@ -58,9 +84,10 @@ func (r *RunRepo) SubmitTurn(ctx context.Context, input domain.SubmitTurnInput) 
 	}
 
 	var activeLeaf, activeBranch sql.NullString
+	var sessionProjectID string
 	if err := tx.QueryRowContext(ctx,
-		`SELECT active_leaf_message_id,active_branch_id FROM sessions WHERE id = ? AND status = 'active'`, input.SessionID,
-	).Scan(&activeLeaf, &activeBranch); err != nil {
+		`SELECT active_leaf_message_id,active_branch_id,project_id FROM sessions WHERE id = ? AND status = 'active'`, input.SessionID,
+	).Scan(&activeLeaf, &activeBranch, &sessionProjectID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrSessionNotFound
 		}
@@ -69,7 +96,7 @@ func (r *RunRepo) SubmitTurn(ctx context.Context, input domain.SubmitTurnInput) 
 
 	var activeRunKind sql.NullString
 	if err := tx.QueryRowContext(ctx,
-		`SELECT run_kind FROM agent_runs WHERE session_id = ? AND status IN ('queued', 'running', 'waiting_for_approval') LIMIT 1`,
+		`SELECT run_kind FROM agent_runs WHERE session_id = ? AND status IN ('queued', 'running', 'waiting_for_approval', 'waiting_delegation_admission', 'waiting_children') AND parent_run_id IS NULL LIMIT 1`,
 		input.SessionID,
 	).Scan(&activeRunKind); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("check active run: %w", err)
@@ -83,6 +110,70 @@ func (r *RunRepo) SubmitTurn(ctx context.Context, input domain.SubmitTurnInput) 
 	activeBranchID, err := ensureActiveBranchTx(ctx, tx, input.SessionID, activeLeaf, activeBranch)
 	if err != nil {
 		return nil, err
+	}
+
+	commitFormat := domain.CommitFormatLegacyV1
+	targetKind, targetObjectID, targetVersionID := "host", "", ""
+	contextMode := domain.InvocationContextRoom
+	replyTo := json.RawMessage(`[]`)
+	speakerSnapshot := json.RawMessage(`{"kind":"host","displayName":"Host"}`)
+	participantInstanceID := ""
+	createParticipant := false
+	inviteParticipant := false
+	if target != nil {
+		var writerSetting string
+		if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='hosted_commit_format_version'`).Scan(&writerSetting); err != nil || writerSetting != "2" {
+			return nil, domain.NewCodedError(domain.ErrorCommitFormatNotEnabled, fmt.Errorf("format 2 writer is not enabled"))
+		}
+		var handle, name, icon, color, positioning, configDigest, definitionJSON string
+		err := tx.QueryRowContext(ctx, `SELECT p.handle,p.name,p.icon,p.color,p.positioning,v.config_digest,v.definition_json
+			FROM agent_profiles p JOIN agent_profile_versions v ON v.id=p.current_version_id
+			WHERE p.id=? AND v.id=? AND p.object_kind='role' AND p.status='active' AND v.status='published'
+			AND (p.project_id IS NULL OR p.project_id=?)`, target.ObjectID, target.VersionID, sessionProjectID).
+			Scan(&handle, &name, &icon, &color, &positioning, &configDigest, &definitionJSON)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("Role target is unavailable or not published"))
+		}
+		if err != nil {
+			return nil, fmt.Errorf("resolve Role target: %w", err)
+		}
+		var definition domain.RoleDefinition
+		if err := json.Unmarshal([]byte(definitionJSON), &definition); err != nil {
+			return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("decode Role target: %w", err))
+		}
+		contextAllowed := false
+		for _, allowed := range definition.ContextPolicy.AllowedModes {
+			contextAllowed = contextAllowed || string(allowed) == string(target.ContextMode) ||
+				(allowed == domain.RoleContextReply && target.ContextMode == domain.InvocationContextReplyTo)
+		}
+		if !contextAllowed {
+			return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
+				fmt.Errorf("Role does not allow %s context", target.ContextMode))
+		}
+		speakerSnapshot, err = json.Marshal(map[string]string{
+			"kind": "role", "objectId": target.ObjectID, "versionId": target.VersionID, "handle": handle,
+			"displayName": name, "icon": icon, "color": color, "positioning": positioning, "configDigest": configDigest,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("encode Role speaker snapshot: %w", err)
+		}
+		if len(target.ReplyTo) != 0 {
+			replyTo, err = json.Marshal(target.ReplyTo)
+			if err != nil {
+				return nil, fmt.Errorf("encode reply targets: %w", err)
+			}
+		}
+		commitFormat = domain.CommitFormatSpeakerV2
+		targetKind, targetObjectID, targetVersionID = "role", target.ObjectID, target.VersionID
+		contextMode = target.ContextMode
+		err = tx.QueryRowContext(ctx, `SELECT id FROM room_member_instances
+			WHERE session_id=? AND role_id=? AND role_version_id=?`, input.SessionID, target.ObjectID, target.VersionID).
+			Scan(&participantInstanceID)
+		if errors.Is(err, sql.ErrNoRows) {
+			participantInstanceID, createParticipant, inviteParticipant = uuid.NewString(), true, true
+		} else if err != nil {
+			return nil, fmt.Errorf("resolve Role participant: %w", err)
+		}
 	}
 
 	baseMessageID := input.BaseMessageID
@@ -104,6 +195,42 @@ func (r *RunRepo) SubmitTurn(ctx context.Context, input domain.SubmitTurnInput) 
 			return nil, fmt.Errorf("base message does not belong to session: %s", baseMessageID)
 		}
 	}
+	if target == nil && baseMessageID != "" {
+		// Host-only sessions stay format 1 so the Conversation Surface tool
+		// timeline survives reload. Once the active lineage already contains a
+		// format-2 (Role) contribution, the room runs on the speaker-ledger
+		// model and this Host turn must project other Speakers safely.
+		var formatTwoAncestors int
+		if err := tx.QueryRowContext(ctx, `WITH RECURSIVE chain(id,parent_message_id,run_id) AS (
+			SELECT id,parent_message_id,run_id FROM messages WHERE id=? AND session_id=?
+			UNION ALL SELECT m.id,m.parent_message_id,m.run_id FROM messages m JOIN chain c
+			  ON m.id=c.parent_message_id WHERE m.session_id=?
+		) SELECT COUNT(*) FROM chain WHERE run_id IN (SELECT id FROM agent_runs WHERE commit_format_version=2)`,
+			baseMessageID, input.SessionID, input.SessionID).Scan(&formatTwoAncestors); err != nil {
+			return nil, fmt.Errorf("inspect lineage format: %w", err)
+		}
+		if formatTwoAncestors != 0 {
+			commitFormat = domain.CommitFormatSpeakerV2
+		}
+	}
+	if target != nil && !inviteParticipant {
+		var invitedOnLineage int
+		if baseMessageID != "" {
+			err := tx.QueryRowContext(ctx, `WITH RECURSIVE chain(id,parent_message_id) AS (
+				SELECT id,parent_message_id FROM messages WHERE id=? AND session_id=?
+				UNION ALL SELECT m.id,m.parent_message_id FROM messages m JOIN chain c ON m.id=c.parent_message_id
+				WHERE m.session_id=?
+			) SELECT COUNT(*) FROM chain c JOIN message_parts p ON p.message_id=c.id
+			WHERE p.block_kind='room_control'
+			AND json_extract(p.payload_json,'$.action')='participant_invited'
+			AND json_extract(p.payload_json,'$.participantInstanceId')=?`, baseMessageID, input.SessionID,
+				input.SessionID, participantInstanceID).Scan(&invitedOnLineage)
+			if err != nil {
+				return nil, fmt.Errorf("fold Role participant invitation: %w", err)
+			}
+		}
+		inviteParticipant = invitedOnLineage == 0
+	}
 
 	timestamp := time.Now().UTC()
 	messageID := uuid.NewString()
@@ -114,10 +241,41 @@ func (r *RunRepo) SubmitTurn(ctx context.Context, input domain.SubmitTurnInput) 
 		return nil, err
 	}
 
+	userParentMessageID := baseMessageID
+	if createParticipant {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO room_member_instances
+			(id,session_id,role_id,role_version_id,created_at) VALUES(?,?,?,?,?)`, participantInstanceID,
+			input.SessionID, targetObjectID, targetVersionID, timestamp.Format(time.RFC3339Nano)); err != nil {
+			return nil, fmt.Errorf("create Role participant: %w", err)
+		}
+	}
+	if inviteParticipant {
+		inviteMessageID := uuid.NewString()
+		if _, err := tx.ExecContext(ctx, `INSERT INTO messages
+			(id,session_id,parent_message_id,role,status,speaker_kind,speaker_snapshot_json,
+			 addressee_kind,visibility,originated_at,created_at)
+			 VALUES(?,?,?,'system','complete','system','{"kind":"system","displayName":"System"}',
+			 'room','room_control',?,?)`, inviteMessageID, input.SessionID, nullableStr(baseMessageID),
+			timestamp.Format(time.RFC3339Nano), timestamp.Format(time.RFC3339Nano)); err != nil {
+			return nil, fmt.Errorf("insert participant invite: %w", err)
+		}
+		control := domain.ContentBlock{Kind: domain.ContentRoomControl, RoomControl: &domain.RoomControl{
+			Action: "participant_invited", ParticipantInstanceID: participantInstanceID, ObjectID: targetObjectID,
+			ObjectVersionID: targetVersionID, DisplaySnapshot: speakerSnapshot,
+		}}
+		if err := insertMessageParts(ctx, tx, inviteMessageID, []domain.ContentBlock{control}); err != nil {
+			return nil, fmt.Errorf("insert participant invite content: %w", err)
+		}
+		userParentMessageID = inviteMessageID
+	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO messages (id, session_id, parent_message_id, role, status, created_at)
-		 VALUES (?, ?, ?, 'user', 'complete', ?)`,
-		messageID, input.SessionID, nullableStr(baseMessageID), timestamp.Format(time.RFC3339Nano),
+		`INSERT INTO messages (id, session_id, parent_message_id, role, status,
+		 speaker_kind, speaker_snapshot_json, addressee_kind, addressee_object_id, addressee_version_id,
+		 visibility, originated_at, created_at)
+		 VALUES (?, ?, ?, 'user', 'complete', 'user', '{"kind":"user","displayName":"You"}',
+		 ?, ?, ?, 'public', ?, ?)`,
+		messageID, input.SessionID, nullableStr(userParentMessageID), targetKind, nullableStr(targetObjectID), nullableStr(targetVersionID),
+		timestamp.Format(time.RFC3339Nano), timestamp.Format(time.RFC3339Nano),
 	); err != nil {
 		return nil, fmt.Errorf("insert user message: %w", err)
 	}
@@ -131,18 +289,24 @@ func (r *RunRepo) SubmitTurn(ctx context.Context, input domain.SubmitTurnInput) 
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO turns
-		 (id, session_id, client_request_id, user_message_id, base_message_id, status, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`,
-		turnID, input.SessionID, input.ClientRequestID, messageID, nullableStr(baseMessageID),
-		timestamp.Format(time.RFC3339Nano), timestamp.Format(time.RFC3339Nano),
+		 (id, session_id, client_request_id, user_message_id, base_message_id, status,
+		 input_message_id, input_kind, target_kind, target_object_id, target_version_id,
+		 target_participant_instance_id, context_mode, reply_to_json, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, 'pending', ?, 'user_message', ?, ?, ?, ?, ?, ?, ?, ?)`,
+		turnID, input.SessionID, input.ClientRequestID, messageID, nullableStr(baseMessageID), messageID,
+		targetKind, nullableStr(targetObjectID), nullableStr(targetVersionID), nullableStr(participantInstanceID), contextMode,
+		string(replyTo), timestamp.Format(time.RFC3339Nano), timestamp.Format(time.RFC3339Nano),
 	); err != nil {
 		return nil, fmt.Errorf("insert turn: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO agent_runs
-		 (id, turn_id, session_id, run_kind, base_message_id, attempt, status, requested_config_json, effective_config_json, created_at)
-		 VALUES (?, ?, ?, 'agent', ?, 1, 'queued', ?, '{}', ?)`,
-		runID, turnID, input.SessionID, messageID, string(requestedConfig), timestamp.Format(time.RFC3339Nano),
+		 (id, turn_id, session_id, run_kind, base_message_id, attempt, status, requested_config_json,
+		 effective_config_json, speaker_snapshot_json, root_run_id, execution_depth, publish_mode,
+		 commit_format_version, context_snapshot_json, created_at)
+		 VALUES (?, ?, ?, 'agent', ?, 1, 'queued', ?, '{}', ?, ?, 0, 'public_final', ?, '{}', ?)`,
+		runID, turnID, input.SessionID, messageID, string(requestedConfig), string(speakerSnapshot), runID,
+		commitFormat, timestamp.Format(time.RFC3339Nano),
 	); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return nil, ErrSessionRunActive
@@ -159,7 +323,7 @@ func (r *RunRepo) SubmitTurn(ctx context.Context, input domain.SubmitTurnInput) 
 	); err != nil {
 		return nil, fmt.Errorf("update session leaf: %w", err)
 	}
-	queuedPayload, _ := json.Marshal(map[string]string{"turnId": turnID, "userMessageId": messageID})
+	queuedPayload, _ := json.Marshal(map[string]string{"turnId": turnID, "userMessageId": messageID, "targetKind": targetKind})
 	committedEvents, err := appendEventsTx(ctx, tx, runID, domain.PendingEvent{EventType: "run_queued", Payload: queuedPayload})
 	if err != nil {
 		return nil, err
@@ -175,8 +339,10 @@ func (r *RunRepo) SubmitTurn(ctx context.Context, input domain.SubmitTurnInput) 
 		TurnID: turnID, UserMessageID: messageID,
 		Run: domain.AgentRun{
 			ID: runID, TurnID: turnID, SessionID: input.SessionID, RunKind: domain.RunKindAgent, BaseMessageID: messageID, Attempt: 1,
-			Status: domain.RunQueued, RequestedConfig: requestedConfig,
-			EffectiveConfig: json.RawMessage(`{}`), CreatedAt: timestamp,
+			Status: domain.RunQueued, CommitFormatVersion: commitFormat, RootRunID: runID,
+			ExecutionDepth: 0, PublishMode: domain.PublishPublicFinal,
+			SpeakerSnapshot: speakerSnapshot, ContextSnapshot: json.RawMessage(`{}`),
+			RequestedConfig: requestedConfig, EffectiveConfig: json.RawMessage(`{}`), CreatedAt: timestamp,
 		},
 	}, nil
 }
@@ -224,6 +390,40 @@ func prepareUserPartsTx(ctx context.Context, tx *sql.Tx, sessionID, text string,
 	return parts, artifactIDs, nil
 }
 
+// ParentOfRun returns the parent_run_id of a Run, or "" for a top-level Run.
+func (r *RunRepo) ParentOfRun(ctx context.Context, runID string) (string, error) {
+	var parent sql.NullString
+	if err := r.DB.QueryRowContext(ctx, `SELECT parent_run_id FROM agent_runs WHERE id=?`, runID).Scan(&parent); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrRunNotFound
+		}
+		return "", err
+	}
+	return parent.String, nil
+}
+
+// OwnedChildIDs returns non-terminal direct children before a parent cancel
+// transition changes their durable status. Coordinator uses this snapshot to
+// cancel the corresponding runtime contexts as part of the same user action.
+func (r *RunRepo) OwnedChildIDs(ctx context.Context, parentRunID string) ([]string, error) {
+	rows, err := r.DB.QueryContext(ctx, `SELECT id FROM agent_runs WHERE parent_run_id=?
+		AND status IN ('queued','running','waiting_for_approval','waiting_delegation_admission','waiting_children')
+		ORDER BY created_at,id`, parentRunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (r *RunRepo) Get(ctx context.Context, runID string) (*domain.AgentRun, error) {
 	row := r.DB.QueryRowContext(ctx, runSelect+` WHERE id = ?`, runID)
 	run, err := scanAgentRun(row)
@@ -236,9 +436,18 @@ func (r *RunRepo) Get(ctx context.Context, runID string) (*domain.AgentRun, erro
 	return &run, nil
 }
 
+func (r *RunRepo) IsWaitingChildren(ctx context.Context, runID string) bool {
+	var status string
+	err := r.DB.QueryRowContext(ctx, `SELECT status FROM agent_runs WHERE id=?`, runID).Scan(&status)
+	if err != nil {
+		return false
+	}
+	return status == string(domain.RunWaitingChildren)
+}
+
 func (r *RunRepo) FindActiveBySession(ctx context.Context, sessionID string) (*domain.AgentRun, error) {
 	run, err := scanAgentRun(r.DB.QueryRowContext(ctx, runSelect+
-		` WHERE session_id=? AND status IN ('queued','running','waiting_for_approval') ORDER BY created_at DESC LIMIT 1`, sessionID))
+		` WHERE session_id=? AND status IN ('queued','running','waiting_for_approval','waiting_delegation_admission','waiting_children') AND parent_run_id IS NULL ORDER BY created_at DESC LIMIT 1`, sessionID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -267,12 +476,16 @@ func (r *RunRepo) FinalizeSuccess(ctx context.Context, runID string, output doma
 	defer tx.Rollback()
 
 	var current domain.RunStatus
-	var turnID, sessionID, parentMessageID string
+	var commitFormat domain.CommitFormatVersion
+	var turnID, sessionID, parentMessageID, targetKind, speakerSnapshot string
+	var targetObjectID, targetVersionID, participantInstanceID sql.NullString
 	var activeLeaf, activeBranch sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT ar.status,ar.turn_id,ar.session_id,t.user_message_id,
+	if err := tx.QueryRowContext(ctx, `SELECT ar.status,ar.commit_format_version,ar.turn_id,ar.session_id,t.user_message_id,
+		t.target_kind,t.target_object_id,t.target_version_id,t.target_participant_instance_id,ar.speaker_snapshot_json,
 		s.active_leaf_message_id,s.active_branch_id FROM agent_runs ar
 		JOIN turns t ON t.id=ar.turn_id JOIN sessions s ON s.id=ar.session_id WHERE ar.id=?`, runID).
-		Scan(&current, &turnID, &sessionID, &parentMessageID, &activeLeaf, &activeBranch); err != nil {
+		Scan(&current, &commitFormat, &turnID, &sessionID, &parentMessageID, &targetKind, &targetObjectID,
+			&targetVersionID, &participantInstanceID, &speakerSnapshot, &activeLeaf, &activeBranch); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrRunNotFound
 		}
@@ -281,8 +494,21 @@ func (r *RunRepo) FinalizeSuccess(ctx context.Context, runID string, output doma
 	if current == domain.RunSucceeded {
 		return nil
 	}
+	if commitFormat != domain.CommitFormatLegacyV1 && commitFormat != domain.CommitFormatSpeakerV2 {
+		return domain.NewCodedError(domain.ErrorCommitFormatNotEnabled,
+			fmt.Errorf("run %s uses unsupported commit format %d", runID, commitFormat))
+	}
+	if commitFormat == domain.CommitFormatSpeakerV2 {
+		var writerSetting string
+		if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='hosted_commit_format_version'`).Scan(&writerSetting); err != nil || writerSetting != "2" {
+			return domain.NewCodedError(domain.ErrorCommitFormatNotEnabled, fmt.Errorf("format 2 writer is not enabled"))
+		}
+	}
 	if !domain.CanTransitionRun(current, domain.RunSucceeded) {
 		return fmt.Errorf("%w: %s -> %s", ErrInvalidRunState, current, domain.RunSucceeded)
+	}
+	if err := requireNoOwnedChildrenTx(ctx, tx, runID); err != nil {
+		return fmt.Errorf("parent cannot finalize with owned children: %w", err)
 	}
 	if !activeLeaf.Valid || activeLeaf.String != parentMessageID || !activeBranch.Valid {
 		return fmt.Errorf("%w: active branch moved before run finalization", ErrBranchPointNotActive)
@@ -299,18 +525,37 @@ func (r *RunRepo) FinalizeSuccess(ctx context.Context, runID string, output doma
 	if activeCalls != 0 {
 		return fmt.Errorf("successful run still has %d active calls", activeCalls)
 	}
+	shadowMessages, transcriptDigest, err := AppendRunMessagesTx(ctx, tx, runID, commitFormat, output.Messages, timestamp)
+	if err != nil {
+		return err
+	}
 	messageIDs := make([]string, 0, len(output.Messages))
 	assistantMessageID := ""
-	for _, message := range output.Messages {
-		if message.Role != domain.RoleUser && message.Role != domain.RoleAssistant && message.Role != domain.RoleTool {
-			return fmt.Errorf("unsupported projected message role: %s", message.Role)
+	finalAssistantIndex := -1
+	for index := range output.Messages {
+		if output.Messages[index].Role == domain.RoleAssistant {
+			finalAssistantIndex = index
 		}
+	}
+	if finalAssistantIndex < 0 {
+		return fmt.Errorf("successful run has no complete assistant message")
+	}
+	if commitFormat == domain.CommitFormatSpeakerV2 {
+		message := output.Messages[finalAssistantIndex]
 		messageID := uuid.NewString()
+		speakerKind := targetKind
+		if speakerKind != string(domain.SpeakerRole) {
+			speakerKind = string(domain.SpeakerHost)
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO messages
-			(id, session_id, parent_message_id, role, status, run_id, created_at)
-			VALUES (?, ?, ?, ?, 'complete', ?, ?)`, messageID, sessionID, parentMessageID,
-			message.Role, runID, timestamp.Format(time.RFC3339Nano)); err != nil {
-			return fmt.Errorf("insert projected message: %w", err)
+			(id,session_id,parent_message_id,role,status,run_id,speaker_kind,speaker_object_id,
+			 speaker_version_id,participant_instance_id,speaker_snapshot_json,addressee_kind,
+			 visibility,originated_at,created_at)
+			VALUES(?,?,?,'assistant','complete',?,?,?,?,?,?,'room','public',?,?)`,
+			messageID, sessionID, parentMessageID, runID, speakerKind, nullableNullString(targetObjectID),
+			nullableNullString(targetVersionID), nullableNullString(participantInstanceID), speakerSnapshot,
+			timestamp.Format(time.RFC3339Nano), timestamp.Format(time.RFC3339Nano)); err != nil {
+			return fmt.Errorf("insert speaker-ledger message: %w", err)
 		}
 		if err := insertMessageParts(ctx, tx, messageID, message.Content); err != nil {
 			return err
@@ -318,14 +563,38 @@ func (r *RunRepo) FinalizeSuccess(ctx context.Context, runID string, output doma
 		if err := linkToolResultArtifactsTx(ctx, tx, messageID, sessionID, runID, message.Content); err != nil {
 			return err
 		}
-		parentMessageID = messageID
+		parentMessageID, assistantMessageID = messageID, messageID
 		messageIDs = append(messageIDs, messageID)
-		if message.Role == domain.RoleAssistant {
-			assistantMessageID = messageID
+	} else {
+		for index, message := range output.Messages {
+			if message.Role != domain.RoleUser && message.Role != domain.RoleAssistant && message.Role != domain.RoleTool {
+				return fmt.Errorf("unsupported projected message role: %s", message.Role)
+			}
+			messageID := uuid.NewString()
+			visibility := domain.VisibilityLegacyExecution
+			if index == finalAssistantIndex {
+				visibility = domain.VisibilityPublic
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO messages
+				(id, session_id, parent_message_id, role, status, run_id, speaker_kind,
+				 speaker_snapshot_json, visibility, originated_at, created_at)
+				VALUES (?, ?, ?, ?, 'complete', ?, 'host', '{"kind":"host","displayName":"Host"}', ?, ?, ?)`,
+				messageID, sessionID, parentMessageID, message.Role, runID, visibility,
+				timestamp.Format(time.RFC3339Nano), timestamp.Format(time.RFC3339Nano)); err != nil {
+				return fmt.Errorf("insert projected message: %w", err)
+			}
+			if err := insertMessageParts(ctx, tx, messageID, message.Content); err != nil {
+				return err
+			}
+			if err := linkToolResultArtifactsTx(ctx, tx, messageID, sessionID, runID, message.Content); err != nil {
+				return err
+			}
+			parentMessageID = messageID
+			messageIDs = append(messageIDs, messageID)
+			if message.Role == domain.RoleAssistant {
+				assistantMessageID = messageID
+			}
 		}
-	}
-	if assistantMessageID == "" {
-		return fmt.Errorf("successful run has no complete assistant message")
 	}
 
 	finishedAt := timestamp.Format(time.RFC3339Nano)
@@ -363,6 +632,10 @@ func (r *RunRepo) FinalizeSuccess(ctx context.Context, runID string, output doma
 	messagePayload, _ := json.Marshal(map[string]any{
 		"assistantMessageId": assistantMessageID, "messageIds": messageIDs,
 	})
+	transcriptPayload, _ := json.Marshal(map[string]any{
+		"count": len(shadowMessages), "digest": transcriptDigest,
+		"format": commitFormat, "shadow": commitFormat == domain.CommitFormatLegacyV1,
+	})
 	runPayload, _ := json.Marshal(map[string]any{"status": domain.RunSucceeded})
 	telemetry, telemetryErr := r.buildRunTelemetryTx(ctx, tx, runID, finishedAt)
 	if telemetryErr != nil {
@@ -371,6 +644,7 @@ func (r *RunRepo) FinalizeSuccess(ctx context.Context, runID string, output doma
 	telemetryPayload, _ := json.Marshal(telemetry)
 	committedEvents, err := appendEventsTx(ctx, tx, runID,
 		domain.PendingEvent{EventType: "message_committed", Payload: messagePayload},
+		domain.PendingEvent{EventType: "run_transcript_committed", Payload: transcriptPayload},
 		domain.PendingEvent{EventType: "run_telemetry", Payload: telemetryPayload},
 		domain.PendingEvent{EventType: "run_succeeded", Payload: runPayload},
 	)
@@ -434,11 +708,40 @@ func linkToolResultArtifactsTx(ctx context.Context, tx *sql.Tx, messageID, sessi
 	return nil
 }
 
+// requireNoOwnedChildrenTx fails when a Run still owns non-terminal children.
+// Parents cannot terminalize while children are queued/running/waiting.
+func requireNoOwnedChildrenTx(ctx context.Context, tx *sql.Tx, runID string) error {
+	var children int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_runs WHERE parent_run_id=?
+		AND status IN ('queued','running','waiting_for_approval')`, runID).Scan(&children); err != nil {
+		return err
+	}
+	if children != 0 {
+		return fmt.Errorf("parent Run owns %d non-terminal children", children)
+	}
+	return nil
+}
+
 func (r *RunRepo) Fail(ctx context.Context, runID, code, message string) error {
 	return r.transition(ctx, runID, domain.RunFailed, "run_failed", &code, &message)
 }
 
 func (r *RunRepo) Cancel(ctx context.Context, runID string) error {
+	// Structured concurrency: propagate cancel to children, items, and the
+	// group before the parent itself terminalizes. Over-cancellation is safe.
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := r.DB.ExecContext(ctx, `UPDATE agent_runs SET status='cancelled', finished_at=?
+		WHERE parent_run_id=? AND status IN ('queued','running','waiting_for_approval')`, now, runID); err != nil {
+		return err
+	}
+	if _, err := r.DB.ExecContext(ctx, `UPDATE delegation_items SET status='cancelled'
+		WHERE child_run_id IN (SELECT id FROM agent_runs WHERE parent_run_id=? AND status='cancelled')`, runID); err != nil {
+		return err
+	}
+	if _, err := r.DB.ExecContext(ctx, `UPDATE delegation_groups SET status='cancelled'
+		WHERE parent_run_id=? AND status IN ('pending','waiting_children')`, runID); err != nil {
+		return err
+	}
 	return r.transition(ctx, runID, domain.RunCancelled, "run_cancelled", nil, nil)
 }
 
@@ -449,7 +752,7 @@ func (r *RunRepo) Interrupt(ctx context.Context, runID, message string) error {
 
 func (r *RunRepo) RecoverActive(ctx context.Context) ([]string, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT id,status FROM agent_runs WHERE status IN ('queued','running') ORDER BY created_at`,
+		`SELECT id,status FROM agent_runs WHERE status IN ('queued','running','waiting_for_approval','waiting_delegation_admission','waiting_children') ORDER BY created_at`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list recoverable runs: %w", err)
@@ -563,6 +866,11 @@ func (r *RunRepo) transition(ctx context.Context, runID string, target domain.Ru
 	}
 	if !domain.CanTransitionRun(current, target) {
 		return fmt.Errorf("%w: %s -> %s", ErrInvalidRunState, current, target)
+	}
+	if target == domain.RunSucceeded {
+		if err := requireNoOwnedChildrenTx(ctx, tx, runID); err != nil {
+			return fmt.Errorf("parent cannot succeed with owned children: %w", err)
+		}
 	}
 
 	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
@@ -882,20 +1190,26 @@ func findSubmissionTx(ctx context.Context, tx *sql.Tx, sessionID, requestID stri
 
 const runSelect = `SELECT agent_runs.id, agent_runs.turn_id, agent_runs.session_id, agent_runs.run_kind,
 	agent_runs.base_message_id, agent_runs.attempt, agent_runs.status, agent_runs.assistant_message_id,
-	agent_runs.retry_of_run_id, agent_runs.requested_config_json,
-	agent_runs.effective_config_json, agent_runs.error_code, agent_runs.error_message,
+	agent_runs.retry_of_run_id, agent_runs.commit_format_version, agent_runs.system_prompt_snapshot_json,
+	agent_runs.system_prompt_digest, agent_runs.parent_run_id, agent_runs.root_run_id,
+	agent_runs.execution_depth, agent_runs.publish_mode,
+	agent_runs.speaker_snapshot_json, agent_runs.context_snapshot_json, agent_runs.context_snapshot_digest,
+	agent_runs.requested_config_json, agent_runs.effective_config_json, agent_runs.error_code, agent_runs.error_message,
 	agent_runs.started_at, agent_runs.finished_at, agent_runs.created_at
 	FROM agent_runs`
 
 func scanAgentRun(row rowScanner) (domain.AgentRun, error) {
 	var run domain.AgentRun
-	var turnID, baseMessageID, assistantID, retryOfRunID, errorCode, errorMessage sql.NullString
+	var turnID, baseMessageID, assistantID, retryOfRunID, parentRunID, rootRunID, errorCode, errorMessage sql.NullString
 	var startedAt, finishedAt sql.NullString
-	var requestedConfig, effectiveConfig, createdAt string
+	var speakerSnapshot, contextSnapshot, requestedConfig, effectiveConfig, createdAt string
+	var systemPromptSnapshot, systemPromptDigest string
 	if err := row.Scan(
 		&run.ID, &turnID, &run.SessionID, &run.RunKind, &baseMessageID, &run.Attempt, &run.Status,
-		&assistantID, &retryOfRunID, &requestedConfig, &effectiveConfig, &errorCode, &errorMessage,
-		&startedAt, &finishedAt, &createdAt,
+		&assistantID, &retryOfRunID, &run.CommitFormatVersion, &systemPromptSnapshot, &systemPromptDigest,
+		&parentRunID, &rootRunID, &run.ExecutionDepth, &run.PublishMode,
+		&speakerSnapshot, &contextSnapshot, &run.ContextSnapshotDigest,
+		&requestedConfig, &effectiveConfig, &errorCode, &errorMessage, &startedAt, &finishedAt, &createdAt,
 	); err != nil {
 		return run, err
 	}
@@ -910,6 +1224,27 @@ func scanAgentRun(row rowScanner) (domain.AgentRun, error) {
 	}
 	if retryOfRunID.Valid {
 		run.RetryOfRunID = retryOfRunID.String
+	}
+	if parentRunID.Valid {
+		run.ParentRunID = parentRunID.String
+	}
+	if rootRunID.Valid {
+		run.RootRunID = rootRunID.String
+	}
+	run.SpeakerSnapshot = json.RawMessage(speakerSnapshot)
+	run.ContextSnapshot = json.RawMessage(contextSnapshot)
+	if systemPromptDigest != "" {
+		var snapshot domain.SystemPromptSnapshot
+		if err := json.Unmarshal([]byte(systemPromptSnapshot), &snapshot); err != nil {
+			return run, fmt.Errorf("decode frozen system prompt metadata: %w", err)
+		}
+		if snapshot.Digest != systemPromptDigest {
+			return run, fmt.Errorf("frozen system prompt digest mismatch")
+		}
+		run.SystemPrompt = &domain.SystemPromptMetadata{
+			Version: snapshot.Version, AgentProfileID: snapshot.AgentProfileID,
+			PlatformVersion: snapshot.PlatformVersion, Digest: systemPromptDigest,
+		}
 	}
 	if errorCode.Valid {
 		run.ErrorCode = &errorCode.String

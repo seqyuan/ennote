@@ -21,6 +21,7 @@ const (
 	ContentImage            ContentKind = "image"
 	ContentImageDescription ContentKind = "image_description"
 	ContentContextSummary   ContentKind = "context_summary"
+	ContentRoomControl      ContentKind = "room_control"
 )
 
 type ImageRef struct {
@@ -45,6 +46,14 @@ type ContextSummary struct {
 	Summary      string `json:"summary"`
 }
 
+type RoomControl struct {
+	Action                string          `json:"action"`
+	ParticipantInstanceID string          `json:"participantInstanceId"`
+	ObjectID              string          `json:"objectId"`
+	ObjectVersionID       string          `json:"objectVersionId"`
+	DisplaySnapshot       json.RawMessage `json:"displaySnapshot"`
+}
+
 type ContentBlock struct {
 	Kind             ContentKind              `json:"type"`
 	Text             string                   `json:"text,omitempty"`
@@ -53,6 +62,7 @@ type ContentBlock struct {
 	Image            *ImageRef                `json:"image,omitempty"`
 	ImageDescription *DerivedImageDescription `json:"imageDescription,omitempty"`
 	ContextSummary   *ContextSummary          `json:"contextSummary,omitempty"`
+	RoomControl      *RoomControl             `json:"roomControl,omitempty"`
 }
 
 type ChatMessage struct {
@@ -95,6 +105,7 @@ type CompletionRequest struct {
 	Tools       []ToolDefinition
 	MaxTokens   int
 	Temperature *float64
+	Reasoning   *ReasoningConfig
 }
 
 type StopReason = string

@@ -4,6 +4,27 @@ import "time"
 
 type ProviderType string
 
+type ThinkingEffort string
+
+const (
+	ThinkingDefault ThinkingEffort = "default"
+	ThinkingLow     ThinkingEffort = "low"
+	ThinkingMedium  ThinkingEffort = "medium"
+	ThinkingHigh    ThinkingEffort = "high"
+)
+
+type ThinkingDialect string
+
+const (
+	ThinkingDialectNone                  ThinkingDialect = "none"
+	ThinkingDialectOpenAIReasoningEffort ThinkingDialect = "openai_reasoning_effort"
+)
+
+type ReasoningConfig struct {
+	Dialect ThinkingDialect
+	Effort  ThinkingEffort
+}
+
 const (
 	ProviderOpenAICompatible ProviderType = "openai-compatible"
 )
@@ -64,17 +85,21 @@ type ProviderProfile struct {
 }
 
 type ModelProfile struct {
-	ID               string    `json:"id"`
-	ProviderID       string    `json:"providerId"`
-	ModelName        string    `json:"modelName"`
-	DisplayName      string    `json:"displayName"`
-	ContextWindow    int       `json:"contextWindow"`
-	MaxOutputTokens  int       `json:"maxOutputTokens"`
-	SupportsVision   bool      `json:"supportsVision"`
-	SupportsToolUse  bool      `json:"supportsToolUse"`
-	SupportsThinking bool      `json:"supportsThinking"`
-	IsDefault        bool      `json:"isDefault"`
-	Status           string    `json:"status"`
-	CreatedAt        time.Time `json:"createdAt"`
-	UpdatedAt        time.Time `json:"updatedAt"`
+	ID                            string           `json:"id"`
+	ProviderID                    string           `json:"providerId"`
+	ModelName                     string           `json:"modelName"`
+	DisplayName                   string           `json:"displayName"`
+	ContextWindow                 int              `json:"contextWindow"`
+	MaxOutputTokens               int              `json:"maxOutputTokens"`
+	InputCostUSDMicrosPerMillion  int64            `json:"inputCostUsdMicrosPerMillion"`
+	OutputCostUSDMicrosPerMillion int64            `json:"outputCostUsdMicrosPerMillion"`
+	SupportsVision                bool             `json:"supportsVision"`
+	SupportsToolUse               bool             `json:"supportsToolUse"`
+	SupportsThinking              bool             `json:"supportsThinking"`
+	ThinkingDialect               ThinkingDialect  `json:"thinkingDialect"`
+	SupportedThinkingEfforts      []ThinkingEffort `json:"supportedThinkingEfforts"`
+	IsDefault                     bool             `json:"isDefault"`
+	Status                        string           `json:"status"`
+	CreatedAt                     time.Time        `json:"createdAt"`
+	UpdatedAt                     time.Time        `json:"updatedAt"`
 }

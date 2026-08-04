@@ -2,6 +2,8 @@ package runs
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -89,7 +91,7 @@ func TestCoordinatorLeavesSuspendedRunWaitingAndReleasesCapacity(t *testing.T) {
 	approvals := &store.ApprovalRepo{DB: repo.DB}
 	executor := resultExecutorFunc(func(ctx context.Context, run *domain.AgentRun) (domain.RunOutput, error) {
 		_, err := approvals.Suspend(ctx, run.ID, 1, 1, "digest", []byte(`{"version":1}`),
-			[]domain.ApprovalItem{{ToolCallID: "call", ToolName: "write", RiskClass: domain.RiskLocalWrite}})
+			[]domain.ApprovalItem{{ToolCallID: "call", ToolName: "write", RiskClass: domain.RiskLocalWrite}}, nil)
 		return domain.RunOutput{Suspended: true}, err
 	})
 	coordinator := NewCoordinator(repo, executor, 1)
@@ -159,6 +161,112 @@ func TestCoordinatorMarksRunFailedWhenSuccessProjectionCannotCommit(t *testing.T
 	assert.Equal(t, domain.RunFailed, run.Status)
 	require.NotNil(t, run.ErrorCode)
 	assert.Equal(t, string(domain.ErrorEventPersistence), *run.ErrorCode)
+}
+
+func setupDelegatedCoordinatorTree(t *testing.T, repo *store.RunRepo, requestID string) (*domain.TurnSubmission, *domain.AgentRun) {
+	t.Helper()
+	submission := setupRun(t, repo, requestID)
+	_, err := repo.Claim(context.Background(), submission.Run.ID)
+	require.NoError(t, err)
+	delegations := &store.DelegationRepo{DB: repo.DB}
+	_, _, children, err := delegations.CreateGroupWithChildren(context.Background(), store.CreateDelegationGroupInput{
+		ParentRunID: submission.Run.ID, ParentToolCallID: "delegate-" + requestID,
+		Strategy: domain.DelegationStrategySingle,
+		Items: []store.CreateDelegationItemInput{{Name: "child", RoleVersionID: "builtin-workspace-explorer-v2",
+			AssignmentJSON: json.RawMessage(`{"task":"inspect"}`), OutputContract: "text-v1",
+			Budget: domain.BudgetCeilingJSON{MaxModelCalls: 4, MaxToolCalls: 8, MaxTotalTokens: 20000,
+				MaxOutputTokens: 4000, MaxWallTimeMS: 120000}}},
+	}, submission.Run.SessionID)
+	require.NoError(t, err)
+	require.Len(t, children, 1)
+	return submission, children[0]
+}
+
+func TestCoordinatorFoldsChildFailureAndResumesParent(t *testing.T) {
+	repo := setupRunDB(t)
+	parent, child := setupDelegatedCoordinatorTree(t, repo, "child-failure")
+	executor := resultExecutorFunc(func(_ context.Context, run *domain.AgentRun) (domain.RunOutput, error) {
+		if run.RunKind == domain.RunKindDelegatedAgent {
+			return domain.RunOutput{}, errors.New("provider unavailable")
+		}
+		return domain.RunOutput{Messages: []domain.ChatMessage{{Role: domain.RoleAssistant,
+			Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: "handled child failure"}}}}}, nil
+	})
+	coordinator := NewCoordinator(repo, executor, 2)
+	require.NoError(t, coordinator.Enqueue(context.Background(), child.ID))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	require.NoError(t, coordinator.Wait(ctx, child.ID))
+	require.NoError(t, coordinator.Wait(ctx, parent.Run.ID))
+
+	storedChild, err := repo.Get(ctx, child.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunFailed, storedChild.Status)
+	storedParent, err := repo.Get(ctx, parent.Run.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunSucceeded, storedParent.Status)
+	var itemStatus, groupStatus string
+	require.NoError(t, repo.DB.QueryRow(`SELECT status FROM delegation_items WHERE child_run_id=?`, child.ID).Scan(&itemStatus))
+	require.NoError(t, repo.DB.QueryRow(`SELECT status FROM delegation_groups WHERE parent_run_id=?`, parent.Run.ID).Scan(&groupStatus))
+	assert.Equal(t, "failed", itemStatus)
+	assert.Equal(t, "settled", groupStatus)
+}
+
+func TestCoordinatorFoldsChildSuccessFinalizerFailure(t *testing.T) {
+	repo := setupRunDB(t)
+	parent, child := setupDelegatedCoordinatorTree(t, repo, "child-finalizer-failure")
+	executor := resultExecutorFunc(func(_ context.Context, run *domain.AgentRun) (domain.RunOutput, error) {
+		if run.RunKind == domain.RunKindDelegatedAgent {
+			return domain.RunOutput{Terminal: &domain.SubmitResult{Status: domain.SubmitCompleted, Summary: "bad artifact",
+				ArtifactRefs: []domain.ArtifactReference{{ArtifactID: "missing", Name: "x", Kind: domain.ArtifactKindFile,
+					MIMEType: "text/plain", SHA256: "missing"}}}}, nil
+		}
+		return domain.RunOutput{Messages: []domain.ChatMessage{{Role: domain.RoleAssistant,
+			Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: "handled finalizer failure"}}}}}, nil
+	})
+	coordinator := NewCoordinator(repo, executor, 2)
+	require.NoError(t, coordinator.Enqueue(context.Background(), child.ID))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	require.NoError(t, coordinator.Wait(ctx, child.ID))
+	require.NoError(t, coordinator.Wait(ctx, parent.Run.ID))
+	storedChild, err := repo.Get(ctx, child.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunFailed, storedChild.Status)
+	storedParent, err := repo.Get(ctx, parent.Run.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunSucceeded, storedParent.Status)
+}
+
+func TestCoordinatorParentCancelStopsActiveChildContext(t *testing.T) {
+	repo := setupRunDB(t)
+	parent, child := setupDelegatedCoordinatorTree(t, repo, "tree-cancel")
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+	executor := resultExecutorFunc(func(ctx context.Context, run *domain.AgentRun) (domain.RunOutput, error) {
+		if run.ID != child.ID {
+			return domain.RunOutput{}, nil
+		}
+		close(started)
+		<-ctx.Done()
+		close(stopped)
+		return domain.RunOutput{}, ctx.Err()
+	})
+	coordinator := NewCoordinator(repo, executor, 2)
+	require.NoError(t, coordinator.Enqueue(context.Background(), child.ID))
+	<-started
+	require.NoError(t, coordinator.Cancel(context.Background(), parent.Run.ID))
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("child runtime context was not cancelled")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, coordinator.Wait(ctx, child.ID))
+	storedChild, err := repo.Get(ctx, child.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunCancelled, storedChild.Status)
 }
 
 func TestCoordinatorCancellationIsIdempotent(t *testing.T) {

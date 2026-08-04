@@ -9,12 +9,24 @@ import {
   type TurnMessage,
 } from "../../lib/chat-messages";
 
-function message(id: string, role: CanonicalMessage["role"], text: string, parts?: CanonicalMessage["parts"]): CanonicalMessage {
+function message(
+  id: string,
+  role: CanonicalMessage["role"],
+  text: string,
+  parts?: CanonicalMessage["parts"],
+  visibility: CanonicalMessage["visibility"] = role === "tool" ? "legacy_execution" : "public",
+): CanonicalMessage {
   return {
     id,
     sessionId: "session",
     role,
     status: "complete",
+    speakerKind: role === "user" ? "user" : "host",
+    speakerSnapshot: role === "user"
+      ? { kind: "user", displayName: "You" }
+      : { kind: "host", displayName: "Host" },
+    addresseeKind: role === "user" ? "host" : undefined,
+    visibility,
     parts: parts ?? [{ type: "text", text }],
     createdAt: `2026-07-28T00:00:0${id.slice(-1)}Z`,
   };
@@ -76,6 +88,22 @@ describe("structured conversation projection", () => {
     if (!batch || batch.kind !== "tool_batch") return;
     expect(batch.activities[0].result?.artifacts).toEqual(artifacts);
     expect(batch.activities[0].riskClass).toBe("local_write");
+  });
+
+  it("keeps format-1 execution rows but excludes private transcript rows", () => {
+    const timeline = mergeTimeline([
+      message("m1", "user", "Inspect"),
+      message("m2", "assistant", "working", undefined, "legacy_execution"),
+      message("m3", "assistant", "private reasoning", undefined, "private"),
+      message("m4", "assistant", "Done"),
+    ], [], []);
+
+    expect(timeline).toHaveLength(1);
+    const turn = timeline[0];
+    expect(turn.kind).toBe("turn");
+    if (turn.kind !== "turn") return;
+    expect(turn.messageIds).toEqual(["m1", "m2", "m4"]);
+    expect(turn.steps).toHaveLength(2);
   });
 
   it("keeps steer input and orphan tool results instead of dropping them", () => {

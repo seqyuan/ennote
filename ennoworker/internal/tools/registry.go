@@ -79,6 +79,26 @@ func (r *Registry) Register(tool Tool) error {
 	return nil
 }
 
+// Restrict removes every tool not present in the frozen allowlist. A Registry is
+// scoped to one Run, so this cannot affect concurrent executions.
+func (r *Registry) Restrict(allowed []string) {
+	set := make(map[string]bool, len(allowed))
+	for _, name := range allowed {
+		set[name] = true
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for name := range r.tools {
+		if set[name] {
+			continue
+		}
+		delete(r.tools, name)
+		delete(r.classes, name)
+		delete(r.validators, name)
+		delete(r.retryPolicy, name)
+	}
+}
+
 func (r *Registry) Definitions() []domain.ToolDefinition {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -130,6 +150,47 @@ func (r *Registry) RetryPolicy(toolName string) domain.ToolRetryPolicy {
 		return policy
 	}
 	return domain.ToolRetryPolicy{Mode: domain.ToolRetryNever, MaxRetries: 0}
+}
+
+// ResolveStandingApprovalScope implements domain.StandingApprovalScopeResolver.
+// It delegates to the tool's optional StandingApprovalScopeProvider; returns
+// ok=false for tools that do not implement it.
+func (r *Registry) ResolveStandingApprovalScope(toolName string, arguments json.RawMessage) (domain.StandingApprovalScope, bool, error) {
+	r.mu.RLock()
+	tool := r.tools[toolName]
+	r.mu.RUnlock()
+	if tool == nil {
+		return domain.StandingApprovalScope{}, false, nil
+	}
+	provider, ok := tool.(domain.StandingApprovalScopeProvider)
+	if !ok {
+		return domain.StandingApprovalScope{}, false, nil
+	}
+	// Recover panics from provider implementations — fail closed.
+	var scope domain.StandingApprovalScope
+	var err error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("standing scope provider panic for tool %s", toolName)
+			}
+		}()
+		scope, err = provider.StandingApprovalScope(arguments)
+	}()
+	if err != nil {
+		return domain.StandingApprovalScope{}, false, err
+	}
+	// Validate the returned scope.
+	if scope.Kind == "" || scope.Key == "" || scope.Display == "" {
+		return domain.StandingApprovalScope{}, false, fmt.Errorf("tool %s returned empty standing scope field", toolName)
+	}
+	if scope.ScopeVersion < 1 {
+		return domain.StandingApprovalScope{}, false, fmt.Errorf("tool %s returned invalid scope version %d", toolName, scope.ScopeVersion)
+	}
+	if len(scope.Kind) > 64 || len(scope.Key) > 512 || len(scope.Display) > 200 {
+		return domain.StandingApprovalScope{}, false, fmt.Errorf("tool %s returned out-of-bounds standing scope field", toolName)
+	}
+	return scope, true, nil
 }
 
 func (r *Registry) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {

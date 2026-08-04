@@ -25,6 +25,7 @@ export interface TurnMessage {
   toolState?: ToolActivityState;
   sourceMessageId?: string;
   createdAt?: string;
+  runId?: string;
 }
 
 export interface UserStep {
@@ -40,10 +41,21 @@ export type AssistantBlock =
   | { kind: "image"; artifactId: string; mimeType: string; width: number; height: number }
   | { kind: "image_description"; artifactId: string; text: string };
 
+export interface SpeakerLabel {
+  kind?: string;
+  objectId?: string;
+  versionId?: string;
+  handle?: string;
+  displayName?: string;
+  icon?: string;
+  color?: string;
+}
+
 export interface AssistantStep {
   kind: "assistant";
   id: string;
   blocks: AssistantBlock[];
+  speaker?: SpeakerLabel;
   sourceMessageId?: string;
   createdAt?: string;
 }
@@ -58,6 +70,7 @@ export interface ToolActivity {
   state: ToolActivityState;
   riskClass: DisplayRiskClass;
   sourceMessageIds: string[];
+  runId?: string;
 }
 
 export interface ToolBatchStep {
@@ -199,6 +212,7 @@ export function mergeTimeline(
       const existing = calls.get(callID);
       if (existing) {
         if (message.arguments) existing.arguments = message.arguments;
+        if (message.runId) existing.runId = message.runId;
         existing.result = message.toolState === "running" ? existing.result : {
           content: message.text, isError: Boolean(message.isError), artifacts: [],
         };
@@ -218,6 +232,7 @@ export function mergeTimeline(
         state: message.toolState ?? resultState(message.text, Boolean(message.isError)),
         riskClass: classifyDisplayRisk(message.toolName ?? "tool"),
         sourceMessageIds: [message.sourceMessageId ?? message.id],
+        runId: message.runId,
       }]);
     }
   }
@@ -228,7 +243,8 @@ export function mergeTimeline(
     const flushAssistant = () => {
       if (assistantBlocks.length === 0) return;
       active.steps.push({ kind: "assistant", id: `${message.id}-assistant-${active.steps.length}`,
-        sourceMessageId: message.id, blocks: assistantBlocks, createdAt: message.createdAt });
+        sourceMessageId: message.id, blocks: assistantBlocks, speaker: message.speakerSnapshot,
+        createdAt: message.createdAt });
       assistantBlocks = [];
     };
     const flushBatch = () => {
@@ -248,6 +264,7 @@ export function mergeTimeline(
           state: part.toolCall.partial ? "interrupted" : "pending",
           riskClass: classifyDisplayRisk(part.toolCall.name),
           sourceMessageIds: [message.id],
+          runId: message.runId,
         };
         batch.push(activity);
         calls.set(activity.toolCallId, activity);
@@ -281,6 +298,7 @@ export function mergeTimeline(
           state: resultState(part.toolResult.content, part.toolResult.isError),
           riskClass: classifyDisplayRisk(part.toolResult.toolName),
           sourceMessageIds: [message.id],
+          runId: message.runId,
         };
         calls.set(activity.toolCallId, activity);
         orphaned.push(activity);
@@ -298,7 +316,8 @@ export function mergeTimeline(
 }
 
 function projectionItems(messages: CanonicalMessage[], checkpoints: ContextCheckpoint[]): ProjectionItem[] {
-  const visible = new Set(messages.map(message => message.id));
+  const canonical = messages.filter(message => message.visibility !== "private" && message.visibility !== "room_control");
+  const visible = new Set(canonical.map(message => message.id));
   const unique = [...new Map(checkpoints.filter(value => value.status === "completed").map(value => [value.id, value])).values()]
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   const before = new Map<string, ContextCheckpoint[]>();
@@ -307,7 +326,7 @@ function projectionItems(messages: CanonicalMessage[], checkpoints: ContextCheck
     if (checkpoint.firstKeptMessageId && visible.has(checkpoint.firstKeptMessageId)) append(before, checkpoint.firstKeptMessageId, checkpoint);
     else if (checkpoint.sourceThroughMessageId && visible.has(checkpoint.sourceThroughMessageId)) append(after, checkpoint.sourceThroughMessageId, checkpoint);
   }
-  return messages.flatMap(message => [
+  return canonical.flatMap(message => [
     ...(before.get(message.id) ?? []).map(value => ({ kind: "checkpoint" as const, value })),
     { kind: "message" as const, value: message },
     ...(after.get(message.id) ?? []).map(value => ({ kind: "checkpoint" as const, value })),
