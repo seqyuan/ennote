@@ -832,6 +832,17 @@ func effectiveDelegationBudget(request domain.BudgetCeilingJSON, ceiling domain.
 func (p *agentExecutorDelegationProvider) ExecuteDelegation(ctx context.Context, runID, sessionID, toolCallID string, specs []tools.DelegationSpec) (*tools.DelegateRolesResult, error) {
 	delegations := &store.DelegationRepo{DB: p.db}
 
+	executionMode := domain.DelegationExecutionBlocking
+	autoResume := false
+	// Background mode and auto-resume are frozen with the group; admission
+	// digests them so the client cannot alter them after approval.
+	if mode, ok := ctx.Value(tools.DelegateExecutionModeKey).(string); ok && mode == string(domain.DelegationExecutionBackground) {
+		executionMode = domain.DelegationExecutionBackground
+	}
+	if resume, ok := ctx.Value(tools.DelegateAutoResumeKey).(bool); ok {
+		autoResume = resume
+	}
+
 	type resolvedSpec struct {
 		spec     tools.DelegationSpec
 		snapshot *store.DelegationRoleSnapshot
@@ -875,12 +886,22 @@ func (p *agentExecutorDelegationProvider) ExecuteDelegation(ctx context.Context,
 		ParentRunID: runID, ParentToolCallID: toolCallID,
 		Strategy:          delegationStrategy(len(items)),
 		Items:             items,
+		ExecutionMode:     executionMode,
+		AutoResume:        autoResume,
 		AdmissionApproved: admissionApproved,
 	}, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("materialize delegation tree: %w", err)
 	}
-	result := &tools.DelegateRolesResult{Status: "delegated", GroupID: group.ID}
+	result := &tools.DelegateRolesResult{Status: "delegated", GroupID: group.ID, ExecutionMode: string(executionMode)}
+	if executionMode == domain.DelegationExecutionBackground {
+		handle, handleErr := delegations.HandleForGroup(ctx, group.ID)
+		if handleErr != nil {
+			return nil, fmt.Errorf("resolve delegation handle: %w", handleErr)
+		}
+		result.Status = "accepted"
+		result.HandleID = handle.ID
+	}
 	for index, item := range groupItems {
 		result.Items = append(result.Items, tools.DelegateRolesItemResult{
 			Name: item.Name, ItemID: item.ID, ChildRunID: children[index].ID,

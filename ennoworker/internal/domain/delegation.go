@@ -13,6 +13,28 @@ const (
 	DelegationStrategyParallel DelegationStrategy = "parallel"
 )
 
+// DelegationExecutionMode changes where the delegation result is delivered.
+type DelegationExecutionMode string
+
+const (
+	DelegationExecutionBlocking   DelegationExecutionMode = "blocking"
+	DelegationExecutionBackground DelegationExecutionMode = "background"
+)
+
+// DelegationHandle is the stable delivery identity of one delegation group.
+type DelegationHandle struct {
+	ID               string                 `json:"id"`
+	GroupID          string                 `json:"groupId"`
+	SessionID        string                 `json:"sessionId"`
+	SourceParentRunID string                `json:"sourceParentRunId"`
+	SourceBranchID   string                 `json:"sourceBranchId"`
+	ExecutionMode    DelegationExecutionMode `json:"executionMode"`
+	AutoResume       bool                   `json:"autoResume"`
+	Status           string                 `json:"status"`
+	CreatedAt        time.Time              `json:"createdAt"`
+	UpdatedAt        time.Time              `json:"updatedAt"`
+}
+
 // DelegationGroupStatus tracks the lifecycle of a delegation group.
 type DelegationGroupStatus string
 

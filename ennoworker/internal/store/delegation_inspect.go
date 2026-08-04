@@ -259,3 +259,33 @@ func (r *DelegationRepo) CancelGroup(ctx context.Context, groupID string) error 
 }
 
 var _ = strings.TrimSpace
+
+// HandleForGroup returns the stable delivery handle of a delegation group.
+func (r *DelegationRepo) HandleForGroup(ctx context.Context, groupID string) (*domain.DelegationHandle, error) {
+	var handle domain.DelegationHandle
+	var mode, status, createdAt, updatedAt string
+	var autoResume int
+	err := r.DB.QueryRowContext(ctx, `SELECT id,group_id,session_id,source_parent_run_id,source_branch_id,
+		execution_mode,auto_resume,status,created_at,updated_at
+		FROM delegation_handles WHERE group_id=?`, groupID).Scan(
+		&handle.ID, &handle.GroupID, &handle.SessionID, &handle.SourceParentRunID,
+		&handle.SourceBranchID, &mode, &autoResume, &status, &createdAt, &updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrDelegationGroupNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	handle.ExecutionMode = domain.DelegationExecutionMode(mode)
+	handle.AutoResume = autoResume == 1
+	handle.Status = status
+	handle.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	handle.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &handle, nil
+}

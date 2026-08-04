@@ -55,6 +55,11 @@ type CreateDelegationGroupInput struct {
 	ParentToolCallID string
 	Strategy         domain.DelegationStrategy
 	Items            []CreateDelegationItemInput
+	// ExecutionMode and AutoResume freeze delivery semantics. Blocking keeps
+	// the Item 5 behavior; background returns a handle and never blocks the
+	// parent on waiting_children.
+	ExecutionMode domain.DelegationExecutionMode
+	AutoResume    bool
 	// AdmissionApproved is true only when an approved tool checkpoint contains
 	// this exact parent Provider-visible tool call id.
 	AdmissionApproved bool
@@ -160,6 +165,13 @@ func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 	}
 	if input.Strategy != domain.DelegationStrategySingle && input.Strategy != domain.DelegationStrategyParallel {
 		return nil, nil, fmt.Errorf("unsupported delegation strategy %q", input.Strategy)
+	}
+	if input.ExecutionMode == "" {
+		input.ExecutionMode = domain.DelegationExecutionBlocking
+	}
+	if input.ExecutionMode != domain.DelegationExecutionBlocking &&
+		input.ExecutionMode != domain.DelegationExecutionBackground {
+		return nil, nil, fmt.Errorf("unsupported execution mode %q", input.ExecutionMode)
 	}
 	if len(input.Items) == 0 {
 		return nil, nil, fmt.Errorf("delegation group requires at least one item")
@@ -313,6 +325,9 @@ func validateDelegationRoleTx(ctx context.Context, tx *sql.Tx, input CreateDeleg
 	}
 	if definition.Authority == domain.RoleAuthorityMutation && input.Strategy != domain.DelegationStrategySingle {
 		return fmt.Errorf("%w: mutation Roles require the single mutation lane", ErrDelegationNotAuthorized)
+	}
+	if input.ExecutionMode == domain.DelegationExecutionBackground && definition.Authority == domain.RoleAuthorityMutation {
+		return fmt.Errorf("%w: mutation Roles cannot run in background mode", ErrDelegationNotAuthorized)
 	}
 	if item.OutputContract == "" {
 		item.OutputContract = definition.OutputContract
@@ -660,6 +675,35 @@ func scanDelegationItems(rows *sql.Rows) ([]domain.DelegationItem, error) {
 	return items, rows.Err()
 }
 
+// createDelegationHandleTx writes one stable delivery handle for a group in
+// the same transaction as its children. The branch is frozen from the Session's
+// active branch; auto-resume is part of the frozen handle.
+func createDelegationHandleTx(ctx context.Context, tx *sql.Tx, groupID, parentRunID, sessionID string,
+	executionMode domain.DelegationExecutionMode, autoResume bool) (string, error) {
+	var branchID string
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(active_branch_id,'') FROM sessions WHERE id=?`,
+		sessionID).Scan(&branchID); err != nil {
+		return "", err
+	}
+	if branchID == "" {
+		return "", fmt.Errorf("session %s has no active branch for delegation delivery", sessionID)
+	}
+	handleID := uuid.NewString()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	autoResumeValue := 0
+	if autoResume {
+		autoResumeValue = 1
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO delegation_handles
+		(id,group_id,session_id,source_parent_run_id,source_branch_id,execution_mode,auto_resume,status,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?, 'active',?,?)`,
+		handleID, groupID, sessionID, parentRunID, branchID, string(executionMode),
+		autoResumeValue, now, now); err != nil {
+		return "", fmt.Errorf("create delegation handle: %w", err)
+	}
+	return handleID, nil
+}
+
 // AssignChild links a created child Run to its delegation item. One child may
 // be assigned to exactly one item (UNIQUE(child_run_id) backstop).
 func (r *DelegationRepo) AssignChild(ctx context.Context, itemID, childRunID string) error {
@@ -748,6 +792,9 @@ type CreateChildRunInput struct {
 	// (retry/follow-up). Generation 0 blocking materialization still requires a
 	// running parent.
 	AllowTerminalParent bool
+	// Background skips the waiting_children wake protocol: the parent stays
+	// running and delivery happens through the handle/completion projection.
+	Background bool
 }
 
 // CreateChildRun atomically: validates the parent is running and owns the item,
@@ -775,6 +822,10 @@ func (r *DelegationRepo) CreateChildRun(ctx context.Context, input CreateChildRu
 // visible if any Role snapshot, Run insert, or budget reservation fails.
 func (r *DelegationRepo) CreateGroupWithChildren(ctx context.Context, input CreateDelegationGroupInput,
 	sessionID string) (*domain.DelegationGroup, []domain.DelegationItem, []*domain.AgentRun, error) {
+	executionMode := input.ExecutionMode
+	if executionMode == "" {
+		executionMode = domain.DelegationExecutionBlocking
+	}
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, nil, nil, err
@@ -794,6 +845,7 @@ func (r *DelegationRepo) CreateGroupWithChildren(ctx context.Context, input Crea
 		item := &items[index]
 		child, childErr := createChildRunTx(ctx, tx, CreateChildRunInput{
 			ParentRunID: input.ParentRunID, ItemID: item.ID, SessionID: sessionID,
+			Background: executionMode == domain.DelegationExecutionBackground,
 		})
 		if childErr != nil {
 			return nil, nil, nil, childErr
@@ -802,10 +854,21 @@ func (r *DelegationRepo) CreateGroupWithChildren(ctx context.Context, input Crea
 		item.Status = domain.DelegationItemRunning
 		children = append(children, child)
 	}
+	// Every group gets one stable handle; background mode freezes it with
+	// auto-resume in the same transaction as the children.
+	handleID, err := createDelegationHandleTx(ctx, tx, group.ID, input.ParentRunID, sessionID,
+		executionMode, input.AutoResume)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, nil, nil, err
 	}
 	group.Status = domain.DelegationGroupWaitingChildren
+	if executionMode == domain.DelegationExecutionBackground {
+		group.Status = domain.DelegationGroupPending
+	}
+	_ = handleID
 	return group, items, children, nil
 }
 
@@ -964,13 +1027,15 @@ func createChildRunTx(ctx context.Context, tx *sql.Tx, input CreateChildRunInput
 	if err := reserveRootBudgetTx(ctx, tx, input.ParentRunID, 1, ceiling); err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE delegation_groups SET status='waiting_children' WHERE id=? AND status='pending'`,
-		item.GroupID); err != nil {
-		return nil, fmt.Errorf("activate delegation group: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status='waiting_children'
-		WHERE id=? AND status='running'`, input.ParentRunID); err != nil {
-		return nil, fmt.Errorf("parent enters waiting_children: %w", err)
+	if !input.Background {
+		if _, err := tx.ExecContext(ctx, `UPDATE delegation_groups SET status='waiting_children' WHERE id=? AND status='pending'`,
+			item.GroupID); err != nil {
+			return nil, fmt.Errorf("activate delegation group: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status='waiting_children'
+			WHERE id=? AND status='running'`, input.ParentRunID); err != nil {
+			return nil, fmt.Errorf("parent enters waiting_children: %w", err)
+		}
 	}
 	return &domain.AgentRun{
 		ID: childID, SessionID: input.SessionID, RunKind: domain.RunKindDelegatedAgent, Attempt: 1,
