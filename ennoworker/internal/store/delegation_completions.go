@@ -76,6 +76,20 @@ func createCompletionTx(ctx context.Context, tx *sql.Tx, groupID string, generat
 	if err != nil {
 		return nil, err
 	}
+	// Project the cross-session notification (bounded, never the private
+	// transcript or credentials).
+	var projectID string
+	_ = tx.QueryRowContext(ctx, `SELECT project_id FROM sessions WHERE id=?`, sessionID).Scan(&projectID)
+	attentionKind := domain.AttentionDelegationCompleted
+	if kind == "cancelled" || kind == "failed" {
+		attentionKind = domain.AttentionDelegationFailed
+	}
+	_ = ProjectAttentionTx(ctx, tx, projectID, sessionID,
+		domain.AttentionSourceDelegationCompletion, handleID, generation,
+		attentionKind, false,
+		map[string]any{"kind": kind, "generation": generation,
+			"summary": boundedAttentionSummary(resultJSON)},
+		&domain.AttentionAction{Kind: "none"})
 	return &domain.DelegationCompletion{
 		ID: completionID, HandleID: handleID, SessionID: sessionID, Generation: generation,
 		Kind: kind, ResultJSON: resultJSON, ResultDigest: digest, Sequence: sequence,

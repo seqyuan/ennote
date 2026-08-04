@@ -1805,6 +1805,40 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
+        AttentionPage: {
+            items: components["schemas"]["AttentionItem"][];
+            hasMore: boolean;
+        };
+        AttentionItem: {
+            id: string;
+            projectId: string;
+            sessionId: string;
+            /** @enum {string} */
+            sourceKind: "tool_approval" | "delegation_approval" | "delegation_item" | "delegation_completion";
+            sourceId: string;
+            sourceGeneration: number;
+            /** @enum {string} */
+            kind: "approval_required" | "needs_input" | "delegation_completed" | "delegation_failed";
+            requiresAction: boolean;
+            /** @enum {string} */
+            status: "pending" | "resolved" | "dismissed";
+            display: Record<string, never>;
+            action?: components["schemas"]["AttentionAction"];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            resolvedAt?: string;
+            /** Format: date-time */
+            dismissedAt?: string;
+        };
+        AttentionAction: {
+            /** @enum {string} */
+            kind: "tool_approval" | "delegation_approval" | "delegation_input" | "none";
+            approvalId?: string;
+            itemId?: string;
+            attemptId?: string;
+            expectedGeneration?: number;
+        };
         DeliveryEvent: {
             /** Format: int64 */
             eventId: number;

@@ -102,6 +102,10 @@ func (r *DelegationApprovalRepo) Decide(ctx context.Context, approvalID string,
 			WHERE id=? AND current_generation=?`, previous, now, groupID, generation); err != nil {
 			return nil, nil, err
 		}
+		if err := ResolveAttentionForSourceTx(ctx, tx,
+			domain.AttentionSourceDelegationApproval, approvalID, generation); err != nil {
+			return nil, nil, err
+		}
 		if err := tx.Commit(); err != nil {
 			return nil, nil, err
 		}
@@ -171,6 +175,10 @@ func (r *DelegationApprovalRepo) Decide(ctx context.Context, approvalID string,
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE delegation_group_generations SET status='running'
 		WHERE group_id=? AND generation=? AND status='awaiting_authorization'`, groupID, generation); err != nil {
+		return nil, nil, err
+	}
+	if err := ResolveAttentionForSourceTx(ctx, tx,
+		domain.AttentionSourceDelegationApproval, approvalID, generation); err != nil {
 		return nil, nil, err
 	}
 	if err := tx.Commit(); err != nil {

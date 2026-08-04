@@ -1245,6 +1245,10 @@ func run() error {
 	if _, err := delegationRepo.RebuildMissingDeliveryEvents(context.Background(), 100); err != nil {
 		return fmt.Errorf("rebuild delivery events: %w", err)
 	}
+	// Reconstruct missing cross-session attention projections from source facts.
+	if _, err := (&store.AttentionRepo{DB: db}).RebuildAttention(context.Background(), 100); err != nil {
+		return fmt.Errorf("rebuild attention projections: %w", err)
+	}
 
 	eventWriter := events.NewWriter(&store.EventRepo{DB: db}, hub)
 	artifactService := &artifacts.Service{DB: db, Root: filepath.Join(cfg.HomeDir, "artifacts")}
@@ -1368,6 +1372,7 @@ func run() error {
 		Messages: executor.msgRepo, Compactions: compactionRepo,
 		Approvals: approvalRepo, StandingApprovals: executor.standingApprovals, Delegations: &store.DelegationRepo{DB: db},
 		DelegationApprovals: &store.DelegationApprovalRepo{DB: db},
+		Attention:           &store.AttentionRepo{DB: db},
 		Runs:                runRepo, Queue: &store.QueueRepo{DB: db}, Events: &store.EventRepo{DB: db},
 		Hub: hub, Control: api.CoordinatorController{Coordinator: coordinator}, InstanceID: instanceID,
 		PromptGate: executor,

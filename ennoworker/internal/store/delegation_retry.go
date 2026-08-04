@@ -487,6 +487,14 @@ func insertRetryBudgetApprovalTx(ctx context.Context, tx *sql.Tx, groupID string
 		string(itemsJSON), now); err != nil {
 		return nil, fmt.Errorf("create retry budget approval: %w", err)
 	}
+	// Project the cross-session approval-required attention item.
+	var projectID string
+	_ = tx.QueryRowContext(ctx, `SELECT project_id FROM sessions WHERE id=?`, sessionID).Scan(&projectID)
+	_ = ProjectAttentionTx(ctx, tx, projectID, sessionID,
+		domain.AttentionSourceDelegationApproval, approval.ID, generation,
+		domain.AttentionApprovalRequired, true,
+		map[string]any{"kind": "retry_budget", "generation": generation},
+		&domain.AttentionAction{Kind: "delegation_approval", ApprovalID: approval.ID})
 	return approval, nil
 }
 
@@ -510,6 +518,16 @@ func budgetIncreased(before, after domain.BudgetCeilingJSON) bool {
 func mustMarshalJSON(value any) string {
 	encoded, _ := json.Marshal(value)
 	return string(encoded)
+}
+
+// boundedAttentionSummary renders a short, safe display summary for attention
+// rows.
+func boundedAttentionSummary(resultJSON string) string {
+	const max = 240
+	if len(resultJSON) > max {
+		return resultJSON[:max] + "…"
+	}
+	return resultJSON
 }
 
 func authSnapshotJSON(selection []map[string]string) json.RawMessage {

@@ -50,6 +50,7 @@ type Server struct {
 	StandingApprovals   *store.StandingApprovalRepo
 	Delegations         *store.DelegationRepo
 	DelegationApprovals *store.DelegationApprovalRepo
+	Attention           *store.AttentionRepo
 	Runs                *store.RunRepo
 	Queue               *store.QueueRepo
 	Events              *store.EventRepo
@@ -119,6 +120,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/delegation-handles/{handleID}", s.getDelegationHandle)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/delegation-handles", s.listSessionDelegationHandles)
 	mux.HandleFunc("GET /v1/delivery-events", s.streamDeliveryEvents)
+	mux.HandleFunc("GET /v1/attention", s.listAttention)
+	mux.HandleFunc("GET /v1/sessions/{sessionID}/attention", s.listSessionAttention)
+	mux.HandleFunc("POST /v1/attention/{attentionID}/dismiss", s.dismissAttention)
 	mux.HandleFunc("POST /v1/delegation-approvals/{approvalID}/decision", s.decideDelegationApproval)
 	mux.HandleFunc("POST /v1/runs/{runID}/retry", s.retryRun)
 	mux.HandleFunc("POST /v1/runs/{runID}/cancel", s.cancelRun)
