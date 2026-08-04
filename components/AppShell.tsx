@@ -645,17 +645,7 @@ export function AppShell() {
 
   // Sidebar content
   const sidebar = (
-    <>
-      <div style={{ padding: "10px 12px 0", borderBottom: "1px solid var(--border)" }}>
-        <AttentionPanel
-          projectId={selectedProject ?? currentProjectId ?? undefined}
-          onNavigate={item => {
-            if (item.sessionId && item.sessionId !== selectedSession) switchSession(item.sessionId);
-            closeMobileNavigation();
-          }}
-        />
-      </div>
-      <SessionSidebar
+    <SessionSidebar
       projects={projects}
       sessions={sessionNavigation.visibleSessions}
       selectedProject={selectedProject}
@@ -678,7 +668,6 @@ export function AppShell() {
       closeNavigation={closeMobileNavigation}
       runningSessionIds={runningSessionIds}
     />
-    </>
   );
 
   const combinedError = error ?? branches.error ?? recovery.error ?? sessionNavigation.error;
@@ -854,6 +843,14 @@ export function AppShell() {
                 <rect x="14" y="3" width="7" height="18" rx="1" /><rect x="3" y="3" width="7" height="18" rx="1" />
               </svg>
             </button>
+
+            {/* Global attention */}
+            <AttentionPanel
+              projectId={selectedProject ?? currentProjectId ?? undefined}
+              onNavigate={item => {
+                if (item.sessionId && item.sessionId !== selectedSession) switchSession(item.sessionId);
+              }}
+            />
 
             {/* Settings */}
             <button
