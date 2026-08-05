@@ -90,6 +90,12 @@ type ToolDefinition struct {
 	Name        string
 	Description string
 	Parameters  json.RawMessage
+	// RiskClass is the mandatory local risk classification of the tool. The
+	// Registry fails registration when it is missing or invalid; the value
+	// never leaves the Worker (json:"-" keeps it out of Provider requests and
+	// tool token estimates). External tools (e.g. MCP adapters) must supply a
+	// conservative local RiskClass before they can be registered.
+	RiskClass RiskClass `json:"-"`
 }
 
 type Usage struct {

@@ -15,15 +15,22 @@ import (
 type BuiltinToolPolicy struct {
 	snapshot domain.PolicySnapshot
 	config   domain.ToolPolicyConfig
+	risk     domain.ToolRiskClassifier
 	redact   []*regexp.Regexp
 }
 
-func NewBuiltinToolPolicy(snapshot domain.PolicySnapshot) (*BuiltinToolPolicy, error) {
+// NewBuiltinToolPolicy builds the built-in tool policy from a frozen policy
+// snapshot and the current Run's effective tool registry. risk is required:
+// nil causes a construction error so policy evaluation can never panic.
+func NewBuiltinToolPolicy(snapshot domain.PolicySnapshot, risk domain.ToolRiskClassifier) (*BuiltinToolPolicy, error) {
+	if risk == nil {
+		return nil, fmt.Errorf("tool risk classifier is required")
+	}
 	var config domain.ToolPolicyConfig
 	if err := json.Unmarshal(snapshot.Config, &config); err != nil {
 		return nil, fmt.Errorf("decode tool policy: %w", err)
 	}
-	policy := &BuiltinToolPolicy{snapshot: snapshot, config: config}
+	policy := &BuiltinToolPolicy{snapshot: snapshot, config: config, risk: risk}
 	for _, pattern := range config.RedactPatterns {
 		re, err := regexp.Compile(pattern)
 		if err != nil {
@@ -37,7 +44,7 @@ func NewBuiltinToolPolicy(snapshot domain.PolicySnapshot) (*BuiltinToolPolicy, e
 func (p *BuiltinToolPolicy) BeforeToolBatch(_ context.Context, _ ToolBatchContext, calls []domain.ToolCall) ([]ToolDecision, error) {
 	decisions := make([]ToolDecision, len(calls))
 	for index, call := range calls {
-		risk := ClassifyToolRisk(call.Name)
+		risk := p.risk.RiskClass(call.Name)
 		decisions[index] = ToolDecision{Action: ToolAllow, RiskClass: risk}
 		if p.config.Mode == string(domain.PermissionDiscuss) && risk != domain.RiskReadOnly {
 			decisions[index] = denyDecision("permission_mode_discuss", "Discuss mode allows read-only tools only")

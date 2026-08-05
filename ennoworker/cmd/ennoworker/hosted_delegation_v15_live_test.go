@@ -146,7 +146,8 @@ func TestLiveHostedDelegationV15(t *testing.T) {
 
 	// Follow up the retried child privately: exact thread continuation.
 	followUpGen, followChild, err := delegations.FollowUp(ctx, items[0].ID, domain.DelegationInputCommand{
-		ExpectedGeneration: generation.Generation, Text: "Now list only markdown files.", ClientRequestID: "v15-follow",
+		ExpectedGeneration: generation.Generation, SourceAttemptID: reused.AttemptID,
+		Text: "Now list only markdown files.", ClientRequestID: "v15-follow",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, followUpGen)
@@ -190,10 +191,10 @@ func TestLiveHostedDelegationV15(t *testing.T) {
 // explorerLiveItem mirrors the builtin Workspace Explorer delegation item.
 func explorerLiveItem() store.CreateDelegationItemInput {
 	return store.CreateDelegationItemInput{
-		Name: "explore", RoleVersionID: "builtin-workspace-explorer-v2",
-		AssignmentJSON: json.RawMessage(`{"objective":"Inspect the workspace and report what you find."}`),
+		Name: "explore", RoleVersionID: "builtin-workspace-explorer-v3",
+		AssignmentJSON: json.RawMessage(`{"objective":"List the files in /workspace and note their names in one sentence."}`),
 		OutputContract: "text-v1",
-		Budget: domain.BudgetCeilingJSON{MaxModelCalls: 4, MaxToolCalls: 4, MaxTotalTokens: 16000,
+		Budget: domain.BudgetCeilingJSON{MaxModelCalls: 6, MaxToolCalls: 8, MaxTotalTokens: 20000,
 			MaxOutputTokens: 2048, MaxWallTimeMS: 120000},
 	}
 }

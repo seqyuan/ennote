@@ -50,6 +50,7 @@ func (t *GitReadonlyTool) Definition() domain.ToolDefinition {
 			"args":{"type":"array","items":{"type":"string"},"maxItems":12},
 			"maxOutputLines":{"type":"integer","minimum":1,"maximum":500}
 		},"required":["subcommand"],"additionalProperties":false}`),
+		RiskClass: domain.RiskReadOnly,
 	}
 }
 

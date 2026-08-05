@@ -82,8 +82,17 @@ export function summarizeToolCall(toolName: string, rawArguments: unknown): Tool
       const completed = todos.filter((item: unknown) => item && typeof item === "object" && (item as Record<string, unknown>).status === "completed").length;
       return { label: "Update task list", target: `${completed}/${todos.length} completed` };
     }
-    default:
+    default: {
+      // MCP tools expose as {server}__{remoteTool}. Split so the timeline
+      // shows the server and the remote tool name independently.
+      if (toolName.includes("__")) {
+        const separator = toolName.indexOf("__");
+        const server = toolName.slice(0, separator);
+        const remote = toolName.slice(separator + 2);
+        return { label: remote || toolName, target: `MCP · ${server}` };
+      }
       return { label: toolName || "Unknown tool", target: "Sensitive tool call" };
+    }
   }
 }
 

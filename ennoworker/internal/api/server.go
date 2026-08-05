@@ -31,6 +31,21 @@ type RunController interface {
 	Cancel(context.Context, string) error
 }
 
+func (s *Server) enqueueChildRuns(ctx context.Context, children []*domain.AgentRun) error {
+	if s.Control == nil {
+		return nil
+	}
+	for _, child := range children {
+		if child == nil || child.Status != domain.RunQueued {
+			continue
+		}
+		if err := s.Control.Enqueue(context.WithoutCancel(ctx), child.ID); err != nil {
+			return fmt.Errorf("enqueue delegated child %s: %w", child.ID, err)
+		}
+	}
+	return nil
+}
+
 type Server struct {
 	DB                  *sql.DB
 	Token               string
@@ -59,6 +74,7 @@ type Server struct {
 	InstanceID          string
 	PromptGate          PromptHookGate
 	Prompts             *prompts.Service
+	MCP                 *MCPServer
 }
 
 func (s *Server) Handler() http.Handler {
@@ -141,6 +157,24 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/prompt-templates/{name}", s.getPromptTemplate)
 	mux.HandleFunc("PUT /v1/prompt-templates/{name}", s.updatePromptTemplate)
 	mux.HandleFunc("DELETE /v1/prompt-templates/{name}", s.deletePromptTemplate)
+
+	// MCP server profiles and bindings.
+	mux.HandleFunc("GET /v1/mcp/server-profiles", s.listMCPServerProfiles)
+	mux.HandleFunc("POST /v1/mcp/server-profiles", s.createMCPServerProfile)
+	mux.HandleFunc("GET /v1/mcp/server-profiles/{profileID}/versions", s.listMCPProfileVersions)
+	mux.HandleFunc("POST /v1/mcp/server-profiles/{profileID}/versions", s.createMCPServerVersion)
+	mux.HandleFunc("DELETE /v1/mcp/server-profiles/{profileID}", s.deleteMCPServerProfile)
+	mux.HandleFunc("GET /v1/mcp/bundled-catalog", s.listMCPBundledCatalog)
+	mux.HandleFunc("GET /v1/projects/{projectID}/mcp/bindings", s.listMCPBindings)
+	mux.HandleFunc("POST /v1/projects/{projectID}/mcp/bindings", s.createMCPBinding)
+	mux.HandleFunc("POST /v1/projects/{projectID}/mcp/bindings/from-candidate", s.createMCPBindingFromCandidate)
+	mux.HandleFunc("GET /v1/projects/{projectID}/mcp/candidates", s.listMCPCandidates)
+	mux.HandleFunc("POST /v1/projects/{projectID}/mcp/discovery/refresh", s.refreshMCPDiscovery)
+	mux.HandleFunc("PATCH /v1/projects/{projectID}/mcp/bindings/{bindingID}", s.updateMCPBinding)
+	mux.HandleFunc("DELETE /v1/projects/{projectID}/mcp/bindings/{bindingID}", s.deleteMCPBinding)
+	mux.HandleFunc("POST /v1/projects/{projectID}/mcp/bindings/{bindingID}/test", s.testMCPBinding)
+	mux.HandleFunc("GET /v1/projects/{projectID}/mcp/bindings/{bindingID}/catalog", s.catalogMCPBinding)
+	mux.HandleFunc("POST /v1/projects/{projectID}/mcp/bindings/{bindingID}/catalog/refresh", s.refreshMCPCatalog)
 
 	return s.middleware(mux)
 }

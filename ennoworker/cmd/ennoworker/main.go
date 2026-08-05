@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -26,6 +27,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
 	"github.com/seqyuan/ennote/ennoworker/internal/hooks"
 	"github.com/seqyuan/ennote/ennoworker/internal/llm"
+	"github.com/seqyuan/ennote/ennoworker/internal/mcpclient"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectcontext"
 	"github.com/seqyuan/ennote/ennoworker/internal/prompts"
 	"github.com/seqyuan/ennote/ennoworker/internal/providerdoctor"
@@ -36,6 +38,55 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/tools"
 	"github.com/seqyuan/ennote/ennoworker/internal/workspace"
 )
+
+// mcpBytesPublisher publishes MCP binary/image content into immutable
+// conversation artifacts so the model only sees a bounded reference.
+type mcpBytesPublisher struct {
+	service   *artifacts.Service
+	projectID string
+	sessionID string
+	runID     string
+}
+
+func (p *mcpBytesPublisher) PublishBytes(ctx context.Context, toolCallID, name, mime string, data []byte) (domain.ArtifactReference, error) {
+	if p.service == nil {
+		return domain.ArtifactReference{}, fmt.Errorf("artifact service is unavailable")
+	}
+	artifact, err := p.service.Store(ctx, artifacts.PublishInput{
+		ProjectID: p.projectID, SessionID: p.sessionID, RunID: p.runID, ToolCallID: toolCallID,
+		Name: name, SourceKind: "mcp", RetentionClass: "project",
+	}, bytes.NewReader(data))
+	if err != nil {
+		return domain.ArtifactReference{}, err
+	}
+	return artifact.Reference(), nil
+}
+
+// mcpRecorder persists the MCP request state machine (planned/dispatched ->
+// completed/failed/cancelled/outcome_unknown).
+type mcpRecorder struct {
+	runs  *store.MCPRunRepo
+	runID string
+}
+
+func (r *mcpRecorder) RecordMCPStep(runServerID, runToolID, toolCallID string, generation int,
+	status domain.MCPRequestStatus, requestDigest, responseDigest, errorCode string) {
+	if r.runs == nil || toolCallID == "" {
+		return
+	}
+	ctx := context.Background()
+	record := store.MCPRequestRecord{
+		RunID: r.runID, RunServerID: runServerID, RunToolID: runToolID, ToolCallID: toolCallID,
+		ConnectionGeneration: generation, Status: status,
+		RequestDigest: requestDigest, ResponseDigest: responseDigest, ErrorCode: errorCode,
+	}
+	// CreateRequest advances the state machine with CAS; an illegal transition
+	// (e.g. terminal -> dispatched) is a violation and must not be swallowed
+	// silently — it means the call is being replayed after terminalization.
+	if _, err := r.runs.CreateRequest(ctx, record); err != nil {
+		slog.Warn("record mcp request", "run", r.runID, "toolCall", toolCallID, "status", status, "error", err)
+	}
+}
 
 type agentExecutor struct {
 	db                *sql.DB
@@ -59,6 +110,113 @@ type agentExecutor struct {
 	// OnChildRunsCreated is called after delegate_roles creates children.
 	// The coordinator provides this to enqueue child runs.
 	OnChildRunsCreated func(ctx context.Context, runIDs []string)
+	// MCP wires the MCP tools-only client stores for Run freezing.
+	MCP *api.MCPServer
+}
+
+// freezeMCPIntoRegistry freezes the Run's MCP snapshots (atomic server+tool
+// rows), registers frozen McpTool adapters, and returns a per-Run connection
+// set. Required server failures abort Run initialization; optional failures
+// freeze an unavailable snapshot and continue. Returns nil connection set when
+// MCP is disabled.
+//
+// allowlist filters exposed MCP tools to the exact intersection with a Role's
+// allowedTools (delegation children): a Role never sees MCP tools outside its
+// frozen allowlist. nil allowlist means no filtering (Host runs).
+func (e *agentExecutor) freezeMCPIntoRegistry(ctx context.Context, run *domain.AgentRun,
+	session *domain.Session, toolReg *tools.Registry, allowlist []string) (*mcpclient.RunConnectionSet, error) {
+	if e.MCP == nil {
+		return nil, nil
+	}
+	allowed := map[string]bool{}
+	if allowlist != nil {
+		for _, name := range allowlist {
+			allowed[name] = true
+		}
+	}
+	// FreezeRun is idempotent per Run: on approval resume / rewind it reuses
+	// the already-frozen snapshots verbatim, so a Run's capability set is
+	// immutable even if bindings changed in between.
+	servers, err := e.MCP.FreezeRun(ctx, run.ID, session.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	connSet := mcpclient.NewRunConnectionSet(run.ID)
+	// tools/list_changed from any server marks the matching binding's FUTURE
+	// catalog stale; the active Run's frozen Registry is never hot-updated.
+	connSet.SetListChangedHandler(func() {
+		ctx := context.Background()
+		for _, server := range servers {
+			if err := e.MCP.Catalogs.MarkCatalogStale(ctx, server.Snapshot.BindingID, 0); err != nil {
+				slog.Warn("mark mcp catalog stale", "binding", server.Snapshot.BindingID, "error", err)
+			}
+		}
+	})
+	publisher := &mcpBytesPublisher{service: e.artifacts, projectID: session.ProjectID,
+		sessionID: run.SessionID, runID: run.ID}
+	recorder := &mcpRecorder{runs: e.MCP.Runs, runID: run.ID}
+	for _, server := range servers {
+		serverID := server.Snapshot.ID
+		if server.Snapshot.UnavailableReason != "" {
+			// Optional server unavailable: freeze the unavailable fact; no tools.
+			continue
+		}
+		version := server.Version
+		for _, frozen := range server.Tools {
+			toolID := frozen.ID
+			remoteName := frozen.RemoteName
+			exposedName := frozen.ExposedName
+			// Delegation child: expose only the exact intersection with the
+			// Role's frozen allowlist. Host runs (nil allowlist) expose all
+			// binding-selected tools.
+			if allowlist != nil && !allowed[exposedName] {
+				continue
+			}
+			definition := domain.ToolDefinition{
+				Name:        exposedName,
+				Description: frozen.Description,
+				Parameters:  frozen.InputSchema,
+				RiskClass:   frozen.RiskClass,
+			}
+			mcpTool := &mcpclient.Tool{
+				DefinitionSnapshot: definition,
+				ServerSlug:         exposedName,
+				RemoteName:         remoteName,
+				Recorder:           recorder,
+				Publisher:          publisher,
+				RunServerID:        serverID,
+				RunToolID:          toolID,
+				ProfileVersionID:   server.Snapshot.ProfileVersionID,
+				ProjectID:          session.ProjectID,
+				BindingID:          server.Snapshot.BindingID,
+				BindingRevision:    server.Snapshot.BindingRevision,
+				CatalogDigest:      server.Snapshot.CatalogDigest,
+				SchemaDigest:       frozen.SchemaDigest,
+				GenerationProvider: func() int { return connSet.CurrentGeneration(serverID) },
+				ConnectionProvider: func() *mcpclient.Session {
+					sess, _, err := connSet.GetOrConnect(ctx, serverID, version, e.mcpConnectOption(), slog.Default())
+					if err != nil {
+						slog.Warn("mcp reconnect failed", "run", run.ID, "server", serverID, "error", err)
+						return nil
+					}
+					return sess
+				},
+			}
+			if err := toolReg.Register(mcpTool); err != nil {
+				connSet.Close()
+				return nil, fmt.Errorf("register mcp tool %s: %w", exposedName, err)
+			}
+		}
+	}
+	return connSet, nil
+}
+
+func (e *agentExecutor) mcpConnectOption() mcpclient.ConnectOption {
+	return mcpclient.ConnectOption{
+		ResolveSecret:          e.MCP.ResolveSecret,
+		Logger:                 slog.Default(),
+		AllowedPrivateNetworks: e.MCP.AllowedPrivate,
+	}
 }
 
 func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (domain.RunOutput, error) {
@@ -164,10 +322,6 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	provider, err := e.resolveProvider(resolved)
 	if err != nil {
 		return domain.RunOutput{}, err
-	}
-	toolPolicy, err := agent.NewBuiltinToolPolicy(resolved.Effective.ToolPolicy)
-	if err != nil {
-		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorToolPolicyFailed, err)
 	}
 	router := &agent.SnapshotModelRouter{Factory: e.resolveRuntimeProvider}
 
@@ -285,6 +439,17 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		toolReg.Restrict(resolved.Effective.Role.AllowedTools)
 	}
 
+	// Freeze MCP server/tool snapshots BEFORE the first Provider request and
+	// register the frozen McpTool adapters. Required server failures abort the
+	// Run; optional servers freeze an unavailable snapshot and continue.
+	mcpConnSet, mcpErr := e.freezeMCPIntoRegistry(ctx, run, session, toolReg, nil)
+	if mcpErr != nil {
+		return domain.RunOutput{}, mcpErr
+	}
+	if mcpConnSet != nil {
+		defer mcpConnSet.Close()
+	}
+
 	prepared, err := e.compaction.Prepare(ctx, run, history, resolved.Effective, systemPrompt, toolReg.Definitions())
 	if err != nil {
 		return domain.RunOutput{}, err
@@ -326,9 +491,16 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	if err != nil {
 		return domain.RunOutput{}, err
 	}
-	var effectiveToolPolicy agent.ToolPolicy = toolPolicy
+	// BuiltinToolPolicy must observe the FINAL effective tool set (after Role
+	// Restrict and conditional registration), so it is constructed from the
+	// completed Registry. Unknown/restricted tools resolve to RiskSensitive.
+	tp, policyErr := agent.NewBuiltinToolPolicy(resolved.Effective.ToolPolicy, toolReg)
+	if policyErr != nil {
+		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorToolPolicyFailed, policyErr)
+	}
+	var effectiveToolPolicy agent.ToolPolicy = tp
 	if resolved.Effective.Role == nil {
-		effectiveToolPolicy = &delegationAdmissionToolPolicy{Base: toolPolicy,
+		effectiveToolPolicy = &delegationAdmissionToolPolicy{Base: tp,
 			Delegations: &store.DelegationRepo{DB: e.db}, SessionID: run.SessionID}
 	}
 	loop := &agent.Loop{
@@ -551,10 +723,6 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 	if err != nil {
 		return domain.RunOutput{}, err
 	}
-	toolPolicy, err := agent.NewBuiltinToolPolicy(resolved.Effective.ToolPolicy)
-	if err != nil {
-		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorToolPolicyFailed, err)
-	}
 	router := &agent.SnapshotModelRouter{Factory: e.resolveRuntimeProvider}
 
 	wDir := filepath.Join(os.Getenv("ENNOTE_HOME"), "runtime", "runs", run.ID)
@@ -584,6 +752,17 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 	toolReg.Restrict(resolved.Effective.Role.AllowedTools)
 	if err := toolReg.Register(&tools.SubmitResultTool{}); err != nil {
 		return domain.RunOutput{}, fmt.Errorf("register submit_result: %w", err)
+	}
+
+	// Freeze MCP tools for the child: only the exact intersection with the
+	// Role's frozen allowlist is exposed. A Role that does not list MCP tool
+	// names (the default) receives none — fail closed.
+	childMCPSet, mcpErr := e.freezeMCPIntoRegistry(ctx, run, session, toolReg, resolved.Effective.Role.AllowedTools)
+	if mcpErr != nil {
+		return domain.RunOutput{}, mcpErr
+	}
+	if childMCPSet != nil {
+		defer childMCPSet.Close()
 	}
 
 	systemPrompt := agent.RoleSystemPrompt(*resolved.Effective.Role, resolved.SystemPrompt.AgentPrompt)
@@ -616,11 +795,17 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 		}}
 	}
 
+	// BuiltinToolPolicy observes the FINAL child tool set: todo registered,
+	// Role Restrict applied, then submit_result registered.
+	tp, policyErr := agent.NewBuiltinToolPolicy(resolved.Effective.ToolPolicy, toolReg)
+	if policyErr != nil {
+		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorToolPolicyFailed, policyErr)
+	}
 	loop := &agent.Loop{
 		Provider: provider, ModelRouter: router, TurnPlanner: agent.ContextTurnPlanner{},
 		VisionResolver:    &agent.BuiltinVisionResolver{Loader: e.artifacts},
 		ImageDescriptions: &store.ImageDescriptionRepo{DB: e.db},
-		Tools:             toolReg, ToolPolicy: toolPolicy, ToolPolicySnapshot: resolved.Effective.ToolPolicy,
+		Tools:             toolReg, ToolPolicy: tp, ToolPolicySnapshot: resolved.Effective.ToolPolicy,
 		StandingScopeResolver: toolReg, StandingApprovals: e.standingApprovals,
 		WorkspaceID: wSpace.ID, SessionID: session.ID, Events: e.writer, Hub: e.hub, Recorder: e.calls,
 		QueuedInputs: &queueAdapter{repo: &store.QueueRepo{DB: e.db}},
@@ -1284,6 +1469,22 @@ func run() error {
 		return fmt.Errorf("init trust store: %w", err)
 	}
 	outboxStore := &hooks.OutboxStore{DB: db}
+	mcpServer := &api.MCPServer{
+		Profiles: &store.MCPProfileRepo{DB: db},
+		Bindings: &store.MCPBindingRepo{DB: db},
+		Catalogs: &store.MCPCatalogRepo{DB: db},
+		Runs:     &store.MCPRunRepo{DB: db},
+		ResolveSecret: func(ref string) (string, error) {
+			secret, err := (&llm.CredentialResolver{}).Resolve(ref)
+			if err != nil {
+				return "", err
+			}
+			return secret.Reveal(), nil
+		},
+		Logger:         slog.Default(),
+		AllowedPrivate: false,
+		Bundled:        mcpclient.NewBundledRegistry(),
+	}
 	executor := &agentExecutor{
 		db: db, writer: eventWriter, hub: hub, homeDir: cfg.HomeDir, trustStore: trustStore, outboxStore: outboxStore, runs: runRepo,
 		calls:     callRepo,
@@ -1292,6 +1493,7 @@ func run() error {
 		skillsDir: cfg.SkillsDir, builtinDir: cfg.BuiltinSkillsDir,
 		sandbox: cfg.SandboxMode, artifacts: artifactService, approvals: approvalRepo,
 		standingApprovals: &store.StandingApprovalRepo{DB: db},
+		MCP:               mcpServer,
 	}
 	executor.compaction = &compaction.Service{Repo: compactionRepo, RunRepo: runCompactionRepo, Calls: callRepo,
 		Messages: executor.msgRepo, Events: eventWriter, Providers: executor.resolveRuntimeProvider}
@@ -1324,6 +1526,9 @@ func run() error {
 	go outboxWorker.Start(outboxCtx)
 
 	coordinator := runs.NewCoordinator(runRepo, executor, cfg.MaxConcurrentRuns)
+	coordinator.SetRunSettledHook(func(ctx context.Context, run *domain.AgentRun) error {
+		return tickSessionAutoResume(ctx, db, coordinator, run.SessionID)
+	})
 	// Wire child run enqueuing: when delegate_roles creates children,
 	// the executor notifies the coordinator to start executing them.
 	executor.OnChildRunsCreated = func(_ context.Context, ids []string) {
@@ -1397,6 +1602,7 @@ func run() error {
 		Hub: hub, Control: api.CoordinatorController{Coordinator: coordinator}, InstanceID: instanceID,
 		PromptGate: executor,
 		Prompts:    promptService,
+		MCP:        mcpServer,
 	}
 
 	listener, err := net.Listen("tcp", cfg.ListenAddr)
@@ -1443,7 +1649,6 @@ func run() error {
 // active session, in completion sequence order, and enqueues the resulting
 // continuation Runs.
 func tickIdleAutoResume(ctx context.Context, db *sql.DB, coordinator *runs.Coordinator) error {
-	delegationRepo := &store.DelegationRepo{DB: db}
 	rows, err := db.QueryContext(ctx, `SELECT id FROM sessions WHERE status='active' ORDER BY updated_at`)
 	if err != nil {
 		return err
@@ -1461,15 +1666,23 @@ func tickIdleAutoResume(ctx context.Context, db *sql.DB, coordinator *runs.Coord
 		return err
 	}
 	for _, sessionID := range sessionIDs {
-		continuation, err := delegationRepo.TickSession(ctx, sessionID)
-		if err != nil {
+		if err := tickSessionAutoResume(ctx, db, coordinator, sessionID); err != nil {
 			return err
 		}
-		if continuation != nil {
-			if err := coordinator.Enqueue(context.Background(), continuation.ID); err != nil {
-				slog.Warn("enqueue continuation run failed", "runID", continuation.ID, "error", err)
-			}
-		}
+	}
+	return nil
+}
+
+func tickSessionAutoResume(ctx context.Context, db *sql.DB, coordinator *runs.Coordinator, sessionID string) error {
+	continuation, err := (&store.DelegationRepo{DB: db}).TickSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if continuation == nil {
+		return nil
+	}
+	if err := coordinator.Enqueue(context.Background(), continuation.ID); err != nil {
+		return fmt.Errorf("enqueue continuation run %s: %w", continuation.ID, err)
 	}
 	return nil
 }

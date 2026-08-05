@@ -213,17 +213,17 @@ func (r *StandingApprovalRepo) GetOrCreateActiveTx(ctx context.Context, tx *sql.
 	}
 	createdAt, _ := time.Parse(time.RFC3339, now)
 	return domain.StandingApproval{
-		ID:                   id,
-		SessionID:            approval.SessionID,
-		ToolName:             candidate.ToolName,
-		ScopeKind:            candidate.ScopeKind,
-		ScopeVersion:         candidate.ScopeVersion,
-		ScopeKey:             candidate.ScopeKey,
-		ScopeDisplay:         candidate.ScopeDisplay,
-		RiskClass:            candidate.RiskClass,
-		CreatedAt:            createdAt,
-		CreatedByRunID:       approval.RunID,
-		CreatedByApprovalID:  approval.ID,
+		ID:                  id,
+		SessionID:           approval.SessionID,
+		ToolName:            candidate.ToolName,
+		ScopeKind:           candidate.ScopeKind,
+		ScopeVersion:        candidate.ScopeVersion,
+		ScopeKey:            candidate.ScopeKey,
+		ScopeDisplay:        candidate.ScopeDisplay,
+		RiskClass:           candidate.RiskClass,
+		CreatedAt:           createdAt,
+		CreatedByRunID:      approval.RunID,
+		CreatedByApprovalID: approval.ID,
 	}, true, nil
 }
 

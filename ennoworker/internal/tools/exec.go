@@ -23,7 +23,7 @@ func (t *ExecTool) ExecutionClass() domain.ExecutionClass { return domain.Execut
 
 func (t *ExecTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{Name: "exec", Description: "Execute one program with a structured argument vector in the current workspace",
-		Parameters: schema(`{"type":"object","properties":{"argv":{"type":"array","items":{"type":"string"},"minItems":1},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":3600}},"required":["argv"],"additionalProperties":false}`)}
+		Parameters: schema(`{"type":"object","properties":{"argv":{"type":"array","items":{"type":"string"},"minItems":1},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":3600}},"required":["argv"],"additionalProperties":false}`), RiskClass: domain.RiskShell}
 }
 
 func (t *ExecTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {

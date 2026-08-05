@@ -13,6 +13,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// mapRiskClassifier is a test-only ToolRiskClassifier that resolves declared
+// tools and fails closed (RiskSensitive) for everything else.
+type mapRiskClassifier map[string]domain.RiskClass
+
+func (m mapRiskClassifier) RiskClass(name string) domain.RiskClass {
+	if risk, ok := m[name]; ok {
+		return risk
+	}
+	return domain.RiskSensitive
+}
+
+var testRiskMap = mapRiskClassifier{
+	"read": domain.RiskReadOnly, "ls": domain.RiskReadOnly, "grep": domain.RiskReadOnly,
+	"find": domain.RiskReadOnly, "search_compacted_history": domain.RiskReadOnly,
+	"todo": domain.RiskReadOnly, "git_readonly": domain.RiskReadOnly,
+	"write": domain.RiskLocalWrite, "edit": domain.RiskLocalWrite, "publish_artifact": domain.RiskLocalWrite,
+	"bash": domain.RiskShell, "exec": domain.RiskShell,
+	"web_fetch": domain.RiskExternal,
+	"delegate_roles": domain.RiskDelegation, "submit_result": domain.RiskDelegation,
+}
+
 func restrictedPolicy(t *testing.T) *BuiltinToolPolicy {
 	t.Helper()
 	config, err := json.Marshal(domain.ToolPolicyConfig{Mode: "restricted",
@@ -21,7 +42,7 @@ func restrictedPolicy(t *testing.T) *BuiltinToolPolicy {
 		AllowedWriteRoots: []string{"/workspace"}, MaxTimeoutSeconds: 30,
 		RedactPatterns: []string{`secret=[^\s]+`}})
 	require.NoError(t, err)
-	policy, err := NewBuiltinToolPolicy(domain.PolicySnapshot{ID: "policy", Kind: domain.PolicyKindTool, Version: 1, Config: config})
+	policy, err := NewBuiltinToolPolicy(domain.PolicySnapshot{ID: "policy", Kind: domain.PolicyKindTool, Version: 1, Config: config}, testRiskMap)
 	require.NoError(t, err)
 	return policy
 }
@@ -30,7 +51,7 @@ func permissionPolicy(t *testing.T, config domain.ToolPolicyConfig) *BuiltinTool
 	t.Helper()
 	raw, err := json.Marshal(config)
 	require.NoError(t, err)
-	policy, err := NewBuiltinToolPolicy(domain.PolicySnapshot{ID: "permission", Kind: domain.PolicyKindTool, Version: 1, Config: raw})
+	policy, err := NewBuiltinToolPolicy(domain.PolicySnapshot{ID: "permission", Kind: domain.PolicyKindTool, Version: 1, Config: raw}, testRiskMap)
 	require.NoError(t, err)
 	return policy
 }

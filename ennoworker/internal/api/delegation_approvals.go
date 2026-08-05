@@ -57,6 +57,10 @@ func (s *Server) decideDelegationApproval(w http.ResponseWriter, r *http.Request
 		}
 		return
 	}
+	if err := s.enqueueChildRuns(r.Context(), children); err != nil {
+		writeInternal(w, r, err)
+		return
+	}
 	childIDs := make([]string, 0, len(children))
 	for _, child := range children {
 		childIDs = append(childIDs, child.ID)

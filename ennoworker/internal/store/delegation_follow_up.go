@@ -38,6 +38,13 @@ func (r *DelegationRepo) createContinuationGeneration(ctx context.Context, itemI
 	if strings.TrimSpace(input.Text) == "" || len(input.Text) > 16384 {
 		return nil, nil, fmt.Errorf("continuation instruction must be 1-16384 bytes")
 	}
+	if strings.TrimSpace(input.SourceAttemptID) == "" {
+		return nil, nil, fmt.Errorf("continuation source attempt id is required")
+	}
+	requestDigest, err := continuationRequestDigest(itemID, kind, input)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -45,16 +52,13 @@ func (r *DelegationRepo) createContinuationGeneration(ctx context.Context, itemI
 	}
 	defer tx.Rollback()
 
-	var groupID, parentRunID, sessionID, sourceAttemptID, sourceStatus string
+	var groupID, parentRunID, sessionID string
 	var currentGeneration int
-	if err := tx.QueryRowContext(ctx, `SELECT i.group_id,g.parent_run_id,ar.session_id,
-		COALESCE(a.id,''),COALESCE(a.status,''),g.current_generation
+	if err := tx.QueryRowContext(ctx, `SELECT i.group_id,g.parent_run_id,ar.session_id,g.current_generation
 		FROM delegation_items i
 		JOIN delegation_groups g ON g.id=i.group_id
 		JOIN agent_runs ar ON ar.id=g.parent_run_id
-		LEFT JOIN delegation_item_attempts a ON a.item_id=i.id AND a.generation=g.current_generation
-		WHERE i.id=?`, itemID).Scan(&groupID, &parentRunID, &sessionID,
-		&sourceAttemptID, &sourceStatus, &currentGeneration); err != nil {
+		WHERE i.id=?`, itemID).Scan(&groupID, &parentRunID, &sessionID, &currentGeneration); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, ErrDelegationItemNotFound
 		}
@@ -62,9 +66,13 @@ func (r *DelegationRepo) createContinuationGeneration(ctx context.Context, itemI
 	}
 	// Idempotency first: the client request id already produced a generation,
 	// even if the group cursor has advanced since then.
-	var existingID string
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM delegation_group_generations
-		WHERE group_id=? AND client_request_id=?`, groupID, input.ClientRequestID).Scan(&existingID); err == nil {
+	var existingID, storedRequestDigest string
+	if err := tx.QueryRowContext(ctx, `SELECT id,COALESCE(request_digest,'') FROM delegation_group_generations
+		WHERE group_id=? AND client_request_id=?`, groupID, input.ClientRequestID).
+		Scan(&existingID, &storedRequestDigest); err == nil {
+		if err := requestDigestConflict(storedRequestDigest, requestDigest); err != nil {
+			return nil, nil, err
+		}
 		// Release the single connection before loading outside the transaction.
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
 			return nil, nil, rollbackErr
@@ -79,10 +87,25 @@ func (r *DelegationRepo) createContinuationGeneration(ctx context.Context, itemI
 		return nil, nil, domain.NewCodedError(domain.ErrorDelegationInputStale,
 			fmt.Errorf("expected generation %d, current is %d", input.ExpectedGeneration, currentGeneration))
 	}
-	if sourceAttemptID == "" {
-		return nil, nil, fmt.Errorf("%w: item has no attempt in generation %d", ErrDelegationConflict, currentGeneration)
+	selectedItems, err := resolveGenerationItemStatesTx(ctx, tx, groupID, currentGeneration)
+	if err != nil {
+		return nil, nil, err
 	}
-	if input.SourceAttemptID != "" && input.SourceAttemptID != sourceAttemptID {
+	var source itemState
+	foundSource := false
+	for _, selected := range selectedItems {
+		if selected.item.ID == itemID {
+			source = selected
+			foundSource = true
+			break
+		}
+	}
+	if !foundSource {
+		return nil, nil, ErrDelegationItemNotFound
+	}
+	sourceAttemptID := source.attemptID
+	sourceStatus := string(source.attemptStatus)
+	if input.SourceAttemptID != sourceAttemptID {
 		return nil, nil, domain.NewCodedError(domain.ErrorDelegationInputStale,
 			fmt.Errorf("source attempt is no longer current"))
 	}
@@ -103,46 +126,33 @@ func (r *DelegationRepo) createContinuationGeneration(ctx context.Context, itemI
 		return nil, nil, fmt.Errorf("unsupported continuation kind %q", kind)
 	}
 
-	// Reuse every sibling's current attempt; select only this item.
-	rows, err := tx.QueryContext(ctx, `SELECT i.id,a.id,a.child_run_id,COALESCE(a.result_digest,'')
-		FROM delegation_items i JOIN delegation_item_attempts a ON a.item_id=i.id AND a.generation=?
-		WHERE i.group_id=? ORDER BY i.ordinal`, currentGeneration, groupID)
-	if err != nil {
-		return nil, nil, err
-	}
-	reused := make([]domain.DelegationAttemptReference, 0)
-	for rows.Next() {
-		var item, attemptID, childRunID, digest string
-		if err := rows.Scan(&item, &attemptID, &childRunID, &digest); err != nil {
-			rows.Close()
-			return nil, nil, err
-		}
-		if item == itemID {
-			continue // this item is the continuation target, not reused
+	// Reuse every sibling's logical selection; select only this item.
+	reused := make([]domain.DelegationAttemptReference, 0, len(selectedItems)-1)
+	for _, selected := range selectedItems {
+		if selected.item.ID == itemID {
+			continue
 		}
 		reused = append(reused, domain.DelegationAttemptReference{
-			ItemID: item, AttemptID: attemptID, Generation: currentGeneration,
-			ChildRunID: childRunID, ResultDigest: digest,
+			ItemID: selected.item.ID, AttemptID: selected.attemptID,
+			Generation: selected.attemptGen, ChildRunID: selected.attemptChild,
+			ResultDigest: selected.resultDigest,
 		})
-	}
-	if err := rows.Close(); err != nil {
-		return nil, nil, err
 	}
 
 	// Freeze the new generation snapshot.
-	var itemRoleVersion, itemBudgetJSON string
-	if err := tx.QueryRowContext(ctx, `SELECT role_version_id,budget_json FROM delegation_items WHERE id=?`,
-		itemID).Scan(&itemRoleVersion, &itemBudgetJSON); err != nil {
-		return nil, nil, err
-	}
+	itemRoleVersion := source.item.RoleVersionID
+	itemBudgetJSON := string(source.item.BudgetJSON)
 	var ceiling domain.BudgetCeilingJSON
 	if err := json.Unmarshal([]byte(itemBudgetJSON), &ceiling); err != nil {
 		return nil, nil, err
 	}
+	originalCeiling := ceiling
+	approvalRequired := false
 	if input.Budget != nil {
 		if err := r.validateRetryRoleAndCeilingTx(ctx, tx, itemRoleVersion, *input.Budget); err != nil {
 			return nil, nil, err
 		}
+		approvalRequired = budgetIncreased(originalCeiling, *input.Budget)
 		ceiling = *input.Budget
 		itemBudgetJSON = mustMarshalJSON(ceiling)
 	}
@@ -180,20 +190,46 @@ func (r *DelegationRepo) createContinuationGeneration(ctx context.Context, itemI
 	nextGeneration := maxGeneration + 1
 	now := time.Now().UTC()
 	generationID := uuid.NewString()
+	generationStatus := domain.DelegationGenerationRunning
+	if approvalRequired {
+		generationStatus = domain.DelegationGenerationAwaitingAuthorization
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO delegation_group_generations
 		(id,group_id,generation,kind,status,retry_selection_json,reused_attempts_json,
 		 authorization_snapshot_json,authorization_snapshot_digest,budget_snapshot_json,budget_snapshot_digest,
-		 client_request_id,created_at)
-		VALUES(?,?,?,?,'running',?,?,?,?,?,?,?,?)`,
-		generationID, groupID, nextGeneration, string(kind),
+		 client_request_id,request_digest,created_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		generationID, groupID, nextGeneration, string(kind), string(generationStatus),
 		string(selectionJSON), string(reusedJSON), string(authSnapshotJSON(authSnapshot)),
-		authDigest, string(budgetJSON), budgetDigest, input.ClientRequestID, now.Format(time.RFC3339Nano)); err != nil {
+		authDigest, string(budgetJSON), budgetDigest, input.ClientRequestID, requestDigest,
+		now.Format(time.RFC3339Nano)); err != nil {
 		return nil, nil, fmt.Errorf("create continuation generation: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE delegation_groups SET current_generation=?,updated_at=?
 		WHERE id=? AND current_generation=?`, nextGeneration, now.Format(time.RFC3339Nano),
 		groupID, currentGeneration); err != nil {
 		return nil, nil, err
+	}
+
+	generation := &domain.DelegationGeneration{
+		ID: generationID, GroupID: groupID, Generation: nextGeneration, Kind: kind,
+		Status: generationStatus, RetrySelection: []string{itemID},
+		ReusedAttempts: reused, AuthorizationSnapshot: authSnapshotJSON(authSnapshot),
+		BudgetSnapshot: budgetJSON, ClientRequestID: input.ClientRequestID, CreatedAt: now,
+	}
+	if approvalRequired {
+		if _, err := insertContinuationBudgetApprovalTx(ctx, tx, groupID, nextGeneration,
+			parentRunID, sessionID, source, ceiling, kind, input.Text); err != nil {
+			return nil, nil, err
+		}
+		if err := ResolveAttentionForSourceTx(ctx, tx, domain.AttentionSourceDelegationItem,
+			itemID, currentGeneration); err != nil {
+			return nil, nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, nil, err
+		}
+		return generation, nil, nil
 	}
 
 	var override *domain.BudgetCeilingJSON
@@ -225,16 +261,48 @@ func (r *DelegationRepo) createContinuationGeneration(ctx context.Context, itemI
 		return nil, nil, fmt.Errorf("create continuation fact: %w", err)
 	}
 
-	generation := &domain.DelegationGeneration{
-		ID: generationID, GroupID: groupID, Generation: nextGeneration, Kind: kind,
-		Status: domain.DelegationGenerationRunning, RetrySelection: []string{itemID},
-		ReusedAttempts: reused, AuthorizationSnapshot: authSnapshotJSON(authSnapshot),
-		BudgetSnapshot: budgetJSON, ClientRequestID: input.ClientRequestID, CreatedAt: now,
+	if err := ResolveAttentionForSourceTx(ctx, tx, domain.AttentionSourceDelegationItem,
+		itemID, currentGeneration); err != nil {
+		return nil, nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, nil, err
 	}
 	return generation, child, nil
+}
+
+func insertContinuationBudgetApprovalTx(ctx context.Context, tx *sql.Tx, groupID string, generation int,
+	parentRunID, sessionID string, source itemState, ceiling domain.BudgetCeilingJSON,
+	kind domain.DelegationGenerationKind, text string) (*domain.DelegationApprovalRequest, error) {
+	itemsJSON, err := json.Marshal([]retryBudgetItem{{
+		ItemID: source.item.ID, Name: source.item.Name, RetryOfAttemptID: source.attemptID,
+		Budget: ceiling, ContinuationKind: string(kind), ContinuationInput: text,
+	}})
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	approval := &domain.DelegationApprovalRequest{
+		ID: uuid.NewString(), GroupID: groupID, Generation: generation, Kind: "retry_budget",
+		ParentRunID: parentRunID, SessionID: sessionID, Status: "pending",
+		ItemsJSON: itemsJSON, RequestedAt: now,
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO delegation_approval_requests
+		(id,group_id,generation,kind,parent_run_id,session_id,status,items_json,requested_at)
+		VALUES(?,?,?,?,?,?,'pending',?,?)`, approval.ID, groupID, generation, "retry_budget",
+		parentRunID, sessionID, string(itemsJSON), now.Format(time.RFC3339Nano)); err != nil {
+		return nil, fmt.Errorf("create continuation budget approval: %w", err)
+	}
+	var projectID string
+	_ = tx.QueryRowContext(ctx, `SELECT project_id FROM sessions WHERE id=?`, sessionID).Scan(&projectID)
+	if err := ProjectAttentionTx(ctx, tx, projectID, sessionID,
+		domain.AttentionSourceDelegationApproval, approval.ID, generation,
+		domain.AttentionApprovalRequired, true,
+		map[string]any{"kind": "retry_budget", "generation": generation},
+		&domain.AttentionAction{Kind: "delegation_approval", ApprovalID: approval.ID}); err != nil {
+		return nil, err
+	}
+	return approval, nil
 }
 
 // continuationAttemptID returns the newly created attempt id for the item in

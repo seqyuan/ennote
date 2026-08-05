@@ -766,6 +766,19 @@ func (r *RunRepo) Cancel(ctx context.Context, runID string) error {
 			return err
 		}
 	}
+	// Settle the cancelled Run's own delegation attempt when it is itself a
+	// delegated child (direct pre-dispatch child cancellation). Without this, a
+	// queued attempt remains and the sibling's settlement never settles the
+	// generation, so no logical completion is created. Non-delegated runs have
+	// no attempt row and this is a no-op.
+	if _, err := tx.ExecContext(ctx, `UPDATE delegation_item_attempts SET status='cancelled',finished_at=?,error_code='run_cancelled'
+		WHERE child_run_id=? AND status IN ('queued','running')`, now, runID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE delegation_items SET status='cancelled'
+		WHERE child_run_id=? AND status IN ('pending','running')`, runID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE delegation_items SET status='cancelled'
 		WHERE child_run_id IN (SELECT id FROM agent_runs WHERE parent_run_id=? AND status='cancelled')`, runID); err != nil {
 		return err

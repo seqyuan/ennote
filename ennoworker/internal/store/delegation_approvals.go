@@ -102,6 +102,33 @@ func (r *DelegationApprovalRepo) Decide(ctx context.Context, approvalID string,
 			WHERE id=? AND current_generation=?`, previous, now, groupID, generation); err != nil {
 			return nil, nil, err
 		}
+		var generationKind string
+		if err := tx.QueryRowContext(ctx, `SELECT kind FROM delegation_group_generations
+			WHERE group_id=? AND generation=?`, groupID, generation).Scan(&generationKind); err != nil {
+			return nil, nil, err
+		}
+		if generationKind == string(domain.DelegationGenerationInput) {
+			var plans []retryBudgetItem
+			if err := json.Unmarshal([]byte(itemsJSON), &plans); err != nil {
+				return nil, nil, err
+			}
+			var projectID string
+			_ = tx.QueryRowContext(ctx, `SELECT project_id FROM sessions WHERE id=?`, sessionID).Scan(&projectID)
+			for _, plan := range plans {
+				if err := ProjectAttentionTx(ctx, tx, projectID, sessionID,
+					domain.AttentionSourceDelegationItem, plan.ItemID, previous,
+					domain.AttentionNeedsInput, true,
+					map[string]any{"kind": "needs_input", "generation": previous},
+					&domain.AttentionAction{Kind: "delegation_input", ItemID: plan.ItemID,
+						ExpectedGeneration: previous}); err != nil {
+					return nil, nil, err
+				}
+				if err := ReopenAttentionForSourceTx(ctx, tx,
+					domain.AttentionSourceDelegationItem, plan.ItemID, previous); err != nil {
+					return nil, nil, err
+				}
+			}
+		}
 		if err := ResolveAttentionForSourceTx(ctx, tx,
 			domain.AttentionSourceDelegationApproval, approvalID, generation); err != nil {
 			return nil, nil, err
@@ -167,6 +194,30 @@ func (r *DelegationApprovalRepo) Decide(ctx context.Context, approvalID string,
 			return nil, nil, childErr
 		}
 		children = append(children, child)
+		if plan.ContinuationKind != "" {
+			kind := domain.DelegationGenerationKind(plan.ContinuationKind)
+			if kind != domain.DelegationGenerationInput && kind != domain.DelegationGenerationFollowUp {
+				return nil, nil, fmt.Errorf("approval contains unsupported continuation kind %q", plan.ContinuationKind)
+			}
+			if strings.TrimSpace(plan.ContinuationInput) == "" || len(plan.ContinuationInput) > 16384 {
+				return nil, nil, fmt.Errorf("approval contains invalid continuation input")
+			}
+			inputPayload := map[string]string{"text": plan.ContinuationInput}
+			inputJSON, err := json.Marshal(inputPayload)
+			if err != nil {
+				return nil, nil, err
+			}
+			inputDigest, err := digestJSON(inputPayload)
+			if err != nil {
+				return nil, nil, err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO delegation_attempt_continuations
+				(attempt_id,source_attempt_id,kind,input_json,input_digest,created_at)
+				VALUES(?,?,?,?,?,?)`, continuationAttemptID(ctx, tx, itemID, generation),
+				plan.RetryOfAttemptID, string(kind), string(inputJSON), inputDigest, now); err != nil {
+				return nil, nil, fmt.Errorf("create approved continuation fact: %w", err)
+			}
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE delegation_approval_requests SET status='approved',
 		decision_client_request_id=?,resolved_at=? WHERE id=? AND status='pending'`,
@@ -192,10 +243,12 @@ func (r *DelegationApprovalRepo) Decide(ctx context.Context, approvalID string,
 }
 
 type retryBudgetItem struct {
-	ItemID           string                   `json:"itemId"`
-	Name             string                   `json:"name"`
-	RetryOfAttemptID string                   `json:"retryOfAttemptId"`
-	Budget           domain.BudgetCeilingJSON `json:"budget"`
+	ItemID            string                   `json:"itemId"`
+	Name              string                   `json:"name"`
+	RetryOfAttemptID  string                   `json:"retryOfAttemptId"`
+	Budget            domain.BudgetCeilingJSON `json:"budget"`
+	ContinuationKind  string                   `json:"continuationKind,omitempty"`
+	ContinuationInput string                   `json:"continuationInput,omitempty"`
 }
 
 func (r *DelegationApprovalRepo) loadApproval(ctx context.Context, approvalID string) (*domain.DelegationApprovalRequest, error) {

@@ -3,6 +3,7 @@
 import { Bot, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ContextSettings } from "@/components/settings/ContextSettings";
+import { McpSettings } from "@/components/settings/McpSettings";
 import { ModelsSettings } from "@/components/settings/ModelsSettings";
 import { PoliciesSettings } from "@/components/settings/PoliciesSettings";
 import { ProvidersSettings } from "@/components/settings/ProvidersSettings";
@@ -56,6 +57,15 @@ function tabIcon(id: SettingsTab) {
     return (
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      </svg>
+    );
+  }
+  if (id === "mcp") {
+    return (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2" y="2" width="20" height="20" rx="2" />
+        <line x1="2" y1="12" x2="22" y2="12" />
+        <line x1="12" y1="2" x2="12" y2="22" />
       </svg>
     );
   }
@@ -125,6 +135,7 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
     { id: "policies", label: "Policies", description: "Tool permission and routing policies", icon: tabIcon("policies") },
     { id: "context", label: "Context & session", description: session ? "Session defaults and compaction" : "Compaction policy defaults", icon: tabIcon("context") },
     { id: "templates", label: "Templates", description: "Slash-command prompt templates", icon: tabIcon("templates") },
+    { id: "mcp", label: "MCP", description: "MCP servers and project bindings", icon: tabIcon("mcp") },
   ];
 
   const activeItem = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
@@ -276,6 +287,11 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
             {activeTab === "templates" && (
               <div style={{ height: "100%", overflowY: "auto" }}>
                 <TemplatesSettings projectId={projectId} setError={setError} />
+              </div>
+            )}
+            {activeTab === "mcp" && (
+              <div style={{ height: "100%", overflowY: "auto" }}>
+                <McpSettings projectId={projectId} setError={setError} />
               </div>
             )}
           </div>

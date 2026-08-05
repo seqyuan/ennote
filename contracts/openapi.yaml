@@ -547,6 +547,327 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "413": { $ref: "#/components/responses/Error" }
+  /v1/mcp/server-profiles:
+    get:
+      operationId: listMCPServerProfiles
+      summary: List MCP server profiles (managed + the current project's own project-file profiles)
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          description: When set, project-file profiles scoped to other projects are filtered out
+          schema: { type: string }
+      responses:
+        "200":
+          description: MCP server profiles
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/MCPServerProfile" }
+    post:
+      operationId: createMCPServerProfile
+      summary: Create a managed MCP server profile (project_file/bundled are never creatable via the API)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [displayName, slug]
+              properties:
+                displayName: { type: string }
+                slug: { type: string }
+                sourceKind: { type: string, enum: [managed], default: managed }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MCPServerProfile" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/mcp/server-profiles/{profileID}:
+    parameters:
+      - $ref: "#/components/parameters/ProfileID"
+    delete:
+      operationId: deleteMCPServerProfile
+      summary: Archive an MCP server profile
+      responses:
+        "204": { description: Archived }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/mcp/server-profiles/{profileID}/versions:
+    parameters:
+      - $ref: "#/components/parameters/ProfileID"
+    get:
+      operationId: listMCPProfileVersions
+      summary: List immutable versions of an MCP profile
+      responses:
+        "200":
+          description: Versions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/MCPServerProfileVersion" }
+    post:
+      operationId: createMCPServerVersion
+      summary: Create an immutable version of an MCP profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MCPServerProfileVersion" }
+      responses:
+        "201": { description: Created }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/mcp/bundled-catalog:
+    get:
+      operationId: listMCPBundledCatalog
+      summary: List embedded bundled MCP descriptors (static, no execution)
+      responses:
+        "200":
+          description: Bundled catalog
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/BundledDescriptor" }
+  /v1/projects/{projectID}/mcp/bindings:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: listMCPBindings
+      summary: List MCP bindings for a project
+      responses:
+        "200":
+          description: Bindings
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/MCPProjectBinding" }
+    post:
+      operationId: createMCPBinding
+      summary: Create or update an MCP binding for a project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [profileVersionId]
+              properties:
+                profileVersionId: { type: string }
+                desiredEnabled: { type: boolean, default: false }
+                required: { type: boolean, default: true }
+                selectedRemoteToolNames:
+                  type: array
+                  items: { type: string }
+                credentialRefs:
+                  type: object
+                  additionalProperties: { type: string }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MCPProjectBinding" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/projects/{projectID}/mcp/candidates:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: listMCPCandidates
+      summary: List discovered MCP candidates (bundled, managed, project file) without executing them
+      responses:
+        "200":
+          description: Candidates
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/MCPCandidate" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/projects/{projectID}/mcp/discovery/refresh:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    post:
+      operationId: refreshMCPDiscovery
+      summary: Re-scan project file and bundled descriptors
+      responses:
+        "200":
+          description: Candidates
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/MCPCandidate" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/projects/{projectID}/mcp/bindings/from-candidate:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    post:
+      operationId: createMCPBindingFromCandidate
+      summary: Materialize a discovered candidate into an immutable version and bind it (never auto-enabled)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slug, transport]
+              properties:
+                slug: { type: string }
+                sourceKind: { type: string }
+                executable: { type: string }
+                endpoint: { type: string }
+                transport: { type: string }
+                configDigest: { type: string }
+      responses:
+        "201":
+          description: Created (disabled binding)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MCPProjectBinding" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/projects/{projectID}/mcp/bindings/{bindingID}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/BindingID"
+    patch:
+      operationId: updateMCPBinding
+      summary: Update an MCP binding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                desiredEnabled: { type: boolean }
+                required: { type: boolean }
+                selectedRemoteToolNames:
+                  type: array
+                  items: { type: string }
+                credentialRefs:
+                  type: object
+                  additionalProperties: { type: string }
+      responses:
+        "200": { description: Updated }
+        "400": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteMCPBinding
+      summary: Delete an MCP binding
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/projects/{projectID}/mcp/bindings/{bindingID}/test:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/BindingID"
+    post:
+      operationId: testMCPBinding
+      summary: Test a browse connection to the bound MCP server
+      responses:
+        "200":
+          description: Connection succeeded
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          ok: { type: boolean }
+                          transport: { type: string }
+        "502": { $ref: "#/components/responses/Error" }
+  /v1/projects/{projectID}/mcp/bindings/{bindingID}/catalog:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/BindingID"
+    get:
+      operationId: getMCPBindingCatalog
+      summary: Get the normalized tool catalog for a binding (cached)
+      responses:
+        "200":
+          description: Normalized catalog entries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/MCPCatalogEntry" }
+        "502": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: refreshMCPBindingCatalog
+      summary: Force a catalog refresh via a browse connection
+      responses:
+        "200":
+          description: Fresh catalog entries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/MCPCatalogEntry" }
+        "502": { $ref: "#/components/responses/Error" }
   /v1/projects/{projectID}/sessions:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
@@ -1690,6 +2011,16 @@ components:
       in: path
       required: true
       schema: { type: string }
+    ProfileID:
+      name: profileID
+      in: path
+      required: true
+      schema: { type: string }
+    BindingID:
+      name: bindingID
+      in: path
+      required: true
+      schema: { type: string }
   responses:
     Error:
       description: Error response
@@ -1702,6 +2033,120 @@ components:
       type: object
       properties:
         data: {}
+    MCPServerProfile:
+      type: object
+      properties:
+        id: { type: string }
+        displayName: { type: string }
+        slug: { type: string }
+        sourceKind: { type: string, enum: [managed, project_file, bundled] }
+        projectScope: { type: string, nullable: true }
+        sourceLocator: { type: string }
+        lifecycleStatus: { type: string, enum: [active, archived] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        latestVersion: { type: integer }
+    MCPServerProfileVersion:
+      type: object
+      required: [transport]
+      properties:
+        id: { type: string }
+        profileId: { type: string }
+        version: { type: integer }
+        transport: { type: string, enum: [stdio, streamable_http, legacy_sse] }
+        executable: { type: string }
+        argv: { type: array, items: { type: string } }
+        endpoint: { type: string }
+        envLiterals:
+          type: object
+          additionalProperties: { type: string }
+        envCredentials:
+          type: object
+          description: Secret env references (env:/file:/keyring:) only; values never persisted
+          additionalProperties: { type: string }
+        headerLiterals:
+          type: object
+          additionalProperties: { type: string }
+        headerCredentials:
+          type: object
+          additionalProperties: { type: string }
+        cwd: { type: string }
+        timeoutMs: { type: integer, default: 15000 }
+        networkPolicy: { type: string, enum: [default, loopback, private, custom_ca, insecure], default: default }
+        configDigest: { type: string }
+        createdAt: { type: string, format: date-time }
+    MCPProjectBinding:
+      type: object
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        profileVersionId: { type: string }
+        desiredEnabled: { type: boolean }
+        required: { type: boolean }
+        selectedRemoteToolNames:
+          type: array
+          items: { type: string }
+        credentialRefs:
+          type: object
+          additionalProperties: { type: string }
+        revision: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    MCPCatalogEntry:
+      type: object
+      properties:
+        remoteName: { type: string }
+        exposedName: { type: string }
+        description: { type: string }
+        inputSchema: {}
+        outputSchema: {}
+        readOnlyHint: { type: boolean }
+        digest: { type: string }
+    MCPCandidate:
+      type: object
+      properties:
+        slug: { type: string }
+        displayName: { type: string }
+        sourceKind: { type: string, enum: [managed, project_file, bundled] }
+        sourceLocator: { type: string }
+        transport: { type: string }
+        executable: { type: string }
+        endpoint: { type: string }
+        configDigest: { type: string }
+        boundVersionId: { type: string }
+        alreadyBound: { type: boolean }
+        updateAvailable: { type: boolean }
+    BundledDescriptor:
+      type: object
+      description: Ennote's local trust declaration for a bundled MCP server; metadata only, never auto-executed
+      properties:
+        slug: { type: string }
+        displayName: { type: string }
+        version: { type: string }
+        publisher: { type: string }
+        license: { type: string }
+        description: { type: string }
+        transport: { type: string }
+        command: { type: string }
+        args: { type: array, items: { type: string } }
+        endpoint: { type: string }
+        credentialRequirements:
+          type: array
+          items:
+            type: object
+            properties:
+              envName: { type: string }
+              required: { type: boolean }
+        payloadDelivery: { type: string, enum: [embedded, on_demand_download, external_command] }
+        payloadDigest: { type: string }
+        riskManifest:
+          type: array
+          items:
+            type: object
+            properties:
+              remoteName: { type: string }
+              riskClass: { type: string }
+        readOnlyOnly: { type: boolean }
     HealthEnvelope:
       type: object
       required: [data]
@@ -2668,7 +3113,7 @@ components:
     DelegationInputCommand:
       type: object
       additionalProperties: false
-      required: [expectedGeneration, text, clientRequestId]
+      required: [sourceAttemptId, expectedGeneration, text, clientRequestId]
       properties:
         sourceAttemptId: { type: string }
         expectedGeneration: { type: integer, minimum: 0 }

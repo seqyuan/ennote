@@ -110,6 +110,8 @@ func TestInspectDelegationUnknownGroup(t *testing.T) {
 
 func TestRetryDelegationAPI(t *testing.T) {
 	server, handler, delegations, groupID, failedItemID := setupDelegationGroupAPI(t)
+	control := &fakeController{}
+	server.Control = control
 
 	response := request(t, handler, http.MethodPost, "/v1/delegations/"+groupID+"/retry",
 		map[string]any{"expectedGeneration": 0, "itemIds": []string{failedItemID}, "clientRequestId": "api-retry-1"}, true)
@@ -122,6 +124,7 @@ func TestRetryDelegationAPI(t *testing.T) {
 	assert.Equal(t, 1, payload.Generation.Generation)
 	require.Len(t, payload.ChildRunIDs, 1)
 	require.Len(t, payload.Generation.ReusedAttempts, 1)
+	assert.Equal(t, payload.ChildRunIDs, control.enqueued)
 
 	// Stale expected generation conflicts.
 	response = request(t, handler, http.MethodPost, "/v1/delegations/"+groupID+"/retry",
@@ -141,6 +144,42 @@ func TestRetryDelegationAPI(t *testing.T) {
 		map[string]any{"expectedGeneration": 1, "itemIds": []string{successID}, "clientRequestId": "api-retry-ineligible"}, true)
 	require.Equal(t, http.StatusConflict, response.Code)
 	_ = server
+}
+
+func TestFollowUpAPIEnqueuesContinuationChild(t *testing.T) {
+	server, handler, delegations, groupID, _ := setupDelegationGroupAPI(t)
+	control := &fakeController{}
+	server.Control = control
+	items, err := delegations.ListItems(context.Background(), groupID)
+	require.NoError(t, err)
+	var succeededItemID, sourceAttemptID string
+	for _, item := range items {
+		if item.Status == domain.DelegationItemTerminal {
+			succeededItemID = item.ID
+		}
+	}
+	require.NoError(t, delegations.DB.QueryRow(`SELECT id FROM delegation_item_attempts
+		WHERE item_id=? AND generation=0`, succeededItemID).Scan(&sourceAttemptID))
+
+	response := request(t, handler, http.MethodPost,
+		"/v1/delegation-items/"+succeededItemID+"/follow-up", map[string]any{
+			"sourceAttemptId": sourceAttemptID, "expectedGeneration": 0,
+			"text": "expand", "clientRequestId": "api-follow-up",
+		}, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var payload struct {
+		ChildRunID string `json:"childRunId"`
+	}
+	decodeData(t, response, &payload)
+	require.NotEmpty(t, payload.ChildRunID)
+	assert.Equal(t, []string{payload.ChildRunID}, control.enqueued)
+
+	response = request(t, handler, http.MethodPost,
+		"/v1/delegation-items/"+succeededItemID+"/follow-up", map[string]any{
+			"sourceAttemptId": sourceAttemptID, "expectedGeneration": 0,
+			"text": "different", "clientRequestId": "api-follow-up",
+		}, true)
+	assert.Equal(t, http.StatusConflict, response.Code)
 }
 
 func TestRetryDelegationAPIApprovalRequired(t *testing.T) {

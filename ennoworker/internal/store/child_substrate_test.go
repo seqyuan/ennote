@@ -66,7 +66,7 @@ func TestDelegationTablesExistWithWorkspaceExplorerBuiltin(t *testing.T) {
 	assert.Equal(t, 1, versionCount)
 	var currentVersion string
 	require.NoError(t, db.QueryRow(`SELECT current_version_id FROM agent_profiles WHERE id='builtin-workspace-explorer'`).Scan(&currentVersion))
-	assert.Equal(t, "builtin-workspace-explorer-v2", currentVersion)
+	assert.Equal(t, "builtin-workspace-explorer-v3", currentVersion)
 
 	// The builtin definition must pass RoleRepo validation (known tools, fixed
 	// or inherit binding accepted, read-only without mutation tools).

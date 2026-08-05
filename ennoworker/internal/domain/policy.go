@@ -35,6 +35,19 @@ const (
 	RiskSensitive  RiskClass = "sensitive"
 )
 
+// IsValidRiskClass reports whether value is one of the supported RiskClass
+// values. Empty and unknown values are invalid; tools declaring them fail
+// Registry registration (fail closed).
+func IsValidRiskClass(value RiskClass) bool {
+	switch value {
+	case RiskReadOnly, RiskLocalWrite, RiskShell,
+		RiskExternal, RiskDelegation, RiskSensitive:
+		return true
+	default:
+		return false
+	}
+}
+
 type ToolPolicyConfig struct {
 	Mode                     string              `json:"mode"`
 	AllowedTools             []string            `json:"allowedTools,omitempty"`

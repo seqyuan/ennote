@@ -71,7 +71,7 @@ func setupDelegationApprovalAPI(t *testing.T) (*Server, http.Handler, *store.Del
 // apiExplorerItem mirrors the store-level explorer fixture for the api package.
 func apiExplorerItem() store.CreateDelegationItemInput {
 	return store.CreateDelegationItemInput{
-		Name: "explore", RoleVersionID: "builtin-workspace-explorer-v2",
+		Name: "explore", RoleVersionID: "builtin-workspace-explorer-v3",
 		AssignmentJSON: json.RawMessage(`{"objective":"inspect"}`), OutputContract: "text-v1",
 		Budget: domain.BudgetCeilingJSON{MaxModelCalls: 2, MaxToolCalls: 4, MaxTotalTokens: 10000,
 			MaxOutputTokens: 2000, MaxCostMicros: 50000, MaxWallTimeMS: 60000},
@@ -102,6 +102,8 @@ func TestDecideDelegationApprovalRejectsAndRewinds(t *testing.T) {
 
 func TestDecideDelegationApprovalApprovesAndMaterializes(t *testing.T) {
 	server, handler, delegations, approvalID := setupDelegationApprovalAPI(t)
+	control := &fakeController{}
+	server.Control = control
 
 	response := request(t, handler, http.MethodPost, "/v1/delegation-approvals/"+approvalID+"/decision",
 		map[string]any{"decision": "approved", "clientRequestId": "api-approve"}, true)
@@ -113,6 +115,7 @@ func TestDecideDelegationApprovalApprovesAndMaterializes(t *testing.T) {
 	decodeData(t, response, &payload)
 	assert.Equal(t, "approved", payload.Approval.Status)
 	require.Len(t, payload.ChildRunIDs, 1)
+	assert.Equal(t, payload.ChildRunIDs, control.enqueued)
 	var status string
 	require.NoError(t, delegations.DB.QueryRow(`SELECT status FROM agent_runs WHERE id=?`,
 		payload.ChildRunIDs[0]).Scan(&status))

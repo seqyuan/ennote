@@ -58,6 +58,13 @@ type ToolExecutionClassifier interface {
 	ExecutionClass(toolName string) ExecutionClass
 }
 
+// ToolRiskClassifier resolves a tool's permission risk class by name.
+// The agent Loop and ToolPolicy use this to decide approval behaviour.
+// Unregistered / restricted-away / hallucinated tools resolve to RiskSensitive.
+type ToolRiskClassifier interface {
+	RiskClass(toolName string) RiskClass
+}
+
 type ToolArgumentValidator interface {
 	ValidateArguments(toolName string, arguments json.RawMessage) error
 }

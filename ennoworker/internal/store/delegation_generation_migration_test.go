@@ -84,13 +84,13 @@ func seedMigration22DelegationDB(t *testing.T) *sql.DB {
 	exec(`INSERT INTO delegation_items
 		(id,group_id,child_run_id,name,role_version_id,assignment_json,output_contract,budget_json,result_json,status,ordinal,created_at)
 		VALUES
-		 ('i-ok','g-settled','child-ok','ok','builtin-workspace-explorer-v2','{}','text-v1',` + budget + `,
+		 ('i-ok','g-settled','child-ok','ok','builtin-workspace-explorer-v3','{}','text-v1',` + budget + `,
 		  '{"status":"completed","summary":"found README"}','succeeded',0,CURRENT_TIMESTAMP),
-		 ('i-fail','g-settled','child-fail','fail','builtin-workspace-explorer-v2','{}','text-v1',` + budget + `,
+		 ('i-fail','g-settled','child-fail','fail','builtin-workspace-explorer-v3','{}','text-v1',` + budget + `,
 		  '{"status":"blocked","summary":"exploration failed"}','failed',1,CURRENT_TIMESTAMP),
-		 ('i-wait','g-waiting','child-wait','wait','builtin-workspace-explorer-v2','{}','text-v1',` + budget + `,
+		 ('i-wait','g-waiting','child-wait','wait','builtin-workspace-explorer-v3','{}','text-v1',` + budget + `,
 		  NULL,'pending',0,CURRENT_TIMESTAMP),
-		 ('i-cancel','g-cancelled','child-cancel','cancel','builtin-workspace-explorer-v2','{}','text-v1',` + budget + `,
+		 ('i-cancel','g-cancelled','child-cancel','cancel','builtin-workspace-explorer-v3','{}','text-v1',` + budget + `,
 		  NULL,'cancelled',0,CURRENT_TIMESTAMP)`)
 	exec(`INSERT INTO run_budgets
 		(run_id,max_model_calls,max_tool_calls,max_total_tokens,max_output_tokens,max_cost_usd_micros,max_wall_time_ms,

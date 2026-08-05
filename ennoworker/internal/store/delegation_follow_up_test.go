@@ -19,7 +19,7 @@ func settleNeedsInputGroup(t *testing.T) (*store.DelegationRepo, *store.RunRepo,
 	group, items, children, err := delegations.CreateGroupWithChildren(ctx, store.CreateDelegationGroupInput{
 		ParentRunID: submission.Run.ID, ParentToolCallID: "ni-call", Strategy: domain.DelegationStrategySingle,
 		ExecutionMode: domain.DelegationExecutionBackground,
-		Items:         []store.CreateDelegationItemInput{explorerItem()},
+		Items:         []store.CreateDelegationItemInput{halfExplorerItem()},
 	}, submission.Run.SessionID)
 	require.NoError(t, err)
 	require.Len(t, children, 1)
@@ -33,12 +33,20 @@ func settleNeedsInputGroup(t *testing.T) (*store.DelegationRepo, *store.RunRepo,
 	return delegations, runs, group, items[0].ID
 }
 
+func attemptIDForItemGeneration(t *testing.T, delegations *store.DelegationRepo, itemID string, generation int) string {
+	t.Helper()
+	var attemptID string
+	require.NoError(t, delegations.DB.QueryRow(`SELECT id FROM delegation_item_attempts
+		WHERE item_id=? AND generation=?`, itemID, generation).Scan(&attemptID))
+	return attemptID
+}
+
 func TestContinueNeedsInputCreatesContinuationGeneration(t *testing.T) {
 	delegations, _, group, itemID := settleNeedsInputGroup(t)
 	ctx := context.Background()
 
 	generation, child, err := delegations.ContinueNeedsInput(ctx, itemID, domain.DelegationInputCommand{
-		ExpectedGeneration: 0, SourceAttemptID: "", Text: "inspect src/ only",
+		ExpectedGeneration: 0, SourceAttemptID: attemptIDForItemGeneration(t, delegations, itemID, 0), Text: "inspect src/ only",
 		ClientRequestID: "ni-1",
 	})
 	require.NoError(t, err)
@@ -78,7 +86,8 @@ func TestContinueNeedsInputRejectsWrongSourceState(t *testing.T) {
 
 	// Wrong expected generation is stale.
 	_, _, err := delegations.ContinueNeedsInput(ctx, itemID, domain.DelegationInputCommand{
-		ExpectedGeneration: 5, Text: "x", ClientRequestID: "ni-stale",
+		ExpectedGeneration: 5, SourceAttemptID: attemptIDForItemGeneration(t, delegations, itemID, 0),
+		Text: "x", ClientRequestID: "ni-stale",
 	})
 	require.Error(t, err)
 	assert.Equal(t, domain.ErrorDelegationInputStale, domain.ErrorCodeOf(err))
@@ -89,12 +98,15 @@ func TestContinueNeedsInputIdempotent(t *testing.T) {
 	delegations, _, _, itemID := settleNeedsInputGroup(t)
 	ctx := context.Background()
 
+	sourceAttemptID := attemptIDForItemGeneration(t, delegations, itemID, 0)
 	first, firstChild, err := delegations.ContinueNeedsInput(ctx, itemID, domain.DelegationInputCommand{
-		ExpectedGeneration: 0, Text: "inspect src/", ClientRequestID: "ni-idem",
+		ExpectedGeneration: 0, SourceAttemptID: sourceAttemptID,
+		Text: "inspect src/", ClientRequestID: "ni-idem",
 	})
 	require.NoError(t, err)
 	second, secondChild, err := delegations.ContinueNeedsInput(ctx, itemID, domain.DelegationInputCommand{
-		ExpectedGeneration: 0, Text: "inspect src/", ClientRequestID: "ni-idem",
+		ExpectedGeneration: 0, SourceAttemptID: sourceAttemptID,
+		Text: "inspect src/", ClientRequestID: "ni-idem",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, first.ID, second.ID)
@@ -117,7 +129,8 @@ func TestFollowUpResumesCompletedAttempt(t *testing.T) {
 	require.Len(t, items, 1)
 
 	generation, child, err := delegations.FollowUp(ctx, items[0].ID, domain.DelegationInputCommand{
-		ExpectedGeneration: 0, Text: "expand the summary please", ClientRequestID: "fu-1",
+		ExpectedGeneration: 0, SourceAttemptID: attemptIDForItemGeneration(t, delegations, items[0].ID, 0),
+		Text: "expand the summary please", ClientRequestID: "fu-1",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, generation)
@@ -138,7 +151,8 @@ func TestFollowUpRejectsFailedAttempt(t *testing.T) {
 
 	// failed attempt is not follow-up eligible; retry is the correct command.
 	_, _, err := delegations.FollowUp(ctx, failedItemID, domain.DelegationInputCommand{
-		ExpectedGeneration: 0, Text: "nope", ClientRequestID: "fu-fail",
+		ExpectedGeneration: 0, SourceAttemptID: attemptIDForItemGeneration(t, delegations, failedItemID, 0),
+		Text: "nope", ClientRequestID: "fu-fail",
 	})
 	require.Error(t, err)
 	assert.Equal(t, domain.ErrorDelegationFollowUpForbidden, domain.ErrorCodeOf(err))

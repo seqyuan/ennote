@@ -37,7 +37,20 @@ func createCompletionTx(ctx context.Context, tx *sql.Tx, groupID string, generat
 	if groupStatus == "cancelled" {
 		kind = "cancelled"
 	}
-	resultJSON, err := foldGenerationResult(ctx, tx, groupID, generation)
+	selected, err := resolveGenerationItemStatesTx(ctx, tx, groupID, generation)
+	if err != nil {
+		return nil, err
+	}
+	if kind != "cancelled" {
+		for _, state := range selected {
+			switch state.attemptStatus {
+			case domain.DelegationAttemptFailed, domain.DelegationAttemptCancelled,
+				domain.DelegationAttemptInterrupted, domain.DelegationAttemptNotAuthorized:
+				kind = "failed"
+			}
+		}
+	}
+	resultJSON, err := foldSelectedGenerationResult(selected)
 	if err != nil {
 		return nil, err
 	}
@@ -100,34 +113,28 @@ func createCompletionTx(ctx context.Context, tx *sql.Tx, groupID string, generat
 // foldGenerationResult aggregates the explicit generation selection in ordinal
 // order — never by timestamp — into the completion result payload.
 func foldGenerationResult(ctx context.Context, tx *sql.Tx, groupID string, generation int) (string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT i.name,COALESCE(a.status,''),COALESCE(a.result_json,'')
-		FROM delegation_item_attempts a
-		JOIN delegation_items i ON i.id=a.item_id
-		WHERE i.group_id=? AND a.generation=? ORDER BY i.ordinal`, groupID, generation)
+	selected, err := resolveGenerationItemStatesTx(ctx, tx, groupID, generation)
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
+	return foldSelectedGenerationResult(selected)
+}
+
+func foldSelectedGenerationResult(selected []itemState) (string, error) {
 	type childResult struct {
 		Name   string          `json:"name"`
 		Status string          `json:"status"`
 		Result json.RawMessage `json:"result"`
 	}
-	children := make([]childResult, 0)
-	for rows.Next() {
-		var name, status string
-		var result sql.NullString
-		if err := rows.Scan(&name, &status, &result); err != nil {
-			return "", err
+	children := make([]childResult, 0, len(selected))
+	for _, state := range selected {
+		result := state.resultJSON
+		if len(result) == 0 {
+			result = json.RawMessage("null")
 		}
-		res := json.RawMessage("null")
-		if result.Valid && result.String != "" {
-			res = json.RawMessage(result.String)
-		}
-		children = append(children, childResult{Name: name, Status: status, Result: res})
-	}
-	if err := rows.Err(); err != nil {
-		return "", err
+		children = append(children, childResult{
+			Name: state.item.Name, Status: string(state.attemptStatus), Result: result,
+		})
 	}
 	payload := map[string]any{"status": "settled", "children": children}
 	encoded, err := json.Marshal(payload)
@@ -149,19 +156,25 @@ func (r *DelegationRepo) RebuildMissingCompletions(ctx context.Context, limit in
 		return nil, err
 	}
 	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, `SELECT g.id,g.status FROM delegation_groups g
-		WHERE g.status IN ('settled','cancelled')
+	rows, err := tx.QueryContext(ctx, `SELECT gg.group_id,gg.generation
+		FROM delegation_group_generations gg
+		JOIN delegation_groups g ON g.id=gg.group_id
+		JOIN delegation_handles h ON h.group_id=g.id
+		WHERE gg.status IN ('settled','cancelled')
 		  AND NOT EXISTS (SELECT 1 FROM delegation_completions c
-			JOIN delegation_handles h ON h.id=c.handle_id WHERE h.group_id=g.id)
-		ORDER BY g.created_at LIMIT ?`, limit)
+			WHERE c.handle_id=h.id AND c.generation=gg.generation)
+		ORDER BY g.created_at,gg.generation LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
-	type pending struct{ groupID, status string }
+	type pending struct {
+		groupID    string
+		generation int
+	}
 	var pendingGroups []pending
 	for rows.Next() {
 		var entry pending
-		if err := rows.Scan(&entry.groupID, &entry.status); err != nil {
+		if err := rows.Scan(&entry.groupID, &entry.generation); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -172,12 +185,7 @@ func (r *DelegationRepo) RebuildMissingCompletions(ctx context.Context, limit in
 	}
 	completions := make([]domain.DelegationCompletion, 0, len(pendingGroups))
 	for _, group := range pendingGroups {
-		var generation int
-		if err := tx.QueryRowContext(ctx, `SELECT current_generation FROM delegation_groups WHERE id=?`,
-			group.groupID).Scan(&generation); err != nil {
-			return nil, err
-		}
-		completion, err := createCompletionTx(ctx, tx, group.groupID, generation)
+		completion, err := createCompletionTx(ctx, tx, group.groupID, group.generation)
 		if err != nil {
 			return nil, err
 		}

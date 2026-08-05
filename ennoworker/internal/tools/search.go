@@ -37,10 +37,10 @@ func (t *FindTool) RetryPolicy() domain.ToolRetryPolicy {
 }
 
 func (t *GrepTool) Definition() domain.ToolDefinition {
-	return domain.ToolDefinition{Name: "grep", Description: "Search text files under /workspace with a regular expression", Parameters: schema(`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"}},"required":["pattern"],"additionalProperties":false}`)}
+	return domain.ToolDefinition{Name: "grep", Description: "Search text files under /workspace with a regular expression", Parameters: schema(`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"}},"required":["pattern"],"additionalProperties":false}`), RiskClass: domain.RiskReadOnly}
 }
 func (t *FindTool) Definition() domain.ToolDefinition {
-	return domain.ToolDefinition{Name: "find", Description: "Find files under /workspace by glob pattern", Parameters: schema(`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"}},"required":["pattern"],"additionalProperties":false}`)}
+	return domain.ToolDefinition{Name: "find", Description: "Find files under /workspace by glob pattern", Parameters: schema(`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"}},"required":["pattern"],"additionalProperties":false}`), RiskClass: domain.RiskReadOnly}
 }
 
 func (t *GrepTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {

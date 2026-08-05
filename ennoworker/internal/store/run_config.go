@@ -104,8 +104,10 @@ func (r *RunRepo) ResolveAndFreezeConfig(ctx context.Context, run *domain.AgentR
 			// delegation item; there is no public Turn target.
 			invocationTargetKind = "role"
 			if err := tx.QueryRowContext(ctx, `SELECT v.agent_profile_id,v.id,v.version,v.definition_json,v.config_digest
-				FROM delegation_items di JOIN agent_profile_versions v ON v.id=di.role_version_id
-				WHERE di.child_run_id=?`, run.ID).
+				FROM delegation_item_attempts a
+				JOIN delegation_items di ON di.id=a.item_id
+				JOIN agent_profile_versions v ON v.id=di.role_version_id
+				WHERE a.child_run_id=?`, run.ID).
 				Scan(&roleID, &versionID, &roleVersion, &definitionJSON, &configDigest); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
@@ -261,7 +263,7 @@ func (r *RunRepo) ResolveAndFreezeConfig(ctx context.Context, run *domain.AgentR
 	if frozenRole != nil {
 		switch roleDefinition.PermissionCeiling {
 		case domain.PermissionDiscuss:
-			toolPolicyID = "builtin-tool-discuss-v2"
+			toolPolicyID = "builtin-tool-discuss-v3"
 		case domain.PermissionAsk:
 			toolPolicyID = "builtin-tool-ask-v1"
 		case domain.PermissionAuto:

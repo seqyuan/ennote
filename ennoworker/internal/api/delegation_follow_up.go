@@ -26,6 +26,10 @@ func (s *Server) continueDelegationItem(w http.ResponseWriter, r *http.Request) 
 		writeError(w, r, http.StatusBadRequest, "client_request_id_required", "clientRequestId is required", false)
 		return
 	}
+	if input.SourceAttemptID == "" {
+		writeError(w, r, http.StatusBadRequest, "source_attempt_id_required", "sourceAttemptId is required", false)
+		return
+	}
 	var generation *domain.DelegationGeneration
 	var child *domain.AgentRun
 	var err error
@@ -44,6 +48,8 @@ func (s *Server) continueDelegationItem(w http.ResponseWriter, r *http.Request) 
 			writeError(w, r, http.StatusConflict, "delegation_input_stale", err.Error(), false)
 		case domain.ErrorDelegationFollowUpForbidden:
 			writeError(w, r, http.StatusConflict, "delegation_follow_up_forbidden", err.Error(), false)
+		case domain.ErrorDelegationGenerationConflict:
+			writeError(w, r, http.StatusConflict, "delegation_generation_conflict", err.Error(), false)
 		case domain.ErrorDelegationNotAuthorized:
 			writeError(w, r, http.StatusForbidden, "delegation_not_authorized", err.Error(), false)
 		case domain.ErrorDelegationBudgetExceeded:
@@ -51,6 +57,14 @@ func (s *Server) continueDelegationItem(w http.ResponseWriter, r *http.Request) 
 		default:
 			s.writeStoreError(w, r, err)
 		}
+		return
+	}
+	children := make([]*domain.AgentRun, 0, 1)
+	if child != nil {
+		children = append(children, child)
+	}
+	if err := s.enqueueChildRuns(r.Context(), children); err != nil {
+		writeInternal(w, r, err)
 		return
 	}
 	childID := ""

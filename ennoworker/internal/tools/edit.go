@@ -19,7 +19,7 @@ type EditTool struct {
 func (t *EditTool) ExecutionClass() domain.ExecutionClass { return domain.ExecutionWorkspaceWrite }
 
 func (t *EditTool) Definition() domain.ToolDefinition {
-	return domain.ToolDefinition{Name: "edit", Description: "Replace one unique text occurrence in a file inside /workspace", Parameters: schema(`{"type":"object","properties":{"path":{"type":"string"},"oldText":{"type":"string"},"newText":{"type":"string"}},"required":["path","oldText","newText"],"additionalProperties":false}`)}
+	return domain.ToolDefinition{Name: "edit", Description: "Replace one unique text occurrence in a file inside /workspace", Parameters: schema(`{"type":"object","properties":{"path":{"type":"string"},"oldText":{"type":"string"},"newText":{"type":"string"}},"required":["path","oldText","newText"],"additionalProperties":false}`), RiskClass: domain.RiskLocalWrite}
 }
 
 func (t *EditTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {

@@ -24,7 +24,7 @@ type BashTool struct {
 func (t *BashTool) ExecutionClass() domain.ExecutionClass { return domain.ExecutionExclusive }
 
 func (t *BashTool) Definition() domain.ToolDefinition {
-	return domain.ToolDefinition{Name: "bash", Description: "Execute a shell command in the current workspace", Parameters: schema(`{"type":"object","properties":{"command":{"type":"string"},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":3600}},"required":["command"],"additionalProperties":false}`)}
+	return domain.ToolDefinition{Name: "bash", Description: "Execute a shell command in the current workspace", Parameters: schema(`{"type":"object","properties":{"command":{"type":"string"},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":3600}},"required":["command"],"additionalProperties":false}`), RiskClass: domain.RiskShell}
 }
 
 func (t *BashTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {

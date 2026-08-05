@@ -22,7 +22,7 @@ func setupDelegationParent(t *testing.T) (*store.DelegationRepo, *store.RunRepo,
 
 func explorerItem() store.CreateDelegationItemInput {
 	return store.CreateDelegationItemInput{
-		Name: "explore", RoleVersionID: "builtin-workspace-explorer-v2",
+		Name: "explore", RoleVersionID: "builtin-workspace-explorer-v3",
 		AssignmentJSON: json.RawMessage(`{"objective":"inspect the workspace"}`), OutputContract: "text-v1",
 		Budget: domain.BudgetCeilingJSON{MaxModelCalls: 4, MaxToolCalls: 8, MaxTotalTokens: 20000,
 			MaxOutputTokens: 4000, MaxCostMicros: 100000, MaxWallTimeMS: 120000},
@@ -55,7 +55,7 @@ func TestCreateGroupPersistsItemsAndRejectsDuplicateToolCall(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	assert.Equal(t, "explore", items[0].Name)
-	assert.Equal(t, "builtin-workspace-explorer-v2", items[0].RoleVersionID)
+	assert.Equal(t, "builtin-workspace-explorer-v3", items[0].RoleVersionID)
 	assert.Equal(t, domain.DelegationItemPending, items[0].Status)
 
 	_, err = delegations.CreateGroup(ctx, store.CreateDelegationGroupInput{

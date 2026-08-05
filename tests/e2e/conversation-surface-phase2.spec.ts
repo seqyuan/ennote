@@ -94,7 +94,7 @@ test("Settings tabs use arrow navigation, retain Chat, and restore focus", async
   await providers.press("ArrowRight");
   await expect(page.getByRole("tab", { name: "Models" })).toHaveAttribute("aria-selected", "true");
   await page.getByRole("tab", { name: "Models" }).press("End");
-  await expect(page.getByRole("tab", { name: "Templates" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "MCP" })).toHaveAttribute("aria-selected", "true");
   await page.getByRole("tab", { name: "Context & session" }).click();
   await expect(page.getByLabel("Default model")).toBeVisible();
   expect(await page.evaluate(() => (window as typeof window & { retainedChat?: Element | null }).retainedChat === document.querySelector(".chat-area"))).toBe(true);

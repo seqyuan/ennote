@@ -13,15 +13,6 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 )
 
-// itemState is the per-item retry planning record.
-type itemState struct {
-	item          domain.DelegationItem
-	attemptID     string
-	attemptChild  string
-	attemptStatus domain.DelegationAttemptStatus
-	resultDigest  string
-}
-
 // RetryGeneration atomically creates the next generation for a settled group.
 // Only explicitly selected eligible attempts (failed/cancelled/interrupted) get
 // new child Runs; every other item reuses its frozen current attempt. A budget
@@ -37,10 +28,22 @@ func (r *DelegationRepo) RetryGeneration(ctx context.Context, groupID string,
 	if len(input.ItemIDs) == 0 {
 		return nil, nil, nil, fmt.Errorf("retry requires at least one selected item")
 	}
+	requestDigest, err := retryRequestDigest(input)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 
 	// Idempotent fast path: the client request id already produced a generation.
 	existing, children, approval, err := r.loadRetryResult(ctx, groupID, input.ClientRequestID)
 	if err == nil && existing != nil {
+		var storedDigest string
+		if err := r.DB.QueryRowContext(ctx, `SELECT COALESCE(request_digest,'')
+			FROM delegation_group_generations WHERE id=?`, existing.ID).Scan(&storedDigest); err != nil {
+			return nil, nil, nil, err
+		}
+		if err := requestDigestConflict(storedDigest, requestDigest); err != nil {
+			return nil, nil, nil, err
+		}
 		return existing, children, approval, nil
 	}
 	if err != nil {
@@ -62,6 +65,15 @@ func (r *DelegationRepo) RetryGeneration(ctx context.Context, groupID string,
 		return nil, nil, nil, err
 	}
 	if alreadyExists > 0 {
+		var storedDigest string
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(request_digest,'')
+			FROM delegation_group_generations WHERE group_id=? AND client_request_id=?`,
+			groupID, input.ClientRequestID).Scan(&storedDigest); err != nil {
+			return nil, nil, nil, err
+		}
+		if err := requestDigestConflict(storedDigest, requestDigest); err != nil {
+			return nil, nil, nil, err
+		}
 		if err := tx.Rollback(); err != nil {
 			return nil, nil, nil, err
 		}
@@ -108,39 +120,11 @@ func (r *DelegationRepo) RetryGeneration(ctx context.Context, groupID string,
 		return nil, nil, nil, fmt.Errorf("%w: current generation is not terminal", ErrDelegationConflict)
 	}
 
-	// Resolve every logical item and its current attempt.
-	rows, err := tx.QueryContext(ctx, `SELECT i.id,i.name,i.role_version_id,i.output_contract,i.budget_json,i.status,
-		COALESCE(a.id,''),COALESCE(a.child_run_id,''),COALESCE(a.status,''),COALESCE(a.result_digest,'')
-		FROM delegation_items i
-		LEFT JOIN delegation_item_attempts a ON a.item_id=i.id AND a.generation=?
-		WHERE i.group_id=? ORDER BY i.ordinal`, currentGeneration, groupID)
+	// Resolve every logical item and its selected attempt, including attempts
+	// explicitly reused from an earlier generation.
+	items, err := resolveGenerationItemStatesTx(ctx, tx, groupID, currentGeneration)
 	if err != nil {
 		return nil, nil, nil, err
-	}
-	items := make([]itemState, 0)
-	for rows.Next() {
-		var state itemState
-		var itemStatus, attemptID, attemptChild, attemptStatus, resultDigest string
-		var budgetJSON string
-		if err := rows.Scan(&state.item.ID, &state.item.Name, &state.item.RoleVersionID,
-			&state.item.OutputContract, &budgetJSON, &itemStatus,
-			&attemptID, &attemptChild, &attemptStatus, &resultDigest); err != nil {
-			rows.Close()
-			return nil, nil, nil, err
-		}
-		state.item.Status = domain.DelegationItemStatus(itemStatus)
-		state.item.BudgetJSON = json.RawMessage(budgetJSON)
-		state.attemptID = attemptID
-		state.attemptChild = attemptChild
-		state.attemptStatus = domain.DelegationAttemptStatus(attemptStatus)
-		state.resultDigest = resultDigest
-		items = append(items, state)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, nil, nil, err
-	}
-	if len(items) == 0 {
-		return nil, nil, nil, fmt.Errorf("delegation group has no items")
 	}
 
 	// Validate selection: every selected item must exist and be retry-eligible.
@@ -155,14 +139,11 @@ func (r *DelegationRepo) RetryGeneration(ctx context.Context, groupID string,
 	retryItems := make([]itemState, 0, len(selected))
 	for index := range items {
 		state := &items[index]
-		if state.attemptID == "" {
-			return nil, nil, nil, fmt.Errorf("item %s has no attempt in generation %d", state.item.ID, currentGeneration)
-		}
 		_, isSelected := selected[state.item.ID]
 		if !isSelected {
 			reused = append(reused, domain.DelegationAttemptReference{
 				ItemID: state.item.ID, AttemptID: state.attemptID,
-				Generation: currentGeneration, ChildRunID: state.attemptChild,
+				Generation: state.attemptGen, ChildRunID: state.attemptChild,
 				ResultDigest: state.resultDigest,
 			})
 			continue
@@ -250,11 +231,12 @@ func (r *DelegationRepo) RetryGeneration(ctx context.Context, groupID string,
 	if _, err := tx.ExecContext(ctx, `INSERT INTO delegation_group_generations
 		(id,group_id,generation,kind,status,retry_selection_json,reused_attempts_json,
 		 authorization_snapshot_json,authorization_snapshot_digest,budget_snapshot_json,budget_snapshot_digest,
-		 client_request_id,created_at)
-		VALUES(?,?,?, 'retry',?,?,?,?,?,?,?,?,?)`,
+		 client_request_id,request_digest,created_at)
+		VALUES(?,?,?, 'retry',?,?,?,?,?,?,?,?,?,?)`,
 		generationID, groupID, nextGeneration, string(generationStatus),
 		string(retrySelectionJSON), string(reusedJSON), authSnapshotJSON(authSnapshot),
-		authDigest, string(budgetJSON), budgetDigest, input.ClientRequestID, now.Format(time.RFC3339Nano)); err != nil {
+		authDigest, string(budgetJSON), budgetDigest, input.ClientRequestID, requestDigest,
+		now.Format(time.RFC3339Nano)); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			// Either the same client request id (idempotent replay) or a
 			// concurrent retry raced us on the generation slot. Release the
@@ -267,6 +249,14 @@ func (r *DelegationRepo) RetryGeneration(ctx context.Context, groupID string,
 				return nil, nil, nil, loadErr
 			}
 			if existing != nil {
+				var storedDigest string
+				if err := r.DB.QueryRowContext(ctx, `SELECT COALESCE(request_digest,'')
+					FROM delegation_group_generations WHERE id=?`, existing.ID).Scan(&storedDigest); err != nil {
+					return nil, nil, nil, err
+				}
+				if err := requestDigestConflict(storedDigest, requestDigest); err != nil {
+					return nil, nil, nil, err
+				}
 				return existing, children, approval, nil
 			}
 			return nil, nil, nil, domain.NewCodedError(domain.ErrorDelegationGenerationConflict,
@@ -512,7 +502,8 @@ func budgetIncreased(before, after domain.BudgetCeilingJSON) bool {
 		after.MaxToolCalls > before.MaxToolCalls ||
 		after.MaxTotalTokens > before.MaxTotalTokens ||
 		after.MaxOutputTokens > before.MaxOutputTokens ||
-		after.MaxCostMicros > before.MaxCostMicros
+		after.MaxCostMicros > before.MaxCostMicros ||
+		after.MaxWallTimeMS > before.MaxWallTimeMS
 }
 
 func mustMarshalJSON(value any) string {

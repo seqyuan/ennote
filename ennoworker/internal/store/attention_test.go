@@ -108,23 +108,55 @@ func TestAttentionProjectsDelegationApprovalAndCompletion(t *testing.T) {
 }
 
 func TestAttentionNeedsInputCannotBeDismissed(t *testing.T) {
-	delegations, attention, _, sessionID, _ := setupAttentionProject(t)
+	delegations, _, _, itemID := settleNeedsInputGroup(t)
+	attention := &store.AttentionRepo{DB: delegations.DB}
 	ctx := context.Background()
+	var sessionID string
+	require.NoError(t, delegations.DB.QueryRow(`SELECT session_id FROM agent_runs
+		WHERE id=(SELECT parent_run_id FROM delegation_groups LIMIT 1)`).Scan(&sessionID))
 	projectID := projectIDFor(t, delegations, sessionID)
 
-	// Project a needs_input item directly and verify it is action-typed.
-	require.NoError(t, attention.ProjectAttention(ctx, projectID, sessionID,
-		domain.AttentionSourceDelegationItem, "item-x", 0, domain.AttentionNeedsInput, true,
-		map[string]any{"kind": "needs_input"}, &domain.AttentionAction{Kind: "delegation_input", ItemID: "item-x"}))
+	// Finalizing needs_input projects an action-typed item in the same transaction.
+	items, err := attention.ListAttention(ctx, projectID, "", "pending", 10)
+	require.NoError(t, err)
+	var inputItem *domain.AttentionItem
+	for index := range items {
+		if items[index].SourceKind == domain.AttentionSourceDelegationItem {
+			inputItem = &items[index]
+		}
+	}
+	require.NotNil(t, inputItem)
+	require.NotNil(t, inputItem.Action)
+	assert.Equal(t, "delegation_input", inputItem.Action.Kind)
+	assert.Equal(t, itemID, inputItem.Action.ItemID)
+
+	// Dismissing an action item fails.
+	err = attention.Dismiss(ctx, inputItem.ID)
+	require.Error(t, err)
+}
+
+func TestAttentionProjectsAndResolvesToolApproval(t *testing.T) {
+	runs, approvals, submission := setupApprovalRun(t)
+	ctx := context.Background()
+	request, err := approvals.Suspend(ctx, submission.Run.ID, 1, 2, "attention-tool",
+		json.RawMessage(`{"version":1}`), approvalItems(), nil)
+	require.NoError(t, err)
+	var projectID string
+	require.NoError(t, runs.DB.QueryRow(`SELECT project_id FROM sessions WHERE id=?`,
+		submission.Run.SessionID).Scan(&projectID))
+	attention := &store.AttentionRepo{DB: runs.DB}
 	items, err := attention.ListAttention(ctx, projectID, "", "pending", 10)
 	require.NoError(t, err)
 	require.Len(t, items, 1)
+	assert.Equal(t, domain.AttentionSourceToolApproval, items[0].SourceKind)
 	require.NotNil(t, items[0].Action)
-	assert.Equal(t, "delegation_input", items[0].Action.Kind)
+	assert.Equal(t, request.ID, items[0].Action.ApprovalID)
 
-	// Dismissing an action item fails.
-	err = attention.Dismiss(ctx, items[0].ID)
-	require.Error(t, err)
+	_, err = approvals.Decide(ctx, request.ID, domain.DecisionRejected, "attention-tool-reject", nil)
+	require.NoError(t, err)
+	resolved, err := attention.ListAttention(ctx, projectID, "", "resolved", 10)
+	require.NoError(t, err)
+	require.Len(t, resolved, 1)
 }
 
 func TestAttentionNotificationDismissalDoesNotMutateSource(t *testing.T) {

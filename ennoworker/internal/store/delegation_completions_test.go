@@ -168,6 +168,22 @@ func TestRetryGenerationCreatesSecondCompletion(t *testing.T) {
 	var events int
 	require.NoError(t, delegations2.DB.QueryRow(`SELECT COUNT(*) FROM delivery_events`).Scan(&events))
 	assert.Equal(t, 2, events)
+
+	// Recovery is generation-scoped: generation 0 already existing must not
+	// hide a missing generation 1 completion.
+	_, err = delegations2.DB.Exec(`DELETE FROM delivery_events WHERE source_generation=1`)
+	require.NoError(t, err)
+	_, err = delegations2.DB.Exec(`DELETE FROM attention_items WHERE source_generation=1`)
+	require.NoError(t, err)
+	_, err = delegations2.DB.Exec(`DELETE FROM delegation_completions WHERE generation=1`)
+	require.NoError(t, err)
+	rebuilt, err := delegations2.RebuildMissingCompletions(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, rebuilt, 1)
+	assert.Equal(t, 1, rebuilt[0].Generation)
+	require.NoError(t, delegations2.DB.QueryRow(`SELECT COUNT(*) FROM delegation_completions
+		WHERE generation=1`).Scan(&generation1))
+	assert.Equal(t, 1, generation1)
 }
 
 func TestRebuildMissingCompletionsAndEvents(t *testing.T) {

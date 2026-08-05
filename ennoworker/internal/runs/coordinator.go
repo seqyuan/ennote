@@ -59,8 +59,9 @@ type Coordinator struct {
 	executor  Executor
 	semaphore chan struct{}
 
-	mu     sync.Mutex
-	active map[string]*activeRun
+	mu           sync.Mutex
+	active       map[string]*activeRun
+	onRunSettled func(context.Context, *domain.AgentRun) error
 }
 
 func NewCoordinator(lifecycle Lifecycle, executor Executor, maxConcurrent int) *Coordinator {
@@ -73,6 +74,14 @@ func NewCoordinator(lifecycle Lifecycle, executor Executor, maxConcurrent int) *
 		semaphore: make(chan struct{}, maxConcurrent),
 		active:    make(map[string]*activeRun),
 	}
+}
+
+// SetRunSettledHook installs a post-terminal callback used for durable work
+// such as session auto-resume. The callback runs after the terminal DB commit.
+func (c *Coordinator) SetRunSettledHook(hook func(context.Context, *domain.AgentRun) error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onRunSettled = hook
 }
 
 func (c *Coordinator) Enqueue(parent context.Context, runID string) error {
@@ -116,6 +125,11 @@ func (c *Coordinator) execute(ctx context.Context, runID string, state *activeRu
 		}
 		return
 	}
+	defer func() {
+		if hookErr := c.notifyRunSettled(run); state.err == nil && hookErr != nil {
+			state.err = hookErr
+		}
+	}()
 
 	output, err := c.executor.Execute(ctx, run)
 	switch {
@@ -179,6 +193,20 @@ func (c *Coordinator) execute(ctx context.Context, runID string, state *activeRu
 				string(domain.ErrorEventPersistence), finalizeErr.Error())
 		}
 	}
+}
+
+func (c *Coordinator) notifyRunSettled(run *domain.AgentRun) error {
+	current, err := c.lifecycle.Get(context.Background(), run.ID)
+	if err != nil || !current.Status.Terminal() {
+		return err
+	}
+	c.mu.Lock()
+	hook := c.onRunSettled
+	c.mu.Unlock()
+	if hook == nil {
+		return nil
+	}
+	return hook(context.Background(), current)
 }
 
 func (c *Coordinator) enqueueSettledParent(parentID string) error {

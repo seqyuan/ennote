@@ -1451,6 +1451,22 @@ func (r *RunRepo) FinalizeChildSuccess(ctx context.Context, runID string, output
 		resultJSON, string(output.Terminal.Status), "", ""); err != nil {
 		return err
 	}
+	if attemptStatus == domain.DelegationAttemptNeedsInput {
+		var sessionID, projectID string
+		if err := tx.QueryRowContext(ctx, `SELECT ar.session_id,s.project_id FROM agent_runs ar
+			JOIN sessions s ON s.id=ar.session_id WHERE ar.id=?`, runID).Scan(&sessionID, &projectID); err != nil {
+			return err
+		}
+		if err := ProjectAttentionTx(ctx, tx, projectID, sessionID,
+			domain.AttentionSourceDelegationItem, itemID, generation,
+			domain.AttentionNeedsInput, true,
+			map[string]any{"kind": "needs_input", "generation": generation,
+				"summary": boundedAttentionSummary(string(resultJSON))},
+			&domain.AttentionAction{Kind: "delegation_input", ItemID: itemID,
+				ExpectedGeneration: generation}); err != nil {
+			return err
+		}
+	}
 	// Fold the child's reservation back: release the reserved ceiling and
 	// record actual usage exactly once (idempotent via root_reconciled_at).
 	if err := reconcileRootBudgetTx(ctx, tx, runID); err != nil {
@@ -1591,9 +1607,6 @@ func (r *RunRepo) FinalizeChildFailure(ctx context.Context, runID, code, message
 	if err := reconcileRootBudgetTx(ctx, tx, runID); err != nil {
 		return "", false, err
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT group_id FROM delegation_items WHERE child_run_id=?`, runID).Scan(&groupID); err != nil {
-		return "", false, err
-	}
 	var remaining int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM delegation_items WHERE group_id=? AND status IN ('pending','running')`,
 		groupID).Scan(&remaining); err != nil {
@@ -1669,7 +1682,8 @@ func validateChildTerminalArtifactsTx(ctx context.Context, tx *sql.Tx, runID str
 // AssignmentForChild returns the frozen task assignment of a child Run.
 func (r *DelegationRepo) AssignmentForChild(ctx context.Context, childRunID string) (json.RawMessage, error) {
 	var assignment string
-	if err := r.DB.QueryRowContext(ctx, `SELECT assignment_json FROM delegation_items WHERE child_run_id=?`,
+	if err := r.DB.QueryRowContext(ctx, `SELECT i.assignment_json FROM delegation_item_attempts a
+		JOIN delegation_items i ON i.id=a.item_id WHERE a.child_run_id=?`,
 		childRunID).Scan(&assignment); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrDelegationItemNotFound
@@ -1752,9 +1766,9 @@ func (r *DelegationRepo) ListOwnedChildren(ctx context.Context, parentRunID stri
 	return runs, rows.Err()
 }
 
-// ReapOrphans interrupts live children of terminal parents and reconciles every
-// terminal child into its delegation item/group. This also cleans children that
-// RecoverActive already marked interrupted before this pass.
+// ReapOrphans interrupts generation-0 blocking children of terminal parents
+// and reconciles terminal child facts. Background and explicit later-generation
+// children are parent-owned but intentionally allowed to outlive the parent.
 func (r *DelegationRepo) ReapOrphans(ctx context.Context) ([]string, error) {
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -1762,10 +1776,16 @@ func (r *DelegationRepo) ReapOrphans(ctx context.Context) ([]string, error) {
 	}
 	defer tx.Rollback()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	rows, err := tx.QueryContext(ctx, `SELECT c.id FROM agent_runs c JOIN agent_runs p ON p.id=c.parent_run_id
+	rows, err := tx.QueryContext(ctx, `SELECT c.id FROM agent_runs c
+		JOIN agent_runs p ON p.id=c.parent_run_id
+		LEFT JOIN delegation_item_attempts a ON a.child_run_id=c.id
+		LEFT JOIN delegation_items i ON i.id=a.item_id
+		LEFT JOIN delegation_handles h ON h.group_id=i.group_id
 		WHERE c.run_kind='delegated_agent'
 		  AND c.status IN ('queued','running','waiting_for_approval','waiting_delegation_admission','waiting_children')
-		  AND p.status IN ('succeeded','failed','cancelled','interrupted') ORDER BY c.created_at,c.id`)
+		  AND p.status IN ('succeeded','failed','cancelled','interrupted')
+		  AND (a.id IS NULL OR (a.generation=0 AND COALESCE(h.execution_mode,'blocking')='blocking'))
+		ORDER BY c.created_at,c.id`)
 	if err != nil {
 		return nil, err
 	}

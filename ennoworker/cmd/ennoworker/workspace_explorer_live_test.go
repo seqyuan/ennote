@@ -78,10 +78,10 @@ func TestLiveWorkspaceExplorerChildCompletesContractAndFoldsResult(t *testing.T)
 	group, err := delegations.CreateGroup(ctx, store.CreateDelegationGroupInput{
 		ParentRunID: parentRun.ID, ParentToolCallID: "explore", Strategy: domain.DelegationStrategySingle,
 		Items: []store.CreateDelegationItemInput{{
-			Name: "explore-workspace", RoleVersionID: "builtin-workspace-explorer-v2",
+			Name: "explore-workspace", RoleVersionID: "builtin-workspace-explorer-v3",
 			AssignmentJSON: json.RawMessage(`{"objective":"List the files in /workspace and note their names in one sentence."}`),
 			OutputContract: "text-v1",
-			Budget: domain.BudgetCeilingJSON{MaxModelCalls: 4, MaxToolCalls: 4, MaxTotalTokens: 16000,
+			Budget: domain.BudgetCeilingJSON{MaxModelCalls: 6, MaxToolCalls: 8, MaxTotalTokens: 20000,
 				MaxOutputTokens: 2048, MaxWallTimeMS: 120000},
 		}},
 	})

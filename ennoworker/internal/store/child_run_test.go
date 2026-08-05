@@ -68,8 +68,8 @@ func TestCreateChildRunFrozenRoleAndConfigResolution(t *testing.T) {
 	require.NotNil(t, resolved.Effective.Role)
 	assert.Equal(t, "workspace-explorer", resolved.Effective.Role.Handle)
 	assert.Equal(t, "builtin-workspace-explorer", resolved.Effective.Role.ObjectID)
-	assert.Equal(t, "builtin-workspace-explorer-v2", resolved.Effective.Role.VersionID)
-	assert.Equal(t, "sha256:24c22a66689d403447648700e5b26dea5c3361d251002a717f5999db3a8aeddf",
+	assert.Equal(t, "builtin-workspace-explorer-v3", resolved.Effective.Role.VersionID)
+	assert.Equal(t, "sha256:c7cf36749030bd0626c24eea7ea325c2b70be64bd2f623b3c94b5fc8b81aa38b",
 		resolved.Effective.Role.ConfigDigest)
 	assert.Equal(t, []string{"read", "ls", "grep", "find", "git_readonly"}, resolved.Effective.Role.AllowedTools)
 	// inherit binding resolved the parent's frozen model.

@@ -73,6 +73,18 @@ func ResolveAttentionForSourceTx(ctx context.Context, tx *sql.Tx,
 	return nil
 }
 
+// ReopenAttentionForSourceTx restores an action item when a typed command was
+// rejected and the authoritative source becomes actionable again.
+func ReopenAttentionForSourceTx(ctx context.Context, tx *sql.Tx,
+	sourceKind domain.AttentionSourceKind, sourceID string, sourceGeneration int) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE attention_items SET status='pending',resolved_at=NULL,dismissed_at=NULL
+		WHERE source_kind=? AND source_id=? AND source_generation=?`,
+		string(sourceKind), sourceID, sourceGeneration); err != nil {
+		return fmt.Errorf("reopen attention items: %w", err)
+	}
+	return nil
+}
+
 // Dismiss marks a notification item dismissed. Approval and needs_input items
 // are never dismissible; callers must use their typed action instead.
 func (r *AttentionRepo) Dismiss(ctx context.Context, attentionID string) error {
@@ -199,6 +211,48 @@ func (r *AttentionRepo) RebuildAttention(ctx context.Context, limit int) (int, e
 	}
 	defer tx.Rollback()
 
+	// Pending tool approvals.
+	toolRows, err := tx.QueryContext(ctx, `SELECT a.id,a.session_id,s.project_id,a.items_json
+		FROM tool_approval_requests a JOIN sessions s ON s.id=a.session_id
+		WHERE a.status='pending' LIMIT ?`, limit)
+	if err != nil {
+		return 0, err
+	}
+	type pendingToolApproval struct {
+		id, sessionID, projectID, itemsJSON string
+	}
+	var toolApprovals []pendingToolApproval
+	for toolRows.Next() {
+		var entry pendingToolApproval
+		if err := toolRows.Scan(&entry.id, &entry.sessionID, &entry.projectID, &entry.itemsJSON); err != nil {
+			toolRows.Close()
+			return 0, err
+		}
+		toolApprovals = append(toolApprovals, entry)
+	}
+	if err := toolRows.Close(); err != nil {
+		return 0, err
+	}
+	added := 0
+	for _, approval := range toolApprovals {
+		var items []domain.ApprovalItem
+		if err := json.Unmarshal([]byte(approval.itemsJSON), &items); err != nil {
+			return 0, err
+		}
+		toolNames := make([]string, 0, len(items))
+		for _, item := range items {
+			toolNames = append(toolNames, item.ToolName)
+		}
+		if err := ProjectAttentionTx(ctx, tx, approval.projectID, approval.sessionID,
+			domain.AttentionSourceToolApproval, approval.id, 0,
+			domain.AttentionApprovalRequired, true,
+			map[string]any{"kind": "tool_approval", "tools": toolNames},
+			&domain.AttentionAction{Kind: "tool_approval", ApprovalID: approval.id}); err != nil {
+			return 0, err
+		}
+		added++
+	}
+
 	// Pending delegation approvals.
 	rows, err := tx.QueryContext(ctx, `SELECT ar.id,ar.session_id,ar.generation,s.project_id,ar.status
 		FROM delegation_approval_requests ar JOIN sessions s ON s.id=ar.session_id
@@ -206,7 +260,6 @@ func (r *AttentionRepo) RebuildAttention(ctx context.Context, limit int) (int, e
 	if err != nil {
 		return 0, err
 	}
-	added := 0
 	var approvals []struct {
 		id, sessionID, projectID string
 		generation               int

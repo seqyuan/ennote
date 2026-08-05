@@ -24,7 +24,7 @@ func (t *ListTool) RetryPolicy() domain.ToolRetryPolicy {
 }
 
 func (t *ListTool) Definition() domain.ToolDefinition {
-	return domain.ToolDefinition{Name: "ls", Description: "List a directory inside /workspace or the read-only /skills snapshot", Parameters: schema(pathSchema)}
+	return domain.ToolDefinition{Name: "ls", Description: "List a directory inside /workspace or the read-only /skills snapshot", Parameters: schema(pathSchema), RiskClass: domain.RiskReadOnly}
 }
 
 func (t *ListTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {

@@ -10,5 +10,10 @@ export type RoleIdentity = components["schemas"]["RoleIdentity"];
 export type RoleSummary = components["schemas"]["RoleSummary"];
 export type RoleVersion = components["schemas"]["RoleVersion"];
 export type RoleValidationResult = components["schemas"]["RoleValidationResult"];
+export type MCPServerProfile = components["schemas"]["MCPServerProfile"];
+export type MCPServerProfileVersion = components["schemas"]["MCPServerProfileVersion"];
+export type MCPProjectBinding = components["schemas"]["MCPProjectBinding"];
+export type MCPCatalogEntry = components["schemas"]["MCPCatalogEntry"];
+export type MCPCandidate = components["schemas"]["MCPCandidate"];
 
-export type SettingsTab = "providers" | "models" | "roles" | "policies" | "context" | "templates";
+export type SettingsTab = "providers" | "models" | "roles" | "policies" | "context" | "templates" | "mcp";

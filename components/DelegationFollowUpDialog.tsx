@@ -10,10 +10,11 @@ type DelegationGeneration = components["schemas"]["DelegationGeneration"];
 // DelegationFollowUpDialog submits a typed continuation command (input or
 // follow-up) for one item. The text draft survives stale responses: on
 // conflict the dialog refreshes the group instead of discarding input.
-export function DelegationFollowUpDialog({ itemID, itemName, kind, expectedGeneration, onDone }: {
+export function DelegationFollowUpDialog({ itemID, itemName, kind, sourceAttemptID, expectedGeneration, onDone }: {
   itemID: string;
   itemName: string;
   kind: "input" | "follow_up";
+  sourceAttemptID: string;
   expectedGeneration: number;
   onDone: () => void;
 }) {
@@ -36,7 +37,7 @@ export function DelegationFollowUpDialog({ itemID, itemName, kind, expectedGener
       await apiFetch<{ generation: DelegationGeneration }>(
         `/v1/delegation-items/${encodeURIComponent(itemID)}/${command}`,
         { method: "POST", body: JSON.stringify({
-          expectedGeneration, text: draft, clientRequestId: crypto.randomUUID(),
+          sourceAttemptId: sourceAttemptID, expectedGeneration, text: draft, clientRequestId: crypto.randomUUID(),
         }) },
       );
       onDone();

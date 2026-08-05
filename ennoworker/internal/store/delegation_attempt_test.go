@@ -194,6 +194,49 @@ func TestCancelSyncsAttemptAndGeneration(t *testing.T) {
 	assert.Equal(t, "cancelled", generationStatus)
 }
 
+func TestDirectChildCancelSettlesAttemptSoSiblingSettlesGeneration(t *testing.T) {
+	delegations, runs, submission := setupRootBudgetParent(t, "direct-child-cancel")
+	ctx := context.Background()
+	group, _, children, err := delegations.CreateGroupWithChildren(ctx, store.CreateDelegationGroupInput{
+		ParentRunID: submission.Run.ID, ParentToolCallID: "call-1", Strategy: domain.DelegationStrategyParallel,
+		ExecutionMode: domain.DelegationExecutionBackground,
+		Items:         []store.CreateDelegationItemInput{explorerItem(), explorerItem()},
+	}, submission.Run.SessionID)
+	require.NoError(t, err)
+	require.Len(t, children, 2)
+
+	// Deterministically cancel one child before Provider dispatch (direct child
+	// cancel). This guards the live-qualification fix in RunRepo.Cancel: the
+	// cancelled child's own attempt must settle, otherwise the sibling's
+	// FinalizeChildSuccess can never settle the generation (a queued attempt
+	// remains) and no logical completion is created.
+	require.NoError(t, runs.Cancel(ctx, children[1].ID))
+
+	var attemptStatus string
+	require.NoError(t, delegations.DB.QueryRow(`SELECT status FROM delegation_item_attempts WHERE child_run_id=?`,
+		children[1].ID).Scan(&attemptStatus))
+	assert.Equal(t, "cancelled", attemptStatus, "direct child cancel must settle its own attempt")
+
+	// Sibling succeeds and finalizes.
+	_, err = runs.Claim(ctx, children[0].ID)
+	require.NoError(t, err)
+	require.NoError(t, runs.FinalizeChildSuccess(ctx, children[0].ID, domain.RunOutput{
+		Messages: []domain.ChatMessage{{Role: domain.RoleAssistant,
+			Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: "done"}}}},
+		Terminal: &domain.SubmitResult{Status: domain.SubmitCompleted, Summary: "ok"},
+	}))
+
+	// Exactly one logical completion for generation 0 (mixed succeeded+cancelled).
+	var completions int
+	require.NoError(t, delegations.DB.QueryRow(`SELECT COUNT(*) FROM delegation_completions`).Scan(&completions))
+	assert.Equal(t, 1, completions, "sibling settlement must create exactly one logical completion")
+
+	var genStatus string
+	require.NoError(t, delegations.DB.QueryRow(`SELECT status FROM delegation_group_generations WHERE group_id=?`,
+		group.ID).Scan(&genStatus))
+	assert.Equal(t, "settled", genStatus)
+}
+
 func TestReapOrphansSyncsAttemptAndGeneration(t *testing.T) {
 	delegations, runs, submission := setupRootBudgetParent(t, "attempt-orphan")
 	ctx := context.Background()

@@ -141,6 +141,32 @@ func TestCoordinatorFinalizesProjectedMessages(t *testing.T) {
 	require.NotNil(t, run.AssistantMessageID)
 }
 
+func TestCoordinatorInvokesRunSettledHookAfterTerminalCommit(t *testing.T) {
+	repo := setupRunDB(t)
+	submission := setupRun(t, repo, "settled-hook")
+	executor := resultExecutorFunc(func(context.Context, *domain.AgentRun) (domain.RunOutput, error) {
+		return domain.RunOutput{Messages: []domain.ChatMessage{{Role: domain.RoleAssistant,
+			Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: "done"}}}}}, nil
+	})
+	coordinator := NewCoordinator(repo, executor, 1)
+	hooked := make(chan *domain.AgentRun, 1)
+	coordinator.SetRunSettledHook(func(_ context.Context, run *domain.AgentRun) error {
+		hooked <- run
+		return nil
+	})
+	require.NoError(t, coordinator.Enqueue(context.Background(), submission.Run.ID))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, coordinator.Wait(ctx, submission.Run.ID))
+	select {
+	case run := <-hooked:
+		assert.Equal(t, domain.RunSucceeded, run.Status)
+		assert.Equal(t, submission.Run.SessionID, run.SessionID)
+	case <-ctx.Done():
+		t.Fatal("run-settled hook was not called")
+	}
+}
+
 func TestCoordinatorMarksRunFailedWhenSuccessProjectionCannotCommit(t *testing.T) {
 	repo := setupRunDB(t)
 	submission := setupRun(t, repo, "projection-failure")
@@ -172,7 +198,7 @@ func setupDelegatedCoordinatorTree(t *testing.T, repo *store.RunRepo, requestID 
 	_, _, children, err := delegations.CreateGroupWithChildren(context.Background(), store.CreateDelegationGroupInput{
 		ParentRunID: submission.Run.ID, ParentToolCallID: "delegate-" + requestID,
 		Strategy: domain.DelegationStrategySingle,
-		Items: []store.CreateDelegationItemInput{{Name: "child", RoleVersionID: "builtin-workspace-explorer-v2",
+		Items: []store.CreateDelegationItemInput{{Name: "child", RoleVersionID: "builtin-workspace-explorer-v3",
 			AssignmentJSON: json.RawMessage(`{"task":"inspect"}`), OutputContract: "text-v1",
 			Budget: domain.BudgetCeilingJSON{MaxModelCalls: 4, MaxToolCalls: 8, MaxTotalTokens: 20000,
 				MaxOutputTokens: 4000, MaxWallTimeMS: 120000}}},

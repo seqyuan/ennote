@@ -18,6 +18,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/artifacts"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
+	"github.com/seqyuan/ennote/ennoworker/internal/mcpclient"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -74,6 +75,15 @@ func setupServer(t *testing.T, control RunController) (*Server, http.Handler) {
 		DelegationApprovals: &store.DelegationApprovalRepo{DB: db},
 		Queue:               &store.QueueRepo{DB: db}, Events: &store.EventRepo{DB: db},
 		Hub: hub, Control: control,
+		MCP: &MCPServer{
+			Profiles:      &store.MCPProfileRepo{DB: db},
+			Bindings:      &store.MCPBindingRepo{DB: db},
+			Catalogs:      &store.MCPCatalogRepo{DB: db},
+			Runs:          &store.MCPRunRepo{DB: db},
+			ResolveSecret: nil,
+			Logger:        nil,
+			Bundled:       mcpclient.NewBundledRegistry(),
+		},
 	}
 	return server, server.Handler()
 }
@@ -232,7 +242,7 @@ func TestActiveParentProjectsDepthOneChildApproval(t *testing.T) {
 	delegations := &store.DelegationRepo{DB: server.DB}
 	group, err := delegations.CreateGroup(ctx, store.CreateDelegationGroupInput{
 		ParentRunID: submission.Run.ID, ParentToolCallID: "delegate-call", Strategy: domain.DelegationStrategySingle,
-		Items: []store.CreateDelegationItemInput{{Name: "inspect", RoleVersionID: "builtin-workspace-explorer-v2",
+		Items: []store.CreateDelegationItemInput{{Name: "inspect", RoleVersionID: "builtin-workspace-explorer-v3",
 			AssignmentJSON: json.RawMessage(`{"task":"inspect"}`), OutputContract: "text-v1",
 			Budget: domain.BudgetCeilingJSON{MaxModelCalls: 4, MaxToolCalls: 8, MaxTotalTokens: 20000,
 				MaxOutputTokens: 4000, MaxWallTimeMS: 120000}}},

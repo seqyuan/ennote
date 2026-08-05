@@ -84,3 +84,22 @@ describe("tool presentation", () => {
     expect(defaultToolExpanded("shell", "running")).toBe(true);
   });
 });
+
+describe("MCP tool presentation", () => {
+  it("splits {server}__{tool} into server and remote label", () => {
+    expect(summarizeToolCall("pubmed__search_articles", { query: "cancer" })).toMatchObject({
+      label: "search_articles",
+      target: "MCP · pubmed",
+    });
+    expect(summarizeToolCall("geo__geocode", {})).toMatchObject({
+      label: "geocode",
+      target: "MCP · geo",
+    });
+  });
+
+  it("falls back for non-MCP unknown tools", () => {
+    expect(summarizeToolCall("something_new", {})).toMatchObject({
+      label: "something_new",
+    });
+  });
+});

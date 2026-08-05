@@ -369,6 +369,219 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mcp/server-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List MCP server profiles (managed + the current project's own project-file profiles) */
+        get: operations["listMCPServerProfiles"];
+        put?: never;
+        /** Create a managed MCP server profile (project_file/bundled are never creatable via the API) */
+        post: operations["createMCPServerProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mcp/server-profiles/{profileID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileID: components["parameters"]["ProfileID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Archive an MCP server profile */
+        delete: operations["deleteMCPServerProfile"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mcp/server-profiles/{profileID}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileID: components["parameters"]["ProfileID"];
+            };
+            cookie?: never;
+        };
+        /** List immutable versions of an MCP profile */
+        get: operations["listMCPProfileVersions"];
+        put?: never;
+        /** Create an immutable version of an MCP profile */
+        post: operations["createMCPServerVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mcp/bundled-catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List embedded bundled MCP descriptors (static, no execution) */
+        get: operations["listMCPBundledCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/mcp/bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        /** List MCP bindings for a project */
+        get: operations["listMCPBindings"];
+        put?: never;
+        /** Create or update an MCP binding for a project */
+        post: operations["createMCPBinding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/mcp/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        /** List discovered MCP candidates (bundled, managed, project file) without executing them */
+        get: operations["listMCPCandidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/mcp/discovery/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Re-scan project file and bundled descriptors */
+        post: operations["refreshMCPDiscovery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/mcp/bindings/from-candidate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Materialize a discovered candidate into an immutable version and bind it (never auto-enabled) */
+        post: operations["createMCPBindingFromCandidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/mcp/bindings/{bindingID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+                bindingID: components["parameters"]["BindingID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete an MCP binding */
+        delete: operations["deleteMCPBinding"];
+        options?: never;
+        head?: never;
+        /** Update an MCP binding */
+        patch: operations["updateMCPBinding"];
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/mcp/bindings/{bindingID}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+                bindingID: components["parameters"]["BindingID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test a browse connection to the bound MCP server */
+        post: operations["testMCPBinding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/mcp/bindings/{bindingID}/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+                bindingID: components["parameters"]["BindingID"];
+            };
+            cookie?: never;
+        };
+        /** Get the normalized tool catalog for a binding (cached) */
+        get: operations["getMCPBindingCatalog"];
+        put?: never;
+        /** Force a catalog refresh via a browse connection */
+        post: operations["refreshMCPBindingCatalog"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/projects/{projectID}/sessions": {
         parameters: {
             query?: never;
@@ -1021,6 +1234,120 @@ export interface components {
     schemas: {
         Envelope: {
             data?: unknown;
+        };
+        MCPServerProfile: {
+            id?: string;
+            displayName?: string;
+            slug?: string;
+            /** @enum {string} */
+            sourceKind?: "managed" | "project_file" | "bundled";
+            projectScope?: string | null;
+            sourceLocator?: string;
+            /** @enum {string} */
+            lifecycleStatus?: "active" | "archived";
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+            latestVersion?: number;
+        };
+        MCPServerProfileVersion: {
+            id?: string;
+            profileId?: string;
+            version?: number;
+            /** @enum {string} */
+            transport: "stdio" | "streamable_http" | "legacy_sse";
+            executable?: string;
+            argv?: string[];
+            endpoint?: string;
+            envLiterals?: {
+                [key: string]: string;
+            };
+            /** @description Secret env references (env:/file:/keyring:) only; values never persisted */
+            envCredentials?: {
+                [key: string]: string;
+            };
+            headerLiterals?: {
+                [key: string]: string;
+            };
+            headerCredentials?: {
+                [key: string]: string;
+            };
+            cwd?: string;
+            /** @default 15000 */
+            timeoutMs: number;
+            /**
+             * @default default
+             * @enum {string}
+             */
+            networkPolicy: "default" | "loopback" | "private" | "custom_ca" | "insecure";
+            configDigest?: string;
+            /** Format: date-time */
+            createdAt?: string;
+        };
+        MCPProjectBinding: {
+            id?: string;
+            projectId?: string;
+            profileVersionId?: string;
+            desiredEnabled?: boolean;
+            required?: boolean;
+            selectedRemoteToolNames?: string[];
+            credentialRefs?: {
+                [key: string]: string;
+            };
+            revision?: number;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+        };
+        MCPCatalogEntry: {
+            remoteName?: string;
+            exposedName?: string;
+            description?: string;
+            inputSchema?: unknown;
+            outputSchema?: unknown;
+            readOnlyHint?: boolean;
+            digest?: string;
+        };
+        MCPCandidate: {
+            slug?: string;
+            displayName?: string;
+            /** @enum {string} */
+            sourceKind?: "managed" | "project_file" | "bundled";
+            sourceLocator?: string;
+            transport?: string;
+            executable?: string;
+            endpoint?: string;
+            configDigest?: string;
+            boundVersionId?: string;
+            alreadyBound?: boolean;
+            updateAvailable?: boolean;
+        };
+        /** @description Ennote's local trust declaration for a bundled MCP server; metadata only, never auto-executed */
+        BundledDescriptor: {
+            slug?: string;
+            displayName?: string;
+            version?: string;
+            publisher?: string;
+            license?: string;
+            description?: string;
+            transport?: string;
+            command?: string;
+            args?: string[];
+            endpoint?: string;
+            credentialRequirements?: {
+                envName?: string;
+                required?: boolean;
+            }[];
+            /** @enum {string} */
+            payloadDelivery?: "embedded" | "on_demand_download" | "external_command";
+            payloadDigest?: string;
+            riskManifest?: {
+                remoteName?: string;
+                riskClass?: string;
+            }[];
+            readOnlyOnly?: boolean;
         };
         HealthEnvelope: {
             data: {
@@ -1755,7 +2082,7 @@ export interface components {
             clientRequestId: string;
         };
         DelegationInputCommand: {
-            sourceAttemptId?: string;
+            sourceAttemptId: string;
             expectedGeneration: number;
             text: string;
             budget?: components["schemas"]["DelegationBudgetCeiling"];
@@ -2062,6 +2389,8 @@ export interface components {
         ProjectID: string;
         SessionID: string;
         RunID: string;
+        ProfileID: string;
+        BindingID: string;
     };
     requestBodies: never;
     headers: never;
@@ -2782,6 +3111,444 @@ export interface operations {
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];
             413: components["responses"]["Error"];
+        };
+    };
+    listMCPServerProfiles: {
+        parameters: {
+            query?: {
+                /** @description When set, project-file profiles scoped to other projects are filtered out */
+                projectId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description MCP server profiles */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MCPServerProfile"][];
+                    };
+                };
+            };
+        };
+    };
+    createMCPServerProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    displayName: string;
+                    slug: string;
+                    /**
+                     * @default managed
+                     * @enum {string}
+                     */
+                    sourceKind?: "managed";
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MCPServerProfile"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    deleteMCPServerProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileID: components["parameters"]["ProfileID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Archived */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    listMCPProfileVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileID: components["parameters"]["ProfileID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Versions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MCPServerProfileVersion"][];
+                    };
+                };
+            };
+        };
+    };
+    createMCPServerVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileID: components["parameters"]["ProfileID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MCPServerProfileVersion"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    listMCPBundledCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bundled catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["BundledDescriptor"][];
+                    };
+                };
+            };
+        };
+    };
+    listMCPBindings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bindings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MCPProjectBinding"][];
+                    };
+                };
+            };
+        };
+    };
+    createMCPBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    profileVersionId: string;
+                    /** @default false */
+                    desiredEnabled?: boolean;
+                    /** @default true */
+                    required?: boolean;
+                    selectedRemoteToolNames?: string[];
+                    credentialRefs?: {
+                        [key: string]: string;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MCPProjectBinding"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    listMCPCandidates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Candidates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MCPCandidate"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    refreshMCPDiscovery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Candidates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MCPCandidate"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    createMCPBindingFromCandidate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    slug: string;
+                    sourceKind?: string;
+                    executable?: string;
+                    endpoint?: string;
+                    transport: string;
+                    configDigest?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created (disabled binding) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MCPProjectBinding"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteMCPBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+                bindingID: components["parameters"]["BindingID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    updateMCPBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+                bindingID: components["parameters"]["BindingID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    desiredEnabled?: boolean;
+                    required?: boolean;
+                    selectedRemoteToolNames?: string[];
+                    credentialRefs?: {
+                        [key: string]: string;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    testMCPBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+                bindingID: components["parameters"]["BindingID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Connection succeeded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            ok?: boolean;
+                            transport?: string;
+                        };
+                    };
+                };
+            };
+            502: components["responses"]["Error"];
+        };
+    };
+    getMCPBindingCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+                bindingID: components["parameters"]["BindingID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Normalized catalog entries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MCPCatalogEntry"][];
+                    };
+                };
+            };
+            502: components["responses"]["Error"];
+        };
+    };
+    refreshMCPBindingCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+                bindingID: components["parameters"]["BindingID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Fresh catalog entries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MCPCatalogEntry"][];
+                    };
+                };
+            };
+            502: components["responses"]["Error"];
         };
     };
     listSessions: {

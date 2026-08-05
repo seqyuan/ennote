@@ -44,7 +44,7 @@ func TestRoleRunFreezesPublishedExecutionDefinitionAndPrompt(t *testing.T) {
 	assert.Equal(t, version.Definition.MaxLoopIterations, resolved.Effective.MaxIterations)
 	assert.True(t, resolved.Effective.Routing.Pinned)
 	assert.False(t, resolved.Effective.Routing.AllowAutoRoute)
-	assert.Equal(t, "builtin-tool-discuss-v2", resolved.Effective.ToolPolicy.ID)
+	assert.Equal(t, "builtin-tool-discuss-v3", resolved.Effective.ToolPolicy.ID)
 	assert.Equal(t, version.Definition.RolePrompt, resolved.SystemPrompt.AgentPrompt)
 	assert.Equal(t, role.ID, resolved.SystemPrompt.AgentProfileID)
 	assert.NotContains(t, string(claimed.EffectiveConfig), version.Definition.RolePrompt)

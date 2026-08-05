@@ -16,7 +16,7 @@ type WriteTool struct{ Jail *workspace.Jail }
 func (t *WriteTool) ExecutionClass() domain.ExecutionClass { return domain.ExecutionWorkspaceWrite }
 
 func (t *WriteTool) Definition() domain.ToolDefinition {
-	return domain.ToolDefinition{Name: "write", Description: "Atomically write a UTF-8 text file inside /workspace", Parameters: schema(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}`)}
+	return domain.ToolDefinition{Name: "write", Description: "Atomically write a UTF-8 text file inside /workspace", Parameters: schema(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}`), RiskClass: domain.RiskLocalWrite}
 }
 
 func (t *WriteTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {

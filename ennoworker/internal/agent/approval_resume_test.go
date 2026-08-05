@@ -16,7 +16,7 @@ func askPolicy(t *testing.T) *BuiltinToolPolicy {
 	t.Helper()
 	raw, err := json.Marshal(domain.ToolPolicyConfig{Mode: string(domain.PermissionAsk)})
 	require.NoError(t, err)
-	policy, err := NewBuiltinToolPolicy(domain.PolicySnapshot{ID: "ask", Kind: domain.PolicyKindTool, Version: 1, Config: raw})
+	policy, err := NewBuiltinToolPolicy(domain.PolicySnapshot{ID: "ask", Kind: domain.PolicyKindTool, Version: 1, Config: raw}, testRiskMap)
 	require.NoError(t, err)
 	return policy
 }

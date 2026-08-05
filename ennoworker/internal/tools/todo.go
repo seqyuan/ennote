@@ -28,6 +28,7 @@ func (t *TodoTool) Definition() domain.ToolDefinition {
 			"Each item has a content string and a status of pending, in_progress, or " +
 			"completed. Keep exactly one item in_progress at a time and mark items " +
 			"completed as soon as they are done.",
+		RiskClass: domain.RiskReadOnly,
 		Parameters: json.RawMessage(`{
   "type": "object",
   "properties": {

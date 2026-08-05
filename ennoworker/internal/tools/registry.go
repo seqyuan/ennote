@@ -29,11 +29,13 @@ type Registry struct {
 	classes     map[string]domain.ExecutionClass
 	validators  map[string]*jsonschema.Schema
 	retryPolicy map[string]domain.ToolRetryPolicy
+	risks       map[string]domain.RiskClass
 }
 
 func NewRegistry(tools ...Tool) (*Registry, error) {
 	registry := &Registry{tools: make(map[string]Tool), classes: make(map[string]domain.ExecutionClass),
-		validators: make(map[string]*jsonschema.Schema), retryPolicy: make(map[string]domain.ToolRetryPolicy)}
+		validators: make(map[string]*jsonschema.Schema), retryPolicy: make(map[string]domain.ToolRetryPolicy),
+		risks: make(map[string]domain.RiskClass)}
 	for _, tool := range tools {
 		if err := registry.Register(tool); err != nil {
 			return nil, err
@@ -49,6 +51,11 @@ func (r *Registry) Register(tool Tool) error {
 	definition := tool.Definition()
 	if definition.Name == "" {
 		return fmt.Errorf("tool name is required")
+	}
+	// RiskClass is mandatory local metadata. Missing or invalid risk fails
+	// registration before any map is written (fail closed, no partial state).
+	if !domain.IsValidRiskClass(definition.RiskClass) {
+		return fmt.Errorf("tool %s has invalid risk class %q", definition.Name, definition.RiskClass)
 	}
 	compiler := jsonschema.NewCompiler()
 	resource := "mem://tool/" + definition.Name + ".json"
@@ -76,6 +83,7 @@ func (r *Registry) Register(tool Tool) error {
 		policy = rp.RetryPolicy()
 	}
 	r.retryPolicy[definition.Name] = policy
+	r.risks[definition.Name] = definition.RiskClass
 	return nil
 }
 
@@ -96,6 +104,7 @@ func (r *Registry) Restrict(allowed []string) {
 		delete(r.classes, name)
 		delete(r.validators, name)
 		delete(r.retryPolicy, name)
+		delete(r.risks, name)
 	}
 }
 
@@ -150,6 +159,17 @@ func (r *Registry) RetryPolicy(toolName string) domain.ToolRetryPolicy {
 		return policy
 	}
 	return domain.ToolRetryPolicy{Mode: domain.ToolRetryNever, MaxRetries: 0}
+}
+
+// RiskClass implements domain.ToolRiskClassifier. Unknown, unregistered, and
+// Role-restricted tools resolve to RiskSensitive so policy fails closed.
+func (r *Registry) RiskClass(toolName string) domain.RiskClass {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if risk, ok := r.risks[toolName]; ok {
+		return risk
+	}
+	return domain.RiskSensitive
 }
 
 // ResolveStandingApprovalScope implements domain.StandingApprovalScopeResolver.

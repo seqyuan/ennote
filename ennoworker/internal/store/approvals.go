@@ -102,6 +102,19 @@ func (r *ApprovalRepo) Suspend(ctx context.Context, runID string, schemaVersion,
 			return nil, err
 		}
 	}
+	var projectID string
+	_ = tx.QueryRowContext(ctx, `SELECT project_id FROM sessions WHERE id=?`, sessionID).Scan(&projectID)
+	toolNames := make([]string, 0, len(items))
+	for _, item := range items {
+		toolNames = append(toolNames, item.ToolName)
+	}
+	if err := ProjectAttentionTx(ctx, tx, projectID, sessionID,
+		domain.AttentionSourceToolApproval, approvalID, 0,
+		domain.AttentionApprovalRequired, true,
+		map[string]any{"kind": "tool_approval", "tools": toolNames},
+		&domain.AttentionAction{Kind: "tool_approval", ApprovalID: approvalID}); err != nil {
+		return nil, err
+	}
 	payload, _ := json.Marshal(map[string]any{"approvalId": approvalID, "iteration": iteration,
 		"batchDigest": batchDigest, "items": items})
 	committed, err := appendEventsTx(ctx, tx, runID, domain.PendingEvent{EventType: "approval_requested", Payload: payload})
@@ -196,6 +209,10 @@ func (r *ApprovalRepo) Decide(ctx context.Context, approvalID string, decision d
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return nil, ErrApprovalConflict
+	}
+	if err := ResolveAttentionForSourceTx(ctx, tx,
+		domain.AttentionSourceToolApproval, approvalID, 0); err != nil {
+		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status='queued' WHERE id=? AND status=?`,
 		approval.RunID, runStatus); err != nil {

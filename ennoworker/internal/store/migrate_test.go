@@ -30,6 +30,8 @@ func TestMigrateCreatesTables(t *testing.T) {
 		"room_member_instances", "run_messages", "agent_profile_versions",
 		"delegation_groups", "delegation_items", "run_budgets", "delegation_root_budgets",
 		"delegation_group_generations", "delegation_item_attempts", "delegation_approval_requests",
+		"mcp_server_profiles", "mcp_server_profile_versions", "project_mcp_bindings",
+		"mcp_catalog_cache", "run_mcp_servers", "run_mcp_tools", "mcp_requests",
 	}
 	for _, name := range tables {
 		var exists int
@@ -49,6 +51,10 @@ func TestMigrateCreatesTables(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM policy_profiles
 		WHERE id = 'builtin-tool-discuss-v2' AND status = 'active'`).Scan(&discussV2))
 	assert.Equal(t, 1, discussV2, "builtin-tool-discuss-v2 should be active after migration 0014")
+	var discussV3 int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM policy_profiles
+		WHERE id = 'builtin-tool-discuss-v3' AND status = 'active'`).Scan(&discussV3))
+	assert.Equal(t, 1, discussV3, "builtin-tool-discuss-v3 should be active after migration 0030")
 	var riskColumn int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('tool_calls') WHERE name='risk_class'`).Scan(&riskColumn))
 	assert.Equal(t, 1, riskColumn)

@@ -27,6 +27,7 @@ func (t *SubmitResultTool) Definition() domain.ToolDefinition {
 			"artifactRefs":{"type":"array","maxItems":32,"items":{"type":"object","required":["artifactId","name","kind","mimeType","sha256"],"properties":{"artifactId":{"type":"string"},"name":{"type":"string"},"kind":{"type":"string"},"mimeType":{"type":"string"},"sha256":{"type":"string"}}}},
 			"payload":{"type":"object"}
 		},"additionalProperties":false}`),
+		RiskClass: domain.RiskDelegation,
 	}
 }
 

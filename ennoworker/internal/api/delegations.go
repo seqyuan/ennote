@@ -68,6 +68,10 @@ func (s *Server) retryDelegation(w http.ResponseWriter, r *http.Request) {
 		s.writeDelegationError(w, r, err)
 		return
 	}
+	if err := s.enqueueChildRuns(r.Context(), children); err != nil {
+		writeInternal(w, r, err)
+		return
+	}
 	childIDs := make([]string, 0, len(children))
 	for _, child := range children {
 		childIDs = append(childIDs, child.ID)

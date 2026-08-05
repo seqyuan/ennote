@@ -49,6 +49,30 @@ func TestRecoveryMatrixRetryCrashBeforeEnqueue(t *testing.T) {
 	_ = queued
 }
 
+func TestRecoveryPreservesRunningBackgroundChildOfTerminalParent(t *testing.T) {
+	delegations, runs, submission := setupRootBudgetParent(t, "background-parent-terminal")
+	ctx := context.Background()
+	_, _, children, err := delegations.CreateGroupWithChildren(ctx, store.CreateDelegationGroupInput{
+		ParentRunID: submission.Run.ID, ParentToolCallID: "background-terminal-call",
+		Strategy: domain.DelegationStrategySingle, ExecutionMode: domain.DelegationExecutionBackground,
+		Items: []store.CreateDelegationItemInput{explorerItem()},
+	}, submission.Run.SessionID)
+	require.NoError(t, err)
+	require.Len(t, children, 1)
+	_, err = runs.Claim(ctx, children[0].ID)
+	require.NoError(t, err)
+	_, err = delegations.DB.Exec(`UPDATE agent_runs SET status='succeeded',finished_at=CURRENT_TIMESTAMP
+		WHERE id=?`, submission.Run.ID)
+	require.NoError(t, err)
+
+	reaped, err := delegations.ReapOrphans(ctx)
+	require.NoError(t, err)
+	assert.NotContains(t, reaped, children[0].ID)
+	var childStatus string
+	require.NoError(t, delegations.DB.QueryRow(`SELECT status FROM agent_runs WHERE id=?`, children[0].ID).Scan(&childStatus))
+	assert.Equal(t, "running", childStatus)
+}
+
 func TestRecoveryMatrixBackgroundCompletionAndAttention(t *testing.T) {
 	delegations, runs, submission, _ := settleBackgroundGroup(t)
 	// Parent finishes normally; restart clears active runs and rebuilds any
