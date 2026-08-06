@@ -146,20 +146,27 @@ func (r *AgentFlowProfileRepo) ListProfiles(ctx context.Context) ([]*domain.Agen
 func (r *AgentFlowProfileRepo) GetProfile(ctx context.Context, profileID string) (*domain.AgentFlowProfile, error) {
 	var p domain.AgentFlowProfile
 	var scope sql.NullString
+	var draftJSON, draftYAML sql.NullString
 	var createdAt, updatedAt string
 	err := r.DB.QueryRowContext(ctx, `SELECT p.id, p.name, p.slug, p.source_kind, p.project_scope,
 		p.source_locator, p.lifecycle_status, p.created_at, p.updated_at,
-		COALESCE(MAX(v.version), 0) AS latest
+		COALESCE(MAX(v.version), 0) AS latest, p.draft_json, p.draft_yaml, p.draft_revision
 		FROM agent_flow_profiles p
 		LEFT JOIN agent_flow_versions v ON v.profile_id = p.id
 		WHERE p.id = ? GROUP BY p.id`, profileID).
 		Scan(&p.ID, &p.Name, &p.Slug, &p.SourceKind, &scope, &p.SourceLocator,
-			&p.Lifecycle, &createdAt, &updatedAt, &p.LatestVersion)
+			&p.Lifecycle, &createdAt, &updatedAt, &p.LatestVersion, &draftJSON, &draftYAML, &p.DraftRevision)
 	if err != nil {
 		return nil, err
 	}
 	if scope.Valid {
 		p.ProjectScope = &scope.String
+	}
+	if draftJSON.Valid {
+		p.DraftJSON = json.RawMessage(draftJSON.String)
+	}
+	if draftYAML.Valid {
+		p.DraftYAML = draftYAML.String
 	}
 	p.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
 	p.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)

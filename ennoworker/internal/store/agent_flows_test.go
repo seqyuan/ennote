@@ -67,7 +67,7 @@ inputs:
 outputs:
   report: {type: string}
 budget:
-  maxTotalTokens: 200000
+  max_total_tokens: 200000
 tasks:
   producer:
     role: flow-worker@1
@@ -301,7 +301,7 @@ func TestAgentFlowCandidateDiscoveryNoExecution(t *testing.T) {
 	yaml := `schemaVersion: 1
 id: pwn-flow
 budget:
-  maxTotalTokens: 10000
+  max_total_tokens: 10000
 tasks:
   producer:
     role: flow-worker@1
@@ -348,7 +348,7 @@ tasks:
 	changed := `schemaVersion: 1
 id: pwn-flow
 budget:
-  maxTotalTokens: 10000
+  max_total_tokens: 10000
 tasks:
   producer:
     role: flow-worker@1
@@ -440,7 +440,7 @@ func TestAgentFlowRoleVersionResolutionAndAdmission(t *testing.T) {
 	yaml := `schemaVersion: 1
 id: denied
 budget:
-  maxTotalTokens: 10000
+  max_total_tokens: 10000
 tasks:
   producer:
     role: denied-worker@1
@@ -468,7 +468,7 @@ func TestAgentFlowFreezeRejectsUnknownSkill(t *testing.T) {
 	yaml := `schemaVersion: 1
 id: skill
 budget:
-  maxTotalTokens: 10000
+  max_total_tokens: 10000
 tasks:
   producer:
     role: flow-worker@1
@@ -506,4 +506,88 @@ func mustGetModelID(t *testing.T, db *sql.DB) string {
 	var id string
 	require.NoError(t, db.QueryRow(`SELECT id FROM model_profiles LIMIT 1`).Scan(&id))
 	return id
+}
+
+func TestAgentFlowDraftPublishFlow(t *testing.T) {
+	db, _, _, profiles, _, _, projectID, _, _ := setupFlowFixture(t)
+	ctx := context.Background()
+	profile, err := profiles.CreateProfile(ctx, store.CreateAgentFlowProfileInput{
+		Name: "Review", Slug: "review", SourceKind: domain.FlowSourceManaged,
+	})
+	require.NoError(t, err)
+
+	// The fixture's flow-worker role is project-scoped, so a managed (global)
+	// flow cannot reference it: publish validation fails loudly.
+	yaml := flowYAML("review", "")
+	def, err := agentflow.ParseDefinition([]byte(yaml))
+	require.NoError(t, err)
+	updated, err := profiles.UpdateDraft(ctx, profile.ID, def, yaml, 0)
+	require.NoError(t, err)
+	assert.Equal(t, 1, updated.DraftRevision)
+	// Stale revision conflicts.
+	_, err = profiles.UpdateDraft(ctx, profile.ID, def, yaml, 0)
+	assert.ErrorIs(t, err, store.ErrFlowDraftConflict)
+
+	validator := store.NewFlowValidator(store.FlowPublishOptions{
+		DB: db, Skills: map[string]bool{"go-dev": true},
+		CheckAllowlist: []string{"go", "python3"},
+	})
+	result, err := profiles.ValidateDraft(ctx, profile.ID, validator)
+	require.NoError(t, err)
+	assert.False(t, result.Valid)
+	assert.True(t, hasCodeIn(result.Diagnostics, "role_not_found"))
+
+	// Publish also refuses.
+	_, err = profiles.Publish(ctx, profile.ID, 1, validator)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, store.ErrFlowValidation)
+
+	// Publish a GLOBAL role reference so the draft becomes valid.
+	globalYAML := `schemaVersion: 1
+id: review
+budget:
+  max_total_tokens: 10000
+tasks:
+  producer:
+    role: flow-worker@1
+    goal: "do it"
+`
+	_ = globalYAML
+	// Create a global role with the same handle.
+	roleDef := validRoleDefinition(mustGetModelID(t, db))
+	roleDef.DelegationPolicy.Admission = domain.DelegationAutoWithinBudget
+	roleDef.DelegationPolicy.AllowedCallerKinds = []string{"host"}
+	roleDef.DelegationPolicy.BudgetCeiling.MaxTotalTokens = 100000
+	globalRole, err := (&store.RoleRepo{DB: db, KnownTools: map[string]bool{"read": true, "grep": true}}).Create(ctx, store.CreateRoleInput{
+		Handle: "flow-worker", Name: "Flow Worker Global", Description: "",
+		Positioning: "", Icon: "bot", Color: "neutral",
+		Scope: domain.RoleScopeGlobal, Definition: roleDef,
+	})
+	require.NoError(t, err)
+	_, err = (&store.RoleRepo{DB: db, KnownTools: map[string]bool{"read": true, "grep": true}}).Publish(ctx, globalRole.ID, 0)
+	require.NoError(t, err)
+
+	validYAML := flowYAML("review", "")
+	validDef, err := agentflow.ParseDefinition([]byte(validYAML))
+	require.NoError(t, err)
+	_, err = profiles.UpdateDraft(ctx, profile.ID, validDef, validYAML, 1)
+	require.NoError(t, err)
+	result, err = profiles.ValidateDraft(ctx, profile.ID, validator)
+	require.NoError(t, err)
+	assert.True(t, result.Valid, "%v", result.Diagnostics)
+
+	version, err := profiles.Publish(ctx, profile.ID, 2, validator)
+	require.NoError(t, err)
+	assert.Equal(t, 1, version.Version)
+	assert.Equal(t, result.ConfigDigest, version.ConfigDigest)
+	_ = projectID
+}
+
+func hasCodeIn(diags []agentflow.ValidationDiagnostic, code string) bool {
+	for _, d := range diags {
+		if d.Code == code {
+			return true
+		}
+	}
+	return false
 }

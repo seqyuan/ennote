@@ -30,7 +30,7 @@ func ParseDefinition(data []byte) (*domain.FlowDefinition, error) {
 		Inputs        map[string]domain.FlowPort `yaml:"inputs"`
 		Outputs       map[string]domain.FlowPort `yaml:"outputs"`
 		Budget        *struct {
-			MaxTotalTokens int64 `yaml:"maxTotalTokens"`
+			MaxTotalTokens int64 `yaml:"max_total_tokens"`
 		} `yaml:"budget"`
 		Tasks       map[string]yaml.Node     `yaml:"tasks"`
 		Convergence []convergenceRaw         `yaml:"convergence"`
@@ -87,7 +87,7 @@ func ParseDefinition(data []byte) (*domain.FlowDefinition, error) {
 type convergenceRaw struct {
 	From      string `yaml:"from"`
 	To        string `yaml:"to"`
-	MaxRounds int    `yaml:"maxRounds"`
+	MaxRounds int    `yaml:"max_rounds"`
 }
 
 func decodeTask(node yaml.Node) (domain.FlowTask, error) {

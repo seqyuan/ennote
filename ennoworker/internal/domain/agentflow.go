@@ -92,7 +92,7 @@ type FlowPort struct {
 // FlowBudget is the flow-level total budget. max_total_tokens is mandatory
 // (publish rejects a missing value).
 type FlowBudget struct {
-	MaxTotalTokens int64 `json:"maxTotalTokens" yaml:"maxTotalTokens"`
+	MaxTotalTokens int64 `json:"maxTotalTokens" yaml:"max_total_tokens"`
 }
 
 // FlowTaskBudget overrides the per-task budget ceiling (tokens only in v1).
@@ -117,7 +117,7 @@ type FlowTerminal struct {
 type ConvergenceRule struct {
 	From      string `json:"from" yaml:"from"`
 	To        string `json:"to" yaml:"to"`
-	MaxRounds int    `json:"maxRounds" yaml:"maxRounds"`
+	MaxRounds int    `json:"maxRounds" yaml:"max_rounds"`
 }
 
 // FlowTask is one task of a flow definition.
@@ -128,7 +128,7 @@ type FlowTask struct {
 	Depends  []string          `json:"depends,omitempty" yaml:"depends,omitempty"`
 	Type     string            `json:"type,omitempty" yaml:"type,omitempty"`
 	Command  string            `json:"command,omitempty" yaml:"command,omitempty"`
-	FanOut   *FlowFanOut       `json:"fanOut,omitempty" yaml:"fanOut,omitempty"`
+	FanOut   *FlowFanOut       `json:"fanOut,omitempty" yaml:"fan_out,omitempty"`
 	Budget   *FlowTaskBudget   `json:"budget,omitempty" yaml:"budget,omitempty"`
 	Terminal *FlowTerminal     `json:"terminal,omitempty" yaml:"terminal,omitempty"`
 	Output   string            `json:"output,omitempty" yaml:"output,omitempty"`
@@ -152,16 +152,19 @@ type FlowDefinition struct {
 
 // AgentFlowProfile is the stable identity of a flow definition.
 type AgentFlowProfile struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Slug          string    `json:"slug"`
-	SourceKind    string    `json:"sourceKind"`
-	ProjectScope  *string   `json:"projectScope,omitempty"`
-	SourceLocator string    `json:"sourceLocator,omitempty"`
-	Lifecycle     string    `json:"lifecycleStatus"`
-	LatestVersion int       `json:"latestVersion"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	ID            string          `json:"id"`
+	Name          string          `json:"name"`
+	Slug          string          `json:"slug"`
+	SourceKind    string          `json:"sourceKind"`
+	ProjectScope  *string         `json:"projectScope,omitempty"`
+	SourceLocator string          `json:"sourceLocator,omitempty"`
+	Lifecycle     string          `json:"lifecycleStatus"`
+	LatestVersion int             `json:"latestVersion"`
+	DraftJSON     json.RawMessage `json:"draft,omitempty"`
+	DraftYAML     string          `json:"draftYaml,omitempty"`
+	DraftRevision int             `json:"draftRevision"`
+	CreatedAt     time.Time       `json:"createdAt"`
+	UpdatedAt     time.Time       `json:"updatedAt"`
 }
 
 // AgentFlowVersion is an immutable published flow version.
