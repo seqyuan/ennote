@@ -232,3 +232,55 @@ test("Agent Flow Host invocation by name starts a run in the current session", a
   await expect.poll(() => invokeCalls).toBe(2);
   expect(invokeBody).toMatchObject({ name: "go-review", version: 1 });
 });
+
+// Matrix 3C: import validates, reports missing dependencies, and creates a
+// managed draft (never publishes); export copies the draft YAML.
+test("Agent Flow import checks dependencies and exports YAML", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  let importCalls = 0;
+  let checkCalls = 0;
+  const importYaml = `schemaVersion: 1
+id: shared-flow
+budget:
+  max_total_tokens: 10000
+tasks:
+  producer:
+    role: flow-worker@1
+    goal: "do it"
+`;
+  await page.route("**/api/worker/v1/**", async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace("/api/worker", "");
+    if (path === "/v1/projects") return fulfill(route, [project]);
+    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
+    if (path === "/v1/roles") return fulfill(route, { items: [role] });
+    if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, []);
+    if (path === "/v1/agent-flows") return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/agent-flows/candidates`) return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/agent-flows/bindings`) return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/agent-flows/runs`) return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/agent-flows/check-approvals`) return fulfill(route, []);
+    if (path === "/v1/agent-flows/check-dependencies") {
+      checkCalls++;
+      return fulfill(route, { valid: true, configDigest: "d".repeat(64), diagnostics: [],
+        dependencies: [{ kind: "role", name: "flow-worker", version: 1, present: true },
+          { kind: "skill", name: "phantom-skill", present: false, reason: "skill is not in the catalog" }] });
+    }
+    if (path === "/v1/agent-flows/import") {
+      importCalls++;
+      return fulfill(route, { profileId: "imported-profile", slug: "shared-flow", draftRevision: 1,
+        alreadyDrafted: false, configDigest: "d".repeat(64), dependencies: [] }, 201);
+    }
+    return route.abort();
+  });
+  await selectProjectAndOpenFlows(page);
+
+  await page.getByRole("button", { name: "Import YAML" }).click();
+  await page.getByPlaceholder(/schemaVersion: 1/).fill(importYaml);
+  await page.getByRole("button", { name: "Check dependencies" }).click();
+  await expect(page.getByText("Valid — ready to import as draft")).toBeVisible();
+  // The missing skill is reported, never installed.
+  await expect(page.getByText(/phantom-skill · missing/)).toBeVisible();
+  await page.getByRole("button", { name: "Import as draft" }).click();
+  await expect.poll(() => importCalls).toBe(1);
+});

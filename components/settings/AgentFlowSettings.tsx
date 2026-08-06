@@ -47,6 +47,14 @@ export function AgentFlowSettings({ projectId, setError }: {
   const [newSlug, setNewSlug] = useState("");
   const [timeline, setTimeline] = useState<string[]>([]);
   const [diffView, setDiffView] = useState<{ slug: string; lines: string[] } | null>(null);
+  const [showImport, setShowImport] = useState(false);
+  const [importYaml, setImportYaml] = useState("");
+  const [importReport, setImportReport] = useState<{
+    valid: boolean;
+    diagnostics: Array<{ code: string; message: string }>;
+    dependencies: Array<{ kind: string; name: string; version?: number; present: boolean; reason?: string }>;
+  } | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
@@ -141,6 +149,53 @@ export function AgentFlowSettings({ projectId, setError }: {
       }
     } catch {
       setDraft(emptyDraft(profile.slug ?? ""));
+    }
+  };
+
+  const precheckImport = async () => {
+    if (!importYaml.trim()) return;
+    try {
+      const report = await apiFetch<typeof importReport>(`/v1/agent-flows/check-dependencies`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ yaml: importYaml }),
+      });
+      setImportReport(report);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Dependency pre-check failed");
+    }
+  };
+
+  const confirmImport = async () => {
+    setImporting(true);
+    try {
+      await apiFetch(`/v1/agent-flows/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ yaml: importYaml }),
+      });
+      setShowImport(false);
+      setImportYaml("");
+      setImportReport(null);
+      setError(null);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const exportFlow = async (profileId: string, source: "draft" | "version", versionId?: string) => {
+    try {
+      const params = new URLSearchParams({ source });
+      if (versionId) params.set("versionID", versionId);
+      const yamlText = await apiFetch<string>(`/v1/agent-flows/${profileId}/export?${params.toString()}`);
+      await navigator.clipboard.writeText(yamlText);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Export failed");
     }
   };
 
@@ -375,16 +430,32 @@ export function AgentFlowSettings({ projectId, setError }: {
             Task DAGs of Role agents. Published versions are immutable; project files only produce candidates.
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowCreate((value) => !value)}
-          style={{
-            padding: "5px 10px", borderRadius: 6, border: "1px solid var(--border)",
-            background: "var(--bg)", color: "var(--text)", fontSize: 12, cursor: "pointer",
-          }}
-        >
-          {showCreate ? "Cancel" : "+ New flow"}
-        </button>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button
+            type="button"
+            onClick={() => {
+              setShowImport((value) => !value);
+              setImportReport(null);
+              setImportYaml("");
+            }}
+            style={{
+              padding: "5px 10px", borderRadius: 6, border: "1px solid var(--border)",
+              background: "var(--bg)", color: "var(--text)", fontSize: 12, cursor: "pointer",
+            }}
+          >
+            {showImport ? "Cancel" : "Import YAML"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowCreate((value) => !value)}
+            style={{
+              padding: "5px 10px", borderRadius: 6, border: "1px solid var(--border)",
+              background: "var(--bg)", color: "var(--text)", fontSize: 12, cursor: "pointer",
+            }}
+          >
+            {showCreate ? "Cancel" : "+ New flow"}
+          </button>
+        </div>
       </div>
 
       {showCreate && (
@@ -408,6 +479,65 @@ export function AgentFlowSettings({ projectId, setError }: {
           >
             Create flow
           </button>
+        </div>
+      )}
+
+      {/* Import dialog */}
+      {showImport && (
+        <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
+            Import flow YAML <span style={{ fontWeight: 400, color: "var(--text-dim)" }}>· creates a managed draft; never publishes or binds</span>
+          </div>
+          <textarea
+            value={importYaml}
+            onChange={(e) => {
+              setImportYaml(e.target.value);
+              setImportReport(null);
+            }}
+            placeholder={"schemaVersion: 1\nid: my-flow\nbudget:\n  max_total_tokens: 100000\ntasks:\n  ..."}
+            style={{ ...inputStyle, minHeight: 120, fontFamily: "var(--font-mono, monospace)", fontSize: 11 }}
+          />
+          <div style={{ display: "flex", gap: 6 }}>
+            <button type="button" onClick={precheckImport} style={ghostButtonStyle}>
+              Check dependencies
+            </button>
+            <button
+              type="button"
+              disabled={importing || !importYaml.trim() || (importReport !== null && !importReport.valid)}
+              onClick={confirmImport}
+              style={{
+                padding: "4px 10px", borderRadius: 6, fontSize: 11, border: "none",
+                background: "var(--accent)", color: "#fff", cursor: "pointer",
+              }}
+            >
+              {importing ? "Importing…" : "Import as draft"}
+            </button>
+          </div>
+          {importReport && (
+            <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: importReport.valid ? "#059669" : "#E11D48" }}>
+                {importReport.valid ? "Valid — ready to import as draft" : "Validation failed — fix before importing"}
+              </div>
+              {importReport.diagnostics?.length > 0 && (
+                <div style={{ fontSize: 11, color: "#E11D48", fontFamily: "var(--font-mono, monospace)" }}>
+                  {importReport.diagnostics.map((d, index) => (
+                    <div key={index}>{d.code}: {d.message}</div>
+                  ))}
+                </div>
+              )}
+              {importReport.dependencies?.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Dependencies (reported only; never installed)</div>
+                  {importReport.dependencies.map((dep, index) => (
+                    <div key={index} style={{ fontSize: 11, color: dep.present ? "var(--text-muted)" : "#E11D48", fontFamily: "var(--font-mono, monospace)" }}>
+                      {dep.kind} {dep.name}{dep.version ? `@${dep.version}` : ""} · {dep.present ? "present" : "missing"}
+                      {!dep.present && dep.reason ? ` (${dep.reason})` : ""}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -814,6 +944,14 @@ export function AgentFlowSettings({ projectId, setError }: {
                 <div style={{ display: "flex", gap: 6 }}>
                   <button type="button" onClick={() => openEditor(profile)} style={ghostButtonStyle}>
                     Edit
+                  </button>
+                  <button
+                    type="button"
+                    title="Copy draft YAML"
+                    onClick={() => profile.id && exportFlow(profile.id, "draft")}
+                    style={ghostButtonStyle}
+                  >
+                    Export
                   </button>
                   {(versions[profile.id!] ?? []).map((version) => (
                     <button key={version.id} type="button" onClick={() => bindVersion(version)} style={ghostButtonStyle}>
