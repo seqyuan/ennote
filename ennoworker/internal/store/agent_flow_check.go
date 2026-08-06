@@ -20,8 +20,10 @@ import (
 // durable Ask-mode approvals, the workspace sandbox, and bounded output
 // capture. It is the CheckRunner implementation wired by the Worker.
 type CheckTaskRunner struct {
-	DB        *sql.DB
-	Workspace *workspace.Manager
+	DB *sql.DB
+	// ManagerBuilder builds a sandboxed workspace manager for a session's
+	// workspace root. Nil means checks are unavailable.
+	ManagerBuilder func(ctx context.Context, sessionID string) (*workspace.Manager, error)
 	// MaxOutputBytes bounds captured stdout/stderr per check.
 	MaxOutputBytes int
 	// DefaultTimeoutSeconds bounds a check command without an explicit timeout.
@@ -154,12 +156,22 @@ type CheckApprovalRow struct {
 // output and a bounded wall timeout. The command is passed as a structured
 // argv vector (never a shell string).
 func (c *CheckTaskRunner) ExecuteCheck(ctx context.Context, command string, timeoutSeconds int) (*agentflow.CheckOutcome, error) {
-	if c.Workspace == nil {
+	if c.ManagerBuilder == nil {
 		return nil, fmt.Errorf("workspace sandbox is unavailable")
 	}
 	argv := agentflow.ParseCheckCommand(command)
 	if len(argv) == 0 {
 		return nil, fmt.Errorf("check command is empty")
+	}
+	// Resolve the workspace for the calling flow run's session. The builder
+	// is injected with the session id by the orchestrator's caller.
+	sessionID, ok := ctx.Value(agentflow.CheckSessionKey{}).(string)
+	if !ok {
+		return nil, fmt.Errorf("check session context is missing")
+	}
+	wManager, err := c.ManagerBuilder(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("build workspace sandbox: %w", err)
 	}
 	timeout := time.Duration(c.DefaultTimeoutSeconds) * time.Second
 	if c.DefaultTimeoutSeconds <= 0 {
@@ -174,11 +186,11 @@ func (c *CheckTaskRunner) ExecuteCheck(ctx context.Context, command string, time
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd, err := c.Workspace.CommandArgs(argv[0], argv[1:]...)
+	cmd, err := wManager.CommandArgs(argv[0], argv[1:]...)
 	if err != nil {
 		return nil, err
 	}
-	cmd.Env = safeCheckEnvironment(c.Workspace.RuntimeVisibleDir)
+	cmd.Env = safeCheckEnvironment(wManager.RuntimeVisibleDir)
 	var stdout, stderr boundedBuffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

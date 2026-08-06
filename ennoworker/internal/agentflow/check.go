@@ -8,6 +8,15 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 )
 
+// CheckSessionKey carries the flow run's session id into the sandbox builder.
+type CheckSessionKey struct{}
+
+// WithCheckSession attaches the flow session to the check execution context.
+func WithCheckSession(ctx context.Context, sessionID string) context.Context {
+	return context.WithValue(ctx, CheckSessionKey{}, sessionID)
+}
+
+
 // CheckPolicy is the frozen tool policy the check gate evaluates against.
 // It mirrors the ToolPolicyConfig dimensions relevant to command execution.
 type CheckPolicy struct {

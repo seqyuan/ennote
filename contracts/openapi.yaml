@@ -1990,6 +1990,456 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "500": { $ref: "#/components/responses/Error" }
 
+  # --- Agent Flows (item 7) ---
+  /v1/agent-flows:
+    get:
+      operationId: listAgentFlows
+      summary: List Agent Flow profiles (managed + the project's own project-file profiles)
+      parameters:
+        - { name: projectId, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Agent Flow profiles
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/AgentFlowProfile" }
+    post:
+      operationId: createAgentFlow
+      summary: Create a managed Agent Flow profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, slug]
+              properties:
+                name: { type: string }
+                slug: { type: string }
+      responses:
+        "201":
+          description: Profile created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/AgentFlowProfile" } }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/agent-flows/{profileID}:
+    parameters:
+      - { name: profileID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getAgentFlow
+      summary: Get an Agent Flow profile
+      responses:
+        "200":
+          description: Profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/AgentFlowProfile" } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/agent-flows/{profileID}/draft:
+    parameters:
+      - { name: profileID, in: path, required: true, schema: { type: string } }
+    patch:
+      operationId: updateAgentFlowDraft
+      summary: Store the authoring YAML as the profile draft (draft revision CAS)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [yaml, expectedRevision]
+              properties:
+                yaml: { type: string }
+                expectedRevision: { type: integer }
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/AgentFlowProfile" } }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/agent-flows/{profileID}/validate:
+    parameters:
+      - { name: profileID, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: validateAgentFlowDraft
+      summary: Run the full 9-point publish validation against the draft
+      responses:
+        "200":
+          description: Validation result with per-item diagnostics
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/FlowValidationResult" } }
+  /v1/agent-flows/{profileID}/publish:
+    parameters:
+      - { name: profileID, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: publishAgentFlow
+      summary: Validate the draft and publish the next immutable version
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedRevision: { type: integer }
+      responses:
+        "201":
+          description: Immutable version
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/AgentFlowVersion" } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/agent-flows/{profileID}/archive:
+    parameters:
+      - { name: profileID, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: archiveAgentFlow
+      summary: Archive a profile (existing versions/bindings/runs stay)
+      responses:
+        "204": { description: Archived }
+  /v1/agent-flows/{profileID}/versions:
+    parameters:
+      - { name: profileID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listAgentFlowVersions
+      summary: List immutable versions of a profile
+      responses:
+        "200":
+          description: Versions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/AgentFlowVersion" }
+  /v1/agent-flows/{profileID}/versions/{versionID}:
+    parameters:
+      - { name: profileID, in: path, required: true, schema: { type: string } }
+      - { name: versionID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getAgentFlowVersion
+      summary: Get one immutable version
+      responses:
+        "200":
+          description: Version
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/AgentFlowVersion" } }
+  /v1/projects/{projectID}/agent-flows/candidates:
+    parameters:
+      - { name: projectID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listAgentFlowCandidates
+      summary: Discover .ennote/agent-flows/*.yaml candidates (parse-only, never executed)
+      responses:
+        "200":
+          description: Candidates
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/AgentFlowCandidate" }
+  /v1/projects/{projectID}/agent-flows/bindings/from-candidate:
+    parameters:
+      - { name: projectID, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: bindAgentFlowCandidate
+      summary: Materialize a project-file candidate as an immutable version and a disabled binding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slug]
+              properties:
+                slug: { type: string }
+      responses:
+        "201":
+          description: Binding created (disabled)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/ProjectAgentFlowBinding" } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/projects/{projectID}/agent-flows/bindings:
+    parameters:
+      - { name: projectID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listAgentFlowBindings
+      summary: List project bindings
+      responses:
+        "200":
+          description: Bindings
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/ProjectAgentFlowBinding" }
+    post:
+      operationId: createAgentFlowBinding
+      summary: Bind an immutable version to the project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [flowVersionId]
+              properties:
+                flowVersionId: { type: string }
+                desiredEnabled: { type: boolean }
+      responses:
+        "201":
+          description: Binding created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/ProjectAgentFlowBinding" } }
+  /v1/projects/{projectID}/agent-flows/bindings/{bindingID}:
+    parameters:
+      - { name: projectID, in: path, required: true, schema: { type: string } }
+      - { name: bindingID, in: path, required: true, schema: { type: string } }
+    patch:
+      operationId: updateAgentFlowBinding
+      summary: Update the binding desired state
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                desiredEnabled: { type: boolean }
+      responses:
+        "200":
+          description: Updated binding
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/ProjectAgentFlowBinding" } }
+    delete:
+      operationId: deleteAgentFlowBinding
+      summary: Remove a binding
+      responses:
+        "204": { description: Removed }
+  /v1/projects/{projectID}/agent-flows/bindings/{bindingID}/run:
+    parameters:
+      - { name: projectID, in: path, required: true, schema: { type: string } }
+      - { name: bindingID, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: runAgentFlow
+      summary: Start a flow run (freezes inputs + task snapshots, then dispatches)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId]
+              properties:
+                sessionId: { type: string }
+                inputs: { type: object, additionalProperties: true }
+                vars: { type: object, additionalProperties: true }
+                clientRequestId: { type: string }
+      responses:
+        "201":
+          description: Flow run created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/RunAgentFlow" } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/projects/{projectID}/agent-flows/runs:
+    parameters:
+      - { name: projectID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listAgentFlowRuns
+      summary: List flow runs of the project
+      responses:
+        "200":
+          description: Flow runs
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/RunAgentFlow" }
+  /v1/projects/{projectID}/agent-flows/runs/{runID}:
+    parameters:
+      - { name: projectID, in: path, required: true, schema: { type: string } }
+      - { name: runID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getAgentFlowRun
+      summary: Get a flow run with its task checkpoints
+      responses:
+        "200":
+          description: Flow run detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          run: { $ref: "#/components/schemas/RunAgentFlow" }
+                          nodes:
+                            type: array
+                            items: { $ref: "#/components/schemas/RunAgentFlowNode" }
+                          flowVersion: { type: integer }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/projects/{projectID}/agent-flows/runs/{runID}/cancel:
+    parameters:
+      - { name: projectID, in: path, required: true, schema: { type: string } }
+      - { name: runID, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: cancelAgentFlowRun
+      summary: Cancel a flow run (hard-cancels the active child; future tasks never scheduled)
+      responses:
+        "200":
+          description: Cancel requested
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/RunAgentFlow" } }
+  /v1/projects/{projectID}/agent-flows/runs/{runID}/resume:
+    parameters:
+      - { name: projectID, in: path, required: true, schema: { type: string } }
+      - { name: runID, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: resumeAgentFlowRun
+      summary: Resume a cancelled flow run as checkpoint continuation (completed tasks never replay)
+      responses:
+        "200":
+          description: Resumed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/RunAgentFlow" } }
+  /v1/projects/{projectID}/agent-flows/check-approvals:
+    parameters:
+      - { name: projectID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listAgentFlowCheckApprovals
+      summary: List pending check approvals (Ask-mode check gates)
+      responses:
+        "200":
+          description: Pending approvals
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/AgentFlowCheckApproval" }
+  /v1/projects/{projectID}/agent-flows/check-approvals/{runID}/{taskIndex}/decide:
+    parameters:
+      - { name: projectID, in: path, required: true, schema: { type: string } }
+      - { name: runID, in: path, required: true, schema: { type: string } }
+      - { name: taskIndex, in: path, required: true, schema: { type: integer } }
+    post:
+      operationId: decideAgentFlowCheckApproval
+      summary: Approve or reject a pending check approval (first decision wins)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approved]
+              properties:
+                approved: { type: boolean }
+                clientRequestId: { type: string }
+      responses:
+        "200":
+          description: Decision applied
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status: { type: string, enum: [pending, approved, rejected] }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -2092,6 +2542,135 @@ components:
         revision: { type: integer }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+
+    AgentFlowProfile:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        sourceKind: { type: string, enum: [managed, project_file] }
+        projectScope: { type: string }
+        sourceLocator: { type: string }
+        lifecycleStatus: { type: string }
+        latestVersion: { type: integer }
+        draft: { type: string }
+        draftYaml: { type: string }
+        draftRevision: { type: integer }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+    AgentFlowVersion:
+      type: object
+      properties:
+        id: { type: string }
+        profileId: { type: string }
+        version: { type: integer }
+        configDigest: { type: string }
+        definition:
+          type: object
+          description: The normalized flow definition (never contains secrets)
+          properties:
+            schemaVersion: { type: integer }
+            id: { type: string }
+            description: { type: string }
+            inputs: { type: object, additionalProperties: true }
+            outputs: { type: object, additionalProperties: true }
+            budget:
+              type: object
+              properties:
+                maxTotalTokens: { type: integer }
+            tasks: { type: object, additionalProperties: true }
+            convergence:
+              type: array
+              items:
+                type: object
+                properties:
+                  from: { type: string }
+                  to: { type: string }
+                  maxRounds: { type: integer }
+        publishedAt: { type: string }
+    ProjectAgentFlowBinding:
+      type: object
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        flowVersionId: { type: string }
+        desiredEnabled: { type: boolean }
+        revision: { type: integer }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+    RunAgentFlow:
+      type: object
+      properties:
+        runId: { type: string }
+        sessionId: { type: string }
+        projectId: { type: string }
+        flowVersionId: { type: string }
+        manifestDigest: { type: string }
+        state: { type: string, enum: [pending, running, completed, failed, cancelled, convergence_exceeded, budget_exceeded] }
+        totalTokensUsed: { type: integer }
+        terminalReason: { type: string }
+        inputs: { type: object, additionalProperties: true }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+        finishedAt: { type: string }
+    RunAgentFlowNode:
+      type: object
+      properties:
+        runId: { type: string }
+        taskIndex: { type: integer }
+        handle: { type: string }
+        roleVersionId: { type: string }
+        skillDigests: { type: array, items: { type: string } }
+        goalDigest: { type: string }
+        goalText: { type: string }
+        budget: { type: object, additionalProperties: true }
+        terminalState: { type: string, enum: [pending, running, completed, failed, blocked, cancelled, interrupted] }
+        outputRef: { type: object, additionalProperties: true }
+        childRunId: { type: string }
+        errorCode: { type: string }
+        createdAt: { type: string }
+        finishedAt: { type: string }
+    AgentFlowCandidate:
+      type: object
+      properties:
+        slug: { type: string }
+        name: { type: string }
+        description: { type: string }
+        sourceKind: { type: string, enum: [managed, project_file] }
+        sourceLocator: { type: string }
+        configDigest: { type: string }
+        definition: { type: object, additionalProperties: true }
+        alreadyBound: { type: boolean }
+        boundVersionId: { type: string }
+        boundVersion: { type: integer }
+        updateAvailable: { type: boolean }
+        parseError: { type: string }
+        validation: { type: array, items: { type: string } }
+        taskCount: { type: integer }
+        maxTotalTokens: { type: integer }
+    FlowValidationResult:
+      type: object
+      properties:
+        valid: { type: boolean }
+        configDigest: { type: string }
+        diagnostics:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              message: { type: string }
+              field: { type: string }
+    AgentFlowCheckApproval:
+      type: object
+      properties:
+        runId: { type: string }
+        taskIndex: { type: integer }
+        command: { type: string }
+        sessionId: { type: string }
+        flowVersionId: { type: string }
+        requestedAt: { type: string }
     MCPCatalogEntry:
       type: object
       properties:

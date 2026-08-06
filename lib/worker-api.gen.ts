@@ -1228,6 +1228,376 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/agent-flows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Agent Flow profiles (managed + the project's own project-file profiles) */
+        get: operations["listAgentFlows"];
+        put?: never;
+        /** Create a managed Agent Flow profile */
+        post: operations["createAgentFlow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agent-flows/{profileID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileID: string;
+            };
+            cookie?: never;
+        };
+        /** Get an Agent Flow profile */
+        get: operations["getAgentFlow"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agent-flows/{profileID}/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Store the authoring YAML as the profile draft (draft revision CAS) */
+        patch: operations["updateAgentFlowDraft"];
+        trace?: never;
+    };
+    "/v1/agent-flows/{profileID}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run the full 9-point publish validation against the draft */
+        post: operations["validateAgentFlowDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agent-flows/{profileID}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Validate the draft and publish the next immutable version */
+        post: operations["publishAgentFlow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agent-flows/{profileID}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive a profile (existing versions/bindings/runs stay) */
+        post: operations["archiveAgentFlow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agent-flows/{profileID}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileID: string;
+            };
+            cookie?: never;
+        };
+        /** List immutable versions of a profile */
+        get: operations["listAgentFlowVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agent-flows/{profileID}/versions/{versionID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileID: string;
+                versionID: string;
+            };
+            cookie?: never;
+        };
+        /** Get one immutable version */
+        get: operations["getAgentFlowVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/agent-flows/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        /** Discover .ennote/agent-flows/*.yaml candidates (parse-only, never executed) */
+        get: operations["listAgentFlowCandidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/agent-flows/bindings/from-candidate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Materialize a project-file candidate as an immutable version and a disabled binding */
+        post: operations["bindAgentFlowCandidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/agent-flows/bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        /** List project bindings */
+        get: operations["listAgentFlowBindings"];
+        put?: never;
+        /** Bind an immutable version to the project */
+        post: operations["createAgentFlowBinding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/agent-flows/bindings/{bindingID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                bindingID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a binding */
+        delete: operations["deleteAgentFlowBinding"];
+        options?: never;
+        head?: never;
+        /** Update the binding desired state */
+        patch: operations["updateAgentFlowBinding"];
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/agent-flows/bindings/{bindingID}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                bindingID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a flow run (freezes inputs + task snapshots, then dispatches) */
+        post: operations["runAgentFlow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/agent-flows/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        /** List flow runs of the project */
+        get: operations["listAgentFlowRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/agent-flows/runs/{runID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                runID: string;
+            };
+            cookie?: never;
+        };
+        /** Get a flow run with its task checkpoints */
+        get: operations["getAgentFlowRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/agent-flows/runs/{runID}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                runID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a flow run (hard-cancels the active child; future tasks never scheduled) */
+        post: operations["cancelAgentFlowRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/agent-flows/runs/{runID}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                runID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume a cancelled flow run as checkpoint continuation (completed tasks never replay) */
+        post: operations["resumeAgentFlowRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/agent-flows/check-approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        /** List pending check approvals (Ask-mode check gates) */
+        get: operations["listAgentFlowCheckApprovals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/agent-flows/check-approvals/{runID}/{taskIndex}/decide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                runID: string;
+                taskIndex: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve or reject a pending check approval (first decision wins) */
+        post: operations["decideAgentFlowCheckApproval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1300,6 +1670,136 @@ export interface components {
             createdAt?: string;
             /** Format: date-time */
             updatedAt?: string;
+        };
+        AgentFlowProfile: {
+            id?: string;
+            name?: string;
+            slug?: string;
+            /** @enum {string} */
+            sourceKind?: "managed" | "project_file";
+            projectScope?: string;
+            sourceLocator?: string;
+            lifecycleStatus?: string;
+            latestVersion?: number;
+            draft?: string;
+            draftYaml?: string;
+            draftRevision?: number;
+            createdAt?: string;
+            updatedAt?: string;
+        };
+        AgentFlowVersion: {
+            id?: string;
+            profileId?: string;
+            version?: number;
+            configDigest?: string;
+            /** @description The normalized flow definition (never contains secrets) */
+            definition?: {
+                schemaVersion?: number;
+                id?: string;
+                description?: string;
+                inputs?: {
+                    [key: string]: unknown;
+                };
+                outputs?: {
+                    [key: string]: unknown;
+                };
+                budget?: {
+                    maxTotalTokens?: number;
+                };
+                tasks?: {
+                    [key: string]: unknown;
+                };
+                convergence?: {
+                    from?: string;
+                    to?: string;
+                    maxRounds?: number;
+                }[];
+            };
+            publishedAt?: string;
+        };
+        ProjectAgentFlowBinding: {
+            id?: string;
+            projectId?: string;
+            flowVersionId?: string;
+            desiredEnabled?: boolean;
+            revision?: number;
+            createdAt?: string;
+            updatedAt?: string;
+        };
+        RunAgentFlow: {
+            runId?: string;
+            sessionId?: string;
+            projectId?: string;
+            flowVersionId?: string;
+            manifestDigest?: string;
+            /** @enum {string} */
+            state?: "pending" | "running" | "completed" | "failed" | "cancelled" | "convergence_exceeded" | "budget_exceeded";
+            totalTokensUsed?: number;
+            terminalReason?: string;
+            inputs?: {
+                [key: string]: unknown;
+            };
+            createdAt?: string;
+            updatedAt?: string;
+            finishedAt?: string;
+        };
+        RunAgentFlowNode: {
+            runId?: string;
+            taskIndex?: number;
+            handle?: string;
+            roleVersionId?: string;
+            skillDigests?: string[];
+            goalDigest?: string;
+            goalText?: string;
+            budget?: {
+                [key: string]: unknown;
+            };
+            /** @enum {string} */
+            terminalState?: "pending" | "running" | "completed" | "failed" | "blocked" | "cancelled" | "interrupted";
+            outputRef?: {
+                [key: string]: unknown;
+            };
+            childRunId?: string;
+            errorCode?: string;
+            createdAt?: string;
+            finishedAt?: string;
+        };
+        AgentFlowCandidate: {
+            slug?: string;
+            name?: string;
+            description?: string;
+            /** @enum {string} */
+            sourceKind?: "managed" | "project_file";
+            sourceLocator?: string;
+            configDigest?: string;
+            definition?: {
+                [key: string]: unknown;
+            };
+            alreadyBound?: boolean;
+            boundVersionId?: string;
+            boundVersion?: number;
+            updateAvailable?: boolean;
+            parseError?: string;
+            validation?: string[];
+            taskCount?: number;
+            maxTotalTokens?: number;
+        };
+        FlowValidationResult: {
+            valid?: boolean;
+            configDigest?: string;
+            diagnostics?: {
+                code?: string;
+                message?: string;
+                field?: string;
+            }[];
+        };
+        AgentFlowCheckApproval: {
+            runId?: string;
+            taskIndex?: number;
+            command?: string;
+            sessionId?: string;
+            flowVersionId?: string;
+            requestedAt?: string;
         };
         MCPCatalogEntry: {
             remoteName?: string;
@@ -4873,6 +5373,606 @@ export interface operations {
             };
             404: components["responses"]["Error"];
             500: components["responses"]["Error"];
+        };
+    };
+    listAgentFlows: {
+        parameters: {
+            query?: {
+                projectId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agent Flow profiles */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AgentFlowProfile"][];
+                    };
+                };
+            };
+        };
+    };
+    createAgentFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    slug: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Profile created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AgentFlowProfile"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    getAgentFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Profile */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AgentFlowProfile"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    updateAgentFlowDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    yaml: string;
+                    expectedRevision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated profile */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AgentFlowProfile"];
+                    };
+                };
+            };
+            409: components["responses"]["Error"];
+        };
+    };
+    validateAgentFlowDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Validation result with per-item diagnostics */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["FlowValidationResult"];
+                    };
+                };
+            };
+        };
+    };
+    publishAgentFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    expectedRevision?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Immutable version */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AgentFlowVersion"];
+                    };
+                };
+            };
+            422: components["responses"]["Error"];
+        };
+    };
+    archiveAgentFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Archived */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listAgentFlowVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Versions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AgentFlowVersion"][];
+                    };
+                };
+            };
+        };
+    };
+    getAgentFlowVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileID: string;
+                versionID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AgentFlowVersion"];
+                    };
+                };
+            };
+        };
+    };
+    listAgentFlowCandidates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Candidates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AgentFlowCandidate"][];
+                    };
+                };
+            };
+        };
+    };
+    bindAgentFlowCandidate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    slug: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Binding created (disabled) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ProjectAgentFlowBinding"];
+                    };
+                };
+            };
+            422: components["responses"]["Error"];
+        };
+    };
+    listAgentFlowBindings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bindings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ProjectAgentFlowBinding"][];
+                    };
+                };
+            };
+        };
+    };
+    createAgentFlowBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    flowVersionId: string;
+                    desiredEnabled?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Binding created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ProjectAgentFlowBinding"];
+                    };
+                };
+            };
+        };
+    };
+    deleteAgentFlowBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                bindingID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    updateAgentFlowBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                bindingID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    desiredEnabled?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated binding */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ProjectAgentFlowBinding"];
+                    };
+                };
+            };
+        };
+    };
+    runAgentFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                bindingID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    sessionId: string;
+                    inputs?: {
+                        [key: string]: unknown;
+                    };
+                    vars?: {
+                        [key: string]: unknown;
+                    };
+                    clientRequestId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Flow run created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RunAgentFlow"];
+                    };
+                };
+            };
+            422: components["responses"]["Error"];
+        };
+    };
+    listAgentFlowRuns: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Flow runs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RunAgentFlow"][];
+                    };
+                };
+            };
+        };
+    };
+    getAgentFlowRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                runID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Flow run detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            run?: components["schemas"]["RunAgentFlow"];
+                            nodes?: components["schemas"]["RunAgentFlowNode"][];
+                            flowVersion?: number;
+                        };
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    cancelAgentFlowRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                runID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cancel requested */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RunAgentFlow"];
+                    };
+                };
+            };
+        };
+    };
+    resumeAgentFlowRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                runID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resumed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RunAgentFlow"];
+                    };
+                };
+            };
+        };
+    };
+    listAgentFlowCheckApprovals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pending approvals */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AgentFlowCheckApproval"][];
+                    };
+                };
+            };
+        };
+    };
+    decideAgentFlowCheckApproval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                runID: string;
+                taskIndex: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    approved: boolean;
+                    clientRequestId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Decision applied */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            /** @enum {string} */
+                            status?: "pending" | "approved" | "rejected";
+                        };
+                    };
+                };
+            };
         };
     };
 }

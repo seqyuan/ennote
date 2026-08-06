@@ -187,8 +187,11 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 			effectiveTokens := roleDef.DelegationPolicy.BudgetCeiling.MaxTotalTokens
 			if task.Budget != nil && task.Budget.Tokens > 0 {
 				effectiveTokens = task.Budget.Tokens
+				totalTaskTokens += effectiveTokens
 			}
-			totalTaskTokens += effectiveTokens
+			// Tasks without an explicit budget contribute 0 to the publish-time
+			// sum: their effective ceiling is the Role's, which the runtime flow
+			// budget still caps unconditionally.
 			for _, skill := range task.Skills {
 				if !v.Resolver.KnownSkill(ctx, skill) {
 					add(v.fail("skill_not_found", fmt.Sprintf("task %q references unknown skill %q", name, skill), field+".skills"))

@@ -161,18 +161,21 @@ func (r *AgentFlowRunRepo) CreateFlowRun(ctx context.Context, input CreateFlowRu
 // GetRun loads the meta-Run record.
 func (r *AgentFlowRunRepo) GetRun(ctx context.Context, runID string) (*domain.RunAgentFlow, error) {
 	var run domain.RunAgentFlow
-	var inputs, createdAt, updatedAt, finishedAt sql.NullString
+	var inputs, createdAt, updatedAt, finishedAt, terminalReason sql.NullString
 	err := r.DB.QueryRowContext(ctx, `SELECT run_id, session_id, project_id, flow_version_id, manifest_digest,
 		inputs_json, state, total_tokens_used, terminal_reason, created_at, updated_at, finished_at
 		FROM run_agent_flow WHERE run_id=?`, runID).
 		Scan(&run.RunID, &run.SessionID, &run.ProjectID, &run.FlowVersionID, &run.ManifestDigest,
-			&inputs, &run.State, &run.TotalTokensUsed, &run.TerminalReason,
+			&inputs, &run.State, &run.TotalTokensUsed, &terminalReason,
 			&createdAt, &updatedAt, &finishedAt)
 	if err != nil {
 		return nil, err
 	}
 	if inputs.Valid {
 		run.InputsJSON = json.RawMessage(inputs.String)
+	}
+	if terminalReason.Valid {
+		run.TerminalReason = terminalReason.String
 	}
 	run.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt.String)
 	run.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt.String)
@@ -199,14 +202,17 @@ func (r *AgentFlowRunRepo) ListProjectRuns(ctx context.Context, projectID string
 	var runs []*domain.RunAgentFlow
 	for rows.Next() {
 		var run domain.RunAgentFlow
-		var inputs, createdAt, updatedAt, finishedAt sql.NullString
+		var inputs, createdAt, updatedAt, finishedAt, terminalReason sql.NullString
 		if err := rows.Scan(&run.RunID, &run.SessionID, &run.ProjectID, &run.FlowVersionID,
-			&run.ManifestDigest, &inputs, &run.State, &run.TotalTokensUsed, &run.TerminalReason,
+			&run.ManifestDigest, &inputs, &run.State, &run.TotalTokensUsed, &terminalReason,
 			&createdAt, &updatedAt, &finishedAt); err != nil {
 			return nil, err
 		}
 		if inputs.Valid {
 			run.InputsJSON = json.RawMessage(inputs.String)
+		}
+		if terminalReason.Valid {
+			run.TerminalReason = terminalReason.String
 		}
 		run.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt.String)
 		run.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt.String)
@@ -505,4 +511,19 @@ func (r *AgentFlowRunRepo) ResumeFlowRun(ctx context.Context, runID string) (*do
 		return nil, err
 	}
 	return r.GetRun(ctx, runID)
+}
+
+// SetCancelRequested durably marks a flow run for cancellation. The
+// orchestrator poll sees the flag, hard-cancels the active child, and
+// terminalizes the meta-Run as cancelled.
+func (r *AgentFlowRunRepo) SetCancelRequested(ctx context.Context, runID string) error {
+	res, err := r.DB.ExecContext(ctx, `UPDATE run_agent_flow SET cancel_requested=1, updated_at=?
+		WHERE run_id=?`, roleTime(time.Now().UTC()), runID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }

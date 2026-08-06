@@ -404,7 +404,7 @@ func (o *Orchestrator) runCheckTask(ctx context.Context, runID string, flow *dom
 		}
 	}
 run:
-	outcome, err := o.Checker.ExecuteCheck(ctx, task.Command, 0)
+	outcome, err := o.Checker.ExecuteCheck(WithCheckSession(ctx, flow.SessionID), task.Command, 0)
 	if err != nil {
 		o.failTask(ctx, runID, node, "check_execution_failed")
 		o.fail(ctx, runID, fmt.Sprintf("check task %q execution failed: %v", node.Handle, err))

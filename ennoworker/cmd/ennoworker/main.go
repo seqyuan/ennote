@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agent"
+	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/api"
 	"github.com/seqyuan/ennote/ennoworker/internal/artifacts"
 	"github.com/seqyuan/ennote/ennoworker/internal/compaction"
@@ -1540,6 +1541,96 @@ func run() error {
 			}
 		}
 	}
+	// Agent Flow meta-Run orchestrator (roadmap item 7, Phase 1). The
+	// orchestrator is a pure state machine: it dispatches one child Run per
+	// task and never calls a Provider itself.
+	flowSkillCatalog := make(map[string]string)
+	for _, skill := range skills.Discover(cfg.SkillsDir, cfg.BuiltinSkillsDir) {
+		flowSkillCatalog[skill.Manifest.ID] = skill.Manifest.ID
+	}
+	flowSkillKnown := make(map[string]bool)
+	for name := range flowSkillCatalog {
+		flowSkillKnown[name] = true
+	}
+	flowRuns := &store.AgentFlowRunRepo{DB: db, SkillCatalog: flowSkillCatalog}
+	flowProfiles := &store.AgentFlowProfileRepo{DB: db}
+	flowBindings := &store.AgentFlowBindingRepo{DB: db}
+	checkRunner := &store.CheckTaskRunner{
+		DB: db, MaxOutputBytes: 32 * 1024, DefaultTimeoutSeconds: 300,
+		ManagerBuilder: func(ctx context.Context, sessionID string) (*workspace.Manager, error) {
+			session, err := (&store.SessionRepo{DB: db}).FindByID(ctx, sessionID)
+			if err != nil {
+				return nil, fmt.Errorf("resolve check session: %w", err)
+			}
+			wSpace, err := (&store.ProjectRepo{DB: db}).FindWorkspaceByProjectID(ctx, session.ProjectID)
+			if err != nil {
+				return nil, fmt.Errorf("resolve check workspace: %w", err)
+			}
+			canonicalRoot, err := workspace.CanonicalWorkspaceRoot(wSpace.HostPath)
+			if err != nil {
+				return nil, fmt.Errorf("resolve canonical root: %w", err)
+			}
+			ioDir := filepath.Join(os.Getenv("ENNOTE_HOME"), "runtime", "flows", sessionID)
+			if err := os.MkdirAll(ioDir, 0o700); err != nil {
+				return nil, err
+			}
+			return workspace.NewManager(canonicalRoot, ioDir, "", workspace.SandboxMode(cfg.SandboxMode))
+		},
+	}
+	flowOrchestrator := &agentflow.Orchestrator{
+		Store: &store.OrchestratorStore{Runs: flowRuns, Profiles: flowProfiles},
+		Children: &store.OrchestratorChildren{DB: db, Delegations: &store.DelegationRepo{DB: db}},
+		Events:  &store.FlowEventSink{Writer: eventWriter},
+		Checker: checkRunner,
+		Enqueue: func(ctx context.Context, runID string) error {
+			return coordinator.Enqueue(ctx, runID)
+		},
+		PollInterval: 250 * time.Millisecond,
+	}
+	flowStartRun := func(ctx context.Context, projectID, flowVersionID, sessionID string,
+		inputs, vars map[string]any) (*domain.RunAgentFlow, error) {
+		version, err := flowProfiles.GetVersion(ctx, flowVersionID)
+		if err != nil {
+			return nil, fmt.Errorf("load flow version: %w", err)
+		}
+		var def domain.FlowDefinition
+		if err := json.Unmarshal(version.DefinitionJSON, &def); err != nil {
+			return nil, fmt.Errorf("decode flow version: %w", err)
+		}
+		inputsJSON, err := store.NormalizeFlowInputs(&def, inputs, vars)
+		if err != nil {
+			return nil, err
+		}
+		freeze, diagnostics, err := flowRuns.FreezeFlowDefinition(ctx, projectID, &def, inputsJSON)
+		if err != nil {
+			return nil, fmt.Errorf("freeze flow: %v", append([]string(nil), diagnostics...))
+		}
+		run, err := flowRuns.CreateFlowRun(ctx, store.CreateFlowRunInput{
+			SessionID: sessionID, ProjectID: projectID, FlowVersionID: flowVersionID, InputsJSON: inputsJSON,
+		}, freeze)
+		if err != nil {
+			return nil, err
+		}
+		flowOrchestrator.Start(ctx, run.RunID)
+		return run, nil
+	}
+	flowStartRecovered := func(ctx context.Context, runID string) error {
+		flowOrchestrator.Start(ctx, runID)
+		return nil
+	}
+	// Recover non-terminal meta-Runs after the delegation recovery passes have
+	// settled interrupted children; the orchestrator re-dispatches only
+	// incomplete tasks (checkpoint continuation).
+	if recoveredFlows, flowErr := flowRuns.ListRecoverableRuns(context.Background()); flowErr == nil {
+		for _, flowRunID := range recoveredFlows {
+			flowOrchestrator.Start(context.Background(), flowRunID)
+		}
+		if len(recoveredFlows) > 0 {
+			slog.Info("agent flow runs recovered", "count", len(recoveredFlows))
+		}
+	} else {
+		slog.Warn("agent flow recovery scan failed", "error", flowErr)
+	}
 	for _, runID := range queuedRuns {
 		if err := coordinator.Enqueue(context.Background(), runID); err != nil {
 			return fmt.Errorf("re-enqueue recovered run %s: %w", runID, err)
@@ -1603,6 +1694,15 @@ func run() error {
 		PromptGate: executor,
 		Prompts:    promptService,
 		MCP:        mcpServer,
+		AgentFlows: &api.AgentFlowServer{
+			Profiles: flowProfiles, Bindings: flowBindings, Runs: flowRuns,
+			Projects:  &store.ProjectRepo{DB: db},
+			Sessions:  &store.SessionRepo{DB: db},
+			Checks:    checkRunner,
+			Discovery: &store.AgentFlowDiscovery{Profiles: flowProfiles},
+			Skills:    flowSkillKnown,
+			StartRun:  flowStartRun, StartRecovered: flowStartRecovered,
+		},
 	}
 
 	listener, err := net.Listen("tcp", cfg.ListenAddr)

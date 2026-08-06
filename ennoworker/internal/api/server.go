@@ -75,6 +75,7 @@ type Server struct {
 	PromptGate          PromptHookGate
 	Prompts             *prompts.Service
 	MCP                 *MCPServer
+	AgentFlows          *AgentFlowServer
 }
 
 func (s *Server) Handler() http.Handler {
@@ -148,6 +149,30 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/standing-approvals", s.listStandingApprovals)
 	mux.HandleFunc("POST /v1/sessions/{sessionID}/standing-approvals/{ruleID}/revoke", s.revokeStandingApproval)
 	mux.HandleFunc("GET /v1/runs/{runID}/events", s.streamEvents)
+
+	// Agent Flows (item 7).
+	mux.HandleFunc("GET /v1/agent-flows", s.listAgentFlows)
+	mux.HandleFunc("POST /v1/agent-flows", s.createAgentFlow)
+	mux.HandleFunc("GET /v1/agent-flows/{profileID}", s.getAgentFlow)
+	mux.HandleFunc("PATCH /v1/agent-flows/{profileID}/draft", s.updateAgentFlowDraft)
+	mux.HandleFunc("POST /v1/agent-flows/{profileID}/validate", s.validateAgentFlowDraft)
+	mux.HandleFunc("POST /v1/agent-flows/{profileID}/publish", s.publishAgentFlow)
+	mux.HandleFunc("POST /v1/agent-flows/{profileID}/archive", s.archiveAgentFlow)
+	mux.HandleFunc("GET /v1/agent-flows/{profileID}/versions", s.listAgentFlowVersions)
+	mux.HandleFunc("GET /v1/agent-flows/{profileID}/versions/{versionID}", s.getAgentFlowVersion)
+	mux.HandleFunc("GET /v1/projects/{projectID}/agent-flows/candidates", s.listAgentFlowCandidates)
+	mux.HandleFunc("POST /v1/projects/{projectID}/agent-flows/bindings/from-candidate", s.bindAgentFlowCandidate)
+	mux.HandleFunc("GET /v1/projects/{projectID}/agent-flows/bindings", s.listAgentFlowBindings)
+	mux.HandleFunc("POST /v1/projects/{projectID}/agent-flows/bindings", s.createAgentFlowBinding)
+	mux.HandleFunc("PATCH /v1/projects/{projectID}/agent-flows/bindings/{bindingID}", s.updateAgentFlowBinding)
+	mux.HandleFunc("DELETE /v1/projects/{projectID}/agent-flows/bindings/{bindingID}", s.deleteAgentFlowBinding)
+	mux.HandleFunc("POST /v1/projects/{projectID}/agent-flows/bindings/{bindingID}/run", s.runAgentFlow)
+	mux.HandleFunc("GET /v1/projects/{projectID}/agent-flows/runs", s.listAgentFlowRuns)
+	mux.HandleFunc("GET /v1/projects/{projectID}/agent-flows/runs/{runID}", s.getAgentFlowRun)
+	mux.HandleFunc("POST /v1/projects/{projectID}/agent-flows/runs/{runID}/cancel", s.cancelAgentFlowRun)
+	mux.HandleFunc("POST /v1/projects/{projectID}/agent-flows/runs/{runID}/resume", s.resumeAgentFlowRun)
+	mux.HandleFunc("GET /v1/projects/{projectID}/agent-flows/check-approvals", s.listAgentFlowCheckApprovals)
+	mux.HandleFunc("POST /v1/projects/{projectID}/agent-flows/check-approvals/{runID}/{taskIndex}/decide", s.decideAgentFlowCheckApproval)
 
 	// Prompt templates.
 	mux.HandleFunc("GET /v1/projects/{projectID}/prompt-templates", s.listPromptTemplates)
