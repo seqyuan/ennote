@@ -476,3 +476,33 @@ func scanFlowNode(scan interface{ Scan(...any) error }) (*domain.RunAgentFlowNod
 var (
 	ErrFlowNodeStateConflict = errors.New("flow node state conflict")
 )
+
+// ResumeFlowRun reopens a cancelled (or failed/interrupted) meta-Run for
+// checkpoint continuation: completed task checkpoints are kept, all other
+// nodes are reset to pending, and the cancel flag clears. Force full replay is
+// a NEW run (explicit), never a silent rewrite of a terminal run.
+func (r *AgentFlowRunRepo) ResumeFlowRun(ctx context.Context, runID string) (*domain.RunAgentFlow, error) {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `UPDATE run_agent_flow SET state='pending', cancel_requested=0,
+		terminal_reason=NULL, finished_at=NULL, updated_at=?
+		WHERE run_id=? AND state IN ('cancelled','failed')`, roleTime(time.Now().UTC()), runID)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, fmt.Errorf("flow run %s is not resumable", runID)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE run_agent_flow_nodes SET terminal_state='pending',
+		error_code=NULL, output_ref=NULL, finished_at=NULL
+		WHERE run_id=? AND terminal_state IN ('cancelled','interrupted','failed','blocked')`, runID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return r.GetRun(ctx, runID)
+}
