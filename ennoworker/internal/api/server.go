@@ -23,7 +23,9 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
 	"github.com/seqyuan/ennote/ennoworker/internal/prompts"
+	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
+	"github.com/seqyuan/ennote/ennoworker/internal/workspace"
 )
 
 type RunController interface {
@@ -76,6 +78,8 @@ type Server struct {
 	Prompts             *prompts.Service
 	MCP                 *MCPServer
 	AgentFlows          *AgentFlowServer
+	Skills              *skillsmgmt.Service
+	Trust               *workspace.TrustStore
 }
 
 func (s *Server) Handler() http.Handler {
@@ -204,6 +208,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/projects/{projectID}/mcp/bindings/{bindingID}/test", s.testMCPBinding)
 	mux.HandleFunc("GET /v1/projects/{projectID}/mcp/bindings/{bindingID}/catalog", s.catalogMCPBinding)
 	mux.HandleFunc("POST /v1/projects/{projectID}/mcp/bindings/{bindingID}/catalog/refresh", s.refreshMCPCatalog)
+
+	mux.HandleFunc("GET /v1/skills", s.listSkills)
+	mux.HandleFunc("PATCH /v1/skills/disabled/{relPath...}", s.toggleSkillDisabled)
+	mux.HandleFunc("GET /v1/skills/search", s.searchSkills)
+	mux.HandleFunc("POST /v1/skills/install", s.installSkill)
+	mux.HandleFunc("POST /v1/skills/check", s.checkSkillUpdates)
+	mux.HandleFunc("POST /v1/skills/update", s.updateSkill)
+	mux.HandleFunc("POST /v1/skills/remove/{relPath...}", s.removeSkill)
 
 	return s.middleware(mux)
 }

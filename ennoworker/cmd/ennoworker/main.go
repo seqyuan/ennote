@@ -35,6 +35,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/runs"
 	"github.com/seqyuan/ennote/ennoworker/internal/runtimeinfo"
 	"github.com/seqyuan/ennote/ennoworker/internal/skills"
+	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/seqyuan/ennote/ennoworker/internal/tools"
 	"github.com/seqyuan/ennote/ennoworker/internal/workspace"
@@ -1694,6 +1695,12 @@ func run() error {
 		PromptGate: executor,
 		Prompts:    promptService,
 		MCP:        mcpServer,
+		Skills: &skillsmgmt.Service{
+			UserRoot:    cfg.SkillsDir,
+			BuiltinRoot: cfg.BuiltinSkillsDir,
+			HomeDir:     cfg.HomeDir,
+		},
+		Trust: trustStore,
 		AgentFlows: &api.AgentFlowServer{
 			Profiles: flowProfiles, Bindings: flowBindings, Runs: flowRuns,
 			Projects:  &store.ProjectRepo{DB: db},
