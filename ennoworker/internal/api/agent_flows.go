@@ -633,3 +633,192 @@ func (s *Server) invokeAgentFlow(w http.ResponseWriter, r *http.Request) {
 	}
 	writeData(w, http.StatusCreated, run)
 }
+
+// --- Phase 3: file sharing (import/export; YAML is the shared unit) ---
+
+// checkAgentFlowDependencies validates arbitrary flow YAML and resolves its
+// dependency manifest against the target environment. It never persists.
+func (s *Server) checkAgentFlowDependencies(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		YAML      string `json:"yaml"`
+		ProjectID string `json:"projectId"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	def, diagnostics, opts, ok := s.parseFlowForImport(w, r, input.YAML, input.ProjectID)
+	if !ok {
+		return
+	}
+	_ = diagnostics
+	validator := store.NewFlowValidator(opts)
+	result := validator.Validate(r.Context(), def)
+	dependencies, err := store.CheckFlowDependencies(r.Context(), opts, def)
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	writeData(w, http.StatusOK, map[string]any{
+		"valid": result.Valid, "diagnostics": result.Diagnostics,
+		"configDigest": result.ConfigDigest, "dependencies": dependencies,
+	})
+}
+
+// importAgentFlow validates flow YAML, resolves its dependencies, and creates
+// (or updates) a managed profile DRAFT. It NEVER publishes, binds, or
+// authorizes anything: publishing stays an explicit user action.
+func (s *Server) importAgentFlow(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		YAML      string `json:"yaml"`
+		ProjectID string `json:"projectId"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	def, diagnostics, opts, ok := s.parseFlowForImport(w, r, input.YAML, input.ProjectID)
+	if !ok {
+		_ = diagnostics
+		return
+	}
+	validator := store.NewFlowValidator(opts)
+	result := validator.Validate(r.Context(), def)
+	dependencies, err := store.CheckFlowDependencies(r.Context(), opts, def)
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	if !result.Valid {
+		writeError(w, r, http.StatusUnprocessableEntity, "agent_flow_validation_failed",
+			"imported flow is invalid: "+result.Diagnostics[0].Code, false)
+		return
+	}
+	profile, err := s.AgentFlows.Profiles.FindProfileBySource(r.Context(), def.ID,
+		domain.FlowSourceManaged, nil)
+	if errors.Is(err, sql.ErrNoRows) {
+		profile, err = s.AgentFlows.Profiles.CreateProfile(r.Context(), store.CreateAgentFlowProfileInput{
+			Name: def.ID, Slug: def.ID, SourceKind: domain.FlowSourceManaged,
+		})
+		if err != nil {
+			writeInternal(w, r, err)
+			return
+		}
+	} else if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	// Draft CAS with idempotency: identical digest -> revision unchanged
+	// (no write at all); a changed draft bumps the revision.
+	expectedRevision := 0
+	alreadyDrafted := false
+	existingDraft, draftErr := s.AgentFlows.Profiles.GetDraft(r.Context(), profile.ID)
+	switch {
+	case draftErr == nil:
+		existingDigest, err := agentflow.ConfigDigest(&existingDraft.Definition)
+		if err != nil {
+			writeInternal(w, r, err)
+			return
+		}
+		newDigest, err := agentflow.ConfigDigest(def)
+		if err != nil {
+			writeInternal(w, r, err)
+			return
+		}
+		if existingDigest == newDigest {
+			alreadyDrafted = true
+		} else {
+			expectedRevision = existingDraft.Revision
+		}
+	case errors.Is(draftErr, sql.ErrNoRows):
+		// no draft yet: expectedRevision stays 0
+	default:
+		writeInternal(w, r, draftErr)
+		return
+	}
+	revision := 0
+	if alreadyDrafted {
+		revision = existingDraft.Revision
+	} else {
+		updated, err := s.AgentFlows.Profiles.UpdateDraft(r.Context(), profile.ID, def, input.YAML, expectedRevision)
+		if errors.Is(err, store.ErrFlowDraftConflict) {
+			writeError(w, r, http.StatusConflict, "agent_flow_draft_conflict", err.Error(), false)
+			return
+		}
+		if err != nil {
+			writeInternal(w, r, err)
+			return
+		}
+		revision = updated.DraftRevision
+	}
+	writeData(w, http.StatusCreated, map[string]any{
+		"profileId": profile.ID, "slug": profile.Slug, "draftRevision": revision,
+		"alreadyDrafted": alreadyDrafted, "dependencies": dependencies,
+		"configDigest": result.ConfigDigest,
+	})
+}
+
+// exportAgentFlow returns the flow YAML: the authoring draft verbatim, or a
+// normalized YAML generated from an immutable published version.
+func (s *Server) exportAgentFlow(w http.ResponseWriter, r *http.Request) {
+	profileID := r.PathValue("profileID")
+	source := r.URL.Query().Get("source")
+	if source == "" {
+		source = "draft"
+	}
+	switch source {
+	case "draft":
+		draft, err := s.AgentFlows.Profiles.GetDraft(r.Context(), profileID)
+		if err != nil {
+			s.writeStoreError(w, r, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/x-yaml")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+draft.Definition.ID+`.yaml"`)
+		_, _ = w.Write([]byte(draft.YAML))
+	case "version":
+		versionID := r.URL.Query().Get("versionID")
+		if versionID == "" {
+			writeError(w, r, http.StatusBadRequest, "invalid_agent_flow_export", "versionID is required for version export", false)
+			return
+		}
+		version, err := s.AgentFlows.Profiles.GetVersion(r.Context(), versionID)
+		if err != nil {
+			s.writeStoreError(w, r, err)
+			return
+		}
+		var def domain.FlowDefinition
+		if err := json.Unmarshal(version.DefinitionJSON, &def); err != nil {
+			writeInternal(w, r, err)
+			return
+		}
+		encoded, err := agentflow.DefinitionToYAML(&def)
+		if err != nil {
+			writeInternal(w, r, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/x-yaml")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+def.ID+`.yaml"`)
+		_, _ = w.Write(encoded)
+	default:
+		writeError(w, r, http.StatusBadRequest, "invalid_agent_flow_export", "source must be draft or version", false)
+	}
+}
+
+// parseFlowForImport parses and validates flow YAML, returning the definition,
+// its diagnostics, and the publish options scoped to the optional project.
+func (s *Server) parseFlowForImport(w http.ResponseWriter, r *http.Request, yamlText, projectID string) (
+	*domain.FlowDefinition, []agentflow.ValidationDiagnostic, store.FlowPublishOptions, bool) {
+	if strings.TrimSpace(yamlText) == "" {
+		writeError(w, r, http.StatusBadRequest, "invalid_agent_flow_import", "yaml is required", false)
+		return nil, nil, store.FlowPublishOptions{}, false
+	}
+	def, err := agentflow.ParseDefinition([]byte(yamlText))
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_agent_flow_yaml", err.Error(), false)
+		return nil, nil, store.FlowPublishOptions{}, false
+	}
+	opts := s.AgentFlows.flowPublishOptions()
+	if strings.TrimSpace(projectID) != "" {
+		opts.ProjectID = strings.TrimSpace(projectID)
+	}
+	return def, nil, opts, true
+}

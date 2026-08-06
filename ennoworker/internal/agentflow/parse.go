@@ -192,3 +192,21 @@ func sortRules(rules []domain.ConvergenceRule) {
 		return rules[i].From < rules[j].From
 	})
 }
+
+// DefinitionToYAML serializes a parsed definition back to the snake_case YAML
+// contract. Used by export: the text can be imported again and round-trips to
+// the same config digest.
+func DefinitionToYAML(def *domain.FlowDefinition) ([]byte, error) {
+	if def == nil {
+		return nil, fmt.Errorf("flow definition is required")
+	}
+	copy := *def
+	if err := normalizeDefinition(&copy); err != nil {
+		return nil, err
+	}
+	encoded, err := yaml.Marshal(&copy)
+	if err != nil {
+		return nil, fmt.Errorf("encode flow definition as YAML: %w", err)
+	}
+	return encoded, nil
+}

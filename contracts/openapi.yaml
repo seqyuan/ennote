@@ -2118,6 +2118,95 @@ paths:
                   - type: object
                     properties: { data: { $ref: "#/components/schemas/AgentFlowVersion" } }
         "422": { $ref: "#/components/responses/Error" }
+  /v1/agent-flows/check-dependencies:
+    post:
+      operationId: checkAgentFlowDependencies
+      summary: Validate arbitrary flow YAML and resolve its dependency manifest against the environment (never persists)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [yaml]
+              properties:
+                yaml: { type: string }
+                projectId: { type: string }
+      responses:
+        "200":
+          description: Validation + dependency report
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          valid: { type: boolean }
+                          configDigest: { type: string }
+                          diagnostics:
+                            type: array
+                            items: { $ref: "#/components/schemas/FlowValidationDiagnostic" }
+                          dependencies:
+                            type: array
+                            items: { $ref: "#/components/schemas/FlowDependencyStatus" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/agent-flows/import:
+    post:
+      operationId: importAgentFlow
+      summary: Import flow YAML into a managed profile DRAFT (never publishes, binds, or authorizes)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [yaml]
+              properties:
+                yaml: { type: string }
+                projectId: { type: string }
+      responses:
+        "201":
+          description: Draft created or updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          profileId: { type: string }
+                          slug: { type: string }
+                          draftRevision: { type: integer }
+                          alreadyDrafted: { type: boolean }
+                          configDigest: { type: string }
+                          dependencies:
+                            type: array
+                            items: { $ref: "#/components/schemas/FlowDependencyStatus" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/agent-flows/{profileID}/export:
+    parameters:
+      - { name: profileID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: exportAgentFlow
+      summary: Export flow YAML (authoring draft verbatim or a normalized YAML generated from a version)
+      parameters:
+        - { name: source, in: query, schema: { type: string, enum: [draft, version], default: draft } }
+        - { name: versionID, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: YAML text
+          content:
+            application/x-yaml: { schema: { type: string } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/agent-flows/{profileID}/archive:
     parameters:
       - { name: profileID, in: path, required: true, schema: { type: string } }
@@ -2680,6 +2769,20 @@ components:
         validation: { type: array, items: { type: string } }
         taskCount: { type: integer }
         maxTotalTokens: { type: integer }
+    FlowDependencyStatus:
+      type: object
+      properties:
+        kind: { type: string, enum: [role, skill] }
+        name: { type: string }
+        version: { type: integer }
+        present: { type: boolean }
+        reason: { type: string }
+    FlowValidationDiagnostic:
+      type: object
+      properties:
+        code: { type: string }
+        message: { type: string }
+        field: { type: string }
     FlowValidationResult:
       type: object
       properties:

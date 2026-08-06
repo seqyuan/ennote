@@ -189,3 +189,11 @@ func (f *flowPublishResolver) ToolReadOnly(ctx context.Context, tool string) boo
 		return false
 	}
 }
+
+// CheckFlowDependencies resolves a flow definition's dependency manifest
+// against the target environment (global or project scope). Missing
+// dependencies are reported with reasons and never installed.
+func CheckFlowDependencies(ctx context.Context, opts FlowPublishOptions, def *domain.FlowDefinition) ([]agentflow.DependencyStatus, error) {
+	resolver := &flowPublishResolver{db: opts.DB, projectID: opts.ProjectID, skills: opts.Skills}
+	return agentflow.CheckDependencies(ctx, resolver, def), nil
+}

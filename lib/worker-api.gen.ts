@@ -1322,6 +1322,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/agent-flows/check-dependencies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Validate arbitrary flow YAML and resolve its dependency manifest against the environment (never persists) */
+        post: operations["checkAgentFlowDependencies"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agent-flows/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import flow YAML into a managed profile DRAFT (never publishes, binds, or authorizes) */
+        post: operations["importAgentFlow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agent-flows/{profileID}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileID: string;
+            };
+            cookie?: never;
+        };
+        /** Export flow YAML (authoring draft verbatim or a normalized YAML generated from a version) */
+        get: operations["exportAgentFlow"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/agent-flows/{profileID}/archive": {
         parameters: {
             query?: never;
@@ -1802,6 +1855,19 @@ export interface components {
             validation?: string[];
             taskCount?: number;
             maxTotalTokens?: number;
+        };
+        FlowDependencyStatus: {
+            /** @enum {string} */
+            kind?: "role" | "skill";
+            name?: string;
+            version?: number;
+            present?: boolean;
+            reason?: string;
+        };
+        FlowValidationDiagnostic: {
+            code?: string;
+            message?: string;
+            field?: string;
         };
         FlowValidationResult: {
             valid?: boolean;
@@ -5558,6 +5624,106 @@ export interface operations {
                 };
             };
             422: components["responses"]["Error"];
+        };
+    };
+    checkAgentFlowDependencies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    yaml: string;
+                    projectId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Validation + dependency report */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            valid?: boolean;
+                            configDigest?: string;
+                            diagnostics?: components["schemas"]["FlowValidationDiagnostic"][];
+                            dependencies?: components["schemas"]["FlowDependencyStatus"][];
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    importAgentFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    yaml: string;
+                    projectId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Draft created or updated */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            profileId?: string;
+                            slug?: string;
+                            draftRevision?: number;
+                            alreadyDrafted?: boolean;
+                            configDigest?: string;
+                            dependencies?: components["schemas"]["FlowDependencyStatus"][];
+                        };
+                    };
+                };
+            };
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+        };
+    };
+    exportAgentFlow: {
+        parameters: {
+            query?: {
+                source?: "draft" | "version";
+                versionID?: string;
+            };
+            header?: never;
+            path: {
+                profileID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description YAML text */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-yaml": string;
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     archiveAgentFlow: {
