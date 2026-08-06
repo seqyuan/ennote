@@ -560,7 +560,6 @@ func (r *AgentFlowRunRepo) SetCancelRequested(ctx context.Context, runID string)
 	return nil
 }
 
-
 // nullableOrNil returns nil for empty values so SQL COALESCE preserves the
 // existing column instead of clearing it with an empty string.
 func nullableOrNil(value string) any {

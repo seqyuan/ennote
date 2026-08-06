@@ -42,7 +42,7 @@ func TestAgentFlowCheckDependenciesNoPersist(t *testing.T) {
 		map[string]any{"yaml": importFlowYAML}, true)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	var result struct {
-		Valid        bool                            `json:"valid"`
+		Valid        bool                             `json:"valid"`
 		Diagnostics  []agentflow.ValidationDiagnostic `json:"diagnostics"`
 		Dependencies []agentflow.DependencyStatus     `json:"dependencies"`
 	}
