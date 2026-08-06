@@ -55,7 +55,7 @@ func Load() (*Config, error) {
 		SandboxMode:       sandboxMode(),
 		LogLevel:          logLevel(),
 		BootstrapToken:    os.Getenv("ENNOTE_BOOTSTRAP_TOKEN"),
-		SkillsDir:         envDefault("ENNOTE_SKILLS_DIR", filepath.Join(home, "skills")),
+		SkillsDir:         defaultSkillsDir(home),
 		BuiltinSkillsDir:  os.Getenv("ENNOTE_BUILTIN_SKILLS_DIR"),
 	}
 
@@ -89,4 +89,23 @@ func envDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// defaultSkillsDir resolves the user-installed skills root:
+//  1. ENNOTE_SKILLS_DIR wins when set.
+//  2. Otherwise, when the pi ecosystem global skills directory exists
+//     (~/.pi/agent/skills), reuse it so marketplace-installed skills flow
+//     into the ennote catalog and Role skill binding.
+//  3. Otherwise fall back to $ENNOTE_HOME/skills.
+func defaultSkillsDir(home string) string {
+	if v := os.Getenv("ENNOTE_SKILLS_DIR"); v != "" {
+		return v
+	}
+	if userDir, err := os.UserHomeDir(); err == nil && userDir != "" {
+		pi := filepath.Join(userDir, ".pi", "agent", "skills")
+		if st, statErr := os.Stat(pi); statErr == nil && st.IsDir() {
+			return pi
+		}
+	}
+	return filepath.Join(home, "skills")
 }

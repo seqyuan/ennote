@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/config"
@@ -56,4 +58,31 @@ func TestDataDir(t *testing.T) {
 	cfg, err := config.Load()
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/ennote-test/data/ennote.db", cfg.DatabasePath)
+}
+
+func TestSkillsDirEnvOverride(t *testing.T) {
+	t.Setenv("ENNOTE_HOME", t.TempDir())
+	t.Setenv("ENNOTE_SKILLS_DIR", "/custom/skills")
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, "/custom/skills", cfg.SkillsDir)
+}
+
+func TestSkillsDirFallsBackToEnnoteHome(t *testing.T) {
+	t.Setenv("ENNOTE_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir()) // no ~/.pi/agent/skills under this HOME
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(cfg.HomeDir, "skills"), cfg.SkillsDir)
+}
+
+func TestSkillsDirReusesPiGlobalDirWhenPresent(t *testing.T) {
+	home := t.TempDir()
+	piDir := filepath.Join(home, ".pi", "agent", "skills")
+	require.NoError(t, os.MkdirAll(piDir, 0o755))
+	t.Setenv("HOME", home)
+	t.Setenv("ENNOTE_HOME", t.TempDir())
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, piDir, cfg.SkillsDir)
 }
