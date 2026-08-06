@@ -593,3 +593,71 @@ func hasCodeIn(diags []agentflow.ValidationDiagnostic, code string) bool {
 	}
 	return false
 }
+
+// Regression: the anchor freezes a model profile so mode=inherit child Runs
+// resolve their model from the parent (live qualification finding).
+func TestAgentFlowAnchorFreezesModelProfile(t *testing.T) {
+	db, _, _, profiles, _, runs, projectID, _, _ := setupFlowFixture(t)
+	ctx := context.Background()
+	// Give the session an explicit default model.
+	var modelID string
+	require.NoError(t, db.QueryRow(`SELECT id FROM model_profiles LIMIT 1`).Scan(&modelID))
+	session, err := (&store.SessionRepo{DB: db}).Create(ctx, domain.CreateSessionInput{
+		ProjectID: projectID, Title: "anchor model", DefaultModelProfileID: &modelID,
+	})
+	require.NoError(t, err)
+	profile, err := profiles.CreateProfile(ctx, store.CreateAgentFlowProfileInput{
+		Name: "Review", Slug: "review", SourceKind: domain.FlowSourceManaged,
+	})
+	require.NoError(t, err)
+	def, err := agentflow.ParseDefinition([]byte(flowYAML("review", "")))
+	require.NoError(t, err)
+	version, err := profiles.CreateVersion(ctx, profile.ID, def)
+	require.NoError(t, err)
+	inputs, err := store.NormalizeFlowInputs(def, map[string]any{"target": "src/main.go"}, nil)
+	require.NoError(t, err)
+	freeze, _, err := runs.FreezeFlowDefinition(ctx, projectID, def, inputs)
+	require.NoError(t, err)
+	run, err := runs.CreateFlowRun(ctx, store.CreateFlowRunInput{
+		SessionID: session.ID, ProjectID: projectID, FlowVersionID: version.ID, InputsJSON: inputs,
+	}, freeze)
+	require.NoError(t, err)
+	var effective string
+	require.NoError(t, db.QueryRow(`SELECT effective_config_json FROM agent_runs WHERE id=?`, run.RunID).Scan(&effective))
+	assert.Contains(t, effective, `"modelProfileId":`)
+	assert.Contains(t, effective, modelID)
+}
+
+// Regression: a cancelled/failed anchor can be restored to running so a
+// resume can dispatch new children (live qualification finding).
+func TestAgentFlowSetAnchorRunningFromCancelled(t *testing.T) {
+	db, _, _, profiles, _, runs, projectID, _, _ := setupFlowFixture(t)
+	ctx := context.Background()
+	session, err := (&store.SessionRepo{DB: db}).Create(ctx, domain.CreateSessionInput{
+		ProjectID: projectID, Title: "anchor resume",
+	})
+	require.NoError(t, err)
+	profile, err := profiles.CreateProfile(ctx, store.CreateAgentFlowProfileInput{
+		Name: "Review", Slug: "review", SourceKind: domain.FlowSourceManaged,
+	})
+	require.NoError(t, err)
+	def, err := agentflow.ParseDefinition([]byte(flowYAML("review", "")))
+	require.NoError(t, err)
+	version, err := profiles.CreateVersion(ctx, profile.ID, def)
+	require.NoError(t, err)
+	inputs, err := store.NormalizeFlowInputs(def, map[string]any{"target": "src/main.go"}, nil)
+	require.NoError(t, err)
+	freeze, _, err := runs.FreezeFlowDefinition(ctx, projectID, def, inputs)
+	require.NoError(t, err)
+	run, err := runs.CreateFlowRun(ctx, store.CreateFlowRunInput{
+		SessionID: session.ID, ProjectID: projectID, FlowVersionID: version.ID, InputsJSON: inputs,
+	}, freeze)
+	require.NoError(t, err)
+	// Simulate cancel: anchor terminalizes as cancelled.
+	require.NoError(t, runs.TerminateAnchor(ctx, run.RunID, domain.RunCancelled, "flow_cancelled", "cancelled"))
+	// Resume must restore the anchor so delegation children can be created.
+	require.NoError(t, runs.SetAnchorRunning(ctx, run.RunID))
+	var status string
+	require.NoError(t, db.QueryRow(`SELECT status FROM agent_runs WHERE id=?`, run.RunID).Scan(&status))
+	assert.Equal(t, "running", status)
+}

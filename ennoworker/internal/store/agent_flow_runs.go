@@ -99,13 +99,29 @@ func (r *AgentFlowRunRepo) CreateFlowRun(ctx context.Context, input CreateFlowRu
 	}
 	// Anchor: a top-level Host agent run owned entirely by the orchestrator.
 	// It never goes through the agent loop; it is the durable parent identity
-	// for delegation children, events, and SSE.
+	// for delegation children, events, and SSE. The anchor freezes a model
+	// profile id so child Runs with mode=inherit resolve their model from the
+	// parent (the delegation substrate contract), matching the production
+	// parent effective-config semantics.
+	var modelProfileID string
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(default_model_profile_id, '') FROM sessions WHERE id=?`,
+		input.SessionID).Scan(&modelProfileID); err != nil {
+		return nil, err
+	}
+	if modelProfileID == "" {
+		_ = tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, defaultModelSettingKey).Scan(&modelProfileID)
+	}
+	anchorConfig := map[string]any{}
+	if modelProfileID != "" {
+		anchorConfig["modelProfileId"] = modelProfileID
+	}
+	anchorConfigJSON, _ := json.Marshal(anchorConfig)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_runs
 		(id, turn_id, session_id, run_kind, base_message_id, attempt, status, requested_config_json,
 		 effective_config_json, speaker_snapshot_json, root_run_id, execution_depth, publish_mode,
 		 commit_format_version, context_snapshot_json, created_at)
-		VALUES (?, ?, ?, 'agent', ?, 1, 'running', '{}', '{}', '{"kind":"host","displayName":"Host"}', ?, 0, 'private_to_parent', 2, '{}', ?)`,
-		runID, turnID, input.SessionID, messageID, runID, timestamp); err != nil {
+		VALUES (?, ?, ?, 'agent', ?, 1, 'running', '{}', ?, '{"kind":"host","displayName":"Host"}', ?, 0, 'private_to_parent', 2, '{}', ?)`,
+		runID, turnID, input.SessionID, messageID, string(anchorConfigJSON), runID, timestamp); err != nil {
 		return nil, fmt.Errorf("create flow anchor run: %w", err)
 	}
 	inputsJSON := input.InputsJSON
@@ -351,10 +367,13 @@ func (r *AgentFlowRunRepo) AddTokenUsage(ctx context.Context, runID string, toke
 }
 
 // SetAnchorRunning restores the anchor run to 'running' after crash recovery
-// (RecoverActive interrupts it on restart). It is a no-op when already running.
+// (RecoverActive interrupts it on restart) or after a resume from a
+// cancelled/failed terminal state. Only a completed anchor is excluded: a
+// resumed flow must be able to dispatch new children through the delegation
+// substrate, which requires a running parent.
 func (r *AgentFlowRunRepo) SetAnchorRunning(ctx context.Context, runID string) error {
 	_, err := r.DB.ExecContext(ctx, `UPDATE agent_runs SET status='running', error_code=NULL, error_message=NULL
-		WHERE id=? AND status NOT IN ('succeeded','failed','cancelled')`, runID)
+		WHERE id=? AND status <> 'succeeded'`, runID)
 	return err
 }
 
