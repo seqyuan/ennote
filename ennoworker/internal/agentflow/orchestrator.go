@@ -205,7 +205,7 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 				}
 			}
 		}
-		next := nextReadyTask(nodes, completed)
+		next := nextReadyTask(nodes, completed, &def)
 		if next == nil {
 			// No runnable task: either the flow finished or a dependency failed.
 			if len(completed) == len(nodes) {
@@ -439,8 +439,24 @@ run:
 	}); err != nil {
 		return err
 	}
-	return o.Events.PublishFlow(ctx, runID, "flow_task_completed", map[string]any{
+	if err := o.Events.PublishFlow(ctx, runID, "flow_task_completed", map[string]any{
 		"flowRunId": runID, "task": node.Handle, "outputRef": string(payload), "check": true,
+	}); err != nil {
+		return err
+	}
+	// Phase 2: the deterministic check verdict drives branch routing. Emit the
+	// routed target so the timeline and consumers see the exact gate decision.
+	nextTarget := ""
+	if task.Next != nil {
+		if outcome.Pass {
+			nextTarget = task.Next["pass"]
+		} else {
+			nextTarget = task.Next["fail"]
+		}
+	}
+	return o.Events.PublishFlow(ctx, runID, "flow_check_result", map[string]any{
+		"flowRunId": runID, "task": node.Handle, "pass": outcome.Pass,
+		"summary": outcome.Summary, "next": nextTarget,
 	})
 }
 
@@ -543,17 +559,91 @@ func (o *Orchestrator) isCancelled(ctx context.Context, runID string) bool {
 
 // nextReadyTask picks the first dispatchable task: the lowest-index node that
 // is pending or interrupted (completed/running/failed/blocked/cancelled are
-// never re-selected). Combined with the topological ordering and the
-// dependency gate in run(), a node is only dispatched after every prerequisite
-// has a completed checkpoint.
-func nextReadyTask(nodes []*domain.RunAgentFlowNode, _ map[string]*domain.RunAgentFlowNode) *domain.RunAgentFlowNode {
+// never re-selected). Two gates apply: the dependency gate in run() and the
+// branch gate here — a node claimed by a check's next.pass/next.fail is only
+// dispatchable once that check completed with the matching result.
+func nextReadyTask(nodes []*domain.RunAgentFlowNode, _ map[string]*domain.RunAgentFlowNode,
+	def *domain.FlowDefinition) *domain.RunAgentFlowNode {
+	byHandle := make(map[string]*domain.RunAgentFlowNode, len(nodes))
+	for i := range nodes {
+		byHandle[nodes[i].Handle] = nodes[i]
+	}
 	for i := range nodes {
 		node := nodes[i]
-		if node.TerminalState == domain.FlowNodePending || node.TerminalState == domain.FlowNodeInterrupted {
-			return node
+		if node.TerminalState != domain.FlowNodePending && node.TerminalState != domain.FlowNodeInterrupted {
+			continue
 		}
+		if inactiveBranch(node.Handle, def, byHandle, map[string]bool{}) {
+			continue
+		}
+		return node
 	}
 	return nil
+}
+
+// inactiveBranch reports whether a node lies on an inactive check-gate
+// branch: it (or any of its depends ancestors) is the target of a check whose
+// gate is unresolved or whose verdict does not select that branch. Inactive
+// targets and everything downstream of them are never dispatched — this is
+// what makes branch routing deterministic and keeps unselected branches from
+// leaking into the DAG.
+func inactiveBranch(handle string, def *domain.FlowDefinition, nodes map[string]*domain.RunAgentFlowNode,
+	seen map[string]bool) bool {
+	if seen[handle] {
+		return false
+	}
+	seen[handle] = true
+	if mismatchedTarget(handle, def, nodes) {
+		return true
+	}
+	if task, ok := def.Tasks[handle]; ok {
+		for _, dep := range task.Depends {
+			if inactiveBranch(dep, def, nodes, seen) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// mismatchedTarget reports whether the node is the target of a check-gate
+// branch that is unresolved or does not select it.
+func mismatchedTarget(handle string, def *domain.FlowDefinition, nodes map[string]*domain.RunAgentFlowNode) bool {
+	for name, task := range def.Tasks {
+		if task.Type != domain.FlowTaskCheck || task.Next == nil {
+			continue
+		}
+		wanted := ""
+		if task.Next["pass"] == handle {
+			wanted = "pass"
+		} else if task.Next["fail"] == handle {
+			wanted = "fail"
+		} else {
+			continue
+		}
+		checkNode := nodes[name]
+		if checkNode == nil || checkNode.TerminalState != domain.FlowNodeCompleted {
+			return true // gate not yet resolved -> target inactive
+		}
+		if checkNodePass(checkNode.OutputRef) != (wanted == "pass") {
+			return true // verdict selects the other branch
+		}
+	}
+	return false
+}
+
+// checkNodePass reads the deterministic pass verdict from a check checkpoint.
+func checkNodePass(outputRef json.RawMessage) bool {
+	if len(outputRef) == 0 {
+		return false
+	}
+	var out struct {
+		Pass bool `json:"pass"`
+	}
+	if err := json.Unmarshal(outputRef, &out); err != nil {
+		return false
+	}
+	return out.Pass
 }
 
 // uncompletedDep returns the first depends task that does not have a completed

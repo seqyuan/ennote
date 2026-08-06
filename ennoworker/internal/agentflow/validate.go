@@ -209,6 +209,7 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 
 	// 4. DAG acyclicity + convergence back-edge binding.
 	validateTopology(add, def)
+	validateBranchRouting(add, def)
 
 	// 7. flow-level total budget mandatory and >= sum of task budgets.
 	if def.Budget.MaxTotalTokens < 1 {
@@ -337,6 +338,69 @@ func validateTopology(add func(ValidationDiagnostic), def *domain.FlowDefinition
 }
 
 const maxRoundsLimit = 100
+
+// validateBranchRouting enforces the Phase 2 check-gate branch contract
+// (v2 §5.2 next): keys are pass/fail only; targets exist, are downstream of
+// the check, and differ; one task is never claimed by two different checks.
+func validateBranchRouting(add func(ValidationDiagnostic), def *domain.FlowDefinition) {
+	reach := reachabilityMatrix(def.Tasks, map[[2]string]int{})
+	claimedBy := make(map[string]string)
+	for name, task := range def.Tasks {
+		if task.Type != domain.FlowTaskCheck {
+			continue
+		}
+		passTarget := strings.TrimSpace(task.Next["pass"])
+		failTarget := strings.TrimSpace(task.Next["fail"])
+		if _, ok := task.Next["pass"]; ok {
+			if passTarget == "" {
+				add(ValidationDiagnostic{Code: "next_target_unknown",
+					Message: fmt.Sprintf("check %q next.pass references an unknown task", name), Field: "tasks." + name + ".next"})
+			} else if _, exists := def.Tasks[passTarget]; !exists {
+				add(ValidationDiagnostic{Code: "next_target_unknown",
+					Message: fmt.Sprintf("check %q next.pass references unknown task %q", name, passTarget), Field: "tasks." + name + ".next"})
+			} else {
+				if !reach[name][passTarget] {
+					add(ValidationDiagnostic{Code: "next_target_not_downstream",
+						Message: fmt.Sprintf("check %q next.pass target %q is not downstream of the check", name, passTarget),
+						Field:   "tasks." + name + ".next"})
+				}
+				if other, dup := claimedBy[passTarget]; dup && other != name {
+					add(ValidationDiagnostic{Code: "next_target_conflict",
+						Message: fmt.Sprintf("task %q is claimed by both check %q and check %q", passTarget, other, name),
+						Field:   "tasks." + name + ".next"})
+				} else {
+					claimedBy[passTarget] = name
+				}
+			}
+		}
+		if _, ok := task.Next["fail"]; ok {
+			if failTarget == "" {
+				add(ValidationDiagnostic{Code: "next_target_unknown",
+					Message: fmt.Sprintf("check %q next.fail references an unknown task", name), Field: "tasks." + name + ".next"})
+			} else if _, exists := def.Tasks[failTarget]; !exists {
+				add(ValidationDiagnostic{Code: "next_target_unknown",
+					Message: fmt.Sprintf("check %q next.fail references unknown task %q", name, failTarget), Field: "tasks." + name + ".next"})
+			} else {
+				if !reach[name][failTarget] {
+					add(ValidationDiagnostic{Code: "next_target_not_downstream",
+						Message: fmt.Sprintf("check %q next.fail target %q is not downstream of the check", name, failTarget),
+						Field:   "tasks." + name + ".next"})
+				}
+				if other, dup := claimedBy[failTarget]; dup && other != name {
+					add(ValidationDiagnostic{Code: "next_target_conflict",
+						Message: fmt.Sprintf("task %q is claimed by both check %q and check %q", failTarget, other, name),
+						Field:   "tasks." + name + ".next"})
+				} else {
+					claimedBy[failTarget] = name
+				}
+			}
+		}
+		if passTarget != "" && passTarget == failTarget {
+			add(ValidationDiagnostic{Code: "next_target_same",
+				Message: fmt.Sprintf("check %q next.pass and next.fail must differ", name), Field: "tasks." + name + ".next"})
+		}
+	}
+}
 
 // reachabilityMatrix computes transitive reachability over the DAG (without
 // convergence back-edges).
