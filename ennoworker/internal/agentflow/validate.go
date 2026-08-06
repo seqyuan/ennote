@@ -95,7 +95,9 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 			fmt.Sprintf("flow schemaVersion must be %d", domain.FlowSchemaVersion), "schemaVersion"))
 	}
 
-	// 2. Exactly one entry task (in-degree 0 == 1).
+	// 2. Exactly one entry task (in-degree 0 == 1). In-degree counts the
+	// task's own depends (prerequisites): the entry is the task with no
+	// depends at all.
 	indegree := make(map[string]int, len(def.Tasks))
 	for name := range def.Tasks {
 		indegree[name] = 0
@@ -106,7 +108,7 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 				add(v.fail("depends_unknown", fmt.Sprintf("task %q depends on unknown task %q", name, dep), "tasks."+name+".depends"))
 				continue
 			}
-			indegree[dep]++
+			indegree[name]++
 		}
 	}
 	var entries []string

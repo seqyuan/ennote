@@ -246,14 +246,19 @@ func (c *fakeChildren) CancelChildRun(ctx context.Context, runID string) error {
 }
 
 type fakeEvents struct {
-	mu     sync.Mutex
-	events []string
+	mu      sync.Mutex
+	events  []string
+	payload map[string]map[string]any
 }
 
 func (e *fakeEvents) PublishFlow(ctx context.Context, runID string, eventType string, payload map[string]any) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.events = append(e.events, eventType)
+	if e.payload == nil {
+		e.payload = map[string]map[string]any{}
+	}
+	e.payload[eventType] = payload
 	return nil
 }
 
@@ -263,6 +268,12 @@ func (e *fakeEvents) types() []string {
 	out := make([]string, len(e.events))
 	copy(out, e.events)
 	return out
+}
+
+func (e *fakeEvents) payloadOf(eventType string) map[string]any {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.payload[eventType]
 }
 
 // --- Fixture ---
@@ -533,4 +544,106 @@ func indexOf(values []string, target string) int {
 		}
 	}
 	return -1
+}
+
+// Matrix 14 regression: crash mid-dispatch leaves a node 'running' with an
+// interrupted child. Recovery must re-dispatch that task (not skip it) and
+// still fold its predecessor's completed output into the next goal.
+func TestOrchestratorRecoveryRedispatchInterruptedChild(t *testing.T) {
+	def := threeTaskDef()
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+	// Crash after producer completed its checkpoint but while the reviewer
+	// child was mid-flight: reviewer node is 'running' with an interrupted
+	// child (worker restart semantics).
+	err = fake.UpdateNode(context.Background(), "flow-run-1", NodeUpdate{
+		TaskIndex: 0, ExpectedStates: []domain.FlowNodeState{domain.FlowNodePending},
+		SetState: domain.FlowNodeCompleted, OutputRef: json.RawMessage(`{"changedFiles":["crashed.go"]}`),
+	})
+	require.NoError(t, err)
+	err = fake.UpdateNode(context.Background(), "flow-run-1", NodeUpdate{
+		TaskIndex: 1, ExpectedStates: []domain.FlowNodeState{domain.FlowNodePending},
+		SetState: domain.FlowNodeRunning, ChildRunID: "child-reviewer-crashed",
+	})
+	require.NoError(t, err)
+	fake.mu.Lock()
+	fake.run.State = domain.FlowStateRunning
+	fake.mu.Unlock()
+
+	orch := newOrchestrator(fake, children, events)
+	orch.Recover(context.Background(), []string{"flow-run-1"})
+	state := waitTerminal(t, fake)
+	assert.Equal(t, domain.FlowStateCompleted, state)
+	// The reviewer task was re-dispatched (exactly once) and consumed the
+	// producer checkpoint output.
+	require.Len(t, children.created, 1)
+	assert.Equal(t, "reviewer", children.created[0].Handle)
+	assert.Equal(t, "Review [\"crashed.go\"]", children.created[0].Assignment)
+	// The crashed child run id was replaced by the new dispatch.
+	nodes, _ := fake.ListNodes(context.Background(), "flow-run-1")
+	byHandle := map[string]*domain.RunAgentFlowNode{}
+	for _, n := range nodes {
+		byHandle[n.Handle] = n
+	}
+	assert.Equal(t, domain.FlowNodeCompleted, byHandle["reviewer"].TerminalState)
+	assert.NotEqual(t, "child-reviewer-crashed", byHandle["reviewer"].ChildRunID)
+}
+
+// Crash window: the child Run already succeeded (its terminal fact is folded
+// into the delegation item) but the checkpoint was never written. Recovery
+// must fold the result into the node instead of re-running the task.
+func TestOrchestratorRecoveryFoldsCompletedChild(t *testing.T) {
+	def := threeTaskDef()
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+	// Producer's child succeeded before the crash; the checkpoint write never
+	// happened, so the node is still 'running' with a succeeded child.
+	children.results["producer"] = &domain.SubmitResult{
+		Status: domain.SubmitCompleted, Summary: "done",
+		Payload: json.RawMessage(`{"changedFiles":["folded.go"]}`),
+	}
+	children.status["child-producer"] = domain.RunSucceeded
+	err = fake.UpdateNode(context.Background(), "flow-run-1", NodeUpdate{
+		TaskIndex: 0, ExpectedStates: []domain.FlowNodeState{domain.FlowNodePending},
+		SetState: domain.FlowNodeRunning, ChildRunID: "child-producer",
+	})
+	require.NoError(t, err)
+	fake.mu.Lock()
+	fake.run.State = domain.FlowStateRunning
+	fake.mu.Unlock()
+
+	orch := newOrchestrator(fake, children, events)
+	orch.Recover(context.Background(), []string{"flow-run-1"})
+	state := waitTerminal(t, fake)
+	assert.Equal(t, domain.FlowStateCompleted, state)
+	// Producer was NOT re-dispatched: its checkpoint was folded from the
+	// succeeded child; reviewer consumed the folded output.
+	require.Len(t, children.created, 1)
+	assert.Equal(t, "reviewer", children.created[0].Handle)
+	assert.Equal(t, "Review [\"folded.go\"]", children.created[0].Assignment)
+	nodes, _ := fake.ListNodes(context.Background(), "flow-run-1")
+	byHandle := map[string]*domain.RunAgentFlowNode{}
+	for _, n := range nodes {
+		byHandle[n.Handle] = n
+	}
+	assert.Equal(t, domain.FlowNodeCompleted, byHandle["producer"].TerminalState)
+	assert.JSONEq(t, `{"changedFiles":["folded.go"]}`, string(byHandle["producer"].OutputRef))
+}
+
+// flow_started carries the entry task (v2 §10 contract field).
+func TestOrchestratorFlowStartedCarriesEntryTask(t *testing.T) {
+	def := threeTaskDef()
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+	orch := newOrchestrator(fake, children, events)
+	orch.Start(context.Background(), "flow-run-1")
+	waitTerminal(t, fake)
+	require.Equal(t, "flow_started", events.types()[0])
+	assert.Equal(t, "producer", events.payloadOf("flow_started")["entryTask"])
 }

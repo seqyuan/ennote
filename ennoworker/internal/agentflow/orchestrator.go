@@ -138,7 +138,7 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 		// timeline from the existing checkpoints without a second start event.
 		if err := o.Events.PublishFlow(ctx, runID, "flow_started", map[string]any{
 			"flowRunId": runID, "flowVersionId": run.FlowVersionID,
-			"manifestDigest": run.ManifestDigest,
+			"manifestDigest": run.ManifestDigest, "entryTask": entryTaskHandle(&def),
 		}); err != nil {
 			o.fail(ctx, runID, "flow_started event failed: "+err.Error())
 			return
@@ -162,6 +162,17 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 	}
 
 	taskOutputs := map[string]json.RawMessage{}
+
+	// Crash recovery: any node left in 'running' by a crashed orchestrator is
+	// reconciled against its child Run's terminal fact (folded when terminal,
+	// reset to interrupted otherwise) before the dispatch loop runs, so a
+	// completed child's output is never lost and an interrupted child is
+	// re-dispatched exactly once. Idempotent: the loop re-runs it each
+	// iteration as a safety net for double-start races.
+	if err := o.reconcileCrashedNodes(ctx, runID); err != nil {
+		o.fail(ctx, runID, "reconcile crashed nodes: "+err.Error())
+		return
+	}
 
 	for {
 		select {
@@ -204,6 +215,14 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 			return
 		}
 		task := def.Tasks[next.Handle]
+		// Dependency gate: a pending task may only dispatch once every task it
+		// depends on has a completed checkpoint (defensive: the topological
+		// order makes this true in the happy path, and the check turns any
+		// failed/cancelled dependency into a clear flow failure).
+		if missing := uncompletedDep(task, completed); missing != "" {
+			o.fail(ctx, runID, fmt.Sprintf("task %q depends on incomplete task %q", next.Handle, missing))
+			return
+		}
 		if task.Terminal != nil {
 			// Terminal gate: gather the flow outputs from the terminal task's
 			// dependency outputs and complete the flow.
@@ -522,17 +541,138 @@ func (o *Orchestrator) isCancelled(ctx context.Context, runID string) bool {
 	return err == nil && value
 }
 
-// nextReadyTask picks the first (topological order) non-terminal task whose
-// depends are all completed.
-func nextReadyTask(nodes []*domain.RunAgentFlowNode, completed map[string]*domain.RunAgentFlowNode) *domain.RunAgentFlowNode {
+// nextReadyTask picks the first dispatchable task: the lowest-index node that
+// is pending or interrupted (completed/running/failed/blocked/cancelled are
+// never re-selected). Combined with the topological ordering and the
+// dependency gate in run(), a node is only dispatched after every prerequisite
+// has a completed checkpoint.
+func nextReadyTask(nodes []*domain.RunAgentFlowNode, _ map[string]*domain.RunAgentFlowNode) *domain.RunAgentFlowNode {
 	for i := range nodes {
 		node := nodes[i]
-		if node.TerminalState == domain.FlowNodeCompleted || node.TerminalState == domain.FlowNodeRunning {
-			continue
+		if node.TerminalState == domain.FlowNodePending || node.TerminalState == domain.FlowNodeInterrupted {
+			return node
 		}
-		return node
 	}
 	return nil
+}
+
+// uncompletedDep returns the first depends task that does not have a completed
+// checkpoint, or "" when every prerequisite is satisfied.
+func uncompletedDep(task domain.FlowTask, completed map[string]*domain.RunAgentFlowNode) string {
+	for _, dep := range task.Depends {
+		if _, ok := completed[dep]; !ok {
+			return dep
+		}
+	}
+	return ""
+}
+
+// reconcileCrashedNodes folds any node left in 'running' state by a crashed
+// orchestrator. For each such node:
+//   - child Run reached a terminal fact -> the result is folded into the
+//     checkpoint (completed + output_ref / failed / cancelled) and usage is
+//     accumulated, exactly like a normal dispatch settlement;
+//   - child Run is not terminal (or unknown) -> the node is reset to
+//     interrupted so the dispatch loop re-runs the task once.
+//
+// The flow budget check is applied after folding so a recovered run that
+// already exceeded its ceiling terminalizes as budget_exceeded instead of
+// dispatching more tasks.
+func (o *Orchestrator) reconcileCrashedNodes(ctx context.Context, runID string) error {
+	nodes, err := o.Store.ListNodes(ctx, runID)
+	if err != nil {
+		return err
+	}
+	flow, err := o.Store.GetRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	budgetLimit := o.flowBudgetLimit(ctx, flow.FlowVersionID)
+	for i := range nodes {
+		node := nodes[i]
+		if node.TerminalState != domain.FlowNodeRunning {
+			continue
+		}
+		reset := func() {
+			_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
+				TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
+				SetState: domain.FlowNodeInterrupted,
+			})
+		}
+		if node.ChildRunID == "" {
+			reset()
+			continue
+		}
+		status, err := o.Children.ChildRunStatus(ctx, node.ChildRunID)
+		if err != nil || !status.Terminal() {
+			// Still active (or the row is gone): re-dispatch the task.
+			reset()
+			continue
+		}
+		if status == domain.RunSucceeded {
+			result, _ := o.Children.ChildTerminalResult(ctx, node.ChildRunID)
+			payload := json.RawMessage{}
+			if result != nil && len(result.Payload) > 0 {
+				payload = result.Payload
+			} else if result != nil {
+				payload, _ = json.Marshal(map[string]any{"summary": result.Summary})
+			}
+			usage, _ := o.Children.ChildUsage(ctx, node.ChildRunID)
+			total, _ := o.Store.AddTokenUsage(ctx, runID, usage.Tokens)
+			_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
+				TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
+				SetState: domain.FlowNodeCompleted, OutputRef: payload,
+			})
+			_ = o.Events.PublishFlow(ctx, runID, "flow_task_completed", map[string]any{
+				"flowRunId": runID, "task": node.Handle, "outputRef": string(payload), "childRunId": node.ChildRunID,
+			})
+			if budgetLimit > 0 && total > budgetLimit {
+				_ = o.Store.UpdateFlowState(ctx, runID, domain.FlowStateBudgetExceeded, total,
+					fmt.Sprintf("flow budget exceeded: %d > %d", total, budgetLimit))
+				_ = o.Events.PublishFlow(ctx, runID, "flow_failed", map[string]any{
+					"flowRunId": runID, "reason": "budget_exceeded", "used": total, "limit": budgetLimit,
+				})
+				_ = o.Store.TerminateAnchor(ctx, runID, domain.RunFailed, "budget_exceeded", "flow budget exceeded")
+			}
+			continue
+		}
+		code := "task_failed"
+		if status == domain.RunCancelled {
+			code = "task_cancelled"
+		}
+		_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
+			TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
+			SetState: domain.FlowNodeFailed, ErrorCode: code,
+		})
+		_ = o.Events.PublishFlow(ctx, runID, "flow_task_failed", map[string]any{
+			"flowRunId": runID, "task": node.Handle, "childRunId": node.ChildRunID, "reason": code,
+		})
+	}
+	return nil
+}
+
+// flowBudgetLimit decodes the frozen flow definition's budget ceiling.
+func (o *Orchestrator) flowBudgetLimit(ctx context.Context, flowVersionID string) int64 {
+	version, err := o.Store.GetVersion(ctx, flowVersionID)
+	if err != nil {
+		return 0
+	}
+	var def domain.FlowDefinition
+	if err := json.Unmarshal(version.DefinitionJSON, &def); err != nil {
+		return 0
+	}
+	return def.Budget.MaxTotalTokens
+}
+
+// entryTaskHandle returns the unique entry task (the only task with no
+// depends). Published flows guarantee exactly one; callers treat "" as unknown.
+func entryTaskHandle(def *domain.FlowDefinition) string {
+	for name, task := range def.Tasks {
+		if len(task.Depends) == 0 {
+			return name
+		}
+	}
+	return ""
 }
 
 // ResolveGoalTemplate fills {inputs.x}, {task.X.output(.field)}, {flow.vars.y}

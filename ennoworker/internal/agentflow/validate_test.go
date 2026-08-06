@@ -137,6 +137,31 @@ tasks:
 `)
 	assert.False(t, result.Valid)
 	assert.True(t, hasCode(result, "dag_cycle"))
+
+	// Regression: a legal single-entry flow with two downstream tasks must
+	// pass (the entry is the task with NO depends, not the sink).
+	result = validateDef(t, `schemaVersion: 1
+id: x
+budget: {max_total_tokens: 20000}
+tasks:
+  a: {role: writer@1, goal: "a", budget: {tokens: 100}}
+  b: {role: reader@1, goal: "b", depends: [a], budget: {tokens: 100}}
+  c: {role: reader@1, goal: "c", depends: [a], budget: {tokens: 100}}
+`)
+	assert.True(t, result.Valid, "%v", result.Diagnostics)
+
+	// Regression: two entries merging into one sink must be rejected (only
+	// a alone is not the unique entry).
+	result = validateDef(t, `schemaVersion: 1
+id: x
+budget: {max_total_tokens: 20000}
+tasks:
+  a: {role: writer@1, goal: "a", budget: {tokens: 100}}
+  b: {role: writer@1, goal: "b", budget: {tokens: 100}}
+  c: {role: reader@1, goal: "c", depends: [a, b], budget: {tokens: 100}}
+`)
+	assert.False(t, result.Valid)
+	assert.True(t, hasCode(result, "entry_task_count"))
 }
 
 // Matrix 2: goal variable scope.

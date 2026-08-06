@@ -80,10 +80,12 @@ type OrchestratorChildren struct {
 	Delegations *DelegationRepo
 }
 
-// CreateTaskChild materializes a single-item delegation group + child Run for
-// one task. Background mode keeps the flow anchor 'running' so the standard
-// coordinator parent-wake machinery stays inert and the orchestrator owns the
-// child lifecycle. The synthetic parent tool call id is unique per attempt.
+// CreateTaskChild atomically materializes one task's single-item delegation
+// group + child Run + budget reservation in ONE transaction, so a failure
+// never leaks an orphaned group/item. Background mode keeps the flow anchor
+// 'running' so the standard coordinator parent-wake machinery stays inert and
+// the orchestrator owns the child lifecycle. The synthetic parent tool call
+// id is unique per attempt.
 func (c *OrchestratorChildren) CreateTaskChild(ctx context.Context, parentRunID, sessionID string,
 	spec agentflow.ChildSpec) (agentflow.ChildInfo, error) {
 	item := CreateDelegationItemInput{
@@ -95,7 +97,12 @@ func (c *OrchestratorChildren) CreateTaskChild(ctx context.Context, parentRunID,
 		Budget: spec.Budget,
 	}
 	toolCallID := "flow:" + parentRunID + ":" + spec.Handle + ":" + strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
-	group, err := c.Delegations.CreateGroup(ctx, CreateDelegationGroupInput{
+	tx, err := c.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return agentflow.ChildInfo{}, err
+	}
+	defer tx.Rollback()
+	group, items, err := createDelegationGroupTx(ctx, tx, CreateDelegationGroupInput{
 		ParentRunID:      parentRunID,
 		ParentToolCallID: toolCallID,
 		Strategy:         domain.DelegationStrategySingle,
@@ -104,15 +111,14 @@ func (c *OrchestratorChildren) CreateTaskChild(ctx context.Context, parentRunID,
 	if err != nil {
 		return agentflow.ChildInfo{}, fmt.Errorf("create task delegation group: %w", err)
 	}
-	items, err := c.Delegations.ListItems(ctx, group.ID)
-	if err != nil || len(items) == 0 {
-		return agentflow.ChildInfo{}, fmt.Errorf("list task items: %w", err)
-	}
-	child, err := c.Delegations.CreateChildRun(ctx, CreateChildRunInput{
+	child, err := createChildRunTx(ctx, tx, CreateChildRunInput{
 		ParentRunID: parentRunID, ItemID: items[0].ID, SessionID: sessionID, Background: true,
 	})
 	if err != nil {
 		return agentflow.ChildInfo{}, fmt.Errorf("create task child run: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return agentflow.ChildInfo{}, fmt.Errorf("commit task child: %w", err)
 	}
 	return agentflow.ChildInfo{RunID: child.ID, ItemID: items[0].ID, GroupID: group.ID}, nil
 }
