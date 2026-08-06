@@ -167,6 +167,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /v1/projects/{projectID}/agent-flows/bindings/{bindingID}", s.updateAgentFlowBinding)
 	mux.HandleFunc("DELETE /v1/projects/{projectID}/agent-flows/bindings/{bindingID}", s.deleteAgentFlowBinding)
 	mux.HandleFunc("POST /v1/projects/{projectID}/agent-flows/bindings/{bindingID}/run", s.runAgentFlow)
+	mux.HandleFunc("POST /v1/projects/{projectID}/agent-flows/invoke", s.invokeAgentFlow)
 	mux.HandleFunc("GET /v1/projects/{projectID}/agent-flows/runs", s.listAgentFlowRuns)
 	mux.HandleFunc("GET /v1/projects/{projectID}/agent-flows/runs/{runID}", s.getAgentFlowRun)
 	mux.HandleFunc("POST /v1/projects/{projectID}/agent-flows/runs/{runID}/cancel", s.cancelAgentFlowRun)

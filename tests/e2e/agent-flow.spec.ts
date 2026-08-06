@@ -188,3 +188,47 @@ test("Agent Flow update diff is read-only and surfaces project file changes", as
   await expect(page.getByText(/"goal": "old goal"/)).toBeVisible();
   await expect(page.getByText(/"goal": "new goal"/)).toBeVisible();
 });
+
+// Matrix 2E: /invoke_agent_flow resolves a bound+enabled flow by name and
+// starts a run in the current session; an unbound flow fails closed.
+test("Agent Flow Host invocation by name starts a run in the current session", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const run = { runId: "invoke-run", sessionId: "marker-session", projectId: project.id, flowVersionId: version.id,
+    manifestDigest: "m".repeat(64), state: "running", totalTokensUsed: 0, createdAt: now, updatedAt: now };
+  let invokeCalls = 0;
+  let invokeBody: Record<string, unknown> | null = null;
+  await page.route("**/api/worker/v1/**", async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace("/api/worker", "");
+    if (path === "/v1/projects") return fulfill(route, [project]);
+    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles") return fulfill(route, []);
+    if (path === "/v1/policy-profiles") return fulfill(route, [{ id: "builtin-tool-discuss-v1", name: "discuss", kind: "tool", version: 1, config: { mode: "discuss" }, status: "active", createdAt: now, updatedAt: now }]);
+    if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [{ id: "marker-session", projectId: project.id, title: "Marker review", status: "active", createdAt: now, updatedAt: now }]);
+    if (path.match(/^\/v1\/sessions\/[^/]+$/)) return fulfill(route, { id: "marker-session", projectId: project.id, title: "Marker review", status: "active", createdAt: now, updatedAt: now });
+    if (path.endsWith("/active-run")) return fulfill(route, null);
+    if (path.endsWith("/messages")) return fulfill(route, { messages: [], hasMore: false });
+    if (path.endsWith("/compactions")) return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/agent-flows/invoke`) {
+      invokeCalls++;
+      invokeBody = JSON.parse(route.request().postData() ?? "{}");
+      return fulfill(route, run, 201);
+    }
+    return route.abort();
+  });
+  await page.goto("/");
+  await page.getByTitle("Select project").click();
+  await page.getByRole("button", { name: project.name }).click();
+  await page.getByRole("button", { name: "Marker review", exact: true }).click();
+  await page.getByPlaceholder(/Ask|Type|Message/).fill("/invoke_agent_flow go-review target=src/a.go");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => invokeCalls).toBe(1);
+  expect(invokeBody).toMatchObject({ sessionId: "marker-session", name: "go-review", inputs: { target: "src/a.go" } });
+  // The input was cleared and no error surfaced.
+  await expect(page.getByPlaceholder(/Ask|Type|Message/)).toHaveValue("");
+
+  // @flow:name@version typed-target form also invokes.
+  await page.getByPlaceholder(/Ask|Type|Message/).fill("@flow:go-review@1");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => invokeCalls).toBe(2);
+  expect(invokeBody).toMatchObject({ name: "go-review", version: 1 });
+});

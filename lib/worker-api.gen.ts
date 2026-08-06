@@ -1558,6 +1558,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/projects/{projectID}/agent-flows/invoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve a flow by name[@version] in the project's enabled bindings and start a run (Host-side orchestration address) */
+        post: operations["invokeAgentFlow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/projects/{projectID}/agent-flows/check-approvals": {
         parameters: {
             query?: never;
@@ -5913,6 +5932,46 @@ export interface operations {
                     };
                 };
             };
+        };
+    };
+    invokeAgentFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    sessionId: string;
+                    name: string;
+                    version?: number;
+                    inputs?: {
+                        [key: string]: unknown;
+                    };
+                    vars?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Flow run created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RunAgentFlow"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            422: components["responses"]["Error"];
         };
     };
     listAgentFlowCheckApprovals: {

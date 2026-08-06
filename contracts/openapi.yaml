@@ -2388,6 +2388,37 @@ paths:
                   - $ref: "#/components/schemas/Envelope"
                   - type: object
                     properties: { data: { $ref: "#/components/schemas/RunAgentFlow" } }
+  /v1/projects/{projectID}/agent-flows/invoke:
+    parameters:
+      - { name: projectID, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: invokeAgentFlow
+      summary: Resolve a flow by name[@version] in the project's enabled bindings and start a run (Host-side orchestration address)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, name]
+              properties:
+                sessionId: { type: string }
+                name: { type: string }
+                version: { type: integer }
+                inputs: { type: object, additionalProperties: true }
+                vars: { type: object, additionalProperties: true }
+      responses:
+        "201":
+          description: Flow run created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/RunAgentFlow" } }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
   /v1/projects/{projectID}/agent-flows/check-approvals:
     parameters:
       - { name: projectID, in: path, required: true, schema: { type: string } }

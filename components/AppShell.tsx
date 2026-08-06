@@ -6,6 +6,7 @@ import { AttentionPanel } from "@/components/AttentionPanel";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import type { TextAttachment } from "./Composer";
+import type { RunAgentFlow } from "@/components/settings/types";
 import { BranchControl } from "./BranchControl";
 import { FileTreePanel } from "./FileTreePanel";
 import { FileViewer } from "./FileViewer";
@@ -347,8 +348,57 @@ export function AppShell() {
     }
   }, []);
 
+  // ——— Agent Flow invocation (@flow: / /invoke_agent_flow) ———
+  // Host-side orchestration: resolves a bound+enabled flow in the project and
+  // starts a run in the current session. Flows never enter Room speaker
+  // addressing; resolution fails closed with a clear error.
+  const invokeAgentFlow = useCallback(async (name: string, version?: number, rawParams?: string) => {
+    if (!selectedSession || !selectedProject) {
+      setError("Select a session and project before invoking an Agent Flow.");
+      return false;
+    }
+    const inputs: Record<string, string> = {};
+    if (rawParams) {
+      for (const pair of rawParams.split(/\s+/)) {
+        const [key, ...rest] = pair.split("=");
+        if (key && rest.length > 0) inputs[key] = rest.join("=");
+      }
+    }
+    try {
+      await apiFetch<RunAgentFlow>(`/v1/projects/${encodeURIComponent(selectedProject)}/agent-flows/invoke`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: selectedSession, name, version: version ?? 0, inputs,
+        }),
+      });
+      setInputVersioned("");
+      setError(null);
+      return true;
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to invoke Agent Flow");
+      return false;
+    }
+  }, [selectedSession, selectedProject, setError, setInputVersioned]);
+
   const submit = useCallback(async () => {
     if (!selectedSession || (!input.trim() && !pendingImage && textAttachments.length === 0) || activeRun) return;
+
+    // Agent Flow addressing gates run BEFORE the normal turn: an explicit
+    // /invoke_agent_flow command or a leading @flow:name[@version] token is a
+    // Host orchestration call, never a chat message.
+    const invokeMatch = input.trim().match(/^\/invoke_agent_flow\s+(\S+)(?:\s+([\s\S]+))?$/);
+    if (invokeMatch) {
+      const [name, version] = invokeMatch[1].split("@");
+      void invokeAgentFlow(name, version ? Number(version) : undefined, invokeMatch[2]);
+      return;
+    }
+    const flowToken = input.trim().match(/^@flow:([\w.-]+)(?:@(\d+))?(?:\s+([\s\S]+))?$/);
+    if (flowToken) {
+      void invokeAgentFlow(flowToken[1], flowToken[2] ? Number(flowToken[2]) : undefined, flowToken[3]);
+      return;
+    }
+
     if (!policyId && !selectedRoleId) {
       setError(`The ${permissionMode} permission policy is unavailable.`);
       return;
@@ -399,7 +449,7 @@ export function AppShell() {
 
     void sendTurn(input, policyId ?? "");
   }, [selectedSession, input, pendingImage, textAttachments.length, activeRun, policyId, permissionMode, sendTurn, setError,
-     selectedProject, selectedRoleId, expandedVersion, draftVersion, handleExpand]);
+     selectedProject, selectedRoleId, expandedVersion, draftVersion, handleExpand, invokeAgentFlow]);
 
   const steer = useCallback(async () => {
     if (!activeRun || !input.trim()) return;

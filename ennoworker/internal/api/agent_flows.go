@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -550,4 +551,85 @@ func (s *Server) decideAgentFlowCheckApproval(w http.ResponseWriter, r *http.Req
 
 func (s *AgentFlowServer) flowSkills() map[string]bool {
 	return s.Skills
+}
+
+// invokeAgentFlow resolves a flow by name[@version] inside the project's
+// enabled bindings and starts a run in the given session. This is the
+// Host-side orchestration address (@flow / /invoke_agent_flow): flows never
+// enter Room speaker addressing. Resolution is fail-closed: an unbound,
+// disabled, or version-mismatched flow is rejected with a clear error.
+func (s *Server) invokeAgentFlow(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	if !s.projectExists(w, r, projectID) {
+		return
+	}
+	var input struct {
+		SessionID string         `json:"sessionId"`
+		Name      string         `json:"name"`
+		Version   int            `json:"version,omitempty"`
+		Inputs    map[string]any `json:"inputs"`
+		Vars      map[string]any `json:"vars"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		writeError(w, r, http.StatusBadRequest, "invalid_agent_flow_invoke", "flow name is required", false)
+		return
+	}
+	if input.SessionID == "" {
+		writeError(w, r, http.StatusBadRequest, "invalid_agent_flow_invoke", "sessionId is required", false)
+		return
+	}
+	session, err := s.AgentFlows.Sessions.FindByID(r.Context(), input.SessionID)
+	if err != nil || session.ProjectID != projectID {
+		writeError(w, r, http.StatusNotFound, "session_not_found", "session not found in this project", false)
+		return
+	}
+	bindings, err := s.AgentFlows.Bindings.ListByProject(r.Context(), projectID)
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	// Resolve an enabled binding whose flow definition matches name[@version].
+	var resolvedVersionID string
+	for _, binding := range bindings {
+		if !binding.DesiredEnabled {
+			continue
+		}
+		version, err := s.AgentFlows.Profiles.GetVersion(r.Context(), binding.FlowVersionID)
+		if err != nil {
+			continue
+		}
+		var def domain.FlowDefinition
+		if err := json.Unmarshal(version.DefinitionJSON, &def); err != nil || def.ID != name {
+			continue
+		}
+		if input.Version > 0 && version.Version != input.Version {
+			continue
+		}
+		resolvedVersionID = version.ID
+		break
+	}
+	if resolvedVersionID == "" {
+		if input.Version > 0 {
+			writeError(w, r, http.StatusNotFound, "agent_flow_invoke_not_found",
+				fmt.Sprintf("flow %s@%d is not bound and enabled in this project", name, input.Version), false)
+		} else {
+			writeError(w, r, http.StatusNotFound, "agent_flow_invoke_not_found",
+				fmt.Sprintf("flow %s is not bound and enabled in this project", name), false)
+		}
+		return
+	}
+	if s.AgentFlows.StartRun == nil {
+		writeError(w, r, http.StatusServiceUnavailable, "agent_flow_unavailable", "flow runner is not configured", false)
+		return
+	}
+	run, err := s.AgentFlows.StartRun(r.Context(), projectID, resolvedVersionID, input.SessionID, input.Inputs, input.Vars)
+	if err != nil {
+		writeError(w, r, http.StatusUnprocessableEntity, "agent_flow_run_failed", err.Error(), false)
+		return
+	}
+	writeData(w, http.StatusCreated, run)
 }

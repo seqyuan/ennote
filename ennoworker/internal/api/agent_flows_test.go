@@ -400,3 +400,110 @@ func TestAgentFlowAPIAuthRequired(t *testing.T) {
 	rec := request(t, handler, http.MethodGet, "/v1/agent-flows", nil, false)
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }
+
+// Matrix 2E: /invoke_agent_flow resolves name[@version] in enabled bindings,
+// fails closed for unbound/disabled/wrong-version flows, and never addresses
+// a Room speaker.
+func TestAgentFlowAPIInvokeByName(t *testing.T) {
+	server, handler, projects := setupFlowServer(t)
+	roleRef := publishFixtureRole(t, server)
+	ctx := context.Background()
+	project, _, err := projects.CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: "Invoke", HostPath: t.TempDir()})
+	require.NoError(t, err)
+	session, err := (&store.SessionRepo{DB: server.DB}).Create(ctx, domain.CreateSessionInput{
+		ProjectID: project.ID, Title: "invoke session",
+	})
+	require.NoError(t, err)
+
+	// Publish + bind + enable the flow.
+	yaml := "schemaVersion: 1\nid: invoke-flow\ninputs:\n  target: {type: path, required: true}\noutputs:\n  report: {type: string}\nbudget:\n  max_total_tokens: 120000\ntasks:\n  producer:\n    role: " + roleRef + "\n    goal: \"Implement {inputs.target}\"\n    budget: {tokens: 50000}\n  accept:\n    terminal: {status: success, output: report}\n    output: report\n    depends: [producer]\n"
+	rec := request(t, handler, http.MethodPost, "/v1/agent-flows",
+		map[string]any{"name": "Invoke Flow", "slug": "invoke-flow"}, true)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	var profile domain.AgentFlowProfile
+	decodeData(t, rec, &profile)
+	rec = request(t, handler, http.MethodPatch, "/v1/agent-flows/"+profile.ID+"/draft",
+		map[string]any{"yaml": yaml, "expectedRevision": 0}, true)
+	require.Equal(t, http.StatusOK, rec.Code)
+	rec = request(t, handler, http.MethodPost, "/v1/agent-flows/"+profile.ID+"/publish",
+		map[string]any{"expectedRevision": 1}, true)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	var version domain.AgentFlowVersion
+	decodeData(t, rec, &version)
+	rec = request(t, handler, http.MethodPost, "/v1/projects/"+project.ID+"/agent-flows/bindings",
+		map[string]any{"flowVersionId": version.ID, "desiredEnabled": true}, true)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+
+	server.AgentFlows.StartRun = func(ctx context.Context, projectID, flowVersionID, sessionID string,
+		inputs, vars map[string]any) (*domain.RunAgentFlow, error) {
+		v, err := server.AgentFlows.Profiles.GetVersion(ctx, flowVersionID)
+		if err != nil {
+			return nil, err
+		}
+		var def domain.FlowDefinition
+		require.NoError(t, json.Unmarshal(v.DefinitionJSON, &def))
+		inputsJSON, err := store.NormalizeFlowInputs(&def, inputs, vars)
+		if err != nil {
+			return nil, err
+		}
+		freeze, _, err := server.AgentFlows.Runs.FreezeFlowDefinition(ctx, projectID, &def, inputsJSON)
+		if err != nil {
+			return nil, err
+		}
+		return server.AgentFlows.Runs.CreateFlowRun(ctx, store.CreateFlowRunInput{
+			SessionID: sessionID, ProjectID: projectID, FlowVersionID: flowVersionID, InputsJSON: inputsJSON,
+		}, freeze)
+	}
+
+	// Invoke by name resolves the enabled binding.
+	rec = request(t, handler, http.MethodPost, "/v1/projects/"+project.ID+"/agent-flows/invoke",
+		map[string]any{"sessionId": session.ID, "name": "invoke-flow", "inputs": map[string]any{"target": "src/a.go"}}, true)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	var flowRun domain.RunAgentFlow
+	decodeData(t, rec, &flowRun)
+	assert.Equal(t, version.ID, flowRun.FlowVersionID)
+
+	// Invoke by name@version resolves only that version (a fresh session: one
+	// flow anchor per session is active at a time).
+	session2, err := (&store.SessionRepo{DB: server.DB}).Create(ctx, domain.CreateSessionInput{
+		ProjectID: project.ID, Title: "invoke session 2",
+	})
+	require.NoError(t, err)
+	rec = request(t, handler, http.MethodPost, "/v1/projects/"+project.ID+"/agent-flows/invoke",
+		map[string]any{"sessionId": session2.ID, "name": "invoke-flow", "version": 1,
+			"inputs": map[string]any{"target": "src/b.go"}}, true)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	decodeData(t, rec, &flowRun)
+	assert.Equal(t, version.ID, flowRun.FlowVersionID)
+
+	// Fail-closed: unbound flow.
+	rec = request(t, handler, http.MethodPost, "/v1/projects/"+project.ID+"/agent-flows/invoke",
+		map[string]any{"sessionId": session2.ID, "name": "ghost-flow"}, true)
+	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "agent_flow_invoke_not_found")
+
+	// Fail-closed: wrong version (only v1 exists).
+	rec = request(t, handler, http.MethodPost, "/v1/projects/"+project.ID+"/agent-flows/invoke",
+		map[string]any{"sessionId": session2.ID, "name": "invoke-flow", "version": 99}, true)
+	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+
+	// Fail-closed: disabled binding is not invocable.
+	_, err = server.AgentFlows.Bindings.Update(ctx, bindingIDFor(t, server, project.ID, version.ID), false)
+	require.NoError(t, err)
+	rec = request(t, handler, http.MethodPost, "/v1/projects/"+project.ID+"/agent-flows/invoke",
+		map[string]any{"sessionId": session2.ID, "name": "invoke-flow"}, true)
+	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+}
+
+func bindingIDFor(t *testing.T, server *Server, projectID, versionID string) string {
+	t.Helper()
+	bindings, err := server.AgentFlows.Bindings.ListByProject(context.Background(), projectID)
+	require.NoError(t, err)
+	for _, binding := range bindings {
+		if binding.FlowVersionID == versionID {
+			return binding.ID
+		}
+	}
+	t.Fatal("binding not found")
+	return ""
+}
