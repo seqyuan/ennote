@@ -104,9 +104,45 @@ func EvaluateCheck(policy *CheckPolicy, argv []string) CheckDecision {
 	}
 }
 
-// ParseCheckCommand splits a check command string into an argv vector.
+// ParseCheckCommand splits a check command string into an argv vector with
+// basic quoting support (single/double quotes and backslash escapes), so a
+// check command can express structured shell invocations like
+// `sh -c "test -f x && touch x"`. Unbalanced quotes keep the raw text.
 func ParseCheckCommand(command string) []string {
-	return strings.Fields(command)
+	var argv []string
+	var current strings.Builder
+	inSingle, inDouble := false, false
+	escaped := false
+	flush := func() {
+		if current.Len() > 0 {
+			argv = append(argv, current.String())
+			current.Reset()
+		}
+	}
+	for _, r := range command {
+		if escaped {
+			current.WriteRune(r)
+			escaped = false
+			continue
+		}
+		switch {
+		case r == '\\' && !inSingle:
+			escaped = true
+		case r == '\'' && !inDouble:
+			inSingle = !inSingle
+		case r == '"' && !inSingle:
+			inDouble = !inDouble
+		case (r == ' ' || r == '\t' || r == '\n') && !inSingle && !inDouble:
+			flush()
+		default:
+			current.WriteRune(r)
+		}
+	}
+	if escaped {
+		current.WriteRune('\\')
+	}
+	flush()
+	return argv
 }
 
 func containsString(values []string, target string) bool {

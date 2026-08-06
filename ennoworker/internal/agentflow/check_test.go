@@ -38,3 +38,12 @@ func TestEvaluateCheckPolicyGate(t *testing.T) {
 	// Empty command fails closed.
 	assert.Equal(t, CheckDeny, EvaluateCheck(auto, nil).Action)
 }
+
+func TestParseCheckCommandQuoting(t *testing.T) {
+	argv := ParseCheckCommand(`sh -c "test -f /tmp/x && touch /tmp/x"`)
+	assert.Equal(t, []string{"sh", "-c", "test -f /tmp/x && touch /tmp/x"}, argv)
+	argv = ParseCheckCommand(`go test ./... -run TestX`)
+	assert.Equal(t, []string{"go", "test", "./...", "-run", "TestX"}, argv)
+	argv = ParseCheckCommand(`echo 'a b'`)
+	assert.Equal(t, []string{"echo", "a b"}, argv)
+}

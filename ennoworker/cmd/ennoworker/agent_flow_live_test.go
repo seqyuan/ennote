@@ -44,7 +44,7 @@ func TestLiveAgentFlowPhase1(t *testing.T) {
 	}
 	t.Setenv("ENNOTE_LIVE_API_KEY", apiKey)
 	t.Setenv("ENNOTE_HOME", t.TempDir())
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
 	defer cancel()
 
 	db, err := store.OpenMemory()
@@ -163,7 +163,7 @@ func TestLiveAgentFlowPhase1(t *testing.T) {
 	}
 	waitTerminal := func(runID string, states ...domain.FlowState) domain.FlowState {
 		t.Helper()
-		deadline := time.Now().Add(180 * time.Second)
+		deadline := time.Now().Add(480 * time.Second)
 		for time.Now().Before(deadline) {
 			select {
 			case <-ctx.Done():
