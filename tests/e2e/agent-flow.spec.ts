@@ -13,6 +13,8 @@ const version = { id: "flow-v1", profileId: profile.id, version: 1,
 const role = { id: "role-1", handle: "flow-worker", name: "Flow Worker", description: "", positioning: "",
   icon: "bot", color: "neutral", scope: "global", projectId: null, status: "active",
   currentVersionId: "rv1", currentVersion: 1, updatedAt: now };
+const session = { id: "session-1", projectId: project.id, title: "RNA review", status: "active", mode: "hosted",
+  createdAt: now, updatedAt: now };
 const binding = { id: "flow-binding", projectId: project.id, flowVersionId: version.id, desiredEnabled: false,
   revision: 1, createdAt: now, updatedAt: now };
 const flowRun = { runId: "flow-run-1", sessionId: "session-1", projectId: project.id, flowVersionId: version.id,
@@ -51,7 +53,7 @@ async function mockFlows(page: Page) {
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/provider-profiles" || path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
     if (path === "/v1/roles") return fulfill(route, { items: [role] });
-    if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
     if (path === "/v1/agent-flows") {
       if (route.request().method() === "POST") return fulfill(route, { ...profile, draftRevision: 0 }, 201);
       return fulfill(route, [profile]);
@@ -98,13 +100,6 @@ async function mockFlows(page: Page) {
 for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
   test(`Agent Flow editor, publish, bind, and timeline at ${viewport.width}x${viewport.height}`, async ({ page }) => {
     await page.setViewportSize(viewport);
-    page.on("dialog", (dialog) => {
-      if (dialog.message().includes("Run in which session")) {
-        void dialog.accept("session-1");
-      } else {
-        void dialog.accept();
-      }
-    });
     await mockFlows(page);
     await selectProjectAndOpenFlows(page);
 
@@ -135,15 +130,19 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     await page.getByRole("button", { name: /Bind v1/ }).click();
     await expect(page.getByRole("button", { name: "Disabled" })).toBeVisible();
 
-    // Enable + run + timeline.
+    // Enable + pick target session + run + timeline.
     await page.getByRole("button", { name: "Disabled" }).click();
     await expect(page.getByRole("button", { name: "Enabled" })).toBeVisible();
     await page.getByRole("button", { name: "Run", exact: true }).click();
+    await expect(page.getByLabel("Target session for this flow run")).toBeVisible();
+    await page.getByLabel("Target session for this flow run").selectOption("session-1");
+    await page.getByRole("button", { name: "Start run" }).click();
     await expect(page.getByText("flow-run-1".slice(0, 8))).toBeVisible();
     await page.getByRole("button", { name: "Timeline" }).click();
     await expect(page.getByText("Task checkpoints")).toBeVisible();
     await expect(page.getByText("producer", { exact: true })).toBeVisible();
-    await expect(page.getByText(/producer · completed/)).toBeVisible();
+    await expect(page.getByText(/2 tasks · 2 done/)).toBeVisible();
+    await expect(page.getByText(/changedFiles/)).toBeVisible();
 
     // No horizontal overflow at either viewport.
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
@@ -283,4 +282,48 @@ tasks:
   await expect(page.getByText(/phantom-skill · missing/)).toBeVisible();
   await page.getByRole("button", { name: "Import as draft" }).click();
   await expect.poll(() => importCalls).toBe(1);
+});
+
+// The conversation surface shows pending check approvals for the current
+// session's flow runs and accepts a decision through the durable endpoint.
+test("pending flow check approval surfaces in the conversation and accepts a decision", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const checkApproval = { runId: "check-run-1", taskIndex: 0, command: "go test ./...",
+    sessionId: session.id, flowVersionId: version.id, requestedAt: now };
+  let decideCalls = 0;
+  await page.route("**/api/worker/v1/**", async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace("/api/worker", "");
+    if (path === "/v1/projects") return fulfill(route, [project]);
+    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles") return fulfill(route, []);
+    if (path === "/v1/policy-profiles") return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
+    if (path === `/v1/sessions/${session.id}`) return fulfill(route, session);
+    if (path === `/v1/sessions/${session.id}/compactions` || path === `/v1/sessions/${session.id}/branches`) return fulfill(route, []);
+    if (path === `/v1/sessions/${session.id}/recovery`) return fulfill(route, null);
+    if (path.startsWith("/v1/roles")) return fulfill(route, { items: [], nextCursor: "" });
+    if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, null);
+    if (path === `/v1/sessions/${session.id}/messages`) return fulfill(route, { messages: [], hasMore: false });
+    if (path === `/v1/projects/${project.id}/agent-flows/check-approvals`) {
+      return fulfill(route, [checkApproval]);
+    }
+    if (path === `/v1/projects/${project.id}/agent-flows/check-approvals/${checkApproval.runId}/${checkApproval.taskIndex}/decide`) {
+      decideCalls++;
+      return route.fulfill({ status: 204 });
+    }
+    return route.abort();
+  });
+  await page.goto("/");
+  await page.getByTitle("Select project").click();
+  await page.getByRole("button", { name: project.name }).click();
+  await page.getByRole("button", { name: session.title, exact: true }).click();
+
+  await expect(page.getByText("Flow check approval")).toBeVisible();
+  await expect(page.getByText(/go test \.\/\.\.\./)).toBeVisible();
+  await expect(page.getByText("1 pending")).toBeVisible();
+
+  await page.getByRole("button", { name: "Approve", exact: true }).click();
+  await expect.poll(() => decideCalls).toBe(1);
+  // The decided item is removed from the strip.
+  await expect(page.getByText("Flow check approval")).not.toBeVisible();
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
 import {
   diffText,
@@ -22,6 +22,7 @@ import type {
   RoleSummary,
   RunAgentFlow,
   RunAgentFlowNode,
+  Session,
 } from "@/components/settings/types";
 
 // --- Settings component ---
@@ -37,6 +38,7 @@ export function AgentFlowSettings({ projectId, setError }: {
   const [runs, setRuns] = useState<RunAgentFlow[]>([]);
   const [approvals, setApprovals] = useState<AgentFlowCheckApproval[]>([]);
   const [roles, setRoles] = useState<RoleSummary[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState<FlowDraft | null>(null);
   const [validation, setValidation] = useState<FlowValidationResult | null>(null);
@@ -48,6 +50,8 @@ export function AgentFlowSettings({ projectId, setError }: {
   const [timeline, setTimeline] = useState<string[]>([]);
   const [diffView, setDiffView] = useState<{ slug: string; lines: string[] } | null>(null);
   const [showImport, setShowImport] = useState(false);
+  const [runPanelFor, setRunPanelFor] = useState<string | null>(null);
+  const [runSessionId, setRunSessionId] = useState<string>("");
   const [importYaml, setImportYaml] = useState("");
   const [importReport, setImportReport] = useState<{
     valid: boolean;
@@ -59,13 +63,14 @@ export function AgentFlowSettings({ projectId, setError }: {
   const refresh = useCallback(async () => {
     if (!projectId) return;
     try {
-      const [profileList, bindingList, candidateList, runList, approvalList, rolePage] = await Promise.all([
+      const [profileList, bindingList, candidateList, runList, approvalList, rolePage, sessionList] = await Promise.all([
         apiFetch<AgentFlowProfile[]>("/v1/agent-flows"),
         apiFetch<ProjectAgentFlowBinding[]>(`/v1/projects/${projectId}/agent-flows/bindings`),
         apiFetch<AgentFlowCandidate[]>(`/v1/projects/${projectId}/agent-flows/candidates`),
         apiFetch<RunAgentFlow[]>(`/v1/projects/${projectId}/agent-flows/runs`),
         apiFetch<AgentFlowCheckApproval[]>(`/v1/projects/${projectId}/agent-flows/check-approvals`),
         apiFetch<{ items: RoleSummary[] }>(`/v1/roles?status=active&limit=100`),
+        apiFetch<Session[]>(`/v1/projects/${projectId}/sessions`),
       ]);
       setProfiles(profileList);
       setBindings(bindingList);
@@ -73,6 +78,7 @@ export function AgentFlowSettings({ projectId, setError }: {
       setRuns(runList);
       setApprovals(approvalList);
       setRoles(rolePage.items ?? []);
+      setSessions(sessionList);
       const versionMap: Record<string, AgentFlowVersion[]> = {};
       await Promise.all(profileList.map(async (profile) => {
         try {
@@ -97,7 +103,8 @@ export function AgentFlowSettings({ projectId, setError }: {
       apiFetch<RunAgentFlow[]>(`/v1/projects/${projectId}/agent-flows/runs`),
       apiFetch<AgentFlowCheckApproval[]>(`/v1/projects/${projectId}/agent-flows/check-approvals`),
       apiFetch<{ items: RoleSummary[] }>(`/v1/roles?status=active&limit=100`),
-    ]).then(async ([profileList, bindingList, candidateList, runList, approvalList, rolePage]) => {
+      apiFetch<Session[]>(`/v1/projects/${projectId}/sessions`),
+    ]).then(async ([profileList, bindingList, candidateList, runList, approvalList, rolePage, sessionList]) => {
       if (cancelled) return;
       setProfiles(profileList);
       setBindings(bindingList);
@@ -105,6 +112,7 @@ export function AgentFlowSettings({ projectId, setError }: {
       setRuns(runList);
       setApprovals(approvalList);
       setRoles(rolePage.items ?? []);
+      setSessions(sessionList);
       const versionMap: Record<string, AgentFlowVersion[]> = {};
       await Promise.all(profileList.map(async (profile) => {
         try {
@@ -343,9 +351,7 @@ export function AgentFlowSettings({ projectId, setError }: {
     }
   };
 
-  const runFlow = async (binding: ProjectAgentFlowBinding) => {
-    if (!projectId) return;
-    const sessionId = window.prompt("Run in which session id?", "");
+  const runFlow = async (binding: ProjectAgentFlowBinding, sessionId: string) => {
     if (!sessionId) return;
     try {
       await apiFetch<RunAgentFlow>(`/v1/projects/${projectId}/agent-flows/bindings/${binding.id}/run`, {
@@ -354,6 +360,7 @@ export function AgentFlowSettings({ projectId, setError }: {
         body: JSON.stringify({ sessionId, inputs: {}, clientRequestId: `flow-run-${binding.id}` }),
       });
       setError(null);
+      setRunPanelFor(null);
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start flow run");
@@ -843,7 +850,8 @@ export function AgentFlowSettings({ projectId, setError }: {
           {bindings.map((binding) => {
             const version = versionFor(binding);
             return (
-              <div key={binding.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: 6 }}>
+              <Fragment key={binding.id}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: 6 }}>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>
                     {version ? `${(version.definition as { id?: string } | undefined)?.id ?? "flow"} v${version.version}` : "flow"}
@@ -862,12 +870,61 @@ export function AgentFlowSettings({ projectId, setError }: {
                 >
                   {binding.desiredEnabled ? "Enabled" : "Disabled"}
                 </button>
-                <button type="button" disabled={!binding.desiredEnabled} onClick={() => runFlow(binding)} style={ghostButtonStyle}>
-                  Run
-                </button>
+                {runPanelFor === binding.id ? (
+                  <button type="button" onClick={() => setRunPanelFor(null)} style={ghostButtonStyle}>
+                    Cancel
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={!binding.desiredEnabled}
+                    onClick={() => {
+                      setRunSessionId(sessions.find((s) => s.status === "active")?.id ?? "");
+                      setRunPanelFor(binding.id ?? null);
+                    }}
+                    style={ghostButtonStyle}
+                  >
+                    Run
+                  </button>
+                )}
               </div>
-            );
-          })}
+              {runPanelFor === binding.id && (
+                <div
+                  style={{
+                    borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 8,
+                    display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+                  }}
+                >
+                  <span style={{ fontSize: 11, color: "var(--text-dim)" }}>Run in session</span>
+                  <select
+                    value={runSessionId}
+                    onChange={(e) => setRunSessionId(e.target.value)}
+                    style={{ ...inputStyle, width: 220, padding: "4px 8px", fontSize: 11 }}
+                    aria-label="Target session for this flow run"
+                  >
+                    {sessions.length === 0 && <option value="">No active sessions — open one in the sidebar first</option>}
+                    {sessions.map((session) => (
+                      <option key={session.id} value={session.id}>
+                        {session.title || "Untitled"} · {session.id.slice(0, 8)}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={!runSessionId}
+                    onClick={() => runFlow(binding, runSessionId)}
+                    style={{
+                      padding: "4px 12px", borderRadius: 6, fontSize: 11, border: "none",
+                      background: "var(--accent)", color: "#fff", cursor: "pointer",
+                    }}
+                  >
+                    Start run
+                  </button>
+                </div>
+              )}
+              </Fragment>
+          );
+        })}
         </div>
       </div>
 
@@ -1021,14 +1078,63 @@ export function AgentFlowSettings({ projectId, setError }: {
               </div>
               {detail?.run.runId === runId && (
                 <div style={{ borderTop: "1px solid var(--border)", paddingTop: 6 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>Task checkpoints</div>
-                  {(detail?.nodes ?? []).map((node) => (
-                    <div key={node.taskIndex} style={{ fontSize: 11, color: "var(--text-muted)", padding: "1px 0" }}>
-                      <span style={{ color: "var(--text)", fontWeight: 600 }}>{node.handle}</span>
-                      {" "}· {node.terminalState}
-                      {node.outputRef ? <span style={{ fontFamily: "var(--font-mono, monospace)", marginLeft: 6 }}>{JSON.stringify(node.outputRef).slice(0, 120)}</span> : null}
-                    </div>
-                  ))}
+                  {(detail?.nodes?.length ?? 0) > 0 && (() => {
+                    const nodes = detail?.nodes ?? [];
+                    const counts = nodes.reduce<Record<string, number>>((acc, node) => {
+                      acc[node.terminalState ?? "pending"] = (acc[node.terminalState ?? "pending"] ?? 0) + 1;
+                      return acc;
+                    }, {});
+                    const summary = nodes.length === 0
+                      ? ""
+                      : `${nodes.length} task${nodes.length > 1 ? "s" : ""}` +
+                        (counts.completed ? ` · ${counts.completed} done` : "") +
+                        (counts.running ? ` · ${counts.running} running` : "") +
+                        (counts.failed || counts.blocked ? ` · ${(counts.failed ?? 0) + (counts.blocked ?? 0)} failed` : "");
+                    return (
+                      <>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>
+                          Task checkpoints
+                          {summary && <span style={{ fontWeight: 400, color: "var(--text-dim)", marginLeft: 6 }}>{summary}</span>}
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          {nodes.map((node) => {
+                            const state = node.terminalState ?? "pending";
+                            const stateColor =
+                              state === "completed" ? "#059669"
+                              : state === "running" ? "var(--accent)"
+                              : state === "failed" || state === "blocked" || state === "cancelled" || state === "interrupted" ? "#E11D48"
+                              : "var(--text-dim)";
+                            const output = node.outputRef ? JSON.stringify(node.outputRef) : null;
+                            return (
+                              <div key={node.taskIndex} style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "6px 8px", display: "flex", flexDirection: "column", gap: 3 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                  <span style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono, monospace)" }}>
+                                    t{node.taskIndex}
+                                  </span>
+                                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{node.handle}</span>
+                                  <span style={{ fontSize: 10, padding: "0 6px", borderRadius: 8, border: `1px solid ${stateColor}`, color: stateColor }}>
+                                    {state}
+                                  </span>
+                                  {node.childRunId && <span style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono, monospace)" }}>{node.childRunId.slice(0, 8)}</span>}
+                                </div>
+                                {node.goalText && (
+                                  <div style={{ fontSize: 10, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 520 }}>
+                                    {node.goalText}
+                                  </div>
+                                )}
+                                {node.errorCode && <div style={{ fontSize: 10, color: "#E11D48", fontFamily: "var(--font-mono, monospace)" }}>{node.errorCode}</div>}
+                                {output && (
+                                  <pre style={{ fontSize: 10, margin: 0, color: "var(--text-muted)", fontFamily: "var(--font-mono, monospace)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 560 }}>
+                                    {output}
+                                  </pre>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </>
+                    );
+                  })()}
                   {timeline.length > 0 && (
                     <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 4, display: "flex", flexWrap: "wrap", gap: "2px 8px" }}>
                       {timeline.map((eventType, index) => (

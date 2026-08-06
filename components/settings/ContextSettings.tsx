@@ -2,19 +2,8 @@
 
 import type { FormEvent } from "react";
 import { useEffect, useState, useCallback } from "react";
-import type { ModelProfile, PolicyProfile, Session } from "@/components/settings/types";
+import type { ModelProfile, PolicyProfile, Session, StandingApproval } from "@/components/settings/types";
 import { apiFetch } from "@/lib/worker-api.client";
-
-interface StandingApprovalItem {
-  id: string;
-  sessionId: string;
-  toolName: string;
-  scopeKind: string;
-  scopeVersion: number;
-  scopeDisplay: string;
-  riskClass: string;
-  createdAt: string;
-}
 
 export function ContextSettings({ policies, models, session, refresh, setError, onSessionUpdated }: {
   policies: PolicyProfile[];
@@ -149,14 +138,14 @@ function CompactionPolicyEditor({ policies, models, onCreate, onDefault }: {
 }
 
 function StandingApprovalsSection({ sessionId }: { sessionId: string | null }) {
-  const [rules, setRules] = useState<StandingApprovalItem[]>([]);
+  const [rules, setRules] = useState<StandingApproval[]>([]);
   const [loadedSessionID, setLoadedSessionID] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!sessionId) return;
     let cancelled = false;
-    void apiFetch<{ items: StandingApprovalItem[] }>(`/v1/sessions/${encodeURIComponent(sessionId)}/standing-approvals`)
+    void apiFetch<{ items: StandingApproval[] }>(`/v1/sessions/${encodeURIComponent(sessionId)}/standing-approvals`)
       .then((data) => {
         if (cancelled) return;
         setRules(data?.items ?? []);

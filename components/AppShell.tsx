@@ -13,6 +13,7 @@ import { FileViewer } from "./FileViewer";
 import { FilePreviewWindow } from "./FilePreviewWindow";
 import { ResizeHandle } from "./ResizeHandle";
 import { TabBar, type Tab } from "./TabBar";
+import { ProjectCreateDialog } from "./ProjectCreateDialog";
 import { SettingsDialog } from "./settings/SettingsDialog";
 import { ThemeControl } from "./ThemeControl";
 import { useResizable } from "@/hooks/useResizable";
@@ -61,6 +62,11 @@ export function AppShell() {
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [creatingProjectBusy, setCreatingProjectBusy] = useState(false);
+  const [compactionPrompt, setCompactionPrompt] = useState<{ open: boolean; instructions: string; busy: boolean }>({
+    open: false, instructions: "", busy: false,
+  });
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [pendingImage, setPendingImage] = useState<ImageArtifact | null>(null);
   const [textAttachments, setTextAttachments] = useState<TextAttachment[]>([]);
@@ -550,26 +556,45 @@ export function AppShell() {
     setModelOverrides((current) => ({ ...current, [selectedSession]: modelId }));
   }, [selectedSession]);
 
-  const compactSession = useCallback(async () => {
+  const startCompaction = useCallback(async () => {
     if (!selectedSession || activeRun) return;
     const session = await refreshSelectedSession();
     if (!session?.activeLeafMessageId) {
       setError("This session has no conversation history to compact.");
       return;
     }
-    const instructions = prompt("Optional focus for the context checkpoint")?.trim() ?? "";
+    setCompactionPrompt({ open: true, instructions: "", busy: false });
+  }, [activeRun, refreshSelectedSession, selectedSession, setError]);
+
+  const confirmCompaction = useCallback(async () => {
+    if (!selectedSession || activeRun) return;
+    const instructions = compactionPrompt.instructions.trim();
+    setCompactionPrompt((current) => ({ ...current, busy: true }));
     try {
+      const session = await refreshSelectedSession();
+      if (!session?.activeLeafMessageId) {
+        setError("This session has no conversation history to compact.");
+        setCompactionPrompt({ open: false, instructions: "", busy: false });
+        return;
+      }
       const submission = await apiFetch<CompactionSubmission>(`/v1/sessions/${encodeURIComponent(selectedSession)}/compactions`, {
         method: "POST", headers: { "Idempotency-Key": genId() },
         body: JSON.stringify({ baseMessageId: session.activeLeafMessageId, instructions }),
       });
       const run = await apiFetch<AgentRun>(`/v1/runs/${encodeURIComponent(submission.runId)}`);
       setError(null);
+      setCompactionPrompt({ open: false, instructions: "", busy: false });
       void watchRun(run);
     } catch (reason) {
       setError((reason as Error).message);
+      setCompactionPrompt((current) => ({ ...current, busy: false }));
     }
-  }, [selectedSession, activeRun, refreshSelectedSession, setError, watchRun]);
+  }, [activeRun, compactionPrompt.instructions, refreshSelectedSession, selectedSession, setError, watchRun]);
+
+  const cancelCompaction = useCallback(() => {
+    setCompactionPrompt((current) =>
+      current.busy ? current : { open: false, instructions: "", busy: false });
+  }, []);
 
   const createBranch = useCallback(async (messageId: string) => {
     if (!activeRun) await branches.createBranch(messageId);
@@ -601,24 +626,36 @@ export function AppShell() {
   }, [currentProjectId, setError, workspaceMap]);
 
   // Also capture workspace path when creating a project
-  const createProject = useCallback(async () => {
-    const name = prompt("Project name")?.trim();
-    if (!name) return;
-    const hostPath = prompt("Host path (directory on this machine)")?.trim();
-    if (!hostPath) return;
+  const openCreateProject = useCallback(() => {
+    setCreatingProjectBusy(false);
+    setCreatingProject(true);
+  }, []);
+
+  const confirmCreateProject = useCallback(async (name: string, hostPath: string) => {
+    setCreatingProjectBusy(true);
     try {
       const result = await apiFetch<{ project: Project; workspace: ProjectWorkspace }>("/v1/projects", {
         method: "POST", body: JSON.stringify({ name, hostPath }),
       });
       setError(null);
+      setCreatingProject(false);
       if (result.workspace) {
         setWorkspaceMap((previous) => new Map(previous).set(result.project.id, result.workspace));
       }
       setProjects(await apiFetch<Project[]>("/v1/projects"));
+      // Auto-select the freshly created project so the workspace is immediately usable.
+      switchProject(result.project.id);
     } catch (reason) {
       setError((reason as Error).message);
+    } finally {
+      setCreatingProjectBusy(false);
     }
-  }, [setError]);
+  }, [setError, switchProject]);
+
+  const cancelCreateProject = useCallback(() => {
+    if (creatingProjectBusy) return;
+    setCreatingProject(false);
+  }, [creatingProjectBusy]);
 
   const handleOpenFile = useCallback((filePath: string, fileName: string) => {
     if (!currentProjectId) return;
@@ -708,7 +745,7 @@ export function AppShell() {
       loading={sessionNavigation.loading}
       mutatingId={sessionNavigation.mutatingId}
       announcement={sessionNavigation.announcement}
-      createProject={createProject}
+      createProject={openCreateProject}
       createSession={createSession}
       switchProject={switchProject}
       switchSession={switchSession}
@@ -927,6 +964,7 @@ export function AppShell() {
 
           {/* Chat area */}
           <ChatWindow
+            projectId={selectedProject}
             selectedSession={selectedSession}
             activeLeafMessageId={selectedSessionRecord?.activeLeafMessageId}
             activeBranchId={activeBranchId}
@@ -970,7 +1008,14 @@ export function AppShell() {
             submit={submit}
             steer={steer}
             cancel={cancel}
-            compactSession={compactSession}
+            compactSession={startCompaction}
+            compactionPromptOpen={compactionPrompt.open}
+            compactionInstructions={compactionPrompt.instructions}
+            compactionBusy={compactionPrompt.busy}
+            setCompactionInstructions={(value) =>
+              setCompactionPrompt((current) => ({ ...current, instructions: value }))}
+            confirmCompaction={confirmCompaction}
+            cancelCompaction={cancelCompaction}
             promptTemplates={promptCatalog.templates}
             showPromptPanel={commandPanelOpen && !promptPanelDismissed}
             onPromptSelect={(name: string) => {
@@ -1079,6 +1124,16 @@ export function AppShell() {
         onSessionUpdated={sessionNavigation.replaceSession}
         projectId={selectedProject}
       />
+
+      {/* New project dialog */}
+      {creatingProject && (
+        <ProjectCreateDialog
+          busy={creatingProjectBusy}
+          error={error}
+          onCreate={(name, hostPath) => void confirmCreateProject(name, hostPath)}
+          onClose={cancelCreateProject}
+        />
+      )}
     </>
   );
 }

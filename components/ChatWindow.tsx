@@ -4,6 +4,8 @@ import { X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Composer, type TextAttachment } from "@/components/Composer";
 import { BackgroundDelegationStrip } from "@/components/BackgroundDelegationStrip";
+import { FlowCheckApprovalStrip } from "@/components/FlowCheckApprovalStrip";
+import { CompactionPromptBar } from "@/components/CompactionPromptBar";
 import { ConversationTimeline } from "@/components/ConversationTimeline";
 import { StreamingStatusBar } from "@/components/StreamingStatusBar";
 import type { ModelProfile, RoleSummary } from "@/components/settings/types";
@@ -23,6 +25,7 @@ export interface PendingImage {
 }
 
 interface ChatWindowProps {
+  projectId: string | null;
   selectedSession: string | null;
   activeLeafMessageId?: string;
   activeBranchId?: string;
@@ -67,6 +70,12 @@ interface ChatWindowProps {
   steer: () => void;
   cancel: () => void;
   compactSession: () => void;
+  compactionPromptOpen: boolean;
+  compactionInstructions: string;
+  compactionBusy: boolean;
+  setCompactionInstructions: (value: string) => void;
+  confirmCompaction: () => void;
+  cancelCompaction: () => void;
   // Prompt templates.
   promptTemplates: { name: string; description: string; argumentHint: string; source: string; editable: boolean }[];
   showPromptPanel: boolean;
@@ -77,12 +86,13 @@ interface ChatWindowProps {
 }
 
 export function ChatWindow({
-  selectedSession, activeLeafMessageId, activeBranchId, branchChanging,
+  projectId, selectedSession, activeLeafMessageId, activeBranchId, branchChanging,
   createBranch, recovery, retrying, retryRun, messages, historyLoading, historyLoadingOlder, historyError,
   hasMoreHistory, loadOlderHistory, error, clearError, status, input, setInput, activeRun, activeRunStatus, compacting,
   permissionMode, permissionReady, setPermissionMode, pendingApproval, resolvingApproval, decideApproval,
   pendingImage, clearPendingImage, uploadImage, models, selectedModelId, setSelectedModelId,
   roles, selectedRoleId, setSelectedRoleId, textAttachments, removeTextAttachment, attachFiles, submit, steer, cancel, compactSession,
+  compactionPromptOpen, compactionInstructions, compactionBusy, setCompactionInstructions, confirmCompaction, cancelCompaction,
   promptTemplates, showPromptPanel, onPromptSelect, onPromptPanelClose, expanding, expandDiag,
 }: ChatWindowProps) {
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -165,6 +175,16 @@ export function ChatWindow({
       <button onClick={clearPendingImage} aria-label="Remove image"><X size={14} aria-hidden="true" /></button>
     </div>}
     <BackgroundDelegationStrip sessionId={selectedSession ?? undefined} />
+    <FlowCheckApprovalStrip projectId={projectId} sessionId={selectedSession ?? undefined} />
+    {compactionPromptOpen && (
+      <CompactionPromptBar
+        value={compactionInstructions}
+        onChange={setCompactionInstructions}
+        busy={compactionBusy}
+        onConfirm={confirmCompaction}
+        onCancel={cancelCompaction}
+      />
+    )}
     <Composer selectedSession={selectedSession} activeLeafMessageId={activeLeafMessageId} input={input} setInput={setInput}
       activeRun={Boolean(activeRun)} compacting={compacting} hasPendingImage={Boolean(pendingImage)} reconnecting={reconnecting}
       permissionMode={permissionMode} permissionReady={permissionReady} setPermissionMode={setPermissionMode}
