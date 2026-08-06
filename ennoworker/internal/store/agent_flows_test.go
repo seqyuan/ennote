@@ -42,6 +42,8 @@ func setupFlowFixture(t *testing.T) (*sql.DB, *store.ProjectRepo, *store.RoleRep
 	roleDef := validRoleDefinition(model.ID)
 	roleDef.DelegationPolicy.Admission = domain.DelegationAutoWithinBudget
 	roleDef.DelegationPolicy.AllowedCallerKinds = []string{"host"}
+	roleDef.DelegationPolicy.MaxInvocationsPerParentRun = 16
+	roleDef.DelegationPolicy.MaxConcurrentInstances = 16
 	roleDef.DelegationPolicy.BudgetCeiling.MaxTotalTokens = 200000
 	roleDef.DelegationPolicy.BudgetCeiling.MaxWallTimeMS = 1_800_000
 	role, err := roles.Create(ctx, store.CreateRoleInput{

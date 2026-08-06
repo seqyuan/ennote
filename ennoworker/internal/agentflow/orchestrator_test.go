@@ -479,3 +479,58 @@ func (f *fakeStore) GetNode(ctx context.Context, runID string, taskIndex int) (*
 	}
 	return nil, errFakeConflict
 }
+
+// Matrix 15: resume identity — the frozen manifest digest must match on
+// resume; a drifted version fails closed (interrupted), never silently
+// switching to a newer definition.
+func TestOrchestratorResumeIdentityMismatch(t *testing.T) {
+	def := threeTaskDef()
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+	run, _ := fake.GetRun(context.Background(), "flow-run-1")
+	run.State = domain.FlowStateRunning // crash mid-run
+	// Drift the frozen manifest identity (as if the version were rewritten).
+	fake.mu.Lock()
+	fake.run.ManifestDigest = "sha256:drifted"
+	fake.mu.Unlock()
+
+	orch := newOrchestrator(fake, children, events)
+	orch.Start(context.Background(), "flow-run-1")
+	state := waitTerminal(t, fake)
+	assert.Equal(t, domain.FlowStateFailed, state)
+	terminal, _ := fake.GetRun(context.Background(), "flow-run-1")
+	assert.Contains(t, terminal.TerminalReason, "manifest identity mismatch")
+	assert.Empty(t, children.created, "no child was dispatched after identity drift")
+	assert.Contains(t, events.types(), "flow_failed")
+}
+
+// Matrix 16: the Phase 1 event set is emitted in order and the durable event
+// log is the timeline source. (Store-level persistence + EventWriter
+// commit-before-publish is covered in the store integration test; here we
+// assert the orchestrator emission order.)
+func TestOrchestratorEventSequence(t *testing.T) {
+	def := threeTaskDef()
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+	orch := newOrchestrator(fake, children, events)
+	orch.Start(context.Background(), "flow-run-1")
+	waitTerminal(t, fake)
+	types := events.types()
+	assert.Equal(t, "flow_started", types[0])
+	// Started before completed per task; flow_completed closes the stream.
+	assert.True(t, indexOf(types, "flow_task_started") < indexOf(types, "flow_task_completed"))
+	assert.Equal(t, "flow_completed", types[len(types)-1])
+}
+
+func indexOf(values []string, target string) int {
+	for i, value := range values {
+		if value == target {
+			return i
+		}
+	}
+	return -1
+}
