@@ -63,22 +63,53 @@ type ListResult struct {
 	ProjectResourcesLoaded bool             `json:"projectResourcesLoaded"`
 }
 
+// Root is a user-configured additional skills directory (pi/claude/codex/...
+// ecosystems or a custom path). Lower Priority wins on path conflicts.
+type Root struct {
+	Name     string
+	Path     string
+	Priority int
+}
+
 // Service exposes skills listing and frontmatter toggling. Roots are resolved
-// by the caller (config defaults), keeping this package free of env access.
+// by the caller: the ennote default root (priority 0), user-configured
+// additional roots, and the builtin root (highest priority).
 type Service struct {
-	UserRoot    string // Priority 0 user-installed skills root
-	BuiltinRoot string // Priority 1 builtin skills root (may be "")
-	HomeDir     string // used to locate the global lock (~/.agents/.skill-lock.json)
+	UserRoot        string // ennote default user skills root (priority 0)
+	BuiltinRoot     string // builtin skills root (may be "")
+	AdditionalRoots []Root // sorted by priority ascending; lower wins
+	HomeDir         string // used to locate the global lock (~/.agents/.skill-lock.json)
+}
+
+// catalogSources flattens the configured roots into skills.SourceRoot entries.
+func (s *Service) catalogSources() []skills.SourceRoot {
+	sources := []skills.SourceRoot{{Name: "user", Path: s.UserRoot, Priority: 0}}
+	used := map[string]bool{"user": true}
+	for i, root := range s.AdditionalRoots {
+		name := root.Name
+		if name == "" {
+			name = "root"
+		}
+		if used[name] {
+			name = fmt.Sprintf("%s-%d", name, i)
+		}
+		used[name] = true
+		priority := root.Priority
+		if priority <= 0 {
+			priority = 10 + i
+		}
+		sources = append(sources, skills.SourceRoot{Name: name, Path: root.Path, Priority: priority})
+	}
+	if s.BuiltinRoot != "" {
+		sources = append(sources, skills.SourceRoot{Name: "builtin", Path: s.BuiltinRoot, Priority: 1000})
+	}
+	return sources
 }
 
 // List builds the merged catalog and annotates skills with install info from
 // the global lock and (when workspaceDir is non-empty) the project lock.
 func (s *Service) List(workspaceDir string) (*ListResult, error) {
-	sources := []skills.SourceRoot{{Name: "user", Path: s.UserRoot, Priority: 0}}
-	if s.BuiltinRoot != "" {
-		sources = append(sources, skills.SourceRoot{Name: "builtin", Path: s.BuiltinRoot, Priority: 1})
-	}
-	catalog := skills.BuildCatalog(sources)
+	catalog := skills.BuildCatalog(s.catalogSources())
 
 	result := &ListResult{
 		Skills:      make([]AnnotatedSkill, 0, len(catalog.Skills)),
@@ -328,6 +359,37 @@ func annotateInstall(globalEntries, projectEntries map[string]skillLockEntry, lo
 		return nil
 	}
 	return getInstallInfo(entries, loaded.Manifest.ID, scope)
+}
+
+// ResolveDir maps a catalog relPath to the winning directory across the
+// managed (default + additional) roots, mirroring catalog precedence: the
+// lowest-priority root that actually contains the skill wins. Builtin roots
+// are excluded (management operations never touch builtin skills).
+func (s *Service) ResolveDir(relPath string) (string, bool) {
+	clean := filepath.Clean(relPath)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	roots := make([]Root, 0, 1+len(s.AdditionalRoots))
+	roots = append(roots, Root{Name: "user", Path: s.UserRoot, Priority: 0})
+	roots = append(roots, s.AdditionalRoots...)
+	sort.SliceStable(roots, func(i, j int) bool { return roots[i].Priority < roots[j].Priority })
+	for _, root := range roots {
+		if root.Path == "" {
+			continue
+		}
+		dir := filepath.Join(root.Path, filepath.FromSlash(clean))
+		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+			return dir, true
+		}
+	}
+	return "", false
+}
+
+// PiGlobalRoot returns the pi-ecosystem global skills root managed by the
+// skills.sh CLI (also where the global lock lives).
+func (s *Service) PiGlobalRoot() string {
+	return filepath.Join(piAgentDir(s.HomeDir), "skills")
 }
 
 // ——— disable-model-invocation ———

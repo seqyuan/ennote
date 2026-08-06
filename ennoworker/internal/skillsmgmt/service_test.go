@@ -193,3 +193,57 @@ func TestAnnotatedSkillJSONShape(t *testing.T) {
 	assert.Equal(t, "web", first["skillId"])
 	assert.Equal(t, "web", first["name"])
 }
+
+func TestListMergesMultipleRootsWithPriority(t *testing.T) {
+	home := t.TempDir()
+	userRoot := filepath.Join(home, "skills") // ennote default
+	piRoot := filepath.Join(home, ".pi", "agent", "skills")
+	claudeRoot := filepath.Join(home, ".claude", "skills")
+
+	// Same skill id in default (pri 0) and claude (pri 20): default wins.
+	writeSkill(t, filepath.Join(userRoot, "shared"), `{"id":"shared","version":"0.1.0"}`, "# default\n")
+	writeSkill(t, filepath.Join(claudeRoot, "shared"), "", "---\nname: shared\n---\n\n# claude version\n")
+	// Only in claude (pri 20) and only in pi (pri 10).
+	writeSkill(t, filepath.Join(claudeRoot, "claude-only"), "", "---\nname: claude-only\n---\n\n# c\n")
+	writeSkill(t, filepath.Join(piRoot, "pi-only"), "", "---\nname: pi-only\n---\n\n# p\n")
+
+	svc := &Service{
+		UserRoot: userRoot, BuiltinRoot: "", HomeDir: home,
+		AdditionalRoots: []Root{
+			{Name: "pi", Path: piRoot, Priority: 10},
+			{Name: "claude", Path: claudeRoot, Priority: 20},
+		},
+	}
+	result, err := svc.List("")
+	require.NoError(t, err)
+	require.Len(t, result.Skills, 3)
+
+	byID := map[string]AnnotatedSkill{}
+	for _, skill := range result.Skills {
+		byID[skill.SkillID] = skill
+	}
+	// Default root wins the conflict.
+	assert.Contains(t, byID["shared"].BaseDir, "skills/shared")
+	assert.NotContains(t, byID["shared"].BaseDir, ".claude")
+	assert.Contains(t, byID["claude-only"].BaseDir, ".claude")
+	assert.Contains(t, byID["pi-only"].BaseDir, ".pi")
+
+	// ResolveDir mirrors the winning root.
+	dir, ok := svc.ResolveDir("shared")
+	require.True(t, ok)
+	assert.Contains(t, dir, "skills/shared")
+	dir, ok = svc.ResolveDir("pi-only")
+	require.True(t, ok)
+	assert.Contains(t, dir, ".pi")
+	_, ok = svc.ResolveDir("missing")
+	assert.False(t, ok)
+}
+
+func TestResolveDirRejectsTraversal(t *testing.T) {
+	home := t.TempDir()
+	svc := &Service{UserRoot: filepath.Join(home, "skills"), HomeDir: home}
+	for _, rel := range []string{"..", "../x", "/etc", "a/../../b", ""} {
+		_, ok := svc.ResolveDir(rel)
+		assert.False(t, ok, rel)
+	}
+}

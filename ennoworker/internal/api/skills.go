@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
+	"github.com/seqyuan/ennote/ennoworker/internal/store"
 )
 
 // ——— skills management ———
@@ -70,12 +72,12 @@ func (s *Server) listSkills(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, result)
 }
 
-// toggleSkillDisabled sets or clears disable-model-invocation on a user-root
-// skill's SKILL.md frontmatter.
+// toggleSkillDisabled sets or clears disable-model-invocation on a managed
+// root skill's SKILL.md frontmatter.
 func (s *Server) toggleSkillDisabled(w http.ResponseWriter, r *http.Request) {
-	dir, ok := s.resolveUserSkillDir(r.PathValue("relPath"))
+	dir, ok := s.Skills.ResolveDir(r.PathValue("relPath"))
 	if !ok {
-		writeError(w, r, http.StatusBadRequest, "invalid_skill_path", "skill path must stay inside the user skills root", false)
+		writeError(w, r, http.StatusBadRequest, "invalid_skill_path", "skill path is not in a managed skills root", false)
 		return
 	}
 	var body struct {
@@ -243,11 +245,15 @@ func (s *Server) updateSkill(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, map[string]any{"success": true, "output": output})
 }
 
-// removeSkill removes a user-root skill (global scope only).
+// removeSkill removes a globally installed skill (pi ecosystem only).
 func (s *Server) removeSkill(w http.ResponseWriter, r *http.Request) {
-	dir, ok := s.resolveUserSkillDir(r.PathValue("relPath"))
+	dir, ok := s.Skills.ResolveDir(r.PathValue("relPath"))
 	if !ok {
-		writeError(w, r, http.StatusBadRequest, "invalid_skill_path", "skill path must stay inside the user skills root", false)
+		writeError(w, r, http.StatusBadRequest, "invalid_skill_path", "skill path is not in a managed skills root", false)
+		return
+	}
+	if !isWithinPath(dir, s.Skills.PiGlobalRoot()) {
+		writeError(w, r, http.StatusBadRequest, "skill_not_removable", "only marketplace-installed (pi) skills can be removed here", false)
 		return
 	}
 	name := filepath.Base(dir)
@@ -258,18 +264,127 @@ func (s *Server) removeSkill(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// resolveUserSkillDir safely maps a catalog relPath onto the user skills root,
-// rejecting traversal and absolute paths.
-func (s *Server) resolveUserSkillDir(relPath string) (string, bool) {
-	raw := strings.TrimSpace(relPath)
-	if raw == "" || strings.HasPrefix(raw, "/") || strings.Contains(raw, "..") {
-		return "", false
+// ——— skill roots management ———
+
+// listSkillRoots returns the configured additional skill roots.
+func (s *Server) listSkillRoots(w http.ResponseWriter, r *http.Request) {
+	roots, err := s.SkillRoots.List(r.Context())
+	if err != nil {
+		writeInternal(w, r, err)
+		return
 	}
-	dir := filepath.Join(s.Skills.UserRoot, filepath.FromSlash(raw))
-	if !isWithinPath(dir, s.Skills.UserRoot) {
-		return "", false
+	writeData(w, http.StatusOK, map[string]any{"items": roots})
+}
+
+// createSkillRoot adds an additional skills directory (or preset by agent kind).
+func (s *Server) createSkillRoot(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name      string `json:"name"`
+		Path      string `json:"path"`
+		AgentKind string `json:"agentKind"`
+		Priority  int    `json:"priority"`
+		Enabled   *bool  `json:"enabled"`
 	}
-	return dir, true
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_body", "body must be JSON", false)
+		return
+	}
+	path, kind, err := resolveSkillRootPath(body.Path, body.AgentKind, s.Skills.HomeDir)
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_skill_root", err.Error(), false)
+		return
+	}
+	if body.Name == "" {
+		body.Name = kind
+	}
+	enabled := true
+	if body.Enabled != nil {
+		enabled = *body.Enabled
+	}
+	root, err := s.SkillRoots.Create(r.Context(), store.CreateSkillRootInput{
+		Name: body.Name, Path: path, AgentKind: kind, Priority: body.Priority, Enabled: enabled,
+	})
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "skill_root_create_failed", err.Error(), false)
+		return
+	}
+	writeData(w, http.StatusCreated, root)
+}
+
+// updateSkillRoot patches an additional root.
+func (s *Server) updateSkillRoot(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name      *string `json:"name"`
+		Path      *string `json:"path"`
+		AgentKind *string `json:"agentKind"`
+		Priority  *int    `json:"priority"`
+		Enabled   *bool   `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_body", "body must be JSON", false)
+		return
+	}
+	patch := struct {
+		Name      *string
+		Path      *string
+		AgentKind *string
+		Priority  *int
+		Enabled   *bool
+	}{Name: body.Name, Path: body.Path, AgentKind: body.AgentKind, Priority: body.Priority, Enabled: body.Enabled}
+	if patch.Path != nil {
+		kind := ""
+		if patch.AgentKind != nil {
+			kind = *patch.AgentKind
+		}
+		path, resolvedKind, err := resolveSkillRootPath(*patch.Path, kind, s.Skills.HomeDir)
+		if err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_skill_root", err.Error(), false)
+			return
+		}
+		patch.Path = &path
+		patch.AgentKind = &resolvedKind
+	}
+	root, err := s.SkillRoots.Update(r.Context(), r.PathValue("rootID"), patch)
+	if err != nil {
+		s.writeStoreError(w, r, err)
+		return
+	}
+	writeData(w, http.StatusOK, root)
+}
+
+// deleteSkillRoot removes an additional root.
+func (s *Server) deleteSkillRoot(w http.ResponseWriter, r *http.Request) {
+	if err := s.SkillRoots.Delete(r.Context(), r.PathValue("rootID")); err != nil {
+		s.writeStoreError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// resolveSkillRootPath resolves a root path from an explicit path or a preset
+// agent kind. Presets map to the skills.sh CLI ecosystem directories under the
+// worker host home (the browser never computes host paths).
+func resolveSkillRootPath(explicitPath, agentKind, home string) (string, string, error) {
+	kind := strings.ToLower(strings.TrimSpace(agentKind))
+	if explicitPath = strings.TrimSpace(explicitPath); explicitPath != "" {
+		if kind == "" {
+			kind = "generic"
+		}
+		return filepath.Clean(explicitPath), kind, nil
+	}
+	subdirs := map[string]string{
+		"pi":     filepath.Join(".pi", "agent", "skills"),
+		"claude": filepath.Join(".claude", "skills"),
+		"codex":  filepath.Join(".codex", "skills"),
+		"cursor": filepath.Join(".cursor", "skills"),
+		"generic": filepath.Join(".agents", "skills"),
+	}
+	subdir, ok := subdirs[kind]
+	if !ok {
+		return "", "", fmt.Errorf("agentKind must be pi, claude, codex, cursor, or generic; or provide an explicit path")
+	}
+	return filepath.Join(home, subdir), kind, nil
+
 }
 
 func isWithinPath(candidate, root string) bool {

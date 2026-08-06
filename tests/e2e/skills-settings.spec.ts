@@ -1,7 +1,5 @@
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { expect, test, type Route } from "@playwright/test";
 
-const now = "2026-08-06T00:00:00Z";
-const project = { id: "skills-project", name: "Skills lab", description: "", status: "active", createdAt: now, updatedAt: now };
 
 const installed = [
   { name: "web-search", description: "Web search via Brave API.", filePath: "/home/u/.pi/agent/skills/web-search/SKILL.md",
@@ -22,6 +20,8 @@ const local = [
     baseDir: "/home/u/.ennote/skills/builtin-thing", disableModelInvocation: false,
     sourceInfo: { source: "builtin", scope: "builtin" }, skillId: "builtin-thing", relPath: "builtin-thing", install: undefined },
 ];
+
+const now = "2026-08-06T00:00:00Z";
 
 async function fulfill(route: Route, data: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ data }) });
@@ -87,7 +87,7 @@ test("marketplace search installs a skill", async ({ page }) => {
 test("toggle, check update, and remove a skill", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   const patched: string[] = [];
-  let checkBody: Record<string, unknown> | null = null;
+
   let updateBody: Record<string, unknown> | null = null;
   let removed: string | null = null;
   await page.route("**/api/worker/v1/**", async (route) => {
@@ -102,7 +102,7 @@ test("toggle, check update, and remove a skill", async ({ page }) => {
       return route.fulfill({ status: 204 });
     }
     if (path === "/v1/skills/check") {
-      checkBody = JSON.parse(route.request().postData() ?? "{}");
+
       return fulfill(route, { updates: [{ package: "openai/skills@pdf", scope: "global", state: "update-available",
         currentVersion: "4cffaac4541278a5b142f9773e8a83ccbabc9231", latestVersion: "newhash" }] });
     }
@@ -136,4 +136,64 @@ test("toggle, check update, and remove a skill", async ({ page }) => {
   page.on("dialog", (dialog) => void dialog.accept());
   await page.locator('button[title="Remove skill"]').click();
   await expect.poll(() => removed).toBe("/v1/skills/remove/pdf");
+});
+
+test("skill roots: preset add, toggle, and remove via the settings surface", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const roots: Array<Record<string, unknown>> = [];
+  let createBody: Record<string, unknown> | null = null;
+  let patched: string | null = null;
+  let deleted: string | null = null;
+  await page.route("**/api/worker/v1/**", async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace("/api/worker", "");
+    if (path === "/v1/projects") return fulfill(route, []);
+    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
+    if (path === "/v1/roles") return fulfill(route, { items: [], nextCursor: "" });
+    if (path === "/v1/skills") return fulfill(route, { skills: [], diagnostics: [], projectResourcesLoaded: false });
+    if (path === "/v1/skills/roots") {
+      if (route.request().method() === "POST") {
+        createBody = JSON.parse(route.request().postData() ?? "{}");
+        const root = { id: `root-${roots.length + 1}`, name: createBody?.name ?? "pi",
+          path: `/home/u/.pi/agent/skills`, agentKind: createBody?.agentKind ?? "pi",
+          priority: 10, enabled: true, createdAt: now, updatedAt: now };
+        roots.push(root);
+        return fulfill(route, root, 201);
+      }
+      return fulfill(route, { items: roots });
+    }
+    if (path.startsWith("/v1/skills/roots/")) {
+      if (route.request().method() === "PATCH") {
+        patched = path;
+        const body = JSON.parse(route.request().postData() ?? "{}");
+        const root = { ...roots[0], enabled: body.enabled ?? roots[0].enabled };
+        roots[0] = root;
+        return fulfill(route, root);
+      }
+      if (route.request().method() === "DELETE") {
+        deleted = path;
+        return route.fulfill({ status: 204 });
+      }
+    }
+    return route.abort();
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open settings" }).click();
+  await page.getByRole("tab", { name: /Skills/ }).click();
+
+  // Empty state + preset add.
+  await expect(page.getByText(/Ennote reads/)).toBeVisible();
+  await page.getByRole("button", { name: "+ Add skills root" }).click();
+  await page.getByLabel("Ecosystem preset").selectOption("pi");
+  await page.getByRole("button", { name: "Add root" }).click();
+  await expect.poll(() => createBody).not.toBeNull();
+  expect(createBody).toMatchObject({ agentKind: "pi" });
+
+  // Root listed, toggle, remove.
+  await expect(page.getByText("/home/u/.pi/agent/skills")).toBeVisible();
+  await page.getByRole("button", { name: "Enabled", exact: true }).click();
+  await expect.poll(() => patched).toContain("/v1/skills/roots/root-1");
+  page.on("dialog", (dialog) => void dialog.accept());
+  await page.locator('button[title*="Stop reading skills"]').click();
+  await expect.poll(() => deleted).toBe("/v1/skills/roots/root-1");
 });

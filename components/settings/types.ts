@@ -29,5 +29,6 @@ export type AnnotatedSkill = components["schemas"]["AnnotatedSkill"];
 export type SkillInstallInfo = components["schemas"]["SkillInstallInfo"];
 export type SkillSearchResult = components["schemas"]["SkillSearchResult"];
 export type SkillUpdateResult = components["schemas"]["SkillUpdateResult"];
+export type SkillRoot = components["schemas"]["SkillRoot"];
 
 export type SettingsTab = "providers" | "models" | "roles" | "policies" | "context" | "templates" | "mcp" | "flows" | "skills";

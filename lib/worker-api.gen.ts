@@ -1728,6 +1728,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/skills/roots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List configured additional skills directories */
+        get: operations["listSkillRoots"];
+        put?: never;
+        /** Add an additional skills directory (by path or ecosystem preset) */
+        post: operations["createSkillRoot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/skills/roots/{rootID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rootID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove an additional skills directory */
+        delete: operations["deleteSkillRoot"];
+        options?: never;
+        head?: never;
+        /** Patch name, path, agent kind, priority, or enabled */
+        patch: operations["updateSkillRoot"];
+        trace?: never;
+    };
     "/v1/skills": {
         parameters: {
             query?: never;
@@ -3052,6 +3090,18 @@ export interface components {
             package: string;
             installs?: string;
             url?: string;
+        };
+        SkillRoot: {
+            id: string;
+            name: string;
+            path: string;
+            agentKind: string;
+            priority: number;
+            enabled: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
         };
         SkillUpdateResult: {
             package: string;
@@ -6496,6 +6546,130 @@ export interface operations {
                     };
                 };
             };
+        };
+    };
+    listSkillRoots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Configured roots ordered by priority */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items: components["schemas"]["SkillRoot"][];
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    createSkillRoot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description Explicit absolute path; or leave empty and use agentKind */
+                    path?: string;
+                    /**
+                     * @description Preset resolving to the ecosystem skills dir under the worker home
+                     * @enum {string}
+                     */
+                    agentKind?: "pi" | "claude" | "codex" | "cursor" | "generic";
+                    priority?: number;
+                    enabled?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Root created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SkillRoot"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+        };
+    };
+    deleteSkillRoot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rootID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Root removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateSkillRoot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rootID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    path?: string;
+                    /** @enum {string} */
+                    agentKind?: "pi" | "claude" | "codex" | "cursor" | "generic";
+                    priority?: number;
+                    enabled?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated root */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SkillRoot"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     listSkills: {

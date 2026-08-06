@@ -91,21 +91,13 @@ func envDefault(key, fallback string) string {
 	return fallback
 }
 
-// defaultSkillsDir resolves the user-installed skills root:
-//  1. ENNOTE_SKILLS_DIR wins when set.
-//  2. Otherwise, when the pi ecosystem global skills directory exists
-//     (~/.pi/agent/skills), reuse it so marketplace-installed skills flow
-//     into the ennote catalog and Role skill binding.
-//  3. Otherwise fall back to $ENNOTE_HOME/skills.
+// defaultSkillsDir resolves the ennote default user skills root:
+// ENNOTE_SKILLS_DIR wins when set, otherwise $ENNOTE_HOME/skills.
+// Other ecosystems (pi/claude/codex/cursor) are configured as additional
+// roots through the Skills settings and never replace this default.
 func defaultSkillsDir(home string) string {
 	if v := os.Getenv("ENNOTE_SKILLS_DIR"); v != "" {
 		return v
-	}
-	if userDir, err := os.UserHomeDir(); err == nil && userDir != "" {
-		pi := filepath.Join(userDir, ".pi", "agent", "skills")
-		if st, statErr := os.Stat(pi); statErr == nil && st.IsDir() {
-			return pi
-		}
 	}
 	return filepath.Join(home, "skills")
 }

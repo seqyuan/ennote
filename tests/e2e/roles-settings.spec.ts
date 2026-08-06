@@ -44,7 +44,6 @@ async function mockRoles(page: Page) {
     }
     if (path === `/v1/roles/${role.id}/validate`) return fulfill(route, { valid: true, diagnostics: [] });
     if (path === `/v1/roles/${role.id}/publish`) {
-      publishBody = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
       return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ data: { ...role, draftRevision: 0 } }) });
     }
     if (path === "/v1/skills") return fulfill(route, { skills: [catalogSkill], diagnostics: [], projectResourcesLoaded: false });
@@ -56,7 +55,7 @@ const catalogSkill = { name: "web-search", description: "Web search.", filePath:
   baseDir: "/s/web-search", disableModelInvocation: false, sourceInfo: { source: "user", scope: "user" },
   skillId: "web-search", relPath: "web-search", install: undefined };
 let draftBody: Record<string, unknown> | null = null;
-let publishBody: Record<string, unknown> | null = null;
+
 
 // Skill binding writes RoleDefinition.skills.entries and survives publish.
 test("role editor binds catalog skills with a mode and publishes them", async ({ page }) => {

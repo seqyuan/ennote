@@ -1681,6 +1681,10 @@ func run() error {
 		GlobalStore: globalStore,
 	}
 
+	// Seed ecosystem skill roots (pi/claude/codex/cursor) once at startup so
+	// existing marketplace installs appear in the catalog.
+	seedSkillRoots(context.Background(), db, cfg.HomeDir)
+
 	server := &api.Server{
 		DB: db, Token: cfg.BootstrapToken, Sandbox: cfg.SandboxMode,
 		Projects: &store.ProjectRepo{DB: db}, Providers: providerRepo,
@@ -1699,7 +1703,9 @@ func run() error {
 			UserRoot:    cfg.SkillsDir,
 			BuiltinRoot: cfg.BuiltinSkillsDir,
 			HomeDir:     cfg.HomeDir,
+			AdditionalRoots: loadSkillRoots(db, cfg.HomeDir),
 		},
+		SkillRoots: &store.SkillRootRepo{DB: db},
 		Trust: trustStore,
 		AgentFlows: &api.AgentFlowServer{
 			Profiles: flowProfiles, Bindings: flowBindings, Runs: flowRuns,
@@ -1792,4 +1798,64 @@ func tickSessionAutoResume(ctx context.Context, db *sql.DB, coordinator *runs.Co
 		return fmt.Errorf("enqueue continuation run %s: %w", continuation.ID, err)
 	}
 	return nil
+}
+
+// seedSkillRoots inserts enabled roots for existing pi/claude/codex/cursor
+// ecosystem skill directories on first run, so marketplace-installed skills
+// appear in the catalog without manual setup. Existing rows are left alone.
+func seedSkillRoots(ctx context.Context, db *sql.DB, homeDir string) {
+	repo := &store.SkillRootRepo{DB: db}
+	existing, err := repo.List(ctx)
+	if err != nil {
+		slog.Warn("skill root seeding skipped", "error", err)
+		return
+	}
+	havePath := map[string]bool{}
+	for _, root := range existing {
+		havePath[root.Path] = true
+	}
+	kinds := []struct {
+		kind string
+		sub  string
+	}{
+		{"pi", filepath.Join(".pi", "agent", "skills")},
+		{"claude", filepath.Join(".claude", "skills")},
+		{"codex", filepath.Join(".codex", "skills")},
+		{"cursor", filepath.Join(".cursor", "skills")},
+	}
+	priority := 10
+	for _, k := range kinds {
+		p := filepath.Join(homeDir, k.sub)
+		if havePath[p] {
+			priority += 10
+			continue
+		}
+		st, err := os.Stat(p)
+		if err != nil || !st.IsDir() {
+			priority += 10
+			continue
+		}
+		if _, err := repo.Create(ctx, store.CreateSkillRootInput{
+			Name: k.kind, Path: p, AgentKind: k.kind, Priority: priority, Enabled: true,
+		}); err != nil {
+			slog.Warn("skill root seed failed", "kind", k.kind, "error", err)
+		}
+		priority += 10
+	}
+}
+
+// loadSkillRoots returns the enabled additional roots for the skills service.
+func loadSkillRoots(db *sql.DB, homeDir string) []skillsmgmt.Root {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	roots, err := (&store.SkillRootRepo{DB: db}).EnabledPaths(ctx)
+	if err != nil {
+		slog.Warn("load additional skill roots failed", "error", err)
+		return nil
+	}
+	out := make([]skillsmgmt.Root, 0, len(roots))
+	for _, root := range roots {
+		out = append(out, skillsmgmt.Root{Name: root.Name, Path: root.Path, Priority: root.Priority})
+	}
+	return out
 }

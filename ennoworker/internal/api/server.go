@@ -79,6 +79,7 @@ type Server struct {
 	MCP                 *MCPServer
 	AgentFlows          *AgentFlowServer
 	Skills              *skillsmgmt.Service
+	SkillRoots          *store.SkillRootRepo
 	Trust               *workspace.TrustStore
 }
 
@@ -216,6 +217,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/skills/check", s.checkSkillUpdates)
 	mux.HandleFunc("POST /v1/skills/update", s.updateSkill)
 	mux.HandleFunc("POST /v1/skills/remove/{relPath...}", s.removeSkill)
+	mux.HandleFunc("GET /v1/skills/roots", s.listSkillRoots)
+	mux.HandleFunc("POST /v1/skills/roots", s.createSkillRoot)
+	mux.HandleFunc("PATCH /v1/skills/roots/{rootID}", s.updateSkillRoot)
+	mux.HandleFunc("DELETE /v1/skills/roots/{rootID}", s.deleteSkillRoot)
 
 	return s.middleware(mux)
 }
@@ -1122,6 +1127,8 @@ func (s *Server) writeStoreError(w http.ResponseWriter, r *http.Request, err err
 		writeError(w, r, http.StatusNotFound, "delegation_item_not_found", err.Error(), false)
 	case errors.Is(err, store.ErrDelegationConflict):
 		writeError(w, r, http.StatusConflict, "delegation_conflict", err.Error(), false)
+	case errors.Is(err, store.ErrSkillRootNotFound):
+		writeError(w, r, http.StatusNotFound, "skill_root_not_found", err.Error(), false)
 	default:
 		writeInternal(w, r, err)
 	}

@@ -7,6 +7,7 @@ import type {
   AnnotatedSkill,
   SkillInstallInfo,
   SkillListResult,
+  SkillRoot,
   SkillSearchResult,
   SkillUpdateResult,
 } from "@/components/settings/types";
@@ -22,6 +23,14 @@ export function SkillsSettings({ projectId, setError }: {
   const [diagnostics, setDiagnostics] = useState<Array<{ level?: string; message?: string; relPath?: string; source?: string }>>([]);
   const [projectTrusted, setProjectTrusted] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Additional skills roots (pi / claude / codex / cursor ecosystems).
+  const [roots, setRoots] = useState<SkillRoot[]>([]);
+  const [showRootForm, setShowRootForm] = useState(false);
+  const [rootName, setRootName] = useState("");
+  const [rootPreset, setRootPreset] = useState("pi");
+  const [rootPath, setRootPath] = useState("");
+  const [rootBusy, setRootBusy] = useState<string | null>(null);
 
   // Marketplace search.
   const [query, setQuery] = useState("");
@@ -47,6 +56,8 @@ export function SkillsSettings({ projectId, setError }: {
       setSkills(result.skills ?? []);
       setDiagnostics(result.diagnostics ?? []);
       setProjectTrusted(Boolean(result.projectResourcesLoaded));
+      const rootsData = await apiFetch<{ items: SkillRoot[] }>("/v1/skills/roots");
+      setRoots(rootsData.items ?? []);
       setError(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Failed to load skills");
@@ -186,6 +197,63 @@ export function SkillsSettings({ projectId, setError }: {
     }
   };
 
+  const addRoot = async () => {
+    setRootBusy("add");
+    try {
+      await apiFetch<SkillRoot>("/v1/skills/roots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: rootName.trim() || rootPreset,
+          agentKind: rootPath.trim() ? "generic" : rootPreset,
+          path: rootPath.trim() || undefined,
+        }),
+      });
+      setRootName("");
+      setRootPath("");
+      setShowRootForm(false);
+      setError(null);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to add skill root");
+    } finally {
+      setRootBusy(null);
+    }
+  };
+
+  const toggleRoot = async (root: SkillRoot) => {
+    setRootBusy(root.id);
+    try {
+      const updated = await apiFetch<SkillRoot>(`/v1/skills/roots/${root.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !root.enabled }),
+      });
+      setRoots((current) => current.map((item) => item.id === root.id ? updated : item));
+      setError(null);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Toggle failed");
+    } finally {
+      setRootBusy(null);
+    }
+  };
+
+  const removeRoot = async (root: SkillRoot) => {
+    if (!window.confirm(`Stop reading skills from "${root.path}"?`)) return;
+    setRootBusy(root.id);
+    try {
+      await apiFetch(`/v1/skills/roots/${root.id}`, { method: "DELETE" });
+      setRoots((current) => current.filter((item) => item.id !== root.id));
+      setError(null);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Remove failed");
+    } finally {
+      setRootBusy(null);
+    }
+  };
+
   const installed = skills.filter((skill) => Boolean(skill.install));
   const local = skills.filter((skill) => !skill.install);
 
@@ -194,6 +262,97 @@ export function SkillsSettings({ projectId, setError }: {
       <h2 id="settings-skills-heading">Skills</h2>
       <p>Marketplace installs, catalog browsing, and per-skill invocation control.</p>
     </header>
+
+    {/* Skills roots (additional resolution paths) */}
+    <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", marginTop: 12, marginBottom: 6 }}>
+      Skills roots <span style={{ fontWeight: 400, color: "var(--text-dim)", marginLeft: 4 }}>{roots.length} additional</span>
+    </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {roots.length === 0 && !loading && (
+        <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
+          No additional roots. Ennote reads <code>$ENNOTE_HOME/skills</code> by default; add pi, Claude Code, Codex, or Cursor skill directories here.
+        </div>
+      )}
+      {roots.map((root) => (
+        <div key={root.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{root.name}</span>
+              <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 8, border: "1px solid var(--border)", color: "var(--text-muted)", flexShrink: 0 }}>
+                {root.agentKind}
+              </span>
+              <span style={{ fontSize: 9, color: "var(--text-dim)", flexShrink: 0 }}>pri {root.priority}</span>
+            </div>
+            <div style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono, monospace)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 380 }}>
+              {root.path}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void toggleRoot(root)}
+            disabled={rootBusy !== null}
+            style={{
+              fontSize: 10, padding: "2px 8px", borderRadius: 6, border: "1px solid var(--border)",
+              background: root.enabled ? "var(--accent)" : "var(--bg)",
+              color: root.enabled ? "#fff" : "var(--text)", cursor: "pointer", flexShrink: 0,
+            }}
+          >
+            {root.enabled ? "Enabled" : "Disabled"}
+          </button>
+          <button type="button" onClick={() => void removeRoot(root)} disabled={rootBusy !== null}
+            title={`Stop reading skills from ${root.path}`}
+            style={{ ...ghostButtonStyle, color: "#E11D48" }}>
+            <X size={12} aria-hidden="true" />
+          </button>
+        </div>
+      ))}
+      {!showRootForm ? (
+        <button type="button" onClick={() => setShowRootForm(true)} style={ghostButtonStyle}>
+          + Add skills root
+        </button>
+      ) : (
+        <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <select
+              value={rootPreset}
+              onChange={(event) => setRootPreset(event.target.value)}
+              aria-label="Ecosystem preset"
+              style={{ ...inputStyle, width: 130 }}
+              disabled={Boolean(rootPath.trim())}
+            >
+              <option value="pi">pi</option>
+              <option value="claude">Claude Code</option>
+              <option value="codex">Codex</option>
+              <option value="cursor">Cursor</option>
+              <option value="generic">Custom path</option>
+            </select>
+            <input
+              value={rootName}
+              onChange={(event) => setRootName(event.target.value)}
+              placeholder="Name (defaults to preset)"
+              aria-label="Root name"
+              style={{ ...inputStyle, minWidth: 140, flex: 0 }}
+            />
+            <input
+              value={rootPath}
+              onChange={(event) => setRootPath(event.target.value)}
+              placeholder={rootPreset === "generic" ? "/absolute/path/to/skills" : "Optional explicit path (else preset)"}
+              aria-label="Root path"
+              style={inputStyle}
+            />
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button type="button" onClick={() => void addRoot()} disabled={rootBusy !== null}
+              style={{ padding: "4px 12px", borderRadius: 6, border: "none", background: "var(--accent)", color: "#fff", fontSize: 11, cursor: "pointer" }}>
+              {rootBusy === "add" ? "Adding…" : "Add root"}
+            </button>
+            <button type="button" onClick={() => setShowRootForm(false)} style={ghostButtonStyle}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
 
     {/* Marketplace search */}
     <div className="skills-market-panel" style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>

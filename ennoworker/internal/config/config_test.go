@@ -70,13 +70,13 @@ func TestSkillsDirEnvOverride(t *testing.T) {
 
 func TestSkillsDirFallsBackToEnnoteHome(t *testing.T) {
 	t.Setenv("ENNOTE_HOME", t.TempDir())
-	t.Setenv("HOME", t.TempDir()) // no ~/.pi/agent/skills under this HOME
+	t.Setenv("HOME", t.TempDir()) // ecosystem dirs never replace the default
 	cfg, err := config.Load()
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(cfg.HomeDir, "skills"), cfg.SkillsDir)
 }
 
-func TestSkillsDirReusesPiGlobalDirWhenPresent(t *testing.T) {
+func TestSkillsDirIgnoresEcosystemDirsForDefault(t *testing.T) {
 	home := t.TempDir()
 	piDir := filepath.Join(home, ".pi", "agent", "skills")
 	require.NoError(t, os.MkdirAll(piDir, 0o755))
@@ -84,5 +84,7 @@ func TestSkillsDirReusesPiGlobalDirWhenPresent(t *testing.T) {
 	t.Setenv("ENNOTE_HOME", t.TempDir())
 	cfg, err := config.Load()
 	require.NoError(t, err)
-	assert.Equal(t, piDir, cfg.SkillsDir)
+	// The default root stays ennote's own; pi is an additional root instead.
+	assert.Equal(t, filepath.Join(cfg.HomeDir, "skills"), cfg.SkillsDir)
+	assert.NotEqual(t, piDir, cfg.SkillsDir)
 }

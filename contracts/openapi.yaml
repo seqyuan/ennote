@@ -2609,6 +2609,103 @@ paths:
                         type: object
                         properties:
                           status: { type: string, enum: [pending, approved, rejected] }
+  /v1/skills/roots:
+    get:
+      operationId: listSkillRoots
+      summary: List configured additional skills directories
+      responses:
+        "200":
+          description: Configured roots ordered by priority
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        additionalProperties: false
+                        required: [items]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: "#/components/schemas/SkillRoot" }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createSkillRoot
+      summary: Add an additional skills directory (by path or ecosystem preset)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: { type: string }
+                path: { type: string, description: "Explicit absolute path; or leave empty and use agentKind" }
+                agentKind: { type: string, enum: [pi, claude, codex, cursor, generic], description: "Preset resolving to the ecosystem skills dir under the worker home" }
+                priority: { type: integer, minimum: 1 }
+                enabled: { type: boolean }
+      responses:
+        "201":
+          description: Root created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SkillRoot" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/skills/roots/{rootID}:
+    parameters:
+      - name: rootID
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      operationId: updateSkillRoot
+      summary: Patch name, path, agent kind, priority, or enabled
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name: { type: string }
+                path: { type: string }
+                agentKind: { type: string, enum: [pi, claude, codex, cursor, generic] }
+                priority: { type: integer, minimum: 1 }
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: Updated root
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SkillRoot" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteSkillRoot
+      summary: Remove an additional skills directory
+      responses:
+        "204":
+          description: Root removed
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
 
   # ——— Skills management ———
 
@@ -4321,6 +4418,19 @@ components:
         package: { type: string }
         installs: { type: string }
         url: { type: string }
+    SkillRoot:
+      type: object
+      additionalProperties: false
+      required: [id, name, path, agentKind, priority, enabled, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        path: { type: string }
+        agentKind: { type: string }
+        priority: { type: integer }
+        enabled: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     SkillUpdateResult:
       type: object
       additionalProperties: false
