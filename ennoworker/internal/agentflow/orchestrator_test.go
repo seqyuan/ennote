@@ -168,12 +168,12 @@ func (e *conflictError) Error() string { return "fake node state conflict" }
 
 // fakeChildren auto-settles each created child with a per-handle result.
 type fakeChildren struct {
-	mu         sync.Mutex
-	created    []ChildSpec
-	results    map[string]*domain.SubmitResult
-	status     map[string]domain.RunStatus
-	usage      map[string]domain.RunBudgetUsage
-	runIDSeq   int
+	mu          sync.Mutex
+	created     []ChildSpec
+	results     map[string]*domain.SubmitResult
+	status      map[string]domain.RunStatus
+	usage       map[string]domain.RunBudgetUsage
+	runIDSeq    int
 	failHandles map[string]bool
 	// blockedHandles: children for these handles stay running until cancelled
 	// or explicitly settled by the test.

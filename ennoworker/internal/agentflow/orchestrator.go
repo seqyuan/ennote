@@ -54,16 +54,16 @@ type NodeUpdate struct {
 
 // ChildSpec is one task's child Run request.
 type ChildSpec struct {
-	Handle      string
+	Handle        string
 	RoleVersionID string
-	Assignment  string
-	Budget      domain.BudgetCeilingJSON
+	Assignment    string
+	Budget        domain.BudgetCeilingJSON
 }
 
 // ChildInfo identifies the materialized child Run.
 type ChildInfo struct {
-	RunID  string
-	ItemID string
+	RunID   string
+	ItemID  string
 	GroupID string
 }
 

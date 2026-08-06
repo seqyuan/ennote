@@ -67,9 +67,9 @@ func TestAgentFlowMatrixRunAndEventsPersisted(t *testing.T) {
 	writer := events.NewWriter(&store.EventRepo{DB: db}, hub)
 	children := &stubMatrixChildren{db: db}
 	orch := &agentflow.Orchestrator{
-		Store:    &store.OrchestratorStore{Runs: flowRuns, Profiles: profiles},
-		Children: children,
-		Events:   &store.FlowEventSink{Writer: writer},
+		Store:        &store.OrchestratorStore{Runs: flowRuns, Profiles: profiles},
+		Children:     children,
+		Events:       &store.FlowEventSink{Writer: writer},
 		PollInterval: 5 * time.Millisecond,
 	}
 	orch.Start(ctx, run.RunID)

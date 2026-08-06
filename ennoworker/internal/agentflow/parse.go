@@ -23,17 +23,17 @@ import (
 // types and malformed structures fail loudly.
 func ParseDefinition(data []byte) (*domain.FlowDefinition, error) {
 	var raw struct {
-		SchemaVersion *int                     `yaml:"schemaVersion"`
-		ID            string                   `yaml:"id"`
-		Version       int                      `yaml:"version"`
-		Description   string                   `yaml:"description"`
+		SchemaVersion *int                       `yaml:"schemaVersion"`
+		ID            string                     `yaml:"id"`
+		Version       int                        `yaml:"version"`
+		Description   string                     `yaml:"description"`
 		Inputs        map[string]domain.FlowPort `yaml:"inputs"`
 		Outputs       map[string]domain.FlowPort `yaml:"outputs"`
 		Budget        *struct {
 			MaxTotalTokens int64 `yaml:"max_total_tokens"`
 		} `yaml:"budget"`
-		Tasks       map[string]yaml.Node     `yaml:"tasks"`
-		Convergence []convergenceRaw         `yaml:"convergence"`
+		Tasks       map[string]yaml.Node `yaml:"tasks"`
+		Convergence []convergenceRaw     `yaml:"convergence"`
 	}
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)

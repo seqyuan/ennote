@@ -1578,10 +1578,10 @@ func run() error {
 		},
 	}
 	flowOrchestrator := &agentflow.Orchestrator{
-		Store: &store.OrchestratorStore{Runs: flowRuns, Profiles: flowProfiles},
+		Store:    &store.OrchestratorStore{Runs: flowRuns, Profiles: flowProfiles},
 		Children: &store.OrchestratorChildren{DB: db, Delegations: &store.DelegationRepo{DB: db}},
-		Events:  &store.FlowEventSink{Writer: eventWriter},
-		Checker: checkRunner,
+		Events:   &store.FlowEventSink{Writer: eventWriter},
+		Checker:  checkRunner,
 		Enqueue: func(ctx context.Context, runID string) error {
 			return coordinator.Enqueue(ctx, runID)
 		},

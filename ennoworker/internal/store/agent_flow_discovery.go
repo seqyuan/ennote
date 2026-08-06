@@ -17,21 +17,21 @@ import (
 // (or a managed profile). Candidates are never executed, bound, or enabled
 // implicitly — the UI must explicitly bind/publish them.
 type AgentFlowCandidate struct {
-	Slug              string                 `json:"slug"`
-	Name              string                 `json:"name"`
-	Description       string                 `json:"description"`
-	SourceKind        string                 `json:"sourceKind"`
-	SourceLocator     string                 `json:"sourceLocator,omitempty"`
-	ConfigDigest      string                 `json:"configDigest"`
-	Definition        *domain.FlowDefinition `json:"definition,omitempty"`
-	AlreadyBound      bool                   `json:"alreadyBound"`
-	BoundVersionID    string                 `json:"boundVersionId,omitempty"`
-	BoundVersion      int                    `json:"boundVersion,omitempty"`
-	UpdateAvailable   bool                   `json:"updateAvailable"`
-	ParseError        string                 `json:"parseError,omitempty"`
-	Validation        []string               `json:"validation,omitempty"`
-	TaskCount         int                    `json:"taskCount"`
-	MaxTotalTokens    int64                  `json:"maxTotalTokens"`
+	Slug            string                 `json:"slug"`
+	Name            string                 `json:"name"`
+	Description     string                 `json:"description"`
+	SourceKind      string                 `json:"sourceKind"`
+	SourceLocator   string                 `json:"sourceLocator,omitempty"`
+	ConfigDigest    string                 `json:"configDigest"`
+	Definition      *domain.FlowDefinition `json:"definition,omitempty"`
+	AlreadyBound    bool                   `json:"alreadyBound"`
+	BoundVersionID  string                 `json:"boundVersionId,omitempty"`
+	BoundVersion    int                    `json:"boundVersion,omitempty"`
+	UpdateAvailable bool                   `json:"updateAvailable"`
+	ParseError      string                 `json:"parseError,omitempty"`
+	Validation      []string               `json:"validation,omitempty"`
+	TaskCount       int                    `json:"taskCount"`
+	MaxTotalTokens  int64                  `json:"maxTotalTokens"`
 }
 
 // AgentFlowDiscovery is the parse-only project file scanner. It never starts

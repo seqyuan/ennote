@@ -75,7 +75,7 @@ func publishFixtureRole(t *testing.T, server *Server) string {
 		SchemaVersion: 1, RolePrompt: "Execute one flow task.",
 		ModelBinding: domain.RoleModelBinding{Mode: domain.RoleModelFixed, ModelProfileID: model.ID,
 			ThinkingEffort: domain.ThinkingDefault, FallbackModelProfileIDs: []string{}, OverridableFields: []string{}},
-		Skills: domain.RoleSkills{Entries: []domain.RoleSkillEntry{}},
+		Skills:    domain.RoleSkills{Entries: []domain.RoleSkillEntry{}},
 		Authority: domain.RoleAuthorityReadOnly, PermissionCeiling: domain.PermissionDiscuss,
 		AllowedTools: []string{"read", "grep"},
 		ContextPolicy: domain.RoleContextPolicy{

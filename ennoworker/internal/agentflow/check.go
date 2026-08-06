@@ -16,7 +16,6 @@ func WithCheckSession(ctx context.Context, sessionID string) context.Context {
 	return context.WithValue(ctx, CheckSessionKey{}, sessionID)
 }
 
-
 // CheckPolicy is the frozen tool policy the check gate evaluates against.
 // It mirrors the ToolPolicyConfig dimensions relevant to command execution.
 type CheckPolicy struct {
@@ -30,9 +29,9 @@ type CheckPolicy struct {
 type CheckDecisionAction string
 
 const (
-	CheckAllow       CheckDecisionAction = "allow"
-	CheckDeny        CheckDecisionAction = "deny"
-	CheckRequireAsk  CheckDecisionAction = "ask"
+	CheckAllow      CheckDecisionAction = "allow"
+	CheckDeny       CheckDecisionAction = "deny"
+	CheckRequireAsk CheckDecisionAction = "ask"
 )
 
 // CheckDecision is the fail-loud verdict of the policy gate.

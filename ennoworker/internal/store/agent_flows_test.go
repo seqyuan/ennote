@@ -34,8 +34,8 @@ func setupFlowFixture(t *testing.T) (*sql.DB, *store.ProjectRepo, *store.RoleRep
 	model, err := (&store.ModelRepo{DB: db}).Create(ctx, store.CreateModelInput{
 		ProviderID: provider.ID, ModelName: "flow-model", ContextWindow: 32000, MaxOutputTokens: 2048,
 		SupportsToolUse: true, SupportsThinking: true,
-		ThinkingDialect:            domain.ThinkingDialectOpenAIReasoningEffort,
-		SupportedThinkingEfforts:   []domain.ThinkingEffort{domain.ThinkingDefault, domain.ThinkingLow, domain.ThinkingMedium},
+		ThinkingDialect:          domain.ThinkingDialectOpenAIReasoningEffort,
+		SupportedThinkingEfforts: []domain.ThinkingEffort{domain.ThinkingDefault, domain.ThinkingLow, domain.ThinkingMedium},
 	})
 	require.NoError(t, err)
 	roles := &store.RoleRepo{DB: db, KnownTools: map[string]bool{"read": true, "grep": true}}

@@ -19,9 +19,9 @@ type ValidationDiagnostic struct {
 
 // ValidationResult is the fail-loud publish verdict.
 type ValidationResult struct {
-	Valid       bool                   `json:"valid"`
-	Diagnostics []ValidationDiagnostic `json:"diagnostics"`
-	ConfigDigest string                `json:"configDigest,omitempty"`
+	Valid        bool                   `json:"valid"`
+	Diagnostics  []ValidationDiagnostic `json:"diagnostics"`
+	ConfigDigest string                 `json:"configDigest,omitempty"`
 }
 
 // RoleInfo is the publish-time resolution of one role@version reference.
