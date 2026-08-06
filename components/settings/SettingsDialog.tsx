@@ -4,6 +4,7 @@ import { Bot, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ContextSettings } from "@/components/settings/ContextSettings";
 import { McpSettings } from "@/components/settings/McpSettings";
+import { AgentFlowSettings } from "@/components/settings/AgentFlowSettings";
 import { ModelsSettings } from "@/components/settings/ModelsSettings";
 import { PoliciesSettings } from "@/components/settings/PoliciesSettings";
 import { ProvidersSettings } from "@/components/settings/ProvidersSettings";
@@ -136,6 +137,7 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
     { id: "context", label: "Context & session", description: session ? "Session defaults and compaction" : "Compaction policy defaults", icon: tabIcon("context") },
     { id: "templates", label: "Templates", description: "Slash-command prompt templates", icon: tabIcon("templates") },
     { id: "mcp", label: "MCP", description: "MCP servers and project bindings", icon: tabIcon("mcp") },
+    { id: "flows", label: "Flows", description: "Agent Flow tasks, bindings, and runs", icon: tabIcon("flows") },
   ];
 
   const activeItem = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
@@ -292,6 +294,11 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
             {activeTab === "mcp" && (
               <div style={{ height: "100%", overflowY: "auto" }}>
                 <McpSettings projectId={projectId} setError={setError} />
+              </div>
+            )}
+            {activeTab === "flows" && (
+              <div style={{ height: "100%", overflowY: "auto" }}>
+                <AgentFlowSettings projectId={projectId} setError={setError} />
               </div>
             )}
           </div>

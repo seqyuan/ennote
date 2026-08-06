@@ -12,8 +12,16 @@ export type RoleVersion = components["schemas"]["RoleVersion"];
 export type RoleValidationResult = components["schemas"]["RoleValidationResult"];
 export type MCPServerProfile = components["schemas"]["MCPServerProfile"];
 export type MCPServerProfileVersion = components["schemas"]["MCPServerProfileVersion"];
+export type AgentFlowProfile = components["schemas"]["AgentFlowProfile"];
+export type AgentFlowVersion = components["schemas"]["AgentFlowVersion"];
+export type ProjectAgentFlowBinding = components["schemas"]["ProjectAgentFlowBinding"];
+export type RunAgentFlow = components["schemas"]["RunAgentFlow"];
+export type RunAgentFlowNode = components["schemas"]["RunAgentFlowNode"];
+export type AgentFlowCandidate = components["schemas"]["AgentFlowCandidate"];
+export type FlowValidationResult = components["schemas"]["FlowValidationResult"];
+export type AgentFlowCheckApproval = components["schemas"]["AgentFlowCheckApproval"];
 export type MCPProjectBinding = components["schemas"]["MCPProjectBinding"];
 export type MCPCatalogEntry = components["schemas"]["MCPCatalogEntry"];
 export type MCPCandidate = components["schemas"]["MCPCandidate"];
 
-export type SettingsTab = "providers" | "models" | "roles" | "policies" | "context" | "templates" | "mcp";
+export type SettingsTab = "providers" | "models" | "roles" | "policies" | "context" | "templates" | "mcp" | "flows";
