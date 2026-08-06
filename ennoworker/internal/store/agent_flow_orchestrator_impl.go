@@ -190,3 +190,11 @@ func (r *AgentFlowRunRepo) ListRecoverableRuns(ctx context.Context) ([]string, e
 	}
 	return ids, rows.Err()
 }
+
+func (s *OrchestratorStore) GetConvergenceRounds(ctx context.Context, runID string) (map[string]int, error) {
+	return s.Runs.GetConvergenceRounds(ctx, runID)
+}
+
+func (s *OrchestratorStore) SetConvergenceRounds(ctx context.Context, runID string, rounds map[string]int) error {
+	return s.Runs.SetConvergenceRounds(ctx, runID, rounds)
+}

@@ -21,6 +21,7 @@ type fakeStore struct {
 	version         *domain.AgentFlowVersion
 	cancelRequested bool
 	anchorStatus    domain.RunStatus
+	rounds          map[string]int
 }
 
 func newFakeStore(def *domain.FlowDefinition) (*fakeStore, error) {
@@ -646,4 +647,19 @@ func TestOrchestratorFlowStartedCarriesEntryTask(t *testing.T) {
 	waitTerminal(t, fake)
 	require.Equal(t, "flow_started", events.types()[0])
 	assert.Equal(t, "producer", events.payloadOf("flow_started")["entryTask"])
+}
+
+// UpdateNodeByHandle completes the node with the given handle (test helper
+// for convergence scenarios where the topological index is not hardcoded).
+func (f *fakeStore) UpdateNodeByHandle(ctx context.Context, runID, handle string, outputRef json.RawMessage) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.nodes {
+		if f.nodes[i].Handle == handle {
+			f.nodes[i].TerminalState = domain.FlowNodeCompleted
+			f.nodes[i].OutputRef = outputRef
+			return nil
+		}
+	}
+	return errFakeConflict
 }

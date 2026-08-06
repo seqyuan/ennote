@@ -37,6 +37,8 @@ type FlowStore interface {
 	AddTokenUsage(ctx context.Context, runID string, tokens int64) (int64, error)
 	SetCancelRequested(ctx context.Context, runID string) error
 	IsCancelRequested(ctx context.Context, runID string) (bool, error)
+	GetConvergenceRounds(ctx context.Context, runID string) (map[string]int, error)
+	SetConvergenceRounds(ctx context.Context, runID string, rounds map[string]int) error
 	SetAnchorRunning(ctx context.Context, runID string) error
 	TerminateAnchor(ctx context.Context, runID string, status domain.RunStatus, code, message string) error
 }
@@ -204,6 +206,16 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 					taskOutputs[nodes[i].Handle] = nodes[i].OutputRef
 				}
 			}
+		}
+		// Convergence: a completed 'from' node triggers one durable back-edge
+		// round (reset the loop path, count it, and stop at max_rounds).
+		converged, err := o.applyConvergence(ctx, runID, &def, nodes)
+		if err != nil {
+			o.fail(ctx, runID, "convergence: "+err.Error())
+			return
+		}
+		if converged {
+			continue // nodes changed by the back-edge reset; re-read them
 		}
 		next := nextReadyTask(nodes, completed, &def)
 		if next == nil {
@@ -739,6 +751,84 @@ func (o *Orchestrator) reconcileCrashedNodes(ctx context.Context, runID string) 
 		})
 	}
 	return nil
+}
+
+// applyConvergence performs at most one back-edge round per rule per
+// invocation: when the rule's from node is completed, the counter is
+// incremented durably; if the counter exceeds max_rounds the meta-Run
+// terminalizes as convergence_exceeded (never silent success); otherwise the
+// loop path (to..from) is reset to pending so the next dispatch re-runs the
+// loop. Nodes outside the loop keep their checkpoints.
+func (o *Orchestrator) applyConvergence(ctx context.Context, runID string, def *domain.FlowDefinition,
+	nodes []*domain.RunAgentFlowNode) (bool, error) {
+	if len(def.Convergence) == 0 {
+		return false, nil
+	}
+	byHandle := make(map[string]*domain.RunAgentFlowNode, len(nodes))
+	for i := range nodes {
+		byHandle[nodes[i].Handle] = nodes[i]
+	}
+	rounds, err := o.Store.GetConvergenceRounds(ctx, runID)
+	if err != nil {
+		return false, err
+	}
+	if rounds == nil {
+		rounds = map[string]int{}
+	}
+	changed := false
+	for _, rule := range def.Convergence {
+		fromNode := byHandle[rule.From]
+		if fromNode == nil || fromNode.TerminalState != domain.FlowNodeCompleted {
+			continue // from has not completed in this round yet
+		}
+		key := rule.From + "\x00" + rule.To
+		rounds[key]++
+		changed = true
+		if rounds[key] > rule.MaxRounds {
+			reason := fmt.Sprintf("convergence %s->%s exceeded max_rounds %d", rule.From, rule.To, rule.MaxRounds)
+			_ = o.Store.UpdateFlowState(ctx, runID, domain.FlowStateConvergenceExceeded, 0, reason)
+			_ = o.Events.PublishFlow(ctx, runID, "flow_convergence_exceeded", map[string]any{
+				"flowRunId": runID, "from": rule.From, "to": rule.To, "rounds": rounds[key],
+			})
+			_ = o.Store.TerminateAnchor(ctx, runID, domain.RunFailed, "convergence_exceeded", reason)
+			_ = o.Store.SetConvergenceRounds(ctx, runID, rounds)
+			return true, nil
+		}
+		// Back-edge: reset every node on the loop path (to..from) so the next
+		// dispatch re-runs the loop; nodes outside the loop keep checkpoints.
+		for _, handle := range loopPathNodes(rule.From, rule.To, def) {
+			node := byHandle[handle]
+			if node == nil || !node.TerminalState.Terminal() {
+				continue
+			}
+			_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
+				TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{node.TerminalState},
+				SetState: domain.FlowNodePending,
+			})
+		}
+	}
+	if changed {
+		if err := o.Store.SetConvergenceRounds(ctx, runID, rounds); err != nil {
+			return false, err
+		}
+	}
+	return changed, nil
+}
+
+// loopPathNodes returns the nodes on the declared loop path from 'to' to
+// 'from' (inclusive), i.e. every node reachable from 'to' that also reaches
+// 'from' in the depends DAG. These are exactly the nodes a back-edge must
+// re-run; everything else keeps its checkpoint.
+func loopPathNodes(from, to string, def *domain.FlowDefinition) []string {
+	reach := reachabilityMatrix(def.Tasks, map[[2]string]int{})
+	var path []string
+	for handle := range def.Tasks {
+		if reach[to][handle] && reach[handle][from] {
+			path = append(path, handle)
+		}
+	}
+	sort.Strings(path)
+	return path
 }
 
 // flowBudgetLimit decodes the frozen flow definition's budget ceiling.

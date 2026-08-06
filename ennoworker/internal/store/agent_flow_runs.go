@@ -313,10 +313,11 @@ func (r *AgentFlowRunRepo) UpdateNode(ctx context.Context, runID string, upd Nod
 		terminal_state=?, child_run_id=COALESCE(?, child_run_id),
 		output_ref=COALESCE(?, output_ref), goal_text=COALESCE(?, goal_text),
 		error_code=COALESCE(?, error_code),
-		finished_at=CASE WHEN ?='' THEN finished_at ELSE ? END
+		finished_at=CASE WHEN ? IS NULL THEN finished_at ELSE ? END
 		WHERE run_id=? AND task_index=?`+expected,
-		upd.SetState, upd.ChildRunID, outputRef, upd.GoalText, upd.ErrorCode,
-		now, now, runID, upd.TaskIndex)
+		upd.SetState, nullableOrNil(upd.ChildRunID), nullableOrNil(outputRef),
+		nullableOrNil(upd.GoalText), nullableOrNil(upd.ErrorCode),
+		nullableOrNil(now), nullableOrNil(now), runID, upd.TaskIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -545,4 +546,43 @@ func (r *AgentFlowRunRepo) SetCancelRequested(ctx context.Context, runID string)
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+
+// nullableOrNil returns nil for empty values so SQL COALESCE preserves the
+// existing column instead of clearing it with an empty string.
+func nullableOrNil(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+// GetConvergenceRounds reads the durable per-rule back-edge counters.
+func (r *AgentFlowRunRepo) GetConvergenceRounds(ctx context.Context, runID string) (map[string]int, error) {
+	var raw string
+	if err := r.DB.QueryRowContext(ctx, `SELECT convergence_rounds_json FROM run_agent_flow WHERE run_id=?`,
+		runID).Scan(&raw); err != nil {
+		return nil, err
+	}
+	rounds := map[string]int{}
+	if err := json.Unmarshal([]byte(raw), &rounds); err != nil {
+		return nil, err
+	}
+	return rounds, nil
+}
+
+// SetConvergenceRounds persists the back-edge counters (crash-safe: a
+// recovery between back-edges never loses count).
+func (r *AgentFlowRunRepo) SetConvergenceRounds(ctx context.Context, runID string, rounds map[string]int) error {
+	if rounds == nil {
+		rounds = map[string]int{}
+	}
+	encoded, err := json.Marshal(rounds)
+	if err != nil {
+		return err
+	}
+	_, err = r.DB.ExecContext(ctx, `UPDATE run_agent_flow SET convergence_rounds_json=?, updated_at=?
+		WHERE run_id=?`, string(encoded), roleTime(time.Now().UTC()), runID)
+	return err
 }
