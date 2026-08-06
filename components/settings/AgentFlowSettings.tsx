@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
 import {
+  diffText,
   draftToYAML,
   emptyDraft,
   emptyTask,
@@ -45,6 +46,7 @@ export function AgentFlowSettings({ projectId, setError }: {
   const [newName, setNewName] = useState("");
   const [newSlug, setNewSlug] = useState("");
   const [timeline, setTimeline] = useState<string[]>([]);
+  const [diffView, setDiffView] = useState<{ slug: string; lines: string[] } | null>(null);
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
@@ -745,7 +747,8 @@ export function AgentFlowSettings({ projectId, setError }: {
           <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>Discovered flows</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {candidates.map((candidate) => (
-              <div key={`${candidate.sourceKind}:${candidate.slug}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: 6 }}>
+              <div key={`${candidate.sourceKind}:${candidate.slug}`} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: 6 }}>
                 <div style={{ minWidth: 0 }}>
                   <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{candidate.name ?? candidate.slug}</span>
                   <span style={{ fontSize: 10, color: "var(--text-dim)", marginLeft: 6 }}>
@@ -765,7 +768,41 @@ export function AgentFlowSettings({ projectId, setError }: {
                       Bind
                     </button>
                   )}
+                  {candidate.updateAvailable && (
+                    <button
+                      type="button"
+                      title="Show the read-only diff between the bound version and the project file"
+                      onClick={() => {
+                        let bound;
+                        for (const list of Object.values(versions)) {
+                          bound = list.find((version) => version.id === candidate.boundVersionId);
+                          if (bound) break;
+                        }
+                        const oldText = JSON.stringify(bound?.definition ?? {}, null, 2);
+                        const newText = JSON.stringify(candidate.definition ?? {}, null, 2);
+                        setDiffView({ slug: candidate.slug ?? "", lines: diffText(oldText, newText) });
+                      }}
+                      style={ghostButtonStyle}
+                    >
+                      View diff
+                    </button>
+                  )}
                 </div>
+              </div>
+              {diffView && diffView.slug === candidate.slug && (
+                <div style={{ border: "1px solid var(--border)", borderRadius: 6, padding: 8, marginTop: 4 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>
+                    Read-only diff: bound version vs project file
+                  </div>
+                  <div style={{ maxHeight: 200, overflowY: "auto", fontSize: 10, fontFamily: "var(--font-mono, monospace)", color: "var(--text-muted)", whiteSpace: "pre-wrap" }}>
+                    {diffView.lines.map((line, index) => (
+                      <div key={index} style={{ color: line.startsWith("- ") ? "#E11D48" : line.startsWith("+ ") ? "#059669" : undefined }}>
+                        {line}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               </div>
             ))}
             {profiles.filter((profile) => profile.sourceKind === "managed" && !bindings.some((binding) => versionFor(binding)?.profileId === profile.id)).map((profile) => (
@@ -855,8 +892,20 @@ export function AgentFlowSettings({ projectId, setError }: {
                     </div>
                   ))}
                   {timeline.length > 0 && (
-                    <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 4 }}>
-                      {timeline.join(" → ")}
+                    <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 4, display: "flex", flexWrap: "wrap", gap: "2px 8px" }}>
+                      {timeline.map((eventType, index) => (
+                        <span
+                          key={index}
+                          style={{
+                            color: eventType.includes("check_result") ? "var(--accent)"
+                              : eventType.includes("cancelled") || eventType.includes("convergence_exceeded") || eventType.includes("budget_exceeded") ? "#E11D48"
+                              : eventType.includes("completed") ? "#059669"
+                              : undefined,
+                          }}
+                        >
+                          {eventType.replace(/^flow_/, "").replace(/_/g, " ")}
+                        </span>
+                      ))}
                     </div>
                   )}
                 </div>

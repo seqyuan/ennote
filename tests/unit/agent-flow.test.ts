@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { draftToYAML, emptyTask, flowToDraft, suggestedBudget, variableChips, type FlowDraft } from "../../lib/agent-flow";
+import { diffText, draftToYAML, emptyTask, flowToDraft, suggestedBudget, variableChips, type FlowDraft } from "../../lib/agent-flow";
 
 function sampleDraft(): FlowDraft {
   const producer = { ...emptyTask("producer"), role: "flow-worker@1", skills: ["go-dev"], goal: "Implement {inputs.target}", budgetTokens: "50000" };
@@ -82,5 +82,16 @@ describe("Agent Flow variable autocomplete scope", () => {
     // The first task has no depends, so no task chips.
     const producerChips = variableChips(draft.tasks[0], draft);
     expect(producerChips.some((chip) => chip.startsWith("{task."))).toBe(false);
+  });
+});
+
+describe("Agent Flow update diff", () => {
+  it("marks removed, added, and unchanged lines", () => {
+    const diff = diffText("a: 1\nb: 2\nc: 3", "a: 1\nb: 9\nc: 3\nd: 4");
+    expect(diff).toContain("  a: 1");
+    expect(diff).toContain("- b: 2");
+    expect(diff).toContain("+ b: 9");
+    expect(diff).toContain("  c: 3");
+    expect(diff).toContain("+ d: 4");
   });
 });

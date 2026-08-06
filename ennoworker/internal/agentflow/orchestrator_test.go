@@ -443,6 +443,11 @@ func TestOrchestratorCancelPropagation(t *testing.T) {
 	assert.Equal(t, domain.FlowNodeCancelled, byHandle["producer"].TerminalState)
 	assert.Equal(t, domain.FlowNodeCancelled, byHandle["reviewer"].TerminalState)
 	assert.Equal(t, domain.RunCancelled, fake.anchorStatus)
+	assert.Contains(t, events.types(), "flow_cancelled")
+	assert.NotContains(t, events.types(), "flow_failed")
+	// The durable event carries the cancelled child run ids.
+	payload := events.payloadOf("flow_cancelled")
+	assert.NotNil(t, payload["cancelledChildRuns"])
 }
 
 // Matrix 12: budget exceeded -> budget_exceeded terminal state.
@@ -457,7 +462,8 @@ func TestOrchestratorBudgetExceeded(t *testing.T) {
 	orch.Start(context.Background(), "flow-run-1")
 	state := waitTerminal(t, fake)
 	assert.Equal(t, domain.FlowStateBudgetExceeded, state)
-	assert.Contains(t, events.types(), "flow_failed")
+	assert.Contains(t, events.types(), "flow_budget_exceeded")
+	assert.NotContains(t, events.types(), "flow_failed")
 }
 
 // Goal template resolution unit tests.

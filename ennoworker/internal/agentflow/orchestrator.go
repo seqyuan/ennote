@@ -339,8 +339,8 @@ func (o *Orchestrator) runRoleTask(ctx context.Context, runID string, flow *doma
 			def.Budget.MaxTotalTokens > 0 && total > def.Budget.MaxTotalTokens {
 			_ = o.Store.UpdateFlowState(ctx, runID, domain.FlowStateBudgetExceeded, total,
 				fmt.Sprintf("flow budget exceeded: %d > %d", total, def.Budget.MaxTotalTokens))
-			_ = o.Events.PublishFlow(ctx, runID, "flow_failed", map[string]any{
-				"flowRunId": runID, "reason": "budget_exceeded", "used": total, "limit": def.Budget.MaxTotalTokens,
+			_ = o.Events.PublishFlow(ctx, runID, "flow_budget_exceeded", map[string]any{
+				"flowRunId": runID, "used": total, "limit": def.Budget.MaxTotalTokens,
 			})
 			_ = o.Store.TerminateAnchor(ctx, runID, domain.RunFailed, "budget_exceeded", "flow budget exceeded")
 			return nil
@@ -575,8 +575,8 @@ func (o *Orchestrator) runFanOutTask(ctx context.Context, runID string, flow *do
 		if budgetLimit > 0 && total > budgetLimit {
 			_ = o.Store.UpdateFlowState(ctx, runID, domain.FlowStateBudgetExceeded, total,
 				fmt.Sprintf("flow budget exceeded: %d > %d", total, budgetLimit))
-			_ = o.Events.PublishFlow(ctx, runID, "flow_failed", map[string]any{
-				"flowRunId": runID, "reason": "budget_exceeded", "used": total, "limit": budgetLimit,
+			_ = o.Events.PublishFlow(ctx, runID, "flow_budget_exceeded", map[string]any{
+				"flowRunId": runID, "used": total, "limit": budgetLimit,
 			})
 			_ = o.Store.TerminateAnchor(ctx, runID, domain.RunFailed, "budget_exceeded", "flow budget exceeded")
 			return nil
@@ -726,8 +726,14 @@ func (o *Orchestrator) cancelRemaining(ctx context.Context, runID string, active
 			SetState: domain.FlowNodeCancelled,
 		})
 	}
+	cancelledChildRuns := []string{}
+	for i := range nodes {
+		cancelledChildRuns = append(cancelledChildRuns, o.nodeChildIDs(nodes[i])...)
+	}
 	_ = o.Store.UpdateFlowState(ctx, runID, domain.FlowStateCancelled, 0, "cancelled by user")
-	_ = o.Events.PublishFlow(ctx, runID, "flow_failed", map[string]any{"flowRunId": runID, "reason": "cancelled"})
+	_ = o.Events.PublishFlow(ctx, runID, "flow_cancelled", map[string]any{
+		"flowRunId": runID, "cancelledChildRuns": cancelledChildRuns,
+	})
 	_ = o.Store.TerminateAnchor(ctx, runID, domain.RunCancelled, "flow_cancelled", "cancelled by user")
 	return nil
 }
@@ -925,8 +931,8 @@ func (o *Orchestrator) reconcileCrashedNodes(ctx context.Context, runID string) 
 			if budgetLimit > 0 && total > budgetLimit {
 				_ = o.Store.UpdateFlowState(ctx, runID, domain.FlowStateBudgetExceeded, total,
 					fmt.Sprintf("flow budget exceeded: %d > %d", total, budgetLimit))
-				_ = o.Events.PublishFlow(ctx, runID, "flow_failed", map[string]any{
-					"flowRunId": runID, "reason": "budget_exceeded", "used": total, "limit": budgetLimit,
+				_ = o.Events.PublishFlow(ctx, runID, "flow_budget_exceeded", map[string]any{
+					"flowRunId": runID, "used": total, "limit": budgetLimit,
 				})
 				_ = o.Store.TerminateAnchor(ctx, runID, domain.RunFailed, "budget_exceeded", "flow budget exceeded")
 				return nil

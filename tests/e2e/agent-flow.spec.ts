@@ -150,3 +150,41 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     expect(overflow).toBe(false);
   });
 }
+
+test("Agent Flow update diff is read-only and surfaces project file changes", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const staleCandidate = {
+    slug: "pwn-flow", name: "pwn-flow", sourceKind: "project_file", sourceLocator: ".ennote/agent-flows/pwn-flow.yaml",
+    configDigest: "b".repeat(64), definition: { schemaVersion: 1, id: "pwn-flow", budget: { maxTotalTokens: 10000 },
+      tasks: { producer: { role: "flow-worker@1", goal: "new goal" } } },
+    alreadyBound: true, boundVersionId: "bound-v1", boundVersion: 1, updateAvailable: true, taskCount: 1, maxTotalTokens: 10000,
+  };
+  const boundVersion = { id: "bound-v1", profileId: "flow-profile", version: 1, configDigest: "a".repeat(64),
+    definition: { schemaVersion: 1, id: "pwn-flow", budget: { maxTotalTokens: 10000 },
+      tasks: { producer: { role: "flow-worker@1", goal: "old goal" } } },
+    publishedAt: now };
+  await page.route("**/api/worker/v1/**", async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace("/api/worker", "");
+    if (path === "/v1/projects") return fulfill(route, [project]);
+    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
+    if (path === "/v1/roles") return fulfill(route, { items: [role] });
+    if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, []);
+    if (path === "/v1/agent-flows") return fulfill(route, [profile]);
+    if (path === `/v1/projects/${project.id}/agent-flows/candidates`) return fulfill(route, [staleCandidate]);
+    if (path === `/v1/projects/${project.id}/agent-flows/bindings`) return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/agent-flows/runs`) return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/agent-flows/check-approvals`) return fulfill(route, []);
+    if (path === "/v1/agent-flows/flow-profile/versions") return fulfill(route, [boundVersion]);
+    return route.abort();
+  });
+  await selectProjectAndOpenFlows(page);
+
+  await page.getByText("Update available").scrollIntoViewIfNeeded();
+  await expect(page.getByText("Update available")).toBeVisible();
+  await page.getByRole("button", { name: "View diff" }).click();
+  await expect(page.getByText("Read-only diff: bound version vs project file")).toBeVisible();
+  // The changed goal line is surfaced with +/- markers (JSON-pretty rows).
+  await expect(page.getByText(/"goal": "old goal"/)).toBeVisible();
+  await expect(page.getByText(/"goal": "new goal"/)).toBeVisible();
+});
