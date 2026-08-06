@@ -136,3 +136,24 @@ func TestFanOutCancelCoversAllInstances(t *testing.T) {
 	children.mu.Unlock()
 	assert.Equal(t, 2, cancelled)
 }
+
+// Regression: budget_exceeded for a fan_out task records the ACTUAL total
+// usage across every parallel instance, not just the instances accounted
+// before the limit was hit.
+func TestFanOutBudgetExceededTotalsAllChildren(t *testing.T) {
+	def := fanOutDef(2)
+	def.Budget.MaxTotalTokens = 1500 // each instance uses 1000 -> total 2000
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren() // default usage 1000 tokens per instance
+	events := &fakeEvents{}
+	orch := newOrchestrator(fake, children, events)
+	orch.Start(context.Background(), "flow-run-1")
+	state := waitTerminal(t, fake)
+	assert.Equal(t, domain.FlowStateBudgetExceeded, state)
+	run, _ := fake.GetRun(context.Background(), "flow-run-1")
+	// producer (1000) + scan-0 (1000) + scan-1 (1000): every instance's usage
+	// is recorded even though the limit was crossed.
+	assert.Equal(t, int64(3000), run.TotalTokensUsed, "budget record must reflect all instances")
+	assert.Contains(t, events.types(), "flow_budget_exceeded")
+}

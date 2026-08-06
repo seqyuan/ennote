@@ -251,7 +251,7 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 			o.fail(ctx, runID, fmt.Sprintf("resolve goal for task %q: %v", next.Handle, err))
 			return
 		}
-			switch task.Type {
+		switch task.Type {
 		case domain.FlowTaskCheck:
 			if err := o.runCheckTask(ctx, runID, state, next, task, goal, taskOutputs); err != nil {
 				return
@@ -513,9 +513,9 @@ func (o *Orchestrator) runFanOutTask(ctx context.Context, runID string, flow *do
 			return nil
 		}
 		child, err := o.Children.CreateTaskChild(ctx, runID, flow.SessionID, ChildSpec{
-			Handle: fmt.Sprintf("%s-%d", node.Handle, i),
+			Handle:        fmt.Sprintf("%s-%d", node.Handle, i),
 			RoleVersionID: node.RoleVersionID,
-			Assignment: goal, Budget: budget,
+			Assignment:    goal, Budget: budget,
 		})
 		if err != nil {
 			o.failTask(ctx, runID, node, "fan_out_child_create_failed")
@@ -559,8 +559,9 @@ func (o *Orchestrator) runFanOutTask(ctx context.Context, runID string, flow *do
 			return nil
 		}
 	}
-	// Aggregate by instance order; accumulate usage per instance into the flow
-	// budget, terminalizing as budget_exceeded on the first over-limit child.
+	// Accumulate every instance's usage into the flow ledger FIRST so a
+	// budget-exceeded record reflects the actual total consumption across all
+	// parallel children (not just the children accounted before the limit).
 	var budgetLimit int64
 	if v, err := o.Store.GetVersion(ctx, flow.FlowVersionID); err == nil {
 		var def domain.FlowDefinition
@@ -568,19 +569,23 @@ func (o *Orchestrator) runFanOutTask(ctx context.Context, runID string, flow *do
 			budgetLimit = def.Budget.MaxTotalTokens
 		}
 	}
-	aggregate := make([]json.RawMessage, 0, len(results))
+	total := int64(0)
 	for _, childID := range childIDs {
 		usage, _ := o.Children.ChildUsage(ctx, childID)
-		total, _ := o.Store.AddTokenUsage(ctx, runID, usage.Tokens)
-		if budgetLimit > 0 && total > budgetLimit {
-			_ = o.Store.UpdateFlowState(ctx, runID, domain.FlowStateBudgetExceeded, total,
-				fmt.Sprintf("flow budget exceeded: %d > %d", total, budgetLimit))
-			_ = o.Events.PublishFlow(ctx, runID, "flow_budget_exceeded", map[string]any{
-				"flowRunId": runID, "used": total, "limit": budgetLimit,
-			})
-			_ = o.Store.TerminateAnchor(ctx, runID, domain.RunFailed, "budget_exceeded", "flow budget exceeded")
-			return nil
-		}
+		total, _ = o.Store.AddTokenUsage(ctx, runID, usage.Tokens)
+	}
+	if budgetLimit > 0 && total > budgetLimit {
+		_ = o.Store.UpdateFlowState(ctx, runID, domain.FlowStateBudgetExceeded, total,
+			fmt.Sprintf("flow budget exceeded: %d > %d", total, budgetLimit))
+		_ = o.Events.PublishFlow(ctx, runID, "flow_budget_exceeded", map[string]any{
+			"flowRunId": runID, "used": total, "limit": budgetLimit,
+		})
+		_ = o.Store.TerminateAnchor(ctx, runID, domain.RunFailed, "budget_exceeded", "flow budget exceeded")
+		return nil
+	}
+	// Aggregate by instance order.
+	aggregate := make([]json.RawMessage, 0, len(childIDs))
+	for _, childID := range childIDs {
 		result := results[childID]
 		payload := json.RawMessage{}
 		if result != nil && len(result.Payload) > 0 {
@@ -910,9 +915,13 @@ func (o *Orchestrator) reconcileCrashedNodes(ctx context.Context, runID string) 
 		}
 		if !foldable {
 			// Still active (or the row is gone, or an instance failed): reset
-			// for re-dispatch. Cancel any stragglers first.
+			// for re-dispatch. Cancel only the non-succeeded stragglers;
+			// succeeded instances keep their folded results untouched.
 			for _, childID := range childIDs {
-				_ = o.Children.CancelChildRun(ctx, childID)
+				status, err := o.Children.ChildRunStatus(ctx, childID)
+				if err != nil || status != domain.RunSucceeded {
+					_ = o.Children.CancelChildRun(ctx, childID)
+				}
 			}
 			reset()
 			continue
@@ -986,13 +995,19 @@ func (o *Orchestrator) applyConvergence(ctx context.Context, runID string, def *
 		rounds[key]++
 		changed = true
 		if rounds[key] > rule.MaxRounds {
+			// Persist the final counter BEFORE terminalizing so a recovery
+			// between the two writes never observes a missing counter. If the
+			// write fails, surface the error and let the caller fail the flow
+			// (degraded terminal state) instead of silently dropping it.
+			if err := o.Store.SetConvergenceRounds(ctx, runID, rounds); err != nil {
+				return true, err
+			}
 			reason := fmt.Sprintf("convergence %s->%s exceeded max_rounds %d", rule.From, rule.To, rule.MaxRounds)
 			_ = o.Store.UpdateFlowState(ctx, runID, domain.FlowStateConvergenceExceeded, 0, reason)
 			_ = o.Events.PublishFlow(ctx, runID, "flow_convergence_exceeded", map[string]any{
 				"flowRunId": runID, "from": rule.From, "to": rule.To, "rounds": rounds[key],
 			})
 			_ = o.Store.TerminateAnchor(ctx, runID, domain.RunFailed, "convergence_exceeded", reason)
-			_ = o.Store.SetConvergenceRounds(ctx, runID, rounds)
 			return true, nil
 		}
 		// Back-edge: reset every node on the loop path (to..from) so the next
