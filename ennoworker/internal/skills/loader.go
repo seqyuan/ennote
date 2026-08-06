@@ -29,25 +29,33 @@ type LoadedSkill struct {
 	SourceRoot   string // "user" | "builtin"
 }
 
-// IsSkillLeaf returns true if the directory contains a regular-file skill.json.
-// It uses Lstat so symlinks are not followed and can be diagnosed upstream.
+// IsSkillLeaf returns true if the directory contains a regular-file skill.json
+// or SKILL.md (pi-ecosystem skills are SKILL.md-only; ennote synthesizes a
+// manifest for them). It uses Lstat so symlinks are not followed and can be
+// diagnosed upstream.
 func IsSkillLeaf(dir string) (bool, error) {
-	manifestPath := filepath.Join(dir, "skill.json")
-	fi, err := os.Lstat(manifestPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
+	hasManifest := false
+	for _, name := range []string{"skill.json", "SKILL.md", "skill.md"} {
+		fi, err := os.Lstat(filepath.Join(dir, name))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return false, err
 		}
-		return false, err
+		if fi.Mode().IsRegular() {
+			hasManifest = true
+			break
+		}
 	}
-	if !fi.Mode().IsRegular() {
+	if !hasManifest {
 		return false, nil
 	}
 	// Also check there's no category.md (mutual exclusion)
 	catPath := filepath.Join(dir, "category.md")
 	catFi, catErr := os.Lstat(catPath)
 	if catErr == nil && catFi.Mode().IsRegular() {
-		return false, fmt.Errorf("directory contains both skill.json and category.md")
+		return false, fmt.Errorf("directory contains both a skill manifest and category.md")
 	}
 	return true, nil
 }
@@ -83,7 +91,10 @@ func Load(dir string) (*LoadedSkill, error) {
 	manifestPath := filepath.Join(dir, "skill.json")
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
-		return nil, fmt.Errorf("read skill.json: %w", err)
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("read skill.json: %w", err)
+		}
+		return loadSkillMDFallback(dir)
 	}
 	var m Manifest
 	if err := json.Unmarshal(data, &m); err != nil {
@@ -132,6 +143,144 @@ func Load(dir string) (*LoadedSkill, error) {
 		ManifestHash: manifestHash,
 		ContentHash:  contentHash,
 	}, nil
+}
+
+// loadSkillMDFallback loads a pi-ecosystem skill directory that has SKILL.md
+// but no skill.json. The manifest is synthesized: ID from the frontmatter
+// "name" (falling back to a slug of the directory name), Version "1",
+// Description from frontmatter when present, Prompt "SKILL.md". The prompt
+// body has the frontmatter block stripped.
+func loadSkillMDFallback(dir string) (*LoadedSkill, error) {
+	skillPath := filepath.Join(dir, "SKILL.md")
+	if _, statErr := os.Lstat(skillPath); statErr != nil {
+		skillPath = filepath.Join(dir, "skill.md")
+		if _, statErr = os.Lstat(skillPath); statErr != nil {
+			return nil, fmt.Errorf("skill directory has neither skill.json nor SKILL.md")
+		}
+	}
+	data, err := os.ReadFile(skillPath)
+	if err != nil {
+		return nil, fmt.Errorf("read SKILL.md: %w", err)
+	}
+	body, name, description := splitSkillFrontmatter(string(data))
+	if name == "" {
+		name = slugify(filepath.Base(dir))
+	}
+	if name == "" {
+		return nil, fmt.Errorf("cannot derive skill id from directory %q", dir)
+	}
+
+	m := Manifest{
+		ID:          name,
+		Version:     "1",
+		Prompt:      "SKILL.md",
+		Description: description,
+	}
+	synth, err := json.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("synthesize manifest: %w", err)
+	}
+
+	contentHash, err := dirHash(dir)
+	if err != nil {
+		return nil, fmt.Errorf("compute content hash: %w", err)
+	}
+	if !filepath.IsAbs(dir) {
+		abs, err := filepath.Abs(dir)
+		if err == nil {
+			dir = abs
+		}
+	}
+
+	return &LoadedSkill{
+		Manifest:     m,
+		BaseDir:      dir,
+		PromptText:   body,
+		ManifestHash: sha256Hex(synth),
+		ContentHash:  contentHash,
+	}, nil
+}
+
+// splitSkillFrontmatter extracts the YAML frontmatter block (--- ... ---) from
+// a SKILL.md document and returns (body, name, description). Only the name and
+// description keys are consumed; all other frontmatter is preserved for tools
+// but not modeled by Manifest. Multi-line (| / >) description values take the
+// first folded line for compactness.
+func splitSkillFrontmatter(doc string) (body, name, description string) {
+	const delim = "---"
+	if !strings.HasPrefix(doc, delim) {
+		return doc, "", ""
+	}
+	rest := doc[len(delim):]
+	end := strings.Index(rest, "\n"+delim)
+	if end < 0 {
+		return doc, "", ""
+	}
+	front := rest[:end]
+	body = rest[end+len("\n"+delim):]
+	if strings.HasPrefix(body, "\n") {
+		body = body[1:]
+	}
+	for i, line := range strings.Split(front, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "name":
+			if name == "" {
+				name = strings.TrimSpace(value)
+			}
+		case "description":
+			if description == "" {
+				trimmed := strings.TrimSpace(value)
+				if trimmed == "" {
+					continue
+				}
+				if trimmed == "|" || trimmed == ">" || strings.HasPrefix(trimmed, "|-") || strings.HasPrefix(trimmed, ">-") {
+					// Block scalar: consume the following indented lines; take the
+					// first folded line for compactness.
+					var folded []string
+					for _, next := range strings.Split(front, "\n")[i+1:] {
+						if strings.TrimSpace(next) == "" {
+							continue
+						}
+						if next[0] != ' ' && next[0] != '\t' {
+							break
+						}
+						folded = append(folded, strings.TrimSpace(next))
+					}
+					description = strings.Join(folded, " ")
+				} else {
+					description = trimmed
+				}
+			}
+		}
+	}
+	return body, name, description
+}
+
+// slugify lowercases and converts any run of non [a-z0-9_-] characters into a
+// single dash, trimming leading/trailing dashes, so directory names become
+// stable skill IDs.
+func slugify(s string) string {
+	lower := strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	dash := false
+	for _, r := range lower {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			b.WriteRune(r)
+			dash = false
+		} else if !dash {
+			b.WriteByte('-')
+			dash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 func (s *LoadedSkill) SnapshotPath(runDir string) string {

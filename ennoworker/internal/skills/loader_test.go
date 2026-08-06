@@ -193,3 +193,70 @@ func TestIsCategoryDir(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestLoadSkillMDFallback(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(
+		"---\nname: brave-search\ndescription: Web search via the Brave API.\nallowed-tools: Bash(curl)\n---\n\n# Brave Search\n\nDo the search.\n"), 0o644))
+
+	skill, err := Load(dir)
+	require.NoError(t, err)
+	assert.Equal(t, "brave-search", skill.Manifest.ID)
+	assert.Equal(t, "1", skill.Manifest.Version)
+	assert.Equal(t, "SKILL.md", skill.Manifest.Prompt)
+	assert.Equal(t, "Web search via the Brave API.", skill.Manifest.Description)
+	assert.Contains(t, skill.PromptText, "# Brave Search")
+	assert.NotContains(t, skill.PromptText, "frontmatter")
+	assert.NotContains(t, skill.PromptText, "allowed-tools")
+	assert.NotEmpty(t, skill.ManifestHash)
+	assert.NotEmpty(t, skill.ContentHash)
+}
+
+func TestLoadSkillMDFallbackSlugsDirName(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "My Skill 2")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# No frontmatter\n\nbody"), 0o644))
+
+	skill, err := Load(dir)
+	require.NoError(t, err)
+	assert.Equal(t, "my-skill-2", skill.Manifest.ID)
+	assert.Contains(t, skill.PromptText, "body")
+}
+
+func TestLoadSkillMDFallbackMultilineDescription(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(
+		"---\nname: tavily-search\ndescription: |\n  First line of the description.\n  Second line is folded.\n---\n\nbody\n"), 0o644))
+
+	skill, err := Load(dir)
+	require.NoError(t, err)
+	assert.Equal(t, "tavily-search", skill.Manifest.ID)
+	assert.Contains(t, skill.Manifest.Description, "First line")
+}
+
+func TestIsSkillLeafAcceptsSkillMDOnly(t *testing.T) {
+	dir := t.TempDir()
+
+	leaf, err := IsSkillLeaf(dir)
+	require.NoError(t, err)
+	assert.False(t, leaf, "empty dir is not a leaf")
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# x"), 0o644))
+	leaf, err = IsSkillLeaf(dir)
+	require.NoError(t, err)
+	assert.True(t, leaf, "SKILL.md-only dir is a leaf")
+
+	// skill.json + category.md remains an error (mutual exclusion).
+	conflict := filepath.Join(t.TempDir(), "c")
+	require.NoError(t, os.MkdirAll(conflict, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(conflict, "skill.json"), []byte(`{"id":"c"}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(conflict, "category.md"), []byte("# c"), 0o644))
+	_, err = IsSkillLeaf(conflict)
+	assert.ErrorContains(t, err, "category.md")
+}
+
+func TestLoadMissingBothManifests(t *testing.T) {
+	dir := t.TempDir()
+	_, err := Load(dir)
+	assert.ErrorContains(t, err, "neither skill.json nor SKILL.md")
+}
