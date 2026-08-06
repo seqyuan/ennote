@@ -220,7 +220,9 @@ type RunAgentFlowNode struct {
 	TerminalState FlowNodeState   `json:"terminalState"`
 	OutputRef     json.RawMessage `json:"outputRef,omitempty"`
 	ChildRunID    string          `json:"childRunId,omitempty"`
-	ErrorCode     string          `json:"errorCode,omitempty"`
+	// ChildRunIDs is the full set for fan_out tasks (parallel instances).
+	ChildRunIDs []string `json:"childRunIds,omitempty"`
+	ErrorCode   string   `json:"errorCode,omitempty"`
 	CreatedAt     time.Time       `json:"createdAt"`
 	FinishedAt    *time.Time      `json:"finishedAt,omitempty"`
 }

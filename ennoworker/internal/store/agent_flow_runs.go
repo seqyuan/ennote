@@ -245,7 +245,7 @@ func (r *AgentFlowRunRepo) ListProjectRuns(ctx context.Context, projectID string
 // ListNodes returns all task checkpoints of a flow run ordered by task index.
 func (r *AgentFlowRunRepo) ListNodes(ctx context.Context, runID string) ([]*domain.RunAgentFlowNode, error) {
 	rows, err := r.DB.QueryContext(ctx, `SELECT run_id, task_index, handle, role_version_id, skill_digests_json,
-		goal_digest, goal_text, budget_json, terminal_state, output_ref, child_run_id, error_code, created_at, finished_at
+		goal_digest, goal_text, budget_json, terminal_state, output_ref, child_run_id, child_run_ids_json, error_code, created_at, finished_at
 		FROM run_agent_flow_nodes WHERE run_id=? ORDER BY task_index`, runID)
 	if err != nil {
 		return nil, err
@@ -265,7 +265,7 @@ func (r *AgentFlowRunRepo) ListNodes(ctx context.Context, runID string) ([]*doma
 // GetNode fetches one task checkpoint.
 func (r *AgentFlowRunRepo) GetNode(ctx context.Context, runID string, taskIndex int) (*domain.RunAgentFlowNode, error) {
 	rows, err := r.DB.QueryContext(ctx, `SELECT run_id, task_index, handle, role_version_id, skill_digests_json,
-		goal_digest, goal_text, budget_json, terminal_state, output_ref, child_run_id, error_code, created_at, finished_at
+		goal_digest, goal_text, budget_json, terminal_state, output_ref, child_run_id, child_run_ids_json, error_code, created_at, finished_at
 		FROM run_agent_flow_nodes WHERE run_id=? AND task_index=?`, runID, taskIndex)
 	if err != nil {
 		return nil, err
@@ -288,6 +288,7 @@ type NodeUpdate struct {
 	ExpectedStates []domain.FlowNodeState
 	SetState       domain.FlowNodeState
 	ChildRunID     string
+	ChildRunIDs    []string
 	OutputRef      json.RawMessage
 	GoalText       string
 	ErrorCode      string
@@ -309,14 +310,21 @@ func (r *AgentFlowRunRepo) UpdateNode(ctx context.Context, runID string, upd Nod
 	if len(upd.OutputRef) > 0 {
 		outputRef = string(upd.OutputRef)
 	}
+	childRunIDsJSON := ""
+	if len(upd.ChildRunIDs) > 0 {
+		if encoded, err := json.Marshal(upd.ChildRunIDs); err == nil {
+			childRunIDsJSON = string(encoded)
+		}
+	}
 	res, err := r.DB.ExecContext(ctx, `UPDATE run_agent_flow_nodes SET
 		terminal_state=?, child_run_id=COALESCE(?, child_run_id),
+		child_run_ids_json=CASE WHEN ?='' THEN child_run_ids_json ELSE ? END,
 		output_ref=COALESCE(?, output_ref), goal_text=COALESCE(?, goal_text),
 		error_code=COALESCE(?, error_code),
 		finished_at=CASE WHEN ? IS NULL THEN finished_at ELSE ? END
 		WHERE run_id=? AND task_index=?`+expected,
-		upd.SetState, nullableOrNil(upd.ChildRunID), nullableOrNil(outputRef),
-		nullableOrNil(upd.GoalText), nullableOrNil(upd.ErrorCode),
+		upd.SetState, nullableOrNil(upd.ChildRunID), childRunIDsJSON, childRunIDsJSON,
+		nullableOrNil(outputRef), nullableOrNil(upd.GoalText), nullableOrNil(upd.ErrorCode),
 		nullableOrNil(now), nullableOrNil(now), runID, upd.TaskIndex)
 	if err != nil {
 		return nil, err
@@ -461,9 +469,10 @@ func (r *AgentFlowRunRepo) ResolveFlowSkills(ctx context.Context, names []string
 func scanFlowNode(scan interface{ Scan(...any) error }) (*domain.RunAgentFlowNode, error) {
 	var node domain.RunAgentFlowNode
 	var roleVersionID, skillsJSON, goalDigest, goalText, budgetJSON, outputRef, childRunID, errorCode, createdAt, finishedAt sql.NullString
+	var childRunIDsJSON string
 	if err := scan.Scan(&node.RunID, &node.TaskIndex, &node.Handle, &roleVersionID,
 		&skillsJSON, &goalDigest, &goalText, &budgetJSON, &node.TerminalState,
-		&outputRef, &childRunID, &errorCode, &createdAt, &finishedAt); err != nil {
+		&outputRef, &childRunID, &childRunIDsJSON, &errorCode, &createdAt, &finishedAt); err != nil {
 		return nil, err
 	}
 	if roleVersionID.Valid {
@@ -477,6 +486,9 @@ func scanFlowNode(scan interface{ Scan(...any) error }) (*domain.RunAgentFlowNod
 	}
 	if errorCode.Valid {
 		node.ErrorCode = errorCode.String
+	}
+	if childRunIDsJSON != "" {
+		_ = json.Unmarshal([]byte(childRunIDsJSON), &node.ChildRunIDs)
 	}
 	if skillsJSON.Valid {
 		_ = json.Unmarshal([]byte(skillsJSON.String), &node.SkillDigests)

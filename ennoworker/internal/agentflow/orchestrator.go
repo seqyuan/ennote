@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,6 +50,7 @@ type NodeUpdate struct {
 	ExpectedStates []domain.FlowNodeState
 	SetState       domain.FlowNodeState
 	ChildRunID     string
+	ChildRunIDs    []string
 	OutputRef      json.RawMessage
 	GoalText       string
 	ErrorCode      string
@@ -249,12 +251,18 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 			o.fail(ctx, runID, fmt.Sprintf("resolve goal for task %q: %v", next.Handle, err))
 			return
 		}
-		switch task.Type {
+			switch task.Type {
 		case domain.FlowTaskCheck:
 			if err := o.runCheckTask(ctx, runID, state, next, task, goal, taskOutputs); err != nil {
 				return
 			}
 		default:
+			if task.FanOut != nil {
+				if err := o.runFanOutTask(ctx, runID, state, next, task, goal); err != nil {
+					return
+				}
+				continue // loop iteration already reconciled cancel/budget
+			}
 			if err := o.runRoleTask(ctx, runID, state, next, task, goal); err != nil {
 				return
 			}
@@ -479,6 +487,166 @@ const (
 	agentFlowApprovalRejected = CheckApprovalRejected
 )
 
+// runFanOutTask executes a read-only fan_out task: exactly N = min parallel
+// child Runs, each a separate delegation group; results aggregate by instance
+// order into one checkpoint (a JSON array); any instance failure fails the
+// task; usage accumulates into the flow budget; cancellation covers every
+// instance.
+func (o *Orchestrator) runFanOutTask(ctx context.Context, runID string, flow *domain.RunAgentFlow,
+	node *domain.RunAgentFlowNode, task domain.FlowTask, goal string) error {
+	count := task.FanOut.Min
+	if count < 1 {
+		count = 1
+	}
+	budget := taskBudgetCeiling(node)
+	// Claim the node before dispatching (CAS pending/interrupted -> running).
+	if err := o.Store.UpdateNode(ctx, runID, NodeUpdate{
+		TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodePending, domain.FlowNodeInterrupted},
+		SetState: domain.FlowNodeRunning, GoalText: goal,
+	}); err != nil {
+		return err
+	}
+	childIDs := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		if o.isCancelled(ctx, runID) {
+			_ = o.cancelRemaining(ctx, runID, "")
+			return nil
+		}
+		child, err := o.Children.CreateTaskChild(ctx, runID, flow.SessionID, ChildSpec{
+			Handle: fmt.Sprintf("%s-%d", node.Handle, i),
+			RoleVersionID: node.RoleVersionID,
+			Assignment: goal, Budget: budget,
+		})
+		if err != nil {
+			o.failTask(ctx, runID, node, "fan_out_child_create_failed")
+			o.fail(ctx, runID, fmt.Sprintf("fan_out task %q could not start: %v", node.Handle, err))
+			return nil
+		}
+		childIDs = append(childIDs, child.RunID)
+	}
+	_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
+		TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
+		SetState: domain.FlowNodeRunning, ChildRunIDs: childIDs, GoalText: goal,
+	})
+	for _, childID := range childIDs {
+		if o.Enqueue != nil {
+			if err := o.Enqueue(ctx, childID); err != nil {
+				o.fail(ctx, runID, fmt.Sprintf("enqueue fan_out child %s: %v", childID, err))
+				return nil
+			}
+		}
+	}
+	if err := o.Events.PublishFlow(ctx, runID, "flow_task_started", map[string]any{
+		"flowRunId": runID, "task": node.Handle, "childRunIds": childIDs, "fanOut": true,
+	}); err != nil {
+		o.fail(ctx, runID, "flow_task_started event failed: "+err.Error())
+		return nil
+	}
+	results, statuses := o.waitChildren(ctx, runID, childIDs)
+	if o.isCancelled(ctx, runID) {
+		return o.cancelRemaining(ctx, runID, "")
+	}
+	for _, status := range statuses {
+		if status != domain.RunSucceeded {
+			code := "task_failed"
+			if status == domain.RunCancelled {
+				code = "task_cancelled"
+			} else if status == domain.RunInterrupted {
+				code = "task_interrupted"
+			}
+			o.failTask(ctx, runID, node, code)
+			o.fail(ctx, runID, fmt.Sprintf("fan_out task %q %s", node.Handle, code))
+			return nil
+		}
+	}
+	// Aggregate by instance order; accumulate usage per instance into the flow
+	// budget, terminalizing as budget_exceeded on the first over-limit child.
+	var budgetLimit int64
+	if v, err := o.Store.GetVersion(ctx, flow.FlowVersionID); err == nil {
+		var def domain.FlowDefinition
+		if json.Unmarshal(v.DefinitionJSON, &def) == nil {
+			budgetLimit = def.Budget.MaxTotalTokens
+		}
+	}
+	aggregate := make([]json.RawMessage, 0, len(results))
+	for _, childID := range childIDs {
+		usage, _ := o.Children.ChildUsage(ctx, childID)
+		total, _ := o.Store.AddTokenUsage(ctx, runID, usage.Tokens)
+		if budgetLimit > 0 && total > budgetLimit {
+			_ = o.Store.UpdateFlowState(ctx, runID, domain.FlowStateBudgetExceeded, total,
+				fmt.Sprintf("flow budget exceeded: %d > %d", total, budgetLimit))
+			_ = o.Events.PublishFlow(ctx, runID, "flow_failed", map[string]any{
+				"flowRunId": runID, "reason": "budget_exceeded", "used": total, "limit": budgetLimit,
+			})
+			_ = o.Store.TerminateAnchor(ctx, runID, domain.RunFailed, "budget_exceeded", "flow budget exceeded")
+			return nil
+		}
+		result := results[childID]
+		payload := json.RawMessage{}
+		if result != nil && len(result.Payload) > 0 {
+			payload = result.Payload
+		} else if result != nil {
+			payload, _ = json.Marshal(map[string]any{"summary": result.Summary})
+		}
+		aggregate = append(aggregate, payload)
+	}
+	aggregateJSON, _ := json.Marshal(aggregate)
+	if err := o.Store.UpdateNode(ctx, runID, NodeUpdate{
+		TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
+		SetState: domain.FlowNodeCompleted, OutputRef: aggregateJSON,
+	}); err != nil {
+		return err
+	}
+	return o.Events.PublishFlow(ctx, runID, "flow_task_completed", map[string]any{
+		"flowRunId": runID, "task": node.Handle, "outputRef": string(aggregateJSON), "fanOut": true,
+	})
+}
+
+// waitChildren polls every child Run until all are terminal, honoring flow
+// cancellation (hard-cancelling stragglers) and the caller context.
+func (o *Orchestrator) waitChildren(ctx context.Context, runID string, childIDs []string) (
+	map[string]*domain.SubmitResult, map[string]domain.RunStatus) {
+	results := map[string]*domain.SubmitResult{}
+	statuses := map[string]domain.RunStatus{}
+	pending := make(map[string]bool, len(childIDs))
+	for _, id := range childIDs {
+		pending[id] = true
+	}
+	ticker := time.NewTicker(o.PollInterval)
+	defer ticker.Stop()
+	for len(pending) > 0 {
+		select {
+		case <-ctx.Done():
+			for id := range pending {
+				statuses[id] = domain.RunInterrupted
+			}
+			return results, statuses
+		case <-ticker.C:
+		}
+		for id := range pending {
+			status, err := o.Children.ChildRunStatus(ctx, id)
+			if err != nil {
+				statuses[id] = domain.RunInterrupted
+				delete(pending, id)
+				continue
+			}
+			if status.Terminal() {
+				statuses[id] = status
+				result, _ := o.Children.ChildTerminalResult(ctx, id)
+				if result != nil {
+					results[id] = result
+				}
+				delete(pending, id)
+				continue
+			}
+			if o.isCancelled(ctx, runID) {
+				_ = o.Children.CancelChildRun(ctx, id)
+			}
+		}
+	}
+	return results, statuses
+}
+
 // waitChild polls the child Run until terminal, honoring cancellation and the
 // caller context.
 func (o *Orchestrator) waitChild(ctx context.Context, runID, childRunID string) (domain.RunStatus, *domain.SubmitResult, error) {
@@ -550,8 +718,8 @@ func (o *Orchestrator) cancelRemaining(ctx context.Context, runID string, active
 		if nodes[i].TerminalState.Terminal() {
 			continue
 		}
-		if nodes[i].TerminalState == domain.FlowNodeRunning && nodes[i].ChildRunID != "" {
-			_ = o.Children.CancelChildRun(ctx, nodes[i].ChildRunID)
+		for _, childID := range o.nodeChildIDs(nodes[i]) {
+			_ = o.Children.CancelChildRun(ctx, childID)
 		}
 		_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
 			TaskIndex: nodes[i].TaskIndex, ExpectedStates: []domain.FlowNodeState{nodes[i].TerminalState},
@@ -658,6 +826,24 @@ func checkNodePass(outputRef json.RawMessage) bool {
 	return out.Pass
 }
 
+// nodeChildIDs returns every child Run id recorded on a node (single child
+// plus the fan_out set, deduplicated).
+func (o *Orchestrator) nodeChildIDs(node *domain.RunAgentFlowNode) []string {
+	seen := map[string]bool{}
+	var ids []string
+	add := func(id string) {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	add(node.ChildRunID)
+	for _, id := range node.ChildRunIDs {
+		add(id)
+	}
+	return ids
+}
+
 // uncompletedDep returns the first depends task that does not have a completed
 // checkpoint, or "" when every prerequisite is satisfied.
 func uncompletedDep(task domain.FlowTask, completed map[string]*domain.RunAgentFlowNode) string {
@@ -701,33 +887,41 @@ func (o *Orchestrator) reconcileCrashedNodes(ctx context.Context, runID string) 
 				SetState: domain.FlowNodeInterrupted,
 			})
 		}
-		if node.ChildRunID == "" {
+		childIDs := o.nodeChildIDs(node)
+		if len(childIDs) == 0 {
 			reset()
 			continue
 		}
-		status, err := o.Children.ChildRunStatus(ctx, node.ChildRunID)
-		if err != nil || !status.Terminal() {
-			// Still active (or the row is gone): re-dispatch the task.
+		// Every recorded child must be terminal with the same verdict for the
+		// checkpoint to be foldable; otherwise the whole task is re-dispatched.
+		foldable := true
+		for _, childID := range childIDs {
+			status, err := o.Children.ChildRunStatus(ctx, childID)
+			if err != nil || !status.Terminal() || status != domain.RunSucceeded {
+				foldable = false
+				break
+			}
+		}
+		if !foldable {
+			// Still active (or the row is gone, or an instance failed): reset
+			// for re-dispatch. Cancel any stragglers first.
+			for _, childID := range childIDs {
+				_ = o.Children.CancelChildRun(ctx, childID)
+			}
 			reset()
 			continue
 		}
-		if status == domain.RunSucceeded {
-			result, _ := o.Children.ChildTerminalResult(ctx, node.ChildRunID)
+		aggregate := make([]json.RawMessage, 0, len(childIDs))
+		for _, childID := range childIDs {
+			result, _ := o.Children.ChildTerminalResult(ctx, childID)
 			payload := json.RawMessage{}
 			if result != nil && len(result.Payload) > 0 {
 				payload = result.Payload
 			} else if result != nil {
 				payload, _ = json.Marshal(map[string]any{"summary": result.Summary})
 			}
-			usage, _ := o.Children.ChildUsage(ctx, node.ChildRunID)
+			usage, _ := o.Children.ChildUsage(ctx, childID)
 			total, _ := o.Store.AddTokenUsage(ctx, runID, usage.Tokens)
-			_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
-				TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
-				SetState: domain.FlowNodeCompleted, OutputRef: payload,
-			})
-			_ = o.Events.PublishFlow(ctx, runID, "flow_task_completed", map[string]any{
-				"flowRunId": runID, "task": node.Handle, "outputRef": string(payload), "childRunId": node.ChildRunID,
-			})
 			if budgetLimit > 0 && total > budgetLimit {
 				_ = o.Store.UpdateFlowState(ctx, runID, domain.FlowStateBudgetExceeded, total,
 					fmt.Sprintf("flow budget exceeded: %d > %d", total, budgetLimit))
@@ -735,19 +929,20 @@ func (o *Orchestrator) reconcileCrashedNodes(ctx context.Context, runID string) 
 					"flowRunId": runID, "reason": "budget_exceeded", "used": total, "limit": budgetLimit,
 				})
 				_ = o.Store.TerminateAnchor(ctx, runID, domain.RunFailed, "budget_exceeded", "flow budget exceeded")
+				return nil
 			}
-			continue
+			aggregate = append(aggregate, payload)
 		}
-		code := "task_failed"
-		if status == domain.RunCancelled {
-			code = "task_cancelled"
+		output := aggregate[0]
+		if len(aggregate) > 1 {
+			output, _ = json.Marshal(aggregate)
 		}
 		_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
 			TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
-			SetState: domain.FlowNodeFailed, ErrorCode: code,
+			SetState: domain.FlowNodeCompleted, OutputRef: output,
 		})
-		_ = o.Events.PublishFlow(ctx, runID, "flow_task_failed", map[string]any{
-			"flowRunId": runID, "task": node.Handle, "childRunId": node.ChildRunID, "reason": code,
+		_ = o.Events.PublishFlow(ctx, runID, "flow_task_completed", map[string]any{
+			"flowRunId": runID, "task": node.Handle, "outputRef": string(output), "childRunIds": childIDs,
 		})
 	}
 	return nil
@@ -898,11 +1093,11 @@ func resolveRef(raw string, inputs, vars map[string]any, taskOutputs map[string]
 		if field == "" {
 			return string(payload), nil
 		}
-		var object map[string]any
-		if err := json.Unmarshal(payload, &object); err != nil {
-			return "", fmt.Errorf("task %q output is not an object; cannot read field %q", task, field)
+		var root any
+		if err := json.Unmarshal(payload, &root); err != nil {
+			return "", fmt.Errorf("task %q output is not valid JSON; cannot read field %q", task, field)
 		}
-		value, ok := lookupPath(object, field)
+		value, ok := lookupPath(root, field)
 		if !ok {
 			return "", fmt.Errorf("task %q output has no field %q", task, field)
 		}
@@ -919,10 +1114,18 @@ func resolveRef(raw string, inputs, vars map[string]any, taskOutputs map[string]
 	}
 }
 
-func lookupPath(object map[string]any, path string) (any, bool) {
+func lookupPath(root any, path string) (any, bool) {
 	parts := strings.Split(path, ".")
-	var current any = object
+	var current any = root
 	for _, part := range parts {
+		if index, err := strconv.Atoi(part); err == nil {
+			array, ok := current.([]any)
+			if !ok || index < 0 || index >= len(array) {
+				return nil, false
+			}
+			current = array[index]
+			continue
+		}
 		m, ok := current.(map[string]any)
 		if !ok {
 			return nil, false

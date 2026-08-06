@@ -34,8 +34,8 @@ func (s *OrchestratorStore) ListNodes(ctx context.Context, runID string) ([]*dom
 func (s *OrchestratorStore) UpdateNode(ctx context.Context, runID string, upd agentflow.NodeUpdate) error {
 	_, err := s.Runs.UpdateNode(ctx, runID, NodeUpdate{
 		TaskIndex: upd.TaskIndex, ExpectedStates: upd.ExpectedStates, SetState: upd.SetState,
-		ChildRunID: upd.ChildRunID, OutputRef: upd.OutputRef, GoalText: upd.GoalText,
-		ErrorCode: upd.ErrorCode,
+		ChildRunID: upd.ChildRunID, ChildRunIDs: upd.ChildRunIDs, OutputRef: upd.OutputRef,
+		GoalText: upd.GoalText, ErrorCode: upd.ErrorCode,
 	})
 	return err
 }

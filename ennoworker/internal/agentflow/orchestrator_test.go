@@ -103,6 +103,9 @@ func (f *fakeStore) UpdateNode(ctx context.Context, runID string, upd NodeUpdate
 		if upd.ChildRunID != "" {
 			f.nodes[i].ChildRunID = upd.ChildRunID
 		}
+		if len(upd.ChildRunIDs) > 0 {
+			f.nodes[i].ChildRunIDs = append([]string(nil), upd.ChildRunIDs...)
+		}
 		if upd.OutputRef != nil {
 			f.nodes[i].OutputRef = upd.OutputRef
 		}
