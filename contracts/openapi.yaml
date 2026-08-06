@@ -851,6 +851,10 @@ paths:
                         type: array
                         items: { $ref: "#/components/schemas/MCPCatalogEntry" }
         "502": { $ref: "#/components/responses/Error" }
+  /v1/projects/{projectID}/mcp/bindings/{bindingID}/catalog/refresh:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/BindingID"
     post:
       operationId: refreshMCPBindingCatalog
       summary: Force a catalog refresh via a browse connection
@@ -1832,6 +1836,52 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  # ——— Standing approvals ———
+
+  /v1/sessions/{sessionID}/standing-approvals:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    get:
+      operationId: listStandingApprovals
+      summary: List active standing approval rules for a session
+      responses:
+        "200":
+          description: Active standing approval rules
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        additionalProperties: false
+                        required: [items]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: "#/components/schemas/StandingApproval" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/standing-approvals/{ruleID}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+      - name: ruleID
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: revokeStandingApproval
+      summary: Revoke an active standing approval rule
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      responses:
+        "204":
+          description: Standing approval revoked
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /v1/runs/{runID}/events:
     parameters:
       - $ref: "#/components/parameters/RunID"
@@ -2559,6 +2609,212 @@ paths:
                         type: object
                         properties:
                           status: { type: string, enum: [pending, approved, rejected] }
+
+  # ——— Skills management ———
+
+  /v1/skills:
+    get:
+      operationId: listSkills
+      summary: List the merged skill catalog with pi-ecosystem install annotations
+      parameters:
+        - name: projectID
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Catalog skills, diagnostics, and (for a project) trust status
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SkillListResult" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /v1/skills/disabled/{relPath}:
+    parameters:
+      - name: relPath
+        in: path
+        required: true
+        schema: { type: string, description: Skill rel path inside the user skills root; may contain slashes }
+    patch:
+      operationId: toggleSkillDisabled
+      summary: Set or clear disable-model-invocation on a skill's SKILL.md
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [disabled]
+              properties:
+                disabled: { type: boolean }
+      responses:
+        "204":
+          description: Toggle applied
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/skills/search:
+    get:
+      operationId: searchSkills
+      summary: Search the skills.sh registry (with npx find fallback)
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 50 }
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        additionalProperties: false
+                        required: [results]
+                        properties:
+                          results:
+                            type: array
+                            items: { $ref: "#/components/schemas/SkillSearchResult" }
+        "401": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /v1/skills/install:
+    post:
+      operationId: installSkill
+      summary: Install a skill via the skills.sh CLI (global, or project when trusted)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [package, scope]
+              properties:
+                package: { type: string }
+                scope: { type: string, enum: [global, project] }
+                projectId: { type: string }
+      responses:
+        "200":
+          description: Install result
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        additionalProperties: false
+                        required: [success]
+                        properties:
+                          success: { type: boolean }
+                          output: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /v1/skills/check:
+    post:
+      operationId: checkSkillUpdates
+      summary: Compare recorded version hashes against the remote registry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                projectId: { type: string }
+                package: { type: string }
+                scope: { type: string, enum: [global, project] }
+      responses:
+        "200":
+          description: Per-install update states
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        additionalProperties: false
+                        required: [updates]
+                        properties:
+                          updates:
+                            type: array
+                            items: { $ref: "#/components/schemas/SkillUpdateResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/skills/update:
+    post:
+      operationId: updateSkill
+      summary: Re-install an existing skill to the latest version
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [package, scope]
+              properties:
+                projectId: { type: string }
+                package: { type: string }
+                scope: { type: string, enum: [global, project] }
+      responses:
+        "200":
+          description: Update result
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        additionalProperties: false
+                        required: [success]
+                        properties:
+                          success: { type: boolean }
+                          output: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /v1/skills/remove/{relPath}:
+    parameters:
+      - name: relPath
+        in: path
+        required: true
+        schema: { type: string, description: Skill rel path inside the user skills root; may contain slashes }
+    post:
+      operationId: removeSkill
+      summary: Remove a globally installed skill
+      responses:
+        "204":
+          description: Skill removed
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
 
 components:
   securitySchemes:
@@ -3991,6 +4247,91 @@ components:
         requestedAt: { type: string, format: date-time }
         resolvedAt: { type: string, format: date-time }
         attribution: { $ref: "#/components/schemas/ApprovalAttribution" }
+    StandingApproval:
+      type: object
+      required: [id, sessionId, toolName, scopeKind, scopeVersion, scopeKey, scopeDisplay, riskClass, createdAt]
+      properties:
+        id: { type: string }
+        sessionId: { type: string }
+        toolName: { type: string }
+        scopeKind: { type: string }
+        scopeVersion: { type: integer }
+        scopeKey: { type: string }
+        scopeDisplay: { type: string }
+        riskClass: { type: string }
+        createdAt: { type: string, format: date-time }
+        revokedAt: { type: string, format: date-time }
+    SkillListResult:
+      type: object
+      additionalProperties: false
+      required: [skills, diagnostics, projectResourcesLoaded]
+      properties:
+        skills:
+          type: array
+          items: { $ref: "#/components/schemas/AnnotatedSkill" }
+        diagnostics:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              level: { type: string }
+              message: { type: string }
+              relPath: { type: string }
+              source: { type: string }
+        projectResourcesLoaded: { type: boolean }
+    AnnotatedSkill:
+      type: object
+      additionalProperties: false
+      required: [name, description, filePath, baseDir, disableModelInvocation, sourceInfo, skillId, relPath]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        filePath: { type: string }
+        baseDir: { type: string }
+        disableModelInvocation: { type: boolean }
+        sourceInfo:
+          type: object
+          additionalProperties: false
+          properties:
+            source: { type: string }
+            scope: { type: string }
+        skillId: { type: string }
+        relPath: { type: string }
+        install: { $ref: "#/components/schemas/SkillInstallInfo" }
+    SkillInstallInfo:
+      type: object
+      additionalProperties: false
+      required: [package, scope, source, sourceType, canCheckForUpdates]
+      properties:
+        package: { type: string }
+        scope: { type: string, enum: [global, project] }
+        source: { type: string }
+        sourceType: { type: string }
+        skillsShUrl: { type: string }
+        skillPath: { type: string }
+        ref: { type: string }
+        versionHash: { type: string }
+        canCheckForUpdates: { type: boolean }
+    SkillSearchResult:
+      type: object
+      additionalProperties: false
+      required: [package]
+      properties:
+        package: { type: string }
+        installs: { type: string }
+        url: { type: string }
+    SkillUpdateResult:
+      type: object
+      additionalProperties: false
+      required: [package, scope, state]
+      properties:
+        package: { type: string }
+        scope: { type: string, enum: [global, project] }
+        state: { type: string, enum: [up-to-date, update-available, error, unsupported] }
+        currentVersion: { type: string }
+        latestVersion: { type: string }
+        message: { type: string }
     ActiveRunState:
       type: object
       required: [run]

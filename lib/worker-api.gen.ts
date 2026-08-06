@@ -574,6 +574,25 @@ export interface paths {
         /** Get the normalized tool catalog for a binding (cached) */
         get: operations["getMCPBindingCatalog"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/mcp/bindings/{bindingID}/catalog/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+                bindingID: components["parameters"]["BindingID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
         /** Force a catalog refresh via a browse connection */
         post: operations["refreshMCPBindingCatalog"];
         delete?: never;
@@ -1142,6 +1161,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sessions/{sessionID}/standing-approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+            };
+            cookie?: never;
+        };
+        /** List active standing approval rules for a session */
+        get: operations["listStandingApprovals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{sessionID}/standing-approvals/{ruleID}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+                ruleID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke an active standing approval rule */
+        post: operations["revokeStandingApproval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/runs/{runID}/events": {
         parameters: {
             query?: {
@@ -1664,6 +1722,129 @@ export interface paths {
         put?: never;
         /** Approve or reject a pending check approval (first decision wins) */
         post: operations["decideAgentFlowCheckApproval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the merged skill catalog with pi-ecosystem install annotations */
+        get: operations["listSkills"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/skills/disabled/{relPath}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                relPath: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Set or clear disable-model-invocation on a skill's SKILL.md */
+        patch: operations["toggleSkillDisabled"];
+        trace?: never;
+    };
+    "/v1/skills/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search the skills.sh registry (with npx find fallback) */
+        get: operations["searchSkills"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/skills/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Install a skill via the skills.sh CLI (global, or project when trusted) */
+        post: operations["installSkill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/skills/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Compare recorded version hashes against the remote registry */
+        post: operations["checkSkillUpdates"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/skills/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Re-install an existing skill to the latest version */
+        post: operations["updateSkill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/skills/remove/{relPath}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                relPath: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove a globally installed skill */
+        post: operations["removeSkill"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2816,6 +2997,71 @@ export interface components {
             /** Format: date-time */
             resolvedAt?: string;
             attribution?: components["schemas"]["ApprovalAttribution"];
+        };
+        StandingApproval: {
+            id: string;
+            sessionId: string;
+            toolName: string;
+            scopeKind: string;
+            scopeVersion: number;
+            scopeKey: string;
+            scopeDisplay: string;
+            riskClass: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            revokedAt?: string;
+        };
+        SkillListResult: {
+            skills: components["schemas"]["AnnotatedSkill"][];
+            diagnostics: {
+                level?: string;
+                message?: string;
+                relPath?: string;
+                source?: string;
+            }[];
+            projectResourcesLoaded: boolean;
+        };
+        AnnotatedSkill: {
+            name: string;
+            description: string;
+            filePath: string;
+            baseDir: string;
+            disableModelInvocation: boolean;
+            sourceInfo: {
+                source?: string;
+                scope?: string;
+            };
+            skillId: string;
+            relPath: string;
+            install?: components["schemas"]["SkillInstallInfo"];
+        };
+        SkillInstallInfo: {
+            package: string;
+            /** @enum {string} */
+            scope: "global" | "project";
+            source: string;
+            sourceType: string;
+            skillsShUrl?: string;
+            skillPath?: string;
+            ref?: string;
+            versionHash?: string;
+            canCheckForUpdates: boolean;
+        };
+        SkillSearchResult: {
+            package: string;
+            installs?: string;
+            url?: string;
+        };
+        SkillUpdateResult: {
+            package: string;
+            /** @enum {string} */
+            scope: "global" | "project";
+            /** @enum {string} */
+            state: "up-to-date" | "update-available" | "error" | "unsupported";
+            currentVersion?: string;
+            latestVersion?: string;
+            message?: string;
         };
         ActiveRunState: {
             run: components["schemas"]["AgentRun"];
@@ -5243,6 +5489,58 @@ export interface operations {
             503: components["responses"]["Error"];
         };
     };
+    listStandingApprovals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active standing approval rules */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items: components["schemas"]["StandingApproval"][];
+                        };
+                    };
+                };
+            };
+            503: components["responses"]["Error"];
+        };
+    };
+    revokeStandingApproval: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+                ruleID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Standing approval revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
     streamRunEvents: {
         parameters: {
             query?: {
@@ -6198,6 +6496,225 @@ export interface operations {
                     };
                 };
             };
+        };
+    };
+    listSkills: {
+        parameters: {
+            query?: {
+                projectID?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Catalog skills, diagnostics, and (for a project) trust status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SkillListResult"];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            500: components["responses"]["Error"];
+        };
+    };
+    toggleSkillDisabled: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                relPath: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    disabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Toggle applied */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+        };
+    };
+    searchSkills: {
+        parameters: {
+            query: {
+                q: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Search results */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            results: components["schemas"]["SkillSearchResult"][];
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    installSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    package: string;
+                    /** @enum {string} */
+                    scope: "global" | "project";
+                    projectId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Install result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            success: boolean;
+                            output?: string;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    checkSkillUpdates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    projectId?: string;
+                    package?: string;
+                    /** @enum {string} */
+                    scope?: "global" | "project";
+                };
+            };
+        };
+        responses: {
+            /** @description Per-install update states */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            updates: components["schemas"]["SkillUpdateResult"][];
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    projectId?: string;
+                    package: string;
+                    /** @enum {string} */
+                    scope: "global" | "project";
+                };
+            };
+        };
+        responses: {
+            /** @description Update result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            success: boolean;
+                            output?: string;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    removeSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                relPath: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Skill removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            502: components["responses"]["Error"];
         };
     };
 }
