@@ -1349,6 +1349,20 @@ html.dark .file-code .shiki span { color: var(--shiki-dark); }
   .delivery-summary { grid-column: 2; white-space: normal; }
 }
 
+/* Flow check approval strip (conversation surface projection) */
+.flow-check-command {
+  text-transform: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 340px; font-family: var(--font-mono, monospace);
+}
+.flow-check-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.flow-check-actions .secondary-btn { padding: 2px 10px; font-size: 10px; }
+.flow-check-approve { color: var(--success); }
+.flow-check-reject { color: #E11D48; }
+@media (max-width: 640px) {
+  .flow-check-command { max-width: 100%; }
+  .flow-check-actions { grid-column: 2; justify-content: flex-start; }
+}
+
 /* Cross-session attention */
 .attention-panel { position: relative; }
 .attention-bell {
@@ -1430,3 +1444,85 @@ html.dark .file-code .shiki span { color: var(--shiki-dark); }
 @media (max-width: 640px) {
   .follow-up-dialog { margin-left: 12px; margin-right: 12px; }
 }
+
+/* Compaction prompt bar (above the Composer) */
+.compaction-prompt-bar {
+  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--tool-bg) 82%, var(--bg)); padding: 6px 12px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.compaction-prompt-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  color: var(--text); font-size: 10px; font-weight: 700; letter-spacing: 0.02em;
+}
+.compaction-prompt-header span { display: inline-flex; align-items: center; gap: 5px; }
+.compaction-prompt-body { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.compaction-prompt-body input {
+  flex: 1; min-width: 180px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text); font-size: 12px;
+}
+.compaction-prompt-body input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: -1px; }
+.compaction-prompt-actions { display: flex; gap: 6px; }
+.compaction-prompt-actions .secondary-btn { padding: 4px 10px; font-size: 11px; }
+.compaction-prompt-confirm {
+  padding: 4px 12px; border: none; border-radius: 6px; background: var(--accent);
+  color: #fff; font-size: 11px; cursor: pointer;
+}
+.compaction-prompt-confirm:disabled { opacity: 0.5; cursor: default; }
+
+/* New project dialog */
+.project-create-overlay {
+  position: fixed; inset: 0; z-index: 300; display: grid; place-items: center;
+  background: rgba(0, 0, 0, 0.35);
+}
+.project-create-dialog {
+  width: min(420px, calc(100vw - 32px)); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+  padding: 14px; display: flex; flex-direction: column; gap: 10px;
+}
+.project-create-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.project-create-header span { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-size: 12px; font-weight: 700; }
+.project-create-form { display: flex; flex-direction: column; gap: 10px; }
+.project-create-form label {
+  display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-muted); font-weight: 600;
+}
+.project-create-form input {
+  padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text); font-size: 12px;
+}
+.project-create-form input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: -1px; }
+.project-create-form small { color: var(--text-dim); font-weight: 400; font-size: 10px; }
+.project-create-error { color: #E11D48; font-size: 11px; }
+.project-create-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.project-create-actions .secondary-btn { padding: 5px 12px; font-size: 11px; }
+.project-create-submit {
+  padding: 5px 14px; border: none; border-radius: 6px; background: var(--accent);
+  color: #fff; font-size: 11px; cursor: pointer;
+}
+.project-create-submit:disabled { opacity: 0.5; cursor: default; }
+@media (max-width: 640px) {
+  .project-create-dialog { width: calc(100vw - 24px); }
+}
+
+/* Role skill picker */
+.role-skill-picker { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.role-skill-search {
+  display: flex; align-items: center; gap: 6px;
+  border: 1px solid var(--border); border-radius: 6px; padding: 0 8px;
+  background: var(--bg-panel); color: var(--text-muted);
+}
+.role-skill-search input { flex: 1; min-width: 0; background: none; border: none; outline: none; padding: 6px 0; color: var(--text); font-size: 11px; }
+.role-skill-count { color: var(--text-dim); font-size: 10px; }
+.role-skill-error { color: #E11D48; font-size: 10px; }
+.role-skill-empty { color: var(--text-dim); font-size: 10px; padding: 4px 0; }
+.role-skill-list { display: flex; flex-direction: column; gap: 3px; max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 4px; }
+.role-skill-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 4px; }
+.role-skill-row.is-bound { background: color-mix(in srgb, var(--bg-selected) 60%, transparent); }
+.role-skill-check { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; cursor: pointer; }
+.role-skill-check input { accent-color: var(--accent); }
+.role-skill-name { font-size: 11px; font-weight: 600; color: var(--text); white-space: nowrap; }
+.role-skill-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 10px; }
+.role-skill-source { flex-shrink: 0; font-size: 9px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; }
+.role-skill-mode { flex-shrink: 0; font-size: 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); padding: 1px 4px; }

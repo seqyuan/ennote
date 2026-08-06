@@ -37,9 +37,50 @@ async function mockRoles(page: Page) {
     if (path === `/v1/roles/${role.id}`) return fulfill(route, role);
     if (path === `/v1/roles/${role.id}/versions`) return fulfill(route, [{ id: "security-v1", roleId: role.id,
       version: 1, definition, configDigest: `sha256:${"a".repeat(64)}`, status: "published", createdAt: now }]);
+    if (path === `/v1/roles/${role.id}/draft`) {
+      const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+      draftBody = body;
+      return fulfill(route, { ...role, draftRevision: 1, draft: body.definition });
+    }
+    if (path === `/v1/roles/${role.id}/validate`) return fulfill(route, { valid: true, diagnostics: [] });
+    if (path === `/v1/roles/${role.id}/publish`) {
+      publishBody = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+      return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ data: { ...role, draftRevision: 0 } }) });
+    }
+    if (path === "/v1/skills") return fulfill(route, { skills: [catalogSkill], diagnostics: [], projectResourcesLoaded: false });
     return route.abort();
   });
 }
+
+const catalogSkill = { name: "web-search", description: "Web search.", filePath: "/s/web-search/SKILL.md",
+  baseDir: "/s/web-search", disableModelInvocation: false, sourceInfo: { source: "user", scope: "user" },
+  skillId: "web-search", relPath: "web-search", install: undefined };
+let draftBody: Record<string, unknown> | null = null;
+let publishBody: Record<string, unknown> | null = null;
+
+// Skill binding writes RoleDefinition.skills.entries and survives publish.
+test("role editor binds catalog skills with a mode and publishes them", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await mockRoles(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open settings" }).click();
+  await page.getByRole("tab", { name: /Roles/ }).click();
+  await page.getByRole("button", { name: /Security Reviewer/ }).click();
+
+  // Search narrows the catalog; bind with preload mode.
+  await expect(page.getByText("web-search")).toBeVisible();
+  await page.getByPlaceholder("Search skills…").fill("web");
+  await page.locator(".role-skill-row").getByRole("checkbox").check();
+  await page.locator(".role-skill-mode").selectOption("preload");
+  await expect(page.getByText("1 bound")).toBeVisible();
+
+  // Save draft carries skills.entries.
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => draftBody).not.toBeNull();
+  const definition = (draftBody as Record<string, unknown>)["definition"] as Record<string, unknown>;
+  const skills = (definition as Record<string, unknown>)["skills"] as Record<string, unknown>;
+  expect((skills as Record<string, unknown>)["entries"]).toMatchObject([{ skillId: "web-search", mode: "preload" }]);
+});
 
 for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
   test(`Roles editor is usable at ${viewport.width}x${viewport.height}`, async ({ page }) => {

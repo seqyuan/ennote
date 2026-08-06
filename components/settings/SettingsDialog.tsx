@@ -4,6 +4,7 @@ import { Bot, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ContextSettings } from "@/components/settings/ContextSettings";
 import { McpSettings } from "@/components/settings/McpSettings";
+import { SkillsSettings } from "@/components/settings/SkillsSettings";
 import { AgentFlowSettings } from "@/components/settings/AgentFlowSettings";
 import { ModelsSettings } from "@/components/settings/ModelsSettings";
 import { PoliciesSettings } from "@/components/settings/PoliciesSettings";
@@ -67,6 +68,14 @@ function tabIcon(id: SettingsTab) {
         <rect x="2" y="2" width="20" height="20" rx="2" />
         <line x1="2" y1="12" x2="22" y2="12" />
         <line x1="12" y1="2" x2="12" y2="22" />
+      </svg>
+    );
+  }
+  if (id === "skills") {
+    return (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5l-1.9-4.6L5.5 9l4.6-1.4z" />
+        <path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z" />
       </svg>
     );
   }
@@ -138,6 +147,7 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
     { id: "templates", label: "Templates", description: "Slash-command prompt templates", icon: tabIcon("templates") },
     { id: "mcp", label: "MCP", description: "MCP servers and project bindings", icon: tabIcon("mcp") },
     { id: "flows", label: "Flows", description: "Agent Flow tasks, bindings, and runs", icon: tabIcon("flows") },
+    { id: "skills", label: "Skills", description: "Skill catalog, marketplace, and updates", icon: tabIcon("skills") },
   ];
 
   const activeItem = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
@@ -299,6 +309,11 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
             {activeTab === "flows" && (
               <div style={{ height: "100%", overflowY: "auto" }}>
                 <AgentFlowSettings projectId={projectId} setError={setError} />
+              </div>
+            )}
+            {activeTab === "skills" && (
+              <div style={{ height: "100%", overflowY: "auto" }}>
+                <SkillsSettings projectId={projectId} setError={setError} />
               </div>
             )}
           </div>

@@ -3,6 +3,7 @@
 import { Archive, CheckCircle2, History, Save, Upload } from "lucide-react";
 import { useMemo, useState } from "react";
 import { ModelRuntimeControl } from "@/components/ModelRuntimeControl";
+import { SkillPicker, type RoleSkillBinding } from "@/components/settings/SkillPicker";
 import type { ModelProfile, RoleIdentity, RoleValidationResult, RoleVersion } from "@/components/settings/types";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
@@ -244,6 +245,14 @@ export function RoleEditor({ role, models, onSaved, onArchived, setError }: {
               } }))} /> {mode}
           </label>)}
         </div>
+        <SkillPicker
+          entries={(definition.skills?.entries ?? []).map((entry) => ({
+            skillId: entry.skillId,
+            mode: entry.mode === "preload" ? "preload" : "available",
+          }))}
+          onEntries={(entries: RoleSkillBinding[]) => updateDefinition((current) => ({ ...current,
+            skills: { entries: entries.map((entry) => ({ skillId: entry.skillId, mode: entry.mode })) } }))}
+        />
       </section>
 
       <section>

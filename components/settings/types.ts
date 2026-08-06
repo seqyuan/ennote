@@ -23,5 +23,11 @@ export type AgentFlowCheckApproval = components["schemas"]["AgentFlowCheckApprov
 export type MCPProjectBinding = components["schemas"]["MCPProjectBinding"];
 export type MCPCatalogEntry = components["schemas"]["MCPCatalogEntry"];
 export type MCPCandidate = components["schemas"]["MCPCandidate"];
+export type StandingApproval = components["schemas"]["StandingApproval"];
+export type SkillListResult = components["schemas"]["SkillListResult"];
+export type AnnotatedSkill = components["schemas"]["AnnotatedSkill"];
+export type SkillInstallInfo = components["schemas"]["SkillInstallInfo"];
+export type SkillSearchResult = components["schemas"]["SkillSearchResult"];
+export type SkillUpdateResult = components["schemas"]["SkillUpdateResult"];
 
-export type SettingsTab = "providers" | "models" | "roles" | "policies" | "context" | "templates" | "mcp" | "flows";
+export type SettingsTab = "providers" | "models" | "roles" | "policies" | "context" | "templates" | "mcp" | "flows" | "skills";
