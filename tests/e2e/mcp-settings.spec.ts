@@ -163,3 +163,34 @@ test("MCP settings toggles required, edits credentials, and searches tools", asy
   await page.getByRole("button", { name: "Add", exact: true }).click();
   await expect(page.getByText("env:NCBI_KEY")).toBeVisible();
 });
+
+// Profile diff: when a project file changes, the UI shows a read-only diff
+// between the bound (frozen) version and the new candidate connection fields.
+test("update-available candidate exposes a read-only profile diff", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const staleCandidate = { slug: "pubmed", displayName: "PubMed", sourceKind: "project_file",
+    sourceLocator: ".ennote/mcp.json", transport: "stdio", executable: "python3", endpoint: "",
+    configDigest: "sha256:" + "c".repeat(64), boundVersionId: version.id, alreadyBound: true, updateAvailable: true };
+  await page.route("**/api/worker/v1/**", async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace("/api/worker", "");
+    if (path === "/v1/projects") return fulfill(route, [project]);
+    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, []);
+    if (path === "/v1/mcp/server-profiles") return fulfill(route, [profile]);
+    if (path === `/v1/mcp/server-profiles/${profile.id}/versions`) return fulfill(route, [version]);
+    if (path === `/v1/projects/${project.id}/mcp/candidates`) return fulfill(route, [staleCandidate]);
+    if (path === `/v1/projects/${project.id}/mcp/bindings`) return fulfill(route, [binding]);
+    return route.abort();
+  });
+  await selectProjectAndOpenMCPSettings(page);
+
+  await expect(page.getByText("Update available")).toBeVisible();
+  await page.getByRole("button", { name: "View diff" }).click();
+  await expect(page.getByText("Read-only diff: bound version vs project file")).toBeVisible();
+  // Bound executable (uvx, removed) vs candidate executable (python3, added).
+  await expect(page.getByText(/"executable": "uvx"/)).toBeVisible();
+  await expect(page.getByText(/"executable": "python3"/)).toBeVisible();
+  // New config digest is surfaced.
+  await expect(page.getByText(/new config sha256:/)).toBeVisible();
+});

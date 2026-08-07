@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
+import { diffText } from "@/lib/agent-flow";
 import type { MCPCatalogEntry, MCPCandidate, MCPProjectBinding, MCPServerProfile, MCPServerProfileVersion } from "@/components/settings/types";
 
 const TRANSPORT_LABELS: Record<string, string> = {
@@ -35,6 +36,7 @@ export function McpSettings({ projectId, setError }: {
   const [showCreds, setShowCreds] = useState<Record<string, boolean>>({});
   const [credEnv, setCredEnv] = useState<Record<string, string>>({});
   const [credRef, setCredRef] = useState<Record<string, string>>({});
+  const [diffView, setDiffView] = useState<{ slug: string; lines: string[]; digestTo: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [transport, setTransport] = useState("stdio");
@@ -70,6 +72,41 @@ export function McpSettings({ projectId, setError }: {
     },
     [versions],
   );
+
+  const versionById = useCallback((versionId: string | undefined): MCPServerProfileVersion | undefined => {
+    if (!versionId) return undefined;
+    for (const list of Object.values(versions)) {
+      const v = list.find((x) => x.id === versionId);
+      if (v) return v;
+    }
+    return undefined;
+  }, [versions]);
+
+  // openProfileDiff shows a read-only diff between the bound (frozen) version
+  // and the project file candidate over the connection-defining fields both
+  // sides can express (transport / executable / endpoint).
+  const openProfileDiff = useCallback((candidate: MCPCandidate) => {
+    const bound = versionById(candidate.boundVersionId);
+    const oldText = JSON.stringify(
+      bound ? {
+        transport: bound.transport,
+        ...(bound.transport === "stdio" ? { executable: bound.executable ?? "" } : { endpoint: bound.endpoint ?? "" }),
+      } : { transport: "(unknown bound version)" },
+      null, 2,
+    );
+    const newText = JSON.stringify(
+      {
+        transport: candidate.transport,
+        ...(candidate.transport === "stdio" ? { executable: candidate.executable ?? "" } : { endpoint: candidate.endpoint ?? "" }),
+      },
+      null, 2,
+    );
+    setDiffView({
+      slug: candidate.slug ?? "",
+      lines: diffText(oldText, newText),
+      digestTo: candidate.configDigest ?? "",
+    });
+  }, [versionById]);
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
@@ -577,7 +614,8 @@ export function McpSettings({ projectId, setError }: {
           <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>Discovered servers</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {candidates.map((candidate) => (
-              <div key={`${candidate.sourceKind}:${candidate.slug}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: 6 }}>
+              <div key={`${candidate.sourceKind}:${candidate.slug}`} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: 6 }}>
                 <div style={{ minWidth: 0 }}>
                   <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{candidate.displayName ?? candidate.slug}</span>
                   <span style={{ fontSize: 10, color: "var(--text-dim)", marginLeft: 6 }}>
@@ -609,7 +647,43 @@ export function McpSettings({ projectId, setError }: {
                       Update available
                     </button>
                   )}
+                  {candidate.alreadyBound && candidate.updateAvailable && (
+                    <button
+                      type="button"
+                      title="Show the read-only diff between the bound version and the project file"
+                      onClick={() => openProfileDiff(candidate)}
+                      style={ghostButtonStyle}
+                    >
+                      View diff
+                    </button>
+                  )}
                 </div>
+              </div>
+              {diffView && diffView.slug === candidate.slug && (
+                <div style={{ border: "1px solid var(--border)", borderRadius: 6, padding: 8, marginTop: 6 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>
+                    Read-only diff: bound version vs project file
+                    {diffView.digestTo && (
+                      <span style={{ fontWeight: 400, color: "var(--text-dim)", marginLeft: 6, fontFamily: "var(--font-mono, monospace)", fontSize: 10 }}>
+                        new config {diffView.digestTo.slice(0, 8)}
+                      </span>
+                    )}
+                  </div>
+                  {diffView.lines.some((line) => line.startsWith("+ ") || line.startsWith("- ")) ? (
+                    <div style={{ maxHeight: 200, overflowY: "auto", fontSize: 10, fontFamily: "var(--font-mono, monospace)", color: "var(--text-muted)", whiteSpace: "pre-wrap" }}>
+                      {diffView.lines.map((line, index) => (
+                        <div key={index} style={{ color: line.startsWith("- ") ? "#E11D48" : line.startsWith("+ ") ? "#059669" : undefined }}>
+                          {line}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 10, color: "var(--text-dim)" }}>
+                      Connection fields are unchanged — the project file changed argv, env, headers, or timeout (config digest {diffView.digestTo ? diffView.digestTo.slice(0, 8) : "changed"}).
+                    </div>
+                  )}
+                </div>
+              )}
               </div>
             ))}
             {/* Managed profiles already in the library but not listed as candidates */}
