@@ -254,3 +254,69 @@ func TestSkillRootsRequireAuth(t *testing.T) {
 	response := request(t, handler, http.MethodGet, "/v1/skills/roots", nil, false)
 	assert.Equal(t, http.StatusUnauthorized, response.Code)
 }
+
+// Regression: adding a root must make its skills visible without restart.
+// (The in-memory AdditionalRoots snapshot is refreshed after roots CRUD.)
+func TestSkillRootCreateRefreshesCatalog(t *testing.T) {
+	_, handler, home := setupSkillsServer(t)
+	rootDir := filepath.Join(home, "extra")
+	writeSkillAt := func(dir, name string) string {
+		skillDir := filepath.Join(dir, name)
+		require.NoError(t, os.MkdirAll(skillDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"),
+			[]byte("---\nname: "+name+"\n---\n\nbody\n"), 0o644))
+		return skillDir
+	}
+	skillDir := writeSkillAt(rootDir, "from-extra-root")
+
+	// Not visible before adding the root.
+	response := request(t, handler, http.MethodGet, "/v1/skills", nil, true)
+	var before struct {
+		Skills []struct{ SkillID string `json:"skillId"` } `json:"skills"`
+	}
+	decodeData(t, response, &before)
+	assert.False(t, containsSkill(before.Skills, "from-extra-root"))
+
+	// Add root → skill appears immediately (no restart).
+	response = request(t, handler, http.MethodPost, "/v1/skills/roots",
+		map[string]any{"name": "extra", "path": rootDir, "agentKind": "generic"}, true)
+	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+	response = request(t, handler, http.MethodGet, "/v1/skills", nil, true)
+	var after struct {
+		Skills []struct {
+			SkillID string `json:"skillId"`
+			RelPath string `json:"relPath"`
+			BaseDir string `json:"baseDir"`
+		} `json:"skills"`
+	}
+	decodeData(t, response, &after)
+	foundInAfter := false
+	for _, skill := range after.Skills {
+		if skill.SkillID == "from-extra-root" {
+			foundInAfter = true
+		}
+	}
+	require.True(t, foundInAfter)
+	var found struct{ RelPath, BaseDir string }
+	for _, skill := range after.Skills {
+		if skill.SkillID == "from-extra-root" {
+			found = struct{ RelPath, BaseDir string }{skill.RelPath, skill.BaseDir}
+		}
+	}
+	// Toggle uses the directory relPath, not the manifest ID.
+	response = request(t, handler, http.MethodPatch, "/v1/skills/disabled/"+found.RelPath,
+		map[string]any{"disabled": true}, true)
+	require.Equal(t, http.StatusNoContent, response.Code, response.Body.String())
+	data, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "disable-model-invocation: true")
+}
+
+func containsSkill(skills []struct{ SkillID string `json:"skillId"` }, id string) bool {
+	for _, skill := range skills {
+		if skill.SkillID == id {
+			return true
+		}
+	}
+	return false
+}

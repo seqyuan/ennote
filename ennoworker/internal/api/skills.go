@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -266,6 +267,21 @@ func (s *Server) removeSkill(w http.ResponseWriter, r *http.Request) {
 
 // ——— skill roots management ———
 
+// refreshSkillRoots reloads the enabled additional roots into the skills
+// service so Settings changes take effect without a Worker restart.
+func (s *Server) refreshSkillRoots(ctx context.Context) error {
+	roots, err := s.SkillRoots.EnabledPaths(ctx)
+	if err != nil {
+		return err
+	}
+	out := make([]skillsmgmt.Root, 0, len(roots))
+	for _, root := range roots {
+		out = append(out, skillsmgmt.Root{Name: root.Name, Path: root.Path, Priority: root.Priority})
+	}
+	s.Skills.AdditionalRoots = out
+	return nil
+}
+
 // listSkillRoots returns the configured additional skill roots.
 func (s *Server) listSkillRoots(w http.ResponseWriter, r *http.Request) {
 	roots, err := s.SkillRoots.List(r.Context())
@@ -306,6 +322,10 @@ func (s *Server) createSkillRoot(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, r, http.StatusBadRequest, "skill_root_create_failed", err.Error(), false)
+		return
+	}
+	if err := s.refreshSkillRoots(r.Context()); err != nil {
+		writeInternal(w, r, err)
 		return
 	}
 	writeData(w, http.StatusCreated, root)
@@ -349,6 +369,10 @@ func (s *Server) updateSkillRoot(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, r, err)
 		return
 	}
+	if err := s.refreshSkillRoots(r.Context()); err != nil {
+		writeInternal(w, r, err)
+		return
+	}
 	writeData(w, http.StatusOK, root)
 }
 
@@ -356,6 +380,10 @@ func (s *Server) updateSkillRoot(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteSkillRoot(w http.ResponseWriter, r *http.Request) {
 	if err := s.SkillRoots.Delete(r.Context(), r.PathValue("rootID")); err != nil {
 		s.writeStoreError(w, r, err)
+		return
+	}
+	if err := s.refreshSkillRoots(r.Context()); err != nil {
+		writeInternal(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

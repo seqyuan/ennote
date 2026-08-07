@@ -1682,8 +1682,10 @@ func run() error {
 	}
 
 	// Seed ecosystem skill roots (pi/claude/codex/cursor) once at startup so
-	// existing marketplace installs appear in the catalog.
-	seedSkillRoots(context.Background(), db, cfg.HomeDir)
+	// existing marketplace installs appear in the catalog. Ecosystem dirs and
+	// the skills.sh global lock live under the OS user home, not ENNOTE_HOME.
+	userHome, _ := os.UserHomeDir()
+	seedSkillRoots(context.Background(), db, userHome)
 
 	server := &api.Server{
 		DB: db, Token: cfg.BootstrapToken, Sandbox: cfg.SandboxMode,
@@ -1702,8 +1704,8 @@ func run() error {
 		Skills: &skillsmgmt.Service{
 			UserRoot:    cfg.SkillsDir,
 			BuiltinRoot: cfg.BuiltinSkillsDir,
-			HomeDir:     cfg.HomeDir,
-			AdditionalRoots: loadSkillRoots(db, cfg.HomeDir),
+			HomeDir:     userHome, // OS user home: lock files + ecosystem dirs
+			AdditionalRoots: loadSkillRoots(db),
 		},
 		SkillRoots: &store.SkillRootRepo{DB: db},
 		Trust: trustStore,
@@ -1845,7 +1847,7 @@ func seedSkillRoots(ctx context.Context, db *sql.DB, homeDir string) {
 }
 
 // loadSkillRoots returns the enabled additional roots for the skills service.
-func loadSkillRoots(db *sql.DB, homeDir string) []skillsmgmt.Root {
+func loadSkillRoots(db *sql.DB) []skillsmgmt.Root {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	roots, err := (&store.SkillRootRepo{DB: db}).EnabledPaths(ctx)
