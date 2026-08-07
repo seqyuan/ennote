@@ -9,7 +9,7 @@ export interface Tab {
   filePath?: string;
   projectId?: string;
   closable?: boolean;
-  icon?: "report" | "tools" | "files";
+  icon?: "report" | "tools" | "files" | "graph";
 }
 
 interface Props {
@@ -92,6 +92,13 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               ) : tab.icon === "tools" ? (
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.1-3.1a6 6 0 0 1-7.9 7.9l-5.7 5.7a2.1 2.1 0 0 1-3-3l5.7-5.7a6 6 0 0 1 7.9-7.9z" />
+                </svg>
+              ) : tab.icon === "graph" ? (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="5" r="2" />
+                  <circle cx="5" cy="19" r="2" />
+                  <circle cx="19" cy="19" r="2" />
+                  <path d="M12 7v4M5 17v-2h6v4M19 17v-2h-6" />
                 </svg>
               ) : (
                 getFileIcon(tab.filePath ?? tab.label, 13)

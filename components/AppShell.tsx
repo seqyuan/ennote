@@ -27,6 +27,7 @@ import { useRunRecovery } from "@/hooks/useRunRecovery";
 import { useRunningSessionIds } from "@/hooks/useRunningSessionIds";
 import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
 import { usePromptTemplates } from "@/hooks/usePromptTemplates";
+import { GraphActivityPanel } from "./GraphActivityPanel";
 import { permissionModeForPolicyID, permissionPolicyID, withRunConfig, type PermissionMode } from "@/lib/permission-mode";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { AgentFlowProfile, RoleSummary, Session } from "@/components/settings/types";
@@ -719,6 +720,7 @@ export function AppShell() {
   // Right tabs
   const rightTabs: Tab[] = [
     { id: "files", label: "Files", closable: false, icon: "files" },
+    { id: "graph", label: "Graphs", closable: false, icon: "graph" },
     { id: "tools", label: "Status", closable: false, icon: "tools" },
     ...fileTabs,
   ];
@@ -1078,6 +1080,12 @@ export function AppShell() {
                 displayPath={currentCwd}
                 onOpenFile={handleOpenFile}
                 onPreviewFile={handlePreviewFile}
+              />
+            )}
+            {activeRightTabId === "graph" && (
+              <GraphActivityPanel
+                projectId={currentProjectId ?? null}
+                sessionId={selectedSession}
               />
             )}
             {activeRightTabId === "tools" && (

@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
+import { FlowRolesSection } from "@/components/settings/FlowRolesSection";
 import {
   diffText,
   draftToYAML,
@@ -38,6 +39,7 @@ export function AgentFlowSettings({ projectId, setError }: {
   const [runs, setRuns] = useState<RunAgentFlow[]>([]);
   const [approvals, setApprovals] = useState<AgentFlowCheckApproval[]>([]);
   const [roles, setRoles] = useState<RoleSummary[]>([]);
+  const [flowRoles, setFlowRoles] = useState<RoleSummary[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState<FlowDraft | null>(null);
@@ -136,6 +138,33 @@ export function AgentFlowSettings({ projectId, setError }: {
       window.clearInterval(timer);
     };
   }, [projectId, refresh, setError]);
+
+  // Load graph-local Roles (scope='flow') for the selected flow so the task
+  // role picker can offer them ahead of the shared catalog.
+  const loadFlowRoles = useCallback(async (flowId: string) => {
+    if (!flowId) {
+      setFlowRoles([]);
+      return;
+    }
+    try {
+      const page = await apiFetch<{ items: RoleSummary[] }>(
+        `/v1/roles?scope=flow&flowId=${encodeURIComponent(flowId)}&status=active&limit=100`,
+      );
+      setFlowRoles(page.items ?? []);
+    } catch {
+      setFlowRoles([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!selected) {
+      setFlowRoles([]);
+      return () => { cancelled = true; };
+    }
+    void loadFlowRoles(selected).then(() => { cancelled = true; });
+    return () => { cancelled = true; };
+  }, [loadFlowRoles, selected]);
 
   const versionFor = useCallback((binding: ProjectAgentFlowBinding): AgentFlowVersion | undefined => {
     for (const list of Object.values(versions)) {
@@ -757,11 +786,22 @@ export function AgentFlowSettings({ projectId, setError }: {
                             style={inputStyle}
                           >
                             <option value="">Select role…</option>
-                            {roles.map((role) => (
-                              <option key={role.id} value={`${role.handle}@${role.currentVersion ?? 1}`}>
-                                {role.handle}@{role.currentVersion ?? 1} — {role.name}
-                              </option>
-                            ))}
+                            {flowRoles.length > 0 && (
+                              <optgroup label="This graph">
+                                {flowRoles.map((role) => (
+                                  <option key={role.id} value={`${role.handle}`}>
+                                    {role.handle} — {role.name} (graph-local)
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
+                            <optgroup label="Shared catalog">
+                              {roles.map((role) => (
+                                <option key={role.id} value={`${role.handle}@${role.currentVersion ?? 1}`}>
+                                  {role.handle}@{role.currentVersion ?? 1} — {role.name}
+                                </option>
+                              ))}
+                            </optgroup>
                           </select>
                         </label>
                         <label style={labelStyle}>Skills (catalog)
@@ -893,6 +933,16 @@ export function AgentFlowSettings({ projectId, setError }: {
             </div>
           )}
         </div>
+      )}
+
+      {/* Graph-local Roles (scope='flow') */}
+      {selected && (
+        <FlowRolesSection
+          flowId={selected}
+          projectId={projectId}
+          setError={setError}
+          onRolesChanged={() => void loadFlowRoles(selected)}
+        />
       )}
 
       {/* Bindings */}
