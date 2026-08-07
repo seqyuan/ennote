@@ -327,6 +327,11 @@ func TestOrchestratorSerialExecutionAndHandoff(t *testing.T) {
 	fake, err := newFakeStore(def)
 	require.NoError(t, err)
 	children := newFakeChildren()
+	for _, node := range fake.nodes {
+		if node.Handle == "producer" {
+			node.SkillDigests = []string{"skill-go-dev"}
+		}
+	}
 	events := &fakeEvents{}
 	orch := newOrchestrator(fake, children, events)
 	orch.Start(context.Background(), "flow-run-1")
@@ -334,6 +339,7 @@ func TestOrchestratorSerialExecutionAndHandoff(t *testing.T) {
 	assert.Equal(t, domain.FlowStateCompleted, state)
 	require.Len(t, children.created, 2, "producer+reviewer are role tasks; accept is terminal")
 	assert.Equal(t, "Implement src/main.go and fast", children.created[0].Assignment)
+	assert.Equal(t, []string{"skill-go-dev"}, children.created[0].SkillIDs)
 	assert.Equal(t, "Review [\"a.go\"]", children.created[1].Assignment)
 	assert.Equal(t, domain.RunSucceeded, fake.anchorStatus)
 	// Node checkpoints.

@@ -105,6 +105,7 @@ type DelegationItem struct {
 	GroupID        string               `json:"groupId"`
 	ChildRunID     *string              `json:"childRunId,omitempty"`
 	Name           string               `json:"name"`
+	Skills         []string             `json:"skills,omitempty"`
 	Depends        []string             `json:"depends,omitempty"`
 	RoleVersionID  string               `json:"roleVersionId"`
 	AssignmentJSON json.RawMessage      `json:"assignment"`

@@ -26,8 +26,11 @@ type childProgressPublisher struct {
 	groupID     string
 	taskName    string
 
-	mu       sync.Mutex
-	reported map[string]struct{} // tool call ids whose activity was already reported
+	mu sync.Mutex
+	// reported lives exactly as long as one child Run publisher and is bounded
+	// by that Run's frozen maxToolCalls budget. Keeping the full set avoids
+	// duplicate parent activity if late stream fragments arrive out of order.
+	reported map[string]struct{}
 }
 
 func (p *childProgressPublisher) PublishLive(event domain.LiveRunEvent) {

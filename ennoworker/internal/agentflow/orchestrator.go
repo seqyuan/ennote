@@ -60,8 +60,11 @@ type NodeUpdate struct {
 type ChildSpec struct {
 	Handle        string
 	RoleVersionID string
-	Assignment    string
-	Budget        domain.BudgetCeilingJSON
+	// SkillIDs are the task-level additive preload Skills frozen on the flow
+	// node. They supplement, but never replace or widen, the Role policy.
+	SkillIDs   []string
+	Assignment string
+	Budget     domain.BudgetCeilingJSON
 }
 
 // ChildInfo identifies the materialized child Run.
@@ -365,7 +368,8 @@ func (o *Orchestrator) dispatchRoleChild(ctx context.Context, runID string, flow
 		return ChildInfo{}, err
 	}
 	child, err := o.Children.CreateTaskChild(ctx, runID, flow.SessionID, ChildSpec{
-		Handle: node.Handle, RoleVersionID: node.RoleVersionID, Assignment: goal, Budget: budget,
+		Handle: node.Handle, RoleVersionID: node.RoleVersionID,
+		SkillIDs: append([]string(nil), node.SkillDigests...), Assignment: goal, Budget: budget,
 	})
 	if err != nil {
 		o.failTask(ctx, runID, node, err.Error())
@@ -646,6 +650,7 @@ func (o *Orchestrator) runFanOutTask(ctx context.Context, runID string, flow *do
 		child, err := o.Children.CreateTaskChild(ctx, runID, flow.SessionID, ChildSpec{
 			Handle:        fmt.Sprintf("%s-%d", node.Handle, i),
 			RoleVersionID: node.RoleVersionID,
+			SkillIDs:      append([]string(nil), node.SkillDigests...),
 			Assignment:    goal, Budget: budget,
 		})
 		if err != nil {

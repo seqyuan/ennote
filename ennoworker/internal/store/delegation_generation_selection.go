@@ -51,7 +51,7 @@ func resolveGenerationItemStatesTx(ctx context.Context, tx *sql.Tx, groupID stri
 
 	rows, err := tx.QueryContext(ctx, `SELECT i.id,i.name,i.role_version_id,i.assignment_json,
 		i.output_contract,i.budget_json,COALESCE(i.result_json,''),i.status,i.ordinal,i.created_at,
-		COALESCE(i.depends_json,'[]'),
+		COALESCE(i.depends_json,'[]'),COALESCE(i.skills_json,'[]'),
 		COALESCE(a.id,''),COALESCE(a.child_run_id,''),COALESCE(a.status,''),
 		COALESCE(a.result_digest,''),COALESCE(a.result_json,''),COALESCE(a.generation,-1)
 		FROM delegation_items i
@@ -65,11 +65,11 @@ func resolveGenerationItemStatesTx(ctx context.Context, tx *sql.Tx, groupID stri
 	states := make([]itemState, 0)
 	for rows.Next() {
 		var state itemState
-		var assignmentJSON, budgetJSON, itemResultJSON, itemStatus, createdAt, dependsJSON string
+		var assignmentJSON, budgetJSON, itemResultJSON, itemStatus, createdAt, dependsJSON, skillsJSON string
 		var attemptStatus, attemptResultJSON string
 		if err := rows.Scan(&state.item.ID, &state.item.Name, &state.item.RoleVersionID,
 			&assignmentJSON, &state.item.OutputContract, &budgetJSON, &itemResultJSON,
-			&itemStatus, &state.item.Ordinal, &createdAt, &dependsJSON, &state.attemptID,
+			&itemStatus, &state.item.Ordinal, &createdAt, &dependsJSON, &skillsJSON, &state.attemptID,
 			&state.attemptChild, &attemptStatus, &state.resultDigest,
 			&attemptResultJSON, &state.attemptGen); err != nil {
 			return nil, err
@@ -77,6 +77,11 @@ func resolveGenerationItemStatesTx(ctx context.Context, tx *sql.Tx, groupID stri
 		if dependsJSON != "" && dependsJSON != "[]" {
 			if err := json.Unmarshal([]byte(dependsJSON), &state.item.Depends); err != nil {
 				return nil, fmt.Errorf("decode depends for item %s: %w", state.item.ID, err)
+			}
+		}
+		if skillsJSON != "" && skillsJSON != "[]" {
+			if err := json.Unmarshal([]byte(skillsJSON), &state.item.Skills); err != nil {
+				return nil, fmt.Errorf("decode skills for item %s: %w", state.item.ID, err)
 			}
 		}
 		state.item.GroupID = groupID

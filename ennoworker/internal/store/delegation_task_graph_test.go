@@ -313,7 +313,31 @@ func TestDelegationTaskRetryFailureKeepsDescendantsBlocked(t *testing.T) {
 	assert.Empty(t, ready, "descendant stays blocked after failed dependency retry")
 }
 
-// ---- persisted depends_json round trip ----
+// ---- persisted task metadata round trip ----
+
+func TestDelegationTaskSkillsPersistedAndResolvedForChild(t *testing.T) {
+	delegations, _, submission := setupRootBudgetParent(t, "task-skills-persist")
+	ctx := context.Background()
+	item := taskItem("review")
+	item.Skills = []string{"review-guard", "go-dev"}
+	group, created, children, err := delegations.CreateGroupWithChildren(ctx, store.CreateDelegationGroupInput{
+		ParentRunID: submission.Run.ID, ParentToolCallID: "call-skills",
+		Strategy: domain.DelegationStrategySingle, Items: []store.CreateDelegationItemInput{item},
+	}, submission.Run.SessionID)
+	require.NoError(t, err)
+	require.Len(t, created, 1)
+	require.Len(t, children, 1)
+	assert.Equal(t, item.Skills, created[0].Skills)
+
+	listed, err := delegations.ListItems(ctx, group.ID)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	assert.Equal(t, item.Skills, listed[0].Skills)
+
+	resolved, err := delegations.TaskSkillsForChildRun(ctx, children[0].ID)
+	require.NoError(t, err)
+	assert.Equal(t, item.Skills, resolved)
+}
 
 func TestDelegationTaskDependsPersistedAndProjected(t *testing.T) {
 	delegations, _, submission := setupRootBudgetParent(t, "dag-persist")

@@ -73,14 +73,32 @@ func TestDelegationAdmissionPolicyPromotesRoleApprovalAndHonorsKillSwitch(t *tes
 	_, err = db.Exec(`UPDATE agent_profiles SET current_version_id='approval-role-v1' WHERE id='approval-role'`)
 	require.NoError(t, err)
 	policy := &delegationAdmissionToolPolicy{Base: allowToolPolicy{},
-		Delegations: &store.DelegationRepo{DB: db}, SessionID: session.ID}
+		Delegations: &store.DelegationRepo{DB: db}, SessionID: session.ID,
+		KnownSkills: map[string]bool{"review-guard": true}}
 	call := domain.ToolCall{ID: "delegate", Name: "delegate_tasks", Arguments: json.RawMessage(
-		`{"tasks":[{"name":"review","role":"approval-role","goal":"review","budget":{"maxModelCalls":1,"maxToolCalls":1}}]}`)}
+		`{"tasks":[{"name":"review","role":"approval-role","goal":"review","skills":["review-guard"],"budget":{"maxModelCalls":1,"maxToolCalls":1}}]}`)}
 	decisions, err := policy.BeforeToolBatch(ctx, agent.ToolBatchContext{}, []domain.ToolCall{call})
 	require.NoError(t, err)
 	require.Len(t, decisions, 1)
 	assert.Equal(t, agent.ToolRequireApproval, decisions[0].Action)
 	assert.Contains(t, string(decisions[0].Arguments), `"roleVersionId":"approval-role-v1"`)
+	assert.Contains(t, string(decisions[0].Arguments), `"skills":["review-guard"]`)
+
+	missingSkillCall := call
+	missingSkillCall.Arguments = json.RawMessage(
+		`{"tasks":[{"name":"review","role":"approval-role","goal":"review","skills":["missing"],"budget":{"maxModelCalls":1,"maxToolCalls":1}}]}`)
+	decisions, err = policy.BeforeToolBatch(ctx, agent.ToolBatchContext{}, []domain.ToolCall{missingSkillCall})
+	require.NoError(t, err)
+	assert.Equal(t, agent.ToolDeny, decisions[0].Action)
+	assert.Equal(t, "skill_not_found", decisions[0].Code)
+
+	invalidDagCall := call
+	invalidDagCall.Arguments = json.RawMessage(
+		`{"tasks":[{"name":"review","role":"approval-role","goal":"review","depends":["missing"],"budget":{"maxModelCalls":1,"maxToolCalls":1}}]}`)
+	decisions, err = policy.BeforeToolBatch(ctx, agent.ToolBatchContext{}, []domain.ToolCall{invalidDagCall})
+	require.NoError(t, err)
+	assert.Equal(t, agent.ToolDeny, decisions[0].Action)
+	assert.Equal(t, string(domain.ErrorDelegationDagInvalid), decisions[0].Code)
 
 	_, err = db.Exec(`UPDATE agent_profiles SET delegation_enabled=0 WHERE id='approval-role'`)
 	require.NoError(t, err)

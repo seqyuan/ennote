@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
@@ -39,6 +40,33 @@ func TestRolePreloadPromptSkipsAvailableAndNoSkillRoles(t *testing.T) {
 	available := &domain.FrozenRoleExecution{Skills: domain.RoleSkills{
 		Entries: []domain.RoleSkillEntry{{SkillID: "x", Mode: domain.RoleSkillAvailable}}}}
 	assert.Empty(t, executor.rolePreloadPrompt(available))
+}
+
+func TestTaskPreloadPromptAddsExplicitSkillsWithoutDuplicatingRolePreloads(t *testing.T) {
+	skillsDir := t.TempDir()
+	for id, body := range map[string]string{
+		"role-skill": "ROLE_SKILL_BODY",
+		"task-skill": "TASK_SKILL_BODY",
+	} {
+		dir := filepath.Join(skillsDir, id)
+		require.NoError(t, os.MkdirAll(dir, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "skill.json"),
+			[]byte(`{"id":"`+id+`","version":"1","prompt":"SKILL.md"}`), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o600))
+	}
+	executor := &agentExecutor{skillsDir: skillsDir}
+	role := &domain.FrozenRoleExecution{Skills: domain.RoleSkills{Entries: []domain.RoleSkillEntry{
+		{SkillID: "role-skill", Mode: domain.RoleSkillPreload},
+	}}}
+
+	fragment, err := executor.taskPreloadPrompt(role, []string{"role-skill", "task-skill", "task-skill"})
+	require.NoError(t, err)
+	assert.NotContains(t, fragment, "ROLE_SKILL_BODY", "Role preloads are rendered by rolePreloadPrompt")
+	assert.Equal(t, 1, strings.Count(fragment, "TASK_SKILL_BODY"))
+
+	_, err = executor.taskPreloadPrompt(role, []string{"missing-task-skill"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing-task-skill")
 }
 
 func TestRoleCatalogAcceptsSkillsWhenKnownCatalogIsWired(t *testing.T) {

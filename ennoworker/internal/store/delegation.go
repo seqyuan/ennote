@@ -49,6 +49,9 @@ type CreateDelegationItemInput struct {
 	AssignmentJSON json.RawMessage
 	OutputContract string
 	Budget         domain.BudgetCeilingJSON
+	// Skills are task-level additive preload Skill IDs. They do not change the
+	// frozen Role's tool policy or authority and are persisted for retry/recovery.
+	Skills []string
 	// Depends declares batch-scoped task dependencies: sibling item names in
 	// the same group that must settle before this item is ready to start.
 	// Empty means the item is an entry task. The topology is validated in
@@ -264,6 +267,14 @@ func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 		if err != nil {
 			return nil, nil, err
 		}
+		taskSkills, err := normalizeTaskSkillIDs(item.Skills)
+		if err != nil {
+			return nil, nil, fmt.Errorf("delegation item %s: %w", name, err)
+		}
+		skillsJSON, err := json.Marshal(taskSkills)
+		if err != nil {
+			return nil, nil, err
+		}
 		itemID := uuid.NewString()
 		dependsJSON := []byte("[]")
 		if len(item.Depends) > 0 {
@@ -274,15 +285,15 @@ func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 			dependsJSON = encoded
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO delegation_items
-			(id,group_id,child_run_id,name,role_version_id,assignment_json,output_contract,budget_json,result_json,status,ordinal,depends_json,created_at)
-			VALUES(?,?,NULL,?,?,?,?,?,NULL,'pending',?,?,?)`,
+			(id,group_id,child_run_id,name,role_version_id,assignment_json,output_contract,budget_json,result_json,status,ordinal,depends_json,skills_json,created_at)
+			VALUES(?,?,NULL,?,?,?,?,?,NULL,'pending',?,?,?,?)`,
 			itemID, groupID, name, item.RoleVersionID, string(item.AssignmentJSON),
-			outputContract, string(budgetJSON), ordinal, string(dependsJSON), timestamp); err != nil {
+			outputContract, string(budgetJSON), ordinal, string(dependsJSON), string(skillsJSON), timestamp); err != nil {
 			return nil, nil, fmt.Errorf("create delegation item %s: %w", name, err)
 		}
 		items = append(items, domain.DelegationItem{
-			ID: itemID, GroupID: groupID, Name: name, Depends: append([]string(nil), item.Depends...),
-			RoleVersionID: item.RoleVersionID,
+			ID: itemID, GroupID: groupID, Name: name, Skills: taskSkills,
+			Depends: append([]string(nil), item.Depends...), RoleVersionID: item.RoleVersionID,
 			AssignmentJSON: append(json.RawMessage(nil), item.AssignmentJSON...), OutputContract: outputContract,
 			BudgetJSON: budgetJSON, Status: domain.DelegationItemPending, Ordinal: ordinal, CreatedAt: now,
 		})
@@ -293,11 +304,44 @@ func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 	return group, items, nil
 }
 
+// normalizeTaskSkillIDs freezes a stable, de-duplicated task Skill list while
+// rejecting blank IDs. Catalog availability is validated by the caller that
+// owns the effective Skill roots.
+func normalizeTaskSkillIDs(ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		return []string{}, nil
+	}
+	normalized := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, raw := range ids {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			return nil, fmt.Errorf("task skill id is required")
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		normalized = append(normalized, id)
+	}
+	return normalized, nil
+}
+
+// ValidateTaskTopology validates model-authored TaskSpecs before delegation
+// admission. The store repeats the same validation during materialization so
+// replay/recovery and non-tool callers cannot bypass the invariant.
+func ValidateTaskTopology(specs []domain.TaskSpec) error {
+	items := make([]CreateDelegationItemInput, len(specs))
+	for index := range specs {
+		items[index] = CreateDelegationItemInput{Name: specs[index].Name, Depends: specs[index].Depends}
+	}
+	return validateTaskTopologyTx(items)
+}
+
 // validateTaskTopologyTx validates the batch task graph before any row is
-// written: item names are unique, every depends reference names a sibling
-// item, the graph is acyclic, and at least one entry task (indegree 0) exists.
-// A violation is a hard input error: the delegate_tasks call fails loud and
-// never reaches admission.
+// written: item names are unique when dependency edges exist, every depends
+// reference names a sibling item, the graph is acyclic, and at least one entry
+// task (indegree 0) exists.
 func validateTaskTopologyTx(items []CreateDelegationItemInput) error {
 	byName := make(map[string]int, len(items))
 	dupNames := make(map[string]struct{})
@@ -675,13 +719,35 @@ func (r *DelegationRepo) GroupForParentToolCall(ctx context.Context, parentRunID
 
 func (r *DelegationRepo) ListItems(ctx context.Context, groupID string) ([]domain.DelegationItem, error) {
 	rows, err := r.DB.QueryContext(ctx, `SELECT id,group_id,child_run_id,name,role_version_id,assignment_json,
-		output_contract,budget_json,result_json,status,ordinal,depends_json,created_at
+		output_contract,budget_json,result_json,status,ordinal,depends_json,skills_json,created_at
 		FROM delegation_items WHERE group_id=? ORDER BY ordinal`, groupID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	return scanDelegationItems(rows)
+}
+
+// TaskSkillsForChildRun returns the task-level additive preload Skill IDs
+// frozen on the delegation item for this concrete attempt. Looking up through
+// delegation_item_attempts keeps retry children attached to the same task
+// contract without relying on the generation-zero child_run_id substrate.
+func (r *DelegationRepo) TaskSkillsForChildRun(ctx context.Context, childRunID string) ([]string, error) {
+	var encoded string
+	err := r.DB.QueryRowContext(ctx, `SELECT COALESCE(i.skills_json,'[]')
+		FROM delegation_item_attempts a JOIN delegation_items i ON i.id=a.item_id
+		WHERE a.child_run_id=?`, childRunID).Scan(&encoded)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	if err := json.Unmarshal([]byte(encoded), &ids); err != nil {
+		return nil, fmt.Errorf("decode task skills for child run %s: %w", childRunID, err)
+	}
+	return ids, nil
 }
 
 // ListActivity returns stable parent-visible group and child state without
@@ -780,10 +846,11 @@ func scanDelegationItems(rows *sql.Rows) ([]domain.DelegationItem, error) {
 	items := make([]domain.DelegationItem, 0)
 	for rows.Next() {
 		var item domain.DelegationItem
-		var childRun, assignment, budget, result, dependsJSON sql.NullString
+		var childRun, assignment, budget, result, dependsJSON, skillsJSON sql.NullString
 		var createdAt string
 		if err := rows.Scan(&item.ID, &item.GroupID, &childRun, &item.Name, &item.RoleVersionID,
-			&assignment, &item.OutputContract, &budget, &result, &item.Status, &item.Ordinal, &dependsJSON, &createdAt); err != nil {
+			&assignment, &item.OutputContract, &budget, &result, &item.Status, &item.Ordinal,
+			&dependsJSON, &skillsJSON, &createdAt); err != nil {
 			return nil, err
 		}
 		if childRun.Valid {
@@ -797,6 +864,11 @@ func scanDelegationItems(rows *sql.Rows) ([]domain.DelegationItem, error) {
 		if dependsJSON.Valid && dependsJSON.String != "" && dependsJSON.String != "[]" {
 			if err := json.Unmarshal([]byte(dependsJSON.String), &item.Depends); err != nil {
 				return nil, fmt.Errorf("decode depends for item %s: %w", item.ID, err)
+			}
+		}
+		if skillsJSON.Valid && skillsJSON.String != "" && skillsJSON.String != "[]" {
+			if err := json.Unmarshal([]byte(skillsJSON.String), &item.Skills); err != nil {
+				return nil, fmt.Errorf("decode skills for item %s: %w", item.ID, err)
 			}
 		}
 		var err error
@@ -1862,6 +1934,19 @@ func advanceDagTx(ctx context.Context, tx *sql.Tx, groupID string) ([]string, er
 	if len(items) == 0 {
 		return nil, nil
 	}
+	hasDependencies := false
+	for index := range items {
+		if len(items[index].Depends) > 0 {
+			hasDependencies = true
+			break
+		}
+	}
+	if !hasDependencies {
+		// Legacy flat batches may contain duplicate names. They need no DAG
+		// advancement (all children are entry tasks), so avoid constructing an
+		// ambiguous name index and preserve their original parallel semantics.
+		return nil, nil
+	}
 	byName := make(map[string]*dagItemView, len(items))
 	for index := range items {
 		byName[items[index].Name] = &items[index]
@@ -1993,6 +2078,12 @@ func (r *DelegationRepo) ReadyChildrenForEnqueue(ctx context.Context, runIDs []s
 		return nil, err
 	}
 	defer tx.Rollback()
+	type cachedDagGroup struct {
+		items  []dagItemView
+		byName map[string]*dagItemView
+		byID   map[string]*dagItemView
+	}
+	groups := make(map[string]*cachedDagGroup)
 	ready := make([]string, 0, len(runIDs))
 	for _, runID := range runIDs {
 		var groupID, itemID string
@@ -2005,28 +2096,31 @@ func (r *DelegationRepo) ReadyChildrenForEnqueue(ctx context.Context, runIDs []s
 			}
 			return nil, err
 		}
-		items, err := loadDagItemsTx(ctx, tx, groupID)
-		if err != nil {
-			return nil, err
-		}
-		byName := make(map[string]*dagItemView, len(items))
-		for index := range items {
-			byName[items[index].Name] = &items[index]
-		}
-		var current *dagItemView
-		for index := range items {
-			if items[index].ID == itemID {
-				current = &items[index]
-				break
+		group := groups[groupID]
+		if group == nil {
+			items, err := loadDagItemsTx(ctx, tx, groupID)
+			if err != nil {
+				return nil, err
 			}
+			group = &cachedDagGroup{
+				items: items, byName: make(map[string]*dagItemView, len(items)),
+				byID: make(map[string]*dagItemView, len(items)),
+			}
+			for index := range group.items {
+				item := &group.items[index]
+				group.byName[item.Name] = item
+				group.byID[item.ID] = item
+			}
+			groups[groupID] = group
 		}
+		current := group.byID[itemID]
 		if current == nil {
 			ready = append(ready, runID) // defensive: unknown item keeps caller semantics
 			continue
 		}
 		allSettled := true
 		for _, depName := range current.Depends {
-			dep, ok := byName[depName]
+			dep, ok := group.byName[depName]
 			if !ok || dep.AttemptStatus != "succeeded" {
 				allSettled = false
 				break
@@ -2305,6 +2399,10 @@ func (r *DelegationRepo) RecoverDelegation(ctx context.Context) ([]string, error
 		return nil, fmt.Errorf("scan delegation groups for DAG recovery: %w", groupErr)
 	}
 	for _, groupID := range groupIDs {
+		// Recovery needs advanceDagTx here to reconstruct durable blocked
+		// states before generation settlement. Ready child IDs are deliberately
+		// ignored: startup subsequently passes queued Runs through
+		// ReadyChildrenForEnqueue, which performs the actual enqueue decision.
 		if _, err := advanceDagTx(ctx, tx, groupID); err != nil {
 			return nil, fmt.Errorf("advance task graph for group %s during recovery: %w", groupID, err)
 		}

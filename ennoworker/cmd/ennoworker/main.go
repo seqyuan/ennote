@@ -408,6 +408,15 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		if preloaded := e.rolePreloadPrompt(resolved.Effective.Role); preloaded != "" {
 			systemPrompt += preloaded
 		}
+		taskSkillIDs, taskSkillsErr := (&store.DelegationRepo{DB: e.db}).TaskSkillsForChildRun(ctx, run.ID)
+		if taskSkillsErr != nil {
+			return domain.RunOutput{}, fmt.Errorf("load task skills: %w", taskSkillsErr)
+		}
+		if taskPreloaded, taskSkillsErr := e.taskPreloadPrompt(resolved.Effective.Role, taskSkillIDs); taskSkillsErr != nil {
+			return domain.RunOutput{}, taskSkillsErr
+		} else if taskPreloaded != "" {
+			systemPrompt += taskPreloaded
+		}
 	}
 
 	var wManager *workspace.Manager
@@ -508,8 +517,13 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	}
 	var effectiveToolPolicy agent.ToolPolicy = tp
 	if resolved.Effective.Role == nil {
+		knownTaskSkills := make(map[string]bool)
+		for _, skill := range skills.Discover(e.skillsDir, e.builtinDir) {
+			knownTaskSkills[skill.Manifest.ID] = true
+		}
 		effectiveToolPolicy = &delegationAdmissionToolPolicy{Base: tp,
-			Delegations: &store.DelegationRepo{DB: e.db}, SessionID: run.SessionID}
+			Delegations: &store.DelegationRepo{DB: e.db}, SessionID: run.SessionID,
+			KnownSkills: knownTaskSkills}
 	}
 	loop := &agent.Loop{
 		Provider: provider, ModelRouter: router, TurnPlanner: agent.ContextTurnPlanner{},
@@ -941,6 +955,7 @@ func (e *agentExecutor) resolveProvider(resolved *store.ResolvedRunConfig) (llm.
 func (e *agentExecutor) delegateProvider(run *domain.AgentRun) *agentExecutorDelegationProvider {
 	return &agentExecutorDelegationProvider{
 		db: e.db, runs: e.runs, sessions: e.sessionDB,
+		skillsDir: e.skillsDir, builtinDir: e.builtinDir,
 		runID: run.ID, sessionID: run.SessionID,
 	}
 }
@@ -949,6 +964,7 @@ type delegationAdmissionToolPolicy struct {
 	Base        agent.ToolPolicy
 	Delegations *store.DelegationRepo
 	SessionID   string
+	KnownSkills map[string]bool
 }
 
 func (p *delegationAdmissionToolPolicy) BeforeToolBatch(ctx context.Context, batch agent.ToolBatchContext,
@@ -979,21 +995,40 @@ func (p *delegationAdmissionToolPolicy) BeforeToolBatch(ctx context.Context, bat
 		if len(specs) == 0 {
 			continue
 		}
+		if topologyErr := store.ValidateTaskTopology(specs); topologyErr != nil {
+			decisions[index] = agent.ToolDecision{
+				Action: agent.ToolDeny, Code: string(domain.ErrorDelegationDagInvalid),
+				Reason: topologyErr.Error(), RiskClass: domain.RiskDelegation,
+			}
+			continue
+		}
 		requiresApproval := false
 		denial := ""
+		denialCode := ""
 		for specIndex := range specs {
 			spec := &specs[specIndex]
 			spec.Normalize()
+			for _, rawSkillID := range spec.Skills {
+				skillID := strings.TrimSpace(rawSkillID)
+				if skillID == "" || !p.KnownSkills[skillID] {
+					denial = fmt.Sprintf("Task %q references unavailable Skill %q", spec.Name, skillID)
+					denialCode = "skill_not_found"
+					break
+				}
+			}
+			if denial != "" {
+				break
+			}
 			snapshot, resolveErr := p.Delegations.ResolveRoleForDelegation(ctx, p.SessionID, spec.Role)
 			if errors.Is(resolveErr, store.ErrDelegationRoleUnavailable) {
-				denial = fmt.Sprintf("Role %q is unavailable in this project", spec.RoleHandle)
+				denial = fmt.Sprintf("Role %q is unavailable in this project", spec.Role)
 				break
 			}
 			if resolveErr != nil {
 				return nil, resolveErr
 			}
 			if !snapshot.DelegationEnabled || snapshot.Definition.DelegationPolicy.Admission == domain.DelegationDenied {
-				denial = fmt.Sprintf("Role %q does not allow Host delegation", spec.RoleHandle)
+				denial = fmt.Sprintf("Role %q does not allow Host delegation", spec.Role)
 				break
 			}
 			spec.RoleVersionID = snapshot.VersionID
@@ -1001,7 +1036,10 @@ func (p *delegationAdmissionToolPolicy) BeforeToolBatch(ctx context.Context, bat
 				snapshot.Definition.DelegationPolicy.Admission == domain.DelegationApprovalRequired
 		}
 		if denial != "" {
-			decisions[index] = agent.ToolDecision{Action: agent.ToolDeny, Code: string(domain.ErrorDelegationNotAuthorized),
+			if denialCode == "" {
+				denialCode = string(domain.ErrorDelegationNotAuthorized)
+			}
+			decisions[index] = agent.ToolDecision{Action: agent.ToolDeny, Code: denialCode,
 				Reason: denial, RiskClass: domain.RiskDelegation}
 			continue
 		}
@@ -1028,11 +1066,13 @@ func (p *delegationAdmissionToolPolicy) AfterToolCall(ctx context.Context, callC
 }
 
 type agentExecutorDelegationProvider struct {
-	db        *sql.DB
-	runs      *store.RunRepo
-	sessions  *store.SessionRepo
-	runID     string
-	sessionID string
+	db         *sql.DB
+	runs       *store.RunRepo
+	sessions   *store.SessionRepo
+	skillsDir  string
+	builtinDir string
+	runID      string
+	sessionID  string
 }
 
 func delegationStrategy(itemCount int) domain.DelegationStrategy {
@@ -1065,6 +1105,10 @@ func effectiveDelegationBudget(request domain.BudgetCeilingJSON, ceiling domain.
 
 func (p *agentExecutorDelegationProvider) ExecuteDelegation(ctx context.Context, runID, sessionID, toolCallID string, specs []domain.TaskSpec) (*tools.DelegateTasksResult, error) {
 	delegations := &store.DelegationRepo{DB: p.db}
+	availableSkills := make(map[string]struct{})
+	for _, skill := range skills.Discover(p.skillsDir, p.builtinDir) {
+		availableSkills[skill.Manifest.ID] = struct{}{}
+	}
 
 	executionMode := domain.DelegationExecutionBlocking
 	autoResume := false
@@ -1084,6 +1128,15 @@ func (p *agentExecutorDelegationProvider) ExecuteDelegation(ctx context.Context,
 	var resolved []resolvedSpec
 	for _, spec := range specs {
 		spec.Normalize()
+		for _, rawSkillID := range spec.Skills {
+			skillID := strings.TrimSpace(rawSkillID)
+			if skillID == "" {
+				return nil, fmt.Errorf("task %q has an empty skill id", spec.Name)
+			}
+			if _, ok := availableSkills[skillID]; !ok {
+				return nil, fmt.Errorf("task %q references unavailable skill %q", spec.Name, skillID)
+			}
+		}
 		snapshot, err := delegations.ResolveRoleForDelegation(ctx, sessionID, spec.Role)
 		if err != nil {
 			return nil, fmt.Errorf("resolve role %q: %w", spec.Role, err)
@@ -1114,6 +1167,7 @@ func (p *agentExecutorDelegationProvider) ExecuteDelegation(ctx context.Context,
 			AssignmentJSON: json.RawMessage(fmt.Sprintf(`{"task":%q}`, r.spec.Goal)),
 			OutputContract: outputContract,
 			Budget:         r.spec.Budget,
+			Skills:         append([]string(nil), r.spec.Skills...),
 			Depends:        r.spec.Depends,
 		}
 	}
@@ -1206,6 +1260,50 @@ func (e *agentExecutor) rolePreloadPrompt(role *domain.FrozenRoleExecution) stri
 		builder.WriteString("\n</preloaded_skill>")
 	}
 	return builder.String()
+}
+
+// taskPreloadPrompt renders explicit task Skills as an additive overlay. Role
+// preload Skills are rendered separately and are de-duplicated here; explicit
+// task Skills must still exist in the current catalog so a removed or invalid
+// frozen binding fails loudly rather than silently weakening the task.
+func (e *agentExecutor) taskPreloadPrompt(role *domain.FrozenRoleExecution, ids []string) (string, error) {
+	if len(ids) == 0 {
+		return "", nil
+	}
+	loaded := make(map[string]*skills.LoadedSkill)
+	for _, skill := range skills.Discover(e.skillsDir, e.builtinDir) {
+		loaded[skill.Manifest.ID] = skill
+	}
+	rolePreloads := make(map[string]struct{})
+	if role != nil {
+		for _, entry := range role.Skills.Entries {
+			if entry.Mode == domain.RoleSkillPreload {
+				rolePreloads[entry.SkillID] = struct{}{}
+			}
+		}
+	}
+	seen := make(map[string]struct{}, len(ids))
+	var builder strings.Builder
+	for _, rawID := range ids {
+		id := strings.TrimSpace(rawID)
+		skill, ok := loaded[id]
+		if !ok {
+			return "", fmt.Errorf("task skill %q is unavailable", id)
+		}
+		if _, duplicate := seen[id]; duplicate {
+			continue
+		}
+		seen[id] = struct{}{}
+		if _, inherited := rolePreloads[id]; inherited {
+			continue
+		}
+		builder.WriteString("\n\n<preloaded_skill id=\"")
+		builder.WriteString(id)
+		builder.WriteString("\">\n")
+		builder.WriteString(skill.PromptText)
+		builder.WriteString("\n</preloaded_skill>")
+	}
+	return builder.String(), nil
 }
 
 func (e *agentExecutor) resolveRuntimeProvider(runtime domain.ModelRuntimeSnapshot) (llm.Provider, error) {

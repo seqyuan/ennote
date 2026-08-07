@@ -91,6 +91,7 @@ func (c *OrchestratorChildren) CreateTaskChild(ctx context.Context, parentRunID,
 	item := CreateDelegationItemInput{
 		Name:           spec.Handle,
 		RoleVersionID:  spec.RoleVersionID,
+		Skills:         append([]string(nil), spec.SkillIDs...),
 		AssignmentJSON: json.RawMessage(fmt.Sprintf(`{"task":%q}`, spec.Assignment)),
 		// OutputContract empty: the delegation admission resolves the frozen
 		// Role's contract; the typed payload still flows through submit_result.
