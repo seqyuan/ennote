@@ -41,6 +41,10 @@ type FlowNodeFreeze struct {
 	GoalDigest    string
 	GoalText      string
 	BudgetJSON    json.RawMessage
+	// ReadOnly/Writes are the scheduler's concurrency class for this node,
+	// frozen from the resolved Role definition and the task's declares.
+	ReadOnly bool
+	Writes   []string
 }
 
 // CreateFlowRun atomically materializes the anchor agent run, the meta-Run
@@ -155,12 +159,17 @@ func (r *AgentFlowRunRepo) CreateFlowRun(ctx context.Context, input CreateFlowRu
 		if len(budgetJSON) == 0 {
 			budgetJSON = json.RawMessage(`{}`)
 		}
+		readOnly := 0
+		if node.ReadOnly {
+			readOnly = 1
+		}
+		writesJSON, _ := json.Marshal(node.Writes)
 		if _, err := tx.ExecContext(ctx, `INSERT INTO run_agent_flow_nodes
 			(run_id, task_index, handle, role_version_id, skill_digests_json, goal_digest, goal_text,
-			 budget_json, terminal_state, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+			 budget_json, terminal_state, created_at, read_only, writes_json)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
 			runID, node.TaskIndex, node.Handle, node.RoleVersionID, string(skillsJSON),
-			node.GoalDigest, node.GoalText, string(budgetJSON), timestamp); err != nil {
+			node.GoalDigest, node.GoalText, string(budgetJSON), timestamp, readOnly, string(writesJSON)); err != nil {
 			return nil, fmt.Errorf("create flow node %d: %w", node.TaskIndex, err)
 		}
 	}
@@ -245,7 +254,8 @@ func (r *AgentFlowRunRepo) ListProjectRuns(ctx context.Context, projectID string
 // ListNodes returns all task checkpoints of a flow run ordered by task index.
 func (r *AgentFlowRunRepo) ListNodes(ctx context.Context, runID string) ([]*domain.RunAgentFlowNode, error) {
 	rows, err := r.DB.QueryContext(ctx, `SELECT run_id, task_index, handle, role_version_id, skill_digests_json,
-		goal_digest, goal_text, budget_json, terminal_state, output_ref, child_run_id, child_run_ids_json, error_code, created_at, finished_at
+		goal_digest, goal_text, budget_json, terminal_state, output_ref, child_run_id, child_run_ids_json, error_code, created_at, finished_at,
+		read_only, writes_json
 		FROM run_agent_flow_nodes WHERE run_id=? ORDER BY task_index`, runID)
 	if err != nil {
 		return nil, err
@@ -265,7 +275,8 @@ func (r *AgentFlowRunRepo) ListNodes(ctx context.Context, runID string) ([]*doma
 // GetNode fetches one task checkpoint.
 func (r *AgentFlowRunRepo) GetNode(ctx context.Context, runID string, taskIndex int) (*domain.RunAgentFlowNode, error) {
 	rows, err := r.DB.QueryContext(ctx, `SELECT run_id, task_index, handle, role_version_id, skill_digests_json,
-		goal_digest, goal_text, budget_json, terminal_state, output_ref, child_run_id, child_run_ids_json, error_code, created_at, finished_at
+		goal_digest, goal_text, budget_json, terminal_state, output_ref, child_run_id, child_run_ids_json, error_code, created_at, finished_at,
+		read_only, writes_json
 		FROM run_agent_flow_nodes WHERE run_id=? AND task_index=?`, runID, taskIndex)
 	if err != nil {
 		return nil, err
@@ -469,11 +480,17 @@ func (r *AgentFlowRunRepo) ResolveFlowSkills(ctx context.Context, names []string
 func scanFlowNode(scan interface{ Scan(...any) error }) (*domain.RunAgentFlowNode, error) {
 	var node domain.RunAgentFlowNode
 	var roleVersionID, skillsJSON, goalDigest, goalText, budgetJSON, outputRef, childRunID, errorCode, createdAt, finishedAt sql.NullString
-	var childRunIDsJSON string
+	var childRunIDsJSON, writesJSON string
+	var readOnly int
 	if err := scan.Scan(&node.RunID, &node.TaskIndex, &node.Handle, &roleVersionID,
 		&skillsJSON, &goalDigest, &goalText, &budgetJSON, &node.TerminalState,
-		&outputRef, &childRunID, &childRunIDsJSON, &errorCode, &createdAt, &finishedAt); err != nil {
+		&outputRef, &childRunID, &childRunIDsJSON, &errorCode, &createdAt, &finishedAt,
+		&readOnly, &writesJSON); err != nil {
 		return nil, err
+	}
+	node.ReadOnly = readOnly != 0
+	if writesJSON != "" {
+		_ = json.Unmarshal([]byte(writesJSON), &node.Writes)
 	}
 	if roleVersionID.Valid {
 		node.RoleVersionID = roleVersionID.String

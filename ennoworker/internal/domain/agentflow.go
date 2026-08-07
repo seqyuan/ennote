@@ -133,6 +133,27 @@ type FlowTask struct {
 	Terminal *FlowTerminal     `json:"terminal,omitempty" yaml:"terminal,omitempty"`
 	Output   string            `json:"output,omitempty" yaml:"output,omitempty"`
 	Next     map[string]string `json:"next,omitempty" yaml:"next,omitempty"` // reserved for Phase 2
+	// Writes declares the workspace paths this task mutates (globs relative to
+	// /workspace). Used to grant controlled parallelism between writers when
+	// the flow enables parallelism.allow_disjoint_writers; an unset/empty
+	// value means "whole workspace" (exclusive lane). Scheduling-only today;
+	// the sandbox does not enforce the declared scope.
+	Writes []string `json:"writes,omitempty" yaml:"writes,omitempty"`
+}
+
+// DefaultFlowParallelismMax is the ready-set dispatch concurrency ceiling when
+// the flow does not specify parallelism.max (decision 2026-08-07).
+const DefaultFlowParallelismMax = 10
+
+// MaxFlowParallelismMax bounds parallelism.max at publish time.
+const MaxFlowParallelismMax = 16
+
+// FlowParallelism controls ready-set parallel dispatch of independent tasks.
+// Max defaults to 10; AllowDisjointWriters is opt-in and gates parallel
+// mutation between tasks that declare pairwise-disjoint Writes scopes.
+type FlowParallelism struct {
+	Max                   int  `json:"max,omitempty" yaml:"max,omitempty"`
+	AllowDisjointWriters  bool `json:"allowDisjointWriters,omitempty" yaml:"allow_disjoint_writers,omitempty"`
 }
 
 // FlowDefinition is the parsed flow contract. It is the authoring unit; the
@@ -148,6 +169,25 @@ type FlowDefinition struct {
 	Budget        FlowBudget              `json:"budget" yaml:"budget"`
 	Tasks         map[string]FlowTask     `json:"tasks" yaml:"tasks"`
 	Convergence   []ConvergenceRule       `json:"convergence,omitempty" yaml:"convergence,omitempty"`
+	// Parallelism controls ready-set parallel dispatch (defaults: max 10,
+	// allowDisjointWriters false). Optional; nil means defaults.
+	Parallelism   *FlowParallelism        `json:"parallelism,omitempty" yaml:"parallelism,omitempty"`
+}
+
+// EffectiveParallelismMax returns the ready-set dispatch concurrency ceiling:
+// the declared flow value when parallelism is present and positive, else the
+// default (10).
+func (d *FlowDefinition) EffectiveParallelismMax() int {
+	if d.Parallelism != nil && d.Parallelism.Max > 0 {
+		return d.Parallelism.Max
+	}
+	return DefaultFlowParallelismMax
+}
+
+// DisjointWritersEnabled reports whether the flow opts into parallel mutation
+// between tasks that declare pairwise-disjoint writes scopes.
+func (d *FlowDefinition) DisjointWritersEnabled() bool {
+	return d.Parallelism != nil && d.Parallelism.AllowDisjointWriters
 }
 
 // AgentFlowProfile is the stable identity of a flow definition.
@@ -225,6 +265,13 @@ type RunAgentFlowNode struct {
 	ErrorCode   string   `json:"errorCode,omitempty"`
 	CreatedAt     time.Time       `json:"createdAt"`
 	FinishedAt    *time.Time      `json:"finishedAt,omitempty"`
+	// ReadOnly is the frozen concurrency class: true = role cannot mutate the
+	// workspace (may run in parallel with other readers); false = writer
+	// (mutation lane, or disjoint-writes lane when the flow opts in).
+	ReadOnly bool `json:"readOnly,omitempty"`
+	// Writes are the frozen declared writes scopes (globs relative to
+	// /workspace); empty means "whole workspace" (exclusive lane).
+	Writes []string `json:"writes,omitempty"`
 }
 
 // FlowRunOutput is the folded flow output: the outputs port values plus the

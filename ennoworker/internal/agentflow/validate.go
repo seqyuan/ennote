@@ -2,6 +2,7 @@ package agentflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -129,6 +130,9 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 	// 3. role@version / skill resolvability; 6. fan_out read-only; 7. budget.
 	totalTaskTokens := int64(0)
 	checkAllowlistMissing := false
+	// writerScopes collects tasks whose Role can mutate (writer class); used by
+	// the allow_disjoint_writers validation.
+	writerScopes := map[string][]string{}
 	for name, task := range def.Tasks {
 		field := "tasks." + name
 		if task.Terminal != nil {
@@ -173,6 +177,7 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 				continue
 			}
 			roleDef := info.Definition
+			readOnly := roleAllToolsReadOnly(ctx, v.Resolver, roleDef)
 			if task.FanOut != nil {
 				if task.FanOut.Min < 1 || task.FanOut.Max < task.FanOut.Min ||
 					(v.MaxFanOut > 0 && task.FanOut.Max > v.MaxFanOut) {
@@ -180,11 +185,24 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 						fmt.Sprintf("task %q fan_out range %d..%d is invalid", name, task.FanOut.Min, task.FanOut.Max),
 						field+".fanOut"))
 				}
-				if !roleAllToolsReadOnly(ctx, v.Resolver, roleDef) {
+				if !readOnly {
 					add(v.fail("fan_out_not_read_only",
 						fmt.Sprintf("task %q fan_out requires the Role allowlist to be fully read-only", name),
 						field+".fanOut"))
 				}
+			}
+			// Writer class: any mutation-capable task is a candidate for the
+		// disjoint-writes parallel lane; declared scopes are validated here
+		// regardless of the flow flag (catches typos early).
+			if !readOnly {
+				for _, w := range task.Writes {
+					if err := validateWritesGlob(w); err != nil {
+						add(v.fail("writes_glob_invalid",
+							fmt.Sprintf("task %q writes scope %q: %v", name, w, err),
+							field+".writes"))
+					}
+				}
+				writerScopes[name] = task.Writes
 			}
 			effectiveTokens := roleDef.DelegationPolicy.BudgetCeiling.MaxTotalTokens
 			if task.Budget != nil && task.Budget.Tokens > 0 {
@@ -210,6 +228,40 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 	// 4. DAG acyclicity + convergence back-edge binding.
 	validateTopology(add, def)
 	validateBranchRouting(add, def)
+
+	// Parallelism: ready-set dispatch bounds + the disjoint-writers opt-in gate.
+	if def.Parallelism != nil {
+		if def.Parallelism.Max < 1 || def.Parallelism.Max > domain.MaxFlowParallelismMax {
+			add(v.fail("parallelism_max_invalid",
+				fmt.Sprintf("flow parallelism.max must be 1..%d", domain.MaxFlowParallelismMax),
+				"parallelism.max"))
+		}
+		if def.Parallelism.AllowDisjointWriters {
+			writerNames := make([]string, 0, len(writerScopes))
+			for name := range writerScopes {
+				writerNames = append(writerNames, name)
+			}
+			sort.Strings(writerNames)
+			for _, name := range writerNames {
+				if len(writerScopes[name]) == 0 {
+					add(v.fail("disjoint_writers_unscoped",
+						fmt.Sprintf("task %q is a writer but declares no writes scope; allow_disjoint_writers requires every writer to declare a non-empty writes scope", name),
+						"tasks."+name+".writes"))
+				}
+			}
+			for i := 0; i < len(writerNames); i++ {
+				for j := i + 1; j < len(writerNames); j++ {
+					a, b := writerScopes[writerNames[i]], writerScopes[writerNames[j]]
+					if !writesDisjoint(a, b) {
+						add(v.fail("disjoint_writers_overlap",
+							fmt.Sprintf("writer tasks %q and %q declare overlapping writes scopes %v vs %v",
+								writerNames[i], writerNames[j], a, b),
+							"parallelism.allowDisjointWriters"))
+					}
+				}
+			}
+		}
+	}
 
 	// 7. flow-level total budget mandatory and >= sum of task budgets.
 	if def.Budget.MaxTotalTokens < 1 {
@@ -442,6 +494,67 @@ func roleAllToolsReadOnly(ctx context.Context, resolver Resolver, roleDef domain
 	for _, tool := range roleDef.AllowedTools {
 		if !resolver.ToolReadOnly(ctx, tool) {
 			return false
+		}
+	}
+	return true
+}
+
+// validateWritesGlob checks a single writes-scope glob: relative path, no
+// traversal, no leading slash, and only glob metacharacters we understand.
+func validateWritesGlob(scope string) error {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return errors.New("empty scope")
+	}
+	if strings.HasPrefix(scope, "/") {
+		return errors.New("must be relative to /workspace (no leading slash)")
+	}
+	if strings.HasPrefix(scope, "..") {
+		return errors.New("must not escape the workspace (no .. segments)")
+	}
+	for _, seg := range strings.Split(scope, "/") {
+		if seg == ".." {
+			return errors.New("must not escape the workspace (no .. segments)")
+		}
+		if seg != "" && strings.ContainsAny(seg, "\\:\";|&`${}()") {
+			return fmt.Errorf("segment %q contains unsupported characters", seg)
+		}
+	}
+	return nil
+}
+
+// literalPrefix returns everything up to the first glob metacharacter, or the
+// whole pattern if none. Two scopes are conservatively disjoint only when
+// neither literal prefix is a prefix of the other: if either prefix extends
+// the other they may match a common path, so they are treated as overlapping.
+func literalPrefix(pattern string) string {
+	for i, r := range pattern {
+		if r == '*' || r == '?' || r == '[' {
+			return pattern[:i]
+		}
+	}
+	return pattern
+}
+
+// writesDisjoint reports whether two writes-scope sets cannot match any common
+// workspace path. Empty set means "whole workspace" and overlaps everything.
+// This is a conservative static approximation: overlapping literals at any
+// prefix point disqualify parallelism (scheduling-only; no runtime scope
+// enforcement today).
+func writesDisjoint(a, b []string) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	for _, pa := range a {
+		for _, pb := range b {
+			pa, pb = strings.TrimSpace(pa), strings.TrimSpace(pb)
+			if pa == "" || pb == "" {
+				return false
+		}
+			prefA, prefB := literalPrefix(pa), literalPrefix(pb)
+			if strings.HasPrefix(prefA, prefB) || strings.HasPrefix(prefB, prefA) {
+				return false
+		}
 		}
 	}
 	return true

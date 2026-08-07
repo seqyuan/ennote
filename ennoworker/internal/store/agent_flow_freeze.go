@@ -115,6 +115,11 @@ func (r *AgentFlowRunRepo) FreezeFlowDefinition(ctx context.Context, projectID s
 		node.RoleVersionID = versionID
 		node.SkillIDs = skillIDs
 		node.BudgetJSON = budgetJSON
+		// Freeze the scheduler concurrency class: reader (role is read-only)
+		// vs writer (can mutate). Writes scope is frozen verbatim from the
+		// task declaration; empty means the whole workspace (exclusive lane).
+		node.ReadOnly = roleDefinitionIsReadOnly(roleDef)
+		node.Writes = append([]string(nil), task.Writes...)
 		freeze = append(freeze, node)
 	}
 	if len(diagnostics) > 0 {

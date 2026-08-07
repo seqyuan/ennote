@@ -167,6 +167,16 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 
 	taskOutputs := map[string]json.RawMessage{}
 
+	// Parallel dispatch state: the active lane (reader/writer class) and the
+	// set of in-flight role children. Independent ready tasks of the same
+	// class dispatch concurrently up to parallelism.max; readers and writers
+	// never share the workspace at the same time (mutation lane), and writers
+	// only parallelize against each other when the flow opts into disjoint
+	// writes scopes.
+	lane := laneNone
+	var inFlight []inflightTask
+	maxParallel := def.EffectiveParallelismMax()
+
 	// Crash recovery: any node left in 'running' by a crashed orchestrator is
 	// reconciled against its child Run's terminal fact (folded when terminal,
 	// reset to interrupted otherwise) before the dispatch loop runs, so a
@@ -219,59 +229,118 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 		if converged {
 			continue // nodes changed by the back-edge reset; re-read them
 		}
-		next := nextReadyTask(nodes, completed, &def)
-		if next == nil {
-			// No runnable task: either the flow finished or a dependency failed.
+		ready := readyRoleTasks(nodes, completed, &def)
+
+		// Check and fan_out tasks are blocking gates: checks may mutate the
+		// workspace (sandbox commands) and fan_out instances read it. They run
+		// alone, only once the parallel lane has drained, so a concurrent
+		// writer can never race their snapshot.
+		if len(inFlight) == 0 {
+			if c := firstSpecialTask(ready, &def, domain.FlowTaskCheck); c != nil {
+				goal, err := ResolveGoalTemplate(def.Tasks[c.Handle].Goal, inputs, vars, taskOutputs)
+				if err != nil {
+					o.fail(ctx, runID, fmt.Sprintf("resolve goal for task %q: %v", c.Handle, err))
+					return
+				}
+				if err := o.runCheckTask(ctx, runID, state, c, def.Tasks[c.Handle], goal, taskOutputs); err != nil {
+					return
+				}
+				continue
+			}
+			if f := firstFanOutTask(ready, &def); f != nil {
+				goal, err := ResolveGoalTemplate(def.Tasks[f.Handle].Goal, inputs, vars, taskOutputs)
+				if err != nil {
+					o.fail(ctx, runID, fmt.Sprintf("resolve goal for task %q: %v", f.Handle, err))
+					return
+				}
+				if err := o.runFanOutTask(ctx, runID, state, f, def.Tasks[f.Handle], goal); err != nil {
+					return
+				}
+				continue
+			}
+		}
+
+		if len(ready) == 0 {
+			// No runnable task: either the flow finished, the lane is still
+			// draining, or a dependency failed.
 			if len(completed) == len(nodes) {
 				break // all tasks completed
+			}
+			// While children are still in flight, keep folding them: a batch
+			// sibling may be exactly the dependency the terminal gate needs.
+			if len(inFlight) > 0 {
+				if err := o.waitAndFoldAny(ctx, runID, run, &inFlight); err != nil {
+					return
+				}
+				continue
+			}
+			// Terminal gate: once every runnable task has settled, the unique
+			// terminal task (if any) resolves the flow outputs from its
+			// completed dependencies. Branch flows whose unselected paths stay
+			// pending terminate here, never dispatching the inactive branch.
+			if t := terminalGateTask(&def, completed); t != nil {
+				outputs := resolveFlowOutputs(def, *t, completed, taskOutputs)
+				if err := o.complete(ctx, runID, state.TotalTokensUsed, outputs); err != nil {
+					return
+				}
+				return
 			}
 			o.fail(ctx, runID, "flow has no runnable task (dependency failure)")
 			return
 		}
-		task := def.Tasks[next.Handle]
-		// Dependency gate: a pending task may only dispatch once every task it
-		// depends on has a completed checkpoint (defensive: the topological
-		// order makes this true in the happy path, and the check turns any
-		// failed/cancelled dependency into a clear flow failure).
-		if missing := uncompletedDep(task, completed); missing != "" {
-			o.fail(ctx, runID, fmt.Sprintf("task %q depends on incomplete task %q", next.Handle, missing))
-			return
+
+		// Establish the lane. Reader-first: when both classes are ready, the
+		// read-only tasks dispatch first so writers downstream get a stable
+		// snapshot and the mutation lane drains before any write.
+		if lane == laneNone {
+			lane = firstReadyClass(ready)
 		}
-		if task.Terminal != nil {
-			// Terminal gate: gather the flow outputs from the terminal task's
-			// dependency outputs and complete the flow.
-			outputs := resolveFlowOutputs(def, task, completed, taskOutputs)
-			if err := o.complete(ctx, runID, state.TotalTokensUsed, outputs); err != nil {
-				return
-			}
-			return
-		}
-		goal, err := ResolveGoalTemplate(task.Goal, inputs, vars, taskOutputs)
-		if err != nil {
-			o.fail(ctx, runID, fmt.Sprintf("resolve goal for task %q: %v", next.Handle, err))
-			return
-		}
-		switch task.Type {
-		case domain.FlowTaskCheck:
-			if err := o.runCheckTask(ctx, runID, state, next, task, goal, taskOutputs); err != nil {
-				return
-			}
-		default:
-			if task.FanOut != nil {
-				if err := o.runFanOutTask(ctx, runID, state, next, task, goal); err != nil {
+
+		batch, hasLane := selectLaneBatch(ready, lane, &def, maxParallel, inFlight)
+		if !hasLane {
+			// Nothing of the active lane is ready. If the lane is still busy,
+			// drain it before switching so readers and writers never overlap;
+			// otherwise flip the lane.
+			if len(inFlight) > 0 {
+				if err := o.waitAndFoldAny(ctx, runID, run, &inFlight); err != nil {
 					return
 				}
-				continue // loop iteration already reconciled cancel/budget
+				continue
 			}
-			if err := o.runRoleTask(ctx, runID, state, next, task, goal); err != nil {
+			lane = 1 - lane
+			continue
+		}
+
+		// Dispatch the batch: each task gets its own goal and child Run; nodes
+		// are claimed with a CAS so a restart race never dispatches twice.
+		for _, node := range batch {
+			task := def.Tasks[node.Handle]
+			// Dependency gate (defensive: ready-set computation already enforces
+			// this, and the check turns any failed dependency into a clear
+			// flow failure instead of a stuck run).
+			if missing := uncompletedDep(task, completed); missing != "" {
+				o.fail(ctx, runID, fmt.Sprintf("task %q depends on incomplete task %q", node.Handle, missing))
 				return
 			}
+			goal, err := ResolveGoalTemplate(task.Goal, inputs, vars, taskOutputs)
+			if err != nil {
+				o.fail(ctx, runID, fmt.Sprintf("resolve goal for task %q: %v", node.Handle, err))
+				return
+			}
+			child, err := o.dispatchRoleChild(ctx, runID, state, node, task, goal)
+			if err != nil {
+				return
+			}
+			inFlight = append(inFlight, inflightTask{node: node, childID: child.RunID})
 		}
-		// Re-check cancel after the task: a cancelled child settles as
-		// cancelled and the loop converts it to the flow terminal state.
-		if o.isCancelled(ctx, runID) {
-			o.cancelRemaining(ctx, runID, "")
-			return
+
+		if len(inFlight) > 0 {
+			// Wait for any in-flight child to settle, fold its checkpoint, and
+			// re-evaluate the ready set (completed dependencies unlock the next
+			// tier while the rest of the batch keeps running).
+			if err := o.waitAndFoldAny(ctx, runID, run, &inFlight); err != nil {
+				return
+			}
 		}
 	}
 	// All tasks completed.
@@ -280,10 +349,12 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 	}
 }
 
-// runRoleTask dispatches one role task as a child Run and settles its
-// checkpoint from the folded child result.
-func (o *Orchestrator) runRoleTask(ctx context.Context, runID string, flow *domain.RunAgentFlow,
-	node *domain.RunAgentFlowNode, task domain.FlowTask, goal string) error {
+// dispatchRoleChild claims one role task (CAS pending -> running), creates its
+// child Run, records the child on the node, publishes the started event, and
+// enqueues the child. It never blocks: the caller batches role children and
+// waits for any to settle via waitAndFoldAny.
+func (o *Orchestrator) dispatchRoleChild(ctx context.Context, runID string, flow *domain.RunAgentFlow,
+	node *domain.RunAgentFlowNode, task domain.FlowTask, goal string) (ChildInfo, error) {
 	budget := taskBudgetCeiling(node)
 	// Claim the node before dispatching (CAS pending -> running) so two
 	// orchestrators (restart race) never dispatch the same task twice.
@@ -291,7 +362,7 @@ func (o *Orchestrator) runRoleTask(ctx context.Context, runID string, flow *doma
 		TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodePending, domain.FlowNodeInterrupted},
 		SetState: domain.FlowNodeRunning, GoalText: goal,
 	}); err != nil {
-		return err
+		return ChildInfo{}, err
 	}
 	child, err := o.Children.CreateTaskChild(ctx, runID, flow.SessionID, ChildSpec{
 		Handle: node.Handle, RoleVersionID: node.RoleVersionID, Assignment: goal, Budget: budget,
@@ -299,35 +370,38 @@ func (o *Orchestrator) runRoleTask(ctx context.Context, runID string, flow *doma
 	if err != nil {
 		o.failTask(ctx, runID, node, err.Error())
 		o.fail(ctx, runID, fmt.Sprintf("task %q could not start: %v", node.Handle, err))
-		return nil
+		return ChildInfo{}, nil
 	}
 	if err := o.Store.UpdateNode(ctx, runID, NodeUpdate{
 		TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
 		SetState: domain.FlowNodeRunning, ChildRunID: child.RunID, GoalText: goal,
 	}); err != nil {
-		return err
+		return ChildInfo{}, err
 	}
 	if err := o.Events.PublishFlow(ctx, runID, "flow_task_started", map[string]any{
 		"flowRunId": runID, "task": node.Handle, "childRunId": child.RunID,
 	}); err != nil {
 		o.fail(ctx, runID, "flow_task_started event failed: "+err.Error())
-		return nil
+		return ChildInfo{}, nil
 	}
 	if o.Enqueue != nil {
 		if err := o.Enqueue(ctx, child.RunID); err != nil {
 			o.fail(ctx, runID, fmt.Sprintf("enqueue child %s: %v", child.RunID, err))
-			return nil
+			return ChildInfo{}, nil
 		}
 	}
-	status, result, err := o.waitChild(ctx, runID, child.RunID)
-	if err != nil {
-		return err
-	}
-	if o.isCancelled(ctx, runID) || status == domain.RunCancelled {
-		return o.cancelRemaining(ctx, runID, child.RunID)
-	}
+	return child, nil
+}
+
+// foldRoleChild settles one role child from an already-known terminal status:
+// budget accounting, over-budget termination, failure/cancel handling, and the
+// completed checkpoint + event. On failure it cancels every other in-flight
+// child so a parallel batch never leaks running children.
+func (o *Orchestrator) foldRoleChild(ctx context.Context, runID string, flow *domain.RunAgentFlow,
+	node *domain.RunAgentFlowNode, childID string, status domain.RunStatus,
+	result *domain.SubmitResult, remaining []inflightTask) error {
 	// Budget accounting: fold the child's actual usage into the flow ledger.
-	usage, _ := o.Children.ChildUsage(ctx, child.RunID)
+	usage, _ := o.Children.ChildUsage(ctx, childID)
 	total, _ := o.Store.AddTokenUsage(ctx, runID, usage.Tokens)
 	var version *domain.AgentFlowVersion
 	if v, err := o.Store.GetVersion(ctx, flow.FlowVersionID); err == nil {
@@ -337,6 +411,7 @@ func (o *Orchestrator) runRoleTask(ctx context.Context, runID string, flow *doma
 		var def domain.FlowDefinition
 		if json.Unmarshal(version.DefinitionJSON, &def) == nil &&
 			def.Budget.MaxTotalTokens > 0 && total > def.Budget.MaxTotalTokens {
+			o.cancelInflight(ctx, runID, remaining)
 			_ = o.Store.UpdateFlowState(ctx, runID, domain.FlowStateBudgetExceeded, total,
 				fmt.Sprintf("flow budget exceeded: %d > %d", total, def.Budget.MaxTotalTokens))
 			_ = o.Events.PublishFlow(ctx, runID, "flow_budget_exceeded", map[string]any{
@@ -353,6 +428,7 @@ func (o *Orchestrator) runRoleTask(ctx context.Context, runID string, flow *doma
 		} else if status == domain.RunInterrupted {
 			code = "task_interrupted"
 		}
+		o.cancelInflight(ctx, runID, remaining)
 		o.failTask(ctx, runID, node, code)
 		o.fail(ctx, runID, fmt.Sprintf("task %q %s", node.Handle, code))
 		return nil
@@ -370,9 +446,64 @@ func (o *Orchestrator) runRoleTask(ctx context.Context, runID string, flow *doma
 		return err
 	}
 	return o.Events.PublishFlow(ctx, runID, "flow_task_completed", map[string]any{
-		"flowRunId": runID, "task": node.Handle, "outputRef": string(payload), "childRunId": child.RunID,
+		"flowRunId": runID, "task": node.Handle, "outputRef": string(payload), "childRunId": childID,
 	})
 }
+
+// waitAndFoldAny polls all in-flight role children and folds the first one
+// that settles, removing it from the set. The rest keep running; the caller
+// re-evaluates the ready set. On flow cancellation every in-flight child is
+// hard-cancelled and the caller's next loop iteration terminalizes the run.
+func (o *Orchestrator) waitAndFoldAny(ctx context.Context, runID string, flow *domain.RunAgentFlow,
+	inFlight *[]inflightTask) error {
+	ticker := time.NewTicker(o.PollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+		if o.isCancelled(ctx, runID) {
+			o.cancelInflight(ctx, runID, *inFlight)
+			return nil // loop top terminalizes via cancelRemaining
+		}
+		settled := -1
+		for i := range *inFlight {
+			status, err := o.Children.ChildRunStatus(ctx, (*inFlight)[i].childID)
+			if err != nil {
+				return err
+			}
+			if status.Terminal() {
+				settled = i
+				break
+			}
+		}
+		if settled < 0 {
+			continue
+		}
+		task := (*inFlight)[settled]
+		*inFlight = append((*inFlight)[:settled], (*inFlight)[settled+1:]...)
+		result, _ := o.Children.ChildTerminalResult(ctx, task.childID)
+		status, _ := o.Children.ChildRunStatus(ctx, task.childID)
+		return o.foldRoleChild(ctx, runID, flow, task.node, task.childID, status, result, *inFlight)
+	}
+}
+
+// cancelInflight hard-cancels a set of in-flight children and marks their
+// nodes cancelled, without touching the flow state (used on parallel task
+// failure and budget overrun; user cancellation takes the cancelRemaining
+// path instead).
+func (o *Orchestrator) cancelInflight(ctx context.Context, runID string, inFlight []inflightTask) {
+	for _, task := range inFlight {
+		_ = o.Children.CancelChildRun(ctx, task.childID)
+		_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
+			TaskIndex: task.node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
+			SetState: domain.FlowNodeCancelled,
+		})
+	}
+}
+
 
 // runCheckTask executes one deterministic check gate: policy gate, durable
 // Ask-mode approval, sandbox execution, and checkpoint write. Check tasks are
@@ -652,33 +783,6 @@ func (o *Orchestrator) waitChildren(ctx context.Context, runID string, childIDs 
 	return results, statuses
 }
 
-// waitChild polls the child Run until terminal, honoring cancellation and the
-// caller context.
-func (o *Orchestrator) waitChild(ctx context.Context, runID, childRunID string) (domain.RunStatus, *domain.SubmitResult, error) {
-	ticker := time.NewTicker(o.PollInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return "", nil, ctx.Err()
-		case <-ticker.C:
-		}
-		status, err := o.Children.ChildRunStatus(ctx, childRunID)
-		if err != nil {
-			return "", nil, err
-		}
-		if status.Terminal() {
-			result, _ := o.Children.ChildTerminalResult(ctx, childRunID)
-			return status, result, nil
-		}
-		if o.isCancelled(ctx, runID) {
-			// Hard-cancel the active child; its settlement becomes visible on
-			// the next poll.
-			_ = o.Children.CancelChildRun(ctx, childRunID)
-		}
-	}
-}
-
 func (o *Orchestrator) complete(ctx context.Context, runID string, totalTokens int64, outputs map[string]json.RawMessage) error {
 	payload := map[string]any{"outputs": map[string]any{}}
 	for name, value := range outputs {
@@ -748,17 +852,35 @@ func (o *Orchestrator) isCancelled(ctx context.Context, runID string) bool {
 	return err == nil && value
 }
 
-// nextReadyTask picks the first dispatchable task: the lowest-index node that
-// is pending or interrupted (completed/running/failed/blocked/cancelled are
-// never re-selected). Two gates apply: the dependency gate in run() and the
-// branch gate here — a node claimed by a check's next.pass/next.fail is only
-// dispatchable once that check completed with the matching result.
-func nextReadyTask(nodes []*domain.RunAgentFlowNode, _ map[string]*domain.RunAgentFlowNode,
-	def *domain.FlowDefinition) *domain.RunAgentFlowNode {
+// Lane constants: the active ready-set concurrency class. Readers (read-only
+// Roles) run in parallel up to parallelism.max; writers take the mutation
+// lane. The two classes never overlap: readers and writers are dispatched in
+// separate windows so a reader never sees a sibling writer's partial state.
+const (
+	laneNone   = -1
+	laneReader = 0
+	laneWriter = 1
+)
+
+// inflightTask is one dispatched role child awaiting settlement.
+type inflightTask struct {
+	node    *domain.RunAgentFlowNode
+	childID string
+}
+
+// readyRoleTasks returns every dispatchable role/fan_out/check node: pending
+// or interrupted, not on an inactive check-gate branch, and with every
+// depends task completed (the ready set). Nodes are already ordered by task
+// index (ListNodes), which keeps dispatch deterministic and recovery
+// reproducible. Terminal tasks are excluded: they complete the flow instead
+// of dispatching a child.
+func readyRoleTasks(nodes []*domain.RunAgentFlowNode, completed map[string]*domain.RunAgentFlowNode,
+	def *domain.FlowDefinition) []*domain.RunAgentFlowNode {
 	byHandle := make(map[string]*domain.RunAgentFlowNode, len(nodes))
 	for i := range nodes {
 		byHandle[nodes[i].Handle] = nodes[i]
 	}
+	var ready []*domain.RunAgentFlowNode
 	for i := range nodes {
 		node := nodes[i]
 		if node.TerminalState != domain.FlowNodePending && node.TerminalState != domain.FlowNodeInterrupted {
@@ -767,9 +889,130 @@ func nextReadyTask(nodes []*domain.RunAgentFlowNode, _ map[string]*domain.RunAge
 		if inactiveBranch(node.Handle, def, byHandle, map[string]bool{}) {
 			continue
 		}
-		return node
+		if task, ok := def.Tasks[node.Handle]; ok {
+			if task.Terminal != nil {
+				continue // terminal gates complete the flow; never dispatched
+			}
+			if uncompletedDep(task, completed) != "" {
+				continue // depends not yet completed; not ready
+			}
+		}
+		ready = append(ready, node)
+	}
+	return ready
+}
+
+// firstSpecialTask returns the first ready check task (or nil). Check tasks
+// are deterministic gates that run alone, once the parallel lane has drained.
+func firstSpecialTask(ready []*domain.RunAgentFlowNode, def *domain.FlowDefinition, taskType string) *domain.RunAgentFlowNode {
+	for _, node := range ready {
+		if task, ok := def.Tasks[node.Handle]; ok && task.Type == taskType {
+			return node
+		}
 	}
 	return nil
+}
+
+// firstFanOutTask returns the first ready fan_out task (or nil). Fan_out
+// tasks are read-only (validated) and run alone like checks.
+func firstFanOutTask(ready []*domain.RunAgentFlowNode, def *domain.FlowDefinition) *domain.RunAgentFlowNode {
+	for _, node := range ready {
+		if task, ok := def.Tasks[node.Handle]; ok && task.FanOut != nil {
+			return node
+		}
+	}
+	return nil
+}
+
+// terminalGateTask returns the flow's terminal task when every one of its
+// depends has a completed checkpoint, or nil if it is not yet unlocked.
+func terminalGateTask(def *domain.FlowDefinition, completed map[string]*domain.RunAgentFlowNode) *domain.FlowTask {
+	for _, task := range def.Tasks {
+		if task.Terminal == nil {
+			continue
+		}
+		if uncompletedDep(task, completed) == "" {
+			value := task
+			return &value
+		}
+	}
+	return nil
+}
+
+// firstReadyClass picks the lane for the next dispatch window. Reader-first:
+// when both classes are ready, read-only tasks go first so the mutation lane
+// drains before any writer touches the workspace.
+func firstReadyClass(ready []*domain.RunAgentFlowNode) int {
+	for _, node := range ready {
+		if node.ReadOnly {
+			return laneReader
+		}
+	}
+	return laneWriter
+}
+
+// selectLaneBatch picks the dispatch batch for the active lane: up to
+// parallelism.max same-class role tasks. Writers stay exclusive unless the
+// flow opts into disjoint writes scopes; in that case the batch greedily adds
+// writers whose frozen Writes are pairwise disjoint with the batch and with
+// the in-flight writers. Returns the batch and whether any ready task belongs
+// to the lane.
+func selectLaneBatch(ready []*domain.RunAgentFlowNode, lane int, def *domain.FlowDefinition,
+	maxParallel int, inFlight []inflightTask) ([]*domain.RunAgentFlowNode, bool) {
+	var batch []*domain.RunAgentFlowNode
+	found := false
+	if lane == laneReader {
+		for _, node := range ready {
+			if !node.ReadOnly {
+				continue
+			}
+			found = true
+			if len(batch) < maxParallel {
+				batch = append(batch, node)
+			}
+		}
+		return batch, found
+	}
+	// Writer lane.
+	disjoint := def.DisjointWritersEnabled()
+	inFlightScopes := make([][]string, 0, len(inFlight))
+	for _, f := range inFlight {
+		inFlightScopes = append(inFlightScopes, f.node.Writes)
+	}
+	for _, node := range ready {
+		if node.ReadOnly {
+			continue
+		}
+		found = true
+		if len(batch) >= maxParallel {
+			continue
+		}
+		if !disjoint {
+			if len(batch) == 0 {
+				batch = append(batch, node)
+			}
+			continue
+		}
+		compatible := true
+		for _, other := range inFlightScopes {
+			if !writesDisjoint(node.Writes, other) {
+				compatible = false
+				break
+			}
+		}
+		if compatible {
+			for _, selected := range batch {
+				if !writesDisjoint(node.Writes, selected.Writes) {
+					compatible = false
+					break
+				}
+			}
+		}
+		if compatible {
+			batch = append(batch, node)
+		}
+	}
+	return batch, found
 }
 
 // inactiveBranch reports whether a node lies on an inactive check-gate

@@ -34,6 +34,10 @@ func ParseDefinition(data []byte) (*domain.FlowDefinition, error) {
 		} `yaml:"budget"`
 		Tasks       map[string]yaml.Node `yaml:"tasks"`
 		Convergence []convergenceRaw     `yaml:"convergence"`
+		Parallelism *struct {
+			Max                  int  `yaml:"max"`
+			AllowDisjointWriters bool `yaml:"allow_disjoint_writers"`
+		} `yaml:"parallelism"`
 	}
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
@@ -65,6 +69,12 @@ func ParseDefinition(data []byte) (*domain.FlowDefinition, error) {
 	}
 	if raw.Budget != nil {
 		def.Budget = domain.FlowBudget{MaxTotalTokens: raw.Budget.MaxTotalTokens}
+	}
+	if raw.Parallelism != nil {
+		def.Parallelism = &domain.FlowParallelism{
+			Max:                  raw.Parallelism.Max,
+			AllowDisjointWriters: raw.Parallelism.AllowDisjointWriters,
+		}
 	}
 	for name, node := range raw.Tasks {
 		task, err := decodeTask(node)
@@ -128,6 +138,7 @@ func normalizeDefinition(def *domain.FlowDefinition) error {
 		task.Output = strings.TrimSpace(task.Output)
 		task.Skills = sortedUniqueStrings(task.Skills)
 		task.Depends = sortedUniqueStrings(task.Depends)
+		task.Writes = sortedUniqueStrings(task.Writes)
 		if task.Next != nil {
 			for k, v := range task.Next {
 				task.Next[k] = strings.TrimSpace(v)

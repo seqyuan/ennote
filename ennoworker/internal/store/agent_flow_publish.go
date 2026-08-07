@@ -179,15 +179,35 @@ func (f *flowPublishResolver) KnownSkill(ctx context.Context, name string) bool 
 	return f.skills[name]
 }
 
-// ToolReadOnly resolves a tool's fan_out safety. MCP remote tools and unknown
-// tools fail closed (not read-only).
-func (f *flowPublishResolver) ToolReadOnly(ctx context.Context, tool string) bool {
+// toolReadOnlyKind reports whether a tool can never mutate the workspace.
+// MCP remote tools and unknown tools fail closed (not read-only).
+func toolReadOnlyKind(tool string) bool {
 	switch tool {
 	case "read", "ls", "grep", "find", "git_readonly", "search_compacted_history", "todo":
 		return true
 	default:
 		return false
 	}
+}
+
+// ToolReadOnly resolves a tool's fan_out safety.
+func (f *flowPublishResolver) ToolReadOnly(ctx context.Context, tool string) bool {
+	return toolReadOnlyKind(tool)
+}
+
+// roleDefinitionIsReadOnly reports whether a frozen Role definition is fully
+// read-only (authority + every allowed tool), the same classification the
+// publish validator applies to fan_out and to writer-scope accounting.
+func roleDefinitionIsReadOnly(roleDef domain.RoleDefinition) bool {
+	if roleDef.Authority != domain.RoleAuthorityReadOnly {
+		return false
+	}
+	for _, tool := range roleDef.AllowedTools {
+		if !toolReadOnlyKind(tool) {
+			return false
+		}
+	}
+	return true
 }
 
 // CheckFlowDependencies resolves a flow definition's dependency manifest
