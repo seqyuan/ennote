@@ -11,15 +11,16 @@ import (
 )
 
 // FreezeFlowDefinition resolves every task of a flow version into its frozen
-// node snapshot: topological order (depends first), exact role@version binding,
-// skill catalog resolution, goal digest, and the per-task budget ceiling.
+// node snapshot: topological order (depends first), exact role@version binding
+// (or a flow-scoped bare-handle role when flowID owns it), skill catalog
+// resolution, goal digest, and the per-task budget ceiling.
 // Freeze failures are fail-loud diagnostics; nothing is persisted until every
 // task freezes.
 //
 // Phase 1 admission: roles with delegation admission 'denied' or
 // 'approval_required' reject the flow run — the flow start request is the
 // authorization and must not widen a Role's admission policy.
-func (r *AgentFlowRunRepo) FreezeFlowDefinition(ctx context.Context, projectID string,
+func (r *AgentFlowRunRepo) FreezeFlowDefinition(ctx context.Context, projectID, flowID string,
 	def *domain.FlowDefinition, inputsJSON json.RawMessage) ([]FlowNodeFreeze, []string, error) {
 	var diagnostics []string
 	add := func(format string, args ...any) {
@@ -72,7 +73,7 @@ func (r *AgentFlowRunRepo) FreezeFlowDefinition(ctx context.Context, projectID s
 			add("task %q has unsupported type %q", name, task.Type)
 			continue
 		}
-		versionID, definitionJSON, err := r.ResolveFlowRoleVersion(ctx, task.Role, projectID)
+		versionID, definitionJSON, err := r.ResolveFlowRoleVersion(ctx, task.Role, projectID, flowID)
 		if err != nil {
 			add("task %q: %v", name, err)
 			continue

@@ -38,7 +38,10 @@ type CreateRoleInput struct {
 	Color       string
 	Scope       domain.RoleScope
 	ProjectID   *string
-	Definition  domain.RoleDefinition
+	// FlowID is required when Scope is RoleScopeFlow: the owning Agent Flow
+	// profile. Flow roles inherit the flow's project boundary at resolve time.
+	FlowID *string
+	Definition domain.RoleDefinition
 }
 
 type UpdateRoleDraftInput struct {
@@ -56,6 +59,7 @@ type ListRolesInput struct {
 	Query     string
 	Scope     domain.RoleScope
 	ProjectID *string
+	FlowID    *string
 	Status    string
 	Limit     int
 	Cursor    string
@@ -80,6 +84,12 @@ func (r *RoleRepo) Create(ctx context.Context, input CreateRoleInput) (*domain.R
 	if input.Color == "" {
 		input.Color = "neutral"
 	}
+	if input.Scope == domain.RoleScopeFlow && (input.FlowID == nil || *input.FlowID == "") {
+		return nil, fmt.Errorf("flow-scoped role requires a flow id")
+	}
+	if input.Scope != domain.RoleScopeFlow {
+		input.FlowID = nil
+	}
 	definition := normalizeRoleDefinition(input.Definition)
 	encoded, err := json.Marshal(definition)
 	if err != nil {
@@ -89,16 +99,17 @@ func (r *RoleRepo) Create(ctx context.Context, input CreateRoleInput) (*domain.R
 	role := &domain.RoleIdentity{
 		ID: uuid.NewString(), Handle: input.Handle, Name: input.Name, Description: input.Description,
 		Positioning: input.Positioning, Icon: input.Icon, Color: input.Color, Scope: input.Scope,
-		ProjectID: input.ProjectID, Status: "active", Draft: encoded, DraftRevision: 0,
+		ProjectID: input.ProjectID, FlowID: input.FlowID, Status: "active", Draft: encoded, DraftRevision: 0,
 		DelegationEnabled: true, CreatedAt: now, UpdatedAt: now,
 	}
 	_, err = r.DB.ExecContext(ctx, `INSERT INTO agent_profiles
 		(id,name,description,system_prompt,tool_policy,status,created_at,updated_at,
-		 object_kind,handle,scope,project_id,icon,color,positioning,draft_json,draft_revision,
+		 object_kind,handle,scope,project_id,flow_id,icon,color,positioning,draft_json,draft_revision,
 		 delegation_enabled,delegation_revocation_epoch)
-		VALUES(?,?,?,'','default','active',?,?, 'role',?,?,?,?,?,?,?,0,1,0)`,
+		VALUES(?,?,?,'','default','active',?,?, 'role',?,?,?,?,?,?,?,?,0,1,0)`,
 		role.ID, role.Name, role.Description, roleTime(now), roleTime(now), role.Handle,
-		role.Scope, nullableString(role.ProjectID), role.Icon, role.Color, role.Positioning, string(encoded))
+		role.Scope, nullableString(role.ProjectID), nullableString(role.FlowID), role.Icon, role.Color,
+		role.Positioning, string(encoded))
 	if err != nil {
 		return nil, fmt.Errorf("create role: %w", err)
 	}
@@ -133,16 +144,26 @@ func (r *RoleRepo) List(ctx context.Context, input ListRolesInput) ([]domain.Rol
 	if input.ProjectID != nil {
 		projectID = *input.ProjectID
 	}
-	rows, err := r.DB.QueryContext(ctx, `SELECT p.id,p.handle,p.name,p.description,p.positioning,p.icon,p.color,p.scope,p.project_id,
+	flowID := ""
+	if input.FlowID != nil {
+		flowID = *input.FlowID
+	}
+	// Generic role catalogs (chat autocomplete, delegation, approval preview)
+	// must never surface flow-scoped roles: those resolve only inside their
+	// owning graph. An explicit scope=flow&flowId= query is the sole accessor.
+	rows, err := r.DB.QueryContext(ctx, `SELECT p.id,p.handle,p.name,p.description,p.positioning,p.icon,p.color,p.scope,p.project_id,p.flow_id,
 		p.status,p.current_version_id,COALESCE(v.version,0),p.updated_at
 		FROM agent_profiles p LEFT JOIN agent_profile_versions v ON v.id=p.current_version_id
 		WHERE p.object_kind='role' AND p.status=?
 		  AND (?='' OR lower(p.handle) LIKE ? OR lower(p.name) LIKE ? OR lower(p.positioning) LIKE ?)
-		  AND (?='' OR p.scope=?)
-		  AND (p.scope IN ('builtin','global') OR p.project_id=?)
+		  AND (?='' OR p.scope=?) AND (?='' OR p.flow_id=?)
+		  -- Generic queries (no flowId) exclude flow-scoped roles; a flowId
+		  -- query matches exactly the owning flow's roles.
+		  AND ( (p.scope='flow' AND p.flow_id=?) OR (p.scope!='flow' AND (p.scope IN ('builtin','global') OR p.project_id=?)) )
 		  AND (?='' OR p.id>?)
 		ORDER BY p.id LIMIT ?`, status, strings.TrimSpace(input.Query), query, query, query,
-		string(input.Scope), string(input.Scope), projectID, input.Cursor, input.Cursor, limit)
+		string(input.Scope), string(input.Scope), flowID, flowID,
+		flowID, projectID, input.Cursor, input.Cursor, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -150,14 +171,18 @@ func (r *RoleRepo) List(ctx context.Context, input ListRolesInput) ([]domain.Rol
 	items := make([]domain.RoleSummary, 0)
 	for rows.Next() {
 		var item domain.RoleSummary
-		var project, current sql.NullString
+		var project, flow, current sql.NullString
 		var updated string
 		if err := rows.Scan(&item.ID, &item.Handle, &item.Name, &item.Description, &item.Positioning,
-			&item.Icon, &item.Color, &item.Scope, &project, &item.Status, &current, &item.CurrentVersion, &updated); err != nil {
+			&item.Icon, &item.Color, &item.Scope, &project, &flow, &item.Status, &current,
+			&item.CurrentVersion, &updated); err != nil {
 			return nil, err
 		}
 		if project.Valid {
 			item.ProjectID = &project.String
+		}
+		if flow.Valid {
+			item.FlowID = &flow.String
 		}
 		if current.Valid {
 			item.CurrentVersionID = &current.String
@@ -521,18 +546,18 @@ func validationMessage(values []domain.RoleValidationDiagnostic) string {
 	return values[0].Code
 }
 
-const roleIdentitySelect = `SELECT p.id,p.handle,p.name,p.description,p.positioning,p.icon,p.color,p.scope,p.project_id,
+const roleIdentitySelect = `SELECT p.id,p.handle,p.name,p.description,p.positioning,p.icon,p.color,p.scope,p.project_id,p.flow_id,
 	p.status,p.draft_json,p.draft_revision,p.current_version_id,COALESCE(v.version,0),p.delegation_enabled,
 	p.delegation_revocation_epoch,p.delegation_disabled_at,p.created_at,p.updated_at
 	FROM agent_profiles p LEFT JOIN agent_profile_versions v ON v.id=p.current_version_id`
 
 func scanRoleIdentity(scanner interface{ Scan(...any) error }) (domain.RoleIdentity, error) {
 	var role domain.RoleIdentity
-	var projectID, currentVersionID, disabledAt sql.NullString
+	var projectID, flowID, currentVersionID, disabledAt sql.NullString
 	var draftJSON, createdAt, updatedAt string
 	var delegationEnabled int
 	if err := scanner.Scan(&role.ID, &role.Handle, &role.Name, &role.Description, &role.Positioning,
-		&role.Icon, &role.Color, &role.Scope, &projectID, &role.Status, &draftJSON, &role.DraftRevision,
+		&role.Icon, &role.Color, &role.Scope, &projectID, &flowID, &role.Status, &draftJSON, &role.DraftRevision,
 		&currentVersionID, &role.CurrentVersion, &delegationEnabled, &role.DelegationRevocationEpoch,
 		&disabledAt, &createdAt, &updatedAt); err != nil {
 		return role, err
@@ -540,6 +565,9 @@ func scanRoleIdentity(scanner interface{ Scan(...any) error }) (domain.RoleIdent
 	role.Draft = json.RawMessage(draftJSON)
 	if projectID.Valid {
 		role.ProjectID = &projectID.String
+	}
+	if flowID.Valid {
+		role.FlowID = &flowID.String
 	}
 	if currentVersionID.Valid {
 		role.CurrentVersionID = &currentVersionID.String

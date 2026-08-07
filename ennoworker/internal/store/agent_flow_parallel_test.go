@@ -267,7 +267,7 @@ func runParallelFlow(t *testing.T, db *sql.DB, profiles *store.AgentFlowProfileR
 	inputs, err := store.NormalizeFlowInputs(def, map[string]any{"target": "pipeline"}, nil)
 	require.NoError(t, err)
 	flowRuns := &store.AgentFlowRunRepo{DB: db, SkillCatalog: map[string]string{"go-dev": "skill-go-dev"}}
-	freeze, diagnostics, err := flowRuns.FreezeFlowDefinition(ctx, projectID, def, inputs)
+	freeze, diagnostics, err := flowRuns.FreezeFlowDefinition(ctx, projectID, "", def, inputs)
 	require.NoError(t, err, diagnostics)
 	run, err := flowRuns.CreateFlowRun(ctx, store.CreateFlowRunInput{
 		SessionID: session.ID, ProjectID: projectID, FlowVersionID: version.ID, InputsJSON: inputs,
@@ -509,7 +509,7 @@ func TestParallelRecoveryRedispatchesAllInFlight(t *testing.T) {
 	require.NoError(t, err)
 	inputs, err := store.NormalizeFlowInputs(def, map[string]any{"target": "pipeline"}, nil)
 	require.NoError(t, err)
-	freeze, diagnostics, err := flowRuns.FreezeFlowDefinition(ctx, projectID, def, inputs)
+	freeze, diagnostics, err := flowRuns.FreezeFlowDefinition(ctx, projectID, "", def, inputs)
 	require.NoError(t, err, diagnostics)
 	run, err := flowRuns.CreateFlowRun(ctx, store.CreateFlowRunInput{
 		SessionID: session.ID, ProjectID: projectID, FlowVersionID: version.ID, InputsJSON: inputs,

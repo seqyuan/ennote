@@ -2703,6 +2703,7 @@ export interface components {
             color?: string;
             scope: components["schemas"]["RoleScope"];
             projectId?: string;
+            flowId?: string;
             definition: components["schemas"]["RoleDefinition"];
         };
         UpdateRoleDraftInput: {
@@ -3332,6 +3333,7 @@ export interface operations {
                 q?: string;
                 scope?: components["schemas"]["RoleScope"];
                 projectId?: string;
+                flowId?: string;
                 status?: "active" | "archived";
                 cursor?: string;
                 limit?: number;

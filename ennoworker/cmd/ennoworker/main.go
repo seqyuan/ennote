@@ -1753,7 +1753,7 @@ func run() error {
 		if err != nil {
 			return nil, err
 		}
-		freeze, diagnostics, err := flowRuns.FreezeFlowDefinition(ctx, projectID, &def, inputsJSON)
+		freeze, diagnostics, err := flowRuns.FreezeFlowDefinition(ctx, projectID, version.ProfileID, &def, inputsJSON)
 		if err != nil {
 			return nil, fmt.Errorf("freeze flow: %v", append([]string(nil), diagnostics...))
 		}

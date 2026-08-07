@@ -194,7 +194,7 @@ func TestAgentFlowRunFreezeAndNodes(t *testing.T) {
 
 	inputs, err := store.NormalizeFlowInputs(def, map[string]any{"target": "src/main.go"}, nil)
 	require.NoError(t, err)
-	freeze, diagnostics, err := runs.FreezeFlowDefinition(ctx, projectID, def, inputs)
+	freeze, diagnostics, err := runs.FreezeFlowDefinition(ctx, projectID, "", def, inputs)
 	require.NoError(t, err, diagnostics)
 	require.Len(t, freeze, 3) // producer, reviewer, accept
 
@@ -282,7 +282,7 @@ func TestAgentFlowRunFreezeRejectsMissingRequiredInput(t *testing.T) {
 
 	inputs, err := store.NormalizeFlowInputs(def, map[string]any{}, nil)
 	require.NoError(t, err)
-	_, diagnostics, err := runs.FreezeFlowDefinition(ctx, projectID, def, inputs)
+	_, diagnostics, err := runs.FreezeFlowDefinition(ctx, projectID, "", def, inputs)
 	require.Error(t, err)
 	require.Contains(t, diagnostics[0], `input "target" is required`)
 
@@ -407,7 +407,7 @@ func TestAgentFlowSameSlugTwoProjects(t *testing.T) {
 func TestAgentFlowRoleVersionResolutionAndAdmission(t *testing.T) {
 	db, _, roles, profiles, _, runs, projectID, _, _ := setupFlowFixture(t)
 	ctx := context.Background()
-	versionID, defJSON, err := runs.ResolveFlowRoleVersion(ctx, "flow-worker@1", projectID)
+	versionID, defJSON, err := runs.ResolveFlowRoleVersion(ctx, "flow-worker@1", projectID, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, versionID)
 	var roleDef domain.RoleDefinition
@@ -415,14 +415,16 @@ func TestAgentFlowRoleVersionResolutionAndAdmission(t *testing.T) {
 	assert.Equal(t, domain.DelegationAutoWithinBudget, roleDef.DelegationPolicy.Admission)
 
 	// Wrong version fails.
-	_, _, err = runs.ResolveFlowRoleVersion(ctx, "flow-worker@2", projectID)
+	_, _, err = runs.ResolveFlowRoleVersion(ctx, "flow-worker@2", projectID, "")
 	require.Error(t, err)
 	// Unknown role fails.
-	_, _, err = runs.ResolveFlowRoleVersion(ctx, "nope@1", projectID)
+	_, _, err = runs.ResolveFlowRoleVersion(ctx, "nope@1", projectID, "")
 	require.Error(t, err)
-	// Missing @version fails.
-	_, _, err = runs.ResolveFlowRoleVersion(ctx, "flow-worker", projectID)
-	require.Error(t, err)
+	// Bare handle (no @version) resolves to the current shared role when no
+	// flow-scoped role owns it.
+	bareVersion, _, bareErr := runs.ResolveFlowRoleVersion(ctx, "flow-worker", projectID, "")
+	require.NoError(t, bareErr)
+	assert.Equal(t, versionID, bareVersion)
 
 	// A Role that denies delegation rejects the flow freeze.
 	deniedDef := validRoleDefinition(mustGetModelID(t, db))
@@ -454,7 +456,7 @@ tasks:
 	require.NoError(t, err)
 	inputs, err := store.NormalizeFlowInputs(def, nil, nil)
 	require.NoError(t, err)
-	_, diagnostics, err := runs.FreezeFlowDefinition(ctx, projectID, def, inputs)
+	_, diagnostics, err := runs.FreezeFlowDefinition(ctx, projectID, "", def, inputs)
 	require.Error(t, err)
 	require.Contains(t, diagnostics[0], "denies Host delegation")
 	_ = version
@@ -483,7 +485,7 @@ tasks:
 	require.NoError(t, err)
 	inputs, err := store.NormalizeFlowInputs(def, nil, nil)
 	require.NoError(t, err)
-	_, diagnostics, err := runs.FreezeFlowDefinition(ctx, projectID, def, inputs)
+	_, diagnostics, err := runs.FreezeFlowDefinition(ctx, projectID, "", def, inputs)
 	require.Error(t, err)
 	require.Contains(t, diagnostics[0], `skill "no-such-skill" is not in the catalog`)
 	_ = version
@@ -616,7 +618,7 @@ func TestAgentFlowAnchorFreezesModelProfile(t *testing.T) {
 	require.NoError(t, err)
 	inputs, err := store.NormalizeFlowInputs(def, map[string]any{"target": "src/main.go"}, nil)
 	require.NoError(t, err)
-	freeze, _, err := runs.FreezeFlowDefinition(ctx, projectID, def, inputs)
+	freeze, _, err := runs.FreezeFlowDefinition(ctx, projectID, "", def, inputs)
 	require.NoError(t, err)
 	run, err := runs.CreateFlowRun(ctx, store.CreateFlowRunInput{
 		SessionID: session.ID, ProjectID: projectID, FlowVersionID: version.ID, InputsJSON: inputs,
@@ -647,7 +649,7 @@ func TestAgentFlowSetAnchorRunningFromCancelled(t *testing.T) {
 	require.NoError(t, err)
 	inputs, err := store.NormalizeFlowInputs(def, map[string]any{"target": "src/main.go"}, nil)
 	require.NoError(t, err)
-	freeze, _, err := runs.FreezeFlowDefinition(ctx, projectID, def, inputs)
+	freeze, _, err := runs.FreezeFlowDefinition(ctx, projectID, "", def, inputs)
 	require.NoError(t, err)
 	run, err := runs.CreateFlowRun(ctx, store.CreateFlowRunInput{
 		SessionID: session.ID, ProjectID: projectID, FlowVersionID: version.ID, InputsJSON: inputs,
@@ -660,4 +662,154 @@ func TestAgentFlowSetAnchorRunningFromCancelled(t *testing.T) {
 	var status string
 	require.NoError(t, db.QueryRow(`SELECT status FROM agent_runs WHERE id=?`, run.RunID).Scan(&status))
 	assert.Equal(t, "running", status)
+}
+
+func TestFlowScopedRoleResolutionAndVisibility(t *testing.T) {
+	db, _, roles, profiles, _, runs, projectID, modelID, _ := setupFlowFixture(t)
+	ctx := context.Background()
+
+	// A project-scoped role with the same handle exists in the shared catalog.
+	sharedDef := validRoleDefinition(modelID)
+	sharedDef.DelegationPolicy.Admission = domain.DelegationAutoWithinBudget
+	sharedDef.DelegationPolicy.AllowedCallerKinds = []string{"host"}
+	sharedRole, err := roles.Create(ctx, store.CreateRoleInput{
+		Handle: "specialist", Name: "Shared Specialist", Description: "",
+		Positioning: "", Icon: "bot", Color: "neutral",
+		Scope: domain.RoleScopeProject, ProjectID: &projectID, Definition: sharedDef,
+	})
+	require.NoError(t, err)
+	sharedVersion, err := roles.Publish(ctx, sharedRole.ID, 0)
+	require.NoError(t, err)
+
+	// The flow owns a flow-scoped role with the same handle.
+	profile, err := profiles.CreateProfile(ctx, store.CreateAgentFlowProfileInput{
+		Name: "Flow Roles", Slug: "flow-roles", SourceKind: domain.FlowSourceManaged,
+	})
+	require.NoError(t, err)
+	flowDef := validRoleDefinition(modelID)
+	flowDef.DelegationPolicy.Admission = domain.DelegationAutoWithinBudget
+	flowDef.DelegationPolicy.AllowedCallerKinds = []string{"host"}
+	flowRole, err := roles.Create(ctx, store.CreateRoleInput{
+		Handle: "specialist", Name: "Flow Specialist", Description: "flow-local",
+		Positioning: "", Icon: "bot", Color: "neutral",
+		Scope: domain.RoleScopeFlow, FlowID: &profile.ID, Definition: flowDef,
+	})
+	require.NoError(t, err)
+	flowVersion, err := roles.Publish(ctx, flowRole.ID, 0)
+	require.NoError(t, err)
+	assert.NotEqual(t, sharedVersion.ID, flowVersion.ID)
+
+	// Generic role listing never surfaces the flow-scoped role.
+	listed, err := roles.List(ctx, store.ListRolesInput{
+		Scope: domain.RoleScope(""), ProjectID: &projectID, Status: "active",
+	})
+	require.NoError(t, err)
+	for _, item := range listed {
+		assert.NotEqual(t, domain.RoleScopeFlow, item.Scope, "generic role catalog must hide flow roles")
+	}
+	// Explicit flow-scoped listing returns it.
+	flowList, err := roles.List(ctx, store.ListRolesInput{
+		Scope: domain.RoleScopeFlow, FlowID: &profile.ID, Status: "active",
+	})
+	require.NoError(t, err)
+	require.Len(t, flowList, 1)
+	assert.Equal(t, "flow-local", flowList[0].Description)
+
+	// Bare handle inside the owning flow resolves to the flow-scoped role.
+	resolvedVersion, _, err := runs.ResolveFlowRoleVersion(ctx, "specialist", projectID, profile.ID)
+	require.NoError(t, err)
+	assert.Equal(t, flowVersion.ID, resolvedVersion)
+	// Version-qualified handle@version never matches the flow role.
+	_, _, err = runs.ResolveFlowRoleVersion(ctx, "specialist@1", projectID, profile.ID)
+	require.NoError(t, err) // falls back to the shared catalog's v1
+
+	// A different flow cannot see this flow role: bare handle falls through.
+	otherProfile, err := profiles.CreateProfile(ctx, store.CreateAgentFlowProfileInput{
+		Name: "Other Flow", Slug: "other-flow", SourceKind: domain.FlowSourceManaged,
+	})
+	require.NoError(t, err)
+	otherResolved, _, err := runs.ResolveFlowRoleVersion(ctx, "specialist", projectID, otherProfile.ID)
+	require.NoError(t, err)
+	assert.Equal(t, sharedVersion.ID, otherResolved, "bare handle outside the owning flow resolves to the shared role")
+
+	// Delegation (delegate_tasks) can never resolve a flow-scoped role.
+	delegations := &store.DelegationRepo{DB: db}
+	session, err := (&store.SessionRepo{DB: db}).Create(ctx, domain.CreateSessionInput{
+		ProjectID: projectID, Title: "flow-role delegation check",
+	})
+	require.NoError(t, err)
+	// The shared role resolves via session delegation; the flow role with the
+	// same handle never shadows it (delegate_tasks is scope!=flow only).
+	snapshot, err := delegations.ResolveRoleForDelegation(ctx, session.ID, "specialist")
+	require.NoError(t, err)
+	assert.Equal(t, sharedVersion.ID, snapshot.VersionID)
+}
+
+func TestFlowScopedRoleFreezeAndRun(t *testing.T) {
+	_, _, roles, profiles, _, runs, projectID, modelID, _ := setupFlowFixture(t)
+	ctx := context.Background()
+
+	profile, err := profiles.CreateProfile(ctx, store.CreateAgentFlowProfileInput{
+		Name: "Flow Role Run", Slug: "flow-role-run", SourceKind: domain.FlowSourceManaged,
+	})
+	require.NoError(t, err)
+	flowRoleDef := validRoleDefinition(modelID)
+	flowRoleDef.DelegationPolicy.Admission = domain.DelegationAutoWithinBudget
+	flowRoleDef.DelegationPolicy.AllowedCallerKinds = []string{"host"}
+	flowRoleDef.DelegationPolicy.MaxInvocationsPerParentRun = 16
+	flowRoleDef.DelegationPolicy.MaxConcurrentInstances = 16
+	flowRoleDef.DelegationPolicy.BudgetCeiling.MaxTotalTokens = 100000
+	flowRole, err := roles.Create(ctx, store.CreateRoleInput{
+		Handle: "flow-local-worker", Name: "Flow Local Worker", Description: "",
+		Positioning: "", Icon: "bot", Color: "neutral",
+		Scope: domain.RoleScopeFlow, FlowID: &profile.ID, Definition: flowRoleDef,
+	})
+	require.NoError(t, err)
+	_, err = roles.Publish(ctx, flowRole.ID, 0)
+	require.NoError(t, err)
+
+	yaml := `schemaVersion: 1
+id: flow-role-run
+budget:
+  max_total_tokens: 200000
+tasks:
+  local:
+    role: flow-local-worker
+    goal: "use the flow-local role"
+    budget: {tokens: 50000}
+`
+	def, err := agentflow.ParseDefinition([]byte(yaml))
+	require.NoError(t, err)
+	version, err := profiles.CreateVersion(ctx, profile.ID, def)
+	require.NoError(t, err)
+	inputs, err := store.NormalizeFlowInputs(def, nil, nil)
+	require.NoError(t, err)
+	freeze, diagnostics, err := runs.FreezeFlowDefinition(ctx, projectID, profile.ID, def, inputs)
+	require.NoError(t, err, "flow-local role must freeze: %v", diagnostics)
+	require.Len(t, freeze, 1)
+	require.Equal(t, "local", freeze[0].Handle)
+	require.NotEmpty(t, freeze[0].RoleVersionID)
+
+	// A flow WITHOUT the flow-scoped role fails to freeze the same definition.
+	yaml2 := `schemaVersion: 1
+id: flow-role-missing
+budget:
+  max_total_tokens: 200000
+tasks:
+  local:
+    role: flow-local-worker
+    goal: "use the flow-local role"
+`
+	def2, err := agentflow.ParseDefinition([]byte(yaml2))
+	require.NoError(t, err)
+	other, err := profiles.CreateProfile(ctx, store.CreateAgentFlowProfileInput{
+		Name: "Missing Role Flow", Slug: "missing-role-flow", SourceKind: domain.FlowSourceManaged,
+	})
+	require.NoError(t, err)
+	_, err = profiles.CreateVersion(ctx, other.ID, def2)
+	require.NoError(t, err)
+	_, diagnostics, err = runs.FreezeFlowDefinition(ctx, projectID, other.ID, def2, inputs)
+	require.Error(t, err)
+	require.NotEmpty(t, diagnostics)
+	_ = version
 }

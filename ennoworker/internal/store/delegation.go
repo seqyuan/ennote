@@ -100,7 +100,8 @@ func (r *DelegationRepo) ResolveRoleForDelegation(ctx context.Context, sessionID
 	err := r.DB.QueryRowContext(ctx, `SELECT p.id,p.current_version_id,p.scope,p.project_id,v.definition_json,p.delegation_enabled
 		FROM agent_profiles p JOIN agent_profile_versions v ON v.id=p.current_version_id
 		WHERE p.object_kind='role' AND p.handle=? AND p.status='active'
-		  AND p.current_version_id IS NOT NULL AND (p.project_id=? OR p.project_id IS NULL)
+		  AND p.current_version_id IS NOT NULL AND p.scope!='flow'
+		  AND (p.project_id=? OR p.project_id IS NULL)
 		ORDER BY CASE WHEN p.project_id=? THEN 0 WHEN p.scope='builtin' THEN 1 ELSE 2 END LIMIT 1`,
 		strings.TrimSpace(handle), projectID, projectID).Scan(&snapshot.RoleID, &snapshot.VersionID,
 		&snapshot.Scope, &roleProject, &definitionJSON, &enabled)

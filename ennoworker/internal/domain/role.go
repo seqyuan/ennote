@@ -18,6 +18,10 @@ const (
 	RoleScopeBuiltin RoleScope = "builtin"
 	RoleScopeGlobal  RoleScope = "global"
 	RoleScopeProject RoleScope = "project"
+	// RoleScopeFlow is a Role owned by exactly one Agent Flow profile. It is
+	// only resolvable from task references inside that flow (flow -> project ->
+	// global/builtin precedence) and never from delegate_tasks.
+	RoleScopeFlow RoleScope = "flow"
 )
 
 type RoleIdentity struct {
@@ -30,6 +34,7 @@ type RoleIdentity struct {
 	Color                     string          `json:"color"`
 	Scope                     RoleScope       `json:"scope"`
 	ProjectID                 *string         `json:"projectId,omitempty"`
+	FlowID                    *string         `json:"flowId,omitempty"`
 	Status                    string          `json:"status"`
 	Draft                     json.RawMessage `json:"draft"`
 	DraftRevision             int             `json:"draftRevision"`
@@ -52,6 +57,7 @@ type RoleSummary struct {
 	Color            string    `json:"color"`
 	Scope            RoleScope `json:"scope"`
 	ProjectID        *string   `json:"projectId,omitempty"`
+	FlowID           *string   `json:"flowId,omitempty"`
 	Status           string    `json:"status"`
 	CurrentVersionID *string   `json:"currentVersionId,omitempty"`
 	CurrentVersion   int       `json:"currentVersion,omitempty"`

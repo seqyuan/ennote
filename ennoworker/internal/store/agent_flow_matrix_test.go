@@ -48,7 +48,7 @@ func TestAgentFlowMatrixRunAndEventsPersisted(t *testing.T) {
 	// Matrix 7: freeze before the first child — exact role version, skill id,
 	// goal digest, and per-task budget are captured in the node snapshots.
 	freeze, diagnostics, err := (&store.AgentFlowRunRepo{DB: db, SkillCatalog: map[string]string{"go-dev": "skill-go-dev"}}).
-		FreezeFlowDefinition(ctx, projectID, def, inputs)
+		FreezeFlowDefinition(ctx, projectID, "", def, inputs)
 	require.NoError(t, err, diagnostics)
 	require.Len(t, freeze, 3)
 	assert.Equal(t, roleVersionID, freeze[0].RoleVersionID)

@@ -1046,3 +1046,50 @@ func TestUnknownJSONFieldIsRejected(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, response.Code)
 	assert.Contains(t, response.Body.String(), "invalid_json")
 }
+
+func TestFlowScopedRoleAPI(t *testing.T) {
+	server, handler := setupServer(t, nil)
+	ctx := context.Background()
+	project, _, err := server.Projects.CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: "FlowRoles", HostPath: t.TempDir()})
+	require.NoError(t, err)
+	provider, err := server.Providers.Create(ctx, store.CreateProviderInput{Name: "Provider",
+		ProviderType: domain.ProviderOpenAICompatible, BaseURL: "https://provider.test", CredentialRef: "env:FR_KEY"})
+	require.NoError(t, err)
+	model, err := server.Models.Create(ctx, store.CreateModelInput{ProviderID: provider.ID, ModelName: "fr-model",
+		ContextWindow: 32000, MaxOutputTokens: 2048, SupportsToolUse: true})
+	require.NoError(t, err)
+	profile, err := (&store.AgentFlowProfileRepo{DB: server.DB}).CreateProfile(ctx, store.CreateAgentFlowProfileInput{
+		Name: "FR Graph", Slug: "fr-graph", SourceKind: domain.FlowSourceManaged,
+	})
+	require.NoError(t, err)
+
+	definition := apiRoleDefinition(model.ID)
+	created := request(t, handler, http.MethodPost, "/v1/roles", map[string]any{
+		"handle": "graph-local", "name": "Graph Local", "description": "inside the graph only",
+		"positioning": "", "icon": "bot", "color": "neutral",
+		"scope": "flow", "flowId": profile.ID, "definition": definition,
+	}, true)
+	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
+	var role domain.RoleIdentity
+	decodeData(t, created, &role)
+	require.NotNil(t, role.FlowID)
+	assert.Equal(t, profile.ID, *role.FlowID)
+	assert.Equal(t, domain.RoleScopeFlow, role.Scope)
+
+	// Generic project catalog hides the flow role.
+	catalog := request(t, handler, http.MethodGet, "/v1/roles?projectId="+project.ID+"&status=active", nil, true)
+	require.Equal(t, http.StatusOK, catalog.Code, catalog.Body.String())
+	assert.NotContains(t, catalog.Body.String(), "graph-local")
+	// Flow-scoped listing returns it.
+	flowCatalog := request(t, handler, http.MethodGet, "/v1/roles?scope=flow&flowId="+profile.ID+"&status=active", nil, true)
+	require.Equal(t, http.StatusOK, flowCatalog.Code, flowCatalog.Body.String())
+	assert.Contains(t, flowCatalog.Body.String(), "graph-local")
+
+	// Missing flowId on a flow role is rejected by the store contract.
+	bad := request(t, handler, http.MethodPost, "/v1/roles", map[string]any{
+		"handle": "bad-flow-role", "name": "Bad", "description": "",
+		"positioning": "", "icon": "bot", "color": "neutral",
+		"scope": "flow", "definition": definition,
+	}, true)
+	require.Equal(t, http.StatusBadRequest, bad.Code, bad.Body.String())
+}

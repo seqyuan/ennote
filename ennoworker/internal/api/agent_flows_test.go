@@ -241,7 +241,7 @@ func TestAgentFlowAPIBindingRunCancelFlow(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		freeze, _, err := server.AgentFlows.Runs.FreezeFlowDefinition(ctx, projectID, &def, inputsJSON)
+		freeze, _, err := server.AgentFlows.Runs.FreezeFlowDefinition(ctx, projectID, "", &def, inputsJSON)
 		if err != nil {
 			return nil, err
 		}
@@ -362,7 +362,7 @@ tasks:
 	require.NoError(t, err)
 	inputsJSON, err := store.NormalizeFlowInputs(def, nil, nil)
 	require.NoError(t, err)
-	freeze, _, err := server.AgentFlows.Runs.FreezeFlowDefinition(ctx, project.ID, def, inputsJSON)
+	freeze, _, err := server.AgentFlows.Runs.FreezeFlowDefinition(ctx, project.ID, "", def, inputsJSON)
 	require.NoError(t, err)
 	run, err := server.AgentFlows.Runs.CreateFlowRun(ctx, store.CreateFlowRunInput{
 		SessionID: session.ID, ProjectID: project.ID, FlowVersionID: version.ID, InputsJSON: inputsJSON,
@@ -446,7 +446,7 @@ func TestAgentFlowAPIInvokeByName(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		freeze, _, err := server.AgentFlows.Runs.FreezeFlowDefinition(ctx, projectID, &def, inputsJSON)
+		freeze, _, err := server.AgentFlows.Runs.FreezeFlowDefinition(ctx, projectID, "", &def, inputsJSON)
 		if err != nil {
 			return nil, err
 		}

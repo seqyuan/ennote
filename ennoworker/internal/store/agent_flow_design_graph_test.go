@@ -124,7 +124,7 @@ func TestDesignGraphMultiTierSynthesis(t *testing.T) {
 	inputs, err := store.NormalizeFlowInputs(def, map[string]any{"target": "pipeline"}, nil)
 	require.NoError(t, err)
 	freeze, diagnostics, err := (&store.AgentFlowRunRepo{DB: db, SkillCatalog: map[string]string{"go-dev": "skill-go-dev"}}).
-		FreezeFlowDefinition(ctx, projectID, def, inputs)
+		FreezeFlowDefinition(ctx, projectID, "", def, inputs)
 	require.NoError(t, err, diagnostics)
 	require.Len(t, freeze, 9) // a0,a1,a2,a3,b1,b2,c1,d1 role nodes + accept terminal node
 

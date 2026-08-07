@@ -430,29 +430,87 @@ func (r *AgentFlowRunRepo) TerminateAnchor(ctx context.Context, runID string, st
 	return tx.Commit()
 }
 
-// ResolveFlowRoleVersion resolves "handle@version" to a published immutable
-// role version inside the project's scope boundary. Project-scoped roles only
-// resolve for their owning project; global/builtin roles resolve for everyone.
-func (r *AgentFlowRunRepo) ResolveFlowRoleVersion(ctx context.Context, roleRef, projectID string) (versionID string, definitionJSON json.RawMessage, err error) {
-	handle, versionText, ok := strings.Cut(strings.TrimSpace(roleRef), "@")
-	if !ok || strings.TrimSpace(handle) == "" || strings.TrimSpace(versionText) == "" {
-		return "", nil, fmt.Errorf("role reference %q must be handle@version", roleRef)
+// ResolveFlowRoleVersion resolves a role reference to a published immutable
+// role version inside the project's scope boundary. References may be
+// "handle@version" (shared catalog: project-scoped roles override
+// global/builtin, flow roles never match) or a bare "handle" resolved against
+// the owning flow's flow-scoped roles first (flow -> project ->
+// global/builtin precedence).
+func (r *AgentFlowRunRepo) ResolveFlowRoleVersion(ctx context.Context, roleRef, projectID, flowID string) (versionID string, definitionJSON json.RawMessage, err error) {
+	handle, versionText, hasVersion := strings.Cut(strings.TrimSpace(roleRef), "@")
+	handle = strings.TrimSpace(handle)
+	if handle == "" {
+		return "", nil, fmt.Errorf("role reference %q has an empty handle", roleRef)
 	}
-	var versionNumber int
-	if _, err := fmt.Sscanf(versionText, "%d", &versionNumber); err != nil || versionNumber < 1 {
-		return "", nil, fmt.Errorf("role reference %q has an invalid version", roleRef)
+	if hasVersion {
+		versionText = strings.TrimSpace(versionText)
+		if versionText == "" {
+			return "", nil, fmt.Errorf("role reference %q must be handle@version", roleRef)
+		}
+		var versionNumber int
+		if _, err := fmt.Sscanf(versionText, "%d", &versionNumber); err != nil || versionNumber < 1 {
+			return "", nil, fmt.Errorf("role reference %q has an invalid version", roleRef)
+		}
+		// Shared catalog reference: flow-scoped roles never match a
+		// version-qualified handle@version lookup outside their own flow.
+		return r.resolveSharedRoleVersion(ctx, handle, versionNumber, projectID)
 	}
+	// Bare handle: flow-scoped role wins when the flow owns one; otherwise
+	// fall back to the shared catalog's current version.
+	if flowID != "" {
+		var scope, roleProject, definitionJSONOut sql.NullString
+		var versionIDOut string
+		err := r.DB.QueryRowContext(ctx, `SELECT v.id, p.scope, p.project_id, v.definition_json
+			FROM agent_profiles p JOIN agent_profile_versions v ON v.id=p.current_version_id
+			WHERE p.object_kind='role' AND p.handle=? AND p.scope='flow' AND p.flow_id=?
+			  AND p.status='active' AND p.current_version_id IS NOT NULL`, handle, flowID).
+			Scan(&versionIDOut, &scope, &roleProject, &definitionJSONOut)
+		if err == nil {
+			return versionIDOut, json.RawMessage(definitionJSONOut.String), nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", nil, err
+		}
+	}
+	// No flow-scoped match: resolve the current published shared role.
+	return r.resolveSharedRoleCurrent(ctx, handle, projectID)
+}
+
+// resolveSharedRoleVersion resolves a version-qualified handle@version against
+// the shared catalog (project > global/builtin; flow roles never match).
+func (r *AgentFlowRunRepo) resolveSharedRoleVersion(ctx context.Context, handle string, versionNumber int, projectID string) (string, json.RawMessage, error) {
 	var versionIDOut, definitionJSONOut string
 	var scope, roleProject sql.NullString
-	err = r.DB.QueryRowContext(ctx, `SELECT v.id, p.scope, p.project_id, v.definition_json
+	err := r.DB.QueryRowContext(ctx, `SELECT v.id, p.scope, p.project_id, v.definition_json
 		FROM agent_profiles p JOIN agent_profile_versions v ON v.agent_profile_id=p.id
 		WHERE p.object_kind='role' AND p.handle=? AND v.version=? AND v.status='published'
-		  AND p.status='active' AND (p.project_id=? OR p.project_id IS NULL)
+		  AND p.status='active' AND p.scope!='flow' AND (p.project_id=? OR p.project_id IS NULL)
 		ORDER BY CASE WHEN p.project_id=? THEN 0 WHEN p.scope='builtin' THEN 1 ELSE 2 END LIMIT 1`,
 		handle, versionNumber, projectID, projectID).
 		Scan(&versionIDOut, &scope, &roleProject, &definitionJSONOut)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil, fmt.Errorf("role %q is not published in this project", roleRef)
+		return "", nil, fmt.Errorf("role %q is not published in this project", fmt.Sprintf("%s@%d", handle, versionNumber))
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	return versionIDOut, json.RawMessage(definitionJSONOut), nil
+}
+
+// resolveSharedRoleCurrent resolves the current published shared role version.
+func (r *AgentFlowRunRepo) resolveSharedRoleCurrent(ctx context.Context, handle, projectID string) (string, json.RawMessage, error) {
+	var versionIDOut, definitionJSONOut string
+	var scope, roleProject sql.NullString
+	err := r.DB.QueryRowContext(ctx, `SELECT v.id, p.scope, p.project_id, v.definition_json
+		FROM agent_profiles p JOIN agent_profile_versions v ON v.id=p.current_version_id
+		WHERE p.object_kind='role' AND p.handle=? AND p.status='active'
+		  AND p.scope!='flow' AND p.current_version_id IS NOT NULL
+		  AND (p.project_id=? OR p.project_id IS NULL)
+		ORDER BY CASE WHEN p.project_id=? THEN 0 WHEN p.scope='builtin' THEN 1 ELSE 2 END LIMIT 1`,
+		handle, projectID, projectID).
+		Scan(&versionIDOut, &scope, &roleProject, &definitionJSONOut)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil, fmt.Errorf("role %q is not published in this project", handle)
 	}
 	if err != nil {
 		return "", nil, err

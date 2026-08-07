@@ -23,6 +23,7 @@ func (s *Server) createRole(w http.ResponseWriter, r *http.Request) {
 		Color       string                `json:"color"`
 		Scope       domain.RoleScope      `json:"scope"`
 		ProjectID   *string               `json:"projectId"`
+		FlowID      *string               `json:"flowId"`
 		Definition  domain.RoleDefinition `json:"definition"`
 	}
 	if !decodeJSON(w, r, &input) {
@@ -31,7 +32,8 @@ func (s *Server) createRole(w http.ResponseWriter, r *http.Request) {
 	role, err := s.Roles.Create(r.Context(), store.CreateRoleInput{
 		Handle: input.Handle, Name: input.Name, Description: input.Description,
 		Positioning: input.Positioning, Icon: input.Icon, Color: input.Color,
-		Scope: input.Scope, ProjectID: input.ProjectID, Definition: input.Definition,
+		Scope: input.Scope, ProjectID: input.ProjectID, FlowID: input.FlowID,
+		Definition: input.Definition,
 	})
 	if err != nil {
 		writeError(w, r, http.StatusBadRequest, "invalid_role", err.Error(), false)
@@ -57,9 +59,14 @@ func (s *Server) listRoles(w http.ResponseWriter, r *http.Request) {
 	if value := strings.TrimSpace(r.URL.Query().Get("projectId")); value != "" {
 		projectID = &value
 	}
+	var flowID *string
+	if value := strings.TrimSpace(r.URL.Query().Get("flowId")); value != "" {
+		flowID = &value
+	}
 	items, err := s.Roles.List(r.Context(), store.ListRolesInput{
 		Query: r.URL.Query().Get("q"), Scope: domain.RoleScope(r.URL.Query().Get("scope")),
-		ProjectID: projectID, Status: r.URL.Query().Get("status"), Cursor: r.URL.Query().Get("cursor"), Limit: limit,
+		ProjectID: projectID, FlowID: flowID, Status: r.URL.Query().Get("status"),
+		Cursor: r.URL.Query().Get("cursor"), Limit: limit,
 	})
 	if err != nil {
 		writeInternal(w, r, err)
