@@ -37,9 +37,17 @@ function fulfill(route: Route, data: unknown, status = 200) {
 async function selectProjectAndOpenFlows(page: Page) {
   // Graphs moved from the settings dialog to the dedicated /graphs route.
   await page.goto("/graphs");
+  // The WorkspaceNav project switcher needs an explicit selection (no auto-select).
+  await page.getByRole("button", { name: /Select project/ }).first().click();
+  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
 }
 
 async function mockFlows(page: Page) {
+  // Clone module-level fixtures per test so sequential runs within a file do
+  // not leak draft/desiredEnabled mutations across tests (each test owns its
+  // own mock state).
+  const localProfile = { ...profile };
+  const localBinding = { ...binding };
   const bindings: typeof binding[] = [];
   const runs: typeof flowRun[] = [];
   let published = false;
@@ -51,33 +59,33 @@ async function mockFlows(page: Page) {
     if (path === "/v1/roles") return fulfill(route, { items: [role] });
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
     if (path === "/v1/agent-flows") {
-      if (route.request().method() === "POST") return fulfill(route, { ...profile, draftRevision: 0 }, 201);
-      return fulfill(route, [profile]);
+      if (route.request().method() === "POST") return fulfill(route, { ...localProfile, draftRevision: 0 }, 201);
+      return fulfill(route, [localProfile]);
     }
-    if (path === `/v1/agent-flows/${profile.id}`) return fulfill(route, profile);
-    if (path === `/v1/agent-flows/${profile.id}/draft`) {
+    if (path === `/v1/agent-flows/${localProfile.id}`) return fulfill(route, localProfile);
+    if (path === `/v1/agent-flows/${localProfile.id}/draft`) {
       const body = JSON.parse(route.request().postData() ?? "{}");
-      profile.draftRevision = (body.expectedRevision ?? 0) + 1;
-      return fulfill(route, profile);
+      localProfile.draftRevision = (body.expectedRevision ?? 0) + 1;
+      return fulfill(route, localProfile);
     }
-    if (path === `/v1/agent-flows/${profile.id}/validate`) return fulfill(route, { valid: true, diagnostics: [] });
-    if (path === `/v1/agent-flows/${profile.id}/publish`) {
+    if (path === `/v1/agent-flows/${localProfile.id}/validate`) return fulfill(route, { valid: true, diagnostics: [] });
+    if (path === `/v1/agent-flows/${localProfile.id}/publish`) {
       published = true;
       return fulfill(route, version, 201);
     }
-    if (path === `/v1/agent-flows/${profile.id}/versions`) return fulfill(route, published ? [version] : []);
+    if (path === `/v1/agent-flows/${localProfile.id}/versions`) return fulfill(route, published ? [version] : []);
     if (path === `/v1/projects/${project.id}/agent-flows/candidates`) return fulfill(route, []);
     if (path === `/v1/projects/${project.id}/agent-flows/bindings`) {
       if (route.request().method() === "POST") {
-        bindings.push(binding);
-        return fulfill(route, binding, 201);
+        bindings.push(localBinding);
+        return fulfill(route, localBinding, 201);
       }
       return fulfill(route, bindings);
     }
-    if (path === `/v1/projects/${project.id}/agent-flows/bindings/${binding.id}`) {
+    if (path === `/v1/projects/${project.id}/agent-flows/bindings/${localBinding.id}`) {
       const body = JSON.parse(route.request().postData() ?? "{}");
-      if (typeof body.desiredEnabled === "boolean") binding.desiredEnabled = body.desiredEnabled;
-      return fulfill(route, binding);
+      if (typeof body.desiredEnabled === "boolean") localBinding.desiredEnabled = body.desiredEnabled;
+      return fulfill(route, localBinding);
     }
     if (path === `/v1/projects/${project.id}/agent-flows/bindings/${binding.id}/run`) {
       const created = { ...flowRun };
