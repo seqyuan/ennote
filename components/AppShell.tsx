@@ -27,7 +27,7 @@ import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
 import { usePromptTemplates } from "@/hooks/usePromptTemplates";
 import { permissionModeForPolicyID, permissionPolicyID, withRunConfig, type PermissionMode } from "@/lib/permission-mode";
 import { apiFetch } from "@/lib/worker-api.client";
-import type { RoleSummary, Session } from "@/components/settings/types";
+import type { AgentFlowProfile, RoleSummary, Session } from "@/components/settings/types";
 import type { AgentRun } from "@/lib/approval";
 import type { components } from "@/lib/worker-api.gen";
 
@@ -82,19 +82,44 @@ export function AppShell() {
   const [promptPanelDismissed, setPromptPanelDismissed] = useState(false);
   const expandAbortRef = useRef<AbortController | null>(null);
   const promptCatalog = usePromptTemplates(selectedProject);
+  const [flowCatalog, setFlowCatalog] = useState<{ name: string; version?: number }[]>([]);
+  const refreshFlowCatalog = useCallback(async () => {
+    if (!selectedProject) { setFlowCatalog([]); return; }
+    try {
+      const profiles = await apiFetch<AgentFlowProfile[]>("/v1/agent-flows");
+      setFlowCatalog((profiles ?? [])
+        .filter((profile) => profile.lifecycleStatus === "active" && (profile.latestVersion ?? 0) > 0)
+        .flatMap((profile) => {
+          const name = profile.slug || profile.name;
+          return name ? [{ name, version: profile.latestVersion }] : [];
+        }));
+    } catch { /* panel is a convenience; failures surface elsewhere */ }
+  }, [selectedProject]);
+
+  useEffect(() => {
+    const t0 = window.setTimeout(() => void refreshFlowCatalog(), 0);
+    return () => window.clearTimeout(t0);
+  }, [refreshFlowCatalog]);
 
   // Refresh the catalog whenever the command panel transitions from closed to
   // open, so external file changes are visible (design §9.1).
   const commandPanelOpen = Boolean(
-    selectedProject && input.startsWith("/") && !input.slice(1).match(/[\s]/) && promptCatalog.templates.length > 0,
+    selectedProject
+    && !input.slice(1).match(/[\s]/)
+    && (
+      (input.startsWith("/") && promptCatalog.templates.length > 0)
+      || (input.startsWith("@role:") && roles.length > 0)
+      || (input.startsWith("@flow:") && flowCatalog.length > 0)
+    ),
   );
   const wasPanelOpen = useRef(false);
   useEffect(() => {
     if (commandPanelOpen && !wasPanelOpen.current) {
       void promptCatalog.refresh();
+      void refreshFlowCatalog();
     }
     wasPanelOpen.current = commandPanelOpen;
-  }, [commandPanelOpen, promptCatalog]);
+  }, [commandPanelOpen, promptCatalog, refreshFlowCatalog]);
 
   const setInputVersioned = useCallback((value: string) => {
     setInput(value);
@@ -1017,10 +1042,21 @@ export function AppShell() {
             confirmCompaction={confirmCompaction}
             cancelCompaction={cancelCompaction}
             promptTemplates={promptCatalog.templates}
+            panelRoles={roles.map((role) => ({ id: role.id, handle: role.handle, name: role.name, description: role.description }))}
+            panelFlows={flowCatalog}
             showPromptPanel={commandPanelOpen && !promptPanelDismissed}
             onPromptSelect={(name: string) => {
               setPromptPanelDismissed(false);
               setInputVersioned(`/${name} `);
+            }}
+            onRoleSelect={(roleId: string) => {
+              setSelectedRoleId(roleId);
+              setPromptPanelDismissed(true);
+              setInputVersioned("");
+            }}
+            onFlowSelect={(name: string, version?: number) => {
+              setPromptPanelDismissed(false);
+              setInputVersioned(`@flow:${name}${version ? `@${version}` : ""} `);
             }}
             onPromptPanelClose={() => setPromptPanelDismissed(true)}
             expanding={expanding}

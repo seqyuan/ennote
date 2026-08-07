@@ -8,44 +8,102 @@ interface PromptTemplateItem {
   argumentHint: string;
 }
 
+export interface RoleMenuItem {
+  id: string;
+  handle: string;
+  name: string;
+  description?: string;
+}
+
+export interface FlowMenuItem {
+  name: string;
+  version?: number;
+  description?: string;
+}
+
 interface PromptCommandMenuProps {
   templates: PromptTemplateItem[];
+  roles: RoleMenuItem[];
+  flows: FlowMenuItem[];
   input: string;
-  onSelect: (name: string) => void;
+  onSelectTemplate: (name: string) => void;
+  onSelectRole: (roleId: string, handle: string) => void;
+  onSelectFlow: (name: string, version?: number) => void;
   onClose: () => void;
 }
 
-export function PromptCommandMenu({ templates, input, onSelect, onClose }: PromptCommandMenuProps) {
+type Mode = "template" | "role" | "flow";
+
+interface MenuEntry {
+  key: string;
+  label: string;
+  hint?: string;
+  desc?: string;
+  onPick: () => void;
+}
+
+function activeMode(input: string): Mode | null {
+  if (input.startsWith("/")) return "template";
+  if (input.startsWith("@role:")) return "role";
+  if (input.startsWith("@flow:")) return "flow";
+  return null;
+}
+
+export function PromptCommandMenu({
+  templates, roles, flows, input, onSelectTemplate, onSelectRole, onSelectFlow, onClose,
+}: PromptCommandMenuProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
   const mountedAt = useRef(0);
 
   useEffect(() => { mountedAt.current = Date.now(); }, []);
 
-  const token = (() => {
-    if (!input.startsWith("/")) return "";
-    const spaceIdx = input.indexOf(" ");
-    if (spaceIdx < 0) return input.slice(1);
-    return input.slice(1, spaceIdx);
-  })();
+  const mode = activeMode(input);
 
-  const filtered = (() => {
-    if (!token) return templates;
-    const lower = token.toLowerCase();
-    const prefix: PromptTemplateItem[] = [];
-    const desc: PromptTemplateItem[] = [];
-    for (const t of templates) {
-      if (t.name.toLowerCase().startsWith(lower)) {
-        prefix.push(t);
-      } else if (t.description.toLowerCase().includes(lower)) {
-        desc.push(t);
-      }
+  const entries: MenuEntry[] = (() => {
+    if (mode === "template") {
+      const token = input.slice(1).split(/\s/)[0].toLowerCase();
+      const filtered = templates
+        .filter((tpl) => !token || tpl.name.toLowerCase().includes(token) ||
+          tpl.description.toLowerCase().includes(token));
+      return filtered.map((tpl) => ({
+        key: `t:${tpl.name}`,
+        label: `/${tpl.name}`,
+        hint: tpl.argumentHint,
+        desc: tpl.description,
+        onPick: () => onSelectTemplate(tpl.name),
+      }));
     }
-    return [...prefix, ...desc];
+    if (mode === "role") {
+      const token = input.slice("@role:".length).split(/\s/)[0].toLowerCase();
+      const filtered = roles
+        .filter((role) => !token || role.handle.toLowerCase().includes(token) ||
+          role.name.toLowerCase().includes(token));
+      return filtered.map((role) => ({
+        key: `r:${role.id}`,
+        label: `@role:${role.handle}`,
+        hint: role.name,
+        desc: role.description,
+        onPick: () => onSelectRole(role.id, role.handle),
+      }));
+    }
+    if (mode === "flow") {
+      const token = input.slice("@flow:".length).split(/\s/)[0].toLowerCase();
+      const filtered = flows
+        .filter((flow) => !token || flow.name.toLowerCase().includes(token));
+      return filtered.map((flow) => ({
+        key: `f:${flow.name}`,
+        label: `@flow:${flow.name}${flow.version ? `@${flow.version}` : ""}`,
+        hint: flow.version ? `v${flow.version}` : "",
+        desc: flow.description,
+        onPick: () => onSelectFlow(flow.name, flow.version),
+      }));
+    }
+    return [];
   })();
 
   // Reset active index when filter changes.
-  const effectiveActive = activeIndex >= filtered.length && filtered.length > 0 ? 0 : activeIndex;
+  const effectiveActive = activeIndex >= entries.length && entries.length > 0 ? 0 : activeIndex;
 
   // Close on outside click.
   useEffect(() => {
@@ -68,29 +126,32 @@ export function PromptCommandMenu({ templates, input, onSelect, onClose }: Promp
 
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLUListElement>) => {
     switch (e.key) {
-      case "ArrowDown": e.preventDefault(); setActiveIndex((p) => Math.min(p + 1, filtered.length - 1)); break;
+      case "ArrowDown": e.preventDefault(); setActiveIndex((p) => Math.min(p + 1, entries.length - 1)); break;
       case "ArrowUp": e.preventDefault(); setActiveIndex((p) => Math.max(p - 1, 0)); break;
-      case "Enter": case "Tab": e.preventDefault(); if (filtered[effectiveActive]) onSelect(filtered[effectiveActive].name); break;
+      case "Enter": case "Tab": e.preventDefault(); if (entries[effectiveActive]) entries[effectiveActive].onPick(); break;
     }
-  }, [filtered, effectiveActive, onSelect]);
+  }, [entries, effectiveActive]);
 
   useEffect(() => {
     (listRef.current?.children[effectiveActive] as HTMLElement | undefined)?.scrollIntoView({ block: "nearest" });
   }, [effectiveActive]);
 
-  if (filtered.length === 0) return null;
+  if (entries.length === 0 || !mode) return null;
+
+  const ariaLabel = mode === "template" ? "Prompt templates"
+    : mode === "role" ? "Role targets" : "Agent Flows";
 
   return (
-    <div className="prompt-command-menu" role="listbox" aria-label="Prompt templates">
+    <div className="prompt-command-menu" role="listbox" aria-label={ariaLabel}>
       <ul ref={listRef} onKeyDown={handleKeyDown}>
-        {filtered.map((tpl, idx) => (
-          <li key={tpl.name} role="option" aria-selected={idx === effectiveActive}
+        {entries.map((entry, idx) => (
+          <li key={entry.key} role="option" aria-selected={idx === effectiveActive}
             className={idx === effectiveActive ? "active" : ""}
             onMouseEnter={() => setActiveIndex(idx)}
-            onMouseDown={(e) => { e.preventDefault(); onSelect(tpl.name); }}>
-            <span className="pcm-name">/{tpl.name}</span>
-            {tpl.argumentHint && <span className="pcm-hint">{tpl.argumentHint}</span>}
-            <span className="pcm-desc">{tpl.description}</span>
+            onMouseDown={(e) => { e.preventDefault(); entry.onPick(); }}>
+            <span className="pcm-name">{entry.label}</span>
+            {entry.hint && <span className="pcm-hint">{entry.hint}</span>}
+            {entry.desc && <span className="pcm-desc">{entry.desc}</span>}
           </li>
         ))}
       </ul>

@@ -78,8 +78,12 @@ interface ChatWindowProps {
   cancelCompaction: () => void;
   // Prompt templates.
   promptTemplates: { name: string; description: string; argumentHint: string; source: string; editable: boolean }[];
+  panelRoles: { id: string; handle: string; name: string; description?: string }[];
+  panelFlows: { name: string; version?: number; description?: string }[];
   showPromptPanel: boolean;
   onPromptSelect: (name: string) => void;
+  onRoleSelect: (roleId: string, handle: string) => void;
+  onFlowSelect: (name: string, version?: number) => void;
   onPromptPanelClose: () => void;
   expanding: boolean;
   expandDiag: string | null;
@@ -94,6 +98,7 @@ export function ChatWindow({
   roles, selectedRoleId, setSelectedRoleId, textAttachments, removeTextAttachment, attachFiles, submit, steer, cancel, compactSession,
   compactionPromptOpen, compactionInstructions, compactionBusy, setCompactionInstructions, confirmCompaction, cancelCompaction,
   promptTemplates, showPromptPanel, onPromptSelect, onPromptPanelClose, expanding, expandDiag,
+  panelRoles, panelFlows, onRoleSelect, onFlowSelect,
 }: ChatWindowProps) {
   const messagesRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -193,6 +198,7 @@ export function ChatWindow({
       textAttachments={textAttachments} removeTextAttachment={removeTextAttachment} attachFiles={attachFiles}
       uploadImage={uploadImage} submit={submit} steer={steer} cancel={cancel} compactSession={compactSession}
       promptTemplates={promptTemplates} showPromptPanel={showPromptPanel} onPromptSelect={onPromptSelect}
+      panelRoles={panelRoles} panelFlows={panelFlows} onRoleSelect={onRoleSelect} onFlowSelect={onFlowSelect}
       onPromptPanelClose={onPromptPanelClose}
       expanding={expanding} expandDiag={expandDiag} />
   </main>;

@@ -40,10 +40,14 @@ interface ComposerProps {
   steer: () => void;
   cancel: () => void;
   compactSession: () => void;
-  // Prompt templates panel.
+  // Prompt templates + @addressing panel.
   promptTemplates: { name: string; description: string; argumentHint: string; source: string; editable: boolean }[];
+  panelRoles: { id: string; handle: string; name: string; description?: string }[];
+  panelFlows: { name: string; version?: number; description?: string }[];
   showPromptPanel: boolean;
   onPromptSelect: (name: string) => void;
+  onRoleSelect: (roleId: string, handle: string) => void;
+  onFlowSelect: (name: string, version?: number) => void;
   onPromptPanelClose: () => void;
   expanding: boolean;
   expandDiag: string | null;
@@ -54,6 +58,7 @@ export function Composer({
   permissionMode, permissionReady, setPermissionMode, models, selectedModelId, setSelectedModelId,
   roles, selectedRoleId, setSelectedRoleId, textAttachments, removeTextAttachment, attachFiles, uploadImage, submit, steer, cancel, compactSession,
   promptTemplates, showPromptPanel, onPromptSelect, onPromptPanelClose, expanding, expandDiag,
+  panelRoles, panelFlows, onRoleSelect, onFlowSelect,
 }: ComposerProps) {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const form = useRef<HTMLFormElement>(null);
@@ -173,8 +178,12 @@ export function Composer({
           {showPromptPanel && (
             <PromptCommandMenu
               templates={promptTemplates}
+              roles={panelRoles}
+              flows={panelFlows}
               input={input}
-              onSelect={onPromptSelect}
+              onSelectTemplate={onPromptSelect}
+              onSelectRole={onRoleSelect}
+              onSelectFlow={onFlowSelect}
               onClose={onPromptPanelClose}
             />
           )}
