@@ -93,10 +93,25 @@ func TestAgentFlowMatrixRunAndEventsPersisted(t *testing.T) {
 	assert.Contains(t, children.assignments[1], "\"a.go\"")
 
 	// Matrix 16: the Phase 1 event set is durably persisted in order and
-	// consumable (the timeline's After() source).
+	// consumable (the timeline's After() source). The flow terminal state is
+	// committed before the flow_completed event (commit-before-publish), so
+	// the test polls for the terminal event instead of reading once the moment
+	// the state flips — a single read can race the event commit.
 	eventsRepo := &store.EventRepo{DB: db}
-	committed, err := eventsRepo.After(ctx, run.RunID, 0, 100)
-	require.NoError(t, err)
+	var committed []domain.RunEvent
+	eventDeadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(eventDeadline) {
+		committed, err = eventsRepo.After(ctx, run.RunID, 0, 100)
+		require.NoError(t, err)
+		var last string
+		for _, event := range committed {
+			last = event.EventType
+		}
+		if last == "flow_completed" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	types := make([]string, 0, len(committed))
 	for _, event := range committed {
 		types = append(types, event.EventType)
