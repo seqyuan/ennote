@@ -40,12 +40,21 @@ describe("tool presentation", () => {
     });
   });
 
-  it("summarizes delegated Role assignments", () => {
+  it("summarizes delegated Role tasks", () => {
+    expect(summarizeToolCall("delegate_tasks", { tasks: [
+      { role: "explorer", goal: "Inspect files" },
+      { role: "reviewer", goal: "Review findings" },
+    ] })).toEqual({
+      label: "Delegate tasks", target: "2 tasks", detail: "@explorer, @reviewer",
+    });
+  });
+
+  it("still summarizes legacy delegate_roles calls", () => {
     expect(summarizeToolCall("delegate_roles", { delegations: [
       { roleHandle: "explorer", assignment: "Inspect files" },
       { roleHandle: "reviewer", assignment: "Review findings" },
     ] })).toEqual({
-      label: "Delegate roles", target: "2 assignments", detail: "@explorer, @reviewer",
+      label: "Delegate tasks", target: "2 tasks", detail: "@explorer, @reviewer",
     });
   });
 

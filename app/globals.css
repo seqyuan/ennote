@@ -518,10 +518,18 @@ button:disabled { cursor: default; }
 .child-run-row[data-state="approval"] .child-run-status { color: var(--warning); }
 .child-run-row[data-state="completed"] .child-run-status { color: var(--success); }
 .child-run-row[data-state="failed"] .child-run-status, .child-run-row[data-state="interrupted"] .child-run-status,
-.child-run-row[data-state="cancelled"] .child-run-status { color: var(--danger); }
+.child-run-row[data-state="cancelled"] .child-run-status, .child-run-row[data-state="blocked"] .child-run-status { color: var(--danger); }
+.child-run-activity { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: italic; }
+.child-run-error-code { padding: 0 5px; border: 1px solid var(--border); border-radius: 999px; font-size: 9px; }
 .child-run-result { grid-column: 2 / 4; min-width: 0; padding: 1px 0 5px; color: var(--text-muted); font-size: 10px; }
 .child-run-result > summary { cursor: pointer; font-weight: 700; }
 .child-run-result > div { padding-top: 5px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
+.delegation-task-list { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; }
+.delegation-task { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 11px; }
+.delegation-task-name { color: var(--text); font-weight: 600; }
+.delegation-task-role { color: var(--text-muted); font: 10px var(--font-mono); }
+.delegation-task-depends { color: var(--text-dim); font-size: 10px; }
+.delegation-task-depends::before { content: "→ "; }
 .child-run-actions { display: inline-flex; justify-content: flex-end; align-items: center; gap: 6px; }
 .child-run-retry, .child-run-approve, .child-run-reject {
   display: inline-flex; align-items: center; justify-content: center; gap: 4px;

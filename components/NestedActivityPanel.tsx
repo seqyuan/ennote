@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChildRunRow } from "@/components/ChildRunRow";
 import { DelegationFollowUpDialog } from "@/components/DelegationFollowUpDialog";
 import { DelegationGenerationHistory } from "@/components/DelegationGenerationHistory";
+import { useChildProgress } from "@/hooks/useChildProgress";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
 
@@ -14,6 +15,7 @@ type DelegationInspection = components["schemas"]["DelegationInspection"];
 
 const pollIntervalMs = 1200;
 const emptyPollLimit = 20;
+const emptyProgress: ReadonlyMap<string, string> = new Map();
 
 export function NestedActivityPanel({ parentRunId, toolCallId }: { parentRunId: string; toolCallId: string }) {
   const [page, setPage] = useState<ActivityPage | null>(null);
@@ -23,6 +25,7 @@ export function NestedActivityPanel({ parentRunId, toolCallId }: { parentRunId: 
   const [retry, setRetry] = useState(0);
   const [open, setOpen] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  const childProgress = useChildProgress();
   const [continuation, setContinuation] = useState<{
     itemID: string;
     itemName: string;
@@ -152,6 +155,7 @@ export function NestedActivityPanel({ parentRunId, toolCallId }: { parentRunId: 
         group={group}
         inspection={inspections[group.id]}
         busy={busy}
+        progress={childProgress.get(group.id) ?? emptyProgress}
         onRetry={retryItem}
         onDecide={decideApproval}
         onContinue={(itemID, itemName, kind, sourceAttemptID, expectedGeneration) =>
@@ -165,13 +169,14 @@ export function NestedActivityPanel({ parentRunId, toolCallId }: { parentRunId: 
   </details>;
 }
 
-function GroupBlock({ group, inspection, busy, onRetry, onDecide, onContinue }: {
+function GroupBlock({ group, inspection, busy, onRetry, onDecide, onContinue, progress }: {
   group: ActivityGroup;
   inspection?: DelegationInspection;
   busy: string | null;
   onRetry: (group: ActivityGroup, itemId: string) => void;
   onDecide: (approvalID: string, decision: "approved" | "rejected") => void;
   onContinue: (itemID: string, itemName: string, kind: "input" | "follow_up", sourceAttemptID: string, expectedGeneration: number) => void;
+  progress: ReadonlyMap<string, string>;
 }) {
   const reusedChildRunIds = useMemo(() => {
     const ids = new Set<string>();
@@ -189,6 +194,7 @@ function GroupBlock({ group, inspection, busy, onRetry, onDecide, onContinue }: 
         child={child}
         key={child.itemId}
         reused={reusedChildRunIds.has(child.childRunId ?? "")}
+        activity={progress.get(child.name)}
         onRetry={itemId => onRetry(group, itemId)}
         onContinue={selectedAttemptID(inspection, child.itemId) ? (itemId, kind) => {
           const sourceAttemptID = selectedAttemptID(inspection, itemId);

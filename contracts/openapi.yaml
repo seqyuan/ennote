@@ -4024,11 +4024,19 @@ components:
     DelegationApprovalPreview:
       type: object
       additionalProperties: false
-      required: [name, roleHandle, assignmentPreview, outputContract, budget]
+      required: [name, role, goalPreview, outputContract, budget]
       properties:
         name: { type: string }
-        roleHandle: { type: string }
-        assignmentPreview: { type: string, maxLength: 240 }
+        role: { type: string }
+        roleHandle: { type: string, description: legacy preview compat }
+        goalPreview: { type: string, maxLength: 240 }
+        assignmentPreview: { type: string, maxLength: 240, description: legacy preview compat }
+        skills:
+          type: array
+          items: { type: string }
+        depends:
+          type: array
+          items: { type: string }
         outputContract: { type: string }
         budget: { $ref: "#/components/schemas/DelegationBudgetCeiling" }
     DelegationTerminalResult:
@@ -4052,7 +4060,7 @@ components:
         name: { type: string }
         roleHandle: { type: string }
         roleDisplayName: { type: string }
-        itemStatus: { type: string, enum: [pending, running, succeeded, failed, cancelled, not_authorized] }
+        itemStatus: { type: string, enum: [pending, running, blocked, succeeded, failed, cancelled, not_authorized] }
         runStatus: { type: string, enum: [queued, running, waiting_for_approval, waiting_delegation_admission, waiting_children, succeeded, failed, cancelled, interrupted] }
         result: { $ref: "#/components/schemas/DelegationTerminalResult" }
         errorCode: { type: string }

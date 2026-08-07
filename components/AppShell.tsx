@@ -21,6 +21,7 @@ import { useProjectSessions } from "@/hooks/useProjectSessions";
 import { useSessionBranches } from "@/hooks/useSessionBranches";
 import { useSessionMessages } from "@/hooks/useSessionMessages";
 import { useAgentSession } from "@/hooks/useAgentSession";
+import { ChildProgressProvider } from "@/hooks/useChildProgress";
 import { useRunRecovery } from "@/hooks/useRunRecovery";
 import { useRunningSessionIds } from "@/hooks/useRunningSessionIds";
 import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
@@ -786,6 +787,7 @@ export function AppShell() {
   const clearCombinedError = () => { setError(null); branches.clearError(); recovery.clearError(); sessionNavigation.setError(null); };
 
   return (
+    <ChildProgressProvider>
     <>
       <div className="app-shell" data-testid="ennote-shell">
         {/* Mobile overlay backdrop */}
@@ -1171,6 +1173,7 @@ export function AppShell() {
         />
       )}
     </>
+    </ChildProgressProvider>
   );
 }
 

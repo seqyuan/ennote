@@ -2774,8 +2774,14 @@ export interface components {
         };
         DelegationApprovalPreview: {
             name: string;
-            roleHandle: string;
-            assignmentPreview: string;
+            role: string;
+            /** @description legacy preview compat */
+            roleHandle?: string;
+            goalPreview: string;
+            /** @description legacy preview compat */
+            assignmentPreview?: string;
+            skills?: string[];
+            depends?: string[];
             outputContract: string;
             budget: components["schemas"]["DelegationBudgetCeiling"];
         };
@@ -2795,7 +2801,7 @@ export interface components {
             roleHandle: string;
             roleDisplayName: string;
             /** @enum {string} */
-            itemStatus: "pending" | "running" | "succeeded" | "failed" | "cancelled" | "not_authorized";
+            itemStatus: "pending" | "running" | "blocked" | "succeeded" | "failed" | "cancelled" | "not_authorized";
             /** @enum {string} */
             runStatus?: "queued" | "running" | "waiting_for_approval" | "waiting_delegation_admission" | "waiting_children" | "succeeded" | "failed" | "cancelled" | "interrupted";
             result?: components["schemas"]["DelegationTerminalResult"];

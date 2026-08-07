@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ActiveRunState, AgentRun, ApprovalDecision, ToolApprovalRequest } from "@/lib/approval";
 import type { TurnMessage } from "@/lib/chat-messages";
 import { runFailureMessage } from "@/lib/provider-errors";
+import { registerChildProgress } from "@/hooks/useChildProgress";
 import { apiFetch } from "@/lib/worker-api.client";
 
 interface UseAgentSessionInput {
@@ -398,6 +399,20 @@ async function streamAgentEvents(
               argumentsFragment: partial.argumentsFragment }, "pending", "Collecting tool arguments…");
             break;
           }
+          case "child_progress": {
+            // Live-only per-task activity for delegated children (published on
+            // the parent run's live channel). Non-durable; the nested activity
+            // panel merges it with polled delegation state.
+            if (!wasLive) break;
+            registerChildProgress({
+              delegationGroupId: String(payload.delegationGroupId ?? ""),
+              taskName: String(payload.taskName ?? ""),
+              childRunId: String(payload.childRunId ?? ""),
+              activity: String(payload.activity ?? ""),
+              tokens: Number(payload.tokens ?? 0),
+            });
+            break;
+          }
           case "tool_output_delta": {
             // Live tool stdout/stderr streaming: accumulate per call so text appends.
             if (!wasLive) break;
@@ -426,7 +441,7 @@ async function streamAgentEvents(
             setStatus(`Running: ${payload.toolName ?? "tool"}…`); upsertTool(payload, "running", "Running"); break;
           case "tool_call_completed": {
             setStatus("");
-            if (payload.toolName === "delegate_roles") approval.delegated();
+            if (payload.toolName === "delegate_tasks" || payload.toolName === "delegate_roles") approval.delegated();
             const callID = String(payload.toolCallId ?? payload.recordId ?? `event-${payload.callIndex ?? "unknown"}`);
             toolOutputs.delete(callID); // final result replaces the live preview
             upsertTool(payload, payload.isError ? "failed" : "completed", "No output");

@@ -26,17 +26,27 @@ function StandingCheckbox({ item, checked, onChange }: {
 function DelegationPreview({ item }: { item: ApprovalItem }) {
   if (!item.delegations?.length) return <pre>{item.argumentsPreview}</pre>;
   return <div className="approval-delegations">
-    {item.delegations.map((delegation, index) => <div className="approval-delegation" key={`${delegation.roleHandle}-${index}`}>
-      <span className="approval-delegation-icon"><Users size={14} aria-hidden="true" /></span>
-      <span className="approval-delegation-copy">
-        <strong>{delegation.name}</strong>
-        <span>@{delegation.roleHandle}</span>
-        <small>{delegation.assignmentPreview}</small>
-      </span>
-      <span className="approval-delegation-budget">
-        {delegation.budget.maxModelCalls} model · {delegation.budget.maxToolCalls} tool
-      </span>
-    </div>)}
+    {item.delegations.map((delegation, index) => {
+      const role = delegation.role || delegation.roleHandle;
+      const goal = delegation.goalPreview || delegation.assignmentPreview;
+      return <div className="approval-delegation" key={`${role}-${index}`}>
+        <span className="approval-delegation-icon"><Users size={14} aria-hidden="true" /></span>
+        <span className="approval-delegation-copy">
+          <strong>{delegation.name}</strong>
+          <span>@{role}</span>
+          <small>{goal}</small>
+          {Boolean(delegation.skills?.length) && <small className="approval-delegation-meta">
+            skills: {(delegation.skills ?? []).join(", ")}
+          </small>}
+          {Boolean(delegation.depends?.length) && <small className="approval-delegation-meta">
+            after: {(delegation.depends ?? []).join(", ")}
+          </small>}
+        </span>
+        <span className="approval-delegation-budget">
+          {delegation.budget.maxModelCalls} model · {delegation.budget.maxToolCalls} tool
+        </span>
+      </div>;
+    })}
   </div>;
 }
 
@@ -50,7 +60,8 @@ export function ApprovalPanel({ approval, resolving, decide }: ApprovalPanelProp
     [approval.id, selection],
   );
   const selectedSet = useMemo(() => new Set(selectedIndexes), [selectedIndexes]);
-  const delegationAdmission = approval.items.some(item => item.toolName === "delegate_roles");
+  const delegationAdmission = approval.items.some(item =>
+    item.toolName === "delegate_tasks" || item.toolName === "delegate_roles");
 
   const toggleIndex = useCallback((callIndex: number) => {
     setSelection((current) => {
@@ -89,7 +100,8 @@ export function ApprovalPanel({ approval, resolving, decide }: ApprovalPanelProp
           <code>{item.toolName}</code>
           <span data-risk={item.riskClass}>{approvalRiskLabel(item.riskClass)}</span>
         </div>
-        {item.toolName === "delegate_roles" ? <DelegationPreview item={item} /> : <pre>{item.argumentsPreview}</pre>}
+        {item.toolName === "delegate_tasks" || item.toolName === "delegate_roles"
+          ? <DelegationPreview item={item} /> : <pre>{item.argumentsPreview}</pre>}
         <StandingCheckbox item={item}
           checked={selectedSet.has(item.callIndex)}
           onChange={toggleIndex} />
