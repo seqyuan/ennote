@@ -122,6 +122,17 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     const budgetValue = await page.locator('input[placeholder="e.g. 600000"]').inputValue();
     expect(Number(budgetValue)).toBeGreaterThanOrEqual(10000);
 
+    // Parallelism: max concurrency input + the opt-in confirmation dialog
+    // before allow_disjoint_writers can be enabled.
+    await page.getByPlaceholder("10").fill("4");
+    await page.getByText("Allow parallel writes (disjoint scopes)").click();
+    await expect(page.getByText("Enable parallel writes?")).toBeVisible();
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByText("Enable parallel writes?")).toBeHidden();
+    await page.getByText("Allow parallel writes (disjoint scopes)").click();
+    await page.getByRole("button", { name: "Enable" }).click();
+    await expect(page.getByText(/Writers run concurrently only when every writer task declares/)).toBeVisible();
+
     // Save + publish the draft.
     await page.getByRole("button", { name: "Save draft" }).click();
     await page.getByRole("button", { name: "Publish" }).click();

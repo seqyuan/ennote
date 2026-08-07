@@ -11,6 +11,8 @@ function sampleDraft(): FlowDraft {
     inputs: [{ name: "target", type: "path", required: true }],
     outputs: [{ name: "report", type: "string" }],
     maxTotalTokens: "120000",
+    parallelismMax: "3",
+    allowDisjointWriters: true,
     tasks: [producer, reviewer, accept],
   };
 }
@@ -21,6 +23,9 @@ describe("Agent Flow editor YAML contract", () => {
     expect(yaml).toContain("schemaVersion: 1");
     expect(yaml).toContain("id: go-review");
     expect(yaml).toContain("max_total_tokens: 120000");
+    expect(yaml).toContain("parallelism:");
+    expect(yaml).toContain("  max: 3");
+    expect(yaml).toContain("  allow_disjoint_writers: true");
     expect(yaml).toContain("role: flow-worker@1");
     expect(yaml).toContain('goal: "Implement {inputs.target}"');
     expect(yaml).toContain("depends: [producer]");
@@ -43,6 +48,7 @@ describe("Agent Flow editor YAML contract", () => {
       inputs: { target: { type: "path", required: true } },
       outputs: { report: { type: "string" } },
       budget: { maxTotalTokens: 99999 },
+      parallelism: { max: 4, allowDisjointWriters: true },
       tasks: {
         producer: { role: "flow-worker@1", skills: ["go-dev"], goal: "g", budget: { tokens: 4000 } },
         gate: { type: "check", command: "go test ./...", depends: ["producer"] },
@@ -56,6 +62,19 @@ describe("Agent Flow editor YAML contract", () => {
     expect(draft.tasks[1].kind).toBe("check");
     expect(draft.tasks[2].kind).toBe("terminal");
     expect(draft.tasks[1].command).toBe("go test ./...");
+    expect(draft.parallelismMax).toBe("4");
+    expect(draft.allowDisjointWriters).toBe(true);
+  });
+
+  it("serializes and round-trips writes scopes", () => {
+    const draft = sampleDraft();
+    draft.tasks[0].writes = [".docs/plan/design-a1.md"];
+    const yaml = draftToYAML(draft);
+    expect(yaml).toContain('writes: [".docs/plan/design-a1.md"]');
+    const back = flowToDraft({
+      tasks: { producer: { role: "flow-worker@1", writes: [".docs/plan/x.md", ".docs/plan/y.md"] } },
+    }, "w");
+    expect(back.tasks[0].writes).toEqual([".docs/plan/x.md", ".docs/plan/y.md"]);
   });
 });
 

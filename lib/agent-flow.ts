@@ -15,6 +15,9 @@ export interface TaskDraft {
   budgetTokens: string;
   command: string;
   outputPort: string;
+  // writes declares the workspace paths this task mutates (globs relative to
+  // /workspace). Empty means "whole workspace" (exclusive mutation lane).
+  writes: string[];
 }
 
 export interface FlowDraft {
@@ -23,6 +26,11 @@ export interface FlowDraft {
   inputs: { name: string; type: string; required: boolean }[];
   outputs: { name: string; type: string }[];
   maxTotalTokens: string;
+  // parallelism.max bounds concurrent ready tasks (default 10, 1..16).
+  parallelismMax: string;
+  // allowDisjointWriters opts into parallel mutation between writers whose
+  // declared writes scopes are pairwise disjoint (default off).
+  allowDisjointWriters: boolean;
   tasks: TaskDraft[];
 }
 
@@ -38,6 +46,7 @@ export function emptyTask(name: string): TaskDraft {
     budgetTokens: "",
     command: "",
     outputPort: "",
+    writes: [],
   };
 }
 
@@ -48,6 +57,8 @@ export function emptyDraft(id: string): FlowDraft {
     inputs: [{ name: "target", type: "path", required: true }],
     outputs: [{ name: "report", type: "string" }],
     maxTotalTokens: "",
+    parallelismMax: "",
+    allowDisjointWriters: false,
     tasks: [emptyTask("producer")],
   };
 }
@@ -57,6 +68,7 @@ type RawFlowDefinition = {
   inputs?: Record<string, { type?: string; required?: boolean }>;
   outputs?: Record<string, { type?: string }>;
   budget?: { maxTotalTokens?: number };
+  parallelism?: { max?: number; allowDisjointWriters?: boolean };
   tasks?: Record<string, RawTask>;
 };
 
@@ -69,6 +81,7 @@ type RawTask = {
   budget?: { tokens?: number };
   command?: string;
   terminal?: { status?: string; output?: string };
+  writes?: string[];
 };
 
 export function flowToDraft(def: RawFlowDefinition | undefined, id: string): FlowDraft {
@@ -80,6 +93,7 @@ export function flowToDraft(def: RawFlowDefinition | undefined, id: string): Flo
       kind, role: task.role ?? "", skills: task.skills ?? [], goal: task.goal ?? "",
       depends: task.depends ?? [], budgetTokens: String(task.budget?.tokens ?? ""),
       command: task.command ?? "", outputPort: task.terminal?.output ?? "",
+      writes: task.writes ?? [],
     };
   });
   return {
@@ -91,6 +105,8 @@ export function flowToDraft(def: RawFlowDefinition | undefined, id: string): Flo
       name, type: port.type ?? "string",
     })),
     maxTotalTokens: String(def.budget?.maxTotalTokens ?? ""),
+    parallelismMax: String(def.parallelism?.max ?? ""),
+    allowDisjointWriters: !!def.parallelism?.allowDisjointWriters,
     tasks,
   };
 }
@@ -117,6 +133,13 @@ export function draftToYAML(draft: FlowDraft): string {
   }
   lines.push("budget:");
   lines.push(`  max_total_tokens: ${Number(draft.maxTotalTokens) || 0}`);
+  if (draft.parallelismMax || draft.allowDisjointWriters) {
+    lines.push("parallelism:");
+    lines.push(`  max: ${Number(draft.parallelismMax) || 10}`);
+    if (draft.allowDisjointWriters) {
+      lines.push("  allow_disjoint_writers: true");
+    }
+  }
   lines.push("tasks:");
   for (const task of draft.tasks) {
     lines.push(`  ${task.name}:`);
@@ -132,8 +155,13 @@ export function draftToYAML(draft: FlowDraft): string {
       lines.push(`    goal: ${jsonQuote(task.goal)}`);
     }
     if (task.depends.length > 0) lines.push(`    depends: [${task.depends.join(", ")}]`);
-    if (task.kind === "role" && task.budgetTokens) {
-      lines.push(`    budget: {tokens: ${Number(task.budgetTokens) || 0}}`);
+    if (task.kind === "role") {
+      if (task.budgetTokens) {
+        lines.push(`    budget: {tokens: ${Number(task.budgetTokens) || 0}}`);
+      }
+      if (task.writes.length > 0) {
+        lines.push(`    writes: [${task.writes.map(jsonQuote).join(", ")}]`);
+      }
     }
   }
   return lines.join("\n") + "\n";

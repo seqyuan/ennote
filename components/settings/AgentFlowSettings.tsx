@@ -51,6 +51,7 @@ export function AgentFlowSettings({ projectId, setError }: {
   const [diffView, setDiffView] = useState<{ slug: string; lines: string[] } | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [runPanelFor, setRunPanelFor] = useState<string | null>(null);
+  const [confirmDisjoint, setConfirmDisjoint] = useState(false);
   const [runSessionId, setRunSessionId] = useState<string>("");
   const [importYaml, setImportYaml] = useState("");
   const [importReport, setImportReport] = useState<{
@@ -659,6 +660,41 @@ export function AgentFlowSettings({ projectId, setError }: {
                   </button>
                 </div>
               </label>
+              <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600 }}>Parallelism (ready-set dispatch)</div>
+                <label style={labelStyle}>Max concurrent tasks (default 10, 1–16)
+                  <input
+                    type="number"
+                    min={1}
+                    max={16}
+                    value={draft.parallelismMax}
+                    onChange={(e) => setDraft({ ...draft, parallelismMax: e.target.value })}
+                    style={inputStyle}
+                    placeholder="10"
+                  />
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text)" }}>
+                  <input
+                    type="checkbox"
+                    checked={draft.allowDisjointWriters}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setConfirmDisjoint(true);
+                      } else {
+                        setDraft({ ...draft, allowDisjointWriters: false });
+                      }
+                    }}
+                  />
+                  Allow parallel writes (disjoint scopes)
+                </label>
+                {draft.allowDisjointWriters && (
+                  <div style={{ fontSize: 10, color: "var(--text-dim)" }}>
+                    Writers run concurrently only when every writer task declares a <code>writes</code> scope and
+                    all scopes are pairwise disjoint. The declared scope is scheduling-only: the sandbox does not
+                    block out-of-scope writes (worktree/patch isolation is not implemented).
+                  </div>
+                )}
+              </div>
             </div>
 
             <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 8, fontSize: 11 }}>
@@ -791,6 +827,23 @@ export function AgentFlowSettings({ projectId, setError }: {
                           />
                         </label>
                       </div>
+                      <label style={labelStyle}>
+                        Writes scope (comma-separated globs relative to /workspace — enables parallel writers with &ldquo;Allow parallel writes&rdquo;)
+                        <input
+                          value={task.writes.join(", ")}
+                          onChange={(e) => updateTask(index, (t) => ({
+                            ...t,
+                            writes: e.target.value.split(",").map((item) => item.trim()).filter(Boolean),
+                          }))}
+                          style={{ ...inputStyle, fontFamily: "var(--font-mono, monospace)", fontSize: 11 }}
+                          placeholder={".docs/plan/design-a1.md, .docs/plan/notes/**"}
+                        />
+                        {draft.allowDisjointWriters && task.writes.length === 0 && (
+                          <span style={{ fontSize: 10, color: "#D97706" }}>
+                            Writer task without a writes scope — publish validation rejects it while &ldquo;Allow parallel writes&rdquo; is on.
+                          </span>
+                        )}
+                      </label>
                     </>
                   )}
                   {task.kind === "check" && (
@@ -1159,6 +1212,48 @@ export function AgentFlowSettings({ projectId, setError }: {
           })}
         </div>
       </div>
+
+      {confirmDisjoint && draft && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 50,
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 10,
+            padding: 16, maxWidth: 460, display: "flex", flexDirection: "column", gap: 10,
+          }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)" }}>
+              Enable parallel writes?
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5 }}>
+              With <code>allow_disjoint_writers</code> on, writer tasks run concurrently — but only when every
+              writer declares a <code>writes</code> scope and all scopes are pairwise disjoint. The declared scope
+              is used for scheduling only: the sandbox does not block a model writing outside its scope
+              (worktree/patch isolation is not implemented), so overlapping or unscoped writers are rejected at
+              publish. Read-only tasks always run in parallel regardless of this switch.
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setConfirmDisjoint(false)}
+                style={ghostButtonStyle}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft({ ...draft, allowDisjointWriters: true });
+                  setConfirmDisjoint(false);
+                }}
+                style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, border: "none", background: "var(--accent)", color: "#fff", cursor: "pointer" }}
+              >
+                Enable
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
