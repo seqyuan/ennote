@@ -47,7 +47,7 @@ async function selectProject(page: Page) {
   await page.goto("/");
   if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByTitle("Select project").click();
-  await page.getByRole("button", { name: project.name }).click();
+  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
 }
 
 test("searches active Sessions and supports archive and restore lifecycle actions", async ({ page }) => {
@@ -128,7 +128,7 @@ test.describe("mobile drawer", () => {
 
     await trigger.click();
     await page.getByTitle("Select project").click();
-    await page.getByRole("button", { name: project.name }).click();
+    await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
     await expect(trigger).toBeFocused();
     await trigger.click();
     await page.getByRole("button", { name: "Marker review", exact: true }).click();

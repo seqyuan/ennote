@@ -27,7 +27,7 @@ async function selectProject(page: Page) {
     await expect(navigation).toHaveClass(/sidebar-open/);
   }
   await page.getByTitle("Select project").click();
-  await page.getByRole("button", { name: project.name }).click();
+  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
 }
 
 function commonRoute(path: string, route: Route) {

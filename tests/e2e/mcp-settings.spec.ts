@@ -72,7 +72,7 @@ async function selectProjectAndOpenMCPSettings(page: Page) {
   await page.goto("/");
   if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByTitle("Select project").click();
-  await page.getByRole("button", { name: project.name }).click();
+  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
   await page.getByRole("button", { name: "Open settings" }).click();
   await page.getByRole("tab", { name: /MCP/ }).click();
 }
