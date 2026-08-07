@@ -42,11 +42,11 @@ async function openSession(page: Page) {
   await mockBackend(page);
   await page.goto("/");
   await page.getByTitle("Select project").click();
-  await page.getByRole("button", { name: project.name }).click();
+  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
   await page.getByRole("button", { name: session.title, exact: true }).click();
 }
 
-test("typing @role: completes a role target and clears the token", async ({ page }) => {
+test("typing @role completes a role target and clears the token", async ({ page }) => {
   await openSession(page);
   const textarea = page.locator("textarea[aria-label]");
   const panel = page.locator(".prompt-command-menu");
@@ -63,18 +63,18 @@ test("typing @role: completes a role target and clears the token", async ({ page
   await expect(page.getByText("@security-reviewer", { exact: true })).toBeVisible();
 });
 
-test("typing @flow: completes a flow invocation with version", async ({ page }) => {
+test("typing @graph completes a graph invocation with version", async ({ page }) => {
   await openSession(page);
   const textarea = page.locator("textarea[aria-label]");
   const panel = page.locator(".prompt-command-menu");
 
-  await textarea.fill("@flow:go-");
+  await textarea.fill("@graph:go-");
   await expect(panel).toBeVisible();
-  await expect(panel.getByText("@flow:go-review@2")).toBeVisible();
+  await expect(panel.getByText("@graph:go-review@2")).toBeVisible();
 
-  await panel.getByText("@flow:go-review@2").click();
+  await panel.getByText("@graph:go-review@2").click();
   // The invocation token is inserted; the existing submit gate parses it.
-  await expect(textarea).toHaveValue("@flow:go-review@2 ");
+  await expect(textarea).toHaveValue("@graph:go-review@2 ");
   await expect(panel).not.toBeVisible();
 });
 
@@ -85,6 +85,6 @@ test("@ addressing does not open when no match exists", async ({ page }) => {
 
   await textarea.fill("@role:zzz");
   await expect(panel).not.toBeVisible();
-  await textarea.fill("@flow:nope");
+  await textarea.fill("@graph:nope");
   await expect(panel).not.toBeVisible();
 });

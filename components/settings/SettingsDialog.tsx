@@ -1,15 +1,13 @@
 "use client";
 
-import { Bot, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ContextSettings } from "@/components/settings/ContextSettings";
 import { McpSettings } from "@/components/settings/McpSettings";
 import { SkillsSettings } from "@/components/settings/SkillsSettings";
-import { AgentFlowSettings } from "@/components/settings/AgentFlowSettings";
 import { ModelsSettings } from "@/components/settings/ModelsSettings";
 import { PoliciesSettings } from "@/components/settings/PoliciesSettings";
 import { ProvidersSettings } from "@/components/settings/ProvidersSettings";
-import { RolesSettings } from "@/components/settings/RolesSettings";
 import { TemplatesSettings } from "@/components/settings/TemplatesSettings";
 import type { ModelProfile, PolicyProfile, ProviderProfile, Session, SettingsTab } from "@/components/settings/types";
 
@@ -51,9 +49,6 @@ function tabIcon(id: SettingsTab) {
         <line x1="15" y1="20" x2="15" y2="23" />
       </svg>
     );
-  }
-  if (id === "roles") {
-    return <Bot size={15} aria-hidden="true" />;
   }
   if (id === "policies") {
     return (
@@ -141,12 +136,10 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
   const tabs: TabItem[] = [
     { id: "providers", label: "Providers", description: "API connection profiles and credentials", icon: tabIcon("providers") },
     { id: "models", label: "Models", description: "Configure and assign model profiles", icon: tabIcon("models") },
-    { id: "roles", label: "Roles", description: "Addressable identities and immutable versions", icon: tabIcon("roles") },
     { id: "policies", label: "Policies", description: "Tool permission and routing policies", icon: tabIcon("policies") },
     { id: "context", label: "Context & session", description: session ? "Session defaults and compaction" : "Compaction policy defaults", icon: tabIcon("context") },
     { id: "templates", label: "Templates", description: "Slash-command prompt templates", icon: tabIcon("templates") },
     { id: "mcp", label: "MCP", description: "MCP servers and project bindings", icon: tabIcon("mcp") },
-    { id: "flows", label: "Flows", description: "Agent Flow tasks, bindings, and runs", icon: tabIcon("flows") },
     { id: "skills", label: "Skills", description: "Skill catalog, marketplace, and updates", icon: tabIcon("skills") },
   ];
 
@@ -279,9 +272,6 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
                 <ModelsSettings providers={providers} models={models} refresh={refresh} setError={setError} />
               </div>
             )}
-            {activeTab === "roles" && (
-              <RolesSettings projectId={projectId} models={models} setError={setError} />
-            )}
             {activeTab === "policies" && (
               <div style={{ height: "100%", overflowY: "auto" }}>
                 <PoliciesSettings policies={policies} refresh={refresh} setError={setError} />
@@ -304,11 +294,6 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
             {activeTab === "mcp" && (
               <div style={{ height: "100%", overflowY: "auto" }}>
                 <McpSettings projectId={projectId} setError={setError} />
-              </div>
-            )}
-            {activeTab === "flows" && (
-              <div style={{ height: "100%", overflowY: "auto" }}>
-                <AgentFlowSettings projectId={projectId} setError={setError} />
               </div>
             )}
             {activeTab === "skills" && (

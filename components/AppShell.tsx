@@ -22,6 +22,7 @@ import { useSessionBranches } from "@/hooks/useSessionBranches";
 import { useSessionMessages } from "@/hooks/useSessionMessages";
 import { useAgentSession } from "@/hooks/useAgentSession";
 import { ChildProgressProvider } from "@/hooks/useChildProgress";
+import { useWorkspace } from "./WorkspaceProvider";
 import { useRunRecovery } from "@/hooks/useRunRecovery";
 import { useRunningSessionIds } from "@/hooks/useRunningSessionIds";
 import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
@@ -55,16 +56,17 @@ function useIsMobile() {
 
 export function AppShell() {
   const isMobile = useIsMobile();
-  // Project/Session state
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const {
+    projects, selectedProject, switchProject: workspaceSwitchProject,
+    createProjectOpen, openCreateProject, confirmCreateProject, cancelCreateProject, createProjectBusy,
+    settingsOpen, openSettings: workspaceOpenSettings, closeSettings,
+    workspaceFor, togglePinProject, pinnedProjectIds,
+  } = useWorkspace();
+  // Session/chat state stays in the chat shell.
   const [selectedSession, setSelectedSessionState] = useState<string | null>(null);
   const [roles, setRoles] = useState<RoleSummary[]>([]);
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
   const [input, setInput] = useState("");
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [creatingProject, setCreatingProject] = useState(false);
-  const [creatingProjectBusy, setCreatingProjectBusy] = useState(false);
   const [compactionPrompt, setCompactionPrompt] = useState<{ open: boolean; instructions: string; busy: boolean }>({
     open: false, instructions: "", busy: false,
   });
@@ -109,8 +111,9 @@ export function AppShell() {
     && !input.slice(1).match(/[\s]/)
     && (
       (input.startsWith("/") && promptCatalog.templates.length > 0)
-      || (input.startsWith("@role:") && roles.length > 0)
-      || (input.startsWith("@flow:") && flowCatalog.length > 0)
+      || (input.startsWith("@role") && roles.length > 0)
+      || (input.startsWith("@graph") && flowCatalog.length > 0)
+      || (input.startsWith("@") && (roles.length > 0 || flowCatalog.length > 0))
     ),
   );
   const wasPanelOpen = useRef(false);
@@ -239,8 +242,6 @@ export function AppShell() {
     activeRun ? selectedSession : null,
   );
 
-  useEffect(() => { apiFetch<Project[]>("/v1/projects").then(setProjects).catch(() => {}); }, []);
-
   const selectedPermissionPolicyID = useCallback(
     () => { return permissionPolicyID(settings.policies, permissionMode); },
     [permissionMode, settings.policies],
@@ -267,20 +268,18 @@ export function AppShell() {
 
   const refreshSettings = settings.refresh;
   const openSettings = useCallback(() => {
-    setSettingsOpen(true);
+    workspaceOpenSettings();
     void refreshSettings();
-  }, [refreshSettings]);
-  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+  }, [refreshSettings, workspaceOpenSettings]);
 
   const switchProject = useCallback((projectId: string) => {
-    setSettingsOpen(false);
+    workspaceSwitchProject(projectId);
     setSelectedRoleId(null);
-    setSelectedProject(projectId);
     selectSession(null);
     sessionNavigation.setView("active");
     sessionNavigation.setQuery("");
     if (isMobile) closeMobileNavigation();
-  }, [closeMobileNavigation, isMobile, selectSession, sessionNavigation]);
+  }, [closeMobileNavigation, isMobile, selectSession, sessionNavigation, workspaceSwitchProject]);
 
   const createSession = useCallback(async () => {
     if (!selectedProject) return;
@@ -298,11 +297,11 @@ export function AppShell() {
   }, [selectSession, selectedProject, sessionNavigation, setError]);
 
   const switchSession = useCallback((sessionId: string) => {
-    setSettingsOpen(false);
+    closeSettings();
     selectSession(sessionId);
     apiFetch<Session>(`/v1/sessions/${encodeURIComponent(sessionId)}`).then(sessionNavigation.replaceSession).catch(() => {});
     if (isMobile) closeMobileNavigation();
-  }, [closeMobileNavigation, isMobile, selectSession, sessionNavigation]);
+  }, [closeMobileNavigation, closeSettings, isMobile, selectSession, sessionNavigation]);
 
   const archiveSession = useCallback(async (session: Session) => {
     const succeeded = await sessionNavigation.archive(session);
@@ -417,7 +416,7 @@ export function AppShell() {
     if (!selectedSession || (!input.trim() && !pendingImage && textAttachments.length === 0) || activeRun) return;
 
     // Agent Flow addressing gates run BEFORE the normal turn: an explicit
-    // /invoke_agent_flow command or a leading @flow:name[@version] token is a
+    // /invoke_agent_flow command or a leading @graph:name[@version] token is a
     // Host orchestration call, never a chat message.
     const invokeMatch = input.trim().match(/^\/invoke_agent_flow\s+(\S+)(?:\s+([\s\S]+))?$/);
     if (invokeMatch) {
@@ -425,7 +424,7 @@ export function AppShell() {
       void invokeAgentFlow(name, version ? Number(version) : undefined, invokeMatch[2]);
       return;
     }
-    const flowToken = input.trim().match(/^@flow:([\w.-]+)(?:@(\d+))?(?:\s+([\s\S]+))?$/);
+    const flowToken = input.trim().match(/^@graph:([\w.-]+)(?:@(\d+))?(?:\s+([\s\S]+))?$/);
     if (flowToken) {
       void invokeAgentFlow(flowToken[1], flowToken[2] ? Number(flowToken[2]) : undefined, flowToken[3]);
       return;
@@ -634,54 +633,22 @@ export function AppShell() {
   }, [recovery, watchRun]);
 
   // File operations use project-scoped /workspace paths. Host paths are display-only.
-  const [workspaceMap, setWorkspaceMap] = useState<Map<string, ProjectWorkspace>>(new Map());
   const currentProjectId = selectedSessionRecord?.projectId ?? selectedProject;
-  const currentWorkspace = currentProjectId ? workspaceMap.get(currentProjectId) ?? null : null;
+  const currentWorkspace = currentProjectId ? workspaceFor(currentProjectId) ?? null : null;
   const currentCwd = currentWorkspace?.hostPath ?? null;
 
+  // Workspace loading is owned by the WorkspaceProvider; surface load errors here.
   useEffect(() => {
     const projectId = currentProjectId;
-    if (!projectId || workspaceMap.has(projectId)) return;
+    if (!projectId || workspaceFor(projectId)) return;
     const controller = new AbortController();
     void apiFetch<ProjectWorkspace>(`/v1/projects/${encodeURIComponent(projectId)}/workspace`, { signal: controller.signal })
-      .then((workspace) => setWorkspaceMap((previous) => new Map(previous).set(projectId, workspace)))
       .catch((reason) => {
         if (!controller.signal.aborted) setError((reason as Error).message);
       });
     return () => controller.abort();
-  }, [currentProjectId, setError, workspaceMap]);
-
-  // Also capture workspace path when creating a project
-  const openCreateProject = useCallback(() => {
-    setCreatingProjectBusy(false);
-    setCreatingProject(true);
-  }, []);
-
-  const confirmCreateProject = useCallback(async (name: string, hostPath: string) => {
-    setCreatingProjectBusy(true);
-    try {
-      const result = await apiFetch<{ project: Project; workspace: ProjectWorkspace }>("/v1/projects", {
-        method: "POST", body: JSON.stringify({ name, hostPath }),
-      });
-      setError(null);
-      setCreatingProject(false);
-      if (result.workspace) {
-        setWorkspaceMap((previous) => new Map(previous).set(result.project.id, result.workspace));
-      }
-      setProjects(await apiFetch<Project[]>("/v1/projects"));
-      // Auto-select the freshly created project so the workspace is immediately usable.
-      switchProject(result.project.id);
-    } catch (reason) {
-      setError((reason as Error).message);
-    } finally {
-      setCreatingProjectBusy(false);
-    }
-  }, [setError, switchProject]);
-
-  const cancelCreateProject = useCallback(() => {
-    if (creatingProjectBusy) return;
-    setCreatingProject(false);
-  }, [creatingProjectBusy]);
+    // workspaceFor is stable via context; re-run on project switch.
+  }, [currentProjectId, setError, workspaceFor]);
 
   const handleOpenFile = useCallback((filePath: string, fileName: string) => {
     if (!currentProjectId) return;
@@ -1058,7 +1025,7 @@ export function AppShell() {
             }}
             onFlowSelect={(name: string, version?: number) => {
               setPromptPanelDismissed(false);
-              setInputVersioned(`@flow:${name}${version ? `@${version}` : ""} `);
+              setInputVersioned(`@graph:${name}${version ? `@${version}` : ""} `);
             }}
             onPromptPanelClose={() => setPromptPanelDismissed(true)}
             expanding={expanding}
@@ -1164,9 +1131,9 @@ export function AppShell() {
       />
 
       {/* New project dialog */}
-      {creatingProject && (
+      {createProjectOpen && (
         <ProjectCreateDialog
-          busy={creatingProjectBusy}
+          busy={createProjectBusy}
           error={error}
           onCreate={(name, hostPath) => void confirmCreateProject(name, hostPath)}
           onClose={cancelCreateProject}

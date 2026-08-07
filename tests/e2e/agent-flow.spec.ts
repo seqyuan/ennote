@@ -35,12 +35,8 @@ function fulfill(route: Route, data: unknown, status = 200) {
 }
 
 async function selectProjectAndOpenFlows(page: Page) {
-  await page.goto("/");
-  if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.getByTitle("Select project").click();
-  await page.getByRole("button", { name: project.name }).click();
-  await page.getByRole("button", { name: "Open settings" }).click();
-  await page.getByRole("tab", { name: /Flows/ }).click();
+  // Graphs moved from the settings dialog to the dedicated /graphs route.
+  await page.goto("/graphs");
 }
 
 async function mockFlows(page: Page) {
@@ -227,7 +223,7 @@ test("Agent Flow Host invocation by name starts a run in the current session", a
   });
   await page.goto("/");
   await page.getByTitle("Select project").click();
-  await page.getByRole("button", { name: project.name }).click();
+  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
   await page.getByRole("button", { name: "Marker review", exact: true }).click();
   await page.getByPlaceholder(/Ask|Type|Message/).fill("/invoke_agent_flow go-review target=src/a.go");
   await page.keyboard.press("Enter");
@@ -236,8 +232,8 @@ test("Agent Flow Host invocation by name starts a run in the current session", a
   // The input was cleared and no error surfaced.
   await expect(page.getByPlaceholder(/Ask|Type|Message/)).toHaveValue("");
 
-  // @flow:name@version typed-target form also invokes.
-  await page.getByPlaceholder(/Ask|Type|Message/).fill("@flow:go-review@1");
+  // @graph:name@version typed-target form also invokes.
+  await page.getByPlaceholder(/Ask|Type|Message/).fill("@graph:go-review@1");
   await page.keyboard.press("Enter");
   await expect.poll(() => invokeCalls).toBe(2);
   expect(invokeBody).toMatchObject({ name: "go-review", version: 1 });
@@ -326,7 +322,7 @@ test("pending flow check approval surfaces in the conversation and accepts a dec
   });
   await page.goto("/");
   await page.getByTitle("Select project").click();
-  await page.getByRole("button", { name: project.name }).click();
+  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
   await page.getByRole("button", { name: session.title, exact: true }).click();
 
   await expect(page.getByText("Flow check approval")).toBeVisible();

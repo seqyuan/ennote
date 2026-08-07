@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { WorkspaceProvider } from "@/components/WorkspaceProvider";
 
 const themeInitScript = `(function(){try{var t=localStorage.getItem("ennote-theme");var d=t==="dark"||(t!=="light"&&matchMedia("(prefers-color-scheme:dark)").matches);document.documentElement.classList.toggle("dark",d);document.documentElement.dataset.theme=d?"dark":"light"}catch(e){}})();`;
 
@@ -22,7 +23,7 @@ export default function RootLayout({
         />
       </head>
       <body style={{ height: "100dvh", display: "flex", flexDirection: "column" }}>
-        {children}
+        <WorkspaceProvider>{children}</WorkspaceProvider>
       </body>
     </html>
   );

@@ -61,9 +61,7 @@ let draftBody: Record<string, unknown> | null = null;
 test("role editor binds catalog skills with a mode and publishes them", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await mockRoles(page);
-  await page.goto("/");
-  await page.getByRole("button", { name: "Open settings" }).click();
-  await page.getByRole("tab", { name: /Roles/ }).click();
+  await page.goto("/roles");
   await page.getByRole("button", { name: /Security Reviewer/ }).click();
 
   // Search narrows the catalog; bind with preload mode.
@@ -85,10 +83,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
   test(`Roles editor is usable at ${viewport.width}x${viewport.height}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await mockRoles(page);
-    await page.goto("/");
-    await page.getByRole("button", { name: "Open settings" }).click();
-    await page.getByRole("tab", { name: /Roles/ }).click();
-    await expect(page.getByRole("heading", { name: "Roles" })).toBeVisible();
+    await page.goto("/roles");
+    await expect(page.getByRole("heading", { name: "Roles", level: 1 })).toBeVisible();
     await page.getByRole("button", { name: /Security Reviewer/ }).click();
     await expect(page.getByRole("textbox", { name: "Handle" })).toHaveValue("security-reviewer");
     await expect(page.getByRole("textbox", { name: "Role prompt" })).toHaveValue("Review evidence independently.");

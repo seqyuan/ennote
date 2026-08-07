@@ -32,7 +32,7 @@ interface PromptCommandMenuProps {
   onClose: () => void;
 }
 
-type Mode = "template" | "role" | "flow";
+type Mode = "template" | "role" | "flow" | "all";
 
 interface MenuEntry {
   key: string;
@@ -44,9 +44,17 @@ interface MenuEntry {
 
 function activeMode(input: string): Mode | null {
   if (input.startsWith("/")) return "template";
-  if (input.startsWith("@role:")) return "role";
-  if (input.startsWith("@flow:")) return "flow";
+  if (input.startsWith("@role")) return "role";
+  if (input.startsWith("@graph")) return "flow";
+  if (input.startsWith("@")) return "all";
   return null;
+}
+
+// tokenAfter strips the "@kind:" or "@kind" prefix (both spellings) and
+// returns the search token up to the first space.
+function tokenAfter(input: string, prefix: string): string {
+  const withoutColon = input.startsWith(`${prefix}:`) ? input.slice(prefix.length + 1) : input.slice(prefix.length);
+  return withoutColon.split(/\s/)[0].toLowerCase();
 }
 
 export function PromptCommandMenu({
@@ -75,7 +83,7 @@ export function PromptCommandMenu({
       }));
     }
     if (mode === "role") {
-      const token = input.slice("@role:".length).split(/\s/)[0].toLowerCase();
+      const token = tokenAfter(input, "@role");
       const filtered = roles
         .filter((role) => !token || role.handle.toLowerCase().includes(token) ||
           role.name.toLowerCase().includes(token));
@@ -88,16 +96,38 @@ export function PromptCommandMenu({
       }));
     }
     if (mode === "flow") {
-      const token = input.slice("@flow:".length).split(/\s/)[0].toLowerCase();
+      const token = tokenAfter(input, "@graph");
       const filtered = flows
         .filter((flow) => !token || flow.name.toLowerCase().includes(token));
       return filtered.map((flow) => ({
         key: `f:${flow.name}`,
-        label: `@flow:${flow.name}${flow.version ? `@${flow.version}` : ""}`,
+        label: `@graph:${flow.name}${flow.version ? `@${flow.version}` : ""}`,
         hint: flow.version ? `v${flow.version}` : "",
         desc: flow.description,
         onPick: () => onSelectFlow(flow.name, flow.version),
       }));
+    }
+    if (mode === "all") {
+      const token = input.slice(1).split(/\s/)[0].toLowerCase();
+      const filteredRoles = roles
+        .filter((role) => !token || role.handle.toLowerCase().includes(token) || role.name.toLowerCase().includes(token));
+      const filteredFlows = flows.filter((flow) => !token || flow.name.toLowerCase().includes(token));
+      return [
+        ...filteredRoles.map((role) => ({
+          key: `r:${role.id}`,
+          label: `@role:${role.handle}`,
+          hint: role.name,
+          desc: role.description,
+          onPick: () => onSelectRole(role.id, role.handle),
+        })),
+        ...filteredFlows.map((flow) => ({
+          key: `f:${flow.name}`,
+          label: `@graph:${flow.name}${flow.version ? `@${flow.version}` : ""}`,
+          hint: flow.version ? `v${flow.version}` : "",
+          desc: flow.description,
+          onPick: () => onSelectFlow(flow.name, flow.version),
+        })),
+      ];
     }
     return [];
   })();

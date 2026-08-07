@@ -1,6 +1,8 @@
 "use client";
 
-import { Archive, MoreHorizontal, Plus, RotateCcw, Search, Settings2, X } from "lucide-react";
+import { Archive, Bot, MoreHorizontal, Plus, RotateCcw, Search, Settings2, Workflow, X } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { Session } from "@/components/settings/types";
 import type { SessionLifecycleView } from "@/hooks/useProjectSessions";
@@ -360,6 +362,12 @@ export function SessionSidebar({
         )}
       </div>
 
+      {/* Primary navigation: Roles / Graphs (independent routes) */}
+      <nav style={{ flexShrink: 0, padding: "8px 10px 2px", display: "flex", flexDirection: "column", gap: 2 }} aria-label="Workspace">
+        <NavLink href="/roles" label="Roles" icon={<Bot size={15} />} />
+        <NavLink href="/graphs" label="Graphs" icon={<Workflow size={15} />} />
+      </nav>
+
       {/* Sessions section label */}
       {selectedProject && (
         <div style={{ flexShrink: 0, padding: "10px 10px 6px" }}>
@@ -453,5 +461,26 @@ export function SessionSidebar({
         </button>
       </div>
     </aside>
+  );
+}
+
+function NavLink({ href, label, icon }: { href: string; label: string; icon: React.ReactNode }) {
+  const pathname = usePathname();
+  const active = pathname === href;
+  return (
+    <Link
+      href={href}
+      className={`sidebar-item ${active ? "active" : ""}`}
+      style={{
+        display: "flex", alignItems: "center", gap: 8,
+        padding: "6px 10px", borderRadius: 7,
+        color: active ? "var(--text)" : "var(--text-muted)",
+        fontSize: 12, fontWeight: active ? 600 : 400,
+        textDecoration: "none",
+      }}
+    >
+      <span style={{ color: active ? "var(--accent)" : "inherit", display: "flex", flexShrink: 0 }}>{icon}</span>
+      {label}
+    </Link>
   );
 }
