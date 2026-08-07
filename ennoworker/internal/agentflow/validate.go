@@ -165,12 +165,15 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 				add(v.fail("role_required", fmt.Sprintf("task %q requires a role", name), field+".role"))
 				continue
 			}
-			if !strings.Contains(task.Role, "@") || strings.HasSuffix(strings.TrimSpace(task.Role), "@latest") {
+			if strings.HasSuffix(strings.TrimSpace(task.Role), "@latest") {
 				add(v.fail("role_version_required",
 					fmt.Sprintf("task %q role %q must pin an exact version (handle@version, no latest)", name, task.Role),
 					field+".role"))
 				continue
 			}
+			// A bare handle is a flow-local reference (resolves flow > shared
+			// catalog at freeze time); the resolver enforces that the handle
+			// actually resolves, failing loud otherwise.
 			info, err := v.Resolver.ResolveRole(ctx, task.Role)
 			if err != nil {
 				add(v.fail("role_not_found", fmt.Sprintf("task %q: %v", name, err), field+".role"))

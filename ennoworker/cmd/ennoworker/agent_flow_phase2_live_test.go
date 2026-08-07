@@ -151,7 +151,7 @@ func newPhase2LiveFixture(t *testing.T, ctx context.Context) *phase2LiveFixture 
 		require.NoError(t, json.Unmarshal(version.DefinitionJSON, &def))
 		inputsJSON, err := store.NormalizeFlowInputs(&def, nil, nil)
 		require.NoError(t, err)
-		freeze, diagnostics, err := flowRuns.FreezeFlowDefinition(ctx, project.ID, &def, inputsJSON)
+		freeze, diagnostics, err := flowRuns.FreezeFlowDefinition(ctx, project.ID, version.ProfileID, &def, inputsJSON)
 		require.NoError(t, err, diagnostics)
 		run, err := flowRuns.CreateFlowRun(ctx, store.CreateFlowRunInput{
 			SessionID: session.ID, ProjectID: project.ID, FlowVersionID: flowVersionID, InputsJSON: inputsJSON,

@@ -145,7 +145,7 @@ func (s *Server) updateAgentFlowDraft(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) validateAgentFlowDraft(w http.ResponseWriter, r *http.Request) {
-	validator := store.NewFlowValidator(s.AgentFlows.flowPublishOptions())
+	validator := store.NewFlowValidator(s.AgentFlows.flowPublishOptions(r.Context(), r.PathValue("profileID")))
 	result, err := s.AgentFlows.Profiles.ValidateDraft(r.Context(), r.PathValue("profileID"), validator)
 	if err != nil {
 		s.writeStoreError(w, r, err)
@@ -166,7 +166,7 @@ func (s *Server) publishAgentFlow(w http.ResponseWriter, r *http.Request) {
 		}
 		expectedRevision = input.ExpectedRevision
 	}
-	validator := store.NewFlowValidator(s.AgentFlows.flowPublishOptions())
+	validator := store.NewFlowValidator(s.AgentFlows.flowPublishOptions(r.Context(), profileID))
 	version, err := s.AgentFlows.Profiles.Publish(r.Context(), profileID, expectedRevision, validator)
 	if err != nil {
 		if errors.Is(err, store.ErrFlowDraftConflict) {
@@ -183,10 +183,18 @@ func (s *Server) publishAgentFlow(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusCreated, version)
 }
 
-func (s *AgentFlowServer) flowPublishOptions() store.FlowPublishOptions {
-	return store.FlowPublishOptions{
+func (s *AgentFlowServer) flowPublishOptions(ctx context.Context, profileID string) store.FlowPublishOptions {
+	opts := store.FlowPublishOptions{
 		DB: s.Runs.DB, Skills: s.Skills, CheckAllowlist: defaultCheckAllowlist,
 	}
+	if strings.TrimSpace(profileID) != "" {
+		var flowID string
+		if err := s.Runs.DB.QueryRowContext(ctx,
+			`SELECT id FROM agent_flow_profiles WHERE id=?`, profileID).Scan(&flowID); err == nil {
+			opts.FlowID = flowID
+		}
+	}
+	return opts
 }
 
 var defaultCheckAllowlist = []string{"go", "python3", "python", "sh", "bash", "node", "git", "make", "pytest", "Rscript", "echo"}
@@ -816,7 +824,7 @@ func (s *Server) parseFlowForImport(w http.ResponseWriter, r *http.Request, yaml
 		writeError(w, r, http.StatusBadRequest, "invalid_agent_flow_yaml", err.Error(), false)
 		return nil, nil, store.FlowPublishOptions{}, false
 	}
-	opts := s.AgentFlows.flowPublishOptions()
+	opts := s.AgentFlows.flowPublishOptions(r.Context(), "")
 	if strings.TrimSpace(projectID) != "" {
 		opts.ProjectID = strings.TrimSpace(projectID)
 	}

@@ -85,6 +85,13 @@ func TestLiveTaskGraph(t *testing.T) {
 	require.NotEmpty(t, parentResolved.Effective.ModelProfileID)
 
 	delegations := &store.DelegationRepo{DB: db}
+	// Simulate the parent's recorded delegate_tasks tool call so folding lands
+	// on the expected result_preview when the group settles.
+	_, err = db.Exec(`INSERT INTO tool_calls
+		(id,run_id,seq,tool_call_id,tool_name,arguments_json,status,started_at)
+		VALUES('tc-tg',?,1,'tg-chain','delegate_tasks','{}','completed',CURRENT_TIMESTAMP)`,
+		parentRun.ID)
+	require.NoError(t, err)
 	explore := explorerLiveItem()
 	explore.Name = "explore"
 	review := explorerLiveItem()
