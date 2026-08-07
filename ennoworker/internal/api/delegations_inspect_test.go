@@ -43,7 +43,7 @@ func setupDelegationGroupAPI(t *testing.T) (*Server, http.Handler, *store.Delega
 	require.Len(t, children, 2)
 	_, err = delegations.DB.Exec(`INSERT INTO tool_calls
 		(id,run_id,seq,tool_call_id,tool_name,arguments_json,status,started_at)
-		VALUES('tc-inspect',?,1,'call-1','delegate_roles','{}','completed',CURRENT_TIMESTAMP)`,
+		VALUES('tc-inspect',?,1,'call-1','delegate_tasks','{}','completed',CURRENT_TIMESTAMP)`,
 		submission.Run.ID)
 	require.NoError(t, err)
 	for index, child := range children {

@@ -74,8 +74,8 @@ func TestDelegationAdmissionPolicyPromotesRoleApprovalAndHonorsKillSwitch(t *tes
 	require.NoError(t, err)
 	policy := &delegationAdmissionToolPolicy{Base: allowToolPolicy{},
 		Delegations: &store.DelegationRepo{DB: db}, SessionID: session.ID}
-	call := domain.ToolCall{ID: "delegate", Name: "delegate_roles", Arguments: json.RawMessage(
-		`{"delegations":[{"name":"review","roleHandle":"approval-role","assignment":"review","budget":{"maxModelCalls":1,"maxToolCalls":1}}]}`)}
+	call := domain.ToolCall{ID: "delegate", Name: "delegate_tasks", Arguments: json.RawMessage(
+		`{"tasks":[{"name":"review","role":"approval-role","goal":"review","budget":{"maxModelCalls":1,"maxToolCalls":1}}]}`)}
 	decisions, err := policy.BeforeToolBatch(ctx, agent.ToolBatchContext{}, []domain.ToolCall{call})
 	require.NoError(t, err)
 	require.Len(t, decisions, 1)

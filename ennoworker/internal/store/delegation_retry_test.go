@@ -38,7 +38,7 @@ func settleMixedGroup(t *testing.T) (*store.DelegationRepo, *store.RunRepo, *dom
 	// Record the parent tool call so generation 0 folding lands exactly once.
 	_, err = delegations.DB.Exec(`INSERT INTO tool_calls
 		(id,run_id,seq,tool_call_id,tool_name,arguments_json,status,started_at)
-		VALUES('tc-settled',?,1,'call-1','delegate_roles','{}','completed',CURRENT_TIMESTAMP)`,
+		VALUES('tc-settled',?,1,'call-1','delegate_tasks','{}','completed',CURRENT_TIMESTAMP)`,
 		submission.Run.ID)
 	require.NoError(t, err)
 

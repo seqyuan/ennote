@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -48,6 +49,11 @@ type CreateDelegationItemInput struct {
 	AssignmentJSON json.RawMessage
 	OutputContract string
 	Budget         domain.BudgetCeilingJSON
+	// Depends declares batch-scoped task dependencies: sibling item names in
+	// the same group that must settle before this item is ready to start.
+	// Empty means the item is an entry task. The topology is validated in
+	// createDelegationGroupTx (no dangling refs, no cycles, one entry minimum).
+	Depends []string
 }
 
 type CreateDelegationGroupInput struct {
@@ -112,8 +118,10 @@ func (r *DelegationRepo) ResolveRoleForDelegation(ctx context.Context, sessionID
 }
 
 // DelegationToolCallApproved reports whether user approval covered this exact
-// Provider-visible delegate_roles call. A previous approval for another call
-// or Run is never reusable.
+// Provider-visible delegate_tasks call. A previous approval for another call
+// or Run is never reusable. Both the current name and the legacy
+// delegate_roles alias are matched so approvals recorded before the rename
+// stay valid for resumed runs.
 func (r *DelegationRepo) DelegationToolCallApproved(ctx context.Context, runID, toolCallID string) (bool, error) {
 	rows, err := r.DB.QueryContext(ctx, `SELECT items_json FROM tool_approval_requests
 		WHERE run_id=? AND status='approved' ORDER BY resolved_at DESC`, runID)
@@ -131,7 +139,7 @@ func (r *DelegationRepo) DelegationToolCallApproved(ctx context.Context, runID, 
 			return false, err
 		}
 		for _, item := range items {
-			if item.ToolName == "delegate_roles" && item.ToolCallID == toolCallID {
+			if domain.IsDelegationToolName(item.ToolName) && item.ToolCallID == toolCallID {
 				return true, nil
 			}
 		}
@@ -225,6 +233,12 @@ func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 	}
 	items := make([]domain.DelegationItem, 0, len(input.Items))
 	proposedByRole := make(map[string]int)
+	// Batch topology validation: every depends reference must name a sibling
+	// item, the dependency graph must be acyclic, and at least one entry task
+	// (indegree 0) must exist. Fail loud before any row is written.
+	if err := validateTaskTopologyTx(input.Items); err != nil {
+		return nil, nil, err
+	}
 	for ordinal, item := range input.Items {
 		name := strings.TrimSpace(item.Name)
 		if name == "" {
@@ -251,15 +265,24 @@ func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 			return nil, nil, err
 		}
 		itemID := uuid.NewString()
+		dependsJSON := []byte("[]")
+		if len(item.Depends) > 0 {
+			encoded, marshalErr := json.Marshal(item.Depends)
+			if marshalErr != nil {
+				return nil, nil, marshalErr
+			}
+			dependsJSON = encoded
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO delegation_items
-			(id,group_id,child_run_id,name,role_version_id,assignment_json,output_contract,budget_json,result_json,status,ordinal,created_at)
-			VALUES(?,?,NULL,?,?,?,?,?,NULL,'pending',?,?)`,
+			(id,group_id,child_run_id,name,role_version_id,assignment_json,output_contract,budget_json,result_json,status,ordinal,depends_json,created_at)
+			VALUES(?,?,NULL,?,?,?,?,?,NULL,'pending',?,?,?)`,
 			itemID, groupID, name, item.RoleVersionID, string(item.AssignmentJSON),
-			outputContract, string(budgetJSON), ordinal, timestamp); err != nil {
+			outputContract, string(budgetJSON), ordinal, string(dependsJSON), timestamp); err != nil {
 			return nil, nil, fmt.Errorf("create delegation item %s: %w", name, err)
 		}
 		items = append(items, domain.DelegationItem{
-			ID: itemID, GroupID: groupID, Name: name, RoleVersionID: item.RoleVersionID,
+			ID: itemID, GroupID: groupID, Name: name, Depends: append([]string(nil), item.Depends...),
+			RoleVersionID: item.RoleVersionID,
 			AssignmentJSON: append(json.RawMessage(nil), item.AssignmentJSON...), OutputContract: outputContract,
 			BudgetJSON: budgetJSON, Status: domain.DelegationItemPending, Ordinal: ordinal, CreatedAt: now,
 		})
@@ -268,6 +291,105 @@ func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 		ParentToolCallID: input.ParentToolCallID, Strategy: input.Strategy,
 		Status: domain.DelegationGroupPending, CreatedAt: now}
 	return group, items, nil
+}
+
+// validateTaskTopologyTx validates the batch task graph before any row is
+// written: item names are unique, every depends reference names a sibling
+// item, the graph is acyclic, and at least one entry task (indegree 0) exists.
+// A violation is a hard input error: the delegate_tasks call fails loud and
+// never reaches admission.
+func validateTaskTopologyTx(items []CreateDelegationItemInput) error {
+	byName := make(map[string]int, len(items))
+	dupNames := make(map[string]struct{})
+	hasDepends := false
+	for index, item := range items {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			return domain.NewCodedError(domain.ErrorDelegationDagInvalid,
+				fmt.Errorf("task name is required"))
+		}
+		if len(item.Depends) > 0 {
+			hasDepends = true
+		}
+		if _, dup := byName[name]; dup {
+			dupNames[name] = struct{}{}
+		}
+		byName[name] = index
+	}
+	// Duplicate names are permitted for dependency-free parallel batches
+	// (multiple instances of the same Role); once any depends declaration
+	// exists, names must be unique because depends references by name.
+	if !hasDepends {
+		return nil // flat parallel batch: legacy semantics, no topology checks
+	}
+	if len(dupNames) > 0 {
+		names := make([]string, 0, len(dupNames))
+		for name := range dupNames {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		return domain.NewCodedError(domain.ErrorDelegationDagInvalid,
+			fmt.Errorf("duplicate task name(s) %v with depends declared", names))
+	}
+	if len(items) == 1 {
+		// A single task must not depend on itself; an empty depends is valid.
+		if len(items[0].Depends) > 0 {
+			return domain.NewCodedError(domain.ErrorDelegationDagInvalid,
+				fmt.Errorf("task %q depends on %q which is not a sibling task", items[0].Name, items[0].Depends[0]))
+		}
+		return nil
+	}
+	indegree := make([]int, len(items))
+	adj := make([][]int, len(items))
+	seen := make(map[string]struct{})
+	for index, item := range items {
+		for _, dep := range item.Depends {
+			target, ok := byName[dep]
+			if !ok {
+				return domain.NewCodedError(domain.ErrorDelegationDagInvalid,
+					fmt.Errorf("task %q depends on %q which is not a sibling task", item.Name, dep))
+			}
+			if target == index {
+				return domain.NewCodedError(domain.ErrorDelegationDagInvalid,
+					fmt.Errorf("task %q depends on itself", item.Name))
+			}
+			key := fmt.Sprintf("%d>%d", index, target)
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+			adj[index] = append(adj[index], target)
+			indegree[target]++
+		}
+	}
+	// Kahn topological sort: a cycle leaves unvisited nodes.
+	queue := make([]int, 0, len(items))
+	for index, degree := range indegree {
+		if degree == 0 {
+			queue = append(queue, index)
+		}
+	}
+	if len(queue) == 0 {
+		return domain.NewCodedError(domain.ErrorDelegationDagInvalid,
+			fmt.Errorf("task graph has no entry task (all tasks depend on something)"))
+	}
+	visited := 0
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		visited++
+		for _, next := range adj[current] {
+			indegree[next]--
+			if indegree[next] == 0 {
+				queue = append(queue, next)
+			}
+		}
+	}
+	if visited != len(items) {
+		return domain.NewCodedError(domain.ErrorDelegationDagInvalid,
+			fmt.Errorf("task graph contains a dependency cycle"))
+	}
+	return nil
 }
 
 func validateDelegationRoleTx(ctx context.Context, tx *sql.Tx, input CreateDelegationGroupInput,
@@ -553,7 +675,7 @@ func (r *DelegationRepo) GroupForParentToolCall(ctx context.Context, parentRunID
 
 func (r *DelegationRepo) ListItems(ctx context.Context, groupID string) ([]domain.DelegationItem, error) {
 	rows, err := r.DB.QueryContext(ctx, `SELECT id,group_id,child_run_id,name,role_version_id,assignment_json,
-		output_contract,budget_json,result_json,status,ordinal,created_at
+		output_contract,budget_json,result_json,status,ordinal,depends_json,created_at
 		FROM delegation_items WHERE group_id=? ORDER BY ordinal`, groupID)
 	if err != nil {
 		return nil, err
@@ -599,6 +721,13 @@ func (r *DelegationRepo) ListActivity(ctx context.Context, parentRunID string) (
 			return nil, err
 		}
 		child.RoleHandle, child.RoleDisplayName = fallbackHandle, fallbackName
+		if child.ItemStatus == domain.DelegationItemBlocked && child.ErrorMessage == "" {
+			// A blocked task never started: the terminal reason is always a
+			// prerequisite task that failed, cancelled, or was itself blocked.
+			// The exact dependency name is rendered from the task graph in the UI.
+			child.ErrorCode = string(domain.ErrorDelegationDagInvalid)
+			child.ErrorMessage = "Blocked: a prerequisite task did not complete"
+		}
 		if speakerJSON != "" && speakerJSON != "{}" {
 			var speaker struct {
 				Handle      string `json:"handle"`
@@ -651,10 +780,10 @@ func scanDelegationItems(rows *sql.Rows) ([]domain.DelegationItem, error) {
 	items := make([]domain.DelegationItem, 0)
 	for rows.Next() {
 		var item domain.DelegationItem
-		var childRun, assignment, budget, result sql.NullString
+		var childRun, assignment, budget, result, dependsJSON sql.NullString
 		var createdAt string
 		if err := rows.Scan(&item.ID, &item.GroupID, &childRun, &item.Name, &item.RoleVersionID,
-			&assignment, &item.OutputContract, &budget, &result, &item.Status, &item.Ordinal, &createdAt); err != nil {
+			&assignment, &item.OutputContract, &budget, &result, &item.Status, &item.Ordinal, &dependsJSON, &createdAt); err != nil {
 			return nil, err
 		}
 		if childRun.Valid {
@@ -664,6 +793,11 @@ func scanDelegationItems(rows *sql.Rows) ([]domain.DelegationItem, error) {
 		item.BudgetJSON = json.RawMessage(budget.String)
 		if result.Valid {
 			item.ResultJSON = json.RawMessage(result.String)
+		}
+		if dependsJSON.Valid && dependsJSON.String != "" && dependsJSON.String != "[]" {
+			if err := json.Unmarshal([]byte(dependsJSON.String), &item.Depends); err != nil {
+				return nil, fmt.Errorf("decode depends for item %s: %w", item.ID, err)
+			}
 		}
 		var err error
 		item.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
@@ -1337,6 +1471,14 @@ func settleAttemptTx(ctx context.Context, tx *sql.Tx, childRunID string, status 
 		string(usageJSON), now, now, errorCode, errorMessage, attemptID); err != nil {
 		return err
 	}
+	// Advance the dynamic task graph BEFORE the generation settlement check:
+	// dependent tasks whose dependencies failed are marked blocked here so the
+	// generation settlement below sees only terminal attempts; dependent tasks
+	// whose dependencies all succeeded are reported ready for enqueue. Blocked
+	// attempts never consume budget because their child Runs never start.
+	if _, err := advanceDagTx(ctx, tx, groupID); err != nil {
+		return err
+	}
 	// Settle the generation when every attempt of THIS generation is terminal.
 	// Item substrate columns are frozen at generation 0 and must never gate
 	// later generations. The first (and only) transition to settled creates the
@@ -1492,7 +1634,7 @@ func (r *RunRepo) FinalizeChildSuccess(ctx context.Context, runID string, output
 			return err
 		}
 
-		// Inject folded child results into the parent's delegate_roles tool call
+		// Inject folded child results into the parent's delegate_tasks tool call
 		// result_preview so the parent resume sees real output instead of a placeholder.
 		if err := injectFoldedResultsTx(ctx, tx, groupID, parent.String); err != nil {
 			return err
@@ -1648,6 +1790,256 @@ func (r *RunRepo) FinalizeChildFailure(ctx context.Context, runID, code, message
 		r.Publisher.Publish(committed...)
 	}
 	return parent.String, wakeParent, nil
+}
+
+// dagItemView is one delegation item with its latest attempt status and child
+// Run status, used by the dynamic task graph scheduler. For retry generations
+// the view follows the newest attempt (the frozen item substrate columns never
+// rewrite, so they cannot gate scheduling).
+type dagItemView struct {
+	ID            string
+	Name          string
+	Status        string
+	AttemptChild  string
+	Depends       []string
+	AttemptStatus string
+	RunStatus     string
+}
+
+// loadDagItemsTx loads all items of a group with their latest attempt status
+// and child Run status. The latest attempt is the effective execution state
+// for scheduling: for generation 0 it mirrors the item substrate columns; for
+// retry generations it reflects the newest attempt without rewriting the
+// frozen item row.
+func loadDagItemsTx(ctx context.Context, tx *sql.Tx, groupID string) ([]dagItemView, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT i.id, i.name, i.status, i.depends_json,
+		COALESCE((SELECT a.child_run_id FROM delegation_item_attempts a
+			WHERE a.item_id=i.id ORDER BY a.generation DESC, a.created_at DESC LIMIT 1), COALESCE(i.child_run_id,'')) AS attempt_child_run_id,
+		COALESCE((SELECT a.status FROM delegation_item_attempts a
+			WHERE a.item_id=i.id ORDER BY a.generation DESC, a.created_at DESC LIMIT 1), i.status) AS attempt_status,
+		COALESCE((SELECT ar.status FROM agent_runs ar WHERE ar.id=(
+			SELECT a.child_run_id FROM delegation_item_attempts a
+			WHERE a.item_id=i.id ORDER BY a.generation DESC, a.created_at DESC LIMIT 1)), '') AS run_status
+		FROM delegation_items i WHERE i.group_id=?`, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []dagItemView
+	for rows.Next() {
+		var view dagItemView
+		var dependsJSON string
+		if err := rows.Scan(&view.ID, &view.Name, &view.Status, &dependsJSON, &view.AttemptChild, &view.AttemptStatus, &view.RunStatus); err != nil {
+			return nil, err
+		}
+		if dependsJSON != "" && dependsJSON != "[]" {
+			if err := json.Unmarshal([]byte(dependsJSON), &view.Depends); err != nil {
+				return nil, fmt.Errorf("decode depends for task %s: %w", view.Name, err)
+			}
+		}
+		items = append(items, view)
+	}
+	return items, rows.Err()
+}
+
+// advanceDagTx advances the dynamic task graph inside a Finalize transaction:
+// dependent tasks whose dependencies reached a terminal failure are marked
+// blocked (item + queued attempt), and dependent tasks whose dependencies all
+// succeeded are reported ready for enqueue. Blocked state propagates
+// transitively (a blocked dependency blocks its descendants) by iterating
+// until stable, and ready tasks must still be queued at the Run level so
+// already-started successors are never re-reported. A blocked item with a
+// fresh retry attempt is unblocked (item substrate reset to running) when its
+// dependencies all succeed, so a successful dependency retry lifts its blocked
+// descendants. It is idempotent: re-running it after any attempt settles
+// re-evaluates every non-terminal item against the latest attempt states.
+// Blocked tasks never consume budget because their attempts never start.
+func advanceDagTx(ctx context.Context, tx *sql.Tx, groupID string) ([]string, error) {
+	items, err := loadDagItemsTx(ctx, tx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, nil
+	}
+	byName := make(map[string]*dagItemView, len(items))
+	for index := range items {
+		byName[items[index].Name] = &items[index]
+	}
+	// Phase 1: propagate blocked state transitively until stable. A task is
+	// blocked when any of its dependencies is failed/cancelled/blocked/not
+	// authorized. Marking updates the in-memory snapshot so descendants of a
+	// freshly blocked task are blocked in the same pass.
+	changed := true
+	for changed {
+		changed = false
+		for index := range items {
+			item := &items[index]
+			retryInFlight := item.Status == "blocked" && item.AttemptStatus != "blocked"
+			if item.Status != "pending" && item.Status != "running" && !retryInFlight {
+				continue
+			}
+			if len(item.Depends) == 0 {
+				continue
+			}
+			anyFailed := false
+			for _, depName := range item.Depends {
+				dep, ok := byName[depName]
+				if !ok {
+					anyFailed = true // dangling reference: treat as unsatisfiable
+					continue
+				}
+				switch dep.AttemptStatus {
+				case "failed", "cancelled", "blocked", "not_authorized":
+					anyFailed = true
+				}
+			}
+			if !anyFailed {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE delegation_items SET status='blocked'
+				WHERE id=? AND status IN ('pending','running')`, item.ID); err != nil {
+				return nil, err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE delegation_item_attempts SET status='blocked'
+				WHERE item_id=? AND status='queued'`, item.ID); err != nil {
+				return nil, err
+			}
+			item.Status = "blocked"
+			item.AttemptStatus = "blocked"
+			changed = true
+		}
+	}
+	// Phase 2: collect ready successors. A task is ready when every dependency
+	// succeeded and its current attempt's child Run is still queued. A blocked
+	// item with a fresh (non-blocked) attempt is unblocked when its
+	// dependencies all succeed: a successful dependency retry lifts it.
+	var ready []string
+	for index := range items {
+		item := &items[index]
+		retryInFlight := item.Status == "blocked" && item.AttemptStatus != "blocked"
+		if item.Status != "pending" && item.Status != "running" && !retryInFlight {
+			continue
+		}
+		if len(item.Depends) == 0 {
+			continue // entry tasks are enqueued at creation
+		}
+		allSettled := true
+		for _, depName := range item.Depends {
+			dep, ok := byName[depName]
+			if !ok || dep.AttemptStatus != "succeeded" {
+				allSettled = false
+				break
+			}
+		}
+		if allSettled && item.AttemptChild != "" && item.RunStatus == "queued" {
+			if retryInFlight {
+				// Unblock the frozen substrate: a successful dependency retry
+				// lifts this task. The attempt row stays the source of truth.
+				if _, err := tx.ExecContext(ctx, `UPDATE delegation_items SET status='running'
+					WHERE id=? AND status='blocked'`, item.ID); err != nil {
+					return nil, err
+				}
+				item.Status = "running"
+			}
+			ready = append(ready, item.AttemptChild)
+		}
+	}
+	return ready, nil
+}
+
+// ReadySuccessorRuns returns the delegated child Runs of a task graph whose
+// dependencies have all succeeded and which are therefore ready to start. It
+// runs advanceDagTx in its own transaction (idempotent) so the coordinator can
+// enqueue ready successors after a child settles, including successors whose
+// blocked state was lifted by a successful dependency retry.
+func (r *RunRepo) ReadySuccessorRuns(ctx context.Context, childRunID string) ([]string, error) {
+	var groupID string
+	if err := r.DB.QueryRowContext(ctx, `SELECT i.group_id FROM delegation_items i
+		JOIN delegation_item_attempts a ON a.item_id=i.id
+		WHERE a.child_run_id=?`, childRunID).Scan(&groupID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil // not a delegated child
+		}
+		return nil, err
+	}
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	ready, err := advanceDagTx(ctx, tx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return ready, nil
+}
+
+// ReadyChildrenForEnqueue filters a set of delegated child Runs down to those
+// whose task dependencies are all satisfied. It is used at materialization
+// time (initial delegate_tasks and retry generations) so dependent tasks stay
+// queued until their dependencies settle; ReadySuccessorRuns wakes them later.
+// Items are resolved through delegation_item_attempts because retry children
+// never own the frozen delegation_items.child_run_id column.
+func (r *DelegationRepo) ReadyChildrenForEnqueue(ctx context.Context, runIDs []string) ([]string, error) {
+	if len(runIDs) == 0 {
+		return nil, nil
+	}
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	ready := make([]string, 0, len(runIDs))
+	for _, runID := range runIDs {
+		var groupID, itemID string
+		if err := tx.QueryRowContext(ctx, `SELECT i.group_id,i.id FROM delegation_items i
+			JOIN delegation_item_attempts a ON a.item_id=i.id
+			WHERE a.child_run_id=?`, runID).Scan(&groupID, &itemID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				ready = append(ready, runID) // not a delegation child: keep caller semantics
+				continue
+			}
+			return nil, err
+		}
+		items, err := loadDagItemsTx(ctx, tx, groupID)
+		if err != nil {
+			return nil, err
+		}
+		byName := make(map[string]*dagItemView, len(items))
+		for index := range items {
+			byName[items[index].Name] = &items[index]
+		}
+		var current *dagItemView
+		for index := range items {
+			if items[index].ID == itemID {
+				current = &items[index]
+				break
+			}
+		}
+		if current == nil {
+			ready = append(ready, runID) // defensive: unknown item keeps caller semantics
+			continue
+		}
+		allSettled := true
+		for _, depName := range current.Depends {
+			dep, ok := byName[depName]
+			if !ok || dep.AttemptStatus != "succeeded" {
+				allSettled = false
+				break
+			}
+		}
+		if allSettled {
+			ready = append(ready, runID)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return ready, nil
 }
 
 func validateChildTerminalArtifactsTx(ctx context.Context, tx *sql.Tx, runID string, refs []domain.ArtifactReference) error {
@@ -1889,6 +2281,34 @@ func (r *DelegationRepo) RecoverDelegation(ctx context.Context) ([]string, error
 	}
 	defer tx.Rollback()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	// Re-advance the dynamic task graph for every group before the settlement
+	// scan: a crash between an attempt settling and its dependent tasks being
+	// marked blocked leaves queued attempts that would otherwise stall the
+	// generation settlement below. advanceDagTx is idempotent, so re-running it
+	// here is safe (ready successors are enqueued by the recovery main path).
+	groupRows, err := tx.QueryContext(ctx, `SELECT id FROM delegation_groups`)
+	if err != nil {
+		return nil, err
+	}
+	var groupIDs []string
+	for groupRows.Next() {
+		var groupID string
+		if err := groupRows.Scan(&groupID); err != nil {
+			groupRows.Close()
+			return nil, err
+		}
+		groupIDs = append(groupIDs, groupID)
+	}
+	groupErr := groupRows.Err()
+	groupCloseErr := groupRows.Close()
+	if groupErr != nil || groupCloseErr != nil {
+		return nil, fmt.Errorf("scan delegation groups for DAG recovery: %w", groupErr)
+	}
+	for _, groupID := range groupIDs {
+		if _, err := advanceDagTx(ctx, tx, groupID); err != nil {
+			return nil, fmt.Errorf("advance task graph for group %s during recovery: %w", groupID, err)
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE delegation_group_generations SET status='settled',completed_at=?
 		WHERE status IN ('queued','running')
 		  AND NOT EXISTS (SELECT 1 FROM delegation_item_attempts a JOIN delegation_items i ON i.id=a.item_id
@@ -1938,7 +2358,7 @@ func (r *DelegationRepo) RecoverDelegation(ctx context.Context) ([]string, error
 	return nil, nil
 }
 
-// injectFoldedResultsTx updates the parent's delegate_roles tool_calls row with
+// injectFoldedResultsTx updates the parent's delegate_tasks tool_calls row with
 // the folded results from all delegation items in the group. It runs inside the
 // FinalizeChildSuccess transaction so the parent resume sees the real output.
 func injectFoldedResultsTx(ctx context.Context, tx *sql.Tx, groupID, parentRunID string) error {
@@ -1977,7 +2397,7 @@ func injectFoldedResultsTx(ctx context.Context, tx *sql.Tx, groupID, parentRunID
 		return err
 	}
 
-	// Find the delegate_roles tool call for this parent run.
+	// Find the delegate_tasks tool call for this parent run.
 	var parentTCID string
 	err = tx.QueryRowContext(ctx,
 		`SELECT dg.parent_tool_call_id FROM delegation_groups dg WHERE dg.id=?`,

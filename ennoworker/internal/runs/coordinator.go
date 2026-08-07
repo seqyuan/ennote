@@ -44,6 +44,15 @@ type parentResolver interface {
 	ParentOfRun(context.Context, string) (string, error)
 }
 
+// successorResolver finds the delegated child Runs of a dynamic task graph
+// whose dependencies have all settled successfully and are ready to start.
+// It is the DAG wake channel: when a child settles, the coordinator enqueues
+// its ready successors (and lifts blocked successors whose dependency retry
+// succeeded).
+type successorResolver interface {
+	ReadySuccessorRuns(context.Context, string) ([]string, error)
+}
+
 type childRunResolver interface {
 	OwnedChildIDs(context.Context, string) ([]string, error)
 }
@@ -145,6 +154,9 @@ func (c *Coordinator) execute(ctx context.Context, runID string, state *activeRu
 				if finalizeErr == nil && wakeParent {
 					state.err = c.enqueueSettledParent(parentID)
 				}
+				if finalizeErr == nil {
+					state.err = c.enqueueReadySuccessors(runID)
+				}
 				return
 			}
 		}
@@ -170,6 +182,11 @@ func (c *Coordinator) execute(ctx context.Context, runID string, state *activeRu
 					if parentID, parentErr := resolver.ParentOfRun(context.Background(), runID); parentErr == nil {
 						finalizeErr = c.enqueueSettledParent(parentID)
 					}
+				}
+				// Wake ready dependent tasks of this task graph (idempotent).
+				successorErr := c.enqueueReadySuccessors(runID)
+				if finalizeErr == nil {
+					finalizeErr = successorErr
 				}
 			}
 		} else if finalizer, ok := c.lifecycle.(successfulRunFinalizer); ok && len(output.Messages) > 0 {
@@ -222,6 +239,27 @@ func (c *Coordinator) enqueueSettledParent(parentID string) error {
 	}
 	if err := c.Enqueue(context.Background(), parentID); err != nil && !errors.Is(err, store.ErrRunNotFound) {
 		return err
+	}
+	return nil
+}
+
+// enqueueReadySuccessors wakes the dependent tasks of a settled task-graph
+// child whose dependencies have all succeeded. It is idempotent: ReadySuccessorRuns
+// re-evaluates the group against latest attempt states, so it is safe to call
+// after every child settle and after startup recovery.
+func (c *Coordinator) enqueueReadySuccessors(childRunID string) error {
+	resolver, ok := c.lifecycle.(successorResolver)
+	if !ok {
+		return nil
+	}
+	ready, err := resolver.ReadySuccessorRuns(context.Background(), childRunID)
+	if err != nil {
+		return err
+	}
+	for _, successor := range ready {
+		if err := c.Enqueue(context.Background(), successor); err != nil && !errors.Is(err, store.ErrRunNotFound) {
+			return err
+		}
 	}
 	return nil
 }

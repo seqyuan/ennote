@@ -87,11 +87,11 @@ func TestFinalizeChildSuccessSettlesAttemptAndGeneration(t *testing.T) {
 	_, err = runs.Claim(ctx, children[0].ID)
 	require.NoError(t, err)
 	require.NoError(t, delegations.RecordBudgetUsage(ctx, children[0].ID, 2, 3, 1000, 500, 50))
-	// Simulate the parent's recorded delegate_roles tool call so folding lands
+	// Simulate the parent's recorded delegate_tasks tool call so folding lands
 	// on exactly one result_preview.
 	_, err = delegations.DB.Exec(`INSERT INTO tool_calls
 		(id,run_id,seq,tool_call_id,tool_name,arguments_json,status,started_at)
-		VALUES('tc-1',?,1,'call-1','delegate_roles','{}','completed',CURRENT_TIMESTAMP)`,
+		VALUES('tc-1',?,1,'call-1','delegate_tasks','{}','completed',CURRENT_TIMESTAMP)`,
 		submission.Run.ID)
 	require.NoError(t, err)
 	require.NoError(t, runs.FinalizeChildSuccess(ctx, children[0].ID, domain.RunOutput{

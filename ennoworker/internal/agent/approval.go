@@ -142,7 +142,7 @@ func approvalItems(plans []plannedToolCall, policy ToolPolicy) []domain.Approval
 		}
 		item := domain.ApprovalItem{CallIndex: index, ToolCallID: plan.original.ID,
 			ToolName: plan.effective.Name, RiskClass: plan.decision.RiskClass, ArgumentsPreview: preview}
-		if delegationPreviewer != nil && plan.effective.Name == "delegate_roles" {
+		if delegationPreviewer != nil && domain.IsDelegationToolName(plan.effective.Name) {
 			item.Delegations = delegationPreviewer.DelegationApprovalPreview(plan.effective)
 		}
 		items = append(items, item)
@@ -187,32 +187,42 @@ func (p *BuiltinToolPolicy) ApprovalPreview(call domain.ToolCall) string {
 }
 
 func (p *BuiltinToolPolicy) DelegationApprovalPreview(call domain.ToolCall) []domain.DelegationApprovalPreview {
-	var input struct {
-		Delegations []struct {
-			Name           string                   `json:"name"`
-			RoleHandle     string                   `json:"roleHandle"`
-			Assignment     string                   `json:"assignment"`
-			OutputContract string                   `json:"outputContract"`
-			Budget         domain.BudgetCeilingJSON `json:"budget"`
-		} `json:"delegations"`
-	}
-	if call.Name != "delegate_roles" || json.Unmarshal(call.Arguments, &input) != nil {
+	if !domain.IsDelegationToolName(call.Name) {
 		return nil
 	}
-	previews := make([]domain.DelegationApprovalPreview, 0, len(input.Delegations))
-	for _, delegation := range input.Delegations {
-		assignment := delegation.Assignment
+	var input struct {
+		Tasks       []domain.TaskSpec `json:"tasks"`
+		Delegations []domain.TaskSpec `json:"delegations"` // legacy replay compat
+	}
+	if json.Unmarshal(call.Arguments, &input) != nil {
+		return nil
+	}
+	specs := input.Tasks
+	if len(specs) == 0 {
+		specs = input.Delegations
+	}
+	previews := make([]domain.DelegationApprovalPreview, 0, len(specs))
+	for index := range specs {
+		spec := specs[index]
+		spec.Normalize()
+		goal := spec.Goal
 		for _, pattern := range p.redact {
-			assignment = pattern.ReplaceAllString(assignment, "[REDACTED]")
+			goal = pattern.ReplaceAllString(goal, "[REDACTED]")
 		}
-		outputContract := delegation.OutputContract
+		outputContract := spec.OutputContract
 		if outputContract == "" {
 			outputContract = "text-v1"
 		}
 		previews = append(previews, domain.DelegationApprovalPreview{
-			Name: delegation.Name, RoleHandle: delegation.RoleHandle,
-			AssignmentPreview: truncateApprovalRunes(assignment, delegationAssignmentPreviewLimit),
-			OutputContract:    outputContract, Budget: delegation.Budget,
+			Name:           spec.Name,
+			Role:           spec.Role,
+			RoleHandle:     spec.Role,
+			GoalPreview:    truncateApprovalRunes(goal, delegationAssignmentPreviewLimit),
+			AssignmentPreview: truncateApprovalRunes(goal, delegationAssignmentPreviewLimit),
+			Skills:         spec.Skills,
+			Depends:        spec.Depends,
+			OutputContract: outputContract,
+			Budget:         spec.Budget,
 		})
 	}
 	return previews

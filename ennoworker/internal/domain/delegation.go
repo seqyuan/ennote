@@ -52,6 +52,7 @@ type DelegationItemStatus string
 const (
 	DelegationItemPending   DelegationItemStatus = "pending"
 	DelegationItemRunning   DelegationItemStatus = "running"
+	DelegationItemBlocked   DelegationItemStatus = "blocked"
 	DelegationItemTerminal  DelegationItemStatus = "succeeded"
 	DelegationItemFailed    DelegationItemStatus = "failed"
 	DelegationItemCancelled DelegationItemStatus = "cancelled"
@@ -104,6 +105,7 @@ type DelegationItem struct {
 	GroupID        string               `json:"groupId"`
 	ChildRunID     *string              `json:"childRunId,omitempty"`
 	Name           string               `json:"name"`
+	Depends        []string             `json:"depends,omitempty"`
 	RoleVersionID  string               `json:"roleVersionId"`
 	AssignmentJSON json.RawMessage      `json:"assignment"`
 	OutputContract string               `json:"outputContract"`
@@ -112,6 +114,49 @@ type DelegationItem struct {
 	Status         DelegationItemStatus `json:"status"`
 	Ordinal        int                  `json:"ordinal"`
 	CreatedAt      time.Time            `json:"createdAt"`
+}
+
+// TaskSpec is the unified task execution unit shared by the runtime task
+// graph (delegate_tasks tool, model-authored) and Agent Flow task nodes
+// (compile-time task graph, versioned). A task answers who (role), what
+// (goal), with what skills (optional), after which tasks (depends, optional),
+// within which budget, and with which output contract.
+//
+// Legacy fields RoleHandle/Assignment are accepted on input for replay of tool
+// calls persisted under the pre-rename delegate_roles argument shape; they are
+// normalized away by Normalize and never emitted or exposed to models.
+type TaskSpec struct {
+	Name           string            `json:"name"`
+	Role           string            `json:"role"`
+	RoleHandle     string            `json:"roleHandle,omitempty"` // legacy input compat
+	RoleVersionID  string            `json:"roleVersionId,omitempty"`
+	Goal           string            `json:"goal"`
+	Assignment     string            `json:"assignment,omitempty"` // legacy input compat
+	Skills         []string          `json:"skills,omitempty"`
+	Depends        []string          `json:"depends,omitempty"`
+	OutputContract string            `json:"outputContract,omitempty"`
+	Budget         BudgetCeilingJSON `json:"budget"`
+}
+
+// Normalize applies legacy field fallbacks so a spec parsed from the old
+// delegate_roles argument shape behaves identically after the rename.
+func (s *TaskSpec) Normalize() {
+	if s.Role == "" {
+		s.Role = s.RoleHandle
+	}
+	s.RoleHandle = ""
+	if s.Goal == "" {
+		s.Goal = s.Assignment
+	}
+	s.Assignment = ""
+}
+
+// IsDelegationToolName reports whether name is the current delegate_tasks tool
+// or its legacy delegate_roles alias. Matching both keeps approval records,
+// folded results, and replayed tool calls of runs started before the rename
+// resolvable without surfacing the legacy name to models.
+func IsDelegationToolName(name string) bool {
+	return name == "delegate_tasks" || name == "delegate_roles"
 }
 
 // BudgetCeilingJSON is the wire representation of a child budget ceiling.

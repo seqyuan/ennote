@@ -31,7 +31,7 @@ var testRiskMap = mapRiskClassifier{
 	"write": domain.RiskLocalWrite, "edit": domain.RiskLocalWrite, "publish_artifact": domain.RiskLocalWrite,
 	"bash": domain.RiskShell, "exec": domain.RiskShell,
 	"web_fetch": domain.RiskExternal,
-	"delegate_roles": domain.RiskDelegation, "submit_result": domain.RiskDelegation,
+	"delegate_tasks": domain.RiskDelegation, "submit_result": domain.RiskDelegation,
 }
 
 func restrictedPolicy(t *testing.T) *BuiltinToolPolicy {
@@ -81,7 +81,7 @@ func TestAskRequiresApprovalOnlyAfterSafetyChecks(t *testing.T) {
 		{Name: "exec", Arguments: json.RawMessage(`{"argv":["git","status"]}`)},
 		{Name: "exec", Arguments: json.RawMessage(`{"argv":["git","push"]}`)},
 		{Name: "future_tool", Arguments: json.RawMessage(`{}`)},
-		{Name: "delegate_roles", Arguments: json.RawMessage(`{"delegations":[{"name":"inspect","roleHandle":"workspace-explorer","assignment":"Inspect secret=raw","budget":{"maxModelCalls":4,"maxToolCalls":8}}]}`)},
+		{Name: "delegate_tasks", Arguments: json.RawMessage(`{"tasks":[{"name":"inspect","role":"workspace-explorer","goal":"Inspect secret=raw","budget":{"maxModelCalls":4,"maxToolCalls":8}}]}`)},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, ToolAllow, decisions[0].Action)
@@ -98,8 +98,8 @@ func TestAskRequiresApprovalOnlyAfterSafetyChecks(t *testing.T) {
 func TestDelegationApprovalPreviewIsStructuredAndRedacted(t *testing.T) {
 	policy := permissionPolicy(t, domain.ToolPolicyConfig{Mode: string(domain.PermissionAsk),
 		RedactPatterns: []string{`secret=[^\s\"]+`}})
-	call := domain.ToolCall{ID: "delegate", Name: "delegate_roles", Arguments: json.RawMessage(
-		`{"delegations":[{"name":"inspect","roleHandle":"workspace-explorer","assignment":"Inspect secret=raw","outputContract":"text-v1","budget":{"maxModelCalls":4,"maxToolCalls":8}}]}`)}
+	call := domain.ToolCall{ID: "delegate", Name: "delegate_tasks", Arguments: json.RawMessage(
+		`{"tasks":[{"name":"inspect","role":"workspace-explorer","goal":"Inspect secret=raw","outputContract":"text-v1","budget":{"maxModelCalls":4,"maxToolCalls":8}}]}`)}
 	items := approvalItems([]plannedToolCall{{original: call, effective: call,
 		decision: ToolDecision{Action: ToolRequireApproval, RiskClass: domain.RiskDelegation}, requiresApproval: true}}, policy)
 	require.Len(t, items, 1)

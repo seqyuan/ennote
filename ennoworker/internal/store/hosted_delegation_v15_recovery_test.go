@@ -144,7 +144,7 @@ func TestSecurityMatrixKillSwitchAndDepth(t *testing.T) {
 		WHERE id='builtin-workspace-explorer'`)
 	require.NoError(t, err)
 
-	// A delegated Role must never receive delegate_roles: verify the child tool
+	// A delegated Role must never receive delegate_tasks: verify the child tool
 	// registry excludes it by checking a depth-two materialization is refused.
 	// (Depth is enforced at create time: children are delegated_agent runs with
 	// no further delegation path; verify via the execution-depth contract.)

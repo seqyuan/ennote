@@ -37,12 +37,23 @@ func (s *Server) enqueueChildRuns(ctx context.Context, children []*domain.AgentR
 	if s.Control == nil {
 		return nil
 	}
+	// Task-graph readiness filter: a dependent task whose dependencies have not
+	// settled stays queued and is woken by the coordinator's
+	// enqueueReadySuccessors when its dependencies settle. Retry children of a
+	// successful dependency and initial entry tasks pass through immediately.
+	ids := make([]string, 0, len(children))
 	for _, child := range children {
-		if child == nil || child.Status != domain.RunQueued {
-			continue
+		if child != nil && child.Status == domain.RunQueued {
+			ids = append(ids, child.ID)
 		}
-		if err := s.Control.Enqueue(context.WithoutCancel(ctx), child.ID); err != nil {
-			return fmt.Errorf("enqueue delegated child %s: %w", child.ID, err)
+	}
+	ready, err := (&store.DelegationRepo{DB: s.DB}).ReadyChildrenForEnqueue(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("filter children by task readiness: %w", err)
+	}
+	for _, childID := range ready {
+		if err := s.Control.Enqueue(context.WithoutCancel(ctx), childID); err != nil {
+			return fmt.Errorf("enqueue delegated child %s: %w", childID, err)
 		}
 	}
 	return nil

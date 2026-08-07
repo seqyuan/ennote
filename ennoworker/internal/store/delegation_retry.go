@@ -135,6 +135,16 @@ func (r *DelegationRepo) RetryGeneration(ctx context.Context, groupID string,
 		}
 		selected[itemID] = struct{}{}
 	}
+	// v1.5: expand the selection with the transitive blocked descendants of the
+	// explicitly selected items. A blocked descendant depends (directly or
+	// transitively) on a selected item; it is retried automatically so the task
+	// graph resumes when its dependency retry succeeds. Its new attempt is
+	// enqueued only after the dependency attempt settles successfully (the DAG
+	// readiness filter in the coordinator).
+	autoSelected := blockedDescendants(items, selected)
+	for itemID := range autoSelected {
+		selected[itemID] = struct{}{}
+	}
 	reused := make([]domain.DelegationAttemptReference, 0, len(items))
 	retryItems := make([]itemState, 0, len(selected))
 	for index := range items {
@@ -146,6 +156,16 @@ func (r *DelegationRepo) RetryGeneration(ctx context.Context, groupID string,
 				Generation: state.attemptGen, ChildRunID: state.attemptChild,
 				ResultDigest: state.resultDigest,
 			})
+			continue
+		}
+		if _, wasAuto := autoSelected[state.item.ID]; wasAuto {
+			// Blocked descendants are automatically retried without an explicit
+			// user selection; their blocked attempt is the only valid source.
+			if state.attemptStatus != domain.DelegationAttemptBlocked {
+				return nil, nil, nil, domain.NewCodedError(domain.ErrorDelegationRetryIneligible,
+					fmt.Errorf("auto-selected descendant for item %s has status %s", state.item.ID, state.attemptStatus))
+			}
+			retryItems = append(retryItems, *state)
 			continue
 		}
 		if !domain.AttemptRetryEligible(state.attemptStatus) {
@@ -217,7 +237,14 @@ func (r *DelegationRepo) RetryGeneration(ctx context.Context, groupID string,
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	retrySelectionJSON, err := json.Marshal(input.ItemIDs)
+	// The persisted selection is the full set actually rerun (explicit user
+	// selection plus automatically expanded blocked descendants), so audit and
+	// resume see exactly which attempts this generation materialized.
+	retrySelection := make([]string, 0, len(retryItems))
+	for index := range retryItems {
+		retrySelection = append(retrySelection, retryItems[index].item.ID)
+	}
+	retrySelectionJSON, err := json.Marshal(retrySelection)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -280,7 +307,7 @@ func (r *DelegationRepo) RetryGeneration(ctx context.Context, groupID string,
 	generation := &domain.DelegationGeneration{
 		ID: generationID, GroupID: groupID, Generation: nextGeneration,
 		Kind: domain.DelegationGenerationRetry, Status: generationStatus,
-		RetrySelection: input.ItemIDs, ReusedAttempts: reused,
+		RetrySelection: retrySelection, ReusedAttempts: reused,
 		AuthorizationSnapshot: authSnapshotJSON(authSnapshot), BudgetSnapshot: budgetJSON,
 		ClientRequestID: input.ClientRequestID, CreatedAt: now,
 	}
@@ -533,4 +560,54 @@ func referenceAttemptRoleVersion(ctx context.Context, tx *sql.Tx, attemptID stri
 	_ = tx.QueryRowContext(ctx, `SELECT role_version_id FROM delegation_items i
 		JOIN delegation_item_attempts a ON a.item_id=i.id WHERE a.id=?`, attemptID).Scan(&version)
 	return version
+}
+
+// blockedDescendants returns the transitive set of items that are blocked and
+// depend (directly or transitively) on at least one explicitly selected item.
+// v1.5 retries these automatically so a task graph resumes when its failed
+// dependency retry succeeds; their new attempts stay queued until that
+// dependency attempt settles successfully.
+func blockedDescendants(states []itemState, selected map[string]struct{}) map[string]struct{} {
+	byID := make(map[string]*itemState, len(states))
+	successors := make(map[string][]string, len(states)) // item id -> dependent item ids
+	for index := range states {
+		byID[states[index].item.ID] = &states[index]
+	}
+	for index := range states {
+		for _, depName := range states[index].item.Depends {
+			for _, candidate := range states {
+				if candidate.item.Name == depName {
+					successors[candidate.item.ID] = append(successors[candidate.item.ID], states[index].item.ID)
+					break
+				}
+			}
+		}
+	}
+	result := make(map[string]struct{})
+	queue := make([]string, 0)
+	for itemID := range selected {
+		queue = append(queue, itemID)
+	}
+	visited := make(map[string]struct{}, len(states))
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		if _, seen := visited[current]; seen {
+			continue
+		}
+		visited[current] = struct{}{}
+		for _, successor := range successors[current] {
+			state, ok := byID[successor]
+			if !ok {
+				continue
+			}
+			if state.attemptStatus == domain.DelegationAttemptBlocked {
+				result[successor] = struct{}{}
+			}
+			if _, already := result[successor]; !already {
+				queue = append(queue, successor)
+			}
+		}
+	}
+	return result
 }

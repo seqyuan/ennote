@@ -88,7 +88,7 @@ func (r *ApprovalRepo) Suspend(ctx context.Context, runID string, schemaVersion,
 	}
 	waitingStatus := domain.RunWaitingForApproval
 	for _, item := range items {
-		if item.ToolName == "delegate_roles" {
+		if domain.IsDelegationToolName(item.ToolName) {
 			waitingStatus = domain.RunWaitingDelegationAdmit
 			break
 		}

@@ -432,10 +432,16 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	if err := toolReg.Register(&tools.TodoTool{Store: todoStore}); err != nil {
 		return domain.RunOutput{}, fmt.Errorf("register todo tool: %w", err)
 	}
-	// Register delegate_roles with the Host delegation provider.
-	delegateRoles := &tools.DelegateRolesTool{Provider: e.delegateProvider(run), RunID: run.ID, SessionID: run.SessionID}
-	if err := toolReg.Register(delegateRoles); err != nil {
-		return domain.RunOutput{}, fmt.Errorf("register delegate_roles: %w", err)
+	// Register delegate_tasks with the Host delegation provider, plus its
+	// legacy delegate_roles alias so runs started before the rename can replay
+	// persisted tool calls and approval records. Models only ever see
+	// delegate_tasks (aliases are hidden by the Registry).
+	delegateTasks := &tools.DelegateTasksTool{Provider: e.delegateProvider(run), RunID: run.ID, SessionID: run.SessionID}
+	if err := toolReg.Register(delegateTasks); err != nil {
+		return domain.RunOutput{}, fmt.Errorf("register delegate_tasks: %w", err)
+	}
+	if err := toolReg.RegisterAlias("delegate_roles", "delegate_tasks", delegateTasks.LegacySchema()); err != nil {
+		return domain.RunOutput{}, fmt.Errorf("register delegate_roles alias: %w", err)
 	}
 	if resolved.Effective.Role != nil {
 		toolReg.Restrict(resolved.Effective.Role.AllowedTools)
@@ -647,8 +653,11 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	return domain.RunOutput{Messages: outputMessages, Waiting: result.Waiting}, nil
 }
 
-// enqueueQueuedChildren finds queued child runs for this parent and notifies
-// the coordinator so children start executing.
+// enqueueQueuedChildren finds queued child runs for this parent whose task
+// dependencies are satisfied (dynamic task graph readiness) and notifies the
+// coordinator so children start executing. Dependent tasks whose dependencies
+// have not settled stay queued and are woken by the coordinator's
+// enqueueReadySuccessors when their dependencies settle.
 func (e *agentExecutor) enqueueQueuedChildren(ctx context.Context, parentRunID string) {
 	if e.OnChildRunsCreated == nil {
 		return
@@ -671,7 +680,14 @@ func (e *agentExecutor) enqueueQueuedChildren(ctx context.Context, parentRunID s
 		return
 	}
 	if len(ids) > 0 {
-		e.OnChildRunsCreated(ctx, ids)
+		ready, filterErr := (&store.DelegationRepo{DB: e.db}).ReadyChildrenForEnqueue(ctx, ids)
+		if filterErr != nil {
+			slog.Warn("filter queued children by task readiness", "parentRunID", parentRunID, "error", filterErr)
+			return
+		}
+		if len(ready) > 0 {
+			e.OnChildRunsCreated(ctx, ready)
+		}
 	}
 }
 
@@ -824,7 +840,7 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 		SubmitResultGate: &agent.SubmitResultGate{}, BudgetController: budget,
 	}
 	if e.hub != nil {
-		loop.LivePublisher = e.hub
+		loop.LivePublisher = e.livePublisherFor(run)
 	}
 
 	result, runErr := loop.Run(ctx, agent.RunInput{
@@ -942,24 +958,33 @@ func (p *delegationAdmissionToolPolicy) BeforeToolBatch(ctx context.Context, bat
 		return nil, err
 	}
 	for index, call := range calls {
-		if call.Name != "delegate_roles" || index >= len(decisions) || decisions[index].Action == agent.ToolTerminateBatch {
+		if !domain.IsDelegationToolName(call.Name) || index >= len(decisions) || decisions[index].Action == agent.ToolTerminateBatch {
 			continue
 		}
 		var input struct {
-			Delegations []tools.DelegationSpec `json:"delegations"`
+			Tasks       []domain.TaskSpec `json:"tasks"`
+			Delegations []domain.TaskSpec `json:"delegations"` // legacy replay compat
 		}
 		effectiveArguments := call.Arguments
 		if len(decisions[index].Arguments) > 0 {
 			effectiveArguments = decisions[index].Arguments
 		}
-		if json.Unmarshal(effectiveArguments, &input) != nil || len(input.Delegations) == 0 {
+		if json.Unmarshal(effectiveArguments, &input) != nil {
 			continue // Registry schema validation reports malformed arguments.
+		}
+		specs := input.Tasks
+		if len(specs) == 0 {
+			specs = input.Delegations
+		}
+		if len(specs) == 0 {
+			continue
 		}
 		requiresApproval := false
 		denial := ""
-		for specIndex := range input.Delegations {
-			spec := &input.Delegations[specIndex]
-			snapshot, resolveErr := p.Delegations.ResolveRoleForDelegation(ctx, p.SessionID, spec.RoleHandle)
+		for specIndex := range specs {
+			spec := &specs[specIndex]
+			spec.Normalize()
+			snapshot, resolveErr := p.Delegations.ResolveRoleForDelegation(ctx, p.SessionID, spec.Role)
 			if errors.Is(resolveErr, store.ErrDelegationRoleUnavailable) {
 				denial = fmt.Sprintf("Role %q is unavailable in this project", spec.RoleHandle)
 				break
@@ -980,6 +1005,8 @@ func (p *delegationAdmissionToolPolicy) BeforeToolBatch(ctx context.Context, bat
 				Reason: denial, RiskClass: domain.RiskDelegation}
 			continue
 		}
+		input.Tasks = specs
+		input.Delegations = nil
 		encodedArguments, err := json.Marshal(input)
 		if err != nil {
 			return nil, err
@@ -1036,7 +1063,7 @@ func effectiveDelegationBudget(request domain.BudgetCeilingJSON, ceiling domain.
 	return request
 }
 
-func (p *agentExecutorDelegationProvider) ExecuteDelegation(ctx context.Context, runID, sessionID, toolCallID string, specs []tools.DelegationSpec) (*tools.DelegateRolesResult, error) {
+func (p *agentExecutorDelegationProvider) ExecuteDelegation(ctx context.Context, runID, sessionID, toolCallID string, specs []domain.TaskSpec) (*tools.DelegateTasksResult, error) {
 	delegations := &store.DelegationRepo{DB: p.db}
 
 	executionMode := domain.DelegationExecutionBlocking
@@ -1051,17 +1078,18 @@ func (p *agentExecutorDelegationProvider) ExecuteDelegation(ctx context.Context,
 	}
 
 	type resolvedSpec struct {
-		spec     tools.DelegationSpec
+		spec     domain.TaskSpec
 		snapshot *store.DelegationRoleSnapshot
 	}
 	var resolved []resolvedSpec
 	for _, spec := range specs {
-		snapshot, err := delegations.ResolveRoleForDelegation(ctx, sessionID, spec.RoleHandle)
+		spec.Normalize()
+		snapshot, err := delegations.ResolveRoleForDelegation(ctx, sessionID, spec.Role)
 		if err != nil {
-			return nil, fmt.Errorf("resolve role %q: %w", spec.RoleHandle, err)
+			return nil, fmt.Errorf("resolve role %q: %w", spec.Role, err)
 		}
 		if spec.RoleVersionID == "" || spec.RoleVersionID != snapshot.VersionID {
-			return nil, fmt.Errorf("role %q version changed after delegation admission", spec.RoleHandle)
+			return nil, fmt.Errorf("role %q version changed after delegation admission", spec.Role)
 		}
 		spec.Budget = effectiveDelegationBudget(spec.Budget, snapshot.Definition.DelegationPolicy.BudgetCeiling)
 		if spec.OutputContract == "" {
@@ -1083,9 +1111,10 @@ func (p *agentExecutorDelegationProvider) ExecuteDelegation(ctx context.Context,
 		items[i] = store.CreateDelegationItemInput{
 			Name:           r.spec.Name,
 			RoleVersionID:  r.snapshot.VersionID,
-			AssignmentJSON: json.RawMessage(fmt.Sprintf(`{"task":%q}`, r.spec.Assignment)),
+			AssignmentJSON: json.RawMessage(fmt.Sprintf(`{"task":%q}`, r.spec.Goal)),
 			OutputContract: outputContract,
 			Budget:         r.spec.Budget,
+			Depends:        r.spec.Depends,
 		}
 	}
 
@@ -1100,7 +1129,7 @@ func (p *agentExecutorDelegationProvider) ExecuteDelegation(ctx context.Context,
 	if err != nil {
 		return nil, fmt.Errorf("materialize delegation tree: %w", err)
 	}
-	result := &tools.DelegateRolesResult{Status: "delegated", GroupID: group.ID, ExecutionMode: string(executionMode)}
+	result := &tools.DelegateTasksResult{Status: "delegated", GroupID: group.ID, ExecutionMode: string(executionMode)}
 	if executionMode == domain.DelegationExecutionBackground {
 		handle, handleErr := delegations.HandleForGroup(ctx, group.ID)
 		if handleErr != nil {
@@ -1110,11 +1139,35 @@ func (p *agentExecutorDelegationProvider) ExecuteDelegation(ctx context.Context,
 		result.HandleID = handle.ID
 	}
 	for index, item := range groupItems {
-		result.Items = append(result.Items, tools.DelegateRolesItemResult{
+		result.Items = append(result.Items, tools.DelegateTasksItemResult{
 			Name: item.Name, ItemID: item.ID, ChildRunID: children[index].ID,
 		})
 	}
 	return result, nil
+}
+
+// livePublisherFor returns the live delta publisher for a Run. Delegated
+// children additionally translate their tool/turn activity into live
+// child_progress events on the parent run's channel (bounded, non-durable) so
+// the parent surface can render per-task activity without a second SSE
+// subscription. Returns nil when no Hub is configured.
+func (e *agentExecutor) livePublisherFor(run *domain.AgentRun) events.LivePublisher {
+	if e.hub == nil {
+		return nil
+	}
+	if run.RunKind != domain.RunKindDelegatedAgent || run.ParentRunID == "" {
+		return e.hub
+	}
+	var groupID, taskName string
+	if err := e.db.QueryRow(`SELECT i.group_id,i.name FROM delegation_item_attempts a
+		JOIN delegation_items i ON i.id=a.item_id
+		WHERE a.child_run_id=?`, run.ID).Scan(&groupID, &taskName); err != nil {
+		return e.hub // not a resolvable delegation child: plain forwarding
+	}
+	return &childProgressPublisher{
+		hub: e.hub, childRunID: run.ID, parentRunID: run.ParentRunID,
+		groupID: groupID, taskName: taskName, reported: make(map[string]struct{}),
+	}
 }
 
 // rolePreloadPrompt returns the frozen preload Skill prompts for a Role as an
@@ -1632,13 +1685,21 @@ func run() error {
 	} else {
 		slog.Warn("agent flow recovery scan failed", "error", flowErr)
 	}
-	for _, runID := range queuedRuns {
+	// Filter recovered queued runs through task-graph readiness: a task-graph
+	// child whose dependencies have not settled stays queued and is woken by
+	// enqueueReadySuccessors when its dependencies settle; top-level runs and
+	// ready children are re-enqueued now.
+	recovered, filterErr := (&store.DelegationRepo{DB: db}).ReadyChildrenForEnqueue(context.Background(), queuedRuns)
+	if filterErr != nil {
+		return fmt.Errorf("filter recovered runs by task readiness: %w", filterErr)
+	}
+	for _, runID := range recovered {
 		if err := coordinator.Enqueue(context.Background(), runID); err != nil {
 			return fmt.Errorf("re-enqueue recovered run %s: %w", runID, err)
 		}
 	}
 	if len(queuedRuns) > 0 {
-		slog.Info("queued runs recovered", "count", len(queuedRuns))
+		slog.Info("queued runs recovered", "count", len(queuedRuns), "ready", len(recovered))
 	}
 	// Deliver any pending auto-resume completions for idle sessions, in
 	// sequence order. Each tick creates at most one continuation Run.
@@ -1659,7 +1720,7 @@ func run() error {
 		"read": true, "write": true, "edit": true, "ls": true, "grep": true, "find": true,
 		"exec": true, "bash": true, "web_fetch": true, "publish_artifact": true,
 		"todo": true, "search_compacted_history": true, "git_readonly": true,
-		"submit_result": true, "delegate_roles": true,
+		"submit_result": true, "delegate_tasks": true, "delegate_roles": true, // legacy alias stays known for old Role definitions
 	}, KnownSkills: knownSkills}
 	doctor := &providerdoctor.Service{Providers: providerRepo, Models: modelRepo,
 		Credentials: llm.CredentialResolver{}, Timeout: 15 * time.Second}

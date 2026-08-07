@@ -30,12 +30,13 @@ type Registry struct {
 	validators  map[string]*jsonschema.Schema
 	retryPolicy map[string]domain.ToolRetryPolicy
 	risks       map[string]domain.RiskClass
+	aliases     map[string]string // legacy alias name -> canonical tool name (hidden from models)
 }
 
 func NewRegistry(tools ...Tool) (*Registry, error) {
 	registry := &Registry{tools: make(map[string]Tool), classes: make(map[string]domain.ExecutionClass),
 		validators: make(map[string]*jsonschema.Schema), retryPolicy: make(map[string]domain.ToolRetryPolicy),
-		risks: make(map[string]domain.RiskClass)}
+		risks: make(map[string]domain.RiskClass), aliases: make(map[string]string)}
 	for _, tool := range tools {
 		if err := registry.Register(tool); err != nil {
 			return nil, err
@@ -87,6 +88,42 @@ func (r *Registry) Register(tool Tool) error {
 	return nil
 }
 
+// RegisterAlias registers a legacy alias name for an already-registered
+// canonical tool. The alias resolves to the same Tool instance and executes
+// under the provided legacy argument schema, but is hidden from Definitions()
+// so models never see it. It exists so tool calls persisted before a rename
+// (approval records, replayed calls of resumed runs) keep resolving.
+func (r *Registry) RegisterAlias(alias, canonical, legacySchema string) error {
+	if alias == "" || canonical == "" || legacySchema == "" {
+		return fmt.Errorf("alias, canonical, and legacy schema are required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	tool, ok := r.tools[canonical]
+	if !ok {
+		return fmt.Errorf("alias target %s is not registered", canonical)
+	}
+	if _, exists := r.tools[alias]; exists {
+		return fmt.Errorf("tool already registered: %s", alias)
+	}
+	compiler := jsonschema.NewCompiler()
+	resource := "mem://tool/" + alias + ".json"
+	if err := compiler.AddResource(resource, strings.NewReader(legacySchema)); err != nil {
+		return fmt.Errorf("add legacy schema for alias %s: %w", alias, err)
+	}
+	validator, err := compiler.Compile(resource)
+	if err != nil {
+		return fmt.Errorf("compile legacy schema for alias %s: %w", alias, err)
+	}
+	r.tools[alias] = tool
+	r.validators[alias] = validator
+	r.classes[alias] = r.classes[canonical]
+	r.retryPolicy[alias] = r.retryPolicy[canonical]
+	r.risks[alias] = r.risks[canonical]
+	r.aliases[alias] = canonical
+	return nil
+}
+
 // Restrict removes every tool not present in the frozen allowlist. A Registry is
 // scoped to one Run, so this cannot affect concurrent executions.
 func (r *Registry) Restrict(allowed []string) {
@@ -113,6 +150,9 @@ func (r *Registry) Definitions() []domain.ToolDefinition {
 	defer r.mu.RUnlock()
 	names := make([]string, 0, len(r.tools))
 	for name := range r.tools {
+		if _, isAlias := r.aliases[name]; isAlias {
+			continue // legacy aliases are never advertised to models
+		}
 		names = append(names, name)
 	}
 	sort.Strings(names)

@@ -53,7 +53,7 @@ func TestApprovalSuspendIsAtomicAndSessionRestorable(t *testing.T) {
 
 func TestDelegationApprovalUsesAdmissionStatusAndQueuesAfterDecision(t *testing.T) {
 	runs, approvals, submission := setupApprovalRun(t)
-	items := []domain.ApprovalItem{{CallIndex: 0, ToolCallID: "delegate-call", ToolName: "delegate_roles",
+	items := []domain.ApprovalItem{{CallIndex: 0, ToolCallID: "delegate-call", ToolName: "delegate_tasks",
 		RiskClass: domain.RiskDelegation, ArgumentsPreview: "delegate to @workspace-explorer",
 		Delegations: []domain.DelegationApprovalPreview{{Name: "inspect", RoleHandle: "workspace-explorer",
 			AssignmentPreview: "Inspect the workspace", Budget: domain.BudgetCeilingJSON{MaxModelCalls: 4, MaxToolCalls: 8}}}}}

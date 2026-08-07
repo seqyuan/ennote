@@ -275,6 +275,7 @@ const (
 	ErrorDelegationBudgetExceeded        ErrorCode = "delegation_budget_exceeded"
 	ErrorDelegationNotAuthorized         ErrorCode = "delegation_not_authorized"
 	ErrorDelegationGenerationConflict    ErrorCode = "delegation_generation_conflict"
+	ErrorDelegationDagInvalid            ErrorCode = "delegation_dag_invalid"
 	ErrorDelegationRetryIneligible       ErrorCode = "delegation_retry_ineligible"
 	ErrorDelegationRetryApprovalRequired ErrorCode = "delegation_retry_budget_approval_required"
 	ErrorDelegationRetrySnapshotMismatch ErrorCode = "delegation_retry_snapshot_mismatch"
@@ -450,6 +451,11 @@ const (
 	LiveToolCallDelta          = "tool_call_delta"
 	LiveVisionDescriptionDelta = "vision_description_delta"
 	LiveToolOutputDelta        = "tool_output_delta"
+	// LiveChildProgress is a live-only activity delta for a delegated task
+	// child, published on the PARENT run's live channel so the parent surface
+	// can render per-task activity without a second subscription. It is never
+	// persisted; delegation state transitions remain the durable source.
+	LiveChildProgress = "child_progress"
 )
 
 type PendingEvent struct {

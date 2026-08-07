@@ -81,7 +81,7 @@ type Loop struct {
 	// admission before Provider/tool execution and reconciles Provider usage.
 	BudgetController RunBudgetController
 	// DelegationDetector checks whether the run has entered a delegation-waiting
-	// state (e.g. waiting_children after delegate_roles). When set, the loop
+	// state (e.g. waiting_children after delegate_tasks). When set, the loop
 	// checks after each tool batch and exits with Waiting=true when detected.
 	DelegationDetector RunDelegationDetector
 	// StandingAuthorizationSnapshot is the frozen standing-authorization set from
@@ -135,7 +135,7 @@ type RunResult struct {
 }
 
 // RunDelegationDetector checks whether a run has entered a delegation-waiting
-// state after a tool call (e.g. delegate_roles placed the parent in
+// state after a tool call (e.g. delegate_tasks placed the parent in
 // waiting_children).
 type RunDelegationDetector interface {
 	IsWaitingChildren(ctx context.Context, runID string) bool

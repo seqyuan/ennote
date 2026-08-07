@@ -198,8 +198,8 @@ func TestResumeMessagesUsesProviderToolCallIDAndFoldedResult(t *testing.T) {
 
 	providerToolCallID := "call_provider_assigned"
 	internalRecordID := "internal-record-uuid"
-	call := domain.ToolCall{ID: providerToolCallID, Name: "delegate_roles",
-		Arguments: json.RawMessage(`{"delegations":[]}`)}
+	call := domain.ToolCall{ID: providerToolCallID, Name: "delegate_tasks",
+		Arguments: json.RawMessage(`{"tasks":[]}`)}
 	placeholder := domain.ToolResult{ToolCallID: providerToolCallID, ToolName: call.Name,
 		Content: `{"status":"delegated"}`}
 	waitingMessages := []domain.ChatMessage{
