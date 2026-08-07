@@ -267,10 +267,13 @@ export function SkillsSettings({ projectId, setError }: {
     <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", marginTop: 12, marginBottom: 6 }}>
       Skills roots <span style={{ fontWeight: 400, color: "var(--text-dim)", marginLeft: 4 }}>{roots.length} additional</span>
     </div>
+    <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 6 }}>
+      Resolution paths are on the Worker host. Remote clients (Tauri) read the same configured roots — no per-client setup.
+    </div>
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       {roots.length === 0 && !loading && (
         <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
-          No additional roots. Ennote reads <code>$ENNOTE_HOME/skills</code> by default; add pi, Claude Code, Codex, or Cursor skill directories here.
+          No additional roots. Ennote reads <code>$ENNOTE_HOME/skills</code> on the Worker host by default; add pi, Claude Code, Codex, or Cursor skill directories here.
         </div>
       )}
       {roots.map((root) => (
