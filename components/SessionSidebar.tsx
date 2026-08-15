@@ -1,7 +1,7 @@
 "use client";
 
-import { Bot, Plus, RefreshCw, Search, Settings2, Workflow } from "lucide-react";
-import { useState } from "react";
+import { Bot, Plus, RefreshCw, Search, Settings2, Workflow, X } from "lucide-react";
+import { useEffect, useRef } from "react";
 import type { Session } from "@/components/settings/types";
 import type { SidebarProjectGroup } from "@/hooks/useSidebarProjectGroups";
 import { useProjectSelector } from "@/hooks/useProjectSelector";
@@ -10,7 +10,6 @@ import { NewSessionButton } from "./NewSessionButton";
 import { NavLink } from "./NavLink";
 import { ProjectGroup } from "./ProjectGroup";
 import { ProjectSelector } from "./ProjectSelector";
-import { SessionSearch } from "./SessionSearch";
 
 interface SidebarProject { id: string; name: string }
 
@@ -55,8 +54,17 @@ export function SessionSidebar({
   archiveSession, restoreSession, openSettings, closeNavigation, runningSessionIds,
   railMode, onToggleSidebar,
 }: SessionSidebarProps) {
-  const [searchOpen, setSearchOpen] = useState(false);
   const projectSelector = useProjectSelector();
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const pendingSearchFocus = useRef(false);
+
+  // Rail search = expand + land in the inline search box once it remounts.
+  useEffect(() => {
+    if (!railMode && pendingSearchFocus.current) {
+      pendingSearchFocus.current = false;
+      searchInputRef.current?.focus({ preventScroll: true });
+    }
+  }, [railMode]);
 
   return (
     <aside className={`sidebar ${railMode ? "sidebar-rail" : ""}`} aria-label="Projects and sessions">
@@ -74,26 +82,9 @@ export function SessionSidebar({
         <NavLink href="/graphs" label="Graphs" icon={<Workflow size={15} />} />
       </nav>
 
-      {/* Search entry: icon in the rail; expandable input in wide mode. */}
-      {!railMode && (
-        <div style={{ flexShrink: 0, padding: "0 10px 8px" }}>
-          {searchOpen ? (
-            <SessionSearch
-              value={query}
-              onChange={setQuery}
-              onClear={() => { setQuery(""); setSearchOpen(false); }}
-              onEscape={() => setSearchOpen(false)}
-            />
-          ) : (
-            <button type="button" className="sidebar-search-trigger" aria-label="Search sessions" onClick={() => setSearchOpen(true)}>
-              <Search size={14} aria-hidden="true" />
-              <span>Search sessions</span>
-            </button>
-          )}
-        </div>
-      )}
+      {/* Rail search: expand then focus the inline header search. */}
       {railMode && (
-        <button type="button" className="sidebar-rail-icon" aria-label="Search sessions" onClick={() => { setSearchOpen(true); onToggleSidebar(); }}>
+        <button type="button" className="sidebar-rail-icon" aria-label="Search sessions" onClick={() => { pendingSearchFocus.current = true; onToggleSidebar(); }}>
           <Search size={18} aria-hidden="true" />
         </button>
       )}
@@ -111,11 +102,28 @@ export function SessionSidebar({
         />
       )}
 
-      {/* Sessions (pin/archive/tree unchanged, restyled via CSS) */}
+      {/* Sessions (pin/archive/tree unchanged; search now inline in the header) */}
       {!railMode && selectedProject && (
         <section className="sidebar-section sidebar-sessions" aria-labelledby="sessions-heading" style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" }}>
           <div className="sidebar-sessions-head">
             <span id="sessions-heading" className="sessions-label">Sessions</span>
+            <div className="sessions-search">
+              <Search size={13} aria-hidden="true" />
+              <input
+                ref={searchInputRef}
+                type="search"
+                value={query}
+                placeholder="Search"
+                aria-label="Search sessions"
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => { if (event.key === "Escape") { setQuery(""); event.currentTarget.blur(); } }}
+              />
+              {query && (
+                <button type="button" aria-label="Clear search" onClick={() => setQuery("")}>
+                  <X size={13} aria-hidden="true" />
+                </button>
+              )}
+            </div>
             <button type="button" onClick={refreshGroups} title="Refresh sessions" aria-label="Refresh sessions" className="sidebar-icon-btn">
               <RefreshCw size={12} aria-hidden="true" />
             </button>

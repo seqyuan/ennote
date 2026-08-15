@@ -18,7 +18,7 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
       <nav aria-label="Primary">
         {navItems.map(({ href, label, icon: Icon, active }) => (
           <Link key={href} href={href} className={active ? "active" : ""} aria-current={active ? "page" : undefined} onClick={onNavigate}>
-            <Icon size={18} /><span>{label}</span>
+            <Icon size={15} /><span>{label}</span>
           </Link>
         ))}
       </nav>

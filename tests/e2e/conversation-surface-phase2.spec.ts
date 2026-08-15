@@ -53,7 +53,6 @@ async function selectProject(page: Page) {
 test("searches active Sessions and supports archive and restore lifecycle actions", async ({ page }) => {
   await mockPhase2(page);
   await selectProject(page);
-  await page.getByRole("button", { name: "Search sessions", exact: true }).click();
   const search = page.getByRole("searchbox", { name: "Search sessions" });
   await search.fill("marker");
   await expect(page.getByRole("button", { name: "Marker review", exact: true })).toBeVisible();

@@ -1,6 +1,7 @@
 /* Sidebar design tokens, aligned to deepseek-harness --dsw-* values.
    Scoped to .sidebar-container so the rest of the app keeps its palette. */
-.sidebar-container {
+.sidebar-container,
+.workspace-nav-container {
   --sb-fill: #f9fafb;                        /* dsw neutral-bluish-50 */
   --sb-text-primary: rgb(15, 17, 21);        /* neutral-bluish-1000 */
   --sb-text-secondary: rgb(97, 102, 107);    /* neutral-bluish-700 */
@@ -22,7 +23,8 @@
   border-right: 1px solid var(--sb-border-l1);
 }
 
-html.dark .sidebar-container {
+html.dark .sidebar-container,
+html.dark .workspace-nav-container {
   --sb-fill: rgb(27, 27, 28);                /* neutral-bluish-900 */
   --sb-text-primary: rgb(249, 250, 251);     /* neutral-bluish-50 */
   --sb-text-secondary: rgb(207, 211, 214);   /* neutral-bluish-300 */
@@ -179,16 +181,18 @@ html.dark .sidebar-container {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   padding: 8px 10px 4px;
 }
 .sidebar-sessions-head .sessions-label {
+  flex: none;
   color: var(--sb-text-tertiary);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+.sidebar-sessions-head .sidebar-icon-btn { flex: none; }
 
 /* ---- Rows (session/project), scoped overrides of globals' .sidebar-item ---- */
 .sidebar .sidebar-item {
@@ -248,23 +252,43 @@ html.dark .sidebar-container {
 .sidebar.sidebar-rail .sidebar-new-session span { display: none; }
 .sidebar.sidebar-rail .sidebar-sessions-head .sessions-label { display: none; }
 
-/* ---- Search trigger (wide) and rail search icon. ---- */
-.sidebar-search-trigger {
+/* ---- Inline persistent search in the Sessions header (dsh section header) ---- */
+.sessions-search {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  height: 32px;
-  padding: 0 10px;
+  gap: 5px;
+  height: 26px;
+  padding: 0 7px;
   border: 1px solid var(--sb-border-l2);
-  border-radius: var(--sb-radius-row);
+  border-radius: 6px;
   background: var(--sb-button-fill);
   color: var(--sb-text-tertiary);
-  font-size: 13px;
-  cursor: pointer;
-  text-align: left;
 }
-.sidebar-search-trigger:hover { background: var(--sb-button-hover); color: var(--sb-text-secondary); }
+.sessions-search:focus-within { border-color: var(--sb-brand); }
+.sessions-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--sb-text-primary);
+  font-size: 12px;
+}
+.sessions-search input::placeholder { color: var(--sb-text-tertiary); }
+.sessions-search button {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--sb-text-tertiary);
+  cursor: pointer;
+}
+.sessions-search button:hover { color: var(--sb-text-secondary); }
 
 .sidebar-rail-icon {
   width: 36px;
@@ -299,4 +323,49 @@ html.dark .sidebar-container {
    only for the mobile off-canvas drawer. */
 @media (min-width: 641px) {
   .topbar-sidebar-toggle { display: none !important; }
+}
+
+/* ---- WorkspaceNav (management pages) aligned to the sidebar language ---- */
+.workspace-nav {
+  padding: 6px var(--sb-pad-x);
+  color: var(--sb-text-primary);
+  font-size: 14px;
+  background: transparent;
+}
+.workspace-nav .workspace-nav-brand {
+  min-height: 0;
+  height: 60px;
+  padding: 8px 0 8px 4px;
+  margin-bottom: 8px;
+  gap: 8px;
+  border-bottom: none;
+}
+.workspace-nav nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 0 8px;
+}
+.workspace-nav nav a {
+  min-height: 0;
+  height: auto;
+  padding: 7px 10px;
+  border-radius: var(--sb-radius-row);
+  color: var(--sb-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+}
+.workspace-nav nav a:hover { background: var(--sb-hover); color: var(--sb-text-primary); }
+.workspace-nav nav a.active {
+  background: var(--sb-active);
+  color: var(--sb-text-primary);
+  box-shadow: none;
+  font-weight: 600;
+}
+.workspace-nav nav a.active svg { color: var(--sb-brand); }
+.workspace-nav .workspace-nav-foot {
+  padding: 13px 4px max(13px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--sb-border-l1);
+  color: var(--sb-text-tertiary);
 }
