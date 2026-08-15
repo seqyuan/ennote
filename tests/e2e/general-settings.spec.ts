@@ -32,4 +32,11 @@ test("General tab persists appearance and default permission preferences", async
   await auto.click();
   await expect(auto).toHaveAttribute("aria-pressed", "true");
   expect(await page.evaluate(() => localStorage.getItem("ennote-default-permission"))).toBe("auto");
+
+  // Language: switch to 中文, persist, and translate the section title.
+  const zh = page.getByRole("button", { name: "中文", exact: true });
+  await zh.click();
+  await expect(zh).toHaveAttribute("aria-pressed", "true");
+  expect(await page.evaluate(() => localStorage.getItem("ennote-locale"))).toBe("zh-CN");
+  await expect(page.getByRole("heading", { name: "通用", level: 2 })).toBeVisible();
 });

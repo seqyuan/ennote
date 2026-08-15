@@ -209,9 +209,10 @@ html.dark .settings-dialog-backdrop {
   padding-top: 8px;
 }
 
-/* ---- General: appearance + permission rows (dsh AppearanceRow/PermissionRow) ---- */
+/* ---- General: appearance + permission + language rows ---- */
 .settings-dialog-shell .appearance-group,
-.settings-dialog-shell .permission-group {
+.settings-dialog-shell .permission-group,
+.settings-dialog-shell .language-group {
   display: flex;
   flex-direction: column;
   gap: 8px;
