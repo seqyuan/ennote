@@ -337,70 +337,13 @@ export function AppShell() {
 
           {/* Chat area */}
           <ChatWindow
-            selectedSession={chat.history.sessionId}
-            activeLeafMessageId={chat.history.activeLeafMessageId}
-            activeBranchId={chat.history.activeBranchId}
-            branchChanging={chat.branches.changing}
-            createBranch={chat.branches.createBranch}
-            recovery={chat.run.recovery}
-            retrying={chat.run.retrying}
-            retryRun={chat.run.retryRun}
-            messages={chat.history.messages}
-            historyLoading={chat.history.loading}
-            historyLoadingOlder={chat.history.loadingOlder}
-            historyError={chat.history.error}
-            hasMoreHistory={chat.history.hasMore}
-            loadOlderHistory={chat.history.loadOlder}
+            history={chat.history}
+            run={chat.run}
+            branches={chat.branches}
+            composer={chat.composer}
+            actions={chat.actions}
             error={combinedError}
             clearError={clearCombinedError}
-            status={chat.run.status}
-            input={chat.composer.input}
-            setInput={chat.composer.setInput}
-            activeRun={chat.run.activeRun}
-            activeRunStatus={chat.run.activeRunStatus}
-            compacting={chat.run.compacting}
-            permissionMode={chat.composer.displayedPermissionMode}
-            permissionReady={chat.composer.permissionReady}
-            setPermissionMode={chat.composer.setPermissionMode}
-            pendingApproval={chat.run.pendingApproval}
-            resolvingApproval={chat.run.resolvingApproval}
-            decideApproval={chat.run.decideApproval}
-            pendingImage={chat.composer.pendingImage}
-            clearPendingImage={chat.composer.clearPendingImage}
-            uploadImage={chat.composer.uploadImage}
-            models={chat.composer.models}
-            selectedModelId={chat.composer.selectedModelId}
-            setSelectedModelId={chat.composer.setSelectedModelId}
-            thinkingEffort={chat.composer.thinkingEffort}
-            setThinkingEffort={chat.composer.setThinkingEffort}
-            roles={chat.composer.roles}
-            selectedRoleId={chat.composer.selectedRoleId}
-            setSelectedRoleId={chat.composer.setSelectedRoleId}
-            textAttachments={chat.composer.textAttachments}
-            removeTextAttachment={chat.composer.removeTextAttachment}
-            attachFiles={chat.composer.attachFiles}
-            submit={chat.actions.submit}
-            steer={chat.actions.steer}
-            followUp={chat.actions.followUp}
-            cancel={chat.run.cancel}
-            pendingFollowUps={chat.run.pendingFollowUps}
-            compactSession={chat.composer.compactSession}
-            compactionPromptOpen={chat.composer.compaction.open}
-            compactionInstructions={chat.composer.compaction.instructions}
-            compactionBusy={chat.composer.compaction.busy}
-            setCompactionInstructions={chat.composer.compaction.setInstructions}
-            confirmCompaction={chat.composer.compaction.confirm}
-            cancelCompaction={chat.composer.compaction.cancel}
-            promptTemplates={chat.composer.promptPanel.templates}
-            panelRoles={chat.composer.promptPanel.roles}
-            panelFlows={chat.composer.promptPanel.flows}
-            showPromptPanel={chat.composer.promptPanel.show}
-            onPromptSelect={chat.composer.promptPanel.onSelect}
-            onRoleSelect={chat.composer.promptPanel.onRoleSelect}
-            onFlowSelect={chat.composer.promptPanel.onFlowSelect}
-            onPromptPanelClose={chat.composer.promptPanel.onClose}
-            expanding={chat.composer.promptPanel.expanding}
-            expandDiag={chat.composer.promptPanel.expandDiag}
           />
         </div>
 
