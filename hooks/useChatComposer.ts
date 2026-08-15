@@ -12,6 +12,7 @@ import {
   type PermissionMode,
   type ThinkingEffort,
 } from "@/lib/permission-mode";
+import { readDefaultPermissionMode } from "@/lib/default-permission";
 import { errorMessage } from "@/lib/provider-errors";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
@@ -87,6 +88,13 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
   const [textAttachments, setTextAttachments] = useState<TextAttachment[]>([]);
   const [modelOverrides, setModelOverrides] = useState<Record<string, string>>({});
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("discuss");
+
+  // Adopt the persisted new-session permission default once mounted (client-only,
+  // so the SSR paint stays deterministic and hydration-safe).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPermissionMode(readDefaultPermissionMode());
+  }, []);
   const [thinkingEffort, setThinkingEffort] = useState<ThinkingEffort>("default");
   const [compactionPrompt, setCompactionPrompt] = useState<{ open: boolean; instructions: string; busy: boolean }>({
     open: false, instructions: "", busy: false,

@@ -209,12 +209,19 @@ html.dark .settings-dialog-backdrop {
   padding-top: 8px;
 }
 
-/* ---- General: appearance cubes (dsh AppearanceRow) ---- */
-.settings-dialog-shell .appearance-group {
+/* ---- General: appearance + permission rows (dsh AppearanceRow/PermissionRow) ---- */
+.settings-dialog-shell .appearance-group,
+.settings-dialog-shell .permission-group {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 14px 0;
+}
+.settings-dialog-shell .settings-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--stg-text-tertiary);
 }
 .settings-dialog-shell .appearance-title {
   font-size: 14px;
