@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./sidebar.css";
+import "./composer.css";
 import { WorkerGenerationGuard } from "@/components/WorkerGenerationGuard";
 import { WorkspaceProvider } from "@/components/WorkspaceProvider";
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, ImagePlus, ListPlus, Minimize2, Paperclip, Plus } from "lucide-react";
+import { ImagePlus, ListPlus, Minimize2, Paperclip, Plus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
 import { RoleTargetPicker } from "@/components/RoleTargetPicker";
 import type { ModelProfile, RoleSummary } from "@/components/settings/types";
@@ -214,18 +214,6 @@ export function Composer({
 
       <form className="composer" onSubmit={onSubmit} ref={form}>
         <div className="composer-editor" ref={configRef}>
-          <button
-            type="button"
-            className="composer-plus"
-            aria-expanded={configOpen}
-            aria-label="Configure run"
-            title="Configure run"
-            disabled={!selectedSession || compacting}
-            onClick={() => setConfigOpen((value) => !value)}
-          >
-            <Plus size={15} aria-hidden="true" />
-            {configDot && <span className="composer-plus-dot" aria-hidden="true" />}
-          </button>
           {configOpen && (
             <div className="composer-config-panel" role="dialog" aria-label="Run configuration">
               <div className="composer-config-row">
@@ -312,76 +300,80 @@ export function Composer({
               event.currentTarget.value = "";
             }}
           />
-          {activeRun ? (
-            <div className="composer-inline-actions">
-              <button type="submit" className="composer-steer" aria-label="Steer" disabled={!input.trim() || compacting || reconnecting}>
-                <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M5 1 L9 5 L5 9" /><line x1="1" y1="5" x2="9" y2="5" />
-                </svg>
-                <span>Steer</span>
-              </button>
-              <button type="button" className="composer-followup" aria-label="Queue follow-up"
-                disabled={!input.trim() || compacting || reconnecting} onClick={followUp}>
-                <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <line x1="5" y1="1" x2="5" y2="6" /><polyline points="2.5 3.5 5 1 7.5 3.5" />
-                  <line x1="2" y1="9" x2="8" y2="9" />
-                </svg>
-                <span>Follow-up</span>
-              </button>
-            </div>
-          ) : (
-            <button type="submit" className="composer-send" aria-label="Send"
-              disabled={!selectedSession || (!permissionReady && !selectedRoleId) || (!input.trim() && !hasPendingImage && textAttachments.length === 0)}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <line x1="2" y1="7" x2="11" y2="7" /><polyline points="7.5 3 12 7 7.5 11" />
-              </svg>
-              <span>Send</span>
+          <div className="composer-toolbar-row">
+            <button
+              type="button"
+              className="composer-plus"
+              aria-expanded={configOpen}
+              aria-label="Configure run"
+              title="Configure run"
+              disabled={!selectedSession || compacting}
+              onClick={() => setConfigOpen((value) => !value)}
+            >
+              <Plus size={15} aria-hidden="true" />
+              {configDot && <span className="composer-plus-dot" aria-hidden="true" />}
             </button>
-          )}
+            <div className="composer-trailing">
+              <ThinkingPicker
+                models={models}
+                selectedModelId={selectedModelId}
+                thinkingEffort={thinkingEffort}
+                setThinkingEffort={setThinkingEffort}
+                disabled={!selectedSession || activeRun || Boolean(selectedRoleId)}
+              />
+              <label className="composer-chip">
+                <span className="sr-only">Model</span>
+                <select
+                  className="composer-chip-select"
+                  value={selectedModelId ?? ""}
+                  disabled={!selectedSession || activeRun || models.length === 0 || Boolean(selectedRoleId)}
+                  onChange={(event) => setSelectedModelId(event.target.value)}
+                  title="Model for the next run"
+                >
+                  {models.length === 0 && <option value="">No model configured</option>}
+                  {models.map((model) => <option key={model.id} value={model.id}>{model.displayName || model.modelName}</option>)}
+                </select>
+              </label>
+              {activeRun && (
+                <button type="button" className="composer-followup" aria-label="Queue follow-up"
+                  disabled={!input.trim() || compacting || reconnecting} onClick={followUp}>
+                  <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <line x1="5" y1="1" x2="5" y2="6" /><polyline points="2.5 3.5 5 1 7.5 3.5" />
+                    <line x1="2" y1="9" x2="8" y2="9" />
+                  </svg>
+                  <span>Follow-up</span>
+                </button>
+              )}
+              {activeRun ? (
+                <button type="button" className="composer-primary" aria-label="Stop run" title="Stop run" onClick={cancel}>
+                  <svg width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+                    <rect x="1.5" y="1.5" width="7" height="7" rx="1.5" fill="currentColor" />
+                  </svg>
+                </button>
+              ) : (
+                <button type="submit" className="composer-primary" aria-label="Send"
+                  disabled={!selectedSession || (!permissionReady && !selectedRoleId) || (!input.trim() && !hasPendingImage && textAttachments.length === 0)}>
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M8.3125 0.980183C8.66767 1.0531 8.97902 1.20418 9.2627 1.43233C9.48724 1.61297 9.73029 1.85793 9.97949 2.10714L14.707 6.83468L13.293 8.24874L9 3.95577V15.0417H7V3.95577L2.70703 8.24874L1.29297 6.83468L6.02051 2.10714C6.26971 1.85793 6.51277 1.61297 6.7373 1.43233C6.97662 1.23986 7.28445 1.04402 7.6875 0.980183C7.8973 0.947006 8.1031 0.95516 8.3125 0.980183Z" fill="currentColor" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </form>
-      {/* Model selector + Stop + status line (annovibe-style toolbar row) */}
-      <div className="composer-toolbar-row">
-        <label className="model-control">
-          <Bot size={13} aria-hidden="true" />
-          <span className="sr-only">Model</span>
-          <select
-            value={selectedModelId ?? ""}
-            disabled={!selectedSession || activeRun || models.length === 0 || Boolean(selectedRoleId)}
-            onChange={(event) => setSelectedModelId(event.target.value)}
-            title="Model for the next run"
-          >
-            {models.length === 0 && <option value="">No model configured</option>}
-            {models.map((model) => <option key={model.id} value={model.id}>{model.displayName || model.modelName}</option>)}
-          </select>
-        </label>
-        <ThinkingPicker
-          models={models}
-          selectedModelId={selectedModelId}
-          thinkingEffort={thinkingEffort}
-          setThinkingEffort={setThinkingEffort}
-          disabled={!selectedSession || activeRun || Boolean(selectedRoleId)}
-        />
-        <div className="composer-toolbar-spacer" />
-        {activeRun && (
-          <button type="button" className="composer-stop" onClick={cancel} aria-label="Stop run" title="Stop run">
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
-              <rect x="1.5" y="1.5" width="7" height="7" rx="1.5" fill="currentColor" />
-            </svg>
-            Stop
-          </button>
-        )}
+      <div className="composer-status-line">
         {activeRun && <span className="composer-config-hint">{permissionMode} is frozen for this run</span>}
         {!permissionReady && selectedSession && !selectedRoleId && <span className="composer-config-hint is-danger">Policy unavailable</span>}
+        {expanding && <span className="composer-status" aria-live="polite">Expanding prompt…</span>}
+        {expandDiag && <span className="composer-status diag-warning" aria-live="polite">{expandDiag}</span>}
+        {pendingFollowUps.length > 0 && (
+          <div className="composer-followup-queue" aria-live="polite" role="status">
+            <ListPlus size={13} aria-hidden="true" />
+            <span>Queued: {pendingFollowUps.map(item => item.text).join(" · ")}</span>
+          </div>
+        )}
       </div>
-      {expanding && <div className="composer-status" aria-live="polite">Expanding prompt…</div>}
-      {expandDiag && <div className="composer-status diag-warning" aria-live="polite">{expandDiag}</div>}
-      {pendingFollowUps.length > 0 && (
-        <div className="composer-followup-queue" aria-live="polite" role="status">
-          <ListPlus size={13} aria-hidden="true" />
-          <span>Queued: {pendingFollowUps.map(item => item.text).join(" · ")}</span>
-        </div>
-      )}
     </div>
   );
 }
@@ -426,17 +418,15 @@ function ThinkingPicker({ models, selectedModelId, thinkingEffort, setThinkingEf
   }, [open]);
 
   return (
-    <div className="composer-thinking" ref={ref}>
-      <button type="button" className="composer-thinking-button" aria-label="Thinking effort" aria-expanded={open}
+    <div className="composer-chip" ref={ref}>
+      <button type="button" className="composer-chip-button" aria-label="Thinking effort" aria-expanded={open}
         title={supports ? "切换推理强度" : "当前模型不支持思考模式"}
         disabled={!canUse}
         onClick={() => setOpen((value) => !value)}>
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M9.5 2A5.5 5.5 0 0 0 4 7.5c0 1.7.78 3.21 2 4.21V14a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1v-2.29c1.22-1 2-2.51 2-4.21A5.5 5.5 0 0 0 9.5 2z" />
-          <line x1="7" y1="18" x2="12" y2="18" />
-          <line x1="8" y1="21" x2="11" y2="21" />
-        </svg>
         <span className="composer-thinking-label">{active}</span>
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M3 4.5L6 7.5L9 4.5" />
+        </svg>
       </button>
       {open && (
         <div className="composer-thinking-menu" role="listbox" aria-label="Thinking effort">

@@ -1,0 +1,190 @@
+/* Composer tokens, scoped to .composer-shell, aligned to the dsh InputBar.
+   The rest of the app keeps its palette; only the center-channel input and its
+   immediate chrome read these. */
+.composer-shell {
+  --cmp-text-primary: #1a1a1a;
+  --cmp-text-secondary: #6b7280;
+  --cmp-text-tertiary: #9ca3af;
+  --cmp-hover: rgba(38, 49, 72, 0.06);
+  --cmp-border: rgba(0, 0, 0, 0.08);
+  --cmp-fill: #ffffff;
+  --cmp-fill-hover: rgb(241, 243, 245);
+  --cmp-selector-fill: #f1f3f5;
+  --cmp-brand: rgb(65, 118, 230);
+  --cmp-brand-hover: rgb(86, 134, 254);
+  --cmp-shadow: 0 12px 32px rgba(24, 24, 21, 0.14), 0 2px 8px rgba(24, 24, 21, 0.08);
+}
+
+html.dark .composer-shell {
+  --cmp-text-primary: #e8e8e8;
+  --cmp-text-secondary: #9ca3af;
+  --cmp-text-tertiary: #6b7280;
+  --cmp-hover: rgba(255, 255, 255, 0.08);
+  --cmp-border: rgba(255, 255, 255, 0.06);
+  --cmp-fill: rgb(44, 44, 46);
+  --cmp-fill-hover: rgb(53, 54, 56);
+  --cmp-selector-fill: rgb(53, 54, 56);
+  --cmp-brand: rgb(103, 158, 254);
+  --cmp-brand-hover: rgb(122, 172, 255);
+  --cmp-shadow: 0 16px 36px rgba(0, 0, 0, 0.38), 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Floating capsule card (dsh Input_Bottom): textarea on top, toolbar row below. */
+.composer-editor {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding-top: 10px;
+  border: 1px solid var(--cmp-border);
+  border-radius: 22px;
+  background: var(--cmp-fill);
+  box-shadow: var(--cmp-shadow);
+  font-size: 16px;
+  line-height: 24px;
+}
+.composer-editor:focus-within {
+  border-color: var(--cmp-brand);
+  box-shadow: var(--cmp-shadow);
+}
+
+/* Textarea: full-width, transparent chrome, business-blue caret. */
+.composer textarea {
+  min-height: 52px;
+  padding: 4px 12px 0 16px;
+  caret-color: var(--cmp-brand);
+}
+.composer textarea::placeholder { color: var(--cmp-text-tertiary); }
+
+/* Toolbar row, now inside the card (dsh layout). */
+.composer-toolbar-row {
+  width: 100%;
+  margin: 0;
+  padding: 2px 8px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--cmp-text-secondary);
+}
+.composer-trailing {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+}
+
+/* + attach circle (dsh 28px selector-fill circle). */
+.composer-plus {
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--cmp-selector-fill);
+  color: var(--cmp-text-primary);
+}
+.composer-plus:hover:not(:disabled) { background: var(--cmp-fill-hover); }
+.composer-plus[aria-expanded="true"] { background: var(--cmp-fill-hover); }
+
+/* Primary circle: send idle / stop running (dsh 34px info-fill circle). */
+.composer-primary {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border: none;
+  border-radius: 999px;
+  background: var(--cmp-brand);
+  color: #fff;
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+.composer-primary:hover:not(:disabled) { background: var(--cmp-brand-hover); }
+.composer-primary:disabled { opacity: 0.4; cursor: default; }
+
+/* Follow-up secondary chip (ennote-specific queue feature). */
+.composer-followup {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cmp-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.composer-followup:hover:not(:disabled) { background: var(--cmp-hover); color: var(--cmp-text-primary); }
+.composer-followup:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Chip controls: model select + thinking picker (dsh .select language). */
+.composer-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.composer-chip-select {
+  max-width: 220px;
+  height: 28px;
+  padding: 0 20px 0 8px;
+  border: none;
+  border-radius: 8px;
+  outline: none;
+  appearance: none;
+  background-color: transparent;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%2381858C' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  background-size: 12px 12px;
+  color: var(--cmp-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.composer-chip-select:hover:not(:disabled) { background-color: var(--cmp-hover); }
+.composer-chip-select:disabled { opacity: 0.5; cursor: default; }
+
+.composer-chip-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cmp-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.composer-chip-button:hover:not(:disabled) { background: var(--cmp-hover); color: var(--cmp-text-primary); }
+.composer-chip-button:disabled { opacity: 0.5; cursor: default; }
+.composer-chip-button[aria-expanded="true"] { background: var(--cmp-hover); color: var(--cmp-text-primary); }
+
+/* Thinking menu uses the card's surface tokens. */
+.composer-thinking-menu {
+  background: var(--cmp-fill);
+  border-color: var(--cmp-border);
+}
+.composer-thinking-menu button { color: var(--cmp-text-secondary); }
+.composer-thinking-menu button:hover { background: var(--cmp-hover); color: var(--cmp-text-primary); }
+.composer-thinking-menu button[aria-selected="true"] { color: var(--cmp-text-primary); background: var(--cmp-hover); }
+
+/* Status line below the card. */
+.composer-status-line {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: min(100%, 920px);
+  margin: 0 auto;
+  padding: 6px 28px 0;
+}
