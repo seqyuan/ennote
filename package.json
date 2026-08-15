@@ -21,6 +21,7 @@
     "test:watch": "vitest",
     "test:go": "cd ennoworker && go test ./...",
     "test:e2e": "playwright test",
+    "check:appshell-size": "[ \"$(awk 'END{print NR}' components/AppShell.tsx)\" -le 500 ] && echo 'AppShell OK ('$(awk 'END{print NR}' components/AppShell.tsx)' lines)' || (echo 'AppShell exceeds 500 lines' && exit 1)",
     "generate:api": "openapi-typescript contracts/openapi.yaml -o lib/worker-api.gen.ts",
     "release:build-worker": "node scripts/build-workers.mjs",
     "release:prepare": "npm run build:web && npm run release:build-worker && npm run pack:check",

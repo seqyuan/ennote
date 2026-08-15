@@ -105,7 +105,9 @@ test("creating a project uses a dialog instead of native prompts", async ({ page
 
   await expect.poll(() => created).not.toBeNull();
   expect(created).toMatchObject({ name: "RNA screen", hostPath: "~/projects/rna-screen" });
-  // Dialog closes and the new project is auto-selected in the selector.
+  // Dialog closes and the new project is auto-selected in the selector. The
+  // sidebar also renders the project with an accessible name of "RNA screen Pin
+  // project", so match the selector button exactly to avoid a strict-mode race.
   await expect(page.getByRole("dialog", { name: "New project" })).not.toBeVisible();
-  await expect(page.getByRole("button", { name: "RNA screen" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "RNA screen", exact: true })).toBeVisible();
 });
