@@ -62,13 +62,14 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     await mockDirectRole(page, (body) => { invocation = body; });
     await page.goto("/");
     if (viewport.width <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
-    await page.getByTitle("Select project").click();
+    await page.getByTitle("Select project").first().click();
     await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
     if (viewport.width <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("button", { name: session.title, exact: true }).click();
 
     await expect(page.getByText(`@${role.handle}`, { exact: true }).first()).toBeVisible();
     await expect(page.getByText("The boundary is explicit.")).toBeVisible();
+    await page.getByRole("button", { name: "Configure run", exact: true }).click();
     await page.getByTitle("Invocation target").click();
     await page.getByRole("option", { name: new RegExp(role.handle) }).click();
     await expect(page.getByTitle("Model for the next run")).toBeDisabled();

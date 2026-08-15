@@ -36,6 +36,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/runtime": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getRuntimeInfo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/roles": {
         parameters: {
             query?: never;
@@ -179,6 +195,339 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/projects/{projectID}/roles/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        /** Discover .ennote/roles/*.md candidates without publishing them */
+        get: operations["listProjectRoleCandidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/roles/from-candidate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Explicitly publish a server-resolved project Role candidate */
+        post: operations["materializeProjectRoleCandidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/global-roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Worker-global file-authored Roles */
+        get: operations["listGlobalRoles"];
+        put?: never;
+        post: operations["createGlobalRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/global-roles/{roleID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        get: operations["getGlobalRole"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateGlobalRole"];
+        trace?: never;
+    };
+    "/v1/graphs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Worker-global Graph source summaries without loading private resources */
+        get: operations["listGraphs"];
+        put?: never;
+        post: operations["createGraph"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/graphs/{graphID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                graphID: string;
+            };
+            cookie?: never;
+        };
+        get: operations["getGraph"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateGraph"];
+        trace?: never;
+    };
+    "/v1/global-roles/{roleID}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["publishGlobalRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/global-roles/{roleID}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        get: operations["listGlobalRoleRevisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/global-roles/{roleID}/resolved": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        /** Resolve a bare Role handle to its latest published revision with audit source */
+        get: operations["getResolvedGlobalRole"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/graphs/{graphID}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                graphID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["publishGraph"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/graphs/{graphID}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                graphID: string;
+            };
+            cookie?: never;
+        };
+        get: operations["listGraphVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/graphs/{graphID}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                graphID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run a global published Graph in a Session-derived Project workspace */
+        post: operations["runGraph"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{sessionID}/graph-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: string;
+            };
+            cookie?: never;
+        };
+        /** List the Session's Graph Runs, newest first */
+        get: operations["listSessionGraphRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{sessionID}/graph-runs/{runID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: string;
+                runID: string;
+            };
+            cookie?: never;
+        };
+        /** One Graph Run with task checkpoints and the frozen flow version */
+        get: operations["getSessionGraphRun"];
+        put?: never;
+        /** Cancel a running Graph Run */
+        post: operations["cancelSessionGraphRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{sessionID}/graph-runs/{runID}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: string;
+                runID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume a cancelled or failed Graph Run */
+        post: operations["resumeSessionGraphRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/graphs/{graphID}/builder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                graphID: string;
+            };
+            cookie?: never;
+        };
+        get: operations["getGraphBuilderThread"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/graphs/{graphID}/builder/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                graphID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["sendGraphBuilderMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/graphs/{graphID}/builder/proposals/{proposalID}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                graphID: string;
+                proposalID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["applyGraphBuilderProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/provider-profiles": {
         parameters: {
             query?: never;
@@ -190,6 +539,40 @@ export interface paths {
         put?: never;
         post: operations["createProviderProfile"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/provider-profiles/discover-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["discoverProviderModels"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/provider-profiles/{providerID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                providerID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteProviderProfile"];
         options?: never;
         head?: never;
         patch?: never;
@@ -224,6 +607,24 @@ export interface paths {
         put?: never;
         post: operations["createModelProfile"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/model-profiles/{modelID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                modelID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteModelProfile"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1286,448 +1687,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/agent-flows": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Agent Flow profiles (managed + the project's own project-file profiles) */
-        get: operations["listAgentFlows"];
-        put?: never;
-        /** Create a managed Agent Flow profile */
-        post: operations["createAgentFlow"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agent-flows/{profileID}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileID: string;
-            };
-            cookie?: never;
-        };
-        /** Get an Agent Flow profile */
-        get: operations["getAgentFlow"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agent-flows/{profileID}/draft": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileID: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** Store the authoring YAML as the profile draft (draft revision CAS) */
-        patch: operations["updateAgentFlowDraft"];
-        trace?: never;
-    };
-    "/v1/agent-flows/{profileID}/validate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileID: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Run the full 9-point publish validation against the draft */
-        post: operations["validateAgentFlowDraft"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agent-flows/{profileID}/publish": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileID: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Validate the draft and publish the next immutable version */
-        post: operations["publishAgentFlow"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agent-flows/check-dependencies": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Validate arbitrary flow YAML and resolve its dependency manifest against the environment (never persists) */
-        post: operations["checkAgentFlowDependencies"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agent-flows/import": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Import flow YAML into a managed profile DRAFT (never publishes, binds, or authorizes) */
-        post: operations["importAgentFlow"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agent-flows/{profileID}/export": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileID: string;
-            };
-            cookie?: never;
-        };
-        /** Export flow YAML (authoring draft verbatim or a normalized YAML generated from a version) */
-        get: operations["exportAgentFlow"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agent-flows/{profileID}/archive": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileID: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Archive a profile (existing versions/bindings/runs stay) */
-        post: operations["archiveAgentFlow"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agent-flows/{profileID}/versions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileID: string;
-            };
-            cookie?: never;
-        };
-        /** List immutable versions of a profile */
-        get: operations["listAgentFlowVersions"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agent-flows/{profileID}/versions/{versionID}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileID: string;
-                versionID: string;
-            };
-            cookie?: never;
-        };
-        /** Get one immutable version */
-        get: operations["getAgentFlowVersion"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/projects/{projectID}/agent-flows/candidates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-            };
-            cookie?: never;
-        };
-        /** Discover .ennote/agent-flows/*.yaml candidates (parse-only, never executed) */
-        get: operations["listAgentFlowCandidates"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/projects/{projectID}/agent-flows/bindings/from-candidate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Materialize a project-file candidate as an immutable version and a disabled binding */
-        post: operations["bindAgentFlowCandidate"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/projects/{projectID}/agent-flows/bindings": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-            };
-            cookie?: never;
-        };
-        /** List project bindings */
-        get: operations["listAgentFlowBindings"];
-        put?: never;
-        /** Bind an immutable version to the project */
-        post: operations["createAgentFlowBinding"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/projects/{projectID}/agent-flows/bindings/{bindingID}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-                bindingID: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Remove a binding */
-        delete: operations["deleteAgentFlowBinding"];
-        options?: never;
-        head?: never;
-        /** Update the binding desired state */
-        patch: operations["updateAgentFlowBinding"];
-        trace?: never;
-    };
-    "/v1/projects/{projectID}/agent-flows/bindings/{bindingID}/run": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-                bindingID: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Start a flow run (freezes inputs + task snapshots, then dispatches) */
-        post: operations["runAgentFlow"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/projects/{projectID}/agent-flows/runs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-            };
-            cookie?: never;
-        };
-        /** List flow runs of the project */
-        get: operations["listAgentFlowRuns"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/projects/{projectID}/agent-flows/runs/{runID}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-                runID: string;
-            };
-            cookie?: never;
-        };
-        /** Get a flow run with its task checkpoints */
-        get: operations["getAgentFlowRun"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/projects/{projectID}/agent-flows/runs/{runID}/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-                runID: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Cancel a flow run (hard-cancels the active child; future tasks never scheduled) */
-        post: operations["cancelAgentFlowRun"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/projects/{projectID}/agent-flows/runs/{runID}/resume": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-                runID: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Resume a cancelled flow run as checkpoint continuation (completed tasks never replay) */
-        post: operations["resumeAgentFlowRun"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/projects/{projectID}/agent-flows/invoke": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Resolve a flow by name[@version] in the project's enabled bindings and start a run (Host-side orchestration address) */
-        post: operations["invokeAgentFlow"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/projects/{projectID}/agent-flows/check-approvals": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-            };
-            cookie?: never;
-        };
-        /** List pending check approvals (Ask-mode check gates) */
-        get: operations["listAgentFlowCheckApprovals"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/projects/{projectID}/agent-flows/check-approvals/{runID}/{taskIndex}/decide": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-                runID: string;
-                taskIndex: number;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Approve or reject a pending check approval (first decision wins) */
-        post: operations["decideAgentFlowCheckApproval"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/skills/roots": {
         parameters: {
             query?: never;
@@ -1896,6 +1855,9 @@ export interface components {
         Envelope: {
             data?: unknown;
         };
+        RuntimeInfo: {
+            instanceId: string;
+        };
         MCPServerProfile: {
             id?: string;
             displayName?: string;
@@ -1962,22 +1924,6 @@ export interface components {
             /** Format: date-time */
             updatedAt?: string;
         };
-        AgentFlowProfile: {
-            id?: string;
-            name?: string;
-            slug?: string;
-            /** @enum {string} */
-            sourceKind?: "managed" | "project_file";
-            projectScope?: string;
-            sourceLocator?: string;
-            lifecycleStatus?: string;
-            latestVersion?: number;
-            draft?: string;
-            draftYaml?: string;
-            draftRevision?: number;
-            createdAt?: string;
-            updatedAt?: string;
-        };
         AgentFlowVersion: {
             id?: string;
             profileId?: string;
@@ -2007,15 +1953,6 @@ export interface components {
                 }[];
             };
             publishedAt?: string;
-        };
-        ProjectAgentFlowBinding: {
-            id?: string;
-            projectId?: string;
-            flowVersionId?: string;
-            desiredEnabled?: boolean;
-            revision?: number;
-            createdAt?: string;
-            updatedAt?: string;
         };
         RunAgentFlow: {
             runId?: string;
@@ -2055,26 +1992,6 @@ export interface components {
             createdAt?: string;
             finishedAt?: string;
         };
-        AgentFlowCandidate: {
-            slug?: string;
-            name?: string;
-            description?: string;
-            /** @enum {string} */
-            sourceKind?: "managed" | "project_file";
-            sourceLocator?: string;
-            configDigest?: string;
-            definition?: {
-                [key: string]: unknown;
-            };
-            alreadyBound?: boolean;
-            boundVersionId?: string;
-            boundVersion?: number;
-            updateAvailable?: boolean;
-            parseError?: string;
-            validation?: string[];
-            taskCount?: number;
-            maxTotalTokens?: number;
-        };
         FlowDependencyStatus: {
             /** @enum {string} */
             kind?: "role" | "skill";
@@ -2096,14 +2013,6 @@ export interface components {
                 message?: string;
                 field?: string;
             }[];
-        };
-        AgentFlowCheckApproval: {
-            runId?: string;
-            taskIndex?: number;
-            command?: string;
-            sessionId?: string;
-            flowVersionId?: string;
-            requestedAt?: string;
         };
         MCPCatalogEntry: {
             remoteName?: string;
@@ -2176,13 +2085,21 @@ export interface components {
             providerType: "openai-compatible";
             /** Format: uri */
             baseUrl: string;
-            credentialRef: string;
+            credentialConfigured: boolean;
             proxy?: string;
             status: string;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+        };
+        DiscoveredModel: {
+            modelName: string;
+            displayName?: string;
+            contextWindow?: number;
+            maxOutputTokens?: number;
+            supportsVision?: boolean;
+            supportsThinking?: boolean;
         };
         ProviderDiagnosticStage: {
             /** @enum {string} */
@@ -2572,8 +2489,173 @@ export interface components {
             hasMore: boolean;
             nextBeforeOrdinal?: number;
         };
+        ImmutableFileRevision: {
+            /** @enum {integer} */
+            schemaVersion: 1;
+            resourceId: string;
+            version: number;
+            digest: string;
+            /** Format: date-time */
+            publishedAt: string;
+        };
+        GlobalRoleSummary: {
+            id: string;
+            name: string;
+            path: string;
+            digest?: string;
+            error?: string;
+        };
+        PortableRoleDocument: {
+            /** @enum {integer} */
+            schemaVersion: 1;
+            handle: string;
+            name: string;
+            description: string;
+            positioning: string;
+            icon: string;
+            color: string;
+            model: {
+                ref: string;
+                thinkingEffort: components["schemas"]["ThinkingEffort"];
+                fallbacks: string[];
+            };
+            skills: {
+                id: string;
+                /** @enum {string} */
+                mode: "preload" | "available";
+            }[];
+            /** @enum {string} */
+            authority: "read_only" | "write_workspace";
+            /** @enum {string} */
+            permissionCeiling: "discuss" | "ask" | "auto";
+            allowedTools: string[];
+            context: {
+                /** @enum {string} */
+                defaultMode: "room" | "fresh";
+                allowedModes: ("room" | "fresh")[];
+                /** @enum {string} */
+                ownExecutionContinuity: "none";
+            };
+            delegation: {
+                /** @enum {string} */
+                admission: "auto_within_budget" | "approval_required" | "deny";
+                allowedCallerKinds: string[];
+                allowedStrategies: string[];
+                maxInvocationsPerParentRun: number;
+                maxConcurrentInstances: number;
+                budgetCeiling: {
+                    maxModelCalls: number;
+                    maxToolCalls: number;
+                    maxTotalTokens: number;
+                    maxOutputTokens: number;
+                    maxCostUsdMicros: number;
+                    maxWallTimeMs: number;
+                };
+            };
+            outputContract: string;
+            maxLoopIterations: number;
+            prompt: string;
+        };
+        GlobalRoleDetail: components["schemas"]["GlobalRoleSummary"] & {
+            digest: string;
+            document: components["schemas"]["PortableRoleDocument"];
+        };
+        ResolvedGlobalRole: {
+            roleId: string;
+            source: string;
+            revision: components["schemas"]["ImmutableFileRevision"];
+            document: components["schemas"]["PortableRoleDocument"];
+        };
+        /** @description Role-backed Tasks declare role only; inline Tasks declare model with optional thinking and skills. The modes are mutually exclusive and enforced by the Worker. */
+        GraphTask: {
+            name: string;
+            role?: string;
+            model?: string;
+            thinking?: components["schemas"]["ThinkingEffort"];
+            skills?: string[];
+            goal: string;
+            writes?: string[];
+            budget?: {
+                tokens?: number;
+            };
+        };
+        GraphDocument: {
+            /** @enum {integer} */
+            schemaVersion: 1;
+            id: string;
+            name: string;
+            description?: string;
+            tasks: {
+                [key: string]: components["schemas"]["GraphTask"];
+            };
+            graph: {
+                [key: string]: string[];
+            };
+        };
+        GraphSummary: {
+            id: string;
+            name: string;
+            path: string;
+            digest?: string;
+            error?: string;
+            latestVersion: number;
+        };
+        GraphDetail: components["schemas"]["GraphSummary"] & {
+            digest: string;
+            document: components["schemas"]["GraphDocument"];
+        };
+        GraphMutation: {
+            expectedDigest: string;
+            name?: string;
+            description?: string;
+            task?: {
+                id: string;
+                value?: components["schemas"]["GraphTask"];
+            };
+            dependencies?: {
+                taskId: string;
+                depends: string[];
+            };
+        };
+        GraphBuilderMessage: {
+            id: string;
+            graphId: string;
+            ordinal: number;
+            /** @enum {string} */
+            role: "user" | "assistant";
+            content: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        GraphBuilderOperation: {
+            /** @enum {string} */
+            kind: "upsert_task" | "delete_task" | "set_dependencies" | "update_graph";
+            taskId?: string;
+            task?: components["schemas"]["GraphTask"];
+            depends?: string[];
+            name?: string;
+            description?: string;
+        };
+        GraphBuilderProposal: {
+            id: string;
+            graphId: string;
+            baseDigest: string;
+            operations: components["schemas"]["GraphBuilderOperation"][];
+            summary: string;
+            /** @enum {string} */
+            status: "pending" | "applied" | "superseded";
+            diagnostics: string[];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        GraphBuilderThread: {
+            graphId: string;
+            modelProfileId?: string;
+            messages: components["schemas"]["GraphBuilderMessage"][];
+            proposal?: components["schemas"]["GraphBuilderProposal"];
+        };
         /** @enum {string} */
-        RoleScope: "builtin" | "global" | "project";
+        RoleScope: "builtin" | "global" | "project" | "flow";
         RoleModelBinding: {
             /** @enum {string} */
             mode: "fixed" | "overridable" | "inherit";
@@ -2617,8 +2699,8 @@ export interface components {
         };
         RoleContextPolicy: {
             /** @enum {string} */
-            defaultMode: "room" | "reply" | "fresh";
-            allowedModes: ("room" | "reply" | "fresh")[];
+            defaultMode: "room" | "reply" | "fresh" | "task_only";
+            allowedModes: ("room" | "reply" | "fresh" | "task_only")[];
             /** @enum {string} */
             ownExecutionContinuity: "none";
         };
@@ -2650,14 +2732,20 @@ export interface components {
             color: string;
             scope: components["schemas"]["RoleScope"];
             projectId?: string;
+            flowId?: string;
             /** @enum {string} */
             status: "active" | "archived";
+            /** @enum {string} */
+            sourceKind: "managed" | "project_file";
+            /** @description Informational Worker-resolved source path; never accepted from clients */
+            sourceLocator?: string;
             currentVersionId?: string;
             currentVersion?: number;
             /** Format: date-time */
             updatedAt: string;
         };
         RoleIdentity: components["schemas"]["RoleSummary"] & {
+            sourceDigest?: string;
             draft: components["schemas"]["RoleDefinition"];
             draftRevision: number;
             delegationEnabled: boolean;
@@ -2693,6 +2781,29 @@ export interface components {
             valid: boolean;
             diagnostics: components["schemas"]["RoleValidationDiagnostic"][];
             configDigest?: string;
+        };
+        RoleCandidate: {
+            handle: string;
+            name: string;
+            description: string;
+            /** @enum {string} */
+            sourceKind: "project_file";
+            /** @description Informational Worker-resolved source path; never accepted from clients */
+            sourceLocator: string;
+            sourceDigest?: string;
+            configDigest?: string;
+            definition?: components["schemas"]["RoleDefinition"];
+            alreadyPublished: boolean;
+            roleId?: string;
+            publishedVersionId?: string;
+            publishedVersion?: number;
+            updateAvailable: boolean;
+            parseError?: string;
+            diagnostics: components["schemas"]["RoleValidationDiagnostic"][];
+        };
+        MaterializedRoleCandidate: {
+            role: components["schemas"]["RoleIdentity"];
+            version: components["schemas"]["RoleVersion"];
         };
         CreateRoleInput: {
             handle: string;
@@ -3327,6 +3438,31 @@ export interface operations {
             503: components["responses"]["Error"];
         };
     };
+    getRuntimeInfo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current Worker process identity used as the connection generation */
+            200: {
+                headers: {
+                    /** @description Current Worker process identity */
+                    "X-Ennote-Worker-Instance"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RuntimeInfo"];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
     listRoles: {
         parameters: {
             query?: {
@@ -3568,6 +3704,642 @@ export interface operations {
             404: components["responses"]["Error"];
         };
     };
+    listProjectRoleCandidates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Parse-only project Role candidates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RoleCandidate"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    materializeProjectRoleCandidate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    handle: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Existing identical immutable version reused */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MaterializedRoleCandidate"];
+                    };
+                };
+            };
+            /** @description Candidate materialized or updated */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MaterializedRoleCandidate"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+        };
+    };
+    listGlobalRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Global Role source summaries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["GlobalRoleSummary"][];
+                    };
+                };
+            };
+        };
+    };
+    createGlobalRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    document: components["schemas"]["PortableRoleDocument"];
+                };
+            };
+        };
+        responses: {
+            /** @description Global Role source created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["GlobalRoleDetail"];
+                    };
+                };
+            };
+            422: components["responses"]["Error"];
+        };
+    };
+    getGlobalRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Global Role source */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["GlobalRoleDetail"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    updateGlobalRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedDigest: string;
+                    document: components["schemas"]["PortableRoleDocument"];
+                };
+            };
+        };
+        responses: {
+            /** @description Updated global Role source */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["GlobalRoleDetail"];
+                    };
+                };
+            };
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+        };
+    };
+    listGraphs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Global Graph catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["GraphSummary"][];
+                    };
+                };
+            };
+        };
+    };
+    createGraph: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    id: string;
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Empty editable Graph draft created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["GraphDetail"];
+                    };
+                };
+            };
+            422: components["responses"]["Error"];
+        };
+    };
+    getGraph: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                graphID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Parsed Graph draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["GraphDetail"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    updateGraph: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                graphID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GraphMutation"];
+            };
+        };
+        responses: {
+            /** @description Semantically updated Graph draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["GraphDetail"];
+                    };
+                };
+            };
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+        };
+    };
+    publishGlobalRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Global Role source published as an immutable runtime version */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            422: components["responses"]["Error"];
+        };
+    };
+    listGlobalRoleRevisions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Immutable file-backed Role revisions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ImmutableFileRevision"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    getResolvedGlobalRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resolved effective Role */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ResolvedGlobalRole"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    publishGraph: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                graphID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Immutable Graph version published */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AgentFlowVersion"];
+                    };
+                };
+            };
+            422: components["responses"]["Error"];
+        };
+    };
+    listGraphVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                graphID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Immutable Graph versions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AgentFlowVersion"][];
+                    };
+                };
+            };
+        };
+    };
+    runGraph: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                graphID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    sessionId: string;
+                    version?: number;
+                    inputs?: {
+                        [key: string]: unknown;
+                    };
+                    vars?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Durable Graph Run created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RunAgentFlow"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+        };
+    };
+    listSessionGraphRuns: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session Graph Runs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RunAgentFlow"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    getSessionGraphRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: string;
+                runID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Graph Run detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            run: components["schemas"]["RunAgentFlow"];
+                            nodes: components["schemas"]["RunAgentFlowNode"][];
+                            flowVersion?: number;
+                        };
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    cancelSessionGraphRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: string;
+                runID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The (possibly now terminal) Graph Run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RunAgentFlow"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    resumeSessionGraphRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: string;
+                runID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The reset Graph Run (pending) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RunAgentFlow"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getGraphBuilderThread: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                graphID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Persistent Builder thread and pending proposal */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["GraphBuilderThread"];
+                    };
+                };
+            };
+        };
+    };
+    sendGraphBuilderMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                graphID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    modelProfileId: string;
+                    instruction: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Builder response and validated proposal */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["GraphBuilderThread"];
+                    };
+                };
+            };
+            422: components["responses"]["Error"];
+        };
+    };
+    applyGraphBuilderProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                graphID: string;
+                proposalID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Proposal applied atomically to graph.yaml */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["GraphDetail"];
+                    };
+                };
+            };
+            409: components["responses"]["Error"];
+        };
+    };
     listProviderProfiles: {
         parameters: {
             query?: never;
@@ -3605,7 +4377,7 @@ export interface operations {
                     providerType: "openai-compatible";
                     /** Format: uri */
                     baseUrl: string;
-                    credentialRef: string;
+                    apiKey?: string;
                     proxy?: string;
                 };
             };
@@ -3621,6 +4393,61 @@ export interface operations {
                         data?: components["schemas"]["ProviderProfile"];
                     };
                 };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    discoverProviderModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    providerId?: string;
+                    /** Format: uri */
+                    baseUrl?: string;
+                    apiKey?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Fetched model catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["DiscoveredModel"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    deleteProviderProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                providerID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Provider and its models removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             400: components["responses"]["Error"];
         };
@@ -3719,6 +4546,27 @@ export interface operations {
                         data?: components["schemas"]["ModelProfile"];
                     };
                 };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    deleteModelProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                modelID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Model profile removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             400: components["responses"]["Error"];
         };
@@ -5814,746 +6662,6 @@ export interface operations {
             };
             404: components["responses"]["Error"];
             500: components["responses"]["Error"];
-        };
-    };
-    listAgentFlows: {
-        parameters: {
-            query?: {
-                projectId?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Agent Flow profiles */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["AgentFlowProfile"][];
-                    };
-                };
-            };
-        };
-    };
-    createAgentFlow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    name: string;
-                    slug: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Profile created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["AgentFlowProfile"];
-                    };
-                };
-            };
-            400: components["responses"]["Error"];
-        };
-    };
-    getAgentFlow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileID: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Profile */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["AgentFlowProfile"];
-                    };
-                };
-            };
-            404: components["responses"]["Error"];
-        };
-    };
-    updateAgentFlowDraft: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileID: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    yaml: string;
-                    expectedRevision: number;
-                };
-            };
-        };
-        responses: {
-            /** @description Updated profile */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["AgentFlowProfile"];
-                    };
-                };
-            };
-            409: components["responses"]["Error"];
-        };
-    };
-    validateAgentFlowDraft: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileID: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Validation result with per-item diagnostics */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["FlowValidationResult"];
-                    };
-                };
-            };
-        };
-    };
-    publishAgentFlow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileID: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": {
-                    expectedRevision?: number;
-                };
-            };
-        };
-        responses: {
-            /** @description Immutable version */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["AgentFlowVersion"];
-                    };
-                };
-            };
-            422: components["responses"]["Error"];
-        };
-    };
-    checkAgentFlowDependencies: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    yaml: string;
-                    projectId?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Validation + dependency report */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: {
-                            valid?: boolean;
-                            configDigest?: string;
-                            diagnostics?: components["schemas"]["FlowValidationDiagnostic"][];
-                            dependencies?: components["schemas"]["FlowDependencyStatus"][];
-                        };
-                    };
-                };
-            };
-            400: components["responses"]["Error"];
-        };
-    };
-    importAgentFlow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    yaml: string;
-                    projectId?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Draft created or updated */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: {
-                            profileId?: string;
-                            slug?: string;
-                            draftRevision?: number;
-                            alreadyDrafted?: boolean;
-                            configDigest?: string;
-                            dependencies?: components["schemas"]["FlowDependencyStatus"][];
-                        };
-                    };
-                };
-            };
-            409: components["responses"]["Error"];
-            422: components["responses"]["Error"];
-        };
-    };
-    exportAgentFlow: {
-        parameters: {
-            query?: {
-                source?: "draft" | "version";
-                versionID?: string;
-            };
-            header?: never;
-            path: {
-                profileID: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description YAML text */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/x-yaml": string;
-                };
-            };
-            400: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-        };
-    };
-    archiveAgentFlow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileID: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Archived */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    listAgentFlowVersions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileID: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Versions */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["AgentFlowVersion"][];
-                    };
-                };
-            };
-        };
-    };
-    getAgentFlowVersion: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileID: string;
-                versionID: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Version */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["AgentFlowVersion"];
-                    };
-                };
-            };
-        };
-    };
-    listAgentFlowCandidates: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Candidates */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["AgentFlowCandidate"][];
-                    };
-                };
-            };
-        };
-    };
-    bindAgentFlowCandidate: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    slug: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Binding created (disabled) */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["ProjectAgentFlowBinding"];
-                    };
-                };
-            };
-            422: components["responses"]["Error"];
-        };
-    };
-    listAgentFlowBindings: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Bindings */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["ProjectAgentFlowBinding"][];
-                    };
-                };
-            };
-        };
-    };
-    createAgentFlowBinding: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    flowVersionId: string;
-                    desiredEnabled?: boolean;
-                };
-            };
-        };
-        responses: {
-            /** @description Binding created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["ProjectAgentFlowBinding"];
-                    };
-                };
-            };
-        };
-    };
-    deleteAgentFlowBinding: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-                bindingID: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Removed */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    updateAgentFlowBinding: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-                bindingID: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    desiredEnabled?: boolean;
-                };
-            };
-        };
-        responses: {
-            /** @description Updated binding */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["ProjectAgentFlowBinding"];
-                    };
-                };
-            };
-        };
-    };
-    runAgentFlow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-                bindingID: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    sessionId: string;
-                    inputs?: {
-                        [key: string]: unknown;
-                    };
-                    vars?: {
-                        [key: string]: unknown;
-                    };
-                    clientRequestId?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Flow run created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["RunAgentFlow"];
-                    };
-                };
-            };
-            422: components["responses"]["Error"];
-        };
-    };
-    listAgentFlowRuns: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Flow runs */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["RunAgentFlow"][];
-                    };
-                };
-            };
-        };
-    };
-    getAgentFlowRun: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-                runID: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Flow run detail */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: {
-                            run?: components["schemas"]["RunAgentFlow"];
-                            nodes?: components["schemas"]["RunAgentFlowNode"][];
-                            flowVersion?: number;
-                        };
-                    };
-                };
-            };
-            404: components["responses"]["Error"];
-        };
-    };
-    cancelAgentFlowRun: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-                runID: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Cancel requested */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["RunAgentFlow"];
-                    };
-                };
-            };
-        };
-    };
-    resumeAgentFlowRun: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-                runID: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Resumed */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["RunAgentFlow"];
-                    };
-                };
-            };
-        };
-    };
-    invokeAgentFlow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    sessionId: string;
-                    name: string;
-                    version?: number;
-                    inputs?: {
-                        [key: string]: unknown;
-                    };
-                    vars?: {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-        responses: {
-            /** @description Flow run created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["RunAgentFlow"];
-                    };
-                };
-            };
-            404: components["responses"]["Error"];
-            422: components["responses"]["Error"];
-        };
-    };
-    listAgentFlowCheckApprovals: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Pending approvals */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["AgentFlowCheckApproval"][];
-                    };
-                };
-            };
-        };
-    };
-    decideAgentFlowCheckApproval: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectID: string;
-                runID: string;
-                taskIndex: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    approved: boolean;
-                    clientRequestId?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Decision applied */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: {
-                            /** @enum {string} */
-                            status?: "pending" | "approved" | "rejected";
-                        };
-                    };
-                };
-            };
         };
     };
     listSkillRoots: {

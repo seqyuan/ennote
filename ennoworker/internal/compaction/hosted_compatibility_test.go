@@ -10,6 +10,8 @@ import (
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agent"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
+	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,13 +23,11 @@ func createHostedCompactionHistory(t *testing.T) (*sql.DB, string, []string) {
 	db, err := store.OpenMemory()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
-	project, _, err := (&store.ProjectRepo{DB: db}).CreateWithWorkspace(ctx,
+	require.NoError(t, store.MigrateFixtureSchema(db))
+	project, _, err := newFileProjects(t).CreateWithWorkspace(ctx,
 		domain.CreateProjectInput{Name: "hosted compaction", HostPath: t.TempDir()})
 	require.NoError(t, err)
-	session, err := (&store.SessionRepo{DB: db}).Create(ctx,
-		domain.CreateSessionInput{ProjectID: project.ID, Title: "history"})
-	require.NoError(t, err)
+	session := sqlCreateSession(t, db, project.ID)
 	runs := &store.RunRepo{DB: db}
 	runIDs := make([]string, 0, 2)
 	for index := 0; index < 2; index++ {
@@ -108,7 +108,7 @@ func TestFormatTwoAncestorUsesMixedLedgerProjectionForNewTurnAndManualCompaction
 	require.NotEmpty(t, projected.Messages)
 	require.NoError(t, runs.Fail(ctx, claimed.ID, "qualification_complete", "projection qualification complete"))
 
-	compactions := &store.CompactionRepo{DB: db}
+	compactions := &store.CompactionRepo{DB: db, Policies: &fileconfig.PolicyStore{}}
 	manual, err := compactions.CreateManual(ctx, domain.ManualCompactionInput{
 		SessionID: sessionID, BaseMessageID: claimed.BaseMessageID, ClientRequestID: "mixed-compaction",
 	})
@@ -120,4 +120,10 @@ func TestFormatTwoAncestorUsesMixedLedgerProjectionForNewTurnAndManualCompaction
 	require.Error(t, err)
 	assert.NotEqual(t, domain.ErrorContextProjectionNotEnabled, domain.ErrorCodeOf(err),
 		"manual compaction must pass the mixed-ledger reader before validating runtime configuration")
+}
+
+// newFileProjects returns a file-native ProjectRepo (V2).
+func newFileProjects(t *testing.T) *store.ProjectRepo {
+	t.Helper()
+	return &store.ProjectRepo{Files: &projectstore.Store{Root: t.TempDir()}}
 }

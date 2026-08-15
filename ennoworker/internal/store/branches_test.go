@@ -12,17 +12,10 @@ import (
 
 func setupBranchSession(t *testing.T) (*store.BranchRepo, *store.SessionRepo, *store.MessageRepo, *domain.Session) {
 	t.Helper()
-	db := store.SetupDB(t)
-	projects := &store.ProjectRepo{DB: db}
-	sessions := &store.SessionRepo{DB: db}
+	db, manager, session := newSessionDB(t)
+	sessions := &store.SessionRepo{Files: manager}
 	messages := &store.MessageRepo{DB: db}
-	project, _, err := projects.CreateWithWorkspace(context.Background(), domain.CreateProjectInput{
-		Name: "Branches", HostPath: t.TempDir(),
-	})
-	require.NoError(t, err)
-	session, err := sessions.Create(context.Background(), domain.CreateSessionInput{ProjectID: project.ID, Title: "History"})
-	require.NoError(t, err)
-	return &store.BranchRepo{DB: db}, sessions, messages, session
+	return &store.BranchRepo{DB: db}, sessions, messages, &session
 }
 
 func TestCreateSessionCreatesStableMainBranch(t *testing.T) {
@@ -85,9 +78,7 @@ func TestBranchCreationRejectsInactiveAndCrossSessionPoints(t *testing.T) {
 	_, err = branches.Create(ctx, session.ID, sibling.ID, "invalid")
 	assert.ErrorIs(t, err, store.ErrBranchPointNotActive)
 
-	projectID := session.ProjectID
-	other, err := sessions.Create(ctx, domain.CreateSessionInput{ProjectID: projectID})
-	require.NoError(t, err)
+	other := sqlCreateSession(t, branches.DB, session.ProjectID)
 	otherMessage, err := messages.CreateUserMessage(ctx, other.ID, "", "other")
 	require.NoError(t, err)
 	_, err = branches.Create(ctx, session.ID, otherMessage.ID, "invalid")

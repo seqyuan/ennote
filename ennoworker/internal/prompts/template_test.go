@@ -209,8 +209,8 @@ func TestExpandTemplate_BracedSlice(t *testing.T) {
 func TestExpandTemplate_UnknownBraced(t *testing.T) {
 	// Unsupported braced forms → empty string (not preserved).
 	assertExpanded(t, "X${foo}Y", []string{"a"}, "XY")
-	assertExpanded(t, "X${@:0}Y", []string{"a"}, "XY")  // N=0 invalid
-	assertExpanded(t, "X${@:x}Y", []string{"a"}, "XY")  // non-numeric
+	assertExpanded(t, "X${@:0}Y", []string{"a"}, "XY") // N=0 invalid
+	assertExpanded(t, "X${@:x}Y", []string{"a"}, "XY") // non-numeric
 }
 
 // ============================================================================

@@ -132,7 +132,7 @@ func BuildCatalog(sources []SourceRoot) *Catalog {
 			// Conflict resolution: existing has higher priority (from earlier source).
 			if existing.Kind != node.Kind {
 				catalog.Diagnostics = append(catalog.Diagnostics, Diagnostic{
-					Level:   "skip",
+					Level: "skip",
 					Message: fmt.Sprintf("node_kind_shadowed: %s (kind=%s from %s) shadows %s (kind=%s from %s)",
 						relPath, existing.Kind, existing.SourceRoot, relPath, node.Kind, node.SourceRoot),
 					RelPath: relPath,
@@ -146,7 +146,7 @@ func BuildCatalog(sources []SourceRoot) *Catalog {
 				existing.Children = mergeChildren(existing.Children, node.Children)
 			}
 			catalog.Diagnostics = append(catalog.Diagnostics, Diagnostic{
-				Level:   "warn",
+				Level: "warn",
 				Message: fmt.Sprintf("path %s exists in both %s and %s, using %s",
 					relPath, existing.SourceRoot, node.SourceRoot, existing.SourceRoot),
 				RelPath: relPath,
@@ -179,7 +179,7 @@ func BuildCatalog(sources []SourceRoot) *Catalog {
 		mid := node.Skill.Manifest.ID
 		if existing, exists := idMap[mid]; exists {
 			catalog.Diagnostics = append(catalog.Diagnostics, Diagnostic{
-				Level:   "skip",
+				Level: "skip",
 				Message: fmt.Sprintf("duplicate_skill_id: %s at %s (from %s) conflicts with %s (from %s)",
 					mid, node.RelPath, node.SourceRoot, existing.RelPath, existing.SourceRoot),
 				RelPath: node.RelPath,

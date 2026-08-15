@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 )
 
 var (
@@ -20,7 +21,12 @@ var (
 // DelegationApprovalRepo decides durable retry-budget authorizations. It is
 // separate from tool-approval checkpoints because the original parent may
 // already be terminal.
-type DelegationApprovalRepo struct{ DB *sql.DB }
+type DelegationApprovalRepo struct {
+	DB *sql.DB
+	// Policies forwards the file-backed delegation policy for retry child
+	// materialization (V2); nil keeps the legacy global policy SQL path.
+	Policies *fileconfig.PolicyStore
+}
 
 // Decide approves or rejects a retry-budget authorization. Approval creates the
 // selected child Runs from the already frozen generation snapshot; rejection
@@ -173,15 +179,11 @@ func (r *DelegationApprovalRepo) Decide(ctx context.Context, approvalID string,
 		if !ok {
 			return nil, nil, fmt.Errorf("approval items do not cover selected item %s", itemID)
 		}
-		// Fail closed on a disabled Role identity; the frozen version never
-		// changes. Budget was validated at request time and is re-validated here.
-		var roleVersionID string
-		if err := tx.QueryRowContext(ctx, `SELECT role_version_id FROM delegation_items WHERE id=?`, itemID).
-			Scan(&roleVersionID); err != nil {
-			return nil, nil, err
-		}
-		repo := &DelegationRepo{DB: r.DB}
-		if err := repo.validateRetryRoleAndCeilingTx(ctx, tx, roleVersionID, plan.Budget); err != nil {
+		// Fail closed when the frozen Role meta is missing; the frozen version
+		// never changes. Budget was validated at request time and is
+		// re-validated here against the frozen definition's ceiling.
+		repo := &DelegationRepo{DB: r.DB, Policies: r.Policies}
+		if err := repo.validateRetryRoleAndCeilingTx(ctx, tx, itemID, plan.Budget); err != nil {
 			return nil, nil, err
 		}
 		override := plan.Budget
@@ -189,6 +191,7 @@ func (r *DelegationApprovalRepo) Decide(ctx context.Context, approvalID string,
 			ParentRunID: parentRunID, ItemID: itemID, SessionID: sessionID,
 			Generation: generation, RetryOfAttemptID: plan.RetryOfAttemptID,
 			BudgetOverride: &override, AllowTerminalParent: true,
+			Policies: repo.Policies,
 		})
 		if childErr != nil {
 			return nil, nil, childErr

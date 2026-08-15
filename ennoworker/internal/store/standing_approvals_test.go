@@ -17,11 +17,8 @@ func testSession(t *testing.T, db *sql.DB) string {
 	t.Helper()
 	id := "s-" + t.Name()
 	pid := "p-" + t.Name()
-	// Create project first (FK requirement).
-	_, err := db.Exec(`INSERT OR IGNORE INTO projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`,
-		pid, t.Name(), time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339))
-	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO sessions (id, project_id, title, status, created_at, updated_at) VALUES (?, ?, ?, 'active', ?, ?)`,
+	// V2: sessions have no FK to the removed projects table.
+	_, err := db.Exec(`INSERT INTO sessions (id, project_id, title, status, created_at, updated_at) VALUES (?, ?, ?, 'active', ?, ?)`,
 		id, pid, t.Name(), time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339))
 	require.NoError(t, err)
 	return id
@@ -180,18 +177,12 @@ func TestStandingApprovalRepo_RevokeCrossSession(t *testing.T) {
 
 	// Create two distinct sessions with unique IDs.
 	pid1 := "p-rcs-1"
-	_, err := db.Exec(`INSERT OR IGNORE INTO projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`,
-		pid1, "rcs1", time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339))
-	require.NoError(t, err)
 	sid1 := "s-rcs-1"
-	_, err = db.Exec(`INSERT INTO sessions (id, project_id, title, status, created_at, updated_at) VALUES (?, ?, ?, 'active', ?, ?)`,
+	_, err := db.Exec(`INSERT INTO sessions (id, project_id, title, status, created_at, updated_at) VALUES (?, ?, ?, 'active', ?, ?)`,
 		sid1, pid1, "rcs1", time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339))
 	require.NoError(t, err)
 
 	pid2 := "p-rcs-2"
-	_, err = db.Exec(`INSERT OR IGNORE INTO projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`,
-		pid2, "rcs2", time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339))
-	require.NoError(t, err)
 	sid2 := "s-rcs-2"
 	_, err = db.Exec(`INSERT INTO sessions (id, project_id, title, status, created_at, updated_at) VALUES (?, ?, ?, 'active', ?, ?)`,
 		sid2, pid2, "rcs2", time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339))

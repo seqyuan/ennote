@@ -6,8 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"os"
-	"strings"
+	"fmt"
 	"testing"
 	"time"
 
@@ -34,46 +33,16 @@ import (
 // It asserts Provider call counts, frozen Role/version snapshots, private
 // transcript boundaries, root/child usage, and one completion per generation.
 func TestLiveHostedDelegationV15(t *testing.T) {
-	baseURL := strings.TrimSpace(os.Getenv("ENNOTE_LIVE_BASE_URL"))
-	apiKey := strings.TrimSpace(os.Getenv("ENNOTE_LIVE_API_KEY"))
-	model := strings.TrimSpace(os.Getenv("ENNOTE_LIVE_MODEL"))
-	if baseURL == "" || apiKey == "" || model == "" {
-		t.Skip("ENNOTE_LIVE_BASE_URL, ENNOTE_LIVE_API_KEY, and ENNOTE_LIVE_MODEL are required")
-	}
-	t.Setenv("ENNOTE_LIVE_API_KEY", apiKey)
-	t.Setenv("ENNOTE_HOME", t.TempDir())
 	ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 	defer cancel()
-	db, err := store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
-
-	workspaceDir := t.TempDir()
-	project, _, err := (&store.ProjectRepo{DB: db}).CreateWithWorkspace(ctx, domain.CreateProjectInput{
-		Name: "v15-live", HostPath: workspaceDir,
-	})
-	require.NoError(t, err)
-	provider, err := (&store.ProviderRepo{DB: db}).Create(ctx, store.CreateProviderInput{
-		Name: "v15-provider", ProviderType: domain.ProviderOpenAICompatible,
-		BaseURL: baseURL, CredentialRef: "env:ENNOTE_LIVE_API_KEY",
-	})
-	require.NoError(t, err)
-	modelProfile, err := (&store.ModelRepo{DB: db}).Create(ctx, store.CreateModelInput{
-		ProviderID: provider.ID, ModelName: model, DisplayName: model,
-		ContextWindow: 64000, MaxOutputTokens: 512,
-		SupportsToolUse: true, SupportsThinking: true, IsDefault: true,
-	})
-	require.NoError(t, err)
-	modelProfileID := modelProfile.ID
-	sessionRepo := &store.SessionRepo{DB: db}
-	session, err := sessionRepo.Create(ctx, domain.CreateSessionInput{
-		ProjectID: project.ID, Title: "V1.5 live", DefaultModelProfileID: &modelProfileID,
-	})
-	require.NoError(t, err)
+	stack := newLiveStack(t, "v15-live")
+	db := stack.DB
+	session := stack.Session
+	modelProfileID := stack.ModelID
 
 	hub := events.NewHub()
-	runRepo := &store.RunRepo{DB: db, Publisher: hub}
+	runRepo := &store.RunRepo{DB: db, Publisher: hub, Providers: stack.Providers,
+		Models: stack.ModelRepo, Policies: stack.Policies}
 	messageRepo := &store.MessageRepo{DB: db}
 
 	parentSubmission, err := runRepo.SubmitTurn(ctx, domain.SubmitTurnInput{
@@ -88,12 +57,12 @@ func TestLiveHostedDelegationV15(t *testing.T) {
 	require.NotEmpty(t, parentResolved.Effective.ModelProfileID)
 
 	delegations := &store.DelegationRepo{DB: db}
-	second := explorerLiveItem()
+	second := explorerLiveItem(t, modelProfileID)
 	second.Name = "review"
 	group, items, children, err := delegations.CreateGroupWithChildren(ctx, store.CreateDelegationGroupInput{
 		ParentRunID: parentRun.ID, ParentToolCallID: "v15-bg", Strategy: domain.DelegationStrategyParallel,
 		ExecutionMode: domain.DelegationExecutionBackground,
-		Items:         []store.CreateDelegationItemInput{explorerLiveItem(), second},
+		Items:         []store.CreateDelegationItemInput{explorerLiveItem(t, modelProfileID), second},
 	}, session.ID)
 	require.NoError(t, err)
 	require.Len(t, children, 2)
@@ -114,7 +83,7 @@ func TestLiveHostedDelegationV15(t *testing.T) {
 	assert.Equal(t, domain.RunCancelled, cancelledRun.Status)
 
 	// Execute the first child through the real Provider.
-	executor := newV15Executor(t, db, hub, runRepo, sessionRepo, messageRepo)
+	executor := newV15Executor(t, db, hub, runRepo, &store.SessionRepo{DB: db}, messageRepo, &store.ProjectRepo{Files: stack.Projects})
 	require.NoError(t, executeV15Child(ctx, t, executor, runRepo, children[0], "explore the workspace and report file names"))
 
 	// The background completion is visible and pending.
@@ -189,19 +158,43 @@ func TestLiveHostedDelegationV15(t *testing.T) {
 }
 
 // explorerLiveItem mirrors the builtin Workspace Explorer delegation item.
-func explorerLiveItem() store.CreateDelegationItemInput {
-	return store.CreateDelegationItemInput{
+// The RoleMeta is frozen from an embedded V2 file-native definition with
+// mode=fixed bound to the live model (the removed global role SQL tables and
+// the unimplemented legacy inherit mode are gone).
+func explorerLiveItem(t *testing.T, modelID string) store.CreateDelegationItemInput {
+	t.Helper()
+	item := store.CreateDelegationItemInput{
 		Name: "explore", RoleVersionID: "builtin-workspace-explorer-v3",
 		AssignmentJSON: json.RawMessage(`{"objective":"List the files in /workspace and note their names in one sentence."}`),
 		OutputContract: "text-v1",
 		Budget: domain.BudgetCeilingJSON{MaxModelCalls: 6, MaxToolCalls: 8, MaxTotalTokens: 20000,
 			MaxOutputTokens: 2048, MaxWallTimeMS: 120000},
 	}
+	item.RoleMeta = liveExplorerRoleMeta(modelID)
+	return item
 }
+
+// liveExplorerRoleMeta freezes the builtin Workspace Explorer Role identity +
+// definition from an embedded V2 definition bound to modelID (mode=fixed).
+func liveExplorerRoleMeta(modelID string) *store.DelegationRoleMeta {
+	definition := fmt.Sprintf(liveExplorerRoleDefinitionV3, modelID)
+	meta, err := store.NewDelegationRoleMeta("builtin-workspace-explorer-v3", []byte(definition))
+	if err != nil {
+		panic(err)
+	}
+	meta.ObjectID = "builtin-workspace-explorer"
+	meta.Handle = "workspace-explorer"
+	meta.DisplayName = "Workspace Explorer"
+	return meta
+}
+
+// liveExplorerRoleDefinitionV3 is the builtin Workspace Explorer definition;
+// the %%s placeholder receives the live model profile id (mode=fixed).
+const liveExplorerRoleDefinitionV3 = `{"schemaVersion":1,"rolePrompt":"You are the Workspace Explorer. Use read, ls, grep, and find to answer questions about workspace files. You may inspect git history and status with the git_readonly tool (status, diff, log, show, ls-files, blame). Every answer must be concise. End every turn by calling submit_result with a structured result. Never create, modify, or delete files, and never run arbitrary shell commands.","modelBinding":{"mode":"fixed","modelProfileId":%q,"thinkingEffort":"default","fallbackModelProfileIds":[],"overridableFields":[]},"skills":{"entries":[]},"authority":"read_only","permissionCeiling":"discuss","allowedTools":["read","ls","grep","find","git_readonly"],"contextPolicy":{"defaultMode":"task_only","allowedModes":["task_only"],"ownExecutionContinuity":"none"},"delegationPolicy":{"admission":"auto_within_budget","allowedCallerKinds":["host"],"allowedStrategies":["single","parallel"],"maxInvocationsPerParentRun":16,"maxConcurrentInstances":16,"budgetCeiling":{"maxModelCalls":6,"maxToolCalls":8,"maxTotalTokens":20000,"maxOutputTokens":4000,"maxCostUsdMicros":100000,"maxWallTimeMs":120000}},"outputContract":"text-v1","maxLoopIterations":8}`
 
 // newV15Executor assembles the production agent executor for live runs.
 func newV15Executor(t *testing.T, db *sql.DB, hub *events.Hub, runRepo *store.RunRepo,
-	sessionRepo *store.SessionRepo, messageRepo *store.MessageRepo) *agentExecutor {
+	sessionRepo *store.SessionRepo, messageRepo *store.MessageRepo, projects *store.ProjectRepo) *agentExecutor {
 	t.Helper()
 	writer := events.NewWriter(&store.EventRepo{DB: db}, hub)
 	callRepo := &store.CallRepo{DB: db, Publisher: hub}
@@ -210,7 +203,7 @@ func newV15Executor(t *testing.T, db *sql.DB, hub *events.Hub, runRepo *store.Ru
 	emptySkills := t.TempDir()
 	return &agentExecutor{
 		db: db, writer: writer, homeDir: t.TempDir(), runs: runRepo, calls: callRepo,
-		sessionDB: sessionRepo, msgRepo: messageRepo,
+		sessionDB: sessionRepo, msgRepo: messageRepo, projects: projects,
 		skillRepo: &store.SkillSnapshotRepo{DB: db}, skillsDir: emptySkills,
 		builtinDir: emptySkills, sandbox: "none",
 		hub:               hub,

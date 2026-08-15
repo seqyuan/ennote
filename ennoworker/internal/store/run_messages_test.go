@@ -86,8 +86,10 @@ func TestLoadRunTranscriptFallsBackAndFailsOnMismatch(t *testing.T) {
 	})
 }
 
-func TestFinalizeRejectsFormatTwoBeforeAnyWrite(t *testing.T) {
-	repo, submission := setupSubmittedRun(t, "format-two-disabled")
+func TestFinalizeFormatTwoWritesTranscript(t *testing.T) {
+	// V2: format-2 (SpeakerV2) is always enabled; the legacy settings writer
+	// gate was removed, so a format-2 Run finalizes and writes its transcript.
+	repo, submission := setupSubmittedRun(t, "format-two-enabled")
 	_, err := repo.Claim(context.Background(), submission.Run.ID)
 	require.NoError(t, err)
 	_, err = repo.DB.Exec(`DROP TRIGGER agent_runs_commit_format_immutable`)
@@ -95,14 +97,13 @@ func TestFinalizeRejectsFormatTwoBeforeAnyWrite(t *testing.T) {
 	_, err = repo.DB.Exec(`UPDATE agent_runs SET commit_format_version=2 WHERE id=?`, submission.Run.ID)
 	require.NoError(t, err)
 
-	err = repo.FinalizeSuccess(context.Background(), submission.Run.ID, transcriptOutput())
-	require.Error(t, err)
-	assert.Equal(t, domain.ErrorCommitFormatNotEnabled, domain.ErrorCodeOf(err))
-	for _, table := range []string{"messages", "run_messages"} {
-		var count int
-		require.NoError(t, repo.DB.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE run_id=?`, submission.Run.ID).Scan(&count))
-		assert.Zero(t, count, table)
-	}
+	require.NoError(t, repo.FinalizeSuccess(context.Background(), submission.Run.ID, transcriptOutput()))
+	run, err := repo.Get(context.Background(), submission.Run.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunSucceeded, run.Status)
+	var messages int
+	require.NoError(t, repo.DB.QueryRow(`SELECT COUNT(*) FROM run_messages WHERE run_id=?`, submission.Run.ID).Scan(&messages))
+	assert.NotZero(t, messages)
 }
 
 func TestFormatTwoFixtureIsPubliclyFilteredButRejectedForExecutionLineage(t *testing.T) {

@@ -5,7 +5,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -20,45 +22,16 @@ import (
 )
 
 func TestLiveDeepSeekExecutorFreezesProfileAndCommitsProjections(t *testing.T) {
-	baseURL := strings.TrimSpace(os.Getenv("ENNOTE_LIVE_BASE_URL"))
-	apiKey := strings.TrimSpace(os.Getenv("ENNOTE_LIVE_API_KEY"))
-	model := strings.TrimSpace(os.Getenv("ENNOTE_LIVE_MODEL"))
-	if baseURL == "" || apiKey == "" || model == "" {
-		t.Skip("ENNOTE_LIVE_BASE_URL, ENNOTE_LIVE_API_KEY, and ENNOTE_LIVE_MODEL are required")
-	}
-	t.Setenv("ENNOTE_LIVE_API_KEY", apiKey)
-	t.Setenv("ENNOTE_HOME", t.TempDir())
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
-	db, err := store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
-
-	project, _, err := (&store.ProjectRepo{DB: db}).CreateWithWorkspace(ctx, domain.CreateProjectInput{
-		Name: "deepseek-live", HostPath: t.TempDir(),
-	})
-	require.NoError(t, err)
-	provider, err := (&store.ProviderRepo{DB: db}).Create(ctx, store.CreateProviderInput{
-		Name: "deepseek-live", ProviderType: domain.ProviderOpenAICompatible,
-		BaseURL: baseURL, CredentialRef: "env:ENNOTE_LIVE_API_KEY",
-	})
-	require.NoError(t, err)
-	modelProfile, err := (&store.ModelRepo{DB: db}).Create(ctx, store.CreateModelInput{
-		ProviderID: provider.ID, ModelName: model, DisplayName: model,
-		ContextWindow: 1000000, MaxOutputTokens: 128,
-		SupportsToolUse: true, SupportsThinking: true, IsDefault: true,
-	})
-	require.NoError(t, err)
-	modelProfileID := modelProfile.ID
-	sessionRepo := &store.SessionRepo{DB: db}
-	session, err := sessionRepo.Create(ctx, domain.CreateSessionInput{
-		ProjectID: project.ID, Title: "deepseek live", DefaultModelProfileID: &modelProfileID,
-	})
-	require.NoError(t, err)
+	stack := newLiveStack(t, "deepseek-live")
+	db, model, modelProfileID := stack.DB, strings.TrimSpace(os.Getenv("ENNOTE_LIVE_MODEL")), stack.ModelID
+	home := stack.Home
+	session := stack.Session
 
 	hub := events.NewHub()
-	runRepo := &store.RunRepo{DB: db, Publisher: hub}
+	runRepo := &store.RunRepo{DB: db, Publisher: hub, Providers: stack.Providers,
+		Models: stack.ModelRepo, Policies: stack.Policies}
 	messageRepo := &store.MessageRepo{DB: db}
 	submission, err := runRepo.SubmitTurn(ctx, domain.SubmitTurnInput{
 		SessionID: session.ID, ClientRequestID: "deepseek-live-request",
@@ -70,11 +43,12 @@ func TestLiveDeepSeekExecutorFreezesProfileAndCommitsProjections(t *testing.T) {
 	require.NoError(t, err)
 	writer := events.NewWriter(&store.EventRepo{DB: db}, hub)
 	callRepo := &store.CallRepo{DB: db, Publisher: hub}
-	compactionRepo := &store.CompactionRepo{DB: db, Publisher: hub}
+	compactionRepo := &store.CompactionRepo{DB: db, Publisher: hub,
+		Policies: &fileconfig.PolicyStore{Path: filepath.Join(home, "config", "policies.json")}}
 	emptySkills := t.TempDir()
 	executor := &agentExecutor{
 		db: db, writer: writer, homeDir: t.TempDir(), runs: runRepo, calls: callRepo,
-		sessionDB: sessionRepo, msgRepo: messageRepo,
+		sessionDB: &store.SessionRepo{DB: db}, msgRepo: messageRepo, projects: &store.ProjectRepo{Files: stack.Projects},
 		skillRepo: &store.SkillSnapshotRepo{DB: db}, skillsDir: emptySkills,
 		builtinDir: emptySkills, sandbox: "none",
 	}

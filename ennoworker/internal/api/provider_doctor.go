@@ -11,6 +11,7 @@ import (
 
 type ProviderDiagnoser interface {
 	Diagnose(context.Context, string, string) (domain.ProviderDiagnostic, error)
+	DiscoverModels(context.Context, providerdoctor.DiscoverInput) ([]providerdoctor.DiscoveredModel, error)
 }
 
 func (s *Server) testProviderProfile(w http.ResponseWriter, r *http.Request) {

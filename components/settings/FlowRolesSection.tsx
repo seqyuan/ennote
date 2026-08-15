@@ -40,7 +40,7 @@ function defaultRoleDefinition(model: ModelProfile): RoleIdentity["draft"] {
 
 /**
  * FlowRolesSection manages graph-local Roles (scope='flow') for the currently
- * selected Agent Flow. These Roles resolve only inside the owning graph's task
+ * selected Graph. These Roles resolve only inside the owning graph's task
  * references (bare handle) and never from delegate_tasks. The section lists,
  * creates, and edits them inline via the shared RoleEditor.
  */
@@ -76,7 +76,10 @@ export function FlowRolesSection({ flowId, projectId, setError, onRolesChanged }
     }
   }, [flowId, setError]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
 
   const openRole = useCallback(async (roleId: string) => {
     try {

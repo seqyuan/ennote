@@ -17,11 +17,11 @@ const (
 
 // Manager controls workspace isolation and skill snapshot access.
 type Manager struct {
-	Jail             *Jail
-	RuntimeHostDir   string // host path for output capture
+	Jail              *Jail
+	RuntimeHostDir    string // host path for output capture
 	RuntimeVisibleDir string // sandbox-visible path for env vars
-	SkillsDir        string // host path for skills snapshot
-	Mode             SandboxMode
+	SkillsDir         string // host path for skills snapshot
+	Mode              SandboxMode
 }
 
 // NewManager creates a Manager with workspace-only (backward compatible).

@@ -59,7 +59,7 @@ func TestPreToolUseHookBlocksDangerousCommand(t *testing.T) {
 
 	loop := &Loop{
 		Provider: provider, Tools: tools, Events: writer, HookLife: life,
-		ToolPolicy: &preflightOnlyPolicy{},
+		ToolPolicy:    &preflightOnlyPolicy{},
 		MaxIterations: 2, ContextTokens: 8000, MaxOutput: 500,
 	}
 	_, err = loop.Run(context.Background(), RunInput{RunID: "run-1", Model: "m"})
@@ -105,7 +105,7 @@ func TestPreToolUseHookAllowsSafeCommand(t *testing.T) {
 
 	loop := &Loop{
 		Provider: provider, Tools: tools, Events: writer, HookLife: life,
-		ToolPolicy: &preflightOnlyPolicy{},
+		ToolPolicy:    &preflightOnlyPolicy{},
 		MaxIterations: 2, ContextTokens: 8000, MaxOutput: 500,
 	}
 	_, err := loop.Run(context.Background(), RunInput{RunID: "run-1", Model: "m"})
@@ -153,7 +153,7 @@ func TestPostToolUseHookAppendsFeedback(t *testing.T) {
 
 	loop := &Loop{
 		Provider: provider, Tools: tools, Events: writer, HookLife: life,
-		ToolPolicy: &preflightOnlyPolicy{},
+		ToolPolicy:    &preflightOnlyPolicy{},
 		MaxIterations: 2, ContextTokens: 8000, MaxOutput: 500,
 	}
 	_, err := loop.Run(context.Background(), RunInput{RunID: "run-1", Model: "m"})
@@ -204,7 +204,7 @@ func TestHookDoesNotFireForUnmatchedTool(t *testing.T) {
 
 	loop := &Loop{
 		Provider: provider, Tools: tools, Events: writer, HookLife: life,
-		ToolPolicy: &preflightOnlyPolicy{},
+		ToolPolicy:    &preflightOnlyPolicy{},
 		MaxIterations: 2, ContextTokens: 8000, MaxOutput: 500,
 	}
 	_, err := loop.Run(context.Background(), RunInput{RunID: "run-1", Model: "m"})

@@ -7,7 +7,7 @@ AI-native bioinformatics agent workspace.
 两个长期运行的 Go 进程，一个职责边界；Next.js 仅在构建时生成静态前端：
 
 ```
-Browser → ennogate (Go, :30142) → ennoworker (Go, :0, loopback)
+Browser → ennogate (Go, :45131) → ennoworker (Go, :0, loopback)
            守门人                     劳动者
            认证 / 代理 / 静态文件       SQLite / Agent / 工具 / Skill
 ```
@@ -18,7 +18,7 @@ Browser → ennogate (Go, :30142) → ennoworker (Go, :0, loopback)
 make dev
 ```
 
-打开 http://127.0.0.1:30142，首次访问会引导设置密码。`make dev` 会先生成静态前端，再由 ennogate 启动和认证 ennoworker。
+打开 http://127.0.0.1:45131，首次访问会引导设置密码。`make dev` 会先生成静态前端，再由 ennogate 启动和认证 ennoworker。
 
 ## 安装与分发
 

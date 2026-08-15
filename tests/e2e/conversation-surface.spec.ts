@@ -76,8 +76,7 @@ test("conversation groups tool activity, applies disclosure defaults, and redact
 
 test("theme control applies and persists light and dark preferences", async ({ page }) => {
   await openSurface(page);
-  await page.getByRole("button", { name: "Choose theme" }).click();
-  await page.getByRole("menuitemradio", { name: "Dark theme" }).click();
+  await page.getByRole("button", { name: "Switch to dark mode" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   expect(await page.evaluate(() => localStorage.getItem("ennote-theme"))).toBe("dark");
   await page.reload();

@@ -39,7 +39,7 @@ test("skills tab lists installed and catalog skills with install annotations", a
     return route.abort();
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "Open settings" }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("tab", { name: /Skills/ }).click();
 
   await expect(page.getByRole("heading", { name: "Skills" })).toBeVisible();
@@ -71,11 +71,11 @@ test("marketplace search installs a skill", async ({ page }) => {
     return route.abort();
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "Open settings" }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("tab", { name: /Skills/ }).click();
 
   await page.getByLabel("Search skills.sh").fill("plotly");
-  await page.getByRole("button", { name: /Search/ }).click();
+  await page.getByRole("button", { name: "Search", exact: true }).click();
   await expect(page.getByText("acme/skills@plotly", { exact: true })).toBeVisible();
   await expect(page.getByText("12.5K installs")).toBeVisible();
 
@@ -117,7 +117,7 @@ test("toggle, check update, and remove a skill", async ({ page }) => {
     return route.abort();
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "Open settings" }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("tab", { name: /Skills/ }).click();
 
   // Toggle on (fixture starts disabled) → PATCH disabled/<relPath> with false.
@@ -178,7 +178,7 @@ test("skill roots: preset add, toggle, and remove via the settings surface", asy
     return route.abort();
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "Open settings" }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("tab", { name: /Skills/ }).click();
 
   // Empty state + preset add.

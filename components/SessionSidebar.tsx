@@ -1,27 +1,32 @@
 "use client";
 
-import { Archive, Bot, MoreHorizontal, Plus, RotateCcw, Search, Settings2, Workflow, X } from "lucide-react";
+import { Archive, Bot, ChevronRight, MoreHorizontal, Plus, RefreshCw, RotateCcw, Search, Settings2, Star, Workflow, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { Session } from "@/components/settings/types";
 import type { SessionLifecycleView } from "@/hooks/useProjectSessions";
+import type { SidebarProjectGroup } from "@/hooks/useSidebarProjectGroups";
 
 interface SidebarProject { id: string; name: string }
 
 interface SessionSidebarProps {
   projects: SidebarProject[];
-  sessions: Session[];
+  groups: SidebarProjectGroup[];
   selectedProject: string | null;
   selectedSession: string | null;
   settingsOpen: boolean;
-  view: SessionLifecycleView;
-  setView: (value: SessionLifecycleView) => void;
   query: string;
   setQuery: (value: string) => void;
-  loading: boolean;
   mutatingId: string | null;
   announcement: string;
+  pinnedProjectIds: string[];
+  togglePinProject: (projectId: string) => void;
+  collapsed: Set<string>;
+  toggleCollapsed: (projectId: string) => void;
+  archived: Record<string, Session[]>;
+  openArchived: (projectId: string) => void;
+  refreshGroups: () => void;
   createProject: () => void;
   createSession: () => void;
   switchProject: (projectID: string) => void;
@@ -199,13 +204,16 @@ function SessionActionMenu({
 }
 
 export function SessionSidebar({
-  projects, sessions, selectedProject, selectedSession, settingsOpen, view, setView,
-  query, setQuery, loading, mutatingId, announcement, createProject, createSession,
-  switchProject, switchSession, archiveSession, restoreSession, openSettings, closeNavigation,
-  runningSessionIds,
+  projects, groups, selectedProject, selectedSession, settingsOpen,
+  query, setQuery, mutatingId, announcement, pinnedProjectIds, togglePinProject,
+  collapsed, toggleCollapsed, archived, openArchived, refreshGroups,
+  createProject, createSession, switchProject, switchSession,
+  archiveSession, restoreSession, openSettings, closeNavigation, runningSessionIds,
 }: SessionSidebarProps) {
   const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
   const projectDropdownRef = useRef<HTMLDivElement>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [archivedOpen, setArchivedOpen] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!projectDropdownOpen) return;
@@ -215,8 +223,6 @@ export function SessionSidebar({
     document.addEventListener("pointerdown", close);
     return () => document.removeEventListener("pointerdown", close);
   }, [projectDropdownOpen]);
-
-  const sessionTree = buildSessionTree(sessions);
 
   return (
     <aside className="sidebar" aria-label="Projects and sessions">
@@ -263,6 +269,38 @@ export function SessionSidebar({
               New Chat
             </button>
             <button
+              type="button"
+              onClick={() => setSearchOpen((o) => !o)}
+              disabled={!selectedProject}
+              aria-label="Search sessions"
+              aria-expanded={searchOpen}
+              title={selectedProject ? "Search sessions" : "Select a project first"}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                background: searchOpen ? "var(--bg-selected)" : "var(--bg-hover)",
+                border: "1px solid var(--border)",
+                color: searchOpen ? "var(--accent)" : "var(--text-muted)",
+                cursor: selectedProject ? "pointer" : "not-allowed",
+                width: 32, height: 32, opacity: selectedProject ? 1 : 0.5,
+                borderRadius: 7, padding: 0, flexShrink: 0,
+                transition: "background 0.12s, color 0.12s, border-color 0.12s",
+              }}
+              onMouseEnter={(e) => {
+                if (!selectedProject) return;
+                e.currentTarget.style.background = "var(--bg-selected)";
+                e.currentTarget.style.color = "var(--accent)";
+                e.currentTarget.style.borderColor = "rgba(37,99,235,0.35)";
+              }}
+              onMouseLeave={(e) => {
+                if (!selectedProject || searchOpen) return;
+                e.currentTarget.style.background = "var(--bg-hover)";
+                e.currentTarget.style.color = "var(--text-muted)";
+                e.currentTarget.style.borderColor = "var(--border)";
+              }}
+            >
+              <Search size={15} aria-hidden="true" />
+            </button>
+            <button
               onClick={closeNavigation}
               className="icon-btn navigation-close"
               aria-label="Close navigation"
@@ -273,6 +311,39 @@ export function SessionSidebar({
           </div>
         </div>
       </div>
+
+      {/* Session search: expands from the header search button (like annovibe) */}
+      {searchOpen && (
+        <div style={{ flexShrink: 0, padding: "8px 10px 0" }}>
+          <label className="session-search" style={{ margin: 0 }}>
+            <Search size={14} aria-hidden="true" />
+            <span className="sr-only">Search sessions</span>
+            <input
+              type="search"
+              autoFocus
+              value={query}
+              placeholder="Search sessions…"
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => { if (event.key === "Escape") setSearchOpen(false); }}
+            />
+            <button
+              type="button"
+              onClick={() => { setQuery(""); setSearchOpen(false); }}
+              aria-label="Clear search"
+              style={{ display: "grid", placeItems: "center", width: 18, height: 18, padding: 0, border: 0, background: "transparent", color: "var(--text-dim)", cursor: "pointer" }}
+            >
+              <X size={13} />
+            </button>
+          </label>
+        </div>
+      )}
+
+      {/* Primary navigation: Roles / Graphs (independent routes) */}
+
+      <nav style={{ flexShrink: 0, padding: "8px 10px 2px", display: "flex", flexDirection: "column", gap: 2 }} aria-label="Workspace">
+        <NavLink href="/roles" label="Roles" icon={<Bot size={15} />} />
+        <NavLink href="/graphs" label="Graphs" icon={<Workflow size={15} />} />
+      </nav>
 
       {/* Project selector */}
       <div ref={projectDropdownRef} style={{ position: "relative", marginTop: 8, padding: "0 10px", display: "flex", alignItems: "stretch", gap: 4 }}>
@@ -317,29 +388,39 @@ export function SessionSidebar({
               <div style={{ padding: "10px 12px", color: "var(--text-dim)", fontSize: 11 }}>No projects yet</div>
             )}
             {projects.map((project) => (
-              <button
-                key={project.id}
-                type="button"
-                onClick={() => {
-                  switchProject(project.id);
-                  setProjectDropdownOpen(false);
-                }}
-                style={{
-                  display: "flex", alignItems: "center", gap: 8,
-                  width: "100%", padding: "8px 10px",
-                  background: project.id === selectedProject ? "var(--bg-selected)" : "transparent",
-                  border: "none", color: "var(--text)", cursor: "pointer",
-                  textAlign: "left" as const, fontSize: 12, fontWeight: project.id === selectedProject ? 600 : 400,
-                  transition: "background 0.1s",
-                }}
-                onMouseEnter={(e) => { if (project.id !== selectedProject) e.currentTarget.style.background = "var(--bg-hover)"; }}
-                onMouseLeave={(e) => { if (project.id !== selectedProject) e.currentTarget.style.background = "transparent"; }}
-              >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: "var(--accent)", opacity: project.id === selectedProject ? 1 : 0.6 }}>
-                  <path d="M1.5 5A1.5 1.5 0 0 1 3 3.5h3l1.2 1.5H13A1.5 1.5 0 0 1 14.5 6.5L13.6 11A1.5 1.5 0 0 1 12.1 12.5H3A1.5 1.5 0 0 1 1.5 11V5Z" />
-                </svg>
-                {project.name}
-              </button>
+              <div key={project.id} style={{ display: "flex", alignItems: "center" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    switchProject(project.id);
+                    setProjectDropdownOpen(false);
+                  }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    flex: 1, minWidth: 0, padding: "8px 4px 8px 10px",
+                    background: project.id === selectedProject ? "var(--bg-selected)" : "transparent",
+                    border: "none", color: "var(--text)", cursor: "pointer",
+                    textAlign: "left" as const, fontSize: 12, fontWeight: project.id === selectedProject ? 600 : 400,
+                    transition: "background 0.1s",
+                  }}
+                  onMouseEnter={(e) => { if (project.id !== selectedProject) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                  onMouseLeave={(e) => { if (project.id !== selectedProject) e.currentTarget.style.background = "transparent"; }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: "var(--accent)", opacity: project.id === selectedProject ? 1 : 0.6 }}>
+                    <path d="M1.5 5A1.5 1.5 0 0 1 3 3.5h3l1.2 1.5H13A1.5 1.5 0 0 1 14.5 6.5L13.6 11A1.5 1.5 0 0 1 12.1 12.5H3A1.5 1.5 0 0 1 1.5 11V5Z" />
+                  </svg>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{project.name}</span>
+                </button>
+                <button
+                  type="button"
+                  title={`${pinnedProjectIds.includes(project.id) ? "Unpin" : "Pin"} project ${project.name}`}
+                  aria-label={pinnedProjectIds.includes(project.id) ? "Unpin project" : "Pin project"}
+                  onClick={() => togglePinProject(project.id)}
+                  style={{ display: "grid", placeItems: "center", width: 26, height: 30, marginRight: 2, padding: 0, border: "none", borderRadius: 5, background: "transparent", cursor: "pointer", flexShrink: 0, color: pinnedProjectIds.includes(project.id) ? "#ca8a04" : "var(--text-dim)" }}
+                >
+                  <Star size={13} fill={pinnedProjectIds.includes(project.id) ? "currentColor" : "none"} aria-hidden="true" />
+                </button>
+              </div>
             ))}
             <button
               type="button"
@@ -362,67 +443,55 @@ export function SessionSidebar({
         )}
       </div>
 
-      {/* Primary navigation: Roles / Graphs (independent routes) */}
-      <nav style={{ flexShrink: 0, padding: "8px 10px 2px", display: "flex", flexDirection: "column", gap: 2 }} aria-label="Workspace">
-        <NavLink href="/roles" label="Roles" icon={<Bot size={15} />} />
-        <NavLink href="/graphs" label="Graphs" icon={<Workflow size={15} />} />
-      </nav>
-
-      {/* Sessions section label */}
-      {selectedProject && (
-        <div style={{ flexShrink: 0, padding: "10px 10px 6px" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-            <span id="sessions-heading" style={{ color: "var(--text-dim)", fontSize: 10, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase" }}>
-              Sessions
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* Session search + lifecycle tabs */}
+      {/* Pinned/current project groups with flat session lists (annovibe style) */}
       {selectedProject && (
         <section className="sidebar-section sidebar-sessions" aria-labelledby="sessions-heading" style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" }}>
-          <div style={{ flexShrink: 0, padding: "0 10px" }}>
-            <label className="session-search">
-              <Search size={14} aria-hidden="true" />
-              <span className="sr-only">Search sessions</span>
-              <input
-                type="search"
-                value={query}
-                placeholder="Search sessions"
-                onChange={(event) => setQuery(event.target.value)}
-              />
-            </label>
-            <div className="session-lifecycle-tabs" role="tablist" aria-label="Session lifecycle">
-              {(["active", "archived"] as const).map((value) => (
-                <button
-                  type="button"
-                  role="tab"
-                  key={value}
-                  aria-selected={view === value}
-                  onClick={() => setView(value)}
-                >
-                  {value === "active" ? "Active" : "Archived"}
-                </button>
-              ))}
+          <div style={{ flexShrink: 0, padding: "8px 10px 4px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <span id="sessions-heading" style={{ color: "var(--text-dim)", fontSize: 10, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase" }}>
+                Sessions
+              </span>
+              <button
+                type="button"
+                onClick={refreshGroups}
+                title="Refresh sessions"
+                aria-label="Refresh sessions"
+                className="sidebar-icon-btn"
+              >
+                <RefreshCw size={12} aria-hidden="true" />
+              </button>
             </div>
           </div>
 
-          <span className="sr-only" role="status" aria-live="polite">
-            {loading ? "Loading sessions" : `${sessions.length} sessions shown`}
-          </span>
-
-          <div style={{ flex: "1 1 auto", overflowY: "auto", minHeight: 0 }}>
-            {loading && sessions.length === 0 ? (
-              <div className="sidebar-empty">Loading...</div>
-            ) : sessions.length === 0 ? (
-              <div className="sidebar-empty" role="status">
-                {query.trim() ? `No ${view} sessions match "${query.trim()}"` : `No ${view} sessions`}
-              </div>
+          <div style={{ flex: "1 1 auto", overflowY: "auto", minHeight: 0, padding: "0 6px 8px" }}>
+            {groups.length === 0 ? (
+              <div className="sidebar-empty">Loading sessions…</div>
             ) : (
-              <ul className="session-list" aria-label={`${view === "active" ? "Active" : "Archived"} sessions`} style={{ padding: "0 0 8px" }}>
-                {renderSessionTree(sessionTree, selectedSession, switchSession, view, archiveSession, restoreSession, mutatingId, 0, runningSessionIds)}
-              </ul>
+              groups.map((group) => (
+                <ProjectGroup
+                  key={group.projectId}
+                  group={group}
+                  isCurrent={group.projectId === selectedProject}
+                  isPinned={pinnedProjectIds.includes(group.projectId)}
+                  isCollapsed={collapsed.has(group.projectId)}
+                  onToggleCollapsed={() => toggleCollapsed(group.projectId)}
+                  onTogglePin={() => togglePinProject(group.projectId)}
+                  query={query.trim()}
+                  selectedSession={selectedSession}
+                  switchSession={switchSession}
+                  archiveSession={archiveSession}
+                  restoreSession={restoreSession}
+                  mutatingId={mutatingId}
+                  archived={archived[group.projectId] ?? []}
+                  archivedOpen={Boolean(archivedOpen[group.projectId])}
+                  onToggleArchived={() => {
+                    const next = !archivedOpen[group.projectId];
+                    setArchivedOpen((cur) => ({ ...cur, [group.projectId]: next }));
+                    if (next) openArchived(group.projectId);
+                  }}
+                  runningSessionIds={runningSessionIds}
+                />
+              ))
             )}
           </div>
         </section>
@@ -461,6 +530,119 @@ export function SessionSidebar({
         </button>
       </div>
     </aside>
+  );
+}
+
+function ProjectGroup({
+  group, isCurrent, isPinned, isCollapsed, onToggleCollapsed, onTogglePin,
+  query, selectedSession, switchSession, archiveSession, restoreSession, mutatingId,
+  archived, archivedOpen, onToggleArchived, runningSessionIds,
+}: {
+  group: SidebarProjectGroup;
+  isCurrent: boolean;
+  isPinned: boolean;
+  isCollapsed: boolean;
+  onToggleCollapsed: () => void;
+  onTogglePin: () => void;
+  query: string;
+  selectedSession: string | null;
+  switchSession: (id: string) => void;
+  archiveSession: (s: Session) => void;
+  restoreSession: (s: Session) => void;
+  mutatingId: string | null;
+  archived: Session[];
+  archivedOpen: boolean;
+  onToggleArchived: () => void;
+  runningSessionIds?: Set<string>;
+}) {
+  const matching = query
+    ? group.sessions.filter((s) => s.title.toLowerCase().includes(query))
+    : group.sessions;
+  return (
+    <div className="sidebar-project-group">
+      <ProjectGroupHeader
+        group={group}
+        isCurrent={isCurrent}
+        isPinned={isPinned}
+        isCollapsed={isCollapsed}
+        onToggleCollapsed={onToggleCollapsed}
+        onTogglePin={onTogglePin}
+      />
+      {!isCollapsed && (
+        <div>
+          {group.error && <div className="sidebar-empty" style={{ color: "var(--danger)" }}>{group.error}</div>}
+          {group.loading && matching.length === 0 ? (
+            <div className="sidebar-empty">Loading…</div>
+          ) : matching.length === 0 ? (
+            <div className="sidebar-empty" role="status">
+              {query ? `No sessions match "${query}"` : "No sessions yet."}
+            </div>
+          ) : (
+            <ul className="session-list" aria-label={`Sessions in ${group.projectName}`} style={{ padding: "0 0 2px" }}>
+              {renderSessionTree(buildSessionTree(matching), selectedSession, switchSession, "active", archiveSession, restoreSession, mutatingId, 0, runningSessionIds)}
+            </ul>
+          )}
+          <button type="button" className="sidebar-archived-toggle" aria-expanded={archivedOpen} onClick={onToggleArchived}>
+            <Archive size={12} aria-hidden="true" />
+            {archivedOpen ? "Hide archived sessions" : "Show archived sessions"}
+          </button>
+          {archivedOpen && archived.length > 0 && (
+            <ul className="session-list" aria-label={`Archived sessions in ${group.projectName}`} style={{ padding: "0 0 6px" }}>
+              {renderSessionTree(buildSessionTree(archived), selectedSession, switchSession, "archived", archiveSession, restoreSession, mutatingId, 0, runningSessionIds)}
+            </ul>
+          )}
+          {archivedOpen && archived.length === 0 && (
+            <div className="sidebar-empty">No archived sessions.</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProjectGroupHeader({
+  group, isCurrent, isPinned, isCollapsed, onToggleCollapsed, onTogglePin,
+}: {
+  group: SidebarProjectGroup;
+  isCurrent: boolean;
+  isPinned: boolean;
+  isCollapsed: boolean;
+  onToggleCollapsed: () => void;
+  onTogglePin: () => void;
+}) {
+  const count = group.sessions.length;
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onToggleCollapsed}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggleCollapsed(); } }}
+      title={group.projectName}
+      style={{
+        display: "flex", alignItems: "center", gap: 6, height: 30, padding: "0 8px", marginTop: 2,
+        background: isCurrent ? "var(--bg-selected)" : "transparent",
+        borderRadius: 6, cursor: "pointer", color: "var(--text)",
+        transition: "background 0.12s",
+      }}
+    >
+      <ChevronRight size={13} aria-hidden="true" style={{ flexShrink: 0, color: "var(--text-dim)", transform: isCollapsed ? "none" : "rotate(90deg)", transition: "transform 0.15s" }} />
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: isCurrent ? "var(--accent)" : "var(--text-dim)" }}>
+        <path d="M1.5 5A1.5 1.5 0 0 1 3 3.5h3l1.2 1.5H13A1.5 1.5 0 0 1 14.5 6.5L13.6 11A1.5 1.5 0 0 1 12.1 12.5H3A1.5 1.5 0 0 1 1.5 11V5Z" />
+      </svg>
+      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: isCurrent ? 650 : 550 }}>
+        {group.projectName}
+      </span>
+      {count > 0 && <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>{count} {count === 1 ? "chat" : "chats"}</span>}
+      <button
+        type="button"
+        title={`${isPinned ? "Unpin" : "Pin"} project ${group.projectName}`}
+        aria-label={isPinned ? "Unpin project" : "Pin project"}
+        onClick={(e) => { e.stopPropagation(); onTogglePin(); }}
+        style={{ display: "grid", placeItems: "center", width: 22, height: 22, padding: 0, border: "none", borderRadius: 5, background: "transparent", cursor: "pointer", flexShrink: 0, color: isPinned ? "#ca8a04" : "var(--text-dim)", opacity: isPinned ? 1 : 0.45 }}
+      >
+        <Star size={13} fill={isPinned ? "currentColor" : "none"} aria-hidden="true" />
+      </button>
+    </div>
   );
 }
 

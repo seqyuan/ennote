@@ -17,27 +17,27 @@ import (
 func setupDelegationGroupAPI(t *testing.T) (*Server, http.Handler, *store.DelegationRepo, string, string) {
 	t.Helper()
 	server, handler := setupServer(t, nil)
-	server.DelegationApprovals = &store.DelegationApprovalRepo{DB: server.DB}
-	delegations := &store.DelegationRepo{DB: server.DB}
-	runs := &store.RunRepo{DB: server.DB}
 	ctx := context.Background()
 
-	_, err := server.DB.Exec(`UPDATE settings SET value='1' WHERE key='hosted_commit_format_version'`)
-	require.NoError(t, err)
 	project, _, err := server.Projects.CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: "api-group", HostPath: t.TempDir()})
 	require.NoError(t, err)
 	session, err := server.Sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID, Title: "group"})
 	require.NoError(t, err)
+	sessionDB, err := server.SessionStores.OpenSession(ctx, session.ID)
+	require.NoError(t, err)
+	server.DelegationApprovals = &store.DelegationApprovalRepo{DB: sessionDB}
+	delegations := &store.DelegationRepo{DB: sessionDB, Policies: apiPolicyStore(t)}
+	runs := &store.RunRepo{DB: sessionDB}
 	submission, err := runs.SubmitTurn(ctx, domain.SubmitTurnInput{SessionID: session.ID, ClientRequestID: "api-group-parent", Text: "run"})
 	require.NoError(t, err)
 	_, err = runs.Claim(ctx, submission.Run.ID)
 	require.NoError(t, err)
 
-	second := apiExplorerItem()
+	second := apiExplorerItem(t, server.DB)
 	second.Name = "fail"
 	group, items, children, err := delegations.CreateGroupWithChildren(ctx, store.CreateDelegationGroupInput{
 		ParentRunID: submission.Run.ID, ParentToolCallID: "call-1", Strategy: domain.DelegationStrategyParallel,
-		Items: []store.CreateDelegationItemInput{apiExplorerItem(), second},
+		Items: []store.CreateDelegationItemInput{apiExplorerItem(t, server.DB), second},
 	}, session.ID)
 	require.NoError(t, err)
 	require.Len(t, children, 2)

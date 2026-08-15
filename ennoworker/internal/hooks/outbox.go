@@ -22,24 +22,24 @@ const (
 	OutboxStatusDelivering = "delivering"
 	OutboxStatusDelivered  = "delivered"
 	OutboxStatusDead       = "dead"
-	maxDeliveryAttempts     = 5
-	outboxPollInterval      = 5 * time.Second
+	maxDeliveryAttempts    = 5
+	outboxPollInterval     = 5 * time.Second
 )
 
 // OutboxEntry is a single pending observer hook delivery.
 type OutboxEntry struct {
-	DeliveryID   string
-	EventID      int64
-	RunID        string
-	SessionID    string
-	EventType    string
-	PayloadJSON  string
-	WorkspaceID  string
+	DeliveryID    string
+	EventID       int64
+	RunID         string
+	SessionID     string
+	EventType     string
+	PayloadJSON   string
+	WorkspaceID   string
 	WorkspaceRoot string
-	Status       string
-	Attempts     int
+	Status        string
+	Attempts      int
 	NextAttemptAt *time.Time
-	CreatedAt    time.Time
+	CreatedAt     time.Time
 }
 
 // OutboxWriter is the interface for inserting outbox rows in a transaction.

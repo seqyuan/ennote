@@ -53,6 +53,7 @@ async function selectProject(page: Page) {
 test("searches active Sessions and supports archive and restore lifecycle actions", async ({ page }) => {
   await mockPhase2(page);
   await selectProject(page);
+  await page.getByRole("button", { name: "Search sessions", exact: true }).click();
   const search = page.getByRole("searchbox", { name: "Search sessions" });
   await search.fill("marker");
   await expect(page.getByRole("button", { name: "Marker review", exact: true })).toBeVisible();
@@ -63,14 +64,15 @@ test("searches active Sessions and supports archive and restore lifecycle action
   await page.getByRole("button", { name: "Actions for Marker review" }).click();
   await page.getByRole("menuitem", { name: "Archive session" }).click();
   await expect(page.getByRole("button", { name: "Marker review", exact: true })).toHaveCount(0);
-  await page.getByRole("tab", { name: "Archived" }).click();
+  await page.getByRole("button", { name: "Show archived sessions" }).click();
   await expect(page.getByRole("button", { name: "Marker review", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Prior integration", exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Actions for Marker review" }).click();
   await page.getByRole("menuitem", { name: "Restore session" }).click();
-  await expect(page.getByRole("button", { name: "Marker review", exact: true })).toHaveCount(0);
   await expect(page.getByText("Restored Marker review", { exact: true })).toBeAttached();
+  await expect(page.getByLabel("Archived sessions in Cell atlas").getByRole("button", { name: "Marker review", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Marker review", exact: true })).toBeVisible();
 });
 
 test("Settings tabs use arrow navigation, retain Chat, and restore focus", async ({ page }) => {
@@ -88,12 +90,12 @@ test("Settings tabs use arrow navigation, retain Chat, and restore focus", async
   await expect(page.getByRole("button", { name: "Add provider" })).toBeFocused();
   await page.getByRole("button", { name: "Add provider" }).press("Tab");
   await expect(closeSettings).toBeFocused();
-  const providers = page.getByRole("tab", { name: "Providers" });
-  await providers.focus();
-  await expect(providers).toHaveAttribute("aria-selected", "true");
-  await providers.press("ArrowRight");
-  await expect(page.getByRole("tab", { name: "Models" })).toHaveAttribute("aria-selected", "true");
-  await page.getByRole("tab", { name: "Models" }).press("End");
+  const models = page.getByRole("tab", { name: "Models" });
+  await models.focus();
+  await expect(models).toHaveAttribute("aria-selected", "true");
+  await models.press("ArrowRight");
+  await expect(page.getByRole("tab", { name: "Policies" })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("tab", { name: "Policies" }).press("End");
   await expect(page.getByRole("tab", { name: "Skills" })).toHaveAttribute("aria-selected", "true");
   await page.getByRole("tab", { name: "Context & session" }).click();
   await expect(page.getByLabel("Default model")).toBeVisible();

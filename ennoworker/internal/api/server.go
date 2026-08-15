@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -22,7 +23,10 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/artifacts"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
+	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
+	"github.com/seqyuan/ennote/ennoworker/internal/graphbuilder"
 	"github.com/seqyuan/ennote/ennoworker/internal/prompts"
+	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/seqyuan/ennote/ennoworker/internal/workspace"
@@ -31,6 +35,11 @@ import (
 type RunController interface {
 	Enqueue(context.Context, string) error
 	Cancel(context.Context, string) error
+}
+
+type ProjectionController interface {
+	UpsertProject(context.Context, *domain.Project, *domain.ProjectWorkspace) error
+	DrainSession(context.Context, string, int) (int, error)
 }
 
 func (s *Server) enqueueChildRuns(ctx context.Context, children []*domain.AgentRun) error {
@@ -61,12 +70,15 @@ func (s *Server) enqueueChildRuns(ctx context.Context, children []*domain.AgentR
 
 type Server struct {
 	DB                  *sql.DB
+	CatalogDB           *sql.DB
+	UsageDB             *sql.DB
+	SessionStores       *sessionstore.Manager
 	Token               string
 	Sandbox             string
 	Projects            *store.ProjectRepo
 	Providers           *store.ProviderRepo
 	Models              *store.ModelRepo
-	Roles               *store.RoleRepo
+	RoleDiscovery       *store.RoleDiscovery
 	Doctor              ProviderDiagnoser
 	Policies            *store.PolicyRepo
 	Artifacts           *artifacts.Service
@@ -84,37 +96,66 @@ type Server struct {
 	Events              *store.EventRepo
 	Hub                 *events.Hub
 	Control             RunController
+	Projection          ProjectionController
 	InstanceID          string
 	PromptGate          PromptHookGate
 	Prompts             *prompts.Service
 	MCP                 *MCPServer
-	AgentFlows          *AgentFlowServer
 	Skills              *skillsmgmt.Service
 	SkillRoots          *store.SkillRootRepo
 	Trust               *workspace.TrustStore
+	GlobalSources       *globalsource.Store
+	GraphBuilder        *graphbuilder.Service
+	// GraphRuns starts file-native Graph Runs (immutable revision + frozen
+	// execution plan in the owning Session database).
+	GraphRuns GraphRunStarter
+	// GraphRunResume restarts the orchestrator for a resumed Graph Run on the
+	// Worker lifetime context.
+	GraphRunResume func(ctx context.Context, db *sql.DB, sessionID, runID string) error
 }
 
 func (s *Server) Handler() http.Handler {
+	next := s.routes()
+	if s.SessionStores != nil {
+		next = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			scoped, err := s.scopeForRequest(r)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) || errors.Is(err, os.ErrNotExist) ||
+					errors.Is(err, store.ErrSessionNotFound) {
+					writeError(w, r, http.StatusNotFound, "session_resource_not_found", "Session resource not found", false)
+				} else {
+					writeInternal(w, r, err)
+				}
+				return
+			}
+			scoped.routes().ServeHTTP(w, r)
+		})
+	}
+	return s.middleware(next)
+}
+
+func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health/live", s.live)
 	mux.HandleFunc("GET /v1/health/ready", s.ready)
 	mux.HandleFunc("GET /v1/runtime", s.runtimeInfo)
 	mux.HandleFunc("GET /v1/provider-profiles", s.listProviderProfiles)
 	mux.HandleFunc("POST /v1/provider-profiles", s.createProviderProfile)
+	mux.HandleFunc("POST /v1/provider-profiles/discover-models", s.discoverProviderModels)
 	mux.HandleFunc("POST /v1/provider-profiles/{providerID}/test", s.testProviderProfile)
+	mux.HandleFunc("DELETE /v1/provider-profiles/{providerID}", s.deleteProviderProfile)
 	mux.HandleFunc("GET /v1/model-profiles", s.listModelProfiles)
 	mux.HandleFunc("POST /v1/model-profiles", s.createModelProfile)
 	mux.HandleFunc("PUT /v1/model-profiles/{modelID}/default", s.setDefaultModelProfile)
+	mux.HandleFunc("DELETE /v1/model-profiles/{modelID}", s.deleteModelProfile)
 	mux.HandleFunc("GET /v1/policy-profiles", s.listPolicyProfiles)
-	mux.HandleFunc("GET /v1/roles", s.listRoles)
-	mux.HandleFunc("POST /v1/roles", s.createRole)
-	mux.HandleFunc("GET /v1/roles/{roleID}", s.getRole)
-	mux.HandleFunc("PATCH /v1/roles/{roleID}/draft", s.updateRoleDraft)
-	mux.HandleFunc("POST /v1/roles/{roleID}/validate", s.validateRole)
-	mux.HandleFunc("POST /v1/roles/{roleID}/publish", s.publishRole)
-	mux.HandleFunc("POST /v1/roles/{roleID}/archive", s.archiveRole)
-	mux.HandleFunc("GET /v1/roles/{roleID}/versions", s.listRoleVersions)
-	mux.HandleFunc("GET /v1/roles/{roleID}/versions/{versionID}", s.getRoleVersion)
+	mux.HandleFunc("GET /v1/global-roles", s.listGlobalRoles)
+	mux.HandleFunc("POST /v1/global-roles", s.createGlobalRole)
+	mux.HandleFunc("GET /v1/global-roles/{roleID}", s.getGlobalRole)
+	mux.HandleFunc("PATCH /v1/global-roles/{roleID}", s.updateGlobalRole)
+	mux.HandleFunc("POST /v1/global-roles/{roleID}/publish", s.publishGlobalRole)
+	mux.HandleFunc("GET /v1/global-roles/{roleID}/versions", s.listGlobalRoleRevisions)
+	mux.HandleFunc("GET /v1/global-roles/{roleID}/resolved", s.getResolvedGlobalRole)
 	mux.HandleFunc("POST /v1/policy-profiles", s.createPolicyProfile)
 	mux.HandleFunc("PUT /v1/policy-profiles/{policyID}/default", s.setDefaultPolicyProfile)
 	mux.HandleFunc("DELETE /v1/policy-profiles/{policyID}", s.deactivatePolicyProfile)
@@ -166,33 +207,24 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/sessions/{sessionID}/standing-approvals/{ruleID}/revoke", s.revokeStandingApproval)
 	mux.HandleFunc("GET /v1/runs/{runID}/events", s.streamEvents)
 
-	// Agent Flows (item 7).
-	mux.HandleFunc("GET /v1/agent-flows", s.listAgentFlows)
-	mux.HandleFunc("POST /v1/agent-flows", s.createAgentFlow)
-	mux.HandleFunc("GET /v1/agent-flows/{profileID}", s.getAgentFlow)
-	mux.HandleFunc("PATCH /v1/agent-flows/{profileID}/draft", s.updateAgentFlowDraft)
-	mux.HandleFunc("POST /v1/agent-flows/{profileID}/validate", s.validateAgentFlowDraft)
-	mux.HandleFunc("POST /v1/agent-flows/{profileID}/publish", s.publishAgentFlow)
-	mux.HandleFunc("POST /v1/agent-flows/{profileID}/archive", s.archiveAgentFlow)
-	mux.HandleFunc("POST /v1/agent-flows/check-dependencies", s.checkAgentFlowDependencies)
-	mux.HandleFunc("POST /v1/agent-flows/import", s.importAgentFlow)
-	mux.HandleFunc("GET /v1/agent-flows/{profileID}/export", s.exportAgentFlow)
-	mux.HandleFunc("GET /v1/agent-flows/{profileID}/versions", s.listAgentFlowVersions)
-	mux.HandleFunc("GET /v1/agent-flows/{profileID}/versions/{versionID}", s.getAgentFlowVersion)
-	mux.HandleFunc("GET /v1/projects/{projectID}/agent-flows/candidates", s.listAgentFlowCandidates)
-	mux.HandleFunc("POST /v1/projects/{projectID}/agent-flows/bindings/from-candidate", s.bindAgentFlowCandidate)
-	mux.HandleFunc("GET /v1/projects/{projectID}/agent-flows/bindings", s.listAgentFlowBindings)
-	mux.HandleFunc("POST /v1/projects/{projectID}/agent-flows/bindings", s.createAgentFlowBinding)
-	mux.HandleFunc("PATCH /v1/projects/{projectID}/agent-flows/bindings/{bindingID}", s.updateAgentFlowBinding)
-	mux.HandleFunc("DELETE /v1/projects/{projectID}/agent-flows/bindings/{bindingID}", s.deleteAgentFlowBinding)
-	mux.HandleFunc("POST /v1/projects/{projectID}/agent-flows/bindings/{bindingID}/run", s.runAgentFlow)
-	mux.HandleFunc("POST /v1/projects/{projectID}/agent-flows/invoke", s.invokeAgentFlow)
-	mux.HandleFunc("GET /v1/projects/{projectID}/agent-flows/runs", s.listAgentFlowRuns)
-	mux.HandleFunc("GET /v1/projects/{projectID}/agent-flows/runs/{runID}", s.getAgentFlowRun)
-	mux.HandleFunc("POST /v1/projects/{projectID}/agent-flows/runs/{runID}/cancel", s.cancelAgentFlowRun)
-	mux.HandleFunc("POST /v1/projects/{projectID}/agent-flows/runs/{runID}/resume", s.resumeAgentFlowRun)
-	mux.HandleFunc("GET /v1/projects/{projectID}/agent-flows/check-approvals", s.listAgentFlowCheckApprovals)
-	mux.HandleFunc("POST /v1/projects/{projectID}/agent-flows/check-approvals/{runID}/{taskIndex}/decide", s.decideAgentFlowCheckApproval)
+	// Worker-global, file-authored Graph catalog.
+	mux.HandleFunc("GET /v1/graphs", s.listGlobalGraphs)
+	mux.HandleFunc("POST /v1/graphs", s.createGlobalGraph)
+	mux.HandleFunc("GET /v1/graphs/{graphID}", s.getGlobalGraph)
+	mux.HandleFunc("PATCH /v1/graphs/{graphID}", s.updateGlobalGraph)
+	mux.HandleFunc("POST /v1/graphs/{graphID}/publish", s.publishGlobalGraph)
+	mux.HandleFunc("GET /v1/graphs/{graphID}/versions", s.listGlobalGraphVersions)
+	mux.HandleFunc("POST /v1/graphs/{graphID}/runs", s.runGlobalGraph)
+	// V2 session-scoped Graph Run activity surface (list/detail/cancel/resume).
+	mux.HandleFunc("GET /v1/sessions/{sessionID}/graph-runs", s.listSessionGraphRuns)
+	mux.HandleFunc("GET /v1/sessions/{sessionID}/graph-runs/{runID}", s.getSessionGraphRun)
+	mux.HandleFunc("POST /v1/sessions/{sessionID}/graph-runs/{runID}/cancel", s.cancelSessionGraphRun)
+	mux.HandleFunc("POST /v1/sessions/{sessionID}/graph-runs/{runID}/resume", s.resumeSessionGraphRun)
+	if s.GraphBuilder != nil {
+		mux.HandleFunc("GET /v1/graphs/{graphID}/builder", s.getGraphBuilderThread)
+		mux.HandleFunc("POST /v1/graphs/{graphID}/builder/messages", s.sendGraphBuilderMessage)
+		mux.HandleFunc("POST /v1/graphs/{graphID}/builder/proposals/{proposalID}/apply", s.applyGraphBuilderProposal)
+	}
 
 	// Prompt templates.
 	mux.HandleFunc("GET /v1/projects/{projectID}/prompt-templates", s.listPromptTemplates)
@@ -204,22 +236,24 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/prompt-templates/{name}", s.deletePromptTemplate)
 
 	// MCP server profiles and bindings.
-	mux.HandleFunc("GET /v1/mcp/server-profiles", s.listMCPServerProfiles)
-	mux.HandleFunc("POST /v1/mcp/server-profiles", s.createMCPServerProfile)
-	mux.HandleFunc("GET /v1/mcp/server-profiles/{profileID}/versions", s.listMCPProfileVersions)
-	mux.HandleFunc("POST /v1/mcp/server-profiles/{profileID}/versions", s.createMCPServerVersion)
-	mux.HandleFunc("DELETE /v1/mcp/server-profiles/{profileID}", s.deleteMCPServerProfile)
-	mux.HandleFunc("GET /v1/mcp/bundled-catalog", s.listMCPBundledCatalog)
-	mux.HandleFunc("GET /v1/projects/{projectID}/mcp/bindings", s.listMCPBindings)
-	mux.HandleFunc("POST /v1/projects/{projectID}/mcp/bindings", s.createMCPBinding)
-	mux.HandleFunc("POST /v1/projects/{projectID}/mcp/bindings/from-candidate", s.createMCPBindingFromCandidate)
-	mux.HandleFunc("GET /v1/projects/{projectID}/mcp/candidates", s.listMCPCandidates)
-	mux.HandleFunc("POST /v1/projects/{projectID}/mcp/discovery/refresh", s.refreshMCPDiscovery)
-	mux.HandleFunc("PATCH /v1/projects/{projectID}/mcp/bindings/{bindingID}", s.updateMCPBinding)
-	mux.HandleFunc("DELETE /v1/projects/{projectID}/mcp/bindings/{bindingID}", s.deleteMCPBinding)
-	mux.HandleFunc("POST /v1/projects/{projectID}/mcp/bindings/{bindingID}/test", s.testMCPBinding)
-	mux.HandleFunc("GET /v1/projects/{projectID}/mcp/bindings/{bindingID}/catalog", s.catalogMCPBinding)
-	mux.HandleFunc("POST /v1/projects/{projectID}/mcp/bindings/{bindingID}/catalog/refresh", s.refreshMCPCatalog)
+	if s.MCP != nil {
+		mux.HandleFunc("GET /v1/mcp/server-profiles", s.listMCPServerProfiles)
+		mux.HandleFunc("POST /v1/mcp/server-profiles", s.createMCPServerProfile)
+		mux.HandleFunc("GET /v1/mcp/server-profiles/{profileID}/versions", s.listMCPProfileVersions)
+		mux.HandleFunc("POST /v1/mcp/server-profiles/{profileID}/versions", s.createMCPServerVersion)
+		mux.HandleFunc("DELETE /v1/mcp/server-profiles/{profileID}", s.deleteMCPServerProfile)
+		mux.HandleFunc("GET /v1/mcp/bundled-catalog", s.listMCPBundledCatalog)
+		mux.HandleFunc("GET /v1/projects/{projectID}/mcp/bindings", s.listMCPBindings)
+		mux.HandleFunc("POST /v1/projects/{projectID}/mcp/bindings", s.createMCPBinding)
+		mux.HandleFunc("POST /v1/projects/{projectID}/mcp/bindings/from-candidate", s.createMCPBindingFromCandidate)
+		mux.HandleFunc("GET /v1/projects/{projectID}/mcp/candidates", s.listMCPCandidates)
+		mux.HandleFunc("POST /v1/projects/{projectID}/mcp/discovery/refresh", s.refreshMCPDiscovery)
+		mux.HandleFunc("PATCH /v1/projects/{projectID}/mcp/bindings/{bindingID}", s.updateMCPBinding)
+		mux.HandleFunc("DELETE /v1/projects/{projectID}/mcp/bindings/{bindingID}", s.deleteMCPBinding)
+		mux.HandleFunc("POST /v1/projects/{projectID}/mcp/bindings/{bindingID}/test", s.testMCPBinding)
+		mux.HandleFunc("GET /v1/projects/{projectID}/mcp/bindings/{bindingID}/catalog", s.catalogMCPBinding)
+		mux.HandleFunc("POST /v1/projects/{projectID}/mcp/bindings/{bindingID}/catalog/refresh", s.refreshMCPCatalog)
+	}
 
 	mux.HandleFunc("GET /v1/skills", s.listSkills)
 	mux.HandleFunc("PATCH /v1/skills/disabled/{relPath...}", s.toggleSkillDisabled)
@@ -228,12 +262,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/skills/check", s.checkSkillUpdates)
 	mux.HandleFunc("POST /v1/skills/update", s.updateSkill)
 	mux.HandleFunc("POST /v1/skills/remove/{relPath...}", s.removeSkill)
-	mux.HandleFunc("GET /v1/skills/roots", s.listSkillRoots)
-	mux.HandleFunc("POST /v1/skills/roots", s.createSkillRoot)
-	mux.HandleFunc("PATCH /v1/skills/roots/{rootID}", s.updateSkillRoot)
-	mux.HandleFunc("DELETE /v1/skills/roots/{rootID}", s.deleteSkillRoot)
+	if s.SkillRoots != nil {
+		mux.HandleFunc("GET /v1/skills/roots", s.listSkillRoots)
+		mux.HandleFunc("POST /v1/skills/roots", s.createSkillRoot)
+		mux.HandleFunc("PATCH /v1/skills/roots/{rootID}", s.updateSkillRoot)
+		mux.HandleFunc("DELETE /v1/skills/roots/{rootID}", s.deleteSkillRoot)
+	}
 
-	return s.middleware(mux)
+	return mux
 }
 
 func (s *Server) middleware(next http.Handler) http.Handler {
@@ -243,6 +279,9 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 			requestID = newID()
 		}
 		w.Header().Set("X-Request-ID", requestID)
+		if s.InstanceID != "" {
+			w.Header().Set("X-Ennote-Worker-Instance", s.InstanceID)
+		}
 		r = r.WithContext(context.WithValue(r.Context(), requestIDKey{}, requestID))
 		if !strings.HasPrefix(r.URL.Path, "/v1/health/") {
 			provided := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -260,7 +299,12 @@ func (s *Server) live(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
-	if s.DB == nil || s.DB.PingContext(r.Context()) != nil {
+	if s.SessionStores != nil {
+		if s.CatalogDB == nil || s.UsageDB == nil || s.CatalogDB.PingContext(r.Context()) != nil || s.UsageDB.PingContext(r.Context()) != nil {
+			writeError(w, r, http.StatusServiceUnavailable, "projection_unavailable", "worker projections are unavailable", true)
+			return
+		}
+	} else if s.DB == nil || s.DB.PingContext(r.Context()) != nil {
 		writeError(w, r, http.StatusServiceUnavailable, "database_unavailable", "worker database is unavailable", true)
 		return
 	}
@@ -274,35 +318,66 @@ func (s *Server) runtimeInfo(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, map[string]any{"instanceId": s.InstanceID})
 }
 
+func (s *Server) drainSessionProjection(ctx context.Context, sessionID string) {
+	if s.Projection == nil || sessionID == "" {
+		return
+	}
+	if _, err := s.Projection.DrainSession(ctx, sessionID, 100); err != nil {
+		slog.Warn("Session projection failed", "session_id", sessionID, "error", err)
+	}
+}
+
 func (s *Server) listProviderProfiles(w http.ResponseWriter, r *http.Request) {
 	profiles, err := s.Providers.List(r.Context())
 	if err != nil {
 		writeInternal(w, r, err)
 		return
 	}
+	for index := range profiles {
+		profiles[index].CredentialConfigured = profiles[index].CredentialConfigured || profiles[index].APIKey != ""
+		profiles[index].APIKey = ""
+	}
 	writeData(w, http.StatusOK, profiles)
 }
 
 func (s *Server) createProviderProfile(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Name          string              `json:"name"`
-		ProviderType  domain.ProviderType `json:"providerType"`
-		BaseURL       string              `json:"baseUrl"`
-		CredentialRef string              `json:"credentialRef"`
-		Proxy         string              `json:"proxy"`
+		Name         string              `json:"name"`
+		ProviderType domain.ProviderType `json:"providerType"`
+		BaseURL      string              `json:"baseUrl"`
+		APIKey       string              `json:"apiKey"`
+		Proxy        string              `json:"proxy"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
 	}
 	profile, err := s.Providers.Create(r.Context(), store.CreateProviderInput{
 		Name: input.Name, ProviderType: input.ProviderType, BaseURL: input.BaseURL,
-		CredentialRef: input.CredentialRef, Proxy: input.Proxy,
+		APIKey: input.APIKey, Proxy: input.Proxy,
 	})
 	if err != nil {
 		writeError(w, r, http.StatusBadRequest, "invalid_provider_profile", err.Error(), false)
 		return
 	}
+	profile.CredentialConfigured = profile.CredentialConfigured || profile.APIKey != ""
+	profile.APIKey = ""
 	writeData(w, http.StatusCreated, profile)
+}
+
+func (s *Server) deleteProviderProfile(w http.ResponseWriter, r *http.Request) {
+	if err := s.Providers.Delete(r.Context(), r.PathValue("providerID")); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_provider_profile", err.Error(), false)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) deleteModelProfile(w http.ResponseWriter, r *http.Request) {
+	if err := s.Models.Delete(r.Context(), r.PathValue("modelID")); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_model_profile", err.Error(), false)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) listModelProfiles(w http.ResponseWriter, r *http.Request) {
@@ -478,6 +553,11 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_workspace", err.Error(), false)
 		return
 	}
+	if s.Projection != nil {
+		if err := s.Projection.UpsertProject(r.Context(), project, workspace); err != nil {
+			slog.Warn("project projection failed", "project_id", project.ID, "error", err)
+		}
+	}
 	writeData(w, http.StatusCreated, map[string]any{"project": project, "workspace": workspace})
 }
 
@@ -516,6 +596,11 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, r, http.StatusBadRequest, "invalid_session", err.Error(), false)
 		return
+	}
+	if s.Projection != nil {
+		if _, err := s.Projection.DrainSession(r.Context(), session.ID, 100); err != nil {
+			slog.Warn("Session projection failed", "session_id", session.ID, "error", err)
+		}
 	}
 	writeData(w, http.StatusCreated, session)
 }
@@ -558,6 +643,7 @@ func (s *Server) updateSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_session", err.Error(), false)
 		return
 	}
+	s.drainSessionProjection(r.Context(), session.ID)
 	writeData(w, http.StatusOK, session)
 }
 
@@ -567,6 +653,7 @@ func (s *Server) archiveSession(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, r, err)
 		return
 	}
+	s.drainSessionProjection(r.Context(), session.ID)
 	writeData(w, http.StatusOK, session)
 }
 
@@ -576,6 +663,7 @@ func (s *Server) restoreSession(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, r, err)
 		return
 	}
+	s.drainSessionProjection(r.Context(), session.ID)
 	writeData(w, http.StatusOK, session)
 }
 
@@ -1065,6 +1153,10 @@ func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.writeStoreError(w, r, err)
 		return
+	}
+	// Drop any still-pending steer/follow-up inputs for the cancelled run.
+	if s.Queue != nil {
+		_, _ = s.Queue.CancelPending(r.Context(), runID)
 	}
 	run, err := s.Runs.Get(r.Context(), runID)
 	if err != nil {

@@ -14,10 +14,8 @@ func TestServiceStoresAndLoadsManagedImage(t *testing.T) {
 	db, err := store.OpenMemory()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
+	require.NoError(t, store.MigrateFixtureSchema(db))
 	now := "2026-07-27T00:00:00Z"
-	_, err = db.Exec(`INSERT INTO projects(id,name,created_at,updated_at) VALUES('p','project',?,?)`, now, now)
-	require.NoError(t, err)
 	_, err = db.Exec(`INSERT INTO sessions(id,project_id,created_at,updated_at) VALUES('s','p',?,?)`, now, now)
 	require.NoError(t, err)
 	png, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
@@ -36,10 +34,8 @@ func TestServiceRejectsUnsupportedOrCrossProjectImage(t *testing.T) {
 	db, err := store.OpenMemory()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
+	require.NoError(t, store.MigrateFixtureSchema(db))
 	now := "2026-07-27T00:00:00Z"
-	_, err = db.Exec(`INSERT INTO projects(id,name,created_at,updated_at) VALUES('p','project',?,?)`, now, now)
-	require.NoError(t, err)
 	_, err = db.Exec(`INSERT INTO sessions(id,project_id,created_at,updated_at) VALUES('s','p',?,?)`, now, now)
 	require.NoError(t, err)
 	service := &Service{DB: db, Root: t.TempDir()}

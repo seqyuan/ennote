@@ -30,19 +30,8 @@ func (w *persistHelperEvents) Append(ctx context.Context, runID string, pending 
 }
 
 func TestReminderIsNotPersistedToMessages(t *testing.T) {
-	db := store.SetupDB(t)
+	db, _, session := newSessionDB(t)
 	ctx := context.Background()
-
-	pRepo := &store.ProjectRepo{DB: db}
-	project, _, err := pRepo.CreateWithWorkspace(ctx, domain.CreateProjectInput{
-		Name: "rp", HostPath: t.TempDir(),
-	})
-	require.NoError(t, err)
-
-	sRepo := &store.SessionRepo{DB: db}
-	session, err := sRepo.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID, Title: "rp-session"})
-	require.NoError(t, err)
-
 	mRepo := &store.MessageRepo{DB: db}
 
 	provider := llm.NewFakeProvider(llm.FakeStep{Completion: domain.Completion{

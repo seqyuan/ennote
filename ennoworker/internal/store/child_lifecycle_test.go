@@ -6,29 +6,24 @@ import (
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"path/filepath"
 )
 
 // TestChildLifecycleParentWake verifies the full single-child substrate flow:
 // parent running -> group+child created -> child claimed -> child finalized
 // with submit_result -> item folded -> group settled -> parent woken to queued.
 func TestChildLifecycleParentWake(t *testing.T) {
-	repo, submission := setupSubmittedRun(t, "child-lifecycle")
+	fixture := newFileRunFixture(t, "child-lifecycle")
 	ctx := context.Background()
-	provider, err := (&store.ProviderRepo{DB: repo.DB}).Create(ctx, store.CreateProviderInput{
-		Name: "provider", ProviderType: domain.ProviderOpenAICompatible, BaseURL: "https://provider.test",
-		CredentialRef: "env:PROVIDER_KEY",
+	runs := fixture.Runs
+	submission, err := runs.SubmitTurn(ctx, domain.SubmitTurnInput{
+		SessionID: fixture.SessionID, ClientRequestID: "child-lifecycle", Text: "run",
 	})
 	require.NoError(t, err)
-	_, err = (&store.ModelRepo{DB: repo.DB}).Create(ctx, store.CreateModelInput{
-		ProviderID: provider.ID, ModelName: "m", ContextWindow: 32000, MaxOutputTokens: 2048,
-		SupportsThinking: true, ThinkingDialect: domain.ThinkingDialectOpenAIReasoningEffort,
-		SupportedThinkingEfforts: []domain.ThinkingEffort{domain.ThinkingDefault}, IsDefault: true,
-	})
-	require.NoError(t, err)
-	runs := &store.RunRepo{DB: repo.DB}
 	_, err = runs.Claim(ctx, submission.Run.ID)
 	require.NoError(t, err)
 	parentRun, err := runs.Get(ctx, submission.Run.ID)
@@ -37,7 +32,7 @@ func TestChildLifecycleParentWake(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, parentResolved.Effective.ModelProfileID)
 
-	delegations := &store.DelegationRepo{DB: repo.DB}
+	delegations := fixture.Delegations()
 	group, err := delegations.CreateGroup(ctx, store.CreateDelegationGroupInput{
 		ParentRunID: submission.Run.ID, ParentToolCallID: "explore-workspace", Strategy: domain.DelegationStrategySingle,
 		Items: []store.CreateDelegationItemInput{explorerItem()},
@@ -77,8 +72,8 @@ func TestChildLifecycleParentWake(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, domain.RunSucceeded, childStored.Status)
 	var canonical, shadow int
-	require.NoError(t, repo.DB.QueryRow(`SELECT COUNT(*) FROM messages WHERE run_id=?`, child.ID).Scan(&canonical))
-	require.NoError(t, repo.DB.QueryRow(`SELECT COUNT(*) FROM run_messages WHERE run_id=?`, child.ID).Scan(&shadow))
+	require.NoError(t, fixture.DB.QueryRow(`SELECT COUNT(*) FROM messages WHERE run_id=?`, child.ID).Scan(&canonical))
+	require.NoError(t, fixture.DB.QueryRow(`SELECT COUNT(*) FROM run_messages WHERE run_id=?`, child.ID).Scan(&shadow))
 	assert.Zero(t, canonical, "children must not publish canonical messages")
 	assert.Equal(t, 2, shadow)
 
@@ -91,7 +86,7 @@ func TestChildLifecycleParentWake(t *testing.T) {
 func TestFinalizeChildRejectsMissingTerminalContract(t *testing.T) {
 	repo, submission := setupSubmittedRun(t, "child-no-terminal")
 	ctx := context.Background()
-	delegations := &store.DelegationRepo{DB: repo.DB}
+	delegations := &store.DelegationRepo{DB: repo.DB, Policies: &fileconfig.PolicyStore{Path: filepath.Join(t.TempDir(), "config", "policies.json")}}
 	runs := &store.RunRepo{DB: repo.DB}
 	_, err := runs.Claim(ctx, submission.Run.ID)
 	require.NoError(t, err)

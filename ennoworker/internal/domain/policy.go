@@ -58,6 +58,7 @@ type ToolPolicyConfig struct {
 	AllowedWriteRoots        []string            `json:"allowedWriteRoots,omitempty"`
 	MaxTimeoutSeconds        int                 `json:"maxTimeoutSeconds,omitempty"`
 	RedactPatterns           []string            `json:"redactPatterns,omitempty"`
+	MaxInlineToolResultBytes int64               `json:"maxInlineToolResultBytes,omitempty"` // 0 = spill disabled (design 二 P2)
 }
 
 type TurnPolicyConfig struct {

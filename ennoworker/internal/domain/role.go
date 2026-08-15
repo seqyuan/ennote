@@ -12,6 +12,11 @@ const (
 	AgentProfileRole AgentProfileObjectKind = "role"
 )
 
+const (
+	RoleSourceManaged     = "managed"
+	RoleSourceProjectFile = "project_file"
+)
+
 type RoleScope string
 
 const (
@@ -36,6 +41,9 @@ type RoleIdentity struct {
 	ProjectID                 *string         `json:"projectId,omitempty"`
 	FlowID                    *string         `json:"flowId,omitempty"`
 	Status                    string          `json:"status"`
+	SourceKind                string          `json:"sourceKind"`
+	SourceLocator             string          `json:"sourceLocator,omitempty"`
+	SourceDigest              string          `json:"sourceDigest,omitempty"`
 	Draft                     json.RawMessage `json:"draft"`
 	DraftRevision             int             `json:"draftRevision"`
 	CurrentVersionID          *string         `json:"currentVersionId,omitempty"`
@@ -59,6 +67,8 @@ type RoleSummary struct {
 	ProjectID        *string   `json:"projectId,omitempty"`
 	FlowID           *string   `json:"flowId,omitempty"`
 	Status           string    `json:"status"`
+	SourceKind       string    `json:"sourceKind"`
+	SourceLocator    string    `json:"sourceLocator,omitempty"`
 	CurrentVersionID *string   `json:"currentVersionId,omitempty"`
 	CurrentVersion   int       `json:"currentVersion,omitempty"`
 	UpdatedAt        time.Time `json:"updatedAt"`

@@ -142,8 +142,12 @@ func TestApprovalFailsClosedOnRoleKillSwitch(t *testing.T) {
 	delegations, approvals, _, _, approval := requestBudgetApproval(t)
 	ctx := context.Background()
 
-	_, err := delegations.DB.Exec(`UPDATE agent_profiles SET delegation_enabled=0
-		WHERE id='builtin-workspace-explorer'`)
+	// V2 kill switch: the frozen Role meta is the only authority. Simulate a
+	// revoked identity by clearing the item's frozen meta; Decide must fail
+	// closed and materialize nothing.
+	_, err := delegations.DB.Exec(`UPDATE delegation_items SET role_meta_json='{}'
+		WHERE group_id=(SELECT group_id FROM delegation_approval_requests WHERE id=?)`,
+		approval.ID)
 	require.NoError(t, err)
 	_, children, err := approvals.Decide(ctx, approval.ID, domain.DecisionApproved, "decision-kill")
 	require.Error(t, err)

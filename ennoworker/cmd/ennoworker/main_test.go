@@ -2,14 +2,22 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/seqyuan/ennote/ennoworker/internal/agent"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
+	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
+	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
+	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,17 +25,18 @@ import (
 
 func TestResolveRuntimeProviderClassifiesPreflightFailures(t *testing.T) {
 	executor := &agentExecutor{}
+	// Missing plaintext API key -> credential unavailable.
 	_, err := executor.resolveRuntimeProvider(domain.ModelRuntimeSnapshot{
 		ProviderProfileID: "provider", ModelProfileID: "model", APIModel: "test-model",
-		BaseURL: "https://provider.test", CredentialRef: "env:MISSING_PROVIDER_KEY",
+		BaseURL: "https://provider.test", APIKey: "",
 	})
 	require.Error(t, err)
 	assert.Equal(t, domain.ErrorProviderCredentialUnavailable, domain.ErrorCodeOf(err))
 
-	t.Setenv("PROVIDER_KEY", "secret")
+	// Present key but invalid model configuration -> configuration invalid.
 	_, err = executor.resolveRuntimeProvider(domain.ModelRuntimeSnapshot{
 		ProviderProfileID: "provider", ModelProfileID: "model", APIModel: "",
-		BaseURL: "https://provider.test", CredentialRef: "env:PROVIDER_KEY",
+		BaseURL: "https://provider.test", APIKey: "sk-provider-key",
 	})
 	require.Error(t, err)
 	assert.Equal(t, domain.ErrorProviderConfigurationInvalid, domain.ErrorCodeOf(err))
@@ -49,39 +58,45 @@ func (allowToolPolicy) AfterToolCall(context.Context, agent.ToolCallContext, dom
 }
 
 func TestDelegationAdmissionPolicyPromotesRoleApprovalAndHonorsKillSwitch(t *testing.T) {
-	db, err := store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
+	db, _, _ := newSessionDB(t)
 	ctx := context.Background()
-	project, _, err := (&store.ProjectRepo{DB: db}).CreateWithWorkspace(ctx,
+	project, _, err := newFileProjects(t).CreateWithWorkspace(ctx,
 		domain.CreateProjectInput{Name: "admission", HostPath: t.TempDir()})
 	require.NoError(t, err)
-	session, err := (&store.SessionRepo{DB: db}).Create(ctx, domain.CreateSessionInput{ProjectID: project.ID})
+	session := sqlCreateSession(t, db, project.ID)
+
+	// V2: the approval Role is a file revision resolved through the file-native
+	// DelegationRepo; the legacy global role SQL is removed.
+	sources, models, modelID, home := setupExecutorFileRoleDelegation(t)
+	document := &rolesource.Document{
+		SchemaVersion: 1, Handle: "approval-role", Name: "Approval",
+		Description: "Requires delegation approval.", Positioning: "Independent", Icon: "bot", Color: "neutral",
+		Model:  rolesource.ModelBinding{Ref: modelID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills: []rolesource.SkillBinding{}, Authority: domain.RoleAuthorityReadOnly,
+		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read", "grep"},
+		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextRoom,
+			AllowedModes: []domain.RoleContextMode{domain.RoleContextRoom}, OwnExecutionContinuity: domain.RoleContinuityNone},
+		Delegation: rolesource.DelegationPolicy{Admission: domain.DelegationApprovalRequired,
+			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
+			MaxInvocationsPerParentRun: 1, MaxConcurrentInstances: 1,
+			BudgetCeiling: rolesource.DelegationBudgetCeiling{MaxModelCalls: 1, MaxToolCalls: 1,
+				MaxTotalTokens: 20000, MaxOutputTokens: 4000, MaxWallTimeMS: 120000}},
+		OutputContract: "text-v1", MaxLoopIterations: 8, Prompt: "Approve the delegation.",
+	}
+	_, _, err = sources.CreateRole(document)
 	require.NoError(t, err)
-	definition, err := json.Marshal(domain.RoleDefinition{DelegationPolicy: domain.RoleDelegationPolicy{
-		Admission: domain.DelegationApprovalRequired, AllowedCallerKinds: []string{"host"},
-		AllowedStrategies: []string{"single"}, MaxInvocationsPerParentRun: 1, MaxConcurrentInstances: 1,
-	}})
-	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO agent_profiles(id,name,object_kind,handle,scope,project_id,draft_json,created_at,updated_at)
-		VALUES('approval-role','Approval','role','approval-role','project',?,'{}','2026-08-04T00:00:00Z','2026-08-04T00:00:00Z')`, project.ID)
-	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO agent_profile_versions(id,agent_profile_id,version,definition_json,config_digest,status,created_at)
-		VALUES('approval-role-v1','approval-role',1,?,'sha256:0000000000000000000000000000000000000000000000000000000000000000','published','2026-08-04T00:00:00Z')`, string(definition))
-	require.NoError(t, err)
-	_, err = db.Exec(`UPDATE agent_profiles SET current_version_id='approval-role-v1' WHERE id='approval-role'`)
+	_, err = sources.PublishRoleRevision(document.Handle)
 	require.NoError(t, err)
 	policy := &delegationAdmissionToolPolicy{Base: allowToolPolicy{},
-		Delegations: &store.DelegationRepo{DB: db}, SessionID: session.ID,
-		KnownSkills: map[string]bool{"review-guard": true}}
+		Delegations: &store.DelegationRepo{DB: db, RoleSources: sources, Models: models},
+		SessionID:   session.ID, KnownSkills: map[string]bool{"review-guard": true}}
 	call := domain.ToolCall{ID: "delegate", Name: "delegate_tasks", Arguments: json.RawMessage(
 		`{"tasks":[{"name":"review","role":"approval-role","goal":"review","skills":["review-guard"],"budget":{"maxModelCalls":1,"maxToolCalls":1}}]}`)}
 	decisions, err := policy.BeforeToolBatch(ctx, agent.ToolBatchContext{}, []domain.ToolCall{call})
 	require.NoError(t, err)
 	require.Len(t, decisions, 1)
 	assert.Equal(t, agent.ToolRequireApproval, decisions[0].Action)
-	assert.Contains(t, string(decisions[0].Arguments), `"roleVersionId":"approval-role-v1"`)
+	assert.Contains(t, string(decisions[0].Arguments), `"roleVersionId":"approval-role@v000001"`)
 	assert.Contains(t, string(decisions[0].Arguments), `"skills":["review-guard"]`)
 
 	missingSkillCall := call
@@ -100,12 +115,38 @@ func TestDelegationAdmissionPolicyPromotesRoleApprovalAndHonorsKillSwitch(t *tes
 	assert.Equal(t, agent.ToolDeny, decisions[0].Action)
 	assert.Equal(t, string(domain.ErrorDelegationDagInvalid), decisions[0].Code)
 
-	_, err = db.Exec(`UPDATE agent_profiles SET delegation_enabled=0 WHERE id='approval-role'`)
-	require.NoError(t, err)
+	// V2 kill switch: revoke the Role by removing its file revision; the
+	// admission gate must deny with no child materialization path.
+	require.NoError(t, os.RemoveAll(filepath.Join(sources.RolesDir(), "approval-role")))
 	decisions, err = policy.BeforeToolBatch(ctx, agent.ToolBatchContext{}, []domain.ToolCall{call})
 	require.NoError(t, err)
 	assert.Equal(t, agent.ToolDeny, decisions[0].Action)
 	assert.Equal(t, string(domain.ErrorDelegationNotAuthorized), decisions[0].Code)
+	_ = home
+}
+
+// setupExecutorFileRoleDelegation wires a file-backed Role source + model
+// catalog for the admission policy tests.
+func setupExecutorFileRoleDelegation(t *testing.T) (*globalsource.Store, *store.ModelRepo, string, string) {
+	t.Helper()
+	home := t.TempDir()
+	models := fileconfig.NewModelStore(
+		filepath.Join(home, "config", "models.json"),
+		filepath.Join(home, "config", "provider-auth.json"),
+		filepath.Join(home, "config", "settings.json"),
+	)
+	_, err := models.CreateProvider(context.Background(), fileconfig.CreateProviderInput{
+		Key: "provider", Name: "Provider", ProviderType: domain.ProviderOpenAICompatible,
+		BaseURL: "https://provider.test/v1", APIKey: "sk-role-secret",
+	})
+	require.NoError(t, err)
+	model, err := models.CreateModel(context.Background(), fileconfig.CreateModelInput{
+		ProviderID: "provider", ModelName: "role-model", ContextWindow: 32768, MaxOutputTokens: 4096,
+		SupportsToolUse: true, ThinkingDialect: domain.ThinkingDialectNone,
+		SupportedThinkingEfforts: []domain.ThinkingEffort{domain.ThinkingDefault}, IsDefault: true,
+	})
+	require.NoError(t, err)
+	return &globalsource.Store{HomeDir: home}, &store.ModelRepo{Files: models}, model.ID, home
 }
 
 func TestDelegationStrategyMatchesChildCount(t *testing.T) {
@@ -114,17 +155,13 @@ func TestDelegationStrategyMatchesChildCount(t *testing.T) {
 }
 
 func TestEnqueueQueuedChildrenClosesSQLiteRowsBeforeCallback(t *testing.T) {
-	db, err := store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
+	db, _, _ := newSessionDB(t)
 	ctx := context.Background()
-	project, _, err := (&store.ProjectRepo{DB: db}).CreateWithWorkspace(ctx, domain.CreateProjectInput{
+	project, _, err := newFileProjects(t).CreateWithWorkspace(ctx, domain.CreateProjectInput{
 		Name: "enqueue children", HostPath: t.TempDir(),
 	})
 	require.NoError(t, err)
-	session, err := (&store.SessionRepo{DB: db}).Create(ctx, domain.CreateSessionInput{ProjectID: project.ID})
-	require.NoError(t, err)
+	session := sqlCreateSession(t, db, project.ID)
 	runs := &store.RunRepo{DB: db}
 	submission, err := runs.SubmitTurn(ctx, domain.SubmitTurnInput{
 		SessionID: session.ID, ClientRequestID: "parent", Text: "delegate",
@@ -177,4 +214,66 @@ func TestWorkspaceCanonicalizationGuard(t *testing.T) {
 	count := strings.Count(text, "workspace.CanonicalWorkspaceRoot(wSpace.HostPath)")
 	assert.GreaterOrEqual(t, count, 2,
 		"expected >=2 CanonicalWorkspaceRoot(wSpace.HostPath) calls, got %d", count)
+}
+
+// newFileProjects returns a file-native ProjectRepo (V2).
+func newFileProjects(t *testing.T) *store.ProjectRepo {
+	t.Helper()
+	return &store.ProjectRepo{Files: &projectstore.Store{Root: t.TempDir()}}
+}
+
+// sqlCreateSession inserts a Session row + Main branch directly on the caller's
+// per-Session database (V2).
+func sqlCreateSession(t *testing.T, db *sql.DB, projectID string) domain.Session {
+	t.Helper()
+	now := time.Now().UTC()
+	timestamp := now.Format(time.RFC3339Nano)
+	id, branchID := uuid.NewString(), uuid.NewString()
+	_, err := db.Exec(`INSERT INTO sessions (id, project_id, title, status, mode, active_branch_id, created_at, updated_at)
+		VALUES (?,?,?, 'active','hosted',NULL,?,?)`, id, projectID, "session", timestamp, timestamp)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO session_branches (id,session_id,label,created_at,updated_at) VALUES(?,?,'Main',?,?)`,
+		branchID, id, timestamp, timestamp)
+	require.NoError(t, err)
+	_, err = db.Exec(`UPDATE sessions SET active_branch_id=? WHERE id=?`, branchID, id)
+	require.NoError(t, err)
+	return domain.Session{ID: id, ProjectID: projectID, Title: "session", Status: "active",
+		Mode: domain.SessionModeHosted, ActiveBranchID: &branchID, CreatedAt: now, UpdatedAt: now}
+}
+
+// newSessionDB creates a project + Session in the file-native layout and opens
+// the per-Session database.
+func newSessionDB(t *testing.T) (*sql.DB, *sessionstore.Manager, domain.Session) {
+	t.Helper()
+	ctx := context.Background()
+	projects := &projectstore.Store{Root: t.TempDir()}
+	project, _, err := projects.CreateWithWorkspace(ctx,
+		domain.CreateProjectInput{Name: "session", HostPath: t.TempDir()})
+	require.NoError(t, err)
+	sessions := sessionstore.NewManager(projects.Root, projects)
+	t.Cleanup(func() { require.NoError(t, sessions.Close()) })
+	session, err := sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID, Title: "session"})
+	require.NoError(t, err)
+	db, err := sessions.OpenSession(ctx, session.ID)
+	require.NoError(t, err)
+	return db, sessions, *session
+}
+
+// sqlCreateSessionWithModel is sqlCreateSession with an optional default model.
+func sqlCreateSessionWithModel(t *testing.T, db *sql.DB, projectID string, defaultModel *string) domain.Session {
+	t.Helper()
+	now := time.Now().UTC()
+	timestamp := now.Format(time.RFC3339Nano)
+	id, branchID := uuid.NewString(), uuid.NewString()
+	_, err := db.Exec(`INSERT INTO sessions (id, project_id, title, status, mode, default_model_profile_id, active_branch_id, created_at, updated_at)
+		VALUES (?,?,?, 'active','hosted',?,NULL,?,?)`, id, projectID, "session", defaultModel, timestamp, timestamp)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO session_branches (id,session_id,label,created_at,updated_at) VALUES(?,?,'Main',?,?)`,
+		branchID, id, timestamp, timestamp)
+	require.NoError(t, err)
+	_, err = db.Exec(`UPDATE sessions SET active_branch_id=? WHERE id=?`, branchID, id)
+	require.NoError(t, err)
+	return domain.Session{ID: id, ProjectID: projectID, Title: "session", Status: "active",
+		Mode: domain.SessionModeHosted, DefaultModelProfileID: defaultModel,
+		ActiveBranchID: &branchID, CreatedAt: now, UpdatedAt: now}
 }

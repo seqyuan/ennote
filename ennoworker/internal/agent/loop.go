@@ -61,6 +61,7 @@ type Loop struct {
 	ToolExecution         domain.ToolExecutionConfig
 	ToolPolicy            ToolPolicy
 	ToolPolicySnapshot    domain.PolicySnapshot
+	PolicyChain           *FrozenPolicyChain // Stage 0: frozen per-run policy chain (design 一)
 	WorkspaceID           string
 	Hub                   *events.Hub
 	TurnPlanner           TurnPlanner
@@ -615,6 +616,13 @@ func (l *Loop) finishCompletedIteration(ctx context.Context, input RunInput, ite
 			return messages, generated, TurnPlan{}, false, classifyAgentError(drainErr)
 		}
 		if len(followUps) > 0 {
+			for index, followUp := range followUps {
+				if eventErr := l.appendEvent(ctx, input.RunID, "follow_up_consumed", map[string]any{
+					"seq": index + 1, "text": followUp.Content,
+				}); eventErr != nil {
+					return messages, generated, TurnPlan{}, false, eventErr
+				}
+			}
 			messages = append(messages, followUps...)
 			generated = append(generated, followUps...)
 			turnContext.Messages = append([]domain.ChatMessage(nil), messages...)

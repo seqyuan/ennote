@@ -2,13 +2,19 @@ package runs
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
+	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
+	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -16,23 +22,13 @@ import (
 
 func setupRunDB(t *testing.T) *store.RunRepo {
 	t.Helper()
-	db, err := store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
+	db, _, _ := newSessionDB(t)
 	return &store.RunRepo{DB: db}
 }
 
 func setupRun(t *testing.T, repo *store.RunRepo, requestID string) *domain.TurnSubmission {
 	t.Helper()
-	projectRepo := &store.ProjectRepo{DB: repo.DB}
-	sessionRepo := &store.SessionRepo{DB: repo.DB}
-	project, _, err := projectRepo.CreateWithWorkspace(context.Background(), domain.CreateProjectInput{
-		Name: requestID, HostPath: t.TempDir(),
-	})
-	require.NoError(t, err)
-	session, err := sessionRepo.Create(context.Background(), domain.CreateSessionInput{ProjectID: project.ID})
-	require.NoError(t, err)
+	session := sqlCreateSession(t, repo.DB, "00000000-0000-4000-8000-00000000000f")
 	submission, err := repo.SubmitTurn(context.Background(), domain.SubmitTurnInput{
 		SessionID: session.ID, ClientRequestID: requestID, Text: "work",
 	})
@@ -194,14 +190,15 @@ func setupDelegatedCoordinatorTree(t *testing.T, repo *store.RunRepo, requestID 
 	submission := setupRun(t, repo, requestID)
 	_, err := repo.Claim(context.Background(), submission.Run.ID)
 	require.NoError(t, err)
-	delegations := &store.DelegationRepo{DB: repo.DB}
+	delegations := &store.DelegationRepo{DB: repo.DB, Policies: &fileconfig.PolicyStore{Path: filepath.Join(t.TempDir(), "config", "policies.json")}}
 	_, _, children, err := delegations.CreateGroupWithChildren(context.Background(), store.CreateDelegationGroupInput{
 		ParentRunID: submission.Run.ID, ParentToolCallID: "delegate-" + requestID,
 		Strategy: domain.DelegationStrategySingle,
 		Items: []store.CreateDelegationItemInput{{Name: "child", RoleVersionID: "builtin-workspace-explorer-v3",
 			AssignmentJSON: json.RawMessage(`{"task":"inspect"}`), OutputContract: "text-v1",
 			Budget: domain.BudgetCeilingJSON{MaxModelCalls: 4, MaxToolCalls: 8, MaxTotalTokens: 20000,
-				MaxOutputTokens: 4000, MaxWallTimeMS: 120000}}},
+				MaxOutputTokens: 4000, MaxWallTimeMS: 120000},
+			RoleMeta: coordinatorRoleMetaFromDB(t, repo.DB, "builtin-workspace-explorer-v3")}},
 	}, submission.Run.SessionID)
 	require.NoError(t, err)
 	require.Len(t, children, 1)
@@ -316,4 +313,63 @@ func TestCoordinatorCancellationIsIdempotent(t *testing.T) {
 	run, err := repo.Get(context.Background(), submission.Run.ID)
 	require.NoError(t, err)
 	assert.Equal(t, domain.RunCancelled, run.Status)
+}
+
+// coordinatorRoleMetaFromDB freezes the builtin Workspace Explorer RoleMeta
+// without consulting global role SQL (V2).
+func coordinatorRoleMetaFromDB(t *testing.T, _ *sql.DB, _ string) *store.DelegationRoleMeta {
+	t.Helper()
+	var definition domain.RoleDefinition
+	require.NoError(t, json.Unmarshal([]byte(coordinatorExplorerRoleDefinition), &definition))
+	return &store.DelegationRoleMeta{
+		ObjectID: "builtin-workspace-explorer", VersionID: "builtin-workspace-explorer-v3",
+		Handle: "workspace-explorer", DisplayName: "Workspace Explorer",
+		ConfigDigest: "sha256:c7cf36749030bd0626c24eea7ea325c2b70be64bd2f623b3c94b5fc8b81aa38b",
+		Definition:   definition,
+	}
+}
+
+const coordinatorExplorerRoleDefinition = `{"schemaVersion":1,"rolePrompt":"You are the Workspace Explorer. Use read, ls, grep, and find to answer questions about workspace files.","modelBinding":{"mode":"inherit","modelProfileId":"provider/model","thinkingEffort":"default","fallbackModelProfileIds":[],"overridableFields":[]},"skills":{"entries":[]},"authority":"read_only","permissionCeiling":"discuss","allowedTools":["read","ls","grep","find","git_readonly"],"contextPolicy":{"defaultMode":"task_only","allowedModes":["task_only"],"ownExecutionContinuity":"none"},"delegationPolicy":{"admission":"auto_within_budget","allowedCallerKinds":["host"],"allowedStrategies":["single","parallel"],"maxInvocationsPerParentRun":16,"maxConcurrentInstances":16,"budgetCeiling":{"maxModelCalls":6,"maxToolCalls":8,"maxTotalTokens":20000,"maxOutputTokens":4000,"maxCostUsdMicros":100000,"maxWallTimeMs":120000}},"outputContract":"text-v1","maxLoopIterations":8}`
+
+// newFileProjects returns a file-native ProjectRepo (V2).
+func newFileProjects(t *testing.T) *store.ProjectRepo {
+	t.Helper()
+	return &store.ProjectRepo{Files: &projectstore.Store{Root: t.TempDir()}}
+}
+
+// sqlCreateSession inserts a Session row + Main branch directly on the caller's
+// per-Session database (V2).
+func sqlCreateSession(t *testing.T, db *sql.DB, projectID string) domain.Session {
+	t.Helper()
+	now := time.Now().UTC()
+	timestamp := now.Format(time.RFC3339Nano)
+	id, branchID := uuid.NewString(), uuid.NewString()
+	_, err := db.Exec(`INSERT INTO sessions (id, project_id, title, status, mode, active_branch_id, created_at, updated_at)
+		VALUES (?,?,?, 'active','hosted',NULL,?,?)`, id, projectID, "session", timestamp, timestamp)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO session_branches (id,session_id,label,created_at,updated_at) VALUES(?,?,'Main',?,?)`,
+		branchID, id, timestamp, timestamp)
+	require.NoError(t, err)
+	_, err = db.Exec(`UPDATE sessions SET active_branch_id=? WHERE id=?`, branchID, id)
+	require.NoError(t, err)
+	return domain.Session{ID: id, ProjectID: projectID, Title: "session", Status: "active",
+		Mode: domain.SessionModeHosted, ActiveBranchID: &branchID, CreatedAt: now, UpdatedAt: now}
+}
+
+// newSessionDB creates a project + Session in the file-native layout and opens
+// the per-Session database.
+func newSessionDB(t *testing.T) (*sql.DB, *sessionstore.Manager, domain.Session) {
+	t.Helper()
+	ctx := context.Background()
+	projects := &projectstore.Store{Root: t.TempDir()}
+	project, _, err := projects.CreateWithWorkspace(ctx,
+		domain.CreateProjectInput{Name: "session", HostPath: t.TempDir()})
+	require.NoError(t, err)
+	sessions := sessionstore.NewManager(projects.Root, projects)
+	t.Cleanup(func() { require.NoError(t, sessions.Close()) })
+	session, err := sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID, Title: "session"})
+	require.NoError(t, err)
+	db, err := sessions.OpenSession(ctx, session.ID)
+	require.NoError(t, err)
+	return db, sessions, *session
 }

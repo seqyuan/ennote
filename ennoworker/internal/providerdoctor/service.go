@@ -2,9 +2,13 @@ package providerdoctor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
@@ -27,12 +31,11 @@ type ModelStore interface {
 }
 
 type Service struct {
-	Providers   ProviderStore
-	Models      ModelStore
-	Credentials llm.CredentialResolver
-	HTTPClient  *http.Client
-	Timeout     time.Duration
-	Now         func() time.Time
+	Providers  ProviderStore
+	Models     ModelStore
+	HTTPClient *http.Client
+	Timeout    time.Duration
+	Now        func() time.Time
 }
 
 func (s *Service) Diagnose(ctx context.Context, providerID, modelProfileID string) (domain.ProviderDiagnostic, error) {
@@ -71,18 +74,13 @@ func (s *Service) Diagnose(ctx context.Context, providerID, modelProfileID strin
 	diagnostic.Stages = append(diagnostic.Stages, passedStage("configuration", "Provider configuration is valid.", now().Sub(stageStarted)))
 
 	stageStarted = now()
-	secret, err := s.Credentials.Resolve(provider.CredentialRef)
-	if err != nil {
-		failure := llm.ClassifyProviderFailure(err)
-		if failure.Category == domain.ProviderFailureUnknown {
-			failure.Category = domain.ProviderFailureCredentialUnavailable
-			failure.Message = "The configured credential could not be resolved."
-		}
+	if strings.TrimSpace(provider.APIKey) == "" {
+		failure := domain.ProviderFailure{Category: domain.ProviderFailureCredentialUnavailable, Message: "No API key is configured for this provider."}
 		diagnostic.Failure = &failure
 		diagnostic.Stages = append(diagnostic.Stages, failedStage("credentials", failure.Message, now().Sub(stageStarted)))
 		return finish(), nil
 	}
-	diagnostic.Stages = append(diagnostic.Stages, passedStage("credentials", "Credential reference resolved successfully.", now().Sub(stageStarted)))
+	diagnostic.Stages = append(diagnostic.Stages, passedStage("credentials", "API key configured.", now().Sub(stageStarted)))
 
 	stageStarted = now()
 	var model *domain.ModelProfile
@@ -120,7 +118,7 @@ func (s *Service) Diagnose(ctx context.Context, providerID, modelProfileID strin
 	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	providerClient, err := llm.NewOpenAIProvider(llm.OpenAIConfig{
-		BaseURL: provider.BaseURL, APIKey: secret, Model: model.ModelName,
+		BaseURL: provider.BaseURL, APIKey: llm.NewSecret(provider.APIKey), Model: model.ModelName,
 		MaxTokens: min(max(model.MaxOutputTokens, 1), 8), HTTPClient: s.HTTPClient,
 	})
 	if err != nil {
@@ -154,4 +152,78 @@ func passedStage(name, message string, elapsed time.Duration) domain.ProviderDia
 
 func failedStage(name, message string, elapsed time.Duration) domain.ProviderDiagnosticStage {
 	return domain.ProviderDiagnosticStage{Name: name, Status: "failed", Message: message, LatencyMS: max(elapsed.Milliseconds(), 0)}
+}
+
+// DiscoveredModel is a single entry from an OpenAI-compatible /models catalog.
+type DiscoveredModel struct {
+	ModelName        string `json:"modelName"`
+	DisplayName      string `json:"displayName,omitempty"`
+	ContextWindow    int    `json:"contextWindow,omitempty"`
+	MaxOutputTokens  int    `json:"maxOutputTokens,omitempty"`
+	SupportsVision   bool   `json:"supportsVision,omitempty"`
+	SupportsThinking bool   `json:"supportsThinking,omitempty"`
+}
+
+// DiscoverInput carries the endpoint and optional key for a catalog fetch.
+type DiscoverInput struct {
+	BaseURL string
+	APIKey  string
+}
+
+// DiscoverModels fetches the model catalog from an OpenAI-compatible provider
+// (GET {baseURL}/models). The API key is injected per request and never
+// returned to callers.
+func (s *Service) DiscoverModels(ctx context.Context, input DiscoverInput) ([]DiscoveredModel, error) {
+	base := strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
+	parsed, err := url.Parse(base)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return nil, fmt.Errorf("provider base URL must be an absolute HTTP URL")
+	}
+	timeout := s.Timeout
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	fetchCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, base+"/models", nil)
+	if err != nil {
+		return nil, fmt.Errorf("build model catalog request: %w", err)
+	}
+	if key := strings.TrimSpace(input.APIKey); key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	req.Header.Set("Accept", "application/json")
+	client := s.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch model catalog: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("model catalog responded HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var envelope struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&envelope); err != nil {
+		return nil, fmt.Errorf("decode model catalog: %w", err)
+	}
+	models := make([]DiscoveredModel, 0, len(envelope.Data))
+	for _, entry := range envelope.Data {
+		id := strings.TrimSpace(entry.ID)
+		if id == "" {
+			continue
+		}
+		models = append(models, DiscoveredModel{ModelName: id})
+	}
+	if len(models) == 0 {
+		return nil, fmt.Errorf("provider returned an empty model catalog")
+	}
+	return models, nil
 }

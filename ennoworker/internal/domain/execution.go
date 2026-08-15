@@ -47,13 +47,13 @@ type ModelCallFinish struct {
 }
 
 type ToolPolicyMetadata struct {
-	PolicyID        string
-	PolicyVersion   int
-	Action          string
-	Code            string
-	RiskClass       RiskClass
-	StopAfterBatch  bool
-	StandingRuleID  string
+	PolicyID       string
+	PolicyVersion  int
+	Action         string
+	Code           string
+	RiskClass      RiskClass
+	StopAfterBatch bool
+	StandingRuleID string
 }
 
 type ToolCallStart struct {

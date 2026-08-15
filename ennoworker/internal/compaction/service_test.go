@@ -2,12 +2,17 @@ package compaction
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"github.com/google/uuid"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agent"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/llm"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
@@ -18,20 +23,28 @@ func TestManualServiceCommitsCallUsageAndCheckpoint(t *testing.T) {
 	db, err := store.OpenMemory()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
+	require.NoError(t, store.MigrateFixtureSchema(db))
 	ctx := context.Background()
-	now := "2026-07-28T00:00:00Z"
-	_, err = db.Exec(`INSERT INTO provider_profiles
-		(id,name,provider_type,base_url,credential_ref,created_at,updated_at)
-		VALUES('provider','Provider','openai-compatible','https://example.test','env:TEST_KEY',?,?);
-		INSERT INTO model_profiles
-		(id,provider_id,model_name,display_name,context_window,max_output_tokens,created_at,updated_at)
-		VALUES('model','provider','test-model','Test',32000,2000,?,?);
-		INSERT INTO settings(key,value) VALUES('default_model_profile_id','model');
-		INSERT INTO projects(id,name,created_at,updated_at) VALUES('project','P',?,?);
-		INSERT INTO sessions(id,project_id,created_at,updated_at) VALUES('session','project',?,?)`,
-		now, now, now, now, now, now, now, now)
+	// V2: provider/model + compaction policy resolve from file stores; the
+	// legacy global provider/model SQL path was removed.
+	home := t.TempDir()
+	models := fileconfig.NewModelStore(
+		filepath.Join(home, "config", "models.json"),
+		filepath.Join(home, "config", "provider-auth.json"),
+		filepath.Join(home, "config", "settings.json"),
+	)
+	_, err = models.CreateProvider(ctx, fileconfig.CreateProviderInput{
+		Key: "provider", Name: "Provider", ProviderType: domain.ProviderOpenAICompatible,
+		BaseURL: "https://example.test", APIKey: "sk-test",
+	})
 	require.NoError(t, err)
+	model, err := models.CreateModel(ctx, fileconfig.CreateModelInput{
+		ProviderID: "provider", ModelName: "test-model", DisplayName: "Test",
+		ContextWindow: 32000, MaxOutputTokens: 2000, IsDefault: true,
+	})
+	require.NoError(t, err)
+	policies := &fileconfig.PolicyStore{Path: filepath.Join(home, "config", "policies.json")}
+	session := sqlCreateSession(t, db, "project")
 
 	config := domain.DefaultCompactionPolicy()
 	config.KeepRecentTurns = 1
@@ -40,29 +53,37 @@ func TestManualServiceCommitsCallUsageAndCheckpoint(t *testing.T) {
 	config.SummaryMaxOutputTokens = 512
 	encoded, err := json.Marshal(config)
 	require.NoError(t, err)
-	profile, err := (&store.PolicyRepo{DB: db}).CreateVersion(ctx, store.CreatePolicyInput{
-		Name: "manual-small-tail", Kind: domain.PolicyKindCompaction, Config: encoded})
+	profile, err := policies.CreateVersion(ctx, "manual-small-tail", domain.PolicyKindCompaction, encoded)
 	require.NoError(t, err)
-	_, err = (&store.SessionRepo{DB: db}).UpdateCompactionPolicy(ctx, "session", &profile.ID)
+	// Set the session's compaction policy directly: UpdateCompactionPolicy
+	// validates against the removed global policy SQL; the V2 file store is
+	// the authority for resolution at CreateManual time.
+	_, err = db.Exec(`UPDATE sessions SET compaction_policy_profile_id=? WHERE id=?`, profile.ID, session.ID)
 	require.NoError(t, err)
 
 	messages := &store.MessageRepo{DB: db}
 	parent := ""
 	for index := 0; index < 4; index++ {
-		message, createErr := messages.CreateUserMessage(ctx, "session", parent, strings.Repeat("sample path /data/run ", 100))
+		message, createErr := messages.CreateUserMessage(ctx, session.ID, parent, strings.Repeat("sample path /data/run ", 100))
 		require.NoError(t, createErr)
 		parent = message.ID
 	}
-	require.NoError(t, (&store.SessionRepo{DB: db}).ActivateLeaf(ctx, "session", parent))
-	compactions := &store.CompactionRepo{DB: db}
-	submission, err := compactions.CreateManual(ctx, domain.ManualCompactionInput{
-		SessionID: "session", BaseMessageID: parent, ClientRequestID: "manual-service"})
+	// V2: the Session row lives in this database; activate the leaf directly.
+	_, err = db.Exec(`UPDATE session_branches SET leaf_message_id=? WHERE session_id=? AND label='Main'`, parent, session.ID)
 	require.NoError(t, err)
-	runs := &store.RunRepo{DB: db}
+	_, err = db.Exec(`UPDATE sessions SET active_leaf_message_id=? WHERE id=?`, parent, session.ID)
+	require.NoError(t, err)
+	compactions := &store.CompactionRepo{DB: db, Policies: policies}
+	submission, err := compactions.CreateManual(ctx, domain.ManualCompactionInput{
+		SessionID: session.ID, BaseMessageID: parent, ClientRequestID: "manual-service"})
+	require.NoError(t, err)
+	runs := &store.RunRepo{DB: db, Providers: &store.ProviderRepo{Files: models},
+		Models: &store.ModelRepo{Files: models}, Policies: policies}
 	run, err := runs.Claim(ctx, submission.RunID)
 	require.NoError(t, err)
 	resolved, err := runs.ResolveAndFreezeConfig(ctx, run)
 	require.NoError(t, err)
+	assert.Equal(t, model.ID, resolved.Effective.ModelProfileID)
 
 	summary := serviceSummary()
 	provider := llm.NewFakeProvider(llm.FakeStep{Completion: domain.Completion{
@@ -94,11 +115,10 @@ func TestRunCompactorCommitsSummaryAndReusesDigest(t *testing.T) {
 	db, err := store.OpenMemory()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
+	require.NoError(t, store.MigrateFixtureSchema(db))
 	ctx := context.Background()
 	now := "2026-07-29T00:00:00Z"
-	_, err = db.Exec(`INSERT INTO projects(id,name,created_at,updated_at) VALUES('project','P',?,?);
-		INSERT INTO sessions(id,project_id,created_at,updated_at) VALUES('session','project',?,?)`, now, now, now, now)
+	_, err = db.Exec(`INSERT INTO sessions(id,project_id,created_at,updated_at) VALUES('session','project',?,?)`, now, now, now, now)
 	require.NoError(t, err)
 	runs := &store.RunRepo{DB: db}
 	submission, err := runs.SubmitTurn(ctx, domain.SubmitTurnInput{SessionID: "session",
@@ -170,4 +190,24 @@ func serviceSummary() string {
 		"## Critical Data\nSample S-1 uses /data/run.\n\n## Progress\n### Done\nLoaded inputs.\n" +
 		"### In Progress\nAnalysis.\n### Blocked\nNone.\n\n## Key Decisions\nKeep canonical history.\n\n" +
 		"## Files & Artifacts\n/data/run\n\n## Next Steps\nContinue analysis."
+}
+
+// sqlCreateSession inserts a Session row + Main branch directly on the caller's
+// database (V2 per-Session SQLite file or a test database with the Session
+// schema).
+func sqlCreateSession(t *testing.T, db *sql.DB, projectID string) domain.Session {
+	t.Helper()
+	now := time.Now().UTC()
+	timestamp := now.Format(time.RFC3339Nano)
+	id, branchID := uuid.NewString(), uuid.NewString()
+	_, err := db.Exec(`INSERT INTO sessions (id, project_id, title, status, mode, active_branch_id, created_at, updated_at)
+		VALUES (?,?,?, 'active','hosted',NULL,?,?)`, id, projectID, "session", timestamp, timestamp)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO session_branches (id,session_id,label,created_at,updated_at) VALUES(?,?,'Main',?,?)`,
+		branchID, id, timestamp, timestamp)
+	require.NoError(t, err)
+	_, err = db.Exec(`UPDATE sessions SET active_branch_id=? WHERE id=?`, branchID, id)
+	require.NoError(t, err)
+	return domain.Session{ID: id, ProjectID: projectID, Title: "session", Status: "active",
+		Mode: domain.SessionModeHosted, ActiveBranchID: &branchID, CreatedAt: now, UpdatedAt: now}
 }

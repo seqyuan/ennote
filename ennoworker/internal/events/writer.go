@@ -19,6 +19,11 @@ type LivePublisher interface {
 	PublishLive(event domain.LiveRunEvent)
 }
 
+// Writer durably appends events and then publishes them to the Hub. The
+// "append then publish" ordering is orchestration, NOT a dispatch mode: the
+// @mode contract (emit/waterfall/parallel/serial/serial-merge) applies only to
+// listener dispatch, and this two-step sequence deliberately does not carry a
+// @mode tag.
 type Writer struct {
 	appender Appender
 	hub      *Hub

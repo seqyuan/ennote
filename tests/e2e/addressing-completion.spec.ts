@@ -10,9 +10,8 @@ const role = { id: "reviewer-role", handle: "security-reviewer", name: "Security
   description: "Independent review", positioning: "", icon: "shield", color: "#b91c1c",
   scope: "global", projectId: null, status: "active", currentVersionId: "rv1", currentVersion: 1, updatedAt: now };
 
-const flows = [
-  { id: "flow-1", name: "Go Review", slug: "go-review", sourceKind: "managed", projectScope: null,
-    sourceLocator: "", lifecycleStatus: "active", latestVersion: 2, draftRevision: 0, createdAt: now, updatedAt: now },
+const graphs = [
+  { id: "go-review", name: "Go Review", path: "/home/graphs/go-review/graph.yaml", digest: `sha256:${"a".repeat(64)}`, latestVersion: 2 },
 ];
 
 function fulfill(route: Route, data: unknown) {
@@ -33,7 +32,7 @@ async function mockBackend(page: Page) {
     if (path === `/v1/sessions/${session.id}/messages`) return fulfill(route, { messages: [], hasMore: false, activeLeafMessageId: null });
     if (path === `/v1/projects/${project.id}/prompt-templates`) return fulfill(route, { templates: [], diagnostics: [] });
     if (path === "/v1/roles" && method === "GET") return fulfill(route, { items: [role], nextCursor: "" });
-    if (path === "/v1/agent-flows" && method === "GET") return fulfill(route, flows);
+    if (path === "/v1/graphs" && method === "GET") return fulfill(route, graphs);
     return route.abort();
   });
 }
@@ -41,7 +40,7 @@ async function mockBackend(page: Page) {
 async function openSession(page: Page) {
   await mockBackend(page);
   await page.goto("/");
-  await page.getByTitle("Select project").click();
+  await page.getByTitle("Select project").first().click();
   await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
   await page.getByRole("button", { name: session.title, exact: true }).click();
 }
@@ -59,7 +58,8 @@ test("typing @role completes a role target and clears the token", async ({ page 
   // The token is consumed and the role target is selected instead.
   await expect(textarea).toHaveValue("");
   await expect(panel).not.toBeVisible();
-  // The composer toolbar trigger now shows the selected role handle.
+  // The config panel trigger now shows the selected role handle.
+  await page.getByRole("button", { name: "Configure run", exact: true }).click();
   await expect(page.getByText("@security-reviewer", { exact: true })).toBeVisible();
 });
 

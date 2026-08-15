@@ -78,7 +78,7 @@ func (r *RunRepo) Retry(ctx context.Context, sourceRunID, clientRequestID string
 		return nil, domain.NewCodedError(domain.ErrorCommitFormatNotEnabled,
 			fmt.Errorf("retry source uses unsupported commit format %d", source.CommitFormatVersion))
 	}
-	if source.CommitFormatVersion == domain.CommitFormatSpeakerV2 {
+	if source.CommitFormatVersion == domain.CommitFormatSpeakerV2 && r.RoleSources == nil {
 		var writerSetting string
 		if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='hosted_commit_format_version'`).Scan(&writerSetting); err != nil || writerSetting != "2" {
 			return nil, domain.NewCodedError(domain.ErrorCommitFormatNotEnabled,

@@ -73,15 +73,17 @@ type ProviderDiagnostic struct {
 }
 
 type ProviderProfile struct {
-	ID            string       `json:"id"`
-	Name          string       `json:"name"`
-	ProviderType  ProviderType `json:"providerType"`
-	BaseURL       string       `json:"baseUrl"`
-	CredentialRef string       `json:"credentialRef"`
-	Proxy         string       `json:"proxy,omitempty"`
-	Status        string       `json:"status"`
-	CreatedAt     time.Time    `json:"createdAt"`
-	UpdatedAt     time.Time    `json:"updatedAt"`
+	ID                   string       `json:"id"`
+	Name                 string       `json:"name"`
+	ProviderType         ProviderType `json:"providerType"`
+	BaseURL              string       `json:"baseUrl"`
+	CredentialRef        string       `json:"-"`
+	APIKey               string       `json:"apiKey,omitempty"`
+	CredentialConfigured bool         `json:"credentialConfigured"`
+	Proxy                string       `json:"proxy,omitempty"`
+	Status               string       `json:"status"`
+	CreatedAt            time.Time    `json:"createdAt"`
+	UpdatedAt            time.Time    `json:"updatedAt"`
 }
 
 type ModelProfile struct {

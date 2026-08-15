@@ -278,3 +278,45 @@ test("shows background delegation completion without blocking the composer", asy
   await expect(page.getByPlaceholder(/message/i).or(page.locator("[contenteditable=true]")).first()).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });
+
+test("cancels an active delegation group when the action is valid", async ({ page }) => {
+  const groupID = "group-cancel";
+  let cancelled = false;
+  const messages = [
+    message("m1", undefined, "user", [{ type: "text", text: "Delegate a long review." }]),
+    message("m2", "m1", "assistant", [{ type: "tool_call", toolCall: { id: "delegate-call", name: "delegate_roles",
+      arguments: { delegations: [{ name: "review", roleHandle: "workspace-explorer", assignment: "Review files" }] } } }], parentRun.id),
+  ];
+  await page.route("**/api/worker/v1/**", async route => {
+    const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    const common = commonRoute(path, route);
+    if (common) return common;
+    if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, null);
+    if (path === `/v1/sessions/${session.id}/messages`) return fulfill(route, { messages, hasMore: false, activeLeafMessageId: "m2" });
+    if (path === `/v1/runs/${parentRun.id}/children`) {
+      return fulfill(route, { parentRunId: parentRun.id, groups: [{ id: groupID, parentToolCallId: "delegate-call",
+        strategy: "single", status: cancelled ? "cancelled" : "waiting_children", createdAt: "2026-08-04T00:00:02Z",
+        children: [{ itemId: "item-cancel", childRunId: "child-cancel", name: "review", roleHandle: "workspace-explorer",
+          roleDisplayName: "Workspace Explorer", itemStatus: cancelled ? "cancelled" : "running",
+          runStatus: cancelled ? "cancelled" : "running", createdAt: "2026-08-04T00:00:02Z" }] }] });
+    }
+    if (path === `/v1/delegations/${groupID}`) {
+      return fulfill(route, { group: { id: groupID, parentRunId: parentRun.id, parentToolCallId: "delegate-call",
+        strategy: "single", status: cancelled ? "cancelled" : "waiting_children", createdAt: "2026-08-04T00:00:02Z" },
+        currentGeneration: 0, items: [], generations: [], validActions: cancelled ? [] : ["cancel"] });
+    }
+    if (path === `/v1/delegations/${groupID}/cancel`) {
+      cancelled = true;
+      return fulfill(route, { id: groupID, status: "cancelled" });
+    }
+    return route.abort();
+  });
+
+  await selectSession(page);
+  await expect(page.getByRole("button", { name: "Cancel delegation" })).toBeVisible();
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("button", { name: "Cancel delegation" }).click();
+  await expect.poll(() => cancelled).toBe(true);
+  await expect(page.getByRole("button", { name: "Cancel delegation" })).toHaveCount(0);
+  await expect(page.locator('[data-child-run-id="child-cancel"] .child-run-status')).toContainText("Cancelled");
+});

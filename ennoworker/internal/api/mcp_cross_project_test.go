@@ -12,11 +12,15 @@ import (
 // TestMCPBindingCrossProjectIsolation verifies every binding-scoped endpoint
 // fails closed when the path projectID does not own the binding (P0-4).
 func TestMCPBindingCrossProjectIsolation(t *testing.T) {
-	_, handler := setupServer(t, &fakeController{})
+	server, handler := setupServer(t, &fakeController{})
 	profileID := createMCPProfileWithVersion(t, handler)
+	projectA, _, err := server.Projects.CreateWithWorkspace(t.Context(), domain.CreateProjectInput{Name: "A", HostPath: t.TempDir()})
+	require.NoError(t, err)
+	projectB, _, err := server.Projects.CreateWithWorkspace(t.Context(), domain.CreateProjectInput{Name: "B", HostPath: t.TempDir()})
+	require.NoError(t, err)
 
 	// Create binding for project A.
-	rec := request(t, handler, http.MethodPost, "/v1/projects/proj-a/mcp/bindings", map[string]any{
+	rec := request(t, handler, http.MethodPost, "/v1/projects/"+projectA.ID+"/mcp/bindings", map[string]any{
 		"profileVersionId": profileID,
 	}, true)
 	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
@@ -28,11 +32,11 @@ func TestMCPBindingCrossProjectIsolation(t *testing.T) {
 		method, path string
 		body         map[string]any
 	}{
-		{http.MethodPatch, "/v1/projects/proj-b/mcp/bindings/" + binding.ID, map[string]any{"desiredEnabled": true}},
-		{http.MethodDelete, "/v1/projects/proj-b/mcp/bindings/" + binding.ID, nil},
-		{http.MethodPost, "/v1/projects/proj-b/mcp/bindings/" + binding.ID + "/test", nil},
-		{http.MethodGet, "/v1/projects/proj-b/mcp/bindings/" + binding.ID + "/catalog", nil},
-		{http.MethodPost, "/v1/projects/proj-b/mcp/bindings/" + binding.ID + "/catalog/refresh", nil},
+		{http.MethodPatch, "/v1/projects/" + projectB.ID + "/mcp/bindings/" + binding.ID, map[string]any{"desiredEnabled": true}},
+		{http.MethodDelete, "/v1/projects/" + projectB.ID + "/mcp/bindings/" + binding.ID, nil},
+		{http.MethodPost, "/v1/projects/" + projectB.ID + "/mcp/bindings/" + binding.ID + "/test", nil},
+		{http.MethodGet, "/v1/projects/" + projectB.ID + "/mcp/bindings/" + binding.ID + "/catalog", nil},
+		{http.MethodPost, "/v1/projects/" + projectB.ID + "/mcp/bindings/" + binding.ID + "/catalog/refresh", nil},
 	}
 	for _, tc := range paths {
 		rec = request(t, handler, tc.method, tc.path, tc.body, true)
@@ -40,7 +44,7 @@ func TestMCPBindingCrossProjectIsolation(t *testing.T) {
 	}
 
 	// The owning project can still mutate it.
-	rec = request(t, handler, http.MethodPatch, "/v1/projects/proj-a/mcp/bindings/"+binding.ID,
+	rec = request(t, handler, http.MethodPatch, "/v1/projects/"+projectA.ID+"/mcp/bindings/"+binding.ID,
 		map[string]any{"desiredEnabled": true}, true)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 }

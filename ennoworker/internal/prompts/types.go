@@ -42,7 +42,7 @@ var (
 type Tier int
 
 const (
-	TierBuiltin  Tier = iota // lowest priority
+	TierBuiltin Tier = iota // lowest priority
 	TierSettings
 	TierGlobal
 	TierProject // highest priority

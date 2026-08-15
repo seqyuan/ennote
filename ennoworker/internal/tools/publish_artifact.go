@@ -26,7 +26,7 @@ func (t *PublishArtifactTool) Definition() domain.ToolDefinition {
 		Name:        "publish_artifact",
 		Description: "Publish one completed Workspace file as an immutable conversation artifact. Files are never published automatically.",
 		Parameters:  schema(`{"type":"object","properties":{"path":{"type":"string","description":"Workspace path of the completed file"},"name":{"type":"string","description":"Optional download filename"}},"required":["path"],"additionalProperties":false}`),
-		RiskClass:    domain.RiskLocalWrite,
+		RiskClass:   domain.RiskLocalWrite,
 	}
 }
 

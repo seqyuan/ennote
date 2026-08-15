@@ -30,7 +30,7 @@ var testRiskMap = mapRiskClassifier{
 	"todo": domain.RiskReadOnly, "git_readonly": domain.RiskReadOnly,
 	"write": domain.RiskLocalWrite, "edit": domain.RiskLocalWrite, "publish_artifact": domain.RiskLocalWrite,
 	"bash": domain.RiskShell, "exec": domain.RiskShell,
-	"web_fetch": domain.RiskExternal,
+	"web_fetch":      domain.RiskExternal,
 	"delegate_tasks": domain.RiskDelegation, "submit_result": domain.RiskDelegation,
 }
 

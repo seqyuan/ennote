@@ -17,7 +17,10 @@ import (
 // snapshots. The cache key includes binding revision and auth generation so a
 // server that returns a different toolset per identity cannot leak a catalog
 // across Projects or credential generations.
-type MCPCatalogRepo struct{ DB *sql.DB }
+type MCPCatalogRepo struct {
+	DB       *sql.DB
+	CacheDir string
+}
 
 // MCPRunRepo persists frozen Run server/tool snapshots and request state.
 type MCPRunRepo struct{ DB *sql.DB }
@@ -42,6 +45,9 @@ type MCPCatalogCacheRow struct {
 
 // PutCatalog stores or replaces the binding-scoped catalog cache row.
 func (r *MCPCatalogRepo) PutCatalog(ctx context.Context, row MCPCatalogCacheRow) error {
+	if r.CacheDir != "" {
+		return r.putCatalogFile(row)
+	}
 	toolsJSON, err := json.Marshal(row.Tools)
 	if err != nil {
 		return err
@@ -64,6 +70,9 @@ func (r *MCPCatalogRepo) PutCatalog(ctx context.Context, row MCPCatalogCacheRow)
 // treated as a miss so future Runs must refresh.
 func (r *MCPCatalogRepo) GetCatalog(ctx context.Context, bindingID string, bindingRevision, authGeneration int,
 	profileVersionID, protocolVersion, credentialDigest string) (*MCPCatalogCacheRow, error) {
+	if r.CacheDir != "" {
+		return r.getCatalogFile(bindingID, bindingRevision, authGeneration, profileVersionID, protocolVersion, credentialDigest)
+	}
 	row := &MCPCatalogCacheRow{}
 	var toolsJSON, fetchedAt string
 	var staleAt sql.NullString
@@ -89,6 +98,9 @@ func (r *MCPCatalogRepo) GetCatalog(ctx context.Context, bindingID string, bindi
 
 // MarkCatalogStale marks a cached catalog stale so future Runs must refresh.
 func (r *MCPCatalogRepo) MarkCatalogStale(ctx context.Context, bindingID string, authGeneration int) error {
+	if r.CacheDir != "" {
+		return r.markCatalogFilesStale(bindingID, authGeneration)
+	}
 	_, err := r.DB.ExecContext(ctx,
 		`UPDATE mcp_catalog_cache SET stale_at=? WHERE binding_id=? AND auth_generation=?`,
 		roleTime(time.Now().UTC()), bindingID, authGeneration)
@@ -180,9 +192,14 @@ func (r *MCPRunRepo) FreezeServerWithTools(ctx context.Context, s RunMCPServerSn
 	}
 	for i := range tools {
 		tools[i].RunServerID = serverID
-		if _, err := r.freezeToolTx(ctx, tx, tools[i]); err != nil {
+		toolID, err := r.freezeToolTx(ctx, tx, tools[i])
+		if err != nil {
 			return "", err
 		}
+		// freezeToolTx takes a value copy and auto-assigns an id when empty;
+		// the caller must get the assigned id back or the frozen snapshot's
+		// RunToolID is empty and mcp_requests FK writes fail.
+		tools[i].ID = toolID
 	}
 	if err := tx.Commit(); err != nil {
 		return "", err

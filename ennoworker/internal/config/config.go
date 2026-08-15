@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+
+	"github.com/seqyuan/ennote/ennoworker/internal/storage"
 )
 
 // Config holds all ennoworker configuration.
@@ -15,8 +17,8 @@ type Config struct {
 	ListenAddr string
 	// MaxConcurrentRuns limits how many agent runs can execute in parallel.
 	MaxConcurrentRuns int
-	// DatabasePath is the full path to the SQLite database file.
-	DatabasePath string
+	// Layout contains all V2 storage paths rooted under HomeDir.
+	Layout storage.Layout
 	// SandboxMode controls the workspace isolation strategy.
 	SandboxMode string
 	// LogLevel controls logging verbosity.
@@ -51,7 +53,7 @@ func Load() (*Config, error) {
 		HomeDir:           home,
 		ListenAddr:        fmt.Sprintf("127.0.0.1:%s", port),
 		MaxConcurrentRuns: 2,
-		DatabasePath:      filepath.Join(home, "data", "ennote.db"),
+		Layout:            storage.ForHome(home),
 		SandboxMode:       sandboxMode(),
 		LogLevel:          logLevel(),
 		BootstrapToken:    os.Getenv("ENNOTE_BOOTSTRAP_TOKEN"),

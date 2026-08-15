@@ -169,7 +169,7 @@ export function PromptCommandMenu({
   if (entries.length === 0 || !mode) return null;
 
   const ariaLabel = mode === "template" ? "Prompt templates"
-    : mode === "role" ? "Role targets" : "Agent Flows";
+    : mode === "role" ? "Role targets" : "Graphs";
 
   return (
     <div className="prompt-command-menu" role="listbox" aria-label={ariaLabel}>

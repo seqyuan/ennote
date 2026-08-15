@@ -209,9 +209,11 @@ func TestRetryRoleKillSwitchFailsClosed(t *testing.T) {
 	delegations, _, _, group, failedItemID := settleMixedGroup(t)
 	ctx := context.Background()
 
-	// Disable the Role identity: retry must fail before creating any child.
-	_, err := delegations.DB.Exec(`UPDATE agent_profiles SET delegation_enabled=0
-		WHERE id='builtin-workspace-explorer'`)
+	// V2 kill switch: the frozen Role meta is the only runtime authority for a
+	// retry. Simulate a revoked identity by clearing the item's frozen meta:
+	// retry must fail closed before creating any child.
+	_, err := delegations.DB.Exec(`UPDATE delegation_items SET role_meta_json='{}'
+		WHERE id=?`, failedItemID)
 	require.NoError(t, err)
 	_, children, _, err := delegations.RetryGeneration(ctx, group.ID, domain.RetryDelegationInput{
 		ExpectedGeneration: 0, ItemIDs: []string{failedItemID}, ClientRequestID: "retry-kill",
@@ -224,10 +226,6 @@ func TestRetryRoleKillSwitchFailsClosed(t *testing.T) {
 	assert.Zero(t, attempts)
 	require.NoError(t, delegations.DB.QueryRow(`SELECT COUNT(*) FROM agent_runs WHERE parent_run_id=?`, group.ParentRunID).Scan(&childrenCount))
 	assert.Equal(t, 2, childrenCount, "no new child Run may be created")
-	// Re-enable for other tests that share nothing (this test is isolated).
-	_, err = delegations.DB.Exec(`UPDATE agent_profiles SET delegation_enabled=1
-		WHERE id='builtin-workspace-explorer'`)
-	require.NoError(t, err)
 }
 
 func TestRetryBudgetIncreaseRequiresApproval(t *testing.T) {

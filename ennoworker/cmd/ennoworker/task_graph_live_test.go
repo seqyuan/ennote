@@ -6,7 +6,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -31,46 +30,16 @@ import (
 // It requires ENNOTE_LIVE_BASE_URL / ENNOTE_LIVE_API_KEY / ENNOTE_LIVE_MODEL
 // (same contract as the Item 6 live qualification).
 func TestLiveTaskGraph(t *testing.T) {
-	baseURL := strings.TrimSpace(os.Getenv("ENNOTE_LIVE_BASE_URL"))
-	apiKey := strings.TrimSpace(os.Getenv("ENNOTE_LIVE_API_KEY"))
-	model := strings.TrimSpace(os.Getenv("ENNOTE_LIVE_MODEL"))
-	if baseURL == "" || apiKey == "" || model == "" {
-		t.Skip("ENNOTE_LIVE_BASE_URL, ENNOTE_LIVE_API_KEY, and ENNOTE_LIVE_MODEL are required")
-	}
-	t.Setenv("ENNOTE_LIVE_API_KEY", apiKey)
-	t.Setenv("ENNOTE_HOME", t.TempDir())
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
-	db, err := store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
-
-	workspaceDir := t.TempDir()
-	project, _, err := (&store.ProjectRepo{DB: db}).CreateWithWorkspace(ctx, domain.CreateProjectInput{
-		Name: "task-graph-live", HostPath: workspaceDir,
-	})
-	require.NoError(t, err)
-	provider, err := (&store.ProviderRepo{DB: db}).Create(ctx, store.CreateProviderInput{
-		Name: "tg-provider", ProviderType: domain.ProviderOpenAICompatible,
-		BaseURL: baseURL, CredentialRef: "env:ENNOTE_LIVE_API_KEY",
-	})
-	require.NoError(t, err)
-	modelProfile, err := (&store.ModelRepo{DB: db}).Create(ctx, store.CreateModelInput{
-		ProviderID: provider.ID, ModelName: model, DisplayName: model,
-		ContextWindow: 64000, MaxOutputTokens: 512,
-		SupportsToolUse: true, SupportsThinking: true, IsDefault: true,
-	})
-	require.NoError(t, err)
-	modelProfileID := modelProfile.ID
-	sessionRepo := &store.SessionRepo{DB: db}
-	session, err := sessionRepo.Create(ctx, domain.CreateSessionInput{
-		ProjectID: project.ID, Title: "task graph live", DefaultModelProfileID: &modelProfileID,
-	})
-	require.NoError(t, err)
+	stack := newLiveStack(t, "task-graph-live")
+	db := stack.DB
+	session := stack.Session
+	modelProfileID := stack.ModelID
 
 	hub := events.NewHub()
-	runRepo := &store.RunRepo{DB: db, Publisher: hub}
+	runRepo := &store.RunRepo{DB: db, Publisher: hub, Providers: stack.Providers,
+		Models: stack.ModelRepo, Policies: stack.Policies}
 	messageRepo := &store.MessageRepo{DB: db}
 
 	parentSubmission, err := runRepo.SubmitTurn(ctx, domain.SubmitTurnInput{
@@ -92,9 +61,9 @@ func TestLiveTaskGraph(t *testing.T) {
 		VALUES('tc-tg',?,1,'tg-chain','delegate_tasks','{}','completed',CURRENT_TIMESTAMP)`,
 		parentRun.ID)
 	require.NoError(t, err)
-	explore := explorerLiveItem()
+	explore := explorerLiveItem(t, modelProfileID)
 	explore.Name = "explore"
-	review := explorerLiveItem()
+	review := explorerLiveItem(t, modelProfileID)
 	review.Name = "review"
 	review.Depends = []string{"explore"}
 	review.AssignmentJSON = json.RawMessage(`{"objective":"Review the workspace listing from the explore task and answer whether any data files are present. Say REVIEW_OK when done."}`)
@@ -114,7 +83,7 @@ func TestLiveTaskGraph(t *testing.T) {
 	parentLive, parentLiveStop := hub.SubscribeLive(parentRun.ID, 128)
 	defer parentLiveStop()
 
-	executor := newV15Executor(t, db, hub, runRepo, sessionRepo, messageRepo)
+	executor := newV15Executor(t, db, hub, runRepo, &store.SessionRepo{DB: db}, messageRepo, &store.ProjectRepo{Files: stack.Projects})
 	require.NoError(t, executeV15Child(ctx, t, executor, runRepo, children[0], "explore"))
 
 	// Entry settled -> dependent task ready.

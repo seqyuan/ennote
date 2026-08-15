@@ -2,27 +2,18 @@
 
 import { X } from "lucide-react";
 import { useEffect, useRef } from "react";
-import { Composer, type TextAttachment } from "@/components/Composer";
+import { Composer, type PendingImage, type TextAttachment } from "@/components/Composer";
 import { BackgroundDelegationStrip } from "@/components/BackgroundDelegationStrip";
-import { FlowCheckApprovalStrip } from "@/components/FlowCheckApprovalStrip";
 import { CompactionPromptBar } from "@/components/CompactionPromptBar";
 import { ConversationTimeline } from "@/components/ConversationTimeline";
 import { StreamingStatusBar } from "@/components/StreamingStatusBar";
 import type { ModelProfile, RoleSummary } from "@/components/settings/types";
 import type { ApprovalDecision, ToolApprovalRequest } from "@/lib/approval";
 import type { ConversationNode } from "@/lib/chat-messages";
-import type { PermissionMode } from "@/lib/permission-mode";
+import type { PermissionMode, ThinkingEffort } from "@/lib/permission-mode";
 import type { components } from "@/lib/worker-api.gen";
 
 type RunRecovery = components["schemas"]["RunRecovery"];
-
-export interface PendingImage {
-  id: string;
-  name: string;
-  mimeType: string;
-  width?: number;
-  height?: number;
-}
 
 interface ChatWindowProps {
   projectId: string | null;
@@ -60,6 +51,8 @@ interface ChatWindowProps {
   models: ModelProfile[];
   selectedModelId: string | null;
   setSelectedModelId: (modelId: string) => void;
+  thinkingEffort: ThinkingEffort;
+  setThinkingEffort: (effort: ThinkingEffort) => void;
   roles: RoleSummary[];
   selectedRoleId: string | null;
   setSelectedRoleId: (roleId: string | null) => void;
@@ -68,7 +61,9 @@ interface ChatWindowProps {
   attachFiles: (files: File[]) => void;
   submit: () => void;
   steer: () => void;
+  followUp: () => void;
   cancel: () => void;
+  pendingFollowUps: { id: string; text: string }[];
   compactSession: () => void;
   compactionPromptOpen: boolean;
   compactionInstructions: string;
@@ -95,7 +90,9 @@ export function ChatWindow({
   hasMoreHistory, loadOlderHistory, error, clearError, status, input, setInput, activeRun, activeRunStatus, compacting,
   permissionMode, permissionReady, setPermissionMode, pendingApproval, resolvingApproval, decideApproval,
   pendingImage, clearPendingImage, uploadImage, models, selectedModelId, setSelectedModelId,
-  roles, selectedRoleId, setSelectedRoleId, textAttachments, removeTextAttachment, attachFiles, submit, steer, cancel, compactSession,
+  thinkingEffort, setThinkingEffort,
+  roles, selectedRoleId, setSelectedRoleId, textAttachments, removeTextAttachment, attachFiles, submit, steer, followUp, cancel, compactSession,
+  pendingFollowUps,
   compactionPromptOpen, compactionInstructions, compactionBusy, setCompactionInstructions, confirmCompaction, cancelCompaction,
   promptTemplates, showPromptPanel, onPromptSelect, onPromptPanelClose, expanding, expandDiag,
   panelRoles, panelFlows, onRoleSelect, onFlowSelect,
@@ -175,12 +172,7 @@ export function ChatWindow({
         <div ref={bottomRef} />
       </div>
     </div>
-    {pendingImage && <div className="attachment-strip">
-      <span>{pendingImage.name} · {pendingImage.width}×{pendingImage.height}</span>
-      <button onClick={clearPendingImage} aria-label="Remove image"><X size={14} aria-hidden="true" /></button>
-    </div>}
     <BackgroundDelegationStrip sessionId={selectedSession ?? undefined} />
-    <FlowCheckApprovalStrip projectId={projectId} sessionId={selectedSession ?? undefined} />
     {compactionPromptOpen && (
       <CompactionPromptBar
         value={compactionInstructions}
@@ -194,9 +186,12 @@ export function ChatWindow({
       activeRun={Boolean(activeRun)} compacting={compacting} hasPendingImage={Boolean(pendingImage)} reconnecting={reconnecting}
       permissionMode={permissionMode} permissionReady={permissionReady} setPermissionMode={setPermissionMode}
       models={models} selectedModelId={selectedModelId} setSelectedModelId={setSelectedModelId}
+      thinkingEffort={thinkingEffort} setThinkingEffort={setThinkingEffort}
       roles={roles} selectedRoleId={selectedRoleId} setSelectedRoleId={setSelectedRoleId}
-      textAttachments={textAttachments} removeTextAttachment={removeTextAttachment} attachFiles={attachFiles}
-      uploadImage={uploadImage} submit={submit} steer={steer} cancel={cancel} compactSession={compactSession}
+      textAttachments={textAttachments} removeTextAttachment={removeTextAttachment}
+      pendingImage={pendingImage} clearPendingImage={clearPendingImage}
+      attachFiles={attachFiles} uploadImage={uploadImage} submit={submit} steer={steer} followUp={followUp} cancel={cancel} compactSession={compactSession}
+      pendingFollowUps={pendingFollowUps}
       promptTemplates={promptTemplates} showPromptPanel={showPromptPanel} onPromptSelect={onPromptSelect}
       panelRoles={panelRoles} panelFlows={panelFlows} onRoleSelect={onRoleSelect} onFlowSelect={onFlowSelect}
       onPromptPanelClose={onPromptPanelClose}

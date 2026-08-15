@@ -180,11 +180,10 @@ func setupArtifactService(t *testing.T) *Service {
 	db, err := store.OpenMemory()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
+	require.NoError(t, store.MigrateFixtureSchema(db))
 	now := "2026-07-28T00:00:00Z"
-	_, err = db.Exec(`INSERT INTO projects(id,name,created_at,updated_at) VALUES('p','project',?,?),('other-project','other',?,?);
-		INSERT INTO sessions(id,project_id,created_at,updated_at) VALUES('s','p',?,?),('other','other-project',?,?)`,
-		now, now, now, now, now, now, now, now)
+	_, err = db.Exec(`INSERT INTO sessions(id,project_id,created_at,updated_at) VALUES('s','p',?,?),('other','other-project',?,?)`,
+		now, now, now, now)
 	require.NoError(t, err)
 	return &Service{DB: db, Root: t.TempDir()}
 }

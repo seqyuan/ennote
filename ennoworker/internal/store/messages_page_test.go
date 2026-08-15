@@ -12,15 +12,10 @@ import (
 )
 
 func TestMessagePagePaginatesActiveLineageInChronologicalOrder(t *testing.T) {
-	db := stores.SetupDB(t)
+	db, manager, session := newSessionDB(t)
 	ctx := context.Background()
-	projects := &stores.ProjectRepo{DB: db}
-	sessions := &stores.SessionRepo{DB: db}
+	sessions := &stores.SessionRepo{Files: manager}
 	messages := &stores.MessageRepo{DB: db}
-	project, _, err := projects.CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: "History", HostPath: t.TempDir()})
-	require.NoError(t, err)
-	session, err := sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID})
-	require.NoError(t, err)
 
 	var lineage []*domain.Message
 	parentID := ""
@@ -31,7 +26,7 @@ func TestMessagePagePaginatesActiveLineageInChronologicalOrder(t *testing.T) {
 		parentID = message.ID
 	}
 	require.NoError(t, sessions.ActivateLeaf(ctx, session.ID, lineage[4].ID))
-	_, err = db.ExecContext(ctx, `INSERT INTO message_parts(id,message_id,ordinal,block_kind,payload_json)
+	_, err := db.ExecContext(ctx, `INSERT INTO message_parts(id,message_id,ordinal,block_kind,payload_json)
 		VALUES('extra-thinking',?,1,'thinking','{"text":"detail"}')`, lineage[4].ID)
 	require.NoError(t, err)
 
@@ -67,15 +62,10 @@ func TestMessagePagePaginatesActiveLineageInChronologicalOrder(t *testing.T) {
 }
 
 func TestMessagePageRejectsOffBranchAndOtherSessionCursors(t *testing.T) {
-	db := stores.SetupDB(t)
+	db, manager, session := newSessionDB(t)
 	ctx := context.Background()
-	projects := &stores.ProjectRepo{DB: db}
-	sessions := &stores.SessionRepo{DB: db}
+	sessions := &stores.SessionRepo{Files: manager}
 	messages := &stores.MessageRepo{DB: db}
-	project, _, err := projects.CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: "Branches", HostPath: t.TempDir()})
-	require.NoError(t, err)
-	session, err := sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID})
-	require.NoError(t, err)
 	root, err := messages.CreateUserMessage(ctx, session.ID, "", "root")
 	require.NoError(t, err)
 	active, err := messages.CreateUserMessage(ctx, session.ID, root.ID, "active")
@@ -87,15 +77,13 @@ func TestMessagePageRejectsOffBranchAndOtherSessionCursors(t *testing.T) {
 	_, err = messages.Page(ctx, session.ID, active.ID, sibling.ID, 10)
 	assert.ErrorIs(t, err, stores.ErrMessageCursorInvalid)
 
-	otherSession, err := sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID})
-	require.NoError(t, err)
+	otherSession := sqlCreateSession(t, db, "00000000-0000-4000-8000-000000000004")
 	other, err := messages.CreateUserMessage(ctx, otherSession.ID, "", "other")
 	require.NoError(t, err)
 	_, err = messages.Page(ctx, session.ID, active.ID, other.ID, 10)
 	assert.True(t, errors.Is(err, stores.ErrMessageCursorInvalid))
 
-	emptySession, err := sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID})
-	require.NoError(t, err)
+	emptySession := sqlCreateSession(t, db, "00000000-0000-4000-8000-000000000004")
 	_, err = messages.Page(ctx, emptySession.ID, "", "fabricated", 10)
 	assert.ErrorIs(t, err, stores.ErrMessageCursorInvalid)
 }

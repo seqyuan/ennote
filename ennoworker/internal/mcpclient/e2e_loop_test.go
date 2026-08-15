@@ -95,7 +95,8 @@ func TestEndToEndMCPToolThroughAgentLoop(t *testing.T) {
 			Recorder:           recorder,
 			ConnectionProvider: func() *Session { return session },
 		}
-		require.NoError(t, reg.Register(mcpTool))
+		_, err := reg.Register(mcpTool)
+		require.NoError(t, err)
 	}
 
 	// Provider: first turn asks for the MCP tool; second turn ends.
@@ -192,11 +193,12 @@ func TestEndToEndMCPAskRequiresApproval(t *testing.T) {
 	reg, err := tools.NewRegistry()
 	require.NoError(t, err)
 	for _, entry := range entries {
-		require.NoError(t, reg.Register(&Tool{
+		_, err := reg.Register(&Tool{
 			DefinitionSnapshot: BuildToolDefinition(entry, domain.RiskExternal),
 			RemoteName:         entry.RemoteName,
 			ConnectionProvider: func() *Session { return session },
-		}))
+		})
+		require.NoError(t, err)
 	}
 	policy, err := agent.NewBuiltinToolPolicy(domain.PolicySnapshot{
 		ID: "ask", Kind: domain.PolicyKindTool, Version: 1,

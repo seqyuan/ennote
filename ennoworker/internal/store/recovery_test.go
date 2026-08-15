@@ -14,10 +14,10 @@ import (
 
 func setupFailedRun(t *testing.T, requestID string) (*store.RunRepo, *domain.TurnSubmission) {
 	t.Helper()
-	db := store.SetupDB(t)
-	_, err := db.Exec(`UPDATE settings SET value='1' WHERE key='hosted_commit_format_version'`)
-	require.NoError(t, err)
-	runs := &store.RunRepo{DB: db}
+	db, _, _ := newSessionDB(t)
+	stack := newFileConfigStack(t)
+	runs := &store.RunRepo{DB: db, Providers: stack.Providers, Models: stack.ModelRepo,
+		Policies: stack.Policies, RoleSources: stack.Sources}
 	sessionID := createRunTestSession(t, runs)
 	submission, err := runs.SubmitTurn(context.Background(), domain.SubmitTurnInput{
 		SessionID: sessionID, ClientRequestID: requestID, Text: "recover this",
@@ -46,6 +46,8 @@ func TestRunRecoveryRetriesFailedAttemptIdempotentlyWithoutDuplicatingUserMessag
 	assert.False(t, first.Existing)
 	assert.Equal(t, 2, first.Run.Attempt)
 	assert.Equal(t, submission.Run.ID, first.Run.RetryOfRunID)
+	// Host turns without format-2 lineage stay LegacyV1; the legacy settings
+	// writer gate no longer exists (V2 file mode).
 	assert.Equal(t, domain.CommitFormatLegacyV1, first.Run.CommitFormatVersion)
 	assert.Equal(t, domain.PublishPublicFinal, first.Run.PublishMode)
 	assert.NotEmpty(t, first.Run.RootRunID)

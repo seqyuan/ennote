@@ -38,39 +38,43 @@ func NewRegistry(tools ...Tool) (*Registry, error) {
 		validators: make(map[string]*jsonschema.Schema), retryPolicy: make(map[string]domain.ToolRetryPolicy),
 		risks: make(map[string]domain.RiskClass), aliases: make(map[string]string)}
 	for _, tool := range tools {
-		if err := registry.Register(tool); err != nil {
+		if _, err := registry.Register(tool); err != nil {
 			return nil, err
 		}
 	}
 	return registry, nil
 }
 
-func (r *Registry) Register(tool Tool) error {
+// Register adds a tool and returns a disposer that removes exactly the entries
+// this registration added. The disposer is idempotent (repeat calls are no-ops)
+// and safe to call after the registry has been discarded wholesale. On failure
+// no map is written and the returned disposer is nil.
+func (r *Registry) Register(tool Tool) (func(), error) {
 	if tool == nil {
-		return fmt.Errorf("tool is nil")
+		return nil, fmt.Errorf("tool is nil")
 	}
 	definition := tool.Definition()
 	if definition.Name == "" {
-		return fmt.Errorf("tool name is required")
+		return nil, fmt.Errorf("tool name is required")
 	}
 	// RiskClass is mandatory local metadata. Missing or invalid risk fails
 	// registration before any map is written (fail closed, no partial state).
 	if !domain.IsValidRiskClass(definition.RiskClass) {
-		return fmt.Errorf("tool %s has invalid risk class %q", definition.Name, definition.RiskClass)
+		return nil, fmt.Errorf("tool %s has invalid risk class %q", definition.Name, definition.RiskClass)
 	}
 	compiler := jsonschema.NewCompiler()
 	resource := "mem://tool/" + definition.Name + ".json"
 	if err := compiler.AddResource(resource, strings.NewReader(string(definition.Parameters))); err != nil {
-		return fmt.Errorf("add schema for tool %s: %w", definition.Name, err)
+		return nil, fmt.Errorf("add schema for tool %s: %w", definition.Name, err)
 	}
 	validator, err := compiler.Compile(resource)
 	if err != nil {
-		return fmt.Errorf("compile schema for tool %s: %w", definition.Name, err)
+		return nil, fmt.Errorf("compile schema for tool %s: %w", definition.Name, err)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.tools[definition.Name]; exists {
-		return fmt.Errorf("tool already registered: %s", definition.Name)
+		return nil, fmt.Errorf("tool already registered: %s", definition.Name)
 	}
 	r.tools[definition.Name] = tool
 	r.validators[definition.Name] = validator
@@ -85,7 +89,20 @@ func (r *Registry) Register(tool Tool) error {
 	}
 	r.retryPolicy[definition.Name] = policy
 	r.risks[definition.Name] = definition.RiskClass
-	return nil
+
+	var once sync.Once
+	dispose := func() {
+		once.Do(func() {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			delete(r.tools, definition.Name)
+			delete(r.validators, definition.Name)
+			delete(r.classes, definition.Name)
+			delete(r.retryPolicy, definition.Name)
+			delete(r.risks, definition.Name)
+		})
+	}
+	return dispose, nil
 }
 
 // RegisterAlias registers a legacy alias name for an already-registered
@@ -93,27 +110,29 @@ func (r *Registry) Register(tool Tool) error {
 // under the provided legacy argument schema, but is hidden from Definitions()
 // so models never see it. It exists so tool calls persisted before a rename
 // (approval records, replayed calls of resumed runs) keep resolving.
-func (r *Registry) RegisterAlias(alias, canonical, legacySchema string) error {
+// The returned disposer removes only the alias entries; the canonical tool is
+// untouched. It is idempotent (repeat calls are no-ops).
+func (r *Registry) RegisterAlias(alias, canonical, legacySchema string) (func(), error) {
 	if alias == "" || canonical == "" || legacySchema == "" {
-		return fmt.Errorf("alias, canonical, and legacy schema are required")
+		return nil, fmt.Errorf("alias, canonical, and legacy schema are required")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	tool, ok := r.tools[canonical]
 	if !ok {
-		return fmt.Errorf("alias target %s is not registered", canonical)
+		return nil, fmt.Errorf("alias target %s is not registered", canonical)
 	}
 	if _, exists := r.tools[alias]; exists {
-		return fmt.Errorf("tool already registered: %s", alias)
+		return nil, fmt.Errorf("tool already registered: %s", alias)
 	}
 	compiler := jsonschema.NewCompiler()
 	resource := "mem://tool/" + alias + ".json"
 	if err := compiler.AddResource(resource, strings.NewReader(legacySchema)); err != nil {
-		return fmt.Errorf("add legacy schema for alias %s: %w", alias, err)
+		return nil, fmt.Errorf("add legacy schema for alias %s: %w", alias, err)
 	}
 	validator, err := compiler.Compile(resource)
 	if err != nil {
-		return fmt.Errorf("compile legacy schema for alias %s: %w", alias, err)
+		return nil, fmt.Errorf("compile legacy schema for alias %s: %w", alias, err)
 	}
 	r.tools[alias] = tool
 	r.validators[alias] = validator
@@ -121,7 +140,21 @@ func (r *Registry) RegisterAlias(alias, canonical, legacySchema string) error {
 	r.retryPolicy[alias] = r.retryPolicy[canonical]
 	r.risks[alias] = r.risks[canonical]
 	r.aliases[alias] = canonical
-	return nil
+
+	var once sync.Once
+	dispose := func() {
+		once.Do(func() {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			delete(r.tools, alias)
+			delete(r.validators, alias)
+			delete(r.classes, alias)
+			delete(r.retryPolicy, alias)
+			delete(r.risks, alias)
+			delete(r.aliases, alias)
+		})
+	}
+	return dispose, nil
 }
 
 // Restrict removes every tool not present in the frozen allowlist. A Registry is

@@ -3,50 +3,47 @@ package store_test
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
+	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
+	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	store "github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestResolveAndFreezeConfigUsesRequestedModelAndExecutionSettings(t *testing.T) {
-	db := store.SetupDB(t)
 	ctx := context.Background()
-	project, _, err := (&store.ProjectRepo{DB: db}).CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: "config", HostPath: t.TempDir()})
-	require.NoError(t, err)
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err = db.Exec(`INSERT INTO provider_profiles
-		(id, name, provider_type, base_url, status, created_at, updated_at)
-		VALUES ('provider-1', 'provider', 'openai-compatible', 'https://provider.test/v1', 'active', ?, ?)`, now, now)
-	require.NoError(t, err)
-	for _, model := range []struct{ id, name string }{{"model-default", "default-api-model"}, {"model-requested", "requested-api-model"}} {
-		_, err = db.Exec(`INSERT INTO model_profiles
-			(id, provider_id, model_name, display_name, context_window, max_output_tokens, status, created_at, updated_at)
-			VALUES (?, 'provider-1', ?, ?, 64000, 4096, 'active', ?, ?)`, model.id, model.name, model.name, now, now)
-		require.NoError(t, err)
-	}
-	defaultModel := "model-default"
-	session, err := (&store.SessionRepo{DB: db}).Create(ctx, domain.CreateSessionInput{
-		ProjectID: project.ID, Title: "session", DefaultModelProfileID: &defaultModel,
+	stack := newFileConfigStack(t)
+	// A second, non-default model exists; the request pins it explicitly.
+	second, err := stack.Models.CreateModel(ctx, fileconfig.CreateModelInput{
+		ProviderID: "provider", ModelName: "requested", DisplayName: "Requested",
+		ContextWindow: 64000, MaxOutputTokens: 4096, SupportsToolUse: true, IsDefault: false,
 	})
 	require.NoError(t, err)
-	repo := &store.RunRepo{DB: db}
+	db := store.SetupDB(t)
+	project, _, err := newFileProjects(t).CreateWithWorkspace(ctx,
+		domain.CreateProjectInput{Name: "config", HostPath: t.TempDir()})
+	require.NoError(t, err)
+	session := sqlCreateSessionWithModel(t, db, project.ID, &stack.DefaultRef)
+	repo := &store.RunRepo{DB: db, Providers: stack.Providers, Models: stack.ModelRepo, Policies: stack.Policies}
 	submission, err := repo.SubmitTurn(ctx, domain.SubmitTurnInput{
 		SessionID: session.ID, ClientRequestID: "config-request", Text: "run",
-		RequestedConfig: json.RawMessage(`{"modelProfileId":"model-requested","toolPolicyProfileId":"builtin-tool-auto-v1","maxIterations":7,"toolExecution":"safe_parallel","maxConcurrentReadTools":3}`),
+		RequestedConfig: json.RawMessage(`{"modelProfileId":"provider/requested","toolPolicyProfileId":"builtin-tool-auto-v1","maxIterations":7,"toolExecution":"safe_parallel","maxConcurrentReadTools":3}`),
 	})
 	require.NoError(t, err)
 	run, err := repo.Claim(ctx, submission.Run.ID)
 	require.NoError(t, err)
 	resolved, err := repo.ResolveAndFreezeConfig(ctx, run)
 	require.NoError(t, err)
-	assert.Equal(t, "provider-1", resolved.Effective.ProviderProfileID)
-	assert.Equal(t, "model-requested", resolved.Effective.ModelProfileID)
-	assert.Equal(t, "requested-api-model", resolved.Effective.APIModel)
+	assert.Equal(t, "provider", resolved.Effective.ProviderProfileID)
+	assert.Equal(t, second.ID, resolved.Effective.ModelProfileID)
+	assert.Equal(t, "requested", resolved.Effective.APIModel)
 	assert.Equal(t, 64000, resolved.Effective.ContextTokens)
 	assert.Equal(t, 4096, resolved.Effective.MaxOutputTokens)
 	assert.Equal(t, 7, resolved.Effective.MaxIterations)
@@ -61,18 +58,37 @@ func TestResolveAndFreezeConfigUsesRequestedModelAndExecutionSettings(t *testing
 	require.NoError(t, err)
 	var effective domain.EffectiveRunConfig
 	require.NoError(t, json.Unmarshal(stored.EffectiveConfig, &effective))
-	assert.Equal(t, "requested-api-model", effective.APIModel)
+	assert.Equal(t, "requested", effective.APIModel)
 	assert.NotEqual(t, `{}`, string(stored.EffectiveConfig))
 }
 
 func TestResolveConfigFailsWithStableCodeWhenNoModelExists(t *testing.T) {
-	repo, submission := setupSubmittedRun(t, "missing-model")
-	run, err := repo.Claim(context.Background(), submission.Run.ID)
+	// File-native stack with an empty model catalog: no active model exists.
+	ctx := context.Background()
+	home := t.TempDir()
+	models := fileconfig.NewModelStore(
+		filepath.Join(home, "config", "models.json"),
+		filepath.Join(home, "config", "provider-auth.json"),
+		filepath.Join(home, "config", "settings.json"),
+	)
+	db := store.SetupDB(t)
+	project, _, err := newFileProjects(t).CreateWithWorkspace(ctx,
+		domain.CreateProjectInput{Name: "missing-model", HostPath: t.TempDir()})
 	require.NoError(t, err)
-	_, err = repo.ResolveAndFreezeConfig(context.Background(), run)
+	session := sqlCreateSession(t, db, project.ID)
+	repo := &store.RunRepo{DB: db, Providers: &store.ProviderRepo{Files: models},
+		Models:   &store.ModelRepo{Files: models},
+		Policies: &fileconfig.PolicyStore{Path: filepath.Join(home, "config", "policies.json")}}
+	submission, err := repo.SubmitTurn(ctx, domain.SubmitTurnInput{
+		SessionID: session.ID, ClientRequestID: "missing-model", Text: "run",
+	})
+	require.NoError(t, err)
+	run, err := repo.Claim(ctx, submission.Run.ID)
+	require.NoError(t, err)
+	_, err = repo.ResolveAndFreezeConfig(ctx, run)
 	require.Error(t, err)
 	assert.Equal(t, domain.ErrorProviderUnavailable, domain.ErrorCodeOf(err))
-	stored, getErr := repo.Get(context.Background(), run.ID)
+	stored, getErr := repo.Get(ctx, run.ID)
 	require.NoError(t, getErr)
 	assert.JSONEq(t, `{}`, string(stored.EffectiveConfig))
 }
@@ -415,16 +431,26 @@ func TestSkippedToolCallStoresValidArgumentsAndRawFragment(t *testing.T) {
 
 func setupSubmittedRun(t *testing.T, requestID string) (*store.RunRepo, *domain.TurnSubmission) {
 	t.Helper()
-	db := store.SetupDB(t)
+	// V2: Sessions live in per-Session SQLite files under the project store;
+	// the returned RunRepo operates on the opened Session database with the
+	// file-native provider/model/policy/role stores wired.
 	ctx := context.Background()
-	_, err := db.Exec(`UPDATE settings SET value='1' WHERE key='hosted_commit_format_version'`)
+	stack := newFileConfigStack(t)
+	projects := &projectstore.Store{Root: filepath.Join(stack.Home, "projects")}
+	project, _, err := projects.CreateWithWorkspace(ctx,
+		domain.CreateProjectInput{Name: requestID, HostPath: t.TempDir()})
 	require.NoError(t, err)
-	project, _, err := (&store.ProjectRepo{DB: db}).CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: requestID, HostPath: t.TempDir()})
+	sessions := sessionstore.NewManager(projects.Root, projects)
+	t.Cleanup(func() { require.NoError(t, sessions.Close()) })
+	session, err := sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID, Title: requestID})
 	require.NoError(t, err)
-	session, err := (&store.SessionRepo{DB: db}).Create(ctx, domain.CreateSessionInput{ProjectID: project.ID, Title: requestID})
+	db, err := sessions.OpenSession(ctx, session.ID)
 	require.NoError(t, err)
-	repo := &store.RunRepo{DB: db}
-	submission, err := repo.SubmitTurn(ctx, domain.SubmitTurnInput{SessionID: session.ID, ClientRequestID: requestID, Text: "run"})
+	repo := &store.RunRepo{DB: db, Providers: stack.Providers, Models: stack.ModelRepo,
+		Policies: stack.Policies, RoleSources: stack.Sources}
+	submission, err := repo.SubmitTurn(ctx, domain.SubmitTurnInput{
+		SessionID: session.ID, ClientRequestID: requestID, Text: "run",
+	})
 	require.NoError(t, err)
 	return repo, submission
 }

@@ -32,9 +32,9 @@ describe("ennote launcher", () => {
   });
 
   it("formats IPv4, wildcard and IPv6 service URLs", () => {
-    expect(launcher.serviceURL("127.0.0.1", "30142")).toBe("http://127.0.0.1:30142");
-    expect(launcher.serviceURL("0.0.0.0", "30142")).toBe("http://127.0.0.1:30142");
-    expect(launcher.serviceURL("::1", "30142")).toBe("http://[::1]:30142");
+    expect(launcher.serviceURL("127.0.0.1", "45131")).toBe("http://127.0.0.1:45131");
+    expect(launcher.serviceURL("0.0.0.0", "45131")).toBe("http://127.0.0.1:45131");
+    expect(launcher.serviceURL("::1", "45131")).toBe("http://[::1]:45131");
   });
 
   it("uses the same authentication file as ennogate", () => {

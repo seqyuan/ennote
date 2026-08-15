@@ -149,7 +149,7 @@ func (r *DelegationRepo) createContinuationGeneration(ctx context.Context, itemI
 	originalCeiling := ceiling
 	approvalRequired := false
 	if input.Budget != nil {
-		if err := r.validateRetryRoleAndCeilingTx(ctx, tx, itemRoleVersion, *input.Budget); err != nil {
+		if err := r.validateRetryRoleAndCeilingTx(ctx, tx, itemID, *input.Budget); err != nil {
 			return nil, nil, err
 		}
 		approvalRequired = budgetIncreased(originalCeiling, *input.Budget)
@@ -240,6 +240,7 @@ func (r *DelegationRepo) createContinuationGeneration(ctx context.Context, itemI
 		ParentRunID: parentRunID, ItemID: itemID, SessionID: sessionID,
 		Generation: nextGeneration, RetryOfAttemptID: sourceAttemptID,
 		BudgetOverride: override, AllowTerminalParent: true,
+		Policies: r.Policies,
 	})
 	if err != nil {
 		return nil, nil, err

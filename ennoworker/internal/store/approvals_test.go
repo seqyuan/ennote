@@ -13,7 +13,7 @@ import (
 
 func setupApprovalRun(t *testing.T) (*store.RunRepo, *store.ApprovalRepo, *domain.TurnSubmission) {
 	t.Helper()
-	db := store.SetupDB(t)
+	db, _, _ := newSessionDB(t)
 	runs := &store.RunRepo{DB: db}
 	sessionID := createRunTestSession(t, runs)
 	submission, err := runs.SubmitTurn(context.Background(), domain.SubmitTurnInput{

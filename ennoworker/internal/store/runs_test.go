@@ -14,19 +14,13 @@ import (
 
 func createRunTestSession(t *testing.T, dbRepo *store.RunRepo) string {
 	t.Helper()
-	projectRepo := &store.ProjectRepo{DB: dbRepo.DB}
-	sessionRepo := &store.SessionRepo{DB: dbRepo.DB}
-	project, _, err := projectRepo.CreateWithWorkspace(context.Background(), domain.CreateProjectInput{
-		Name: "Run test", HostPath: t.TempDir(),
-	})
-	require.NoError(t, err)
-	session, err := sessionRepo.Create(context.Background(), domain.CreateSessionInput{ProjectID: project.ID, Title: "Run test"})
-	require.NoError(t, err)
-	return session.ID
+	// V2: each caller creates its own Session row + Main branch directly on
+	// the opened per-Session database.
+	return sqlCreateSession(t, dbRepo.DB, "00000000-0000-4000-8000-00000000000f").ID
 }
 
 func TestSubmitTurnIsIdempotentAndTransactional(t *testing.T) {
-	db := store.SetupDB(t)
+	db, _, _ := newSessionDB(t)
 	repo := &store.RunRepo{DB: db}
 	sessionID := createRunTestSession(t, repo)
 	input := domain.SubmitTurnInput{
@@ -64,7 +58,7 @@ func TestSubmitTurnIsIdempotentAndTransactional(t *testing.T) {
 }
 
 func TestSubmitTurnRejectsSecondActiveRunWithoutWritingMessage(t *testing.T) {
-	db := store.SetupDB(t)
+	db, _, _ := newSessionDB(t)
 	repo := &store.RunRepo{DB: db}
 	sessionID := createRunTestSession(t, repo)
 	_, err := repo.SubmitTurn(context.Background(), domain.SubmitTurnInput{
@@ -82,7 +76,7 @@ func TestSubmitTurnRejectsSecondActiveRunWithoutWritingMessage(t *testing.T) {
 }
 
 func TestRunTransitionsAppendEventsAndTerminalIsImmutable(t *testing.T) {
-	db := store.SetupDB(t)
+	db, _, _ := newSessionDB(t)
 	repo := &store.RunRepo{DB: db}
 	events := &store.EventRepo{DB: db}
 	sessionID := createRunTestSession(t, repo)
@@ -111,7 +105,7 @@ func TestRunTransitionsAppendEventsAndTerminalIsImmutable(t *testing.T) {
 }
 
 func TestRecoverActiveRequeuesQueuedAndInterruptsOnlyRunning(t *testing.T) {
-	db := store.SetupDB(t)
+	db, _, _ := newSessionDB(t)
 	repo := &store.RunRepo{DB: db}
 	queuedSession := createRunTestSession(t, repo)
 	queuedSubmission, err := repo.SubmitTurn(context.Background(), domain.SubmitTurnInput{

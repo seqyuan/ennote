@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, CheckCircle2, History, Save, Upload } from "lucide-react";
+import { Archive, CheckCircle2, FileText, History, Save, Upload } from "lucide-react";
 import { useMemo, useState } from "react";
 import { ModelRuntimeControl } from "@/components/ModelRuntimeControl";
 import { SkillPicker, type RoleSkillBinding } from "@/components/settings/SkillPicker";
@@ -34,6 +34,8 @@ export function RoleEditor({ role, models, onSaved, onArchived, setError }: {
   const [validation, setValidation] = useState<RoleValidationResult | null>(null);
   const [versions, setVersions] = useState<RoleVersion[] | null>(null);
   const [busy, setBusy] = useState<"save" | "validate" | "publish" | "archive" | null>(null);
+  const fileBacked = role.sourceKind === "project_file";
+  const sourceName = role.sourceLocator?.split(/[\\/]/).filter(Boolean).pop() ?? role.sourceLocator;
 
   const dirty = useMemo(() => name !== role.name || handle !== role.handle || description !== role.description
     || positioning !== role.positioning || icon !== role.icon || color !== role.color
@@ -125,18 +127,20 @@ export function RoleEditor({ role, models, onSaved, onArchived, setError }: {
       <div className="role-editor-version">
         <span className="role-color-swatch" style={{ background: color }} aria-hidden="true" />
         <strong>{role.currentVersion ? `Published v${role.currentVersion}` : "Unpublished draft"}</strong>
-        {dirty && <span>Unsaved</span>}
+        {dirty && !fileBacked && <span>Unsaved</span>}
       </div>
       <div className="role-editor-actions">
-        <button type="button" className="settings-btn" disabled={!dirty || Boolean(busy)} onClick={saveDraft}>
-          <Save size={14} /> Save
-        </button>
-        <button type="button" className="settings-btn" disabled={dirty || Boolean(busy)} onClick={validateDraft}>
-          <CheckCircle2 size={14} /> Validate
-        </button>
-        <button type="button" className="settings-btn primary" disabled={dirty || Boolean(busy)} onClick={publish}>
-          <Upload size={14} /> Publish
-        </button>
+        {!fileBacked && <>
+          <button type="button" className="settings-btn" disabled={!dirty || Boolean(busy)} onClick={saveDraft}>
+            <Save size={14} /> Save
+          </button>
+          <button type="button" className="settings-btn" disabled={dirty || Boolean(busy)} onClick={validateDraft}>
+            <CheckCircle2 size={14} /> Validate
+          </button>
+          <button type="button" className="settings-btn primary" disabled={dirty || Boolean(busy)} onClick={publish}>
+            <Upload size={14} /> Publish
+          </button>
+        </>}
         <button type="button" className="settings-btn" onClick={loadVersions} title="Version history">
           <History size={14} aria-hidden="true" />
         </button>
@@ -145,6 +149,11 @@ export function RoleEditor({ role, models, onSaved, onArchived, setError }: {
         </button>
       </div>
     </div>
+
+    {fileBacked && <div className="role-file-source"><FileText size={13} aria-hidden="true" />
+      <span><strong>{sourceName}</strong><small>{role.sourceLocator}</small></span>
+      <em>Project file</em>
+    </div>}
 
     {validation && <div className={validation.valid ? "role-validation valid" : "role-validation invalid"}>
       <strong>{validation.valid ? "Ready to publish" : "Validation failed"}</strong>
@@ -158,7 +167,7 @@ export function RoleEditor({ role, models, onSaved, onArchived, setError }: {
       {versions.map((version) => <span key={version.id}>v{version.version} <code>{version.configDigest.slice(7, 15)}</code></span>)}
     </div>}
 
-    <div className="role-editor-sections">
+    <fieldset className="role-editor-sections" disabled={fileBacked}>
       <section>
         <header><h3>Identity</h3></header>
         <div className="role-field-grid identity-grid">
@@ -274,7 +283,7 @@ export function RoleEditor({ role, models, onSaved, onArchived, setError }: {
               budgetCeiling: { ...current.delegationPolicy.budgetCeiling, maxTotalTokens: Number(event.target.value) } } }))} /></label>
         </div>
       </section>
-    </div>
+    </fieldset>
     {isPublishedDraft && <span className="role-editor-saved-state">Published configuration is immutable</span>}
   </div>;
 }

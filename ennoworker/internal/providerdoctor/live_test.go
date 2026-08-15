@@ -30,7 +30,7 @@ func liveDoctor(baseURL, apiKey, model string) *Service {
 	return &Service{
 		Providers: providerStoreStub{profile: &domain.ProviderProfile{
 			ID: "provider", ProviderType: domain.ProviderOpenAICompatible,
-			BaseURL: baseURL, CredentialRef: "env:ENNOTE_DOCTOR_KEY", Status: "active",
+			BaseURL: baseURL, APIKey: os.Getenv("ENNOTE_DOCTOR_KEY"), Status: "active",
 		}},
 		Models: modelStoreStub{model: &domain.ModelProfile{
 			ID: "model", ProviderID: "provider", ModelName: model, MaxOutputTokens: 32,

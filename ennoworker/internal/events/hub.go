@@ -7,9 +7,9 @@ import (
 )
 
 type Hub struct {
-	mu           sync.Mutex
-	nextID       uint64
-	subscribers  map[string]map[uint64]chan domain.RunEvent
+	mu          sync.Mutex
+	nextID      uint64
+	subscribers map[string]map[uint64]chan domain.RunEvent
 	// liveSubscribers mirrors subscribers but carries LiveRunEvent instead.
 	liveSubs map[string]map[uint64]chan domain.LiveRunEvent
 }
@@ -61,6 +61,8 @@ func (h *Hub) SubscribeLive(runID string, capacity int) (<-chan domain.LiveRunEv
 // PublishLive sends a LiveRunEvent to all subscribers for the runID.
 // Non-blocking: on a full channel the oldest buffered event is dropped
 // and the sub is kept alive.
+//
+// @mode emit
 func (h *Hub) PublishLive(event domain.LiveRunEvent) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -116,6 +118,11 @@ func (h *Hub) Subscribe(runID string, capacity int) (<-chan domain.RunEvent, fun
 	return channel, unsubscribe
 }
 
+// Publish delivers durable RunEvents to every subscriber for the event's runID.
+// Non-blocking: a subscriber whose buffer is full is removed and its channel
+// closed (the SSE client reconnects and re-syncs via Last-Event-ID).
+//
+// @mode emit
 func (h *Hub) Publish(events ...domain.RunEvent) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

@@ -46,7 +46,14 @@ test("manual compaction uses an inline prompt bar and submits the focus instruct
   });
   await openConversation(page);
 
+  // Attach / compact tools live in the "+" config panel.
+  const configBtn = page.getByRole("button", { name: "Configure run" });
+  const openConfig = async () => {
+    if ((await configBtn.getAttribute("aria-expanded")) !== "true") await configBtn.click();
+  };
+
   // The compact button opens the inline bar instead of a native prompt.
+  await openConfig();
   await page.getByRole("button", { name: "Compact context" }).click();
   await expect(page.getByText("Create context checkpoint")).toBeVisible();
   await expect(page.getByPlaceholder("Optional focus for the checkpoint…")).toBeVisible();
@@ -58,6 +65,7 @@ test("manual compaction uses an inline prompt bar and submits the focus instruct
   expect(compactionBody).toBeNull();
 
   // Confirm path submits the focus instruction.
+  await openConfig();
   await page.getByRole("button", { name: "Compact context" }).click();
   await page.getByPlaceholder("Optional focus for the checkpoint…").fill("Keep the conclusion section intact");
   await page.getByRole("button", { name: "Create checkpoint" }).click();
@@ -92,11 +100,11 @@ test("creating a project uses a dialog instead of native prompts", async ({ page
 
   await expect(page.getByRole("dialog", { name: "New project" })).toBeVisible();
   await page.getByPlaceholder("RNA screen").fill("RNA screen");
-  await page.getByPlaceholder("/data/projects/rna-screen").fill("/data/projects/rna-screen");
+  await page.getByPlaceholder("~/projects/rna-screen").fill("~/projects/rna-screen");
   await page.getByRole("button", { name: "Create project" }).click();
 
   await expect.poll(() => created).not.toBeNull();
-  expect(created).toMatchObject({ name: "RNA screen", hostPath: "/data/projects/rna-screen" });
+  expect(created).toMatchObject({ name: "RNA screen", hostPath: "~/projects/rna-screen" });
   // Dialog closes and the new project is auto-selected in the selector.
   await expect(page.getByRole("dialog", { name: "New project" })).not.toBeVisible();
   await expect(page.getByRole("button", { name: "RNA screen" })).toBeVisible();

@@ -2,9 +2,11 @@ package store_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -56,36 +58,41 @@ func TestBackgroundMutationRoleDeniedAtomically(t *testing.T) {
 	delegations, _, submission := setupRootBudgetParent(t, "background-mutation")
 	ctx := context.Background()
 
-	roleRepo := &store.RoleRepo{DB: delegations.DB, KnownTools: map[string]bool{"write": true}}
-	var modelID string
-	require.NoError(t, delegations.DB.QueryRow(`SELECT id FROM model_profiles WHERE status='active' LIMIT 1`).Scan(&modelID))
-	identity, err := roleRepo.Create(ctx, store.CreateRoleInput{
-		Handle: "mutator", Name: "Mutator", Scope: domain.RoleScopeGlobal,
-		ProjectID: nil, Definition: domain.RoleDefinition{
-			SchemaVersion: 1, RolePrompt: "mutate", Authority: domain.RoleAuthorityMutation,
-			PermissionCeiling: domain.PermissionAsk, AllowedTools: []string{"write"},
-			ModelBinding: domain.RoleModelBinding{Mode: domain.RoleModelFixed, ModelProfileID: modelID},
-			ContextPolicy: domain.RoleContextPolicy{DefaultMode: domain.RoleContextTask,
-				AllowedModes:           []domain.RoleContextMode{domain.RoleContextTask},
-				OwnExecutionContinuity: domain.RoleContinuityNone},
-			DelegationPolicy: domain.RoleDelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
-				AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
-				MaxInvocationsPerParentRun: 4, MaxConcurrentInstances: 4,
-				BudgetCeiling: domain.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
-					MaxTotalTokens: 20000, MaxOutputTokens: 4000, MaxWallTimeMS: 120000}},
-			OutputContract: "text-v1", MaxLoopIterations: 8,
-		},
-	})
-	require.NoError(t, err)
-	_, err = roleRepo.Publish(ctx, identity.ID, identity.DraftRevision)
-	require.NoError(t, err)
+	// V2: the mutation Role lives as a file revision and is resolved through
+	// the file-native DelegationRepo before the item freezes RoleMeta.
+	sources, models, modelID, home := setupFileRoleDelegation(t)
+	document := &rolesource.Document{
+		SchemaVersion: 1, Handle: "mutator", Name: "Mutator", Description: "mutates",
+		Positioning: "Mutates files.", Icon: "bot", Color: "neutral",
+		Model:  rolesource.ModelBinding{Ref: modelID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills: []rolesource.SkillBinding{}, Authority: domain.RoleAuthorityMutation,
+		PermissionCeiling: domain.PermissionAsk, AllowedTools: []string{"write"},
+		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextTask,
+			AllowedModes: []domain.RoleContextMode{domain.RoleContextTask}, OwnExecutionContinuity: domain.RoleContinuityNone},
+		Delegation: rolesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
+			MaxInvocationsPerParentRun: 4, MaxConcurrentInstances: 4,
+			BudgetCeiling: rolesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
+				MaxTotalTokens: 20000, MaxOutputTokens: 4000, MaxWallTimeMS: 120000}},
+		OutputContract: "text-v1", MaxLoopIterations: 8, Prompt: "Mutate the file.",
+	}
+	require.NoError(t, createFileRole(t, sources, document))
 
+	resolver := &store.DelegationRepo{DB: delegations.DB, RoleSources: sources, Models: models,
+		Policies: delegations.Policies}
 	// Resolve the published mutation Role version and attempt background mode.
-	snapshot, err := delegations.ResolveRoleForDelegation(ctx, submission.Run.SessionID, "mutator")
+	snapshot, err := resolver.ResolveRoleForDelegation(ctx, submission.Run.SessionID, "mutator")
 	require.NoError(t, err)
 	mutationItem := explorerItem()
 	mutationItem.Name = "mutate"
 	mutationItem.RoleVersionID = snapshot.VersionID
+	definitionJSON, err := json.Marshal(snapshot.Definition)
+	require.NoError(t, err)
+	meta, err := store.NewDelegationRoleMeta(snapshot.VersionID, definitionJSON)
+	require.NoError(t, err)
+	meta.Handle = "mutator"
+	meta.DisplayName = "Mutator"
+	mutationItem.RoleMeta = meta
 	group, items, children, err := delegations.CreateGroupWithChildren(ctx, store.CreateDelegationGroupInput{
 		ParentRunID: submission.Run.ID, ParentToolCallID: "bg-mut", Strategy: domain.DelegationStrategySingle,
 		ExecutionMode: domain.DelegationExecutionBackground,
@@ -106,6 +113,7 @@ func TestBackgroundMutationRoleDeniedAtomically(t *testing.T) {
 	assert.Zero(t, rows)
 	require.NoError(t, delegations.DB.QueryRow(`SELECT COUNT(*) FROM run_budgets`).Scan(&rows))
 	assert.Zero(t, rows)
+	_ = home
 }
 
 func TestBackgroundChildTerminalDoesNotWakeParent(t *testing.T) {

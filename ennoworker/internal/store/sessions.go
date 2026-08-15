@@ -3,12 +3,14 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 )
 
 var (
@@ -21,60 +23,20 @@ const (
 	SessionStatusArchived = "archived"
 )
 
-type SessionRepo struct{ DB *sql.DB }
+type SessionRepo struct {
+	DB     *sql.DB
+	Files  *sessionstore.Manager
+	Models *ModelRepo
+}
 
 func (r *SessionRepo) Create(ctx context.Context, input domain.CreateSessionInput) (*domain.Session, error) {
-	now := time.Now().UTC()
-	timestamp := now.Format(time.RFC3339Nano)
-	id, branchID := uuid.NewString(), uuid.NewString()
-
-	var defaultAgent, defaultModel, compactionPolicy any
-	if input.DefaultAgentProfileID != nil {
-		defaultAgent = *input.DefaultAgentProfileID
+	// V2: Sessions are created through the file-native sessionstore Manager
+	// (per-Session SQLite files). The legacy global sessions SQL path was
+	// removed.
+	if r == nil || r.Files == nil {
+		return nil, ErrFileBackedStoreRequired
 	}
-	if input.DefaultModelProfileID != nil {
-		defaultModel = *input.DefaultModelProfileID
-	}
-	if input.CompactionPolicyProfileID != nil {
-		compactionPolicy = *input.CompactionPolicyProfileID
-	}
-
-	tx, err := r.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin create session: %w", err)
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO sessions (id, project_id, title, status, mode, active_leaf_message_id, active_branch_id,
-		 default_agent_profile_id, default_model_profile_id, compaction_policy_profile_id,
-		 source_session_id, source_message_id, created_at, updated_at)
-		 VALUES (?, ?, ?, 'active', 'hosted', NULL, NULL, ?, ?, ?, ?, ?, ?, ?)`,
-		id, input.ProjectID, input.Title, defaultAgent, defaultModel, compactionPolicy,
-		input.SourceSessionID, input.SourceMessageID, timestamp, timestamp,
-	); err != nil {
-		return nil, fmt.Errorf("create session: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO session_branches
-		(id,session_id,label,created_at,updated_at) VALUES(?,?,'Main',?,?)`,
-		branchID, id, timestamp, timestamp); err != nil {
-		return nil, fmt.Errorf("create main branch: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET active_branch_id=? WHERE id=?`, branchID, id); err != nil {
-		return nil, fmt.Errorf("activate main branch: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit create session: %w", err)
-	}
-
-	return &domain.Session{
-		ID: id, ProjectID: input.ProjectID, Title: input.Title, Status: "active", Mode: domain.SessionModeHosted, ActiveBranchID: &branchID,
-		DefaultAgentProfileID:     input.DefaultAgentProfileID,
-		DefaultModelProfileID:     input.DefaultModelProfileID,
-		CompactionPolicyProfileID: input.CompactionPolicyProfileID,
-		SourceSessionID:           input.SourceSessionID,
-		SourceMessageID:           input.SourceMessageID,
-		CreatedAt:                 now, UpdatedAt: now,
-	}, nil
+	return r.Files.Create(ctx, input)
 }
 
 func (r *SessionRepo) ListByProject(ctx context.Context, projectID string) ([]domain.Session, error) {
@@ -89,23 +51,21 @@ func (r *SessionRepo) SearchByProject(ctx context.Context, projectID, status, qu
 	if len(query) > 120 {
 		return nil, fmt.Errorf("%w: query exceeds 120 characters", ErrSessionSearchInvalid)
 	}
-	arguments := []any{projectID, status}
-	statement := `SELECT id, project_id, title, status, mode, active_leaf_message_id, active_branch_id,
-		default_agent_profile_id, default_model_profile_id, compaction_policy_profile_id,
-		source_session_id, source_message_id, created_at, updated_at
-		FROM sessions WHERE project_id=? AND status=?`
-	if query != "" {
-		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(strings.ToLower(query))
-		statement += ` AND LOWER(title) LIKE ? ESCAPE '\'`
-		arguments = append(arguments, "%"+escaped+"%")
+	if r == nil || r.Files == nil {
+		return nil, ErrFileBackedStoreRequired
 	}
-	statement += ` ORDER BY updated_at DESC, id`
-	rows, err := r.DB.QueryContext(ctx, statement, arguments...)
-	if err != nil {
-		return nil, err
+	sessions, err := r.Files.ListByProject(ctx, projectID, status)
+	if err != nil || query == "" {
+		return sessions, err
 	}
-	defer rows.Close()
-	return scanSessionRows(rows)
+	filtered := sessions[:0]
+	needle := strings.ToLower(query)
+	for _, session := range sessions {
+		if strings.Contains(strings.ToLower(session.Title), needle) {
+			filtered = append(filtered, session)
+		}
+	}
+	return filtered, nil
 }
 
 func scanSessionRows(rows *sql.Rows) ([]domain.Session, error) {
@@ -142,7 +102,28 @@ func (r *SessionRepo) Restore(ctx context.Context, sessionID string) (*domain.Se
 }
 
 func (r *SessionRepo) transitionStatus(ctx context.Context, sessionID, expected, target string) (*domain.Session, error) {
-	tx, err := r.DB.BeginTx(ctx, nil)
+	if r == nil || (r.Files == nil && r.DB == nil) {
+		return nil, ErrFileBackedStoreRequired
+	}
+	db := r.DB
+	if r.Files != nil {
+		var err error
+		db, err = r.Files.OpenSession(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	session, err := transitionSessionStatus(ctx, db, sessionID, expected, target)
+	if err == nil {
+		err = queueSessionProjection(ctx, db, session)
+	}
+	return session, err
+}
+
+// transitionSessionStatus is the per-Session-database status transition. The
+// Session's SQLite file owns the sessions row; the manager only locates it.
+func transitionSessionStatus(ctx context.Context, db *sql.DB, sessionID, expected, target string) (*domain.Session, error) {
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin session lifecycle transition: %w", err)
 	}
@@ -179,14 +160,43 @@ func (r *SessionRepo) transitionStatus(ctx context.Context, sessionID, expected,
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit session lifecycle transition: %w", err)
 	}
-	return r.FindByID(ctx, sessionID)
+	return findSession(ctx, db, sessionID)
 }
 
 func (r *SessionRepo) FindByID(ctx context.Context, id string) (*domain.Session, error) {
+	// V2 dual mode: with Files the manager locates the per-Session database;
+	// without Files the caller holds an opened per-Session database directly
+	// (the executor's Session repo). The legacy global sessions SQL path was
+	// removed.
+	if r.Files != nil {
+		return r.Files.FindByID(ctx, id)
+	}
+	if r == nil || r.DB == nil {
+		return nil, ErrFileBackedStoreRequired
+	}
 	return findSession(ctx, r.DB, id)
 }
 
 func (r *SessionRepo) UpdateTitle(ctx context.Context, sessionID, title string) (*domain.Session, error) {
+	if r == nil || (r.Files == nil && r.DB == nil) {
+		return nil, ErrFileBackedStoreRequired
+	}
+	db := r.DB
+	if r.Files != nil {
+		var err error
+		db, err = r.Files.OpenSession(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	session, err := updateSessionTitle(ctx, db, sessionID, title)
+	if err == nil {
+		err = queueSessionProjection(ctx, db, session)
+	}
+	return session, err
+}
+
+func updateSessionTitle(ctx context.Context, db *sql.DB, sessionID, title string) (*domain.Session, error) {
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return nil, fmt.Errorf("session title cannot be empty")
@@ -194,7 +204,7 @@ func (r *SessionRepo) UpdateTitle(ctx context.Context, sessionID, title string) 
 	if len([]rune(title)) > 200 {
 		return nil, fmt.Errorf("session title cannot exceed 200 characters")
 	}
-	result, err := r.DB.ExecContext(ctx, `UPDATE sessions SET title = ?, updated_at = ?
+	result, err := db.ExecContext(ctx, `UPDATE sessions SET title = ?, updated_at = ?
 		WHERE id = ? AND status = 'active'`, title, time.Now().UTC().Format(time.RFC3339Nano), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("update session title: %w", err)
@@ -202,28 +212,84 @@ func (r *SessionRepo) UpdateTitle(ctx context.Context, sessionID, title string) 
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return nil, fmt.Errorf("session not found: %s", sessionID)
 	}
-	return r.FindByID(ctx, sessionID)
+	return findSession(ctx, db, sessionID)
 }
 
 func (r *SessionRepo) UpdateDefaultModel(ctx context.Context, sessionID string, modelID *string) (*domain.Session, error) {
+	if r == nil || (r.Files == nil && r.DB == nil) {
+		return nil, ErrFileBackedStoreRequired
+	}
+	if modelID != nil && r.Models != nil {
+		model, err := r.Models.FindByID(ctx, strings.TrimSpace(*modelID))
+		if err != nil {
+			return nil, err
+		}
+		if model == nil {
+			return nil, fmt.Errorf("active model profile not found: %s", *modelID)
+		}
+	}
+	db := r.DB
+	if r.Files != nil {
+		var err error
+		db, err = r.Files.OpenSession(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	session, err := updateSessionDefaultModel(ctx, db, sessionID, modelID)
+	if err == nil {
+		err = queueSessionProjection(ctx, db, session)
+	}
+	return session, err
+}
+
+func (r *SessionRepo) UpdateCompactionPolicy(ctx context.Context, sessionID string, policyID *string) (*domain.Session, error) {
+	if r == nil || (r.Files == nil && r.DB == nil) {
+		return nil, ErrFileBackedStoreRequired
+	}
+	db := r.DB
+	if r.Files != nil {
+		var err error
+		db, err = r.Files.OpenSession(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	session, err := updateSessionCompactionPolicy(ctx, db, sessionID, policyID)
+	if err == nil {
+		err = queueSessionProjection(ctx, db, session)
+	}
+	return session, err
+}
+
+func queueSessionProjection(ctx context.Context, db *sql.DB, session *domain.Session) error {
+	if session == nil {
+		return nil
+	}
+	payload, err := json.Marshal(map[string]string{
+		"sessionId": session.ID, "projectId": session.ProjectID, "title": session.Title,
+		"status": session.Status, "createdAt": session.CreatedAt.Format(time.RFC3339Nano),
+		"updatedAt": session.UpdatedAt.Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		return err
+	}
+	_, err = db.ExecContext(ctx, `INSERT INTO projection_outbox
+		(event_id,event_type,payload_json,created_at) VALUES(?,?,?,?)`, uuid.NewString(),
+		"session.upsert", string(payload), time.Now().UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+func updateSessionDefaultModel(ctx context.Context, db *sql.DB, sessionID string, modelID *string) (*domain.Session, error) {
 	var value any
 	if modelID != nil {
 		trimmed := strings.TrimSpace(*modelID)
 		if trimmed == "" {
 			return nil, fmt.Errorf("defaultModelProfileId cannot be empty")
 		}
-		var exists int
-		if err := r.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM model_profiles m
-			JOIN provider_profiles p ON p.id = m.provider_id
-			WHERE m.id = ? AND m.status = 'active' AND p.status = 'active'`, trimmed).Scan(&exists); err != nil {
-			return nil, err
-		}
-		if exists != 1 {
-			return nil, fmt.Errorf("active model profile not found: %s", trimmed)
-		}
 		value = trimmed
 	}
-	result, err := r.DB.ExecContext(ctx, `UPDATE sessions SET default_model_profile_id = ?, updated_at = ?
+	result, err := db.ExecContext(ctx, `UPDATE sessions SET default_model_profile_id = ?, updated_at = ?
 		WHERE id = ? AND status = 'active'`, value, time.Now().UTC().Format(time.RFC3339Nano), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("update session default model: %w", err)
@@ -231,27 +297,19 @@ func (r *SessionRepo) UpdateDefaultModel(ctx context.Context, sessionID string, 
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return nil, fmt.Errorf("session not found: %s", sessionID)
 	}
-	return r.FindByID(ctx, sessionID)
+	return findSession(ctx, db, sessionID)
 }
 
-func (r *SessionRepo) UpdateCompactionPolicy(ctx context.Context, sessionID string, policyID *string) (*domain.Session, error) {
+func updateSessionCompactionPolicy(ctx context.Context, db *sql.DB, sessionID string, policyID *string) (*domain.Session, error) {
 	var value any
 	if policyID != nil {
 		trimmed := strings.TrimSpace(*policyID)
 		if trimmed == "" {
 			return nil, fmt.Errorf("compactionPolicyProfileId cannot be empty")
 		}
-		var exists int
-		if err := r.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM policy_profiles
-			WHERE id = ? AND kind = 'compaction' AND status = 'active'`, trimmed).Scan(&exists); err != nil {
-			return nil, err
-		}
-		if exists != 1 {
-			return nil, fmt.Errorf("active compaction policy profile not found: %s", trimmed)
-		}
 		value = trimmed
 	}
-	result, err := r.DB.ExecContext(ctx, `UPDATE sessions SET compaction_policy_profile_id = ?, updated_at = ?
+	result, err := db.ExecContext(ctx, `UPDATE sessions SET compaction_policy_profile_id = ?, updated_at = ?
 		WHERE id = ? AND status = 'active'`, value, time.Now().UTC().Format(time.RFC3339Nano), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("update session compaction policy: %w", err)
@@ -259,11 +317,26 @@ func (r *SessionRepo) UpdateCompactionPolicy(ctx context.Context, sessionID stri
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return nil, fmt.Errorf("session not found: %s", sessionID)
 	}
-	return r.FindByID(ctx, sessionID)
+	return findSession(ctx, db, sessionID)
 }
 
 func (r *SessionRepo) ActivateLeaf(ctx context.Context, sessionID, messageID string) error {
-	tx, err := r.DB.BeginTx(ctx, nil)
+	if r == nil || (r.Files == nil && r.DB == nil) {
+		return ErrFileBackedStoreRequired
+	}
+	db := r.DB
+	if r.Files != nil {
+		var err error
+		db, err = r.Files.OpenSession(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+	}
+	return activateSessionLeaf(ctx, db, sessionID, messageID)
+}
+
+func activateSessionLeaf(ctx context.Context, db *sql.DB, sessionID, messageID string) error {
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin activate session leaf: %w", err)
 	}

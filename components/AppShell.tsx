@@ -18,6 +18,7 @@ import { SettingsDialog } from "./settings/SettingsDialog";
 import { ThemeControl } from "./ThemeControl";
 import { useResizable } from "@/hooks/useResizable";
 import { useProjectSessions } from "@/hooks/useProjectSessions";
+import { useSidebarProjectGroups } from "@/hooks/useSidebarProjectGroups";
 import { useSessionBranches } from "@/hooks/useSessionBranches";
 import { useSessionMessages } from "@/hooks/useSessionMessages";
 import { useAgentSession } from "@/hooks/useAgentSession";
@@ -28,17 +29,20 @@ import { useRunningSessionIds } from "@/hooks/useRunningSessionIds";
 import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
 import { usePromptTemplates } from "@/hooks/usePromptTemplates";
 import { GraphActivityPanel } from "./GraphActivityPanel";
-import { permissionModeForPolicyID, permissionPolicyID, withRunConfig, type PermissionMode } from "@/lib/permission-mode";
+import { permissionModeForPolicyID, permissionPolicyID, withRunConfig, type PermissionMode, type ThinkingEffort } from "@/lib/permission-mode";
+import { errorMessage } from "@/lib/provider-errors";
 import { apiFetch } from "@/lib/worker-api.client";
-import type { AgentFlowProfile, RoleSummary, Session } from "@/components/settings/types";
+import type { RoleSummary, Session } from "@/components/settings/types";
 import type { AgentRun } from "@/lib/approval";
 import type { components } from "@/lib/worker-api.gen";
 
-type Project = components["schemas"]["Project"];
 type ProjectWorkspace = components["schemas"]["ProjectWorkspace"];
 type TurnSubmission = components["schemas"]["TurnSubmission"];
 type ImageArtifact = components["schemas"]["ImageArtifact"];
 type CompactionSubmission = components["schemas"]["CompactionSubmission"];
+type GlobalRoleSummary = components["schemas"]["GlobalRoleSummary"];
+type GlobalRoleDetail = components["schemas"]["GlobalRoleDetail"];
+type FileRevision = { version: number; publishedAt: string };
 
 function genId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
@@ -76,6 +80,7 @@ export function AppShell() {
   const [textAttachments, setTextAttachments] = useState<TextAttachment[]>([]);
   const [modelOverrides, setModelOverrides] = useState<Record<string, string>>({});
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("discuss");
+  const [thinkingEffort, setThinkingEffort] = useState<ThinkingEffort>("default");
   const selectedSessionRef = useRef<string | null>(selectedSession);
 
   // Prompt template expansion state.
@@ -88,17 +93,13 @@ export function AppShell() {
   const promptCatalog = usePromptTemplates(selectedProject);
   const [flowCatalog, setFlowCatalog] = useState<{ name: string; version?: number }[]>([]);
   const refreshFlowCatalog = useCallback(async () => {
-    if (!selectedProject) { setFlowCatalog([]); return; }
     try {
-      const profiles = await apiFetch<AgentFlowProfile[]>("/v1/agent-flows");
-      setFlowCatalog((profiles ?? [])
-        .filter((profile) => profile.lifecycleStatus === "active" && (profile.latestVersion ?? 0) > 0)
-        .flatMap((profile) => {
-          const name = profile.slug || profile.name;
-          return name ? [{ name, version: profile.latestVersion }] : [];
-        }));
+      const graphs = await apiFetch<Array<{ id: string; latestVersion?: number }>>("/v1/graphs");
+      setFlowCatalog((graphs ?? [])
+        .filter((graph) => (graph.latestVersion ?? 0) > 0)
+        .map((graph) => ({ name: graph.id, version: graph.latestVersion })));
     } catch { /* panel is a convenience; failures surface elsewhere */ }
-  }, [selectedProject]);
+  }, []);
 
   useEffect(() => {
     const t0 = window.setTimeout(() => void refreshFlowCatalog(), 0);
@@ -203,6 +204,7 @@ export function AppShell() {
 
   // Session data
   const sessionNavigation = useProjectSessions(selectedProject);
+  const sidebarGroups = useSidebarProjectGroups(projects, pinnedProjectIds, selectedProject);
   const settings = useSettingsProfiles();
   const replaceSession = sessionNavigation.replaceSession;
   const selectedSessionRecord = sessionNavigation.activeSessions.find(s => s.id === selectedSession);
@@ -232,14 +234,15 @@ export function AppShell() {
 
   const {
     activeRun: activeRunRecord, activeRunID: activeRun, compacting, pendingApproval, resolvingApproval,
-    status, setStatus, error, setError, watchRun, cancel, steer: queueSteer, decideApproval,
+    status, setStatus, error, setError, watchRun, cancel, steer: queueSteer, followUp: queueFollowUp,
+    pendingFollowUps, decideApproval,
   } = useAgentSession({
     sessionId: selectedSession, lineageId: activeBranchId, appendMessage: addMsg, upsertMessage: upsertMsg,
     refreshLatest, refreshSession: refreshSelectedSession,
   });
   const recovery = useRunRecovery(selectedSession, activeBranchId, activeRun);
   const runningSessionIds = useRunningSessionIds(
-    sessionNavigation.activeSessions.map((session) => session.id),
+    sidebarGroups.groups.flatMap((group) => group.sessions.map((session) => session.id)),
     activeRun ? selectedSession : null,
   );
 
@@ -255,15 +258,46 @@ export function AppShell() {
   useEffect(() => {
     if (!selectedProject) return;
     let cancelled = false;
-    const params = new URLSearchParams({ projectId: selectedProject, status: "active", limit: "100" });
-    void apiFetch<{ items: RoleSummary[] }>(`/v1/roles?${params}`)
-      .then((page) => {
+    void apiFetch<GlobalRoleSummary[]>("/v1/global-roles")
+      .then(async (catalog) => {
+        const resolved = await Promise.all(catalog.filter((entry) => !entry.error).map(async (entry): Promise<RoleSummary | null> => {
+          try {
+            const [detail, revisions] = await Promise.all([
+              apiFetch<GlobalRoleDetail>(`/v1/global-roles/${encodeURIComponent(entry.id)}`),
+              apiFetch<FileRevision[]>(`/v1/global-roles/${encodeURIComponent(entry.id)}/versions`),
+            ]);
+            const latest = revisions.at(-1);
+            if (!latest) return null;
+            return {
+              id: entry.id, handle: detail.document.handle, name: detail.document.name,
+              description: detail.document.description, positioning: detail.document.positioning,
+              icon: detail.document.icon, color: detail.document.color, scope: "global", status: "active",
+              sourceKind: "managed", sourceLocator: detail.path,
+              currentVersionId: `v${String(latest.version).padStart(6, "0")}`,
+              currentVersion: latest.version, updatedAt: latest.publishedAt,
+            };
+          } catch {
+            return null;
+          }
+        }));
         if (cancelled) return;
-        const published = page.items.filter((role) => Boolean(role.currentVersionId));
+        const published = resolved.filter((role): role is RoleSummary => role !== null);
         setRoles(published);
         setSelectedRoleId((current) => published.some((role) => role.id === current) ? current : null);
       })
-      .catch(() => { if (!cancelled) setRoles([]); });
+      .catch(async () => {
+        // SQL-backed API test adapters expose the managed Role catalog.
+        try {
+          const params = new URLSearchParams({ projectId: selectedProject, status: "active", limit: "100" });
+          const page = await apiFetch<{ items: RoleSummary[] }>(`/v1/roles?${params}`);
+          if (cancelled) return;
+          const published = page.items.filter((role) => Boolean(role.currentVersionId));
+          setRoles(published);
+          setSelectedRoleId((current) => published.some((role) => role.id === current) ? current : null);
+        } catch {
+          if (!cancelled) setRoles([]);
+        }
+      });
     return () => { cancelled = true; };
   }, [selectedProject]);
 
@@ -292,10 +326,11 @@ export function AppShell() {
       sessionNavigation.replaceSession(session);
       selectSession(session.id);
       await sessionNavigation.refresh();
+      sidebarGroups.refresh(selectedProject);
     } catch (reason) {
       setError((reason as Error).message);
     }
-  }, [selectSession, selectedProject, sessionNavigation, setError]);
+  }, [selectSession, selectedProject, sessionNavigation, setError, sidebarGroups]);
 
   const switchSession = useCallback((sessionId: string) => {
     closeSettings();
@@ -306,12 +341,18 @@ export function AppShell() {
 
   const archiveSession = useCallback(async (session: Session) => {
     const succeeded = await sessionNavigation.archive(session);
+    if (succeeded) {
+      sidebarGroups.refresh(session.projectId);
+      sidebarGroups.refreshArchived(session.projectId);
+    }
     if (succeeded && selectedSessionRef.current === session.id) selectSession(null);
-  }, [selectSession, sessionNavigation]);
+  }, [selectSession, sessionNavigation, sidebarGroups]);
 
   const restoreSession = useCallback(async (session: Session) => {
     await sessionNavigation.restore(session);
-  }, [sessionNavigation]);
+    sidebarGroups.refresh(session.projectId);
+    sidebarGroups.refreshArchived(session.projectId);
+  }, [sessionNavigation, sidebarGroups]);
 
   const sendTurn = useCallback(async (text: string, toolPolicyProfileId: string) => {
     if (!selectedSession) return;
@@ -334,7 +375,7 @@ export function AppShell() {
       const body = selectedRole && selectedRole.currentVersionId
         ? { ...payload, target: { kind: "role", objectId: selectedRole.id,
             versionId: selectedRole.currentVersionId, contextMode: "room" } }
-        : { ...withRunConfig(payload, toolPolicyProfileId, selectedModelId), target: { kind: "host" } };
+        : { ...withRunConfig(payload, toolPolicyProfileId, selectedModelId, thinkingEffort), target: { kind: "host" } };
       const turn = await apiFetch<TurnSubmission>(endpoint, {
         method: "POST", headers: { "Idempotency-Key": genId() }, body: JSON.stringify(body),
       });
@@ -345,11 +386,11 @@ export function AppShell() {
       if (selectedSessionRef.current === sessionAtSend) {
         setPendingImage(image);
         setTextAttachments(attachments);
-        setError((reason as Error).message);
+        setError(errorMessage(reason, "Failed to send the message"));
       }
     }
   }, [selectedSession, pendingImage, textAttachments, addMsg, setError, setStatus, watchRun, selectedModelId,
-    selectedRoleId, roles, setInputVersioned]);
+    selectedRoleId, roles, setInputVersioned, thinkingEffort]);
 
   // ——— Prompt template expansion ———
 
@@ -380,13 +421,11 @@ export function AppShell() {
     }
   }, []);
 
-  // ——— Agent Flow invocation (@flow: / /invoke_agent_flow) ———
-  // Host-side orchestration: resolves a bound+enabled flow in the project and
-  // starts a run in the current session. Flows never enter Room speaker
-  // addressing; resolution fails closed with a clear error.
+  // Graph invocation is global; the Worker derives Project and workspace from
+  // the selected Session when it creates the Run.
   const invokeAgentFlow = useCallback(async (name: string, version?: number, rawParams?: string) => {
-    if (!selectedSession || !selectedProject) {
-      setError("Select a session and project before invoking an Agent Flow.");
+    if (!selectedSession) {
+      setError("Select a session before invoking a graph.");
       return false;
     }
     const inputs: Record<string, string> = {};
@@ -397,7 +436,7 @@ export function AppShell() {
       }
     }
     try {
-      await apiFetch<RunAgentFlow>(`/v1/projects/${encodeURIComponent(selectedProject)}/agent-flows/invoke`, {
+      await apiFetch<RunAgentFlow>(`/v1/graphs/${encodeURIComponent(name)}/runs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -408,15 +447,15 @@ export function AppShell() {
       setError(null);
       return true;
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to invoke Agent Flow");
+      setError(reason instanceof Error ? reason.message : "Failed to invoke graph");
       return false;
     }
-  }, [selectedSession, selectedProject, setError, setInputVersioned]);
+  }, [selectedSession, setError, setInputVersioned]);
 
   const submit = useCallback(async () => {
     if (!selectedSession || (!input.trim() && !pendingImage && textAttachments.length === 0) || activeRun) return;
 
-    // Agent Flow addressing gates run BEFORE the normal turn: an explicit
+    // Graph addressing gates run BEFORE the normal turn: an explicit
     // /invoke_agent_flow command or a leading @graph:name[@version] token is a
     // Host orchestration call, never a chat message.
     const invokeMatch = input.trim().match(/^\/invoke_agent_flow\s+(\S+)(?:\s+([\s\S]+))?$/);
@@ -472,7 +511,7 @@ export function AppShell() {
             break;
         }
       } catch (err: unknown) {
-        setError((err as Error).message ?? "Failed to expand prompt template");
+        setError(errorMessage(err, "Failed to expand prompt template"));
       } finally {
         setExpanding(false);
       }
@@ -516,7 +555,7 @@ export function AppShell() {
           }
         }
       } catch (err: unknown) {
-        setError((err as Error).message ?? "Failed to expand");
+        setError(errorMessage(err, "Failed to expand"));
       } finally {
         setExpanding(false);
       }
@@ -528,6 +567,20 @@ export function AppShell() {
     const queued = await queueSteer(text);
     if (!queued) setInputVersioned(text);
   }, [activeRun, input, queueSteer, selectedProject, expandedVersion, draftVersion, handleExpand, selectedSession, setError, setInputVersioned]);
+
+  const followUp = useCallback(async () => {
+    if (!activeRun || !input.trim()) return;
+    const text = input;
+    setInputVersioned("");
+    const { queued, runEnded } = await queueFollowUp(text);
+    if (queued) return;
+    // The run ended between click and submit: send as a normal new turn.
+    if (runEnded && selectedSession) {
+      void sendTurn(text, policyId ?? "");
+      return;
+    }
+    setInputVersioned(text);
+  }, [activeRun, input, queueFollowUp, sendTurn, policyId, selectedSession, setInputVersioned]);
 
   const uploadImage = useCallback(async (file: File) => {
     if (!selectedProject || !selectedSession) return;
@@ -542,7 +595,7 @@ export function AppShell() {
       setPendingImage(artifact);
       setError(null);
     } catch (reason) {
-      setError((reason as Error).message);
+      setError(errorMessage(reason, "Failed to attach the image"));
     } finally {
       setStatus("");
     }
@@ -729,17 +782,21 @@ export function AppShell() {
   const sidebar = (
     <SessionSidebar
       projects={projects}
-      sessions={sessionNavigation.visibleSessions}
+      groups={sidebarGroups.groups}
       selectedProject={selectedProject}
       selectedSession={selectedSession}
       settingsOpen={settingsOpen}
-      view={sessionNavigation.view}
-      setView={sessionNavigation.setView}
       query={sessionNavigation.query}
       setQuery={sessionNavigation.setQuery}
-      loading={sessionNavigation.loading}
       mutatingId={sessionNavigation.mutatingId}
       announcement={sessionNavigation.announcement}
+      pinnedProjectIds={pinnedProjectIds}
+      togglePinProject={togglePinProject}
+      collapsed={sidebarGroups.collapsed}
+      toggleCollapsed={sidebarGroups.toggleCollapsed}
+      archived={sidebarGroups.archived}
+      openArchived={sidebarGroups.openArchived}
+      refreshGroups={sidebarGroups.refreshAll}
       createProject={openCreateProject}
       createSession={createSession}
       switchProject={switchProject}
@@ -934,28 +991,6 @@ export function AppShell() {
                 if (item.sessionId && item.sessionId !== selectedSession) switchSession(item.sessionId);
               }}
             />
-
-            {/* Settings */}
-            <button
-              type="button"
-              onClick={openSettings}
-              title="Settings"
-              aria-label="Open settings"
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: 32, height: 32, padding: 0,
-                background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 7,
-                color: "var(--text-muted)", cursor: "pointer", flexShrink: 0,
-                transition: "color 0.12s, background 0.12s",
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "var(--bg-panel)"; }}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.72l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z" />
-                <circle cx="12" cy="12" r="3" />
-              </svg>
-            </button>
           </div>
 
           {/* Chat area */}
@@ -995,6 +1030,8 @@ export function AppShell() {
             models={settings.models.filter((model) => model.status === "active")}
             selectedModelId={selectedModelId}
             setSelectedModelId={selectModel}
+            thinkingEffort={thinkingEffort}
+            setThinkingEffort={setThinkingEffort}
             roles={roles}
             selectedRoleId={selectedRoleId}
             setSelectedRoleId={setSelectedRoleId}
@@ -1003,7 +1040,9 @@ export function AppShell() {
             attachFiles={files => void attachFiles(files)}
             submit={submit}
             steer={steer}
+            followUp={followUp}
             cancel={cancel}
+            pendingFollowUps={pendingFollowUps}
             compactSession={startCompaction}
             compactionPromptOpen={compactionPrompt.open}
             compactionInstructions={compactionPrompt.instructions}

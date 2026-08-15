@@ -2,11 +2,9 @@ package store_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
-	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -50,40 +48,3 @@ func TestChildRunCoexistsWithRunningParent(t *testing.T) {
 		AND status IN ('queued','running')`, submission.Run.SessionID).Scan(&topCount))
 	assert.Equal(t, 1, topCount)
 }
-
-func TestDelegationTablesExistWithWorkspaceExplorerBuiltin(t *testing.T) {
-	db := store.SetupDB(t)
-	ctx := context.Background()
-	for _, table := range []string{"delegation_groups", "delegation_items", "run_budgets"} {
-		var count int
-		require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&count))
-		assert.Equal(t, 1, count, table)
-	}
-	var roleCount, versionCount int
-	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM agent_profiles WHERE id='builtin-workspace-explorer'`).Scan(&roleCount))
-	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM agent_profile_versions WHERE id='builtin-workspace-explorer-v1'`).Scan(&versionCount))
-	assert.Equal(t, 1, roleCount)
-	assert.Equal(t, 1, versionCount)
-	var currentVersion string
-	require.NoError(t, db.QueryRow(`SELECT current_version_id FROM agent_profiles WHERE id='builtin-workspace-explorer'`).Scan(&currentVersion))
-	assert.Equal(t, "builtin-workspace-explorer-v3", currentVersion)
-
-	// The builtin definition must pass RoleRepo validation (known tools, fixed
-	// or inherit binding accepted, read-only without mutation tools).
-	repo := &store.RoleRepo{DB: db, KnownTools: map[string]bool{
-		"read": true, "ls": true, "grep": true, "find": true, "git_readonly": true,
-	}, KnownSkills: map[string]bool{}}
-	version, err := repo.GetVersion(ctx, "builtin-workspace-explorer", "builtin-workspace-explorer-v1")
-	require.NoError(t, err)
-	assert.Equal(t, domain.RoleAuthorityReadOnly, version.Definition.Authority)
-	for _, tool := range version.Definition.AllowedTools {
-		assert.NotEqual(t, "bash", tool, "read-only Explorer must not allow mutation tools")
-		assert.NotEqual(t, "write", tool)
-		assert.NotEqual(t, "exec", tool)
-	}
-	var enabled string
-	require.NoError(t, db.QueryRow(`SELECT value FROM settings WHERE key='workspace_explorer_enabled'`).Scan(&enabled))
-	assert.Equal(t, "1", enabled)
-}
-
-var _ = json.RawMessage{}

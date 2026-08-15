@@ -179,5 +179,5 @@ func (c *cappedBuffer) Write(p []byte) (int, error) {
 	return c.buf.Write(p)
 }
 
-func (c *cappedBuffer) Bytes() []byte    { return c.buf.Bytes() }
-func (c *cappedBuffer) truncated() bool   { return c.dropped > 0 }
+func (c *cappedBuffer) Bytes() []byte   { return c.buf.Bytes() }
+func (c *cappedBuffer) truncated() bool { return c.dropped > 0 }

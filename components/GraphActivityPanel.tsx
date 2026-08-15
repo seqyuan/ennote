@@ -67,10 +67,10 @@ export function GraphActivityPanel({ projectId, sessionId }: {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!projectId) return;
+    if (!sessionId) return;
     try {
-      const all = await apiFetch<RunAgentFlow[]>(`/v1/projects/${encodeURIComponent(projectId)}/agent-flows/runs`);
-      const filtered = (all ?? []).filter((run) => run.sessionId === sessionId);
+      const runs = await apiFetch<RunAgentFlow[]>(`/v1/sessions/${encodeURIComponent(sessionId)}/graph-runs`);
+      const filtered = runs ?? [];
       setRuns(filtered);
       setError(null);
       // Expand the newest run when the list changes (empty -> non-empty or a
@@ -88,7 +88,7 @@ export function GraphActivityPanel({ projectId, sessionId }: {
     } catch (reason) {
       setError((reason as Error).message);
     }
-  }, [projectId, sessionId]);
+  }, [sessionId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -109,16 +109,16 @@ export function GraphActivityPanel({ projectId, sessionId }: {
 
   // Load task checkpoints for the expanded run.
   useEffect(() => {
-    if (!projectId || !expanded) return;
+    if (!sessionId || !expanded) return;
     let cancelled = false;
     void apiFetch<{ run: RunAgentFlow; nodes: RunAgentFlowNode[] }>(
-      `/v1/projects/${encodeURIComponent(projectId)}/agent-flows/runs/${encodeURIComponent(expanded)}`,
+      `/v1/sessions/${encodeURIComponent(sessionId)}/graph-runs/${encodeURIComponent(expanded)}`,
     ).then((detail) => {
       if (cancelled) return;
       setNodes((previous) => ({ ...previous, [expanded]: detail.nodes ?? [] }));
     }).catch(() => { if (!cancelled) setError("Failed to load graph tasks"); });
     return () => { cancelled = true; };
-  }, [expanded, projectId]);
+  }, [expanded, sessionId]);
 
   const running = useMemo(() => runs.some((run) => run.state === "running"), [runs]);
 

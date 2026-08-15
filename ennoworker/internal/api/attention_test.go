@@ -16,18 +16,18 @@ import (
 func setupAttentionAPI(t *testing.T) (*Server, http.Handler, *store.DelegationRepo, string, string) {
 	t.Helper()
 	server, handler := setupServer(t, nil)
-	server.DelegationApprovals = &store.DelegationApprovalRepo{DB: server.DB}
-	server.Attention = &store.AttentionRepo{DB: server.DB}
-	delegations := &store.DelegationRepo{DB: server.DB}
-	runs := &store.RunRepo{DB: server.DB}
 	ctx := context.Background()
 
-	_, err := server.DB.Exec(`UPDATE settings SET value='1' WHERE key='hosted_commit_format_version'`)
-	require.NoError(t, err)
 	project, _, err := server.Projects.CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: "attention-api", HostPath: t.TempDir()})
 	require.NoError(t, err)
 	session, err := server.Sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID, Title: "attention"})
 	require.NoError(t, err)
+	sessionDB, err := server.SessionStores.OpenSession(ctx, session.ID)
+	require.NoError(t, err)
+	server.DelegationApprovals = &store.DelegationApprovalRepo{DB: sessionDB}
+	server.Attention = &store.AttentionRepo{DB: sessionDB}
+	delegations := &store.DelegationRepo{DB: sessionDB, Policies: apiPolicyStore(t)}
+	runs := &store.RunRepo{DB: sessionDB}
 	submission, err := runs.SubmitTurn(ctx, domain.SubmitTurnInput{SessionID: session.ID, ClientRequestID: "att-parent", Text: "run"})
 	require.NoError(t, err)
 	_, err = runs.Claim(ctx, submission.Run.ID)
@@ -35,7 +35,7 @@ func setupAttentionAPI(t *testing.T) (*Server, http.Handler, *store.DelegationRe
 	group, _, children, err := delegations.CreateGroupWithChildren(ctx, store.CreateDelegationGroupInput{
 		ParentRunID: submission.Run.ID, ParentToolCallID: "bg", Strategy: domain.DelegationStrategySingle,
 		ExecutionMode: domain.DelegationExecutionBackground,
-		Items:         []store.CreateDelegationItemInput{apiExplorerItem()},
+		Items:         []store.CreateDelegationItemInput{apiExplorerItem(t, server.DB)},
 	}, session.ID)
 	require.NoError(t, err)
 	require.Len(t, children, 1)

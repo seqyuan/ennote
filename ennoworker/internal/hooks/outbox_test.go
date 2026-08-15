@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	_ "modernc.org/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	_ "modernc.org/sqlite"
 )
 
 func setupOutboxDB(t *testing.T) (*sql.DB, *OutboxStore) {

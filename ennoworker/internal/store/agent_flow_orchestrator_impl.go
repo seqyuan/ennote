@@ -7,16 +7,20 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 )
 
 // OrchestratorStore implements agentflow.FlowStore over the flow run repo.
+// GetVersion resolves the frozen execution plan from the owning Session
+// database (run_agent_flow.definition_json), never from mutable files or the
+// removed global agent_flow_version tables.
 type OrchestratorStore struct {
-	Runs     *AgentFlowRunRepo
-	Profiles *AgentFlowProfileRepo
+	Runs *AgentFlowRunRepo
 }
 
 func (s *OrchestratorStore) GetRun(ctx context.Context, runID string) (*domain.RunAgentFlow, error) {
@@ -24,7 +28,24 @@ func (s *OrchestratorStore) GetRun(ctx context.Context, runID string) (*domain.R
 }
 
 func (s *OrchestratorStore) GetVersion(ctx context.Context, versionID string) (*domain.AgentFlowVersion, error) {
-	return s.Profiles.GetVersion(ctx, versionID)
+	var definitionJSON, configDigest string
+	err := s.Runs.DB.QueryRowContext(ctx, `SELECT definition_json, config_digest
+		FROM run_agent_flow WHERE flow_version_id=? LIMIT 1`, versionID).
+		Scan(&definitionJSON, &configDigest)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("frozen flow definition is unavailable for %s", versionID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	var version int
+	if _, revision, ok := strings.Cut(versionID, "@"); ok {
+		_, _ = fmt.Sscanf(strings.TrimPrefix(revision, "v"), "%d", &version)
+	}
+	return &domain.AgentFlowVersion{
+		ID: versionID, Version: version, ConfigDigest: configDigest,
+		DefinitionJSON: json.RawMessage(definitionJSON),
+	}, nil
 }
 
 func (s *OrchestratorStore) ListNodes(ctx context.Context, runID string) ([]*domain.RunAgentFlowNode, error) {
@@ -78,6 +99,9 @@ func (s *OrchestratorStore) TerminateAnchor(ctx context.Context, runID string, s
 type OrchestratorChildren struct {
 	DB          *sql.DB
 	Delegations *DelegationRepo
+	// Policies resolves the file-backed delegation policy for the root budget
+	// ledger (V2); nil keeps the legacy global policy SQL path.
+	Policies *fileconfig.PolicyStore
 }
 
 // CreateTaskChild atomically materializes one task's single-item delegation
@@ -85,9 +109,22 @@ type OrchestratorChildren struct {
 // never leaks an orphaned group/item. Background mode keeps the flow anchor
 // 'running' so the standard coordinator parent-wake machinery stays inert and
 // the orchestrator owns the child lifecycle. The synthetic parent tool call
-// id is unique per attempt.
+// id is unique per attempt. RoleMeta carries the frozen role identity and
+// definition from the flow node so delegation never reads global role SQL.
 func (c *OrchestratorChildren) CreateTaskChild(ctx context.Context, parentRunID, sessionID string,
 	spec agentflow.ChildSpec) (agentflow.ChildInfo, error) {
+	var roleMeta *DelegationRoleMeta
+	if len(spec.RoleDefinitionJSON) > 0 {
+		meta, err := delegationRoleMetaFromDefinition(spec.RoleVersionID, spec.RoleDefinitionJSON)
+		if err != nil {
+			return agentflow.ChildInfo{}, fmt.Errorf("freeze task role meta: %w", err)
+		}
+		meta.Handle = spec.Handle
+		if meta.DisplayName == "" {
+			meta.DisplayName = spec.Handle
+		}
+		roleMeta = meta
+	}
 	item := CreateDelegationItemInput{
 		Name:           spec.Handle,
 		RoleVersionID:  spec.RoleVersionID,
@@ -95,7 +132,8 @@ func (c *OrchestratorChildren) CreateTaskChild(ctx context.Context, parentRunID,
 		AssignmentJSON: json.RawMessage(fmt.Sprintf(`{"task":%q}`, spec.Assignment)),
 		// OutputContract empty: the delegation admission resolves the frozen
 		// Role's contract; the typed payload still flows through submit_result.
-		Budget: spec.Budget,
+		Budget:   spec.Budget,
+		RoleMeta: roleMeta,
 	}
 	toolCallID := "flow:" + parentRunID + ":" + spec.Handle + ":" + strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
 	tx, err := c.DB.BeginTx(ctx, nil)
@@ -114,6 +152,7 @@ func (c *OrchestratorChildren) CreateTaskChild(ctx context.Context, parentRunID,
 	}
 	child, err := createChildRunTx(ctx, tx, CreateChildRunInput{
 		ParentRunID: parentRunID, ItemID: items[0].ID, SessionID: sessionID, Background: true,
+		Policies: c.Policies,
 	})
 	if err != nil {
 		return agentflow.ChildInfo{}, fmt.Errorf("create task child run: %w", err)

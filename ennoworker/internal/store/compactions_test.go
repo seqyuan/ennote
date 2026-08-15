@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agent"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -15,7 +17,8 @@ import (
 func TestCreateManualCompactionIsIdempotentAndDoesNotChangeMessages(t *testing.T) {
 	db := SetupDB(t)
 	seedCompactionSession(t, db)
-	repo := &CompactionRepo{DB: db}
+	policies := defaultCompactionPolicies(t)
+	repo := &CompactionRepo{DB: db, Publisher: nil, Policies: policies}
 	input := domain.ManualCompactionInput{SessionID: "session", BaseMessageID: "m3",
 		ClientRequestID: "compact-once", Instructions: "keep exact paths"}
 
@@ -45,8 +48,7 @@ func TestCreateManualCompactionIsIdempotentAndDoesNotChangeMessages(t *testing.T
 func TestLatestValidCompactionStaysOnCurrentBranch(t *testing.T) {
 	db := SetupDB(t)
 	now := "2026-07-28T00:00:00Z"
-	_, err := db.Exec(`INSERT INTO projects(id,name,created_at,updated_at) VALUES('project','P',?,?);
-		INSERT INTO sessions(id,project_id,active_leaf_message_id,created_at,updated_at) VALUES('session','project','a3',?,?);
+	_, err := db.Exec(`INSERT INTO sessions(id,project_id,active_leaf_message_id,created_at,updated_at) VALUES('session','project','a3',?,?);
 		INSERT INTO messages(id,session_id,parent_message_id,role,created_at) VALUES
 		('root','session',NULL,'user',?),('a2','session','root','assistant',?),('a3','session','a2','user',?),
 		('b2','session','root','assistant',?),('b3','session','b2','user',?);`, now, now, now, now, now, now, now, now, now)
@@ -86,13 +88,15 @@ func TestLatestValidCompactionStaysOnCurrentBranch(t *testing.T) {
 func TestManualCompactionRejectsDisabledPolicy(t *testing.T) {
 	db := SetupDB(t)
 	seedCompactionSession(t, db)
-	now := "2026-07-28T00:00:00Z"
-	_, err := db.Exec(`INSERT INTO policy_profiles(id,name,kind,version,config_json,status,created_at,updated_at)
-		VALUES('disabled','disabled','compaction',1,'{"mode":"disabled","triggerRatio":0.75,"keepRecentTurns":2,"tailTokenRatio":0.2,"tailMinTokens":8000,"tailMaxTokens":32000,"summaryInputRatio":0.7,"compactionModelProfileId":null,"summaryMaxOutputTokens":4096,"includeReasoning":false,"allowHistoryLookup":true,"allowOverflowRecovery":false,"maxOverflowRecoveries":0,"ineffectiveReclaimRatio":0.1,"ineffectiveLimit":3,"failureCooldownSeconds":600,"promptVersion":"v1"}','active',?,?);
-		UPDATE sessions SET compaction_policy_profile_id='disabled' WHERE id='session'`, now, now)
+	// V2: the compaction policy is file-authored, not a SQL row.
+	policyFile := filepath.Join(t.TempDir(), "policies.json")
+	policies := &fileconfig.PolicyStore{Path: policyFile}
+	profile, err := policies.CreateVersion(context.Background(), "disabled", domain.PolicyKindCompaction,
+		json.RawMessage(`{"mode":"disabled","triggerRatio":0.75,"keepRecentTurns":2,"tailTokenRatio":0.2,"tailMinTokens":8000,"tailMaxTokens":32000,"summaryInputRatio":0.7,"compactionModelProfileId":null,"summaryMaxOutputTokens":4096,"includeReasoning":false,"allowHistoryLookup":true,"allowOverflowRecovery":false,"maxOverflowRecoveries":0,"ineffectiveReclaimRatio":0.1,"ineffectiveLimit":3,"failureCooldownSeconds":600,"promptVersion":"v1"}`))
 	require.NoError(t, err)
+	require.NoError(t, policies.SetDefaultProfile(profile.ID))
 
-	_, err = (&CompactionRepo{DB: db}).CreateManual(context.Background(), domain.ManualCompactionInput{
+	_, err = (&CompactionRepo{DB: db, Policies: policies}).CreateManual(context.Background(), domain.ManualCompactionInput{
 		SessionID: "session", BaseMessageID: "m3", ClientRequestID: "disabled"})
 	assert.Equal(t, domain.ErrorCompactionNotAllowed, domain.ErrorCodeOf(err))
 }
@@ -100,12 +104,23 @@ func TestManualCompactionRejectsDisabledPolicy(t *testing.T) {
 func seedCompactionSession(t *testing.T, db *sql.DB) {
 	t.Helper()
 	now := "2026-07-28T00:00:00Z"
-	_, err := db.Exec(`INSERT INTO projects(id,name,created_at,updated_at) VALUES('project','P',?,?);
-		INSERT INTO sessions(id,project_id,active_leaf_message_id,created_at,updated_at) VALUES('session','project','m3',?,?);
+	_, err := db.Exec(`INSERT INTO sessions(id,project_id,active_leaf_message_id,created_at,updated_at) VALUES('session','project','m3',?,?);
 		INSERT INTO messages(id,session_id,parent_message_id,role,created_at) VALUES
 		('m1','session',NULL,'user',?),('m2','session','m1','assistant',?),('m3','session','m2','user',?);
 		INSERT INTO message_parts(id,message_id,ordinal,block_kind,payload_json) VALUES
 		('p1','m1',0,'text','{"text":"first"}'),('p2','m2',0,'text','{"text":"answer"}'),('p3','m3',0,'text','{"text":"latest"}')`,
 		now, now, now, now, now, now, now)
 	require.NoError(t, err)
+}
+
+// defaultCompactionPolicies returns a file-backed policy store with an enabled
+// default compaction policy (V2 fixture helper).
+func defaultCompactionPolicies(t *testing.T) *fileconfig.PolicyStore {
+	t.Helper()
+	policies := &fileconfig.PolicyStore{Path: filepath.Join(t.TempDir(), "policies.json")}
+	profile, err := policies.CreateVersion(context.Background(), "enabled", domain.PolicyKindCompaction,
+		json.RawMessage(`{"mode":"threshold","triggerRatio":0.75,"keepRecentTurns":2,"tailTokenRatio":0.2,"tailMinTokens":8000,"tailMaxTokens":32000,"summaryInputRatio":0.7,"compactionModelProfileId":null,"summaryMaxOutputTokens":4096,"includeReasoning":false,"allowHistoryLookup":true,"allowOverflowRecovery":false,"maxOverflowRecoveries":0,"ineffectiveReclaimRatio":0.1,"ineffectiveLimit":3,"failureCooldownSeconds":600,"promptVersion":"v1"}`))
+	require.NoError(t, err)
+	require.NoError(t, policies.SetDefaultProfile(profile.ID))
+	return policies
 }

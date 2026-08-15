@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/seqyuan/ennote/ennoworker/internal/agent"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 )
 
 var (
@@ -25,6 +26,9 @@ var (
 type CompactionRepo struct {
 	DB        *sql.DB
 	Publisher EventPublisher
+	// Policies resolves the file-backed compaction policy (V2). When nil, the
+	// legacy global policy SQL is used.
+	Policies *fileconfig.PolicyStore
 }
 
 type CompactionPlanRecord struct {
@@ -101,7 +105,12 @@ func (r *CompactionRepo) CreateManual(ctx context.Context, input domain.ManualCo
 		_ = tx.QueryRowContext(ctx, `SELECT compaction_policy_profile_id FROM agent_profiles
 			WHERE id=? AND status='active'`, agentID.String).Scan(&policyID)
 	}
-	policy, err := loadPolicySnapshotTx(ctx, tx, policyID, domain.PolicyKindCompaction, "default_compaction_policy_profile_id")
+	var policy domain.PolicySnapshot
+	if r.Policies != nil {
+		policy, err = r.Policies.Resolve(ctx, policyID, domain.PolicyKindCompaction)
+	} else {
+		policy, err = loadPolicySnapshotTx(ctx, tx, policyID, domain.PolicyKindCompaction, "default_compaction_policy_profile_id")
+	}
 	if err != nil {
 		return nil, domain.NewCodedError(domain.ErrorCompactionConfigInvalid, err)
 	}

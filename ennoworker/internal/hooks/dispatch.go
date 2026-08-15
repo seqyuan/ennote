@@ -20,9 +20,9 @@ const EventPreToolUse = "PreToolUse"
 // Dispatcher runs the hooks configured for an event and merges their results.
 // A nil *Dispatcher is a valid no-op (Dispatch returns an empty Decision).
 type Dispatcher struct {
-	set      HookSet
-	runner   *Runner
-	warnLog  io.Writer
+	set     HookSet
+	runner  *Runner
+	warnLog io.Writer
 }
 
 // NewDispatcher builds a dispatcher over the given hook set. It returns nil
@@ -46,6 +46,8 @@ func NewDispatcher(set HookSet, projectDir string, warnLog io.Writer) *Dispatche
 // the merged decision. On a nil dispatcher or no matched hooks it returns the
 // zero Decision. For PreToolUse the first block stops the chain so a blocked
 // call is not subsequently rewritten.
+//
+// @mode serial-merge
 func (d *Dispatcher) Dispatch(ctx context.Context, eventType, toolName string, input HookInput) Decision {
 	var dec Decision
 	if d == nil {

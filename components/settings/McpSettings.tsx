@@ -1,5 +1,6 @@
 "use client";
 
+import { Archive } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
 import { diffText } from "@/lib/agent-flow";
@@ -179,6 +180,17 @@ export function McpSettings({ projectId, setError }: {
       cancelled = true;
     };
   }, [projectId, setError, loadVersions]);
+
+  const archiveProfile = async (profile: MCPServerProfile) => {
+    if (!profile.id || !window.confirm(`Archive MCP profile “${profile.displayName ?? profile.slug}”?`)) return;
+    try {
+      await apiFetch(`/v1/mcp/server-profiles/${encodeURIComponent(profile.id)}`, { method: "DELETE" });
+      setError(null);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to archive MCP profile");
+    }
+  };
 
   const createProfile = async () => {
     try {
@@ -657,6 +669,17 @@ export function McpSettings({ projectId, setError }: {
                       View diff
                     </button>
                   )}
+                  {candidate.sourceKind === "managed" && !candidate.alreadyBound && (() => {
+                    const profile = profiles.find(entry => entry.slug === candidate.slug && entry.lifecycleStatus === "active");
+                    return profile ? (
+                      <button type="button" title="Archive MCP profile"
+                        aria-label={`Archive MCP profile ${profile.displayName ?? profile.slug}`}
+                        onClick={() => archiveProfile(profile)}
+                        style={{ ...ghostButtonStyle, color: "#E11D48", padding: 4 }}>
+                        <Archive size={14} aria-hidden="true" />
+                      </button>
+                    ) : null;
+                  })()}
                 </div>
               </div>
               {diffView && diffView.slug === candidate.slug && (
@@ -687,8 +710,9 @@ export function McpSettings({ projectId, setError }: {
               </div>
             ))}
             {/* Managed profiles already in the library but not listed as candidates */}
-            {candidates.length === 0 && profiles.map((profile) => {
-              const bound = bindings.some((binding) => (binding.profileVersionId?.startsWith(profile.id!) ?? false));
+            {profiles.filter(profile => !candidates.some(candidate => candidate.slug === profile.slug)).map((profile) => {
+              const profileVersionIds = new Set((versions[profile.id!] ?? []).map(version => version.id));
+              const bound = bindings.some(binding => profileVersionIds.has(binding.profileVersionId));
               return (
                 <div key={profile.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: 6 }}>
                   <div style={{ minWidth: 0 }}>
@@ -703,7 +727,12 @@ export function McpSettings({ projectId, setError }: {
                         Bound
                       </span>
                     ) : (
-                      <span style={{ fontSize: 10, color: "var(--text-dim)" }}>Use “+ Add server” to configure</span>
+                      <button type="button" title="Archive MCP profile"
+                        aria-label={`Archive MCP profile ${profile.displayName ?? profile.slug}`}
+                        onClick={() => archiveProfile(profile)}
+                        style={{ ...ghostButtonStyle, color: "#E11D48", padding: 4 }}>
+                        <Archive size={14} aria-hidden="true" />
+                      </button>
                     )}
                   </div>
                 </div>

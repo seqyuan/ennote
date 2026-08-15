@@ -3,7 +3,9 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"github.com/google/uuid"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,11 +16,17 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/artifacts"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
+	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/mcpclient"
+	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
+	"github.com/seqyuan/ennote/ennoworker/internal/providerdoctor"
+	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -35,6 +43,10 @@ func (f *fakeDiagnoser) Diagnose(_ context.Context, providerID, modelID string) 
 	f.providerID = providerID
 	f.modelID = modelID
 	return f.diagnostic, f.err
+}
+
+func (f *fakeDiagnoser) DiscoverModels(_ context.Context, _ providerdoctor.DiscoverInput) ([]providerdoctor.DiscoveredModel, error) {
+	return []providerdoctor.DiscoveredModel{{ModelName: "gpt-4o"}}, nil
 }
 
 type fakeController struct {
@@ -58,27 +70,52 @@ func (f *fakeController) Cancel(_ context.Context, runID string) error {
 
 func setupServer(t *testing.T, control RunController) (*Server, http.Handler) {
 	t.Helper()
-	db, err := store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
 	hub := events.NewHub()
+	// V2: Sessions live in per-Session SQLite files; the Server operates in
+	// SessionStores mode over the opened default Session database.
+	home := t.TempDir()
+	projectFiles := &projectstore.Store{Root: filepath.Join(home, "projects")}
+	project, _, err := projectFiles.CreateWithWorkspace(context.Background(),
+		domain.CreateProjectInput{Name: "api", HostPath: t.TempDir()})
+	require.NoError(t, err)
+	manager := sessionstore.NewManager(projectFiles.Root, projectFiles)
+	t.Cleanup(func() { require.NoError(t, manager.Close()) })
+	session, err := manager.Create(context.Background(), domain.CreateSessionInput{ProjectID: project.ID, Title: "session"})
+	require.NoError(t, err)
+	db, err := manager.OpenSession(context.Background(), session.ID)
+	require.NoError(t, err)
+	// Legacy repos that still consult global tables (SQL RoleRepo until B3d,
+	// MCP profiles) get their own fixture database.
+	fixDB, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = fixDB.Close() })
+	require.NoError(t, store.MigrateFixtureSchema(fixDB))
+	// V2: provider/model/policy repos resolve from file stores.
+	modelFiles := fileconfig.NewModelStore(
+		filepath.Join(home, "config", "models.json"),
+		filepath.Join(home, "config", "provider-auth.json"),
+		filepath.Join(home, "config", "settings.json"),
+	)
+	providers := &store.ProviderRepo{Files: modelFiles}
+	models := &store.ModelRepo{Files: modelFiles}
+	policyFiles := &fileconfig.PolicyStore{Path: filepath.Join(home, "config", "policies.json")}
+	policies := &store.PolicyRepo{Files: policyFiles}
+	roleFiles := &globalsource.Store{HomeDir: home}
 	server := &Server{
-		DB: db, Token: "test-token", Sandbox: "none",
-		Projects: &store.ProjectRepo{DB: db}, Providers: &store.ProviderRepo{DB: db},
-		Models: &store.ModelRepo{DB: db}, Roles: &store.RoleRepo{DB: db, KnownTools: map[string]bool{
-			"read": true, "ls": true, "grep": true, "find": true, "bash": true, "write": true,
-		}}, Policies: &store.PolicyRepo{DB: db},
-		Artifacts: &artifacts.Service{DB: db, Root: t.TempDir()}, Sessions: &store.SessionRepo{DB: db},
-		Branches: &store.BranchRepo{DB: db}, Messages: &store.MessageRepo{DB: db}, Compactions: &store.CompactionRepo{DB: db},
-		Approvals: &store.ApprovalRepo{DB: db}, Delegations: &store.DelegationRepo{DB: db}, Runs: &store.RunRepo{DB: db},
+		DB: db, Token: "test-token", Sandbox: "none", SessionStores: manager,
+		CatalogDB: fixDB, UsageDB: fixDB,
+		Projects: &store.ProjectRepo{Files: projectFiles}, Providers: providers,
+		Models: models, Policies: policies,
+		Artifacts: &artifacts.Service{DB: db, Root: t.TempDir()}, Sessions: &store.SessionRepo{Files: manager},
+		Branches: &store.BranchRepo{DB: db}, Messages: &store.MessageRepo{DB: db}, Compactions: &store.CompactionRepo{DB: db, Policies: policyFiles},
+		Approvals: &store.ApprovalRepo{DB: db}, Delegations: &store.DelegationRepo{DB: db, Policies: apiPolicyStore(t)}, Runs: &store.RunRepo{DB: db, Providers: providers, Models: models, Policies: policyFiles, RoleSources: roleFiles},
 		DelegationApprovals: &store.DelegationApprovalRepo{DB: db},
 		Queue:               &store.QueueRepo{DB: db}, Events: &store.EventRepo{DB: db},
 		Hub: hub, Control: control,
 		MCP: &MCPServer{
-			Profiles:      &store.MCPProfileRepo{DB: db},
-			Bindings:      &store.MCPBindingRepo{DB: db},
-			Catalogs:      &store.MCPCatalogRepo{DB: db},
+			Profiles:      &store.MCPProfileRepo{FilePath: filepath.Join(home, "config", "mcp.json")},
+			Bindings:      &store.MCPBindingRepo{Projects: projectFiles},
+			Catalogs:      &store.MCPCatalogRepo{CacheDir: filepath.Join(home, "cache", "mcp")},
 			Runs:          &store.MCPRunRepo{DB: db},
 			ResolveSecret: nil,
 			Logger:        nil,
@@ -125,6 +162,7 @@ func TestArtifactMetadataPreviewDownloadAndSessionScope(t *testing.T) {
 	require.NoError(t, err)
 	session, err := server.Sessions.Create(context.Background(), domain.CreateSessionInput{ProjectID: project.ID})
 	require.NoError(t, err)
+	_ = bindAPISession(t, server, context.Background(), session.ID)
 	otherProject, _, err := server.Projects.CreateWithWorkspace(context.Background(), domain.CreateProjectInput{
 		Name: "other", HostPath: t.TempDir(),
 	})
@@ -186,6 +224,7 @@ func TestApprovalAPIRehydratesAndResolvesPendingBatch(t *testing.T) {
 	require.NoError(t, err)
 	session, err := server.Sessions.Create(context.Background(), domain.CreateSessionInput{ProjectID: project.ID})
 	require.NoError(t, err)
+	_ = bindAPISession(t, server, context.Background(), session.ID)
 	submission, err := server.Runs.SubmitTurn(context.Background(), domain.SubmitTurnInput{
 		SessionID: session.ID, ClientRequestID: "turn", Text: "update",
 	})
@@ -232,6 +271,7 @@ func TestActiveParentProjectsDepthOneChildApproval(t *testing.T) {
 	require.NoError(t, err)
 	session, err := server.Sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID})
 	require.NoError(t, err)
+	_ = bindAPISession(t, server, ctx, session.ID)
 	submission, err := server.Runs.SubmitTurn(ctx, domain.SubmitTurnInput{
 		SessionID: session.ID, ClientRequestID: "parent", Text: "delegate",
 	})
@@ -239,13 +279,16 @@ func TestActiveParentProjectsDepthOneChildApproval(t *testing.T) {
 	_, err = server.Runs.Claim(ctx, submission.Run.ID)
 	require.NoError(t, err)
 
-	delegations := &store.DelegationRepo{DB: server.DB}
+	delegations := &store.DelegationRepo{DB: server.DB, Policies: apiPolicyStore(t)}
 	group, err := delegations.CreateGroup(ctx, store.CreateDelegationGroupInput{
 		ParentRunID: submission.Run.ID, ParentToolCallID: "delegate-call", Strategy: domain.DelegationStrategySingle,
-		Items: []store.CreateDelegationItemInput{{Name: "inspect", RoleVersionID: "builtin-workspace-explorer-v3",
+		Items: []store.CreateDelegationItemInput{{
+			Name: "inspect", RoleVersionID: "builtin-workspace-explorer-v3",
 			AssignmentJSON: json.RawMessage(`{"task":"inspect"}`), OutputContract: "text-v1",
 			Budget: domain.BudgetCeilingJSON{MaxModelCalls: 4, MaxToolCalls: 8, MaxTotalTokens: 20000,
-				MaxOutputTokens: 4000, MaxWallTimeMS: 120000}}},
+				MaxOutputTokens: 4000, MaxWallTimeMS: 120000},
+			RoleMeta: apiRoleMetaFromDB(t, server.DB, "builtin-workspace-explorer-v3"),
+		}},
 	})
 	require.NoError(t, err)
 	items, err := delegations.ListItems(ctx, group.ID)
@@ -322,6 +365,7 @@ func TestRuntimeIdentityRequiresWorkerAuthentication(t *testing.T) {
 	}
 	decodeData(t, authorized, &data)
 	assert.Equal(t, "runtime-instance", data.InstanceID)
+	assert.Equal(t, "runtime-instance", authorized.Header().Get("X-Ennote-Worker-Instance"))
 }
 
 func TestProviderDoctorAPIUsesExplicitModelWithoutRunPersistence(t *testing.T) {
@@ -370,102 +414,19 @@ func apiRoleDefinition(modelID string) domain.RoleDefinition {
 	}
 }
 
-func TestRoleCRUDPublishAndCatalogAPI(t *testing.T) {
-	server, handler := setupServer(t, nil)
-	ctx := context.Background()
-	project, _, err := server.Projects.CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: "Roles", HostPath: t.TempDir()})
-	require.NoError(t, err)
-	provider, err := server.Providers.Create(ctx, store.CreateProviderInput{Name: "Provider",
-		ProviderType: domain.ProviderOpenAICompatible, BaseURL: "https://provider.test", CredentialRef: "env:ROLE_KEY"})
-	require.NoError(t, err)
-	model, err := server.Models.Create(ctx, store.CreateModelInput{ProviderID: provider.ID, ModelName: "role-model",
-		ContextWindow: 32000, MaxOutputTokens: 2048, SupportsToolUse: true})
-	require.NoError(t, err)
-	definition := apiRoleDefinition(model.ID)
-	created := request(t, handler, http.MethodPost, "/v1/roles", map[string]any{
-		"handle": "security-reviewer", "name": "Security Reviewer", "description": "Independent review",
-		"positioning": "Use after trust-boundary changes.", "icon": "shield-check", "color": "red",
-		"scope": "project", "projectId": project.ID, "definition": definition,
-	}, true)
-	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
-	var role domain.RoleIdentity
-	decodeData(t, created, &role)
-
-	catalog := request(t, handler, http.MethodGet, "/v1/roles?projectId="+project.ID+"&status=active", nil, true)
-	require.Equal(t, http.StatusOK, catalog.Code, catalog.Body.String())
-	assert.NotContains(t, catalog.Body.String(), "Review evidence independently")
-	var page struct {
-		Items []domain.RoleSummary `json:"items"`
-	}
-	decodeData(t, catalog, &page)
-	require.Len(t, page.Items, 2)
-
-	validated := request(t, handler, http.MethodPost, "/v1/roles/"+role.ID+"/validate", map[string]any{}, true)
-	require.Equal(t, http.StatusOK, validated.Code, validated.Body.String())
-	var validation domain.RoleValidationResult
-	decodeData(t, validated, &validation)
-	assert.True(t, validation.Valid)
-
-	published := request(t, handler, http.MethodPost, "/v1/roles/"+role.ID+"/publish",
-		map[string]any{"expectedRevision": 0}, true)
-	require.Equal(t, http.StatusCreated, published.Code, published.Body.String())
-	var version domain.RoleVersion
-	decodeData(t, published, &version)
-	assert.Equal(t, 1, version.Version)
-
-	session, err := server.Sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID, Title: "Direct Role"})
-	require.NoError(t, err)
-	_, err = server.DB.Exec(`UPDATE settings SET value='2' WHERE key='hosted_commit_format_version'`)
-	require.NoError(t, err)
-	invoked := request(t, handler, http.MethodPost, "/v1/sessions/"+session.ID+"/invocations", map[string]any{
-		"text":   "Review authorization boundaries.",
-		"target": map[string]any{"kind": "role", "objectId": role.ID, "versionId": version.ID, "contextMode": "room"},
-	}, true)
-	require.Equal(t, http.StatusAccepted, invoked.Code, invoked.Body.String())
-	var invocation domain.TurnSubmission
-	decodeData(t, invoked, &invocation)
-	assert.Equal(t, domain.CommitFormatSpeakerV2, invocation.Run.CommitFormatVersion)
-	assert.Contains(t, string(invocation.Run.SpeakerSnapshot), `"handle":"security-reviewer"`)
-	var addresseeKind, addresseeObjectID string
-	require.NoError(t, server.DB.QueryRow(`SELECT addressee_kind,addressee_object_id FROM messages WHERE id=?`,
-		invocation.UserMessageID).Scan(&addresseeKind, &addresseeObjectID))
-	assert.Equal(t, "role", addresseeKind)
-	assert.Equal(t, role.ID, addresseeObjectID)
-
-	definition.RolePrompt = "Review authorization boundaries."
-	updated := request(t, handler, http.MethodPatch, "/v1/roles/"+role.ID+"/draft", map[string]any{
-		"expectedRevision": 0, "positioning": "Updated positioning", "definition": definition,
-	}, true)
-	require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
-	decodeData(t, updated, &role)
-	assert.Equal(t, 1, role.DraftRevision)
-	assert.Equal(t, "Updated positioning", role.Positioning)
-
-	history := request(t, handler, http.MethodGet, "/v1/roles/"+role.ID+"/versions", nil, true)
-	require.Equal(t, http.StatusOK, history.Code, history.Body.String())
-	var versions []domain.RoleVersion
-	decodeData(t, history, &versions)
-	require.Len(t, versions, 1)
-	assert.Equal(t, version.ID, versions[0].ID)
-
-	archived := request(t, handler, http.MethodPost, "/v1/roles/"+role.ID+"/archive", map[string]any{}, true)
-	assert.Equal(t, http.StatusOK, archived.Code, archived.Body.String())
-}
-
 func TestProfileManagementAndSessionDefaultModel(t *testing.T) {
 	_, handler := setupServer(t, nil)
-	literal := request(t, handler, http.MethodPost, "/v1/provider-profiles", map[string]any{
-		"name": "unsafe", "providerType": "openai-compatible", "baseUrl": "https://provider.test", "credentialRef": "sk-literal",
-	}, true)
-	assert.Equal(t, http.StatusBadRequest, literal.Code)
-
+	// Credential values are accepted on write and never returned.
 	createdProvider := request(t, handler, http.MethodPost, "/v1/provider-profiles", map[string]any{
-		"name": "DeepSeek", "providerType": "openai-compatible", "baseUrl": "https://api.deepseek.com", "credentialRef": "env:DEEPSEEK_API_KEY",
+		"name": "DeepSeek", "providerType": "openai-compatible", "baseUrl": "https://api.deepseek.com", "apiKey": "sk-deepseek-1",
 	}, true)
 	require.Equal(t, http.StatusCreated, createdProvider.Code, createdProvider.Body.String())
 	var provider domain.ProviderProfile
 	decodeData(t, createdProvider, &provider)
-	assert.Equal(t, "env:DEEPSEEK_API_KEY", provider.CredentialRef)
+	assert.Empty(t, provider.APIKey)
+	assert.True(t, provider.CredentialConfigured)
+	assert.NotContains(t, createdProvider.Body.String(), "sk-deepseek-1")
+	assert.NotContains(t, createdProvider.Body.String(), `"apiKey"`)
 
 	createdModel := request(t, handler, http.MethodPost, "/v1/model-profiles", map[string]any{
 		"providerId": provider.ID, "modelName": "deepseek-chat", "displayName": "DeepSeek Chat",
@@ -671,6 +632,7 @@ func TestSessionSearchArchiveRestoreAPI(t *testing.T) {
 
 	busy, err := server.Sessions.Create(context.Background(), domain.CreateSessionInput{ProjectID: project.ID, Title: "Busy"})
 	require.NoError(t, err)
+	_ = bindAPISession(t, server, context.Background(), busy.ID)
 	_, err = server.Runs.SubmitTurn(context.Background(), domain.SubmitTurnInput{SessionID: busy.ID, ClientRequestID: "busy", Text: "run"})
 	require.NoError(t, err)
 	busyResponse := request(t, handler, http.MethodPost, "/v1/sessions/"+busy.ID+"/archive", map[string]any{}, true)
@@ -724,6 +686,7 @@ func TestBranchNavigationAPIAndRunRecovery(t *testing.T) {
 	require.NoError(t, err)
 	session, err := server.Sessions.Create(context.Background(), domain.CreateSessionInput{ProjectID: project.ID})
 	require.NoError(t, err)
+	_ = bindAPISession(t, server, context.Background(), session.ID)
 	root, err := server.Messages.CreateUserMessage(context.Background(), session.ID, "", "root")
 	require.NoError(t, err)
 	leaf, err := server.Messages.CreateUserMessage(context.Background(), session.ID, root.ID, "leaf")
@@ -794,6 +757,7 @@ func TestManualCompactionAPIIsIdempotentAndListable(t *testing.T) {
 	require.NoError(t, err)
 	session, err := server.Sessions.Create(context.Background(), domain.CreateSessionInput{ProjectID: project.ID})
 	require.NoError(t, err)
+	_ = bindAPISession(t, server, context.Background(), session.ID)
 	message, err := (&store.MessageRepo{DB: server.DB}).CreateUserMessage(context.Background(), session.ID, "", "history")
 	require.NoError(t, err)
 	require.NoError(t, server.Sessions.ActivateLeaf(context.Background(), session.ID, message.ID))
@@ -828,6 +792,7 @@ func TestSessionMessagesAPIIsBranchAwareAndPaginated(t *testing.T) {
 	require.NoError(t, err)
 	session, err := server.Sessions.Create(context.Background(), domain.CreateSessionInput{ProjectID: project.ID})
 	require.NoError(t, err)
+	_ = bindAPISession(t, server, context.Background(), session.ID)
 	var lineage []*domain.Message
 	parentID := ""
 	for _, text := range []string{"one", "two", "three"} {
@@ -892,6 +857,7 @@ func TestSessionMessagesAPIRejectsCursorFromSiblingBranch(t *testing.T) {
 	require.NoError(t, err)
 	session, err := server.Sessions.Create(context.Background(), domain.CreateSessionInput{ProjectID: project.ID})
 	require.NoError(t, err)
+	_ = bindAPISession(t, server, context.Background(), session.ID)
 	root, err := server.Messages.CreateUserMessage(context.Background(), session.ID, "", "root")
 	require.NoError(t, err)
 	active, err := server.Messages.CreateUserMessage(context.Background(), session.ID, root.ID, "active")
@@ -915,6 +881,7 @@ func TestRunAPIExposesSafeFrozenPromptMetadata(t *testing.T) {
 	require.NoError(t, err)
 	session, err := server.Sessions.Create(context.Background(), domain.CreateSessionInput{ProjectID: project.ID})
 	require.NoError(t, err)
+	_ = bindAPISession(t, server, context.Background(), session.ID)
 	submission, err := server.Runs.SubmitTurn(context.Background(), domain.SubmitTurnInput{
 		SessionID: session.ID, ClientRequestID: "prompt-metadata", Text: "hello",
 	})
@@ -946,9 +913,8 @@ func TestRunMessagesAPIExposesPrivateShadowAndLegacyFallback(t *testing.T) {
 	require.NoError(t, err)
 	session, err := server.Sessions.Create(context.Background(), domain.CreateSessionInput{ProjectID: project.ID})
 	require.NoError(t, err)
+	_ = bindAPISession(t, server, context.Background(), session.ID)
 	assert.Equal(t, domain.SessionModeHosted, session.Mode)
-	_, err = server.DB.Exec(`UPDATE settings SET value='1' WHERE key='hosted_commit_format_version'`)
-	require.NoError(t, err)
 	submission, err := server.Runs.SubmitTurn(context.Background(), domain.SubmitTurnInput{
 		SessionID: session.ID, ClientRequestID: "transcript", Text: "run",
 	})
@@ -1010,6 +976,7 @@ func TestSSEReplaysAfterCursorWithoutDuplicates(t *testing.T) {
 	require.NoError(t, err)
 	session, err := server.Sessions.Create(context.Background(), domain.CreateSessionInput{ProjectID: project.ID})
 	require.NoError(t, err)
+	_ = bindAPISession(t, server, context.Background(), session.ID)
 	submission, err := server.Runs.SubmitTurn(context.Background(), domain.SubmitTurnInput{SessionID: session.ID, ClientRequestID: "turn", Text: "start"})
 	require.NoError(t, err)
 	_, err = server.Runs.Claim(context.Background(), submission.Run.ID)
@@ -1047,49 +1014,92 @@ func TestUnknownJSONFieldIsRejected(t *testing.T) {
 	assert.Contains(t, response.Body.String(), "invalid_json")
 }
 
-func TestFlowScopedRoleAPI(t *testing.T) {
-	server, handler := setupServer(t, nil)
-	ctx := context.Background()
-	project, _, err := server.Projects.CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: "FlowRoles", HostPath: t.TempDir()})
-	require.NoError(t, err)
-	provider, err := server.Providers.Create(ctx, store.CreateProviderInput{Name: "Provider",
-		ProviderType: domain.ProviderOpenAICompatible, BaseURL: "https://provider.test", CredentialRef: "env:FR_KEY"})
-	require.NoError(t, err)
-	model, err := server.Models.Create(ctx, store.CreateModelInput{ProviderID: provider.ID, ModelName: "fr-model",
-		ContextWindow: 32000, MaxOutputTokens: 2048, SupportsToolUse: true})
-	require.NoError(t, err)
-	profile, err := (&store.AgentFlowProfileRepo{DB: server.DB}).CreateProfile(ctx, store.CreateAgentFlowProfileInput{
-		Name: "FR Graph", Slug: "fr-graph", SourceKind: domain.FlowSourceManaged,
-	})
-	require.NoError(t, err)
+func apiProjectRoleMarkdown(prompt string) string {
+	return `---
+schemaVersion: 1
+handle: project-reviewer
+name: Project Reviewer
+description: Reviews project changes
+positioning: Use after implementation.
+icon: shield-check
+color: "#b91c1c"
+model:
+  ref: openai-main/gpt-5.4
+  thinkingEffort: default
+  fallbacks: []
+skills:
+  - id: code-review
+    mode: preload
+authority: read_only
+permissionCeiling: ask
+allowedTools: [read, grep]
+context:
+  defaultMode: room
+  allowedModes: [room, fresh]
+  ownExecutionContinuity: none
+delegation:
+  admission: approval_required
+  allowedCallerKinds: [host]
+  allowedStrategies: [single]
+  maxInvocationsPerParentRun: 1
+  maxConcurrentInstances: 1
+  budgetCeiling:
+    maxModelCalls: 4
+    maxToolCalls: 8
+    maxTotalTokens: 20000
+    maxOutputTokens: 4000
+    maxCostUsdMicros: 100000
+    maxWallTimeMs: 120000
+outputContract: text-v1
+maxLoopIterations: 8
+---
+` + prompt + "\n"
+}
 
-	definition := apiRoleDefinition(model.ID)
-	created := request(t, handler, http.MethodPost, "/v1/roles", map[string]any{
-		"handle": "graph-local", "name": "Graph Local", "description": "inside the graph only",
-		"positioning": "", "icon": "bot", "color": "neutral",
-		"scope": "flow", "flowId": profile.ID, "definition": definition,
-	}, true)
-	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
-	var role domain.RoleIdentity
-	decodeData(t, created, &role)
-	require.NotNil(t, role.FlowID)
-	assert.Equal(t, profile.ID, *role.FlowID)
-	assert.Equal(t, domain.RoleScopeFlow, role.Scope)
+func newFileProjects(t *testing.T) *store.ProjectRepo {
+	t.Helper()
+	return &store.ProjectRepo{Files: &projectstore.Store{Root: t.TempDir()}}
+}
 
-	// Generic project catalog hides the flow role.
-	catalog := request(t, handler, http.MethodGet, "/v1/roles?projectId="+project.ID+"&status=active", nil, true)
-	require.Equal(t, http.StatusOK, catalog.Code, catalog.Body.String())
-	assert.NotContains(t, catalog.Body.String(), "graph-local")
-	// Flow-scoped listing returns it.
-	flowCatalog := request(t, handler, http.MethodGet, "/v1/roles?scope=flow&flowId="+profile.ID+"&status=active", nil, true)
-	require.Equal(t, http.StatusOK, flowCatalog.Code, flowCatalog.Body.String())
-	assert.Contains(t, flowCatalog.Body.String(), "graph-local")
+// bindAPISession opens the given Session's database and rebinds the Server's
+// per-Session repos to it, so direct repo calls in tests operate on the same
+// database the HTTP endpoints resolve through SessionStores.
+func bindAPISession(t *testing.T, server *Server, ctx context.Context, sessionID string) *sql.DB {
+	t.Helper()
+	db, err := server.SessionStores.OpenSession(ctx, sessionID)
+	require.NoError(t, err)
+	server.DB = db
+	server.Runs = &store.RunRepo{DB: db, Providers: server.Providers, Models: server.Models, Policies: &fileconfig.PolicyStore{},
+		RoleSources: &globalsource.Store{}}
+	server.Messages = &store.MessageRepo{DB: db}
+	server.Branches = &store.BranchRepo{DB: db}
+	server.Queue = &store.QueueRepo{DB: db}
+	server.Events = &store.EventRepo{DB: db}
+	server.Approvals = &store.ApprovalRepo{DB: db}
+	server.Delegations = &store.DelegationRepo{DB: db, Policies: apiPolicyStore(t)}
+	server.DelegationApprovals = &store.DelegationApprovalRepo{DB: db}
+	server.Compactions = &store.CompactionRepo{DB: db, Policies: &fileconfig.PolicyStore{}}
+	if server.Artifacts != nil {
+		// Match the scope middleware's per-Session artifacts root.
+		path, _ := server.SessionStores.SessionPath(sessionID)
+		server.Artifacts = &artifacts.Service{DB: db, Root: filepath.Join(path, "artifacts")}
+	}
+	return db
+}
 
-	// Missing flowId on a flow role is rejected by the store contract.
-	bad := request(t, handler, http.MethodPost, "/v1/roles", map[string]any{
-		"handle": "bad-flow-role", "name": "Bad", "description": "",
-		"positioning": "", "icon": "bot", "color": "neutral",
-		"scope": "flow", "definition": definition,
-	}, true)
-	require.Equal(t, http.StatusBadRequest, bad.Code, bad.Body.String())
+func sqlCreateSession(t *testing.T, db *sql.DB, projectID string) domain.Session {
+	t.Helper()
+	now := time.Now().UTC()
+	timestamp := now.Format(time.RFC3339Nano)
+	id, branchID := uuid.NewString(), uuid.NewString()
+	_, err := db.Exec(`INSERT INTO sessions (id, project_id, title, status, mode, active_branch_id, created_at, updated_at)
+		VALUES (?,?,?, 'active','hosted',NULL,?,?)`, id, projectID, "session", timestamp, timestamp)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO session_branches (id,session_id,label,created_at,updated_at) VALUES(?,?,'Main',?,?)`,
+		branchID, id, timestamp, timestamp)
+	require.NoError(t, err)
+	_, err = db.Exec(`UPDATE sessions SET active_branch_id=? WHERE id=?`, branchID, id)
+	require.NoError(t, err)
+	return domain.Session{ID: id, ProjectID: projectID, Title: "session", Status: "active",
+		Mode: domain.SessionModeHosted, ActiveBranchID: &branchID, CreatedAt: now, UpdatedAt: now}
 }

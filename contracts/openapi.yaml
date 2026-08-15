@@ -34,6 +34,24 @@ paths:
                 $ref: "#/components/schemas/HealthEnvelope"
         "503":
           $ref: "#/components/responses/Error"
+  /v1/runtime:
+    get:
+      operationId: getRuntimeInfo
+      responses:
+        "200":
+          description: Current Worker process identity used as the connection generation
+          headers:
+            X-Ennote-Worker-Instance:
+              description: Current Worker process identity
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/RuntimeInfo" } }
+        "401": { $ref: "#/components/responses/Error" }
   /v1/roles:
     get:
       operationId: listRoles
@@ -199,6 +217,459 @@ paths:
                   - type: object
                     properties: { data: { $ref: "#/components/schemas/RoleVersion" } }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/projects/{projectID}/roles/candidates:
+    parameters:
+      - { name: projectID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listProjectRoleCandidates
+      summary: Discover .ennote/roles/*.md candidates without publishing them
+      responses:
+        "200":
+          description: Parse-only project Role candidates
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/RoleCandidate" } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/projects/{projectID}/roles/from-candidate:
+    parameters:
+      - { name: projectID, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: materializeProjectRoleCandidate
+      summary: Explicitly publish a server-resolved project Role candidate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [handle]
+              properties:
+                handle: { type: string, pattern: "^[a-z][a-z0-9_-]{1,31}$" }
+      responses:
+        "200":
+          description: Existing identical immutable version reused
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/MaterializedRoleCandidate" } }
+        "201":
+          description: Candidate materialized or updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/MaterializedRoleCandidate" } }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/global-roles:
+    get:
+      operationId: listGlobalRoles
+      summary: List Worker-global file-authored Roles
+      responses:
+        "200":
+          description: Global Role source summaries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { type: array, items: { $ref: "#/components/schemas/GlobalRoleSummary" } } }
+    post:
+      operationId: createGlobalRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [document]
+              properties: { document: { $ref: "#/components/schemas/PortableRoleDocument" } }
+      responses:
+        "201":
+          description: Global Role source created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/GlobalRoleDetail" } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/global-roles/{roleID}:
+    parameters:
+      - { name: roleID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getGlobalRole
+      responses:
+        "200":
+          description: Global Role source
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/GlobalRoleDetail" } }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateGlobalRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedDigest, document]
+              properties:
+                expectedDigest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+                document: { $ref: "#/components/schemas/PortableRoleDocument" }
+      responses:
+        "200":
+          description: Updated global Role source
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/GlobalRoleDetail" } }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/graphs:
+    get:
+      operationId: listGraphs
+      summary: List Worker-global Graph source summaries without loading private resources
+      responses:
+        "200":
+          description: Global Graph catalog
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { type: array, items: { $ref: "#/components/schemas/GraphSummary" } } }
+    post:
+      operationId: createGraph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id, name]
+              properties:
+                id: { type: string, pattern: "^[a-z][a-z0-9-]{1,63}$" }
+                name: { type: string, minLength: 1 }
+      responses:
+        "201":
+          description: Empty editable Graph draft created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/GraphDetail" } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/graphs/{graphID}:
+    parameters:
+      - { name: graphID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getGraph
+      responses:
+        "200":
+          description: Parsed Graph draft
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/GraphDetail" } }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateGraph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GraphMutation" }
+      responses:
+        "200":
+          description: Semantically updated Graph draft
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/GraphDetail" } }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/global-roles/{roleID}/publish:
+    parameters:
+      - { name: roleID, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: publishGlobalRole
+      responses:
+        "201":
+          description: Global Role source published as an immutable runtime version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/global-roles/{roleID}/versions:
+    parameters:
+      - { name: roleID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listGlobalRoleRevisions
+      responses:
+        "200":
+          description: Immutable file-backed Role revisions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/ImmutableFileRevision" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/global-roles/{roleID}/resolved:
+    parameters:
+      - { name: roleID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getResolvedGlobalRole
+      summary: Resolve a bare Role handle to its latest published revision with audit source
+      responses:
+        "200":
+          description: Resolved effective Role
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/ResolvedGlobalRole" } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/graphs/{graphID}/publish:
+    parameters:
+      - { name: graphID, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: publishGraph
+      responses:
+        "201":
+          description: Immutable Graph version published
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/AgentFlowVersion" } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/graphs/{graphID}/versions:
+    parameters:
+      - { name: graphID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listGraphVersions
+      responses:
+        "200":
+          description: Immutable Graph versions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { type: array, items: { $ref: "#/components/schemas/AgentFlowVersion" } } }
+  /v1/graphs/{graphID}/runs:
+    parameters:
+      - { name: graphID, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: runGraph
+      summary: Run a global published Graph in a Session-derived Project workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [sessionId]
+              properties:
+                sessionId: { type: string }
+                version: { type: integer, minimum: 1 }
+                inputs: { type: object, additionalProperties: true }
+                vars: { type: object, additionalProperties: true }
+      responses:
+        "201":
+          description: Durable Graph Run created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/RunAgentFlow" } }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/graph-runs:
+    parameters:
+      - { name: sessionID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listSessionGraphRuns
+      summary: List the Session's Graph Runs, newest first
+      responses:
+        "200":
+          description: Session Graph Runs
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { type: array, items: { $ref: "#/components/schemas/RunAgentFlow" } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/graph-runs/{runID}:
+    parameters:
+      - { name: sessionID, in: path, required: true, schema: { type: string } }
+      - { name: runID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getSessionGraphRun
+      summary: One Graph Run with task checkpoints and the frozen flow version
+      responses:
+        "200":
+          description: Graph Run detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        additionalProperties: false
+                        required: [run, nodes]
+                        properties:
+                          run: { $ref: "#/components/schemas/RunAgentFlow" }
+                          nodes:
+                            type: array
+                            items: { $ref: "#/components/schemas/RunAgentFlowNode" }
+                          flowVersion: { type: integer }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: cancelSessionGraphRun
+      summary: Cancel a running Graph Run
+      responses:
+        "200":
+          description: The (possibly now terminal) Graph Run
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/RunAgentFlow" } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/graph-runs/{runID}/resume:
+    parameters:
+      - { name: sessionID, in: path, required: true, schema: { type: string } }
+      - { name: runID, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: resumeSessionGraphRun
+      summary: Resume a cancelled or failed Graph Run
+      responses:
+        "200":
+          description: The reset Graph Run (pending)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/RunAgentFlow" } }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/graphs/{graphID}/builder:
+    parameters:
+      - { name: graphID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getGraphBuilderThread
+      responses:
+        "200":
+          description: Persistent Builder thread and pending proposal
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/GraphBuilderThread" } }
+  /v1/graphs/{graphID}/builder/messages:
+    parameters:
+      - { name: graphID, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: sendGraphBuilderMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [modelProfileId, instruction]
+              properties:
+                modelProfileId: { type: string }
+                instruction: { type: string, minLength: 1, maxLength: 65536 }
+      responses:
+        "201":
+          description: Builder response and validated proposal
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/GraphBuilderThread" } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/graphs/{graphID}/builder/proposals/{proposalID}/apply:
+    parameters:
+      - { name: graphID, in: path, required: true, schema: { type: string } }
+      - { name: proposalID, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: applyGraphBuilderProposal
+      responses:
+        "200":
+          description: Proposal applied atomically to graph.yaml
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/GraphDetail" } }
+        "409": { $ref: "#/components/responses/Error" }
   /v1/provider-profiles:
     get:
       operationId: listProviderProfiles
@@ -223,13 +694,13 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name, providerType, baseUrl, credentialRef]
+              required: [name, providerType, baseUrl]
               additionalProperties: false
               properties:
                 name: { type: string, minLength: 1 }
                 providerType: { type: string, enum: [openai-compatible] }
                 baseUrl: { type: string, format: uri }
-                credentialRef: { type: string, pattern: "^(env|file|keyring):" }
+                apiKey: { type: string }
                 proxy: { type: string }
       responses:
         "201":
@@ -242,6 +713,48 @@ paths:
                   - type: object
                     properties:
                       data: { $ref: "#/components/schemas/ProviderProfile" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/provider-profiles/discover-models:
+    post:
+      operationId: discoverProviderModels
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                providerId: { type: string }
+                baseUrl: { type: string, format: uri }
+                apiKey: { type: string }
+      responses:
+        "200":
+          description: Fetched model catalog
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/DiscoveredModel" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /v1/provider-profiles/{providerID}:
+    parameters:
+      - name: providerID
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      operationId: deleteProviderProfile
+      responses:
+        "204":
+          description: Provider and its models removed
         "400": { $ref: "#/components/responses/Error" }
   /v1/provider-profiles/{providerID}/test:
     parameters:
@@ -328,6 +841,18 @@ paths:
                   - type: object
                     properties:
                       data: { $ref: "#/components/schemas/ModelProfile" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/model-profiles/{modelID}:
+    parameters:
+      - name: modelID
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      operationId: deleteModelProfile
+      responses:
+        "204":
+          description: Model profile removed
         "400": { $ref: "#/components/responses/Error" }
   /v1/model-profiles/{modelID}/default:
     parameters:
@@ -2041,575 +2566,6 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "500": { $ref: "#/components/responses/Error" }
 
-  # --- Agent Flows (item 7) ---
-  /v1/agent-flows:
-    get:
-      operationId: listAgentFlows
-      summary: List Agent Flow profiles (managed + the project's own project-file profiles)
-      parameters:
-        - { name: projectId, in: query, schema: { type: string } }
-      responses:
-        "200":
-          description: Agent Flow profiles
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items: { $ref: "#/components/schemas/AgentFlowProfile" }
-    post:
-      operationId: createAgentFlow
-      summary: Create a managed Agent Flow profile
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [name, slug]
-              properties:
-                name: { type: string }
-                slug: { type: string }
-      responses:
-        "201":
-          description: Profile created
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties: { data: { $ref: "#/components/schemas/AgentFlowProfile" } }
-        "400": { $ref: "#/components/responses/Error" }
-  /v1/agent-flows/{profileID}:
-    parameters:
-      - { name: profileID, in: path, required: true, schema: { type: string } }
-    get:
-      operationId: getAgentFlow
-      summary: Get an Agent Flow profile
-      responses:
-        "200":
-          description: Profile
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties: { data: { $ref: "#/components/schemas/AgentFlowProfile" } }
-        "404": { $ref: "#/components/responses/Error" }
-  /v1/agent-flows/{profileID}/draft:
-    parameters:
-      - { name: profileID, in: path, required: true, schema: { type: string } }
-    patch:
-      operationId: updateAgentFlowDraft
-      summary: Store the authoring YAML as the profile draft (draft revision CAS)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [yaml, expectedRevision]
-              properties:
-                yaml: { type: string }
-                expectedRevision: { type: integer }
-      responses:
-        "200":
-          description: Updated profile
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties: { data: { $ref: "#/components/schemas/AgentFlowProfile" } }
-        "409": { $ref: "#/components/responses/Error" }
-  /v1/agent-flows/{profileID}/validate:
-    parameters:
-      - { name: profileID, in: path, required: true, schema: { type: string } }
-    post:
-      operationId: validateAgentFlowDraft
-      summary: Run the full 9-point publish validation against the draft
-      responses:
-        "200":
-          description: Validation result with per-item diagnostics
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties: { data: { $ref: "#/components/schemas/FlowValidationResult" } }
-  /v1/agent-flows/{profileID}/publish:
-    parameters:
-      - { name: profileID, in: path, required: true, schema: { type: string } }
-    post:
-      operationId: publishAgentFlow
-      summary: Validate the draft and publish the next immutable version
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                expectedRevision: { type: integer }
-      responses:
-        "201":
-          description: Immutable version
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties: { data: { $ref: "#/components/schemas/AgentFlowVersion" } }
-        "422": { $ref: "#/components/responses/Error" }
-  /v1/agent-flows/check-dependencies:
-    post:
-      operationId: checkAgentFlowDependencies
-      summary: Validate arbitrary flow YAML and resolve its dependency manifest against the environment (never persists)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [yaml]
-              properties:
-                yaml: { type: string }
-                projectId: { type: string }
-      responses:
-        "200":
-          description: Validation + dependency report
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          valid: { type: boolean }
-                          configDigest: { type: string }
-                          diagnostics:
-                            type: array
-                            items: { $ref: "#/components/schemas/FlowValidationDiagnostic" }
-                          dependencies:
-                            type: array
-                            items: { $ref: "#/components/schemas/FlowDependencyStatus" }
-        "400": { $ref: "#/components/responses/Error" }
-  /v1/agent-flows/import:
-    post:
-      operationId: importAgentFlow
-      summary: Import flow YAML into a managed profile DRAFT (never publishes, binds, or authorizes)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [yaml]
-              properties:
-                yaml: { type: string }
-                projectId: { type: string }
-      responses:
-        "201":
-          description: Draft created or updated
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          profileId: { type: string }
-                          slug: { type: string }
-                          draftRevision: { type: integer }
-                          alreadyDrafted: { type: boolean }
-                          configDigest: { type: string }
-                          dependencies:
-                            type: array
-                            items: { $ref: "#/components/schemas/FlowDependencyStatus" }
-        "409": { $ref: "#/components/responses/Error" }
-        "422": { $ref: "#/components/responses/Error" }
-  /v1/agent-flows/{profileID}/export:
-    parameters:
-      - { name: profileID, in: path, required: true, schema: { type: string } }
-    get:
-      operationId: exportAgentFlow
-      summary: Export flow YAML (authoring draft verbatim or a normalized YAML generated from a version)
-      parameters:
-        - { name: source, in: query, schema: { type: string, enum: [draft, version], default: draft } }
-        - { name: versionID, in: query, schema: { type: string } }
-      responses:
-        "200":
-          description: YAML text
-          content:
-            application/x-yaml: { schema: { type: string } }
-        "400": { $ref: "#/components/responses/Error" }
-        "404": { $ref: "#/components/responses/Error" }
-  /v1/agent-flows/{profileID}/archive:
-    parameters:
-      - { name: profileID, in: path, required: true, schema: { type: string } }
-    post:
-      operationId: archiveAgentFlow
-      summary: Archive a profile (existing versions/bindings/runs stay)
-      responses:
-        "204": { description: Archived }
-  /v1/agent-flows/{profileID}/versions:
-    parameters:
-      - { name: profileID, in: path, required: true, schema: { type: string } }
-    get:
-      operationId: listAgentFlowVersions
-      summary: List immutable versions of a profile
-      responses:
-        "200":
-          description: Versions
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items: { $ref: "#/components/schemas/AgentFlowVersion" }
-  /v1/agent-flows/{profileID}/versions/{versionID}:
-    parameters:
-      - { name: profileID, in: path, required: true, schema: { type: string } }
-      - { name: versionID, in: path, required: true, schema: { type: string } }
-    get:
-      operationId: getAgentFlowVersion
-      summary: Get one immutable version
-      responses:
-        "200":
-          description: Version
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties: { data: { $ref: "#/components/schemas/AgentFlowVersion" } }
-  /v1/projects/{projectID}/agent-flows/candidates:
-    parameters:
-      - { name: projectID, in: path, required: true, schema: { type: string } }
-    get:
-      operationId: listAgentFlowCandidates
-      summary: Discover .ennote/agent-flows/*.yaml candidates (parse-only, never executed)
-      responses:
-        "200":
-          description: Candidates
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items: { $ref: "#/components/schemas/AgentFlowCandidate" }
-  /v1/projects/{projectID}/agent-flows/bindings/from-candidate:
-    parameters:
-      - { name: projectID, in: path, required: true, schema: { type: string } }
-    post:
-      operationId: bindAgentFlowCandidate
-      summary: Materialize a project-file candidate as an immutable version and a disabled binding
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [slug]
-              properties:
-                slug: { type: string }
-      responses:
-        "201":
-          description: Binding created (disabled)
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties: { data: { $ref: "#/components/schemas/ProjectAgentFlowBinding" } }
-        "422": { $ref: "#/components/responses/Error" }
-  /v1/projects/{projectID}/agent-flows/bindings:
-    parameters:
-      - { name: projectID, in: path, required: true, schema: { type: string } }
-    get:
-      operationId: listAgentFlowBindings
-      summary: List project bindings
-      responses:
-        "200":
-          description: Bindings
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items: { $ref: "#/components/schemas/ProjectAgentFlowBinding" }
-    post:
-      operationId: createAgentFlowBinding
-      summary: Bind an immutable version to the project
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [flowVersionId]
-              properties:
-                flowVersionId: { type: string }
-                desiredEnabled: { type: boolean }
-      responses:
-        "201":
-          description: Binding created
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties: { data: { $ref: "#/components/schemas/ProjectAgentFlowBinding" } }
-  /v1/projects/{projectID}/agent-flows/bindings/{bindingID}:
-    parameters:
-      - { name: projectID, in: path, required: true, schema: { type: string } }
-      - { name: bindingID, in: path, required: true, schema: { type: string } }
-    patch:
-      operationId: updateAgentFlowBinding
-      summary: Update the binding desired state
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                desiredEnabled: { type: boolean }
-      responses:
-        "200":
-          description: Updated binding
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties: { data: { $ref: "#/components/schemas/ProjectAgentFlowBinding" } }
-    delete:
-      operationId: deleteAgentFlowBinding
-      summary: Remove a binding
-      responses:
-        "204": { description: Removed }
-  /v1/projects/{projectID}/agent-flows/bindings/{bindingID}/run:
-    parameters:
-      - { name: projectID, in: path, required: true, schema: { type: string } }
-      - { name: bindingID, in: path, required: true, schema: { type: string } }
-    post:
-      operationId: runAgentFlow
-      summary: Start a flow run (freezes inputs + task snapshots, then dispatches)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [sessionId]
-              properties:
-                sessionId: { type: string }
-                inputs: { type: object, additionalProperties: true }
-                vars: { type: object, additionalProperties: true }
-                clientRequestId: { type: string }
-      responses:
-        "201":
-          description: Flow run created
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties: { data: { $ref: "#/components/schemas/RunAgentFlow" } }
-        "422": { $ref: "#/components/responses/Error" }
-  /v1/projects/{projectID}/agent-flows/runs:
-    parameters:
-      - { name: projectID, in: path, required: true, schema: { type: string } }
-    get:
-      operationId: listAgentFlowRuns
-      summary: List flow runs of the project
-      responses:
-        "200":
-          description: Flow runs
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items: { $ref: "#/components/schemas/RunAgentFlow" }
-  /v1/projects/{projectID}/agent-flows/runs/{runID}:
-    parameters:
-      - { name: projectID, in: path, required: true, schema: { type: string } }
-      - { name: runID, in: path, required: true, schema: { type: string } }
-    get:
-      operationId: getAgentFlowRun
-      summary: Get a flow run with its task checkpoints
-      responses:
-        "200":
-          description: Flow run detail
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          run: { $ref: "#/components/schemas/RunAgentFlow" }
-                          nodes:
-                            type: array
-                            items: { $ref: "#/components/schemas/RunAgentFlowNode" }
-                          flowVersion: { type: integer }
-        "404": { $ref: "#/components/responses/Error" }
-  /v1/projects/{projectID}/agent-flows/runs/{runID}/cancel:
-    parameters:
-      - { name: projectID, in: path, required: true, schema: { type: string } }
-      - { name: runID, in: path, required: true, schema: { type: string } }
-    post:
-      operationId: cancelAgentFlowRun
-      summary: Cancel a flow run (hard-cancels the active child; future tasks never scheduled)
-      responses:
-        "200":
-          description: Cancel requested
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties: { data: { $ref: "#/components/schemas/RunAgentFlow" } }
-  /v1/projects/{projectID}/agent-flows/runs/{runID}/resume:
-    parameters:
-      - { name: projectID, in: path, required: true, schema: { type: string } }
-      - { name: runID, in: path, required: true, schema: { type: string } }
-    post:
-      operationId: resumeAgentFlowRun
-      summary: Resume a cancelled flow run as checkpoint continuation (completed tasks never replay)
-      responses:
-        "200":
-          description: Resumed
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties: { data: { $ref: "#/components/schemas/RunAgentFlow" } }
-  /v1/projects/{projectID}/agent-flows/invoke:
-    parameters:
-      - { name: projectID, in: path, required: true, schema: { type: string } }
-    post:
-      operationId: invokeAgentFlow
-      summary: Resolve a flow by name[@version] in the project's enabled bindings and start a run (Host-side orchestration address)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [sessionId, name]
-              properties:
-                sessionId: { type: string }
-                name: { type: string }
-                version: { type: integer }
-                inputs: { type: object, additionalProperties: true }
-                vars: { type: object, additionalProperties: true }
-      responses:
-        "201":
-          description: Flow run created
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties: { data: { $ref: "#/components/schemas/RunAgentFlow" } }
-        "404": { $ref: "#/components/responses/Error" }
-        "422": { $ref: "#/components/responses/Error" }
-  /v1/projects/{projectID}/agent-flows/check-approvals:
-    parameters:
-      - { name: projectID, in: path, required: true, schema: { type: string } }
-    get:
-      operationId: listAgentFlowCheckApprovals
-      summary: List pending check approvals (Ask-mode check gates)
-      responses:
-        "200":
-          description: Pending approvals
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items: { $ref: "#/components/schemas/AgentFlowCheckApproval" }
-  /v1/projects/{projectID}/agent-flows/check-approvals/{runID}/{taskIndex}/decide:
-    parameters:
-      - { name: projectID, in: path, required: true, schema: { type: string } }
-      - { name: runID, in: path, required: true, schema: { type: string } }
-      - { name: taskIndex, in: path, required: true, schema: { type: integer } }
-    post:
-      operationId: decideAgentFlowCheckApproval
-      summary: Approve or reject a pending check approval (first decision wins)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [approved]
-              properties:
-                approved: { type: boolean }
-                clientRequestId: { type: string }
-      responses:
-        "200":
-          description: Decision applied
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          status: { type: string, enum: [pending, approved, rejected] }
   /v1/skills/roots:
     get:
       operationId: listSkillRoots
@@ -2957,6 +2913,12 @@ components:
       type: object
       properties:
         data: {}
+    RuntimeInfo:
+      type: object
+      required: [instanceId]
+      additionalProperties: false
+      properties:
+        instanceId: { type: string, minLength: 1 }
     MCPServerProfile:
       type: object
       properties:
@@ -3017,22 +2979,6 @@ components:
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
-    AgentFlowProfile:
-      type: object
-      properties:
-        id: { type: string }
-        name: { type: string }
-        slug: { type: string }
-        sourceKind: { type: string, enum: [managed, project_file] }
-        projectScope: { type: string }
-        sourceLocator: { type: string }
-        lifecycleStatus: { type: string }
-        latestVersion: { type: integer }
-        draft: { type: string }
-        draftYaml: { type: string }
-        draftRevision: { type: integer }
-        createdAt: { type: string }
-        updatedAt: { type: string }
     AgentFlowVersion:
       type: object
       properties:
@@ -3063,16 +3009,6 @@ components:
                   to: { type: string }
                   maxRounds: { type: integer }
         publishedAt: { type: string }
-    ProjectAgentFlowBinding:
-      type: object
-      properties:
-        id: { type: string }
-        projectId: { type: string }
-        flowVersionId: { type: string }
-        desiredEnabled: { type: boolean }
-        revision: { type: integer }
-        createdAt: { type: string }
-        updatedAt: { type: string }
     RunAgentFlow:
       type: object
       properties:
@@ -3105,24 +3041,6 @@ components:
         errorCode: { type: string }
         createdAt: { type: string }
         finishedAt: { type: string }
-    AgentFlowCandidate:
-      type: object
-      properties:
-        slug: { type: string }
-        name: { type: string }
-        description: { type: string }
-        sourceKind: { type: string, enum: [managed, project_file] }
-        sourceLocator: { type: string }
-        configDigest: { type: string }
-        definition: { type: object, additionalProperties: true }
-        alreadyBound: { type: boolean }
-        boundVersionId: { type: string }
-        boundVersion: { type: integer }
-        updateAvailable: { type: boolean }
-        parseError: { type: string }
-        validation: { type: array, items: { type: string } }
-        taskCount: { type: integer }
-        maxTotalTokens: { type: integer }
     FlowDependencyStatus:
       type: object
       properties:
@@ -3150,15 +3068,6 @@ components:
               code: { type: string }
               message: { type: string }
               field: { type: string }
-    AgentFlowCheckApproval:
-      type: object
-      properties:
-        runId: { type: string }
-        taskIndex: { type: integer }
-        command: { type: string }
-        sessionId: { type: string }
-        flowVersionId: { type: string }
-        requestedAt: { type: string }
     MCPCatalogEntry:
       type: object
       properties:
@@ -3239,17 +3148,28 @@ components:
             retryable: { type: boolean }
     ProviderProfile:
       type: object
-      required: [id, name, providerType, baseUrl, credentialRef, status, createdAt, updatedAt]
+      required: [id, name, providerType, baseUrl, credentialConfigured, status, createdAt, updatedAt]
       properties:
         id: { type: string }
         name: { type: string }
         providerType: { type: string, enum: [openai-compatible] }
         baseUrl: { type: string, format: uri }
-        credentialRef: { type: string }
+        credentialConfigured: { type: boolean }
         proxy: { type: string }
         status: { type: string }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    DiscoveredModel:
+      type: object
+      required: [modelName]
+      additionalProperties: false
+      properties:
+        modelName: { type: string }
+        displayName: { type: string }
+        contextWindow: { type: integer, minimum: 0 }
+        maxOutputTokens: { type: integer, minimum: 0 }
+        supportsVision: { type: boolean }
+        supportsThinking: { type: boolean }
     ProviderDiagnosticStage:
       type: object
       required: [name, status, message, latencyMs]
@@ -3780,9 +3700,225 @@ components:
           items: { $ref: "#/components/schemas/RunMessage" }
         hasMore: { type: boolean }
         nextBeforeOrdinal: { type: integer, minimum: 0 }
+    ImmutableFileRevision:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, resourceId, version, digest, publishedAt]
+      properties:
+        schemaVersion: { type: integer, enum: [1] }
+        resourceId: { type: string }
+        version: { type: integer, minimum: 1 }
+        digest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+        publishedAt: { type: string, format: date-time }
+    GlobalRoleSummary:
+      type: object
+      additionalProperties: false
+      required: [id, name, path]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        path: { type: string }
+        digest: { type: string }
+        error: { type: string }
+    PortableRoleDocument:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, handle, name, description, positioning, icon, color, model, skills, authority, permissionCeiling, allowedTools, context, delegation, outputContract, maxLoopIterations, prompt]
+      properties:
+        schemaVersion: { type: integer, enum: [1] }
+        handle: { type: string, pattern: "^[a-z][a-z0-9_-]{1,31}$" }
+        name: { type: string, minLength: 1 }
+        description: { type: string }
+        positioning: { type: string }
+        icon: { type: string }
+        color: { type: string }
+        model:
+          type: object
+          additionalProperties: false
+          required: [ref, thinkingEffort, fallbacks]
+          properties:
+            ref: { type: string, pattern: "^[^/]+/[^/]+$" }
+            thinkingEffort: { $ref: "#/components/schemas/ThinkingEffort" }
+            fallbacks: { type: array, uniqueItems: true, items: { type: string } }
+        skills:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, mode]
+            properties:
+              id: { type: string }
+              mode: { type: string, enum: [preload, available] }
+        authority: { type: string, enum: [read_only, write_workspace] }
+        permissionCeiling: { type: string, enum: [discuss, ask, auto] }
+        allowedTools: { type: array, uniqueItems: true, items: { type: string } }
+        context:
+          type: object
+          additionalProperties: false
+          required: [defaultMode, allowedModes, ownExecutionContinuity]
+          properties:
+            defaultMode: { type: string, enum: [room, fresh] }
+            allowedModes: { type: array, uniqueItems: true, items: { type: string, enum: [room, fresh] } }
+            ownExecutionContinuity: { type: string, enum: [none] }
+        delegation:
+          type: object
+          additionalProperties: false
+          required: [admission, allowedCallerKinds, allowedStrategies, maxInvocationsPerParentRun, maxConcurrentInstances, budgetCeiling]
+          properties:
+            admission: { type: string, enum: [auto_within_budget, approval_required, deny] }
+            allowedCallerKinds: { type: array, uniqueItems: true, items: { type: string } }
+            allowedStrategies: { type: array, uniqueItems: true, items: { type: string } }
+            maxInvocationsPerParentRun: { type: integer, minimum: 1 }
+            maxConcurrentInstances: { type: integer, minimum: 1 }
+            budgetCeiling:
+              type: object
+              additionalProperties: false
+              required: [maxModelCalls, maxToolCalls, maxTotalTokens, maxOutputTokens, maxCostUsdMicros, maxWallTimeMs]
+              properties:
+                maxModelCalls: { type: integer, minimum: 1 }
+                maxToolCalls: { type: integer, minimum: 0 }
+                maxTotalTokens: { type: integer, minimum: 1 }
+                maxOutputTokens: { type: integer, minimum: 1 }
+                maxCostUsdMicros: { type: integer, minimum: 0 }
+                maxWallTimeMs: { type: integer, minimum: 1 }
+        outputContract: { type: string }
+        maxLoopIterations: { type: integer, minimum: 1 }
+        prompt: { type: string, minLength: 1, maxLength: 65536 }
+    GlobalRoleDetail:
+      allOf:
+        - $ref: "#/components/schemas/GlobalRoleSummary"
+        - type: object
+          required: [digest, document]
+          properties:
+            digest: { type: string }
+            document: { $ref: "#/components/schemas/PortableRoleDocument" }
+    ResolvedGlobalRole:
+      type: object
+      additionalProperties: false
+      required: [roleId, source, revision, document]
+      properties:
+        roleId: { type: string }
+        source: { type: string }
+        revision: { $ref: "#/components/schemas/ImmutableFileRevision" }
+        document: { $ref: "#/components/schemas/PortableRoleDocument" }
+    GraphTask:
+      type: object
+      additionalProperties: false
+      required: [name, goal]
+      description: Role-backed Tasks declare role only; inline Tasks declare model with optional thinking and skills. The modes are mutually exclusive and enforced by the Worker.
+      properties:
+        name: { type: string, minLength: 1 }
+        role: { type: string, pattern: "^(local|global)/[a-z][a-z0-9_-]{1,63}$" }
+        model: { type: string, pattern: "^[^/]+/[^/]+$" }
+        thinking: { $ref: "#/components/schemas/ThinkingEffort" }
+        skills: { type: array, uniqueItems: true, items: { type: string, pattern: "^(local|global)/[a-z][a-z0-9_-]{1,63}$" } }
+        goal: { type: string, minLength: 1 }
+        writes: { type: array, uniqueItems: true, items: { type: string } }
+        budget:
+          type: object
+          additionalProperties: false
+          properties: { tokens: { type: integer, minimum: 1 } }
+    GraphDocument:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, id, name, tasks, graph]
+      properties:
+        schemaVersion: { type: integer, enum: [1] }
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        tasks: { type: object, additionalProperties: { $ref: "#/components/schemas/GraphTask" } }
+        graph:
+          type: object
+          additionalProperties: { type: array, uniqueItems: true, items: { type: string } }
+    GraphSummary:
+      type: object
+      additionalProperties: false
+      required: [id, name, path, latestVersion]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        path: { type: string }
+        digest: { type: string }
+        error: { type: string }
+        latestVersion: { type: integer, minimum: 0 }
+    GraphDetail:
+      allOf:
+        - $ref: "#/components/schemas/GraphSummary"
+        - type: object
+          required: [digest, document]
+          properties:
+            digest: { type: string }
+            document: { $ref: "#/components/schemas/GraphDocument" }
+    GraphMutation:
+      type: object
+      additionalProperties: false
+      required: [expectedDigest]
+      properties:
+        expectedDigest: { type: string }
+        name: { type: string }
+        description: { type: string }
+        task:
+          type: object
+          additionalProperties: false
+          required: [id]
+          properties:
+            id: { type: string }
+            value: { $ref: "#/components/schemas/GraphTask" }
+        dependencies:
+          type: object
+          additionalProperties: false
+          required: [taskId, depends]
+          properties:
+            taskId: { type: string }
+            depends: { type: array, uniqueItems: true, items: { type: string } }
+    GraphBuilderMessage:
+      type: object
+      additionalProperties: false
+      required: [id, graphId, ordinal, role, content, createdAt]
+      properties:
+        id: { type: string }
+        graphId: { type: string }
+        ordinal: { type: integer, minimum: 1 }
+        role: { type: string, enum: [user, assistant] }
+        content: { type: string }
+        createdAt: { type: string, format: date-time }
+    GraphBuilderOperation:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: { type: string, enum: [upsert_task, delete_task, set_dependencies, update_graph] }
+        taskId: { type: string }
+        task: { $ref: "#/components/schemas/GraphTask" }
+        depends: { type: array, items: { type: string } }
+        name: { type: string }
+        description: { type: string }
+    GraphBuilderProposal:
+      type: object
+      additionalProperties: false
+      required: [id, graphId, baseDigest, operations, summary, status, diagnostics, createdAt]
+      properties:
+        id: { type: string }
+        graphId: { type: string }
+        baseDigest: { type: string }
+        operations: { type: array, items: { $ref: "#/components/schemas/GraphBuilderOperation" } }
+        summary: { type: string }
+        status: { type: string, enum: [pending, applied, superseded] }
+        diagnostics: { type: array, items: { type: string } }
+        createdAt: { type: string, format: date-time }
+    GraphBuilderThread:
+      type: object
+      additionalProperties: false
+      required: [graphId, messages]
+      properties:
+        graphId: { type: string }
+        modelProfileId: { type: string }
+        messages: { type: array, items: { $ref: "#/components/schemas/GraphBuilderMessage" } }
+        proposal: { $ref: "#/components/schemas/GraphBuilderProposal" }
     RoleScope:
       type: string
-      enum: [builtin, global, project]
+      enum: [builtin, global, project, flow]
     RoleModelBinding:
       type: object
       additionalProperties: false
@@ -3844,12 +3980,12 @@ components:
       additionalProperties: false
       required: [defaultMode, allowedModes, ownExecutionContinuity]
       properties:
-        defaultMode: { type: string, enum: [room, reply, fresh] }
+        defaultMode: { type: string, enum: [room, reply, fresh, task_only] }
         allowedModes:
           type: array
           minItems: 1
           uniqueItems: true
-          items: { type: string, enum: [room, reply, fresh] }
+          items: { type: string, enum: [room, reply, fresh, task_only] }
         ownExecutionContinuity: { type: string, enum: [none] }
     RoleDefinition:
       type: object
@@ -3876,7 +4012,7 @@ components:
     RoleSummary:
       type: object
       additionalProperties: false
-      required: [id, handle, name, description, positioning, icon, color, scope, status, updatedAt]
+      required: [id, handle, name, description, positioning, icon, color, scope, status, sourceKind, updatedAt]
       properties:
         id: { type: string }
         handle: { type: string }
@@ -3887,7 +4023,10 @@ components:
         color: { type: string }
         scope: { $ref: "#/components/schemas/RoleScope" }
         projectId: { type: string }
+        flowId: { type: string }
         status: { type: string, enum: [active, archived] }
+        sourceKind: { type: string, enum: [managed, project_file] }
+        sourceLocator: { type: string, description: Informational Worker-resolved source path; never accepted from clients }
         currentVersionId: { type: string }
         currentVersion: { type: integer, minimum: 1 }
         updatedAt: { type: string, format: date-time }
@@ -3898,6 +4037,7 @@ components:
         - type: object
           required: [draft, draftRevision, delegationEnabled, delegationRevocationEpoch, createdAt]
           properties:
+            sourceDigest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
             draft: { $ref: "#/components/schemas/RoleDefinition" }
             draftRevision: { type: integer, minimum: 0 }
             delegationEnabled: { type: boolean }
@@ -3940,6 +4080,33 @@ components:
         valid: { type: boolean }
         diagnostics: { type: array, items: { $ref: "#/components/schemas/RoleValidationDiagnostic" } }
         configDigest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+    RoleCandidate:
+      type: object
+      additionalProperties: false
+      required: [handle, name, description, sourceKind, sourceLocator, alreadyPublished, updateAvailable, diagnostics]
+      properties:
+        handle: { type: string }
+        name: { type: string }
+        description: { type: string }
+        sourceKind: { type: string, enum: [project_file] }
+        sourceLocator: { type: string, description: Informational Worker-resolved source path; never accepted from clients }
+        sourceDigest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+        configDigest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+        definition: { $ref: "#/components/schemas/RoleDefinition" }
+        alreadyPublished: { type: boolean }
+        roleId: { type: string }
+        publishedVersionId: { type: string }
+        publishedVersion: { type: integer, minimum: 1 }
+        updateAvailable: { type: boolean }
+        parseError: { type: string }
+        diagnostics: { type: array, items: { $ref: "#/components/schemas/RoleValidationDiagnostic" } }
+    MaterializedRoleCandidate:
+      type: object
+      additionalProperties: false
+      required: [role, version]
+      properties:
+        role: { $ref: "#/components/schemas/RoleIdentity" }
+        version: { $ref: "#/components/schemas/RoleVersion" }
     CreateRoleInput:
       type: object
       additionalProperties: false

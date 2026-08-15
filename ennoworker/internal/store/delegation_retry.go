@@ -193,7 +193,7 @@ func (r *DelegationRepo) RetryGeneration(ctx context.Context, groupID string,
 			return nil, nil, nil, err
 		}
 		if override, ok := input.BudgetOverrides[state.item.ID]; ok {
-			if err := r.validateRetryRoleAndCeilingTx(ctx, tx, state.item.RoleVersionID, override); err != nil {
+			if err := r.validateRetryRoleAndCeilingTx(ctx, tx, state.item.ID, override); err != nil {
 				return nil, nil, nil, err
 			}
 			if budgetIncreased(ceiling, override) {
@@ -202,7 +202,7 @@ func (r *DelegationRepo) RetryGeneration(ctx context.Context, groupID string,
 			ceiling = override
 			effective = mustMarshalJSON(ceiling)
 		} else {
-			if err := r.validateRetryRoleAndCeilingTx(ctx, tx, state.item.RoleVersionID, ceiling); err != nil {
+			if err := r.validateRetryRoleAndCeilingTx(ctx, tx, state.item.ID, ceiling); err != nil {
 				return nil, nil, nil, err
 			}
 		}
@@ -334,6 +334,7 @@ func (r *DelegationRepo) RetryGeneration(ctx context.Context, groupID string,
 			ParentRunID: parentRunID, ItemID: state.item.ID, SessionID: sessionID,
 			Generation: nextGeneration, RetryOfAttemptID: state.attemptID,
 			BudgetOverride: override, AllowTerminalParent: true,
+			Policies: r.Policies,
 		})
 		if childErr != nil {
 			return nil, nil, nil, childErr
@@ -442,31 +443,28 @@ func (r *DelegationRepo) approvalForGeneration(ctx context.Context, groupID stri
 	return &approval, nil
 }
 
-// validateRetryRoleAndCeilingTx fails closed on a disabled or unpublished Role
-// identity while never replacing the frozen version, and validates an override
-// against the frozen Role's budget ceiling.
+// validateRetryRoleAndCeilingTx fails closed when the frozen Role meta is
+// missing and validates a retry budget override against the frozen
+// definition's ceiling. V2 never consults global role SQL: the Role facts
+// frozen on the delegation item at Run start are the only authority.
 func (r *DelegationRepo) validateRetryRoleAndCeilingTx(ctx context.Context, tx *sql.Tx,
-	roleVersionID string, request domain.BudgetCeilingJSON) error {
-	var profileStatus, versionStatus string
-	var delegationEnabled int
-	var definitionJSON string
-	if err := tx.QueryRowContext(ctx, `SELECT p.status,p.delegation_enabled,v.status,v.definition_json
-		FROM agent_profiles p JOIN agent_profile_versions v ON v.id=? AND v.agent_profile_id=p.id
-		WHERE v.id=?`, roleVersionID, roleVersionID).Scan(
-		&profileStatus, &delegationEnabled, &versionStatus, &definitionJSON); err != nil {
+	itemID string, request domain.BudgetCeilingJSON) error {
+	var metaJSON string
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(role_meta_json, '{}')
+		FROM delegation_items WHERE id=?`, itemID).Scan(&metaJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("%w: frozen Role version is unavailable", ErrDelegationNotAuthorized)
+			return fmt.Errorf("%w: delegation item is unavailable", ErrDelegationNotAuthorized)
 		}
 		return err
 	}
-	if profileStatus != "active" || delegationEnabled != 1 || versionStatus != "published" {
-		return fmt.Errorf("%w: Role identity is disabled or unpublished", ErrDelegationNotAuthorized)
+	if strings.TrimSpace(metaJSON) == "" || strings.TrimSpace(metaJSON) == "{}" {
+		return fmt.Errorf("%w: frozen Role meta is unavailable", ErrDelegationNotAuthorized)
 	}
-	var definition domain.RoleDefinition
-	if err := json.Unmarshal([]byte(definitionJSON), &definition); err != nil {
-		return fmt.Errorf("decode frozen Role definition: %w", err)
+	var meta DelegationRoleMeta
+	if err := json.Unmarshal([]byte(metaJSON), &meta); err != nil {
+		return fmt.Errorf("decode frozen Role meta: %w", err)
 	}
-	if err := validateDelegationBudget(request, definition.DelegationPolicy.BudgetCeiling); err != nil {
+	if err := validateDelegationBudget(request, meta.Definition.DelegationPolicy.BudgetCeiling); err != nil {
 		return fmt.Errorf("%w: %v", ErrDelegationNotAuthorized, err)
 	}
 	return nil

@@ -4,43 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	store "github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestSystemPromptAndThinkingSelectionFreezeTogether(t *testing.T) {
-	db := store.SetupDB(t)
 	ctx := context.Background()
-	project, _, err := (&store.ProjectRepo{DB: db}).CreateWithWorkspace(ctx,
+	stack := newFileConfigStack(t)
+	db := store.SetupDB(t)
+	project, _, err := newFileProjects(t).CreateWithWorkspace(ctx,
 		domain.CreateProjectInput{Name: "freeze", HostPath: t.TempDir()})
 	require.NoError(t, err)
-	provider, err := (&store.ProviderRepo{DB: db}).Create(ctx, store.CreateProviderInput{
-		Name: "provider", ProviderType: domain.ProviderOpenAICompatible, BaseURL: "https://provider.test",
-		CredentialRef: "env:PROVIDER_KEY",
-	})
-	require.NoError(t, err)
-	model, err := (&store.ModelRepo{DB: db}).Create(ctx, store.CreateModelInput{
-		ProviderID: provider.ID, ModelName: "reasoning-model", ContextWindow: 32000, MaxOutputTokens: 2048,
-		SupportsThinking: true, ThinkingDialect: domain.ThinkingDialectOpenAIReasoningEffort,
-		SupportedThinkingEfforts: []domain.ThinkingEffort{domain.ThinkingDefault, domain.ThinkingLow, domain.ThinkingMedium},
-		IsDefault:                true,
-	})
-	require.NoError(t, err)
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err = db.Exec(`INSERT INTO agent_profiles
-		(id,name,system_prompt,default_model_id,status,created_at,updated_at)
-		VALUES('agent','Reviewer','Review evidence precisely.',?,'active',?,?)`, model.ID, now, now)
-	require.NoError(t, err)
-	agentID := "agent"
-	session, err := (&store.SessionRepo{DB: db}).Create(ctx, domain.CreateSessionInput{
-		ProjectID: project.ID, Title: "prompt", DefaultAgentProfileID: &agentID,
-	})
-	require.NoError(t, err)
-	runs := &store.RunRepo{DB: db}
+	session := sqlCreateSession(t, db, project.ID)
+	runs := &store.RunRepo{DB: db, Providers: stack.Providers, Models: stack.ModelRepo, Policies: stack.Policies}
 	submission, err := runs.SubmitTurn(ctx, domain.SubmitTurnInput{
 		SessionID: session.ID, ClientRequestID: "freeze", Text: "inspect",
 		RequestedConfig: json.RawMessage(`{"thinkingEffort":"medium"}`),
@@ -50,14 +30,17 @@ func TestSystemPromptAndThinkingSelectionFreezeTogether(t *testing.T) {
 	require.NoError(t, err)
 	resolved, err := runs.ResolveAndFreezeConfig(ctx, run)
 	require.NoError(t, err)
-	assert.Equal(t, "Review evidence precisely.", resolved.SystemPrompt.AgentPrompt)
+	assert.Empty(t, resolved.SystemPrompt.AgentProfileID)
 	assert.NotEmpty(t, resolved.SystemPrompt.Digest)
 	assert.Equal(t, domain.ThinkingMedium, resolved.Effective.ThinkingEffort)
 	assert.Equal(t, domain.ThinkingDialectOpenAIReasoningEffort, resolved.Effective.InitialRuntime.ThinkingDialect)
 
-	_, err = db.Exec(`UPDATE agent_profiles SET system_prompt='changed' WHERE id='agent'`)
-	require.NoError(t, err)
-	_, err = db.Exec(`UPDATE model_profiles SET thinking_dialect='none',supported_thinking_efforts_json='["default"]' WHERE id=?`, model.ID)
+	// The frozen config is immutable: a second freeze returns the identical
+	// snapshot even though the live catalog changed behind it.
+	_, err = stack.Models.CreateProvider(ctx, fileconfig.CreateProviderInput{
+		Key: "other", Name: "Other", ProviderType: domain.ProviderOpenAICompatible,
+		BaseURL: "https://other.test/v1", APIKey: "sk-other",
+	})
 	require.NoError(t, err)
 	refrozen, err := runs.ResolveAndFreezeConfig(ctx, run)
 	require.NoError(t, err)
@@ -74,27 +57,24 @@ func TestSystemPromptAndThinkingSelectionFreezeTogether(t *testing.T) {
 }
 
 func TestUnsupportedThinkingEffortFailsBeforeConfigFreeze(t *testing.T) {
-	db := store.SetupDB(t)
 	ctx := context.Background()
-	project, _, err := (&store.ProjectRepo{DB: db}).CreateWithWorkspace(ctx,
+	stack := newFileConfigStack(t)
+	// A second model without thinking support; the request pins it and asks for
+	// an unsupported effort.
+	_, err := stack.Models.CreateModel(ctx, fileconfig.CreateModelInput{
+		ProviderID: "provider", ModelName: "plain", DisplayName: "Plain",
+		ContextWindow: 32000, MaxOutputTokens: 2048, IsDefault: false,
+	})
+	require.NoError(t, err)
+	db := store.SetupDB(t)
+	project, _, err := newFileProjects(t).CreateWithWorkspace(ctx,
 		domain.CreateProjectInput{Name: "unsupported", HostPath: t.TempDir()})
 	require.NoError(t, err)
-	provider, err := (&store.ProviderRepo{DB: db}).Create(ctx, store.CreateProviderInput{
-		Name: "provider", ProviderType: domain.ProviderOpenAICompatible, BaseURL: "https://provider.test",
-		CredentialRef: "env:PROVIDER_KEY",
-	})
-	require.NoError(t, err)
-	model, err := (&store.ModelRepo{DB: db}).Create(ctx, store.CreateModelInput{
-		ProviderID: provider.ID, ModelName: "plain", ContextWindow: 32000, MaxOutputTokens: 2048, IsDefault: true,
-	})
-	require.NoError(t, err)
-	session, err := (&store.SessionRepo{DB: db}).Create(ctx, domain.CreateSessionInput{
-		ProjectID: project.ID, Title: "unsupported", DefaultModelProfileID: &model.ID,
-	})
-	require.NoError(t, err)
-	runs := &store.RunRepo{DB: db}
+	session := sqlCreateSession(t, db, project.ID)
+	runs := &store.RunRepo{DB: db, Providers: stack.Providers, Models: stack.ModelRepo, Policies: stack.Policies}
 	submission, err := runs.SubmitTurn(ctx, domain.SubmitTurnInput{SessionID: session.ID,
-		ClientRequestID: "unsupported", Text: "inspect", RequestedConfig: json.RawMessage(`{"thinkingEffort":"high"}`)})
+		ClientRequestID: "unsupported", Text: "inspect",
+		RequestedConfig: json.RawMessage(`{"modelProfileId":"provider/plain","thinkingEffort":"high"}`)})
 	require.NoError(t, err)
 	run, err := runs.Claim(ctx, submission.Run.ID)
 	require.NoError(t, err)

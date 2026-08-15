@@ -2,9 +2,11 @@ package store_test
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,7 +16,8 @@ func setupParentWithChild(t *testing.T) (*store.RunRepo, *store.DelegationRepo, 
 	t.Helper()
 	repo, submission := setupSubmittedRun(t, "cancel-parent")
 	ctx := context.Background()
-	delegations := &store.DelegationRepo{DB: repo.DB}
+	delegations := &store.DelegationRepo{DB: repo.DB,
+		Policies: &fileconfig.PolicyStore{Path: filepath.Join(t.TempDir(), "config", "policies.json")}}
 	runs := &store.RunRepo{DB: repo.DB}
 	_, err := runs.Claim(ctx, submission.Run.ID)
 	require.NoError(t, err)

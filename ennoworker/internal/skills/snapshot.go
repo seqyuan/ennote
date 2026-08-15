@@ -215,8 +215,8 @@ func collectEntries(nodes []*CatalogNode, baseSkillDir string, categories *[]cat
 			skill := node.Skill
 			// Render SKILL.md with trusted variables
 			v := map[string]string{
-				"workspace":  vars.Workspace,
-				"skill_dir":  vars.SkillDir + "/" + node.RelPath,
+				"workspace": vars.Workspace,
+				"skill_dir": vars.SkillDir + "/" + node.RelPath,
 			}
 			rendered, err := RenderTrustedTemplate(skill.PromptText, v)
 			if err != nil {
@@ -331,6 +331,47 @@ func copyLeafForPlan(src, dst, renderedMD string) error {
 }
 
 // MaterializeCatalog writes the catalog snapshot to disk atomically.
+// PromoteMaterializedCatalog atomically moves a Run-local materialization into
+// a content-addressed Session directory. An existing valid target is reused.
+func PromoteMaterializedCatalog(result *MaterializedCatalog, target string) error {
+	if result == nil || result.Root == "" || target == "" {
+		return fmt.Errorf("materialized catalog and target are required")
+	}
+	if result.Root == target {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return fmt.Errorf("create snapshot catalog directory: %w", err)
+	}
+	if _, err := os.Stat(target); err == nil {
+		if err := VerifyMaterializedCatalog(target, result.CatalogDigest); err != nil {
+			return fmt.Errorf("content-addressed snapshot conflicts with digest: %w", err)
+		}
+		if err := os.RemoveAll(result.Root); err != nil {
+			return fmt.Errorf("remove duplicate materialization: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	} else if err := os.Rename(result.Root, target); err != nil {
+		// Another materializer may have won the rename race.
+		if verifyErr := VerifyMaterializedCatalog(target, result.CatalogDigest); verifyErr != nil {
+			return fmt.Errorf("promote materialized catalog: %w", err)
+		}
+		if removeErr := os.RemoveAll(result.Root); removeErr != nil {
+			return fmt.Errorf("remove raced materialization: %w", removeErr)
+		}
+	}
+	for index := range result.Records {
+		rel, err := filepath.Rel(result.Root, result.Records[index].SnapshotPath)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("skill snapshot path escapes materialized catalog")
+		}
+		result.Records[index].SnapshotPath = filepath.Join(target, rel)
+	}
+	result.Root = target
+	return nil
+}
+
 func MaterializeCatalog(parentDir string, plan *MaterializationPlan, catalog *Catalog) (*MaterializedCatalog, error) {
 	if plan == nil {
 		return nil, fmt.Errorf("plan is nil")

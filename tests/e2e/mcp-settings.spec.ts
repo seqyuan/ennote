@@ -70,10 +70,13 @@ async function mockMCP(page: Page) {
 
 async function selectProjectAndOpenMCPSettings(page: Page) {
   await page.goto("/");
-  if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.getByTitle("Select project").click();
+  const mobile = (page.viewportSize()?.width ?? 1280) <= 640;
+  if (mobile) await page.getByRole("button", { name: "Open navigation" }).click();
+  await page.getByTitle("Select project").first().click();
   await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
-  await page.getByRole("button", { name: "Open settings" }).click();
+  // Selecting a project closes the mobile drawer; reopen it to reach Settings.
+  if (mobile) await page.getByRole("button", { name: "Open navigation" }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("tab", { name: /MCP/ }).click();
 }
 
@@ -193,4 +196,31 @@ test("update-available candidate exposes a read-only profile diff", async ({ pag
   await expect(page.getByText(/"executable": "python3"/)).toBeVisible();
   // New config digest is surfaced.
   await expect(page.getByText(/new config sha256:/)).toBeVisible();
+});
+
+test("unbound managed MCP profiles can be archived", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  let archived = false;
+  const managedCandidate = { ...candidate, sourceKind: "managed", sourceLocator: "", alreadyBound: false };
+  await page.route("**/api/worker/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    if (path === "/v1/projects") return fulfill(route, [project]);
+    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, []);
+    if (path === "/v1/mcp/server-profiles") return fulfill(route, archived ? [] : [profile]);
+    if (path === `/v1/mcp/server-profiles/${profile.id}/versions`) return fulfill(route, [version]);
+    if (path === `/v1/mcp/server-profiles/${profile.id}` && route.request().method() === "DELETE") {
+      archived = true;
+      return route.fulfill({ status: 204 });
+    }
+    if (path === `/v1/projects/${project.id}/mcp/candidates`) return fulfill(route, archived ? [] : [managedCandidate]);
+    if (path === `/v1/projects/${project.id}/mcp/bindings`) return fulfill(route, []);
+    return route.abort();
+  });
+  await selectProjectAndOpenMCPSettings(page);
+
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByLabel("Archive MCP profile PubMed").click();
+  await expect(page.getByLabel("Archive MCP profile PubMed")).toHaveCount(0);
+  expect(archived).toBe(true);
 });

@@ -49,7 +49,7 @@ func TestStopHookBlockLimitForcesEnd(t *testing.T) {
 
 	loop := &Loop{
 		Provider: provider, Tools: tools, Events: writer, HookLife: life,
-		ToolPolicy:   &preflightOnlyPolicy{},
+		ToolPolicy:    &preflightOnlyPolicy{},
 		MaxIterations: 10, ContextTokens: 8000, MaxOutput: 500,
 	}
 	_, err := loop.Run(context.Background(), RunInput{RunID: "run-1", Model: "m"})
@@ -90,7 +90,7 @@ func TestStopHookAllowResetsCounter(t *testing.T) {
 
 	loop := &Loop{
 		Provider: providerFromSteps(steps), Tools: tools, Events: writer, HookLife: life,
-		ToolPolicy:   &preflightOnlyPolicy{},
+		ToolPolicy:    &preflightOnlyPolicy{},
 		MaxIterations: 20, ContextTokens: 8000, MaxOutput: 500,
 	}
 	_, err := loop.Run(context.Background(), RunInput{RunID: "run-2", Model: "m"})

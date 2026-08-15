@@ -47,15 +47,15 @@ type ApprovalItem struct {
 // It is the parent-visible, read-only projection shown before the batch is
 // admitted; the canonical request and Role snapshots remain authoritative.
 type DelegationApprovalPreview struct {
-	Name           string            `json:"name"`
-	Role           string            `json:"role"`
-	RoleHandle     string            `json:"roleHandle,omitempty"` // legacy preview compat
-	GoalPreview    string            `json:"goalPreview"`
-	AssignmentPreview string          `json:"assignmentPreview,omitempty"` // legacy preview compat
-	Skills         []string          `json:"skills,omitempty"`
-	Depends        []string          `json:"depends,omitempty"`
-	OutputContract string            `json:"outputContract"`
-	Budget         BudgetCeilingJSON `json:"budget"`
+	Name              string            `json:"name"`
+	Role              string            `json:"role"`
+	RoleHandle        string            `json:"roleHandle,omitempty"` // legacy preview compat
+	GoalPreview       string            `json:"goalPreview"`
+	AssignmentPreview string            `json:"assignmentPreview,omitempty"` // legacy preview compat
+	Skills            []string          `json:"skills,omitempty"`
+	Depends           []string          `json:"depends,omitempty"`
+	OutputContract    string            `json:"outputContract"`
+	Budget            BudgetCeilingJSON `json:"budget"`
 }
 
 // StandingScopeInfo is the safe, client-visible representation of a standing

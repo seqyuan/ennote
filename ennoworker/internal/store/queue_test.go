@@ -12,7 +12,7 @@ import (
 )
 
 func TestQueueInputsAreIdempotentOrderedAndKindSeparated(t *testing.T) {
-	db := store.SetupDB(t)
+	db, _, _ := newSessionDB(t)
 	runs := &store.RunRepo{DB: db}
 	queue := &store.QueueRepo{DB: db}
 	sessionID := createRunTestSession(t, runs)
@@ -55,7 +55,7 @@ func TestQueueInputsAreIdempotentOrderedAndKindSeparated(t *testing.T) {
 }
 
 func TestTerminalRunCancelsPendingInputs(t *testing.T) {
-	db := store.SetupDB(t)
+	db, _, _ := newSessionDB(t)
 	runs := &store.RunRepo{DB: db}
 	queue := &store.QueueRepo{DB: db}
 	sessionID := createRunTestSession(t, runs)
@@ -75,7 +75,7 @@ func TestTerminalRunCancelsPendingInputs(t *testing.T) {
 }
 
 func TestQueueRejectsInvalidModeAndKind(t *testing.T) {
-	db := store.SetupDB(t)
+	db, _, _ := newSessionDB(t)
 	queue := &store.QueueRepo{DB: db}
 	_, err := queue.Enqueue(context.Background(), "missing", "q", "invalid", "text")
 	assert.ErrorContains(t, err, "unsupported")

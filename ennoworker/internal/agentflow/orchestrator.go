@@ -62,9 +62,13 @@ type ChildSpec struct {
 	RoleVersionID string
 	// SkillIDs are the task-level additive preload Skills frozen on the flow
 	// node. They supplement, but never replace or widen, the Role policy.
-	SkillIDs   []string
-	Assignment string
-	Budget     domain.BudgetCeilingJSON
+	SkillIDs []string
+	// RoleDefinitionJSON is the full resolved RoleDefinition frozen at Run
+	// start. It is passed to child Run materialization so delegation never
+	// re-reads mutable Role files or the removed global role SQL.
+	RoleDefinitionJSON json.RawMessage
+	Assignment         string
+	Budget             domain.BudgetCeilingJSON
 }
 
 // ChildInfo identifies the materialized child Run.
@@ -370,6 +374,7 @@ func (o *Orchestrator) dispatchRoleChild(ctx context.Context, runID string, flow
 	child, err := o.Children.CreateTaskChild(ctx, runID, flow.SessionID, ChildSpec{
 		Handle: node.Handle, RoleVersionID: node.RoleVersionID,
 		SkillIDs: append([]string(nil), node.SkillDigests...), Assignment: goal, Budget: budget,
+		RoleDefinitionJSON: node.RoleDefinitionJSON,
 	})
 	if err != nil {
 		o.failTask(ctx, runID, node, err.Error())
@@ -507,7 +512,6 @@ func (o *Orchestrator) cancelInflight(ctx context.Context, runID string, inFligh
 		})
 	}
 }
-
 
 // runCheckTask executes one deterministic check gate: policy gate, durable
 // Ask-mode approval, sandbox execution, and checkpoint write. Check tasks are
@@ -652,6 +656,7 @@ func (o *Orchestrator) runFanOutTask(ctx context.Context, runID string, flow *do
 			RoleVersionID: node.RoleVersionID,
 			SkillIDs:      append([]string(nil), node.SkillDigests...),
 			Assignment:    goal, Budget: budget,
+			RoleDefinitionJSON: node.RoleDefinitionJSON,
 		})
 		if err != nil {
 			o.failTask(ctx, runID, node, "fan_out_child_create_failed")

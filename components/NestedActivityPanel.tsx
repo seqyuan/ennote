@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, RefreshCw, Users, X } from "lucide-react";
+import { Ban, Check, RefreshCw, Users, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChildRunRow } from "@/components/ChildRunRow";
 import { DelegationFollowUpDialog } from "@/components/DelegationFollowUpDialog";
@@ -88,7 +88,7 @@ export function NestedActivityPanel({ parentRunId, toolCallId }: { parentRunId: 
       });
     }
     return () => controller.abort();
-  }, [groupIDs]);
+  }, [groupIDs, retry]);
 
   const children = groups.flatMap(group => group.children);
   const activeCount = children.filter(child => child.runStatus && !isTerminalStatus(child.runStatus)).length;
@@ -117,6 +117,20 @@ export function NestedActivityPanel({ parentRunId, toolCallId }: { parentRunId: 
       setBusy(null);
     }
   }, [busy, inspections]);
+
+  const cancelGroup = useCallback(async (group: ActivityGroup) => {
+    if (busy || !window.confirm("Cancel all active tasks in this delegation?")) return;
+    setBusy(`${group.id}:cancel`);
+    try {
+      await apiFetch(`/v1/delegations/${encodeURIComponent(group.id)}/cancel`, { method: "POST" });
+      setError(null);
+      setRetry(value => value + 1);
+    } catch (reason) {
+      setError((reason as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }, [busy]);
 
   const decideApproval = useCallback(async (approvalID: string, decision: "approved" | "rejected") => {
     if (busy) return;
@@ -157,6 +171,7 @@ export function NestedActivityPanel({ parentRunId, toolCallId }: { parentRunId: 
         busy={busy}
         progress={childProgress.get(group.id) ?? emptyProgress}
         onRetry={retryItem}
+        onCancel={cancelGroup}
         onDecide={decideApproval}
         onContinue={(itemID, itemName, kind, sourceAttemptID, expectedGeneration) =>
           setContinuation({ itemID, itemName, kind, sourceAttemptID, expectedGeneration })}
@@ -169,11 +184,12 @@ export function NestedActivityPanel({ parentRunId, toolCallId }: { parentRunId: 
   </details>;
 }
 
-function GroupBlock({ group, inspection, busy, onRetry, onDecide, onContinue, progress }: {
+function GroupBlock({ group, inspection, busy, onRetry, onCancel, onDecide, onContinue, progress }: {
   group: ActivityGroup;
   inspection?: DelegationInspection;
   busy: string | null;
   onRetry: (group: ActivityGroup, itemId: string) => void;
+  onCancel: (group: ActivityGroup) => void;
   onDecide: (approvalID: string, decision: "approved" | "rejected") => void;
   onContinue: (itemID: string, itemName: string, kind: "input" | "follow_up", sourceAttemptID: string, expectedGeneration: number) => void;
   progress: ReadonlyMap<string, string>;
@@ -188,7 +204,15 @@ function GroupBlock({ group, inspection, busy, onRetry, onDecide, onContinue, pr
     return ids;
   }, [inspection]);
   const pendingApproval = inspection?.pendingApproval;
+  const canCancel = inspection?.validActions.includes("cancel") ?? false;
   return <>
+    {canCancel && <div className="delegation-group-actions">
+      <span>Delegation in progress</span>
+      <button type="button" className="child-run-reject" disabled={busy !== null}
+        onClick={() => onCancel(group)}>
+        <Ban size={13} aria-hidden="true" /> Cancel delegation
+      </button>
+    </div>}
     <div className="child-run-list" role="list">
       {group.children.map(child => <ChildRunRow
         child={child}

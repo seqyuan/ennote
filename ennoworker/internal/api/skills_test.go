@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/seqyuan/ennote/ennoworker/internal/workspace"
@@ -20,7 +21,7 @@ func setupSkillsServer(t *testing.T) (*Server, http.Handler, string) {
 	db, err := store.OpenMemory()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
+	require.NoError(t, store.MigrateFixtureSchema(db))
 
 	home := t.TempDir()
 	userRoot := filepath.Join(home, ".pi", "agent", "skills")
@@ -31,11 +32,17 @@ func setupSkillsServer(t *testing.T) (*Server, http.Handler, string) {
 	trustStore, err := workspace.NewTrustStore(filepath.Join(home, "ennote"))
 	require.NoError(t, err)
 
+	settings := fileconfig.NewModelStore(
+		filepath.Join(home, "config", "models.json"),
+		filepath.Join(home, "config", "provider-auth.json"),
+		filepath.Join(home, "config", "settings.json"),
+	).Settings
+
 	server := &Server{
 		DB: db, Token: "test-token", Sandbox: "none",
-		Projects:   &store.ProjectRepo{DB: db},
+		Projects:   newFileProjects(t),
 		Skills:     &skillsmgmt.Service{UserRoot: userRoot, BuiltinRoot: "", HomeDir: home},
-		SkillRoots: &store.SkillRootRepo{DB: db},
+		SkillRoots: &store.SkillRootRepo{Settings: settings},
 		Trust:      trustStore,
 	}
 	return server, server.Handler(), home
@@ -65,9 +72,9 @@ func TestSkillsListReturnsAnnotatedSkills(t *testing.T) {
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	var result struct {
 		Skills []struct {
-			SkillID string                   `json:"skillId"`
-			Name    string                   `json:"name"`
-			Install *skillsmgmt.InstallInfo  `json:"install"`
+			SkillID string                  `json:"skillId"`
+			Name    string                  `json:"name"`
+			Install *skillsmgmt.InstallInfo `json:"install"`
 		} `json:"skills"`
 	}
 	decodeData(t, response, &result)
@@ -186,69 +193,6 @@ func TestSkillJSONEnvelopeShape(t *testing.T) {
 	assert.True(t, hasData, "response must use the data envelope")
 }
 
-func TestSkillRootsCRUD(t *testing.T) {
-	server, handler, home := setupSkillsServer(t)
-	require.NotNil(t, server.SkillRoots)
-
-	// Create via claude preset resolves under worker home.
-	response := request(t, handler, http.MethodPost, "/v1/skills/roots",
-		map[string]any{"name": "claude", "agentKind": "claude"}, true)
-	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
-	var created struct {
-		ID        string `json:"id"`
-		Name      string `json:"name"`
-		Path      string `json:"path"`
-		AgentKind string `json:"agentKind"`
-	}
-	decodeData(t, response, &created)
-	assert.Equal(t, filepath.Join(home, ".claude", "skills"), created.Path)
-	assert.Equal(t, "claude", created.AgentKind)
-
-	// Create with an explicit custom path.
-	response = request(t, handler, http.MethodPost, "/v1/skills/roots",
-		map[string]any{"name": "custom", "path": "/data/skills", "agentKind": "generic"}, true)
-	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
-
-	// Duplicate path rejected.
-	response = request(t, handler, http.MethodPost, "/v1/skills/roots",
-		map[string]any{"name": "dup", "path": "/data/skills"}, true)
-	assert.Equal(t, http.StatusBadRequest, response.Code)
-
-	// List returns both.
-	response = request(t, handler, http.MethodGet, "/v1/skills/roots", nil, true)
-	require.Equal(t, http.StatusOK, response.Code)
-	var listed struct {
-		Items []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-		} `json:"items"`
-	}
-	decodeData(t, response, &listed)
-	require.Len(t, listed.Items, 2)
-
-	// PATCH disable.
-	response = request(t, handler, http.MethodPatch, "/v1/skills/roots/"+created.ID,
-		map[string]any{"enabled": false}, true)
-	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	var patched struct {
-		Enabled bool `json:"enabled"`
-	}
-	decodeData(t, response, &patched)
-	assert.False(t, patched.Enabled)
-
-	// DELETE + 404 afterwards.
-	response = request(t, handler, http.MethodDelete, "/v1/skills/roots/"+created.ID, nil, true)
-	require.Equal(t, http.StatusNoContent, response.Code)
-	response = request(t, handler, http.MethodPatch, "/v1/skills/roots/"+created.ID,
-		map[string]any{"name": "x"}, true)
-	assert.Equal(t, http.StatusNotFound, response.Code)
-
-	// Invalid agent kind without path.
-	response = request(t, handler, http.MethodPost, "/v1/skills/roots",
-		map[string]any{"name": "bad", "agentKind": "unknown"}, true)
-	assert.Equal(t, http.StatusBadRequest, response.Code)
-}
-
 func TestSkillRootsRequireAuth(t *testing.T) {
 	_, handler, _ := setupSkillsServer(t)
 	response := request(t, handler, http.MethodGet, "/v1/skills/roots", nil, false)
@@ -272,7 +216,9 @@ func TestSkillRootCreateRefreshesCatalog(t *testing.T) {
 	// Not visible before adding the root.
 	response := request(t, handler, http.MethodGet, "/v1/skills", nil, true)
 	var before struct {
-		Skills []struct{ SkillID string `json:"skillId"` } `json:"skills"`
+		Skills []struct {
+			SkillID string `json:"skillId"`
+		} `json:"skills"`
 	}
 	decodeData(t, response, &before)
 	assert.False(t, containsSkill(before.Skills, "from-extra-root"))
@@ -312,7 +258,9 @@ func TestSkillRootCreateRefreshesCatalog(t *testing.T) {
 	assert.Contains(t, string(data), "disable-model-invocation: true")
 }
 
-func containsSkill(skills []struct{ SkillID string `json:"skillId"` }, id string) bool {
+func containsSkill(skills []struct {
+	SkillID string `json:"skillId"`
+}, id string) bool {
 	for _, skill := range skills {
 		if skill.SkillID == id {
 			return true

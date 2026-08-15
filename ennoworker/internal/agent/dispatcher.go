@@ -222,11 +222,34 @@ func (l *Loop) preflightToolBatch(ctx context.Context, runID string, iteration i
 		}
 	}
 
-	decisions := make([]ToolDecision, len(calls))
-	for index := range decisions {
-		decisions[index].Action = ToolAllow
+	execs := make([]*ToolExecution, len(calls))
+	for index, call := range calls {
+		execs[index] = &ToolExecution{
+			RunID:       runID,
+			Iteration:   iteration,
+			CallIndex:   index,
+			Original:    call,
+			Effective:   call,
+			Policy:      l.ToolPolicySnapshot,
+			WorkspaceID: l.WorkspaceID,
+			RiskClass:   l.toolRiskClass(call.Name),
+		}
 	}
-	if l.ToolPolicy != nil {
+	var decisions []ToolDecision
+	terminate := false
+	if l.PolicyChain != nil {
+		var err error
+		decisions, terminate, err = l.PolicyChain.Preflight(ctx, execs)
+		if err != nil {
+			return nil, false, domain.NewCodedError(domain.ErrorToolPolicyFailed, err)
+		}
+		if len(decisions) != len(calls) {
+			return nil, false, domain.NewCodedError(domain.ErrorToolPolicyFailed,
+				fmt.Errorf("tool policy returned %d decisions for %d calls", len(decisions), len(calls)))
+		}
+	} else if l.ToolPolicy != nil {
+		// Legacy direct path: callers that set ToolPolicy without a chain keep
+		// the pre-refactor behaviour.
 		var err error
 		decisions, err = callBeforeToolBatch(ctx, l.ToolPolicy, ToolBatchContext{
 			RunID: runID, Iteration: iteration, Policy: l.ToolPolicySnapshot, WorkspaceID: l.WorkspaceID,
@@ -238,9 +261,18 @@ func (l *Loop) preflightToolBatch(ctx context.Context, runID string, iteration i
 			return nil, false, domain.NewCodedError(domain.ErrorToolPolicyFailed,
 				fmt.Errorf("tool policy returned %d decisions for %d calls", len(decisions), len(calls)))
 		}
+		for index := range decisions {
+			if decisions[index].Action == ToolTerminateBatch {
+				terminate = true
+			}
+		}
+	} else {
+		decisions = make([]ToolDecision, len(calls))
+		for index := range decisions {
+			decisions[index].Action = ToolAllow
+		}
 	}
 	plans := make([]plannedToolCall, len(calls))
-	terminate := false
 	for index, call := range calls {
 		decision := decisions[index]
 		if decision.Action == "" {
@@ -288,7 +320,6 @@ func (l *Loop) preflightToolBatch(ctx context.Context, runID string, iteration i
 				return nil, false, domain.NewCodedError(domain.ErrorToolPolicyFailed,
 					fmt.Errorf("terminate decision %d contains rewritten arguments", index))
 			}
-			terminate = true
 		default:
 			return nil, false, domain.NewCodedError(domain.ErrorToolPolicyFailed,
 				fmt.Errorf("unknown tool policy action %q", decision.Action))
@@ -542,6 +573,25 @@ func (l *Loop) toolCallStart(recordID, runID string, iteration, callIndex int, p
 }
 
 func (l *Loop) projectToolResult(ctx context.Context, runID string, iteration, callIndex int, plan plannedToolCall, raw domain.ToolResult) (domain.ToolResult, bool, string, error) {
+	if l.PolicyChain != nil {
+		exec := &ToolExecution{
+			RunID:       runID,
+			Iteration:   iteration,
+			CallIndex:   callIndex,
+			Original:    plan.original,
+			Effective:   plan.effective,
+			Policy:      l.ToolPolicySnapshot,
+			WorkspaceID: l.WorkspaceID,
+			RiskClass:   l.toolRiskClass(plan.effective.Name),
+		}
+		decision, err := l.PolicyChain.Post(ctx, exec, raw)
+		if err != nil {
+			return raw, false, "policy_hook_failed", err
+		}
+		decision.Result.ToolCallID = plan.effective.ID
+		decision.Result.ToolName = plan.effective.Name
+		return decision.Result, decision.StopAfterBatch, decision.Code, nil
+	}
 	if l.ToolPolicy == nil {
 		return raw, false, "", nil
 	}
@@ -581,6 +631,17 @@ func (l *Loop) executionClass(toolName string) domain.ExecutionClass {
 		return domain.ExecutionExclusive
 	}
 	return class
+}
+
+// toolRiskClass resolves one call's risk class for the policy chain. Unknown or
+// restricted-away tools resolve to RiskSensitive (fail closed), mirroring the
+// Registry contract.
+func (l *Loop) toolRiskClass(toolName string) domain.RiskClass {
+	classifier, ok := l.Tools.(domain.ToolRiskClassifier)
+	if !ok {
+		return domain.RiskSensitive
+	}
+	return classifier.RiskClass(toolName)
 }
 
 func callBeforeToolBatch(ctx context.Context, policy ToolPolicy, batch ToolBatchContext, calls []domain.ToolCall) (decisions []ToolDecision, err error) {

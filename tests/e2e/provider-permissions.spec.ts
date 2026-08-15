@@ -46,6 +46,7 @@ test("each turn freezes the selected permission profile", async ({ page }) => {
   await page.getByText(project.name, { exact: true }).click();
   await page.getByText(session.title, { exact: true }).click();
 
+  await page.getByRole("button", { name: "Configure run", exact: true }).click();
   const discuss = page.getByRole("button", { name: "Discuss", exact: true });
   const ask = page.getByRole("button", { name: "Ask", exact: true });
   await expect(discuss).toHaveAttribute("aria-pressed", "true");
@@ -93,6 +94,7 @@ test.describe("mobile", () => {
     await page.getByText(project.name, { exact: true }).click();
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByText(session.title, { exact: true }).click();
+    await page.getByRole("button", { name: "Configure run", exact: true }).click();
     await expect(page.getByRole("button", { name: "Discuss", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Send", exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);

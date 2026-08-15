@@ -4,9 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ActiveRunState, AgentRun, ApprovalDecision, ToolApprovalRequest } from "@/lib/approval";
 import type { TurnMessage } from "@/lib/chat-messages";
-import { runFailureMessage } from "@/lib/provider-errors";
+import { runFailureMessage, errorMessage } from "@/lib/provider-errors";
 import { registerChildProgress } from "@/hooks/useChildProgress";
-import { apiFetch } from "@/lib/worker-api.client";
+import { apiFetch, apiResponse } from "@/lib/worker-api.client";
 
 interface UseAgentSessionInput {
   sessionId: string | null;
@@ -29,6 +29,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
   const [delegationActive, setDelegationActive] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [pendingFollowUps, setPendingFollowUps] = useState<{ id: string; text: string }[]>([]);
   const streamController = useRef<AbortController | null>(null);
   const decisionController = useRef<AbortController | null>(null);
   const generation = useRef(0);
@@ -80,6 +81,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
           requested: () => void refreshPendingApproval(run.id, version),
           resolved: () => { if (generation.current === version) setPendingApproval(null); },
           delegated: () => { if (generation.current === version) setDelegationActive(true); },
+          followUpConsumed: () => { if (generation.current === version) setPendingFollowUps(current => current.slice(1)); },
         });
       }
     } catch (err) {
@@ -95,6 +97,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
         setPendingApproval(null);
         setResolvingApproval(null);
         setDelegationActive(false);
+        setPendingFollowUps([]);
         streamController.current = null;
         await refreshSession().catch(() => null);
         await refreshLatest();
@@ -199,10 +202,28 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
       setStatus(activeRun.status === "waiting_for_approval" ? "Waiting for approval" : "");
       return true;
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err, "Failed to steer the run"));
       return false;
     }
   }, [activeRun, appendMessage]);
+
+  const followUp = useCallback(async (text: string): Promise<{ queued: boolean; runEnded: boolean }> => {
+    const run = activeRun;
+    if (!run || !text.trim()) return { queued: false, runEnded: false };
+    try {
+      await apiFetch(`/v1/runs/${encodeURIComponent(run.id)}/inputs`, { method: "POST",
+        body: JSON.stringify({ kind: "follow_up", text, clientRequestId: genId() }) });
+      setPendingFollowUps(current => [...current, { id: genId(), text }]);
+      return { queued: true, runEnded: false };
+    } catch (err) {
+      // The run ended between render and submit: the caller can fall back to a
+      // normal turn submission instead of dropping the message.
+      const message = errorMessage(err, "Failed to send follow-up");
+      const runEnded = /not active|not_active/i.test(message);
+      if (!runEnded) setError(message);
+      return { queued: false, runEnded };
+    }
+  }, [activeRun]);
 
   const decideApproval = useCallback(async (decision: ApprovalDecision, standingGrantCallIndexes?: number[]) => {
     const approval = pendingApproval;
@@ -246,6 +267,8 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
     watchRun,
     cancel,
     steer,
+    followUp,
+    pendingFollowUps,
     decideApproval,
   };
 }
@@ -253,7 +276,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
 class TerminalRunError extends Error {}
 
 async function streamCompactionEvents(runId: string, setStatus: (status: string) => void, signal: AbortSignal): Promise<boolean> {
-  const response = await fetch(`/api/worker/v1/runs/${encodeURIComponent(runId)}/events`, { signal });
+  const response = await apiResponse(`/v1/runs/${encodeURIComponent(runId)}/events`, { signal });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const reader = response.body?.getReader();
   if (!reader) return false;
@@ -292,9 +315,9 @@ async function streamAgentEvents(
   upsertMessage: (message: TurnMessage) => void,
   setStatus: (status: string) => void,
   signal: AbortSignal,
-  approval: { requested: () => void; resolved: () => void; delegated: () => void },
+  approval: { requested: () => void; resolved: () => void; delegated: () => void; followUpConsumed: () => void },
 ): Promise<boolean> {
-  const response = await fetch(`/api/worker/v1/runs/${encodeURIComponent(runId)}/events`, { signal });
+  const response = await apiResponse(`/v1/runs/${encodeURIComponent(runId)}/events`, { signal });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const reader = response.body?.getReader();
   if (!reader) return false;
@@ -462,6 +485,7 @@ async function streamAgentEvents(
           case "vision_fallback_completed": setStatus("Image description ready"); break;
           case "approval_requested": setStatus("Waiting for approval"); approval.requested(); break;
           case "approval_resolved": setStatus("Resuming…"); approval.resolved(); break;
+          case "follow_up_consumed": approval.followUpConsumed(); break;
           case "run_succeeded": setStatus("Completed"); return true;
           case "run_cancelled": setStatus("Cancelled"); return true;
           case "run_interrupted": setStatus("Interrupted"); return true;

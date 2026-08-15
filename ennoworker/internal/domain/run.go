@@ -91,7 +91,8 @@ type ModelRuntimeSnapshot struct {
 	ModelProfileID           string           `json:"modelProfileId"`
 	APIModel                 string           `json:"apiModel"`
 	BaseURL                  string           `json:"baseUrl"`
-	CredentialRef            string           `json:"credentialRef"`
+	CredentialRef            string           `json:"credentialRef,omitempty"`
+	APIKey                   string           `json:"-"`
 	Proxy                    string           `json:"proxy,omitempty"`
 	ContextTokens            int              `json:"contextTokens"`
 	MaxOutputTokens          int              `json:"maxOutputTokens"`
@@ -140,6 +141,7 @@ type EffectiveRunConfig struct {
 	CompactionPolicy  PolicySnapshot             `json:"compactionPolicy"`
 	CompactionRuntime ModelRuntimeSnapshot       `json:"compactionRuntime"`
 	HookConfig        EffectiveHookConfig        `json:"hookConfig"`
+	ToolPolicyHooks   []ProjectToolPolicyHook    `json:"toolPolicyHooks,omitempty"`
 	WorkspaceSecurity *WorkspaceSecuritySnapshot `json:"workspaceSecurity,omitempty"`
 	Role              *FrozenRoleExecution       `json:"role,omitempty"`
 	// Delegation is the frozen root budget policy snapshot for a top-level Host

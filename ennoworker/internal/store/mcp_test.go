@@ -7,149 +7,90 @@ import (
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
+	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestMCPProfileLifecycle(t *testing.T) {
-	db := SetupDB(t)
-	repo := &MCPProfileRepo{DB: db}
-
-	profile, err := repo.CreateProfile(context.Background(), CreateMCPProfileInput{
-		DisplayName: "Pubmed", Slug: "pubmed", SourceKind: domain.MCPSourceManaged,
-	})
-	require.NoError(t, err)
-	assert.Equal(t, "pubmed", profile.Slug)
-
-	version := &domain.MCPServerProfileVersion{
-		Transport: domain.MCPTransportStdio, Executable: "/bin/echo", Argv: []string{"-n", "hi"},
-		TimeoutMS: 5000, NetworkPolicy: "default",
-	}
-	require.NoError(t, repo.CreateVersion(context.Background(), profile.ID, version))
-	assert.Equal(t, 1, version.Version)
-	assert.NotEmpty(t, version.ConfigDigest)
-
-	// A second version bumps the number and keeps the first immutable.
-	version2 := &domain.MCPServerProfileVersion{
-		Transport: domain.MCPTransportStdio, Executable: "/bin/echo", Argv: []string{"-n", "bye"},
-	}
-	require.NoError(t, repo.CreateVersion(context.Background(), profile.ID, version2))
-	assert.Equal(t, 2, version2.Version)
-
-	versions, err := repo.ListVersions(context.Background(), profile.ID)
-	require.NoError(t, err)
-	require.Len(t, versions, 2)
-	assert.Equal(t, "/bin/echo", versions[0].Executable)
-	assert.Equal(t, []string{"-n", "hi"}, versions[0].Argv)
-
-	got, err := repo.GetVersion(context.Background(), version.ID)
-	require.NoError(t, err)
-	assert.Equal(t, version.ConfigDigest, got.ConfigDigest)
-
-	profiles, err := repo.ListProfiles(context.Background())
-	require.NoError(t, err)
-	require.Len(t, profiles, 1)
-	assert.Equal(t, 2, profiles[0].LatestVersion)
-
-	require.NoError(t, repo.Archive(context.Background(), profile.ID))
-	profiles, err = repo.ListProfiles(context.Background())
-	require.NoError(t, err)
-	assert.Len(t, profiles, 0)
+// fileMCPFixture wires the file-backed MCP authority: profiles in
+// config/mcp.json, bindings in project.json, catalog cache under cache/mcp, and
+// Run snapshots in the owning Session database.
+type fileMCPFixture struct {
+	home     string
+	projects *projectstore.Store
+	profiles *MCPProfileRepo
+	bindings *MCPBindingRepo
+	catalogs *MCPCatalogRepo
+	sessions *sessionstore.Manager
+	project  *domain.Project
+	session  *domain.Session
+	db       *sql.DB
 }
 
-func TestMCPBindingLifecycle(t *testing.T) {
-	db := SetupDB(t)
-	profileRepo := &MCPProfileRepo{DB: db}
-	bindingRepo := &MCPBindingRepo{DB: db}
+func newFileMCP(t *testing.T) *fileMCPFixture {
+	t.Helper()
+	home := t.TempDir()
+	projects := &projectstore.Store{Root: filepath.Join(home, "projects")}
+	project, _, err := projects.CreateWithWorkspace(context.Background(),
+		domain.CreateProjectInput{Name: "Project", HostPath: t.TempDir()})
+	require.NoError(t, err)
+	sessions := sessionstore.NewManager(projects.Root, projects)
+	t.Cleanup(func() { _ = sessions.Close() })
+	session, err := sessions.Create(context.Background(), domain.CreateSessionInput{ProjectID: project.ID, Title: "Session"})
+	require.NoError(t, err)
+	db, err := sessions.OpenSession(context.Background(), session.ID)
+	require.NoError(t, err)
+	return &fileMCPFixture{
+		home: home, projects: projects,
+		profiles: &MCPProfileRepo{FilePath: filepath.Join(home, "config", "mcp.json")},
+		bindings: &MCPBindingRepo{Projects: projects},
+		catalogs: &MCPCatalogRepo{CacheDir: filepath.Join(home, "cache", "mcp")},
+		sessions: sessions, project: project, session: session, db: db,
+	}
+}
 
-	profile, err := profileRepo.CreateProfile(context.Background(), CreateMCPProfileInput{
-		DisplayName: "GitHub", Slug: "github", SourceKind: domain.MCPSourceManaged,
+// addManagedProfile creates a managed profile with one streamable HTTP version.
+func (f *fileMCPFixture) addManagedProfile(t *testing.T, slug, endpoint string) (*domain.MCPServerProfile, *domain.MCPServerProfileVersion) {
+	t.Helper()
+	profile, err := f.profiles.CreateProfile(context.Background(), CreateMCPProfileInput{
+		DisplayName: slug, Slug: slug, SourceKind: domain.MCPSourceManaged,
 	})
 	require.NoError(t, err)
-	version := &domain.MCPServerProfileVersion{Transport: domain.MCPTransportStreamableHTTP, Endpoint: "https://example.com/mcp"}
-	require.NoError(t, profileRepo.CreateVersion(context.Background(), profile.ID, version))
-
-	binding, err := bindingRepo.EnsureBindingExists(context.Background(), "project-1", version.ID)
-	require.NoError(t, err)
-	assert.False(t, binding.DesiredEnabled)
-	assert.True(t, binding.Required)
-
-	enabled := true
-	updated, err := bindingRepo.Update(context.Background(), binding.ID, MCPBindingUpdate{
-		DesiredEnabled:          &enabled,
-		SelectedRemoteToolNames: []string{"list_issues", "get_issue"},
-		CredentialRefs:          map[string]string{"GITHUB_TOKEN": "env:GITHUB_TOKEN"},
-	})
-	require.NoError(t, err)
-	assert.True(t, updated.DesiredEnabled)
-	assert.Equal(t, 2, updated.Revision)
-	assert.Equal(t, []string{"list_issues", "get_issue"}, updated.SelectedRemoteToolNames)
-
-	byProject, err := bindingRepo.ListByProject(context.Background(), "project-1")
-	require.NoError(t, err)
-	require.Len(t, byProject, 1)
-
-	// Invalid credential ref fails closed.
-	badRef := true
-	_, err = bindingRepo.Update(context.Background(), binding.ID, MCPBindingUpdate{
-		DesiredEnabled: &badRef, CredentialRefs: map[string]string{"X": "plaintext-secret"},
-	})
-	require.Error(t, err)
-
-	require.NoError(t, bindingRepo.Delete(context.Background(), binding.ID))
-	_, err = bindingRepo.Get(context.Background(), binding.ID)
-	require.ErrorIs(t, err, sql.ErrNoRows)
+	version := &domain.MCPServerProfileVersion{Transport: domain.MCPTransportStreamableHTTP, Endpoint: endpoint}
+	require.NoError(t, f.profiles.CreateVersion(context.Background(), profile.ID, version))
+	return profile, version
 }
 
 func TestMCPCatalogCacheScopedByRevision(t *testing.T) {
-	db := SetupDB(t)
-	profileRepo := &MCPProfileRepo{DB: db}
-	bindingRepo := &MCPBindingRepo{DB: db}
-	catalogRepo := &MCPCatalogRepo{DB: db}
-
-	profile, _ := profileRepo.CreateProfile(context.Background(), CreateMCPProfileInput{
-		DisplayName: "Srv", Slug: "srv", SourceKind: domain.MCPSourceManaged,
-	})
-	version := &domain.MCPServerProfileVersion{Transport: domain.MCPTransportStreamableHTTP, Endpoint: "https://example.com/mcp"}
-	require.NoError(t, profileRepo.CreateVersion(context.Background(), profile.ID, version))
-	binding, _ := bindingRepo.EnsureBindingExists(context.Background(), "p1", version.ID)
+	f := newFileMCP(t)
+	_, version := f.addManagedProfile(t, "srv", "https://example.com/mcp")
+	binding, err := f.bindings.EnsureBindingExists(context.Background(), f.project.ID, version.ID)
+	require.NoError(t, err)
 
 	entries := []domain.MCPCatalogEntry{{RemoteName: "a", ExposedName: "srv__a", Digest: "d1"}}
-	require.NoError(t, catalogRepo.PutCatalog(context.Background(), MCPCatalogCacheRow{
+	require.NoError(t, f.catalogs.PutCatalog(context.Background(), MCPCatalogCacheRow{
 		BindingID: binding.ID, BindingRevision: binding.Revision, ProfileVersionID: version.ID,
 		ProtocolVersion: "latest", AuthGeneration: 0, CatalogDigest: "c1", Tools: entries,
 	}))
-	cached, err := catalogRepo.GetCatalog(context.Background(), binding.ID, binding.Revision, 0, version.ID, "latest", "")
+	cached, err := f.catalogs.GetCatalog(context.Background(), binding.ID, binding.Revision, 0, version.ID, "latest", "")
 	require.NoError(t, err)
 	require.Len(t, cached.Tools, 1)
 
 	// A different binding revision must NOT find the old cache (fail closed).
-	_, err = catalogRepo.GetCatalog(context.Background(), binding.ID, binding.Revision+1, 0, version.ID, "latest", "")
+	_, err = f.catalogs.GetCatalog(context.Background(), binding.ID, binding.Revision+1, 0, version.ID, "latest", "")
 	require.ErrorIs(t, err, sql.ErrNoRows)
 }
 
 func TestMCPRunSnapshotAndRequests(t *testing.T) {
 	db := SetupDB(t)
-	profileRepo := &MCPProfileRepo{DB: db}
-	bindingRepo := &MCPBindingRepo{DB: db}
-	catalogRepo := &MCPCatalogRepo{DB: db}
+	// V2: run_mcp_servers has no FK to the removed global MCP tables.
+	versionID, bindingID := "legacy-profile@v000001", "legacy-binding"
+
 	runRepo := &MCPRunRepo{DB: db}
-
-	profile, _ := profileRepo.CreateProfile(context.Background(), CreateMCPProfileInput{
-		DisplayName: "Bio", Slug: "bio", SourceKind: domain.MCPSourceManaged,
-	})
-	version := &domain.MCPServerProfileVersion{Transport: domain.MCPTransportStdio, Executable: "/bin/true"}
-	require.NoError(t, profileRepo.CreateVersion(context.Background(), profile.ID, version))
-	binding, _ := bindingRepo.EnsureBindingExists(context.Background(), "p1", version.ID)
-	entries := []domain.MCPCatalogEntry{{RemoteName: "search", ExposedName: "bio__search", InputSchema: []byte(`{"type":"object"}`), Digest: "d1"}}
-	require.NoError(t, catalogRepo.PutCatalog(context.Background(), MCPCatalogCacheRow{
-		BindingID: binding.ID, BindingRevision: binding.Revision, ProfileVersionID: version.ID,
-		ProtocolVersion: "latest", CatalogDigest: "c1", Tools: entries,
-	}))
-
 	serverID, err := runRepo.FreezeServer(context.Background(), RunMCPServerSnapshot{
-		RunID: "run-1", BindingID: binding.ID, BindingRevision: binding.Revision,
-		ProfileVersionID: version.ID, ConfigDigest: version.ConfigDigest,
+		RunID: "run-1", BindingID: bindingID, BindingRevision: 1,
+		ProfileVersionID: versionID, ConfigDigest: "config-digest-1",
 		NegotiatedProtocol: "2025-06-18", CatalogDigest: "c1", Required: true,
 	})
 	require.NoError(t, err)
@@ -186,7 +127,6 @@ func TestMCPRunSnapshotAndRequests(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, runRepo.UpdateRequestStatus(context.Background(), reqID, domain.MCPRequestOutcomeUnknown, "", "transport_error"))
 
-	// Exactly one row for tc-1, terminal status outcome_unknown.
 	var count int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM mcp_requests WHERE run_id='run-1' AND tool_call_id='tc-1'`).Scan(&count))
 	assert.Equal(t, 1, count)
@@ -194,7 +134,6 @@ func TestMCPRunSnapshotAndRequests(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT status FROM mcp_requests WHERE run_id='run-1' AND tool_call_id='tc-1'`).Scan(&status))
 	assert.Equal(t, string(domain.MCPRequestOutcomeUnknown), status)
 
-	// Generation bump.
 	gen, err := runRepo.BumpConnectionGeneration(context.Background(), serverID)
 	require.NoError(t, err)
 	assert.Equal(t, 1, gen)
@@ -209,89 +148,65 @@ func TestMCPDigestCatalogStable(t *testing.T) {
 }
 
 func TestMCPCatalogCacheAuthGenerationIsolation(t *testing.T) {
-	db := SetupDB(t)
-	profileRepo := &MCPProfileRepo{DB: db}
-	bindingRepo := &MCPBindingRepo{DB: db}
-	catalogRepo := &MCPCatalogRepo{DB: db}
+	f := newFileMCP(t)
+	_, version := f.addManagedProfile(t, "srv", "https://example.com/mcp")
+	binding, err := f.bindings.EnsureBindingExists(context.Background(), f.project.ID, version.ID)
+	require.NoError(t, err)
 
-	profile, _ := profileRepo.CreateProfile(context.Background(), CreateMCPProfileInput{
-		DisplayName: "Srv", Slug: "srv", SourceKind: domain.MCPSourceManaged,
-	})
-	version := &domain.MCPServerProfileVersion{Transport: domain.MCPTransportStreamableHTTP, Endpoint: "https://example.com/mcp"}
-	require.NoError(t, profileRepo.CreateVersion(context.Background(), profile.ID, version))
-	binding, _ := bindingRepo.EnsureBindingExists(context.Background(), "p1", version.ID)
-
-	// Identity A (auth generation 0): catalog shows tool "a".
-	require.NoError(t, catalogRepo.PutCatalog(context.Background(), MCPCatalogCacheRow{
+	require.NoError(t, f.catalogs.PutCatalog(context.Background(), MCPCatalogCacheRow{
 		BindingID: binding.ID, BindingRevision: binding.Revision, ProfileVersionID: version.ID,
 		ProtocolVersion: "latest", AuthGeneration: 0, CatalogDigest: "c-a",
 		Tools: []domain.MCPCatalogEntry{{RemoteName: "a", ExposedName: "srv__a", Digest: "da"}},
 	}))
-	// Identity B (auth generation 1): same binding+revision, different catalog.
-	require.NoError(t, catalogRepo.PutCatalog(context.Background(), MCPCatalogCacheRow{
+	require.NoError(t, f.catalogs.PutCatalog(context.Background(), MCPCatalogCacheRow{
 		BindingID: binding.ID, BindingRevision: binding.Revision, ProfileVersionID: version.ID,
 		ProtocolVersion: "latest", AuthGeneration: 1, CatalogDigest: "c-b",
 		Tools: []domain.MCPCatalogEntry{{RemoteName: "b", ExposedName: "srv__b", Digest: "db"}},
 	}))
 
-	// Each generation reads only its own catalog — never the other identity's.
-	gen0, err := catalogRepo.GetCatalog(context.Background(), binding.ID, binding.Revision, 0, version.ID, "latest", "")
+	gen0, err := f.catalogs.GetCatalog(context.Background(), binding.ID, binding.Revision, 0, version.ID, "latest", "")
 	require.NoError(t, err)
 	require.Len(t, gen0.Tools, 1)
 	assert.Equal(t, "srv__a", gen0.Tools[0].ExposedName)
 
-	gen1, err := catalogRepo.GetCatalog(context.Background(), binding.ID, binding.Revision, 1, version.ID, "latest", "")
+	gen1, err := f.catalogs.GetCatalog(context.Background(), binding.ID, binding.Revision, 1, version.ID, "latest", "")
 	require.NoError(t, err)
 	require.Len(t, gen1.Tools, 1)
 	assert.Equal(t, "srv__b", gen1.Tools[0].ExposedName)
 }
 
 func TestMCPTwoProjectsSameSlugIsolated(t *testing.T) {
-	db := SetupDB(t)
-	profileRepo := &MCPProfileRepo{DB: db}
-	bindingRepo := &MCPBindingRepo{DB: db}
-	catalogRepo := &MCPCatalogRepo{DB: db}
-
-	// Two managed profiles with the same slug are allowed (different ids).
-	profileA, err := profileRepo.CreateProfile(context.Background(), CreateMCPProfileInput{
-		DisplayName: "Shared", Slug: "shared", SourceKind: domain.MCPSourceManaged,
-	})
-	require.NoError(t, err)
-	profileB, err := profileRepo.CreateProfile(context.Background(), CreateMCPProfileInput{
-		DisplayName: "Shared", Slug: "shared", SourceKind: domain.MCPSourceManaged,
-	})
-	require.NoError(t, err)
-	assert.NotEqual(t, profileA.ID, profileB.ID)
-
-	versionA := &domain.MCPServerProfileVersion{Transport: domain.MCPTransportStreamableHTTP, Endpoint: "https://a.example.com/mcp"}
-	require.NoError(t, profileRepo.CreateVersion(context.Background(), profileA.ID, versionA))
-	versionB := &domain.MCPServerProfileVersion{Transport: domain.MCPTransportStreamableHTTP, Endpoint: "https://b.example.com/mcp"}
-	require.NoError(t, profileRepo.CreateVersion(context.Background(), profileB.ID, versionB))
-
-	// Each project binds its own version.
-	bindingA, err := bindingRepo.EnsureBindingExists(context.Background(), "proj-1", versionA.ID)
-	require.NoError(t, err)
-	bindingB, err := bindingRepo.EnsureBindingExists(context.Background(), "proj-2", versionB.ID)
+	f := newFileMCP(t)
+	otherProjects := &projectstore.Store{Root: filepath.Join(f.home, "projects-other")}
+	otherProject, _, err := otherProjects.CreateWithWorkspace(context.Background(),
+		domain.CreateProjectInput{Name: "Other", HostPath: t.TempDir()})
 	require.NoError(t, err)
 
-	// Separate catalogs, no cross-project reuse.
-	require.NoError(t, catalogRepo.PutCatalog(context.Background(), MCPCatalogCacheRow{
-		BindingID: bindingA.ID, BindingRevision: 1, ProfileVersionID: versionA.ID,
+	_, versionA := f.addManagedProfile(t, "shared-a", "https://a.example.com/mcp")
+	_, versionB := f.addManagedProfile(t, "shared-b", "https://b.example.com/mcp")
+
+	bindingA, err := f.bindings.EnsureBindingExists(context.Background(), f.project.ID, versionA.ID)
+	require.NoError(t, err)
+	bindingB, err := (&MCPBindingRepo{Projects: otherProjects}).EnsureBindingExists(context.Background(), otherProject.ID, versionB.ID)
+	require.NoError(t, err)
+
+	require.NoError(t, f.catalogs.PutCatalog(context.Background(), MCPCatalogCacheRow{
+		BindingID: bindingA.ID, BindingRevision: bindingA.Revision, ProfileVersionID: versionA.ID,
 		ProtocolVersion: "latest", CatalogDigest: "ca",
-		Tools: []domain.MCPCatalogEntry{{RemoteName: "x", ExposedName: "shared__x", Digest: "dx"}},
+		Tools: []domain.MCPCatalogEntry{{RemoteName: "x", ExposedName: "shared_a__x", Digest: "dx"}},
 	}))
-	require.NoError(t, catalogRepo.PutCatalog(context.Background(), MCPCatalogCacheRow{
-		BindingID: bindingB.ID, BindingRevision: 1, ProfileVersionID: versionB.ID,
+	require.NoError(t, f.catalogs.PutCatalog(context.Background(), MCPCatalogCacheRow{
+		BindingID: bindingB.ID, BindingRevision: bindingB.Revision, ProfileVersionID: versionB.ID,
 		ProtocolVersion: "latest", CatalogDigest: "cb",
-		Tools: []domain.MCPCatalogEntry{{RemoteName: "y", ExposedName: "shared__y", Digest: "dy"}},
+		Tools: []domain.MCPCatalogEntry{{RemoteName: "y", ExposedName: "shared_b__y", Digest: "dy"}},
 	}))
 
-	gotA, err := catalogRepo.GetCatalog(context.Background(), bindingA.ID, 1, 0, versionA.ID, "latest", "")
+	gotA, err := f.catalogs.GetCatalog(context.Background(), bindingA.ID, bindingA.Revision, 0, versionA.ID, "latest", "")
 	require.NoError(t, err)
-	gotB, err := catalogRepo.GetCatalog(context.Background(), bindingB.ID, 1, 0, versionB.ID, "latest", "")
+	gotB, err := f.catalogs.GetCatalog(context.Background(), bindingB.ID, bindingB.Revision, 0, versionB.ID, "latest", "")
 	require.NoError(t, err)
-	assert.Equal(t, "shared__x", gotA.Tools[0].ExposedName)
-	assert.Equal(t, "shared__y", gotB.Tools[0].ExposedName)
+	assert.Equal(t, "shared_a__x", gotA.Tools[0].ExposedName)
+	assert.Equal(t, "shared_b__y", gotB.Tools[0].ExposedName)
 }
 
 func TestMCPRequestsSurviveStoreReopen(t *testing.T) {
@@ -302,26 +217,13 @@ func TestMCPRequestsSurviveStoreReopen(t *testing.T) {
 	dbPath := filepath.Join(dir, "mcp.db")
 	db1, err := Open(dbPath)
 	require.NoError(t, err)
-	require.NoError(t, Migrate(db1))
+	require.NoError(t, MigrateFixtureSchema(db1))
 
-	// Build the FK chain: profile -> version -> binding -> run server -> tool.
-	profileRepo := &MCPProfileRepo{DB: db1}
-	bindingRepo := &MCPBindingRepo{DB: db1}
-	catalogRepo := &MCPCatalogRepo{DB: db1}
+	versionID, bindingID := "legacy-profile@v000001", "legacy-binding"
 	runRepo1 := &MCPRunRepo{DB: db1}
-	profile, _ := profileRepo.CreateProfile(context.Background(), CreateMCPProfileInput{
-		DisplayName: "P", Slug: "p", SourceKind: domain.MCPSourceManaged,
-	})
-	version := &domain.MCPServerProfileVersion{Transport: domain.MCPTransportStdio, Executable: "/bin/true"}
-	require.NoError(t, profileRepo.CreateVersion(context.Background(), profile.ID, version))
-	binding, _ := bindingRepo.EnsureBindingExists(context.Background(), "p1", version.ID)
-	require.NoError(t, catalogRepo.PutCatalog(context.Background(), MCPCatalogCacheRow{
-		BindingID: binding.ID, BindingRevision: binding.Revision, ProfileVersionID: version.ID,
-		ProtocolVersion: "latest", CatalogDigest: "c", Tools: []domain.MCPCatalogEntry{{RemoteName: "t", ExposedName: "p__t", Digest: "d"}},
-	}))
 	serverID, err := runRepo1.FreezeServer(context.Background(), RunMCPServerSnapshot{
-		RunID: "run-1", BindingID: binding.ID, BindingRevision: binding.Revision,
-		ProfileVersionID: version.ID, ConfigDigest: version.ConfigDigest,
+		RunID: "run-1", BindingID: bindingID, BindingRevision: 1,
+		ProfileVersionID: versionID, ConfigDigest: "config-digest-1",
 		NegotiatedProtocol: "2025-06-18", CatalogDigest: "c", Required: true,
 	})
 	require.NoError(t, err)
@@ -338,11 +240,12 @@ func TestMCPRequestsSurviveStoreReopen(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, db1.Close())
 
-	// Reopen: the record persists with its terminal status.
+	// Reopen: the request row survives; no MCP retry rows are replayed.
 	db2, err := Open(dbPath)
 	require.NoError(t, err)
-	t.Cleanup(func() { db2.Close() })
-	var status string
-	require.NoError(t, db2.QueryRow(`SELECT status FROM mcp_requests WHERE id=?`, reqID).Scan(&status))
-	assert.Equal(t, string(domain.MCPRequestOutcomeUnknown), status)
+	t.Cleanup(func() { _ = db2.Close() })
+	require.NoError(t, MigrateFixtureSchema(db2))
+	var count int
+	require.NoError(t, db2.QueryRow(`SELECT COUNT(*) FROM mcp_requests WHERE run_id='run-1' AND id=?`, reqID).Scan(&count))
+	assert.Equal(t, 1, count)
 }

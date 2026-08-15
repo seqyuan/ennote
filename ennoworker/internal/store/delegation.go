@@ -13,6 +13,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
+	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 )
 
 var (
@@ -41,7 +43,17 @@ type attemptAuthorizationSnapshot struct {
 	OutputContract string `json:"outputContract"`
 }
 
-type DelegationRepo struct{ DB *sql.DB }
+type DelegationRepo struct {
+	DB *sql.DB
+
+	// RoleSources and Models enable file-native Role resolution for delegation
+	// (V2). When RoleSources is nil, the legacy global SQL path is used.
+	RoleSources *globalsource.Store
+	Models      *ModelRepo
+	// Policies resolves the file-backed delegation policy for the root budget
+	// ledger (V2); nil keeps the legacy global policy SQL path.
+	Policies *fileconfig.PolicyStore
+}
 
 type CreateDelegationItemInput struct {
 	Name           string
@@ -57,6 +69,10 @@ type CreateDelegationItemInput struct {
 	// Empty means the item is an entry task. The topology is validated in
 	// createDelegationGroupTx (no dangling refs, no cycles, one entry minimum).
 	Depends []string
+	// RoleMeta freezes the full Role identity + definition at Run start. When
+	// present, delegation validation and child config resolution use the frozen
+	// copy and never touch global role SQL or mutable files.
+	RoleMeta *DelegationRoleMeta
 }
 
 type CreateDelegationGroupInput struct {
@@ -84,41 +100,15 @@ type DelegationRoleSnapshot struct {
 }
 
 // ResolveRoleForDelegation resolves a handle inside the Session's project
-// boundary. Project-scoped Roles override global/builtin Roles with the same
-// handle; Roles from other projects are never candidates.
+// boundary (V2 file-native). Project-scoped Roles override global/builtin
+// Roles with the same handle; Roles from other projects are never candidates.
+// The file-native resolver requires a wired RoleSources store; without one no
+// role is resolvable (the legacy global role SQL was removed).
 func (r *DelegationRepo) ResolveRoleForDelegation(ctx context.Context, sessionID, handle string) (*DelegationRoleSnapshot, error) {
-	var projectID string
-	if err := r.DB.QueryRowContext(ctx, `SELECT project_id FROM sessions WHERE id=?`, sessionID).Scan(&projectID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrSessionNotFound
-		}
-		return nil, err
-	}
-	var snapshot DelegationRoleSnapshot
-	var roleProject, definitionJSON sql.NullString
-	var enabled int
-	err := r.DB.QueryRowContext(ctx, `SELECT p.id,p.current_version_id,p.scope,p.project_id,v.definition_json,p.delegation_enabled
-		FROM agent_profiles p JOIN agent_profile_versions v ON v.id=p.current_version_id
-		WHERE p.object_kind='role' AND p.handle=? AND p.status='active'
-		  AND p.current_version_id IS NOT NULL AND p.scope!='flow'
-		  AND (p.project_id=? OR p.project_id IS NULL)
-		ORDER BY CASE WHEN p.project_id=? THEN 0 WHEN p.scope='builtin' THEN 1 ELSE 2 END LIMIT 1`,
-		strings.TrimSpace(handle), projectID, projectID).Scan(&snapshot.RoleID, &snapshot.VersionID,
-		&snapshot.Scope, &roleProject, &definitionJSON, &enabled)
-	if errors.Is(err, sql.ErrNoRows) {
+	if r.RoleSources == nil {
 		return nil, ErrDelegationRoleUnavailable
 	}
-	if err != nil {
-		return nil, err
-	}
-	if roleProject.Valid {
-		snapshot.ProjectID = &roleProject.String
-	}
-	snapshot.DelegationEnabled = enabled == 1
-	if err := json.Unmarshal([]byte(definitionJSON.String), &snapshot.Definition); err != nil {
-		return nil, fmt.Errorf("decode published Role definition: %w", err)
-	}
-	return &snapshot, nil
+	return r.resolveFileRoleForDelegation(ctx, sessionID, handle)
 }
 
 // DelegationToolCallApproved reports whether user approval covered this exact
@@ -170,6 +160,27 @@ func (r *DelegationRepo) CreateGroup(ctx context.Context, input CreateDelegation
 	return group, nil
 }
 
+func columnExists(ctx context.Context, tx *sql.Tx, table, column string) (bool, error) {
+	rows, err := tx.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	var name string
+	for rows.Next() {
+		var cid, notnull, pk int
+		var dflt, typ sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, rows.Err()
+		}
+	}
+	return false, rows.Err()
+}
+
+// createDelegationGroupTx creates one delegation group and its items.
 func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 	input CreateDelegationGroupInput) (*domain.DelegationGroup, []domain.DelegationItem, error) {
 	if strings.TrimSpace(input.ParentRunID) == "" || strings.TrimSpace(input.ParentToolCallID) == "" {
@@ -218,10 +229,6 @@ func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 	if speaker.Kind == "role" {
 		return nil, nil, fmt.Errorf("%w: V1 only permits Host callers", ErrDelegationNotAuthorized)
 	}
-	var parentProjectID string
-	if err := tx.QueryRowContext(ctx, `SELECT project_id FROM sessions WHERE id=?`, parentSessionID).Scan(&parentProjectID); err != nil {
-		return nil, nil, err
-	}
 
 	now := time.Now().UTC()
 	timestamp := now.Format(time.RFC3339Nano)
@@ -251,7 +258,7 @@ func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 		if strings.TrimSpace(item.RoleVersionID) == "" {
 			return nil, nil, fmt.Errorf("delegation item %s requires a Role version", name)
 		}
-		if err := validateDelegationRoleTx(ctx, tx, input, &item, parentProjectID, proposedByRole); err != nil {
+		if err := validateDelegationRoleTx(ctx, tx, input, &item, proposedByRole); err != nil {
 			return nil, nil, fmt.Errorf("delegation item %s: %w", name, err)
 		}
 		if len(item.AssignmentJSON) == 0 {
@@ -277,6 +284,14 @@ func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 			return nil, nil, err
 		}
 		itemID := uuid.NewString()
+		roleMetaJSON := []byte("{}")
+		if item.RoleMeta != nil {
+			if encoded, marshalErr := json.Marshal(item.RoleMeta); marshalErr != nil {
+				return nil, nil, marshalErr
+			} else {
+				roleMetaJSON = encoded
+			}
+		}
 		dependsJSON := []byte("[]")
 		if len(item.Depends) > 0 {
 			encoded, marshalErr := json.Marshal(item.Depends)
@@ -286,10 +301,11 @@ func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 			dependsJSON = encoded
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO delegation_items
-			(id,group_id,child_run_id,name,role_version_id,assignment_json,output_contract,budget_json,result_json,status,ordinal,depends_json,skills_json,created_at)
-			VALUES(?,?,NULL,?,?,?,?,?,NULL,'pending',?,?,?,?)`,
+			(id,group_id,child_run_id,name,role_version_id,assignment_json,output_contract,budget_json,result_json,status,ordinal,depends_json,skills_json,created_at,role_meta_json)
+			VALUES(?,?,NULL,?,?,?,?,?,NULL,'pending',?,?,?,?,?)`,
 			itemID, groupID, name, item.RoleVersionID, string(item.AssignmentJSON),
-			outputContract, string(budgetJSON), ordinal, string(dependsJSON), string(skillsJSON), timestamp); err != nil {
+			outputContract, string(budgetJSON), ordinal, string(dependsJSON), string(skillsJSON),
+			timestamp, string(roleMetaJSON)); err != nil {
 			return nil, nil, fmt.Errorf("create delegation item %s: %w", name, err)
 		}
 		items = append(items, domain.DelegationItem{
@@ -437,34 +453,40 @@ func validateTaskTopologyTx(items []CreateDelegationItemInput) error {
 	return nil
 }
 
+// validateDelegationRoleTx validates a delegation item's Role facts. V2
+// requires a frozen RoleMeta captured at Run start: the legacy global role SQL
+// path was removed, so items without RoleMeta are rejected. Admission checks
+// run against the frozen definition and invocation limits count prior
+// invocations by the frozen object id, never from global role tables.
 func validateDelegationRoleTx(ctx context.Context, tx *sql.Tx, input CreateDelegationGroupInput,
-	item *CreateDelegationItemInput, parentProjectID string, proposedByRole map[string]int) error {
-	var roleID, currentVersionID, scope, definitionJSON, versionStatus string
-	var roleProject sql.NullString
-	var enabled int
-	err := tx.QueryRowContext(ctx, `SELECT p.id,COALESCE(p.current_version_id,''),p.scope,p.project_id,
-		p.delegation_enabled,v.definition_json,v.status
-		FROM agent_profile_versions v JOIN agent_profiles p ON p.id=v.agent_profile_id
-		WHERE v.id=? AND p.object_kind='role' AND p.status='active'`, item.RoleVersionID).Scan(
-		&roleID, &currentVersionID, &scope, &roleProject, &enabled, &definitionJSON, &versionStatus)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrDelegationRoleUnavailable
+	item *CreateDelegationItemInput, proposedByRole map[string]int) error {
+	if item.RoleMeta == nil {
+		return fmt.Errorf("%w: delegation items require a frozen Role meta", ErrDelegationNotAuthorized)
 	}
-	if err != nil {
-		return err
+	return validateFrozenDelegationRoleTx(ctx, tx, input, item, proposedByRole)
+}
+
+func validateDelegationBudget(request domain.BudgetCeilingJSON, ceiling domain.DelegationBudgetCeiling) error {
+	if request.MaxModelCalls < 1 || request.MaxModelCalls > ceiling.MaxModelCalls ||
+		request.MaxToolCalls < 1 || request.MaxToolCalls > ceiling.MaxToolCalls ||
+		request.MaxTotalTokens < 1 || request.MaxTotalTokens > ceiling.MaxTotalTokens ||
+		request.MaxOutputTokens < 1 || request.MaxOutputTokens > ceiling.MaxOutputTokens ||
+		request.MaxWallTimeMS < 1 || request.MaxWallTimeMS > ceiling.MaxWallTimeMS ||
+		request.MaxCostMicros < 0 || (ceiling.MaxCostUSDMicros > 0 && request.MaxCostMicros > ceiling.MaxCostUSDMicros) {
+		return errors.New("requested budget exceeds the frozen Role ceiling")
 	}
-	if enabled != 1 || versionStatus != "published" || currentVersionID != item.RoleVersionID {
-		return fmt.Errorf("%w: Role is disabled, unpublished, or no longer current", ErrDelegationNotAuthorized)
-	}
-	if (roleProject.Valid && roleProject.String != parentProjectID) ||
-		(scope == string(domain.RoleScopeProject) && !roleProject.Valid) ||
-		((scope == string(domain.RoleScopeGlobal) || scope == string(domain.RoleScopeBuiltin)) && roleProject.Valid) {
-		return fmt.Errorf("%w: Role is outside the parent project", ErrDelegationNotAuthorized)
-	}
-	var definition domain.RoleDefinition
-	if err := json.Unmarshal([]byte(definitionJSON), &definition); err != nil {
-		return fmt.Errorf("decode Role policy: %w", err)
-	}
+	return nil
+}
+
+// validateFrozenDelegationRoleTx validates a delegation item whose Role facts
+// were frozen at Run start (V2 file-native Graph Runs). It performs the same
+// admission checks as validateDelegationRoleTx against the frozen definition
+// and counts prior invocations by the frozen object id (substr on the role
+// version ref) so no global role SQL is required.
+func validateFrozenDelegationRoleTx(ctx context.Context, tx *sql.Tx, input CreateDelegationGroupInput,
+	item *CreateDelegationItemInput, proposedByRole map[string]int) error {
+	meta := item.RoleMeta
+	definition := meta.Definition
 	callerAllowed := false
 	for _, caller := range definition.DelegationPolicy.AllowedCallerKinds {
 		callerAllowed = callerAllowed || caller == "host"
@@ -506,42 +528,30 @@ func validateDelegationRoleTx(ctx context.Context, tx *sql.Tx, input CreateDeleg
 		return fmt.Errorf("%w: %v", ErrDelegationNotAuthorized, err)
 	}
 
-	proposedByRole[roleID]++
+	proposedByRole[meta.ObjectID]++
 	var priorInvocations int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM delegation_items i
 		JOIN delegation_groups g ON g.id=i.group_id
-		JOIN agent_profile_versions v ON v.id=i.role_version_id
-		WHERE g.parent_run_id=? AND g.parent_tool_call_id<>? AND v.agent_profile_id=?`,
-		input.ParentRunID, input.ParentToolCallID, roleID).Scan(&priorInvocations); err != nil {
+		WHERE g.parent_run_id=? AND g.parent_tool_call_id<>?
+		  AND substr(i.role_version_id,1,instr(i.role_version_id,'@')-1)=?`,
+		input.ParentRunID, input.ParentToolCallID, meta.ObjectID).Scan(&priorInvocations); err != nil {
 		return err
 	}
 	if limit := definition.DelegationPolicy.MaxInvocationsPerParentRun; limit < 1 ||
-		priorInvocations+proposedByRole[roleID] > limit {
+		priorInvocations+proposedByRole[meta.ObjectID] > limit {
 		return fmt.Errorf("%w: Role invocation limit exceeded", ErrDelegationNotAuthorized)
 	}
 	var activeInstances int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_runs ar
 		JOIN delegation_items i ON i.child_run_id=ar.id
-		JOIN agent_profile_versions v ON v.id=i.role_version_id
-		WHERE v.agent_profile_id=? AND ar.status IN ('queued','running','waiting_for_approval','waiting_delegation_admission','waiting_children')`,
-		roleID).Scan(&activeInstances); err != nil {
+		WHERE substr(i.role_version_id,1,instr(i.role_version_id,'@')-1)=?
+		  AND ar.status IN ('queued','running','waiting_for_approval','waiting_delegation_admission','waiting_children')`,
+		meta.ObjectID).Scan(&activeInstances); err != nil {
 		return err
 	}
 	if limit := definition.DelegationPolicy.MaxConcurrentInstances; limit < 1 ||
-		activeInstances+proposedByRole[roleID] > limit {
+		activeInstances+proposedByRole[meta.ObjectID] > limit {
 		return fmt.Errorf("%w: Role concurrent instance limit exceeded", ErrDelegationNotAuthorized)
-	}
-	return nil
-}
-
-func validateDelegationBudget(request domain.BudgetCeilingJSON, ceiling domain.DelegationBudgetCeiling) error {
-	if request.MaxModelCalls < 1 || request.MaxModelCalls > ceiling.MaxModelCalls ||
-		request.MaxToolCalls < 1 || request.MaxToolCalls > ceiling.MaxToolCalls ||
-		request.MaxTotalTokens < 1 || request.MaxTotalTokens > ceiling.MaxTotalTokens ||
-		request.MaxOutputTokens < 1 || request.MaxOutputTokens > ceiling.MaxOutputTokens ||
-		request.MaxWallTimeMS < 1 || request.MaxWallTimeMS > ceiling.MaxWallTimeMS ||
-		request.MaxCostMicros < 0 || (ceiling.MaxCostUSDMicros > 0 && request.MaxCostMicros > ceiling.MaxCostUSDMicros) {
-		return errors.New("requested budget exceeds the frozen Role ceiling")
 	}
 	return nil
 }
@@ -550,10 +560,10 @@ func validateDelegationBudget(request domain.BudgetCeilingJSON, ceiling domain.D
 // the top-level root of a parent Run. It is idempotent and safe to call from
 // every materialization path, including Runs that never froze an effective
 // config snapshot (tests and legacy recovery paths).
-func ensureRootDelegationBudgetTx(ctx context.Context, tx *sql.Tx, parentRunID string) error {
-	var rootRunID, sessionID string
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(root_run_id,id),session_id FROM agent_runs WHERE id=?`,
-		parentRunID).Scan(&rootRunID, &sessionID); err != nil {
+func ensureRootDelegationBudgetTx(ctx context.Context, tx *sql.Tx, parentRunID string, policies *fileconfig.PolicyStore) error {
+	var rootRunID string
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(root_run_id,id) FROM agent_runs WHERE id=?`,
+		parentRunID).Scan(&rootRunID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrRunNotFound
 		}
@@ -567,7 +577,12 @@ func ensureRootDelegationBudgetTx(ctx context.Context, tx *sql.Tx, parentRunID s
 	if exists > 0 {
 		return nil
 	}
-	_, err := freezeDelegationPolicyTx(ctx, tx, rootRunID, sessionID)
+	// V2: the root budget ledger is frozen from the file-backed delegation
+	// policy. The legacy global policy SQL path was removed.
+	if policies == nil {
+		return fmt.Errorf("delegation root budget requires a file-backed policy store")
+	}
+	_, err := freezeFileDelegationPolicyTx(ctx, tx, policies, rootRunID)
 	return err
 }
 
@@ -757,15 +772,15 @@ func (r *DelegationRepo) ListActivity(ctx context.Context, parentRunID string) (
 	if strings.TrimSpace(parentRunID) == "" {
 		return nil, fmt.Errorf("parent run id is required")
 	}
+	// V2: the child's Role identity comes from the frozen speaker snapshot
+	// (or its RoleMeta), never from the removed global role SQL tables.
 	rows, err := r.DB.QueryContext(ctx, `SELECT
 		g.id,g.parent_tool_call_id,g.strategy,g.status,g.created_at,
 		i.id,COALESCE(i.child_run_id,''),i.name,i.status,COALESCE(i.result_json,''),i.created_at,
-		COALESCE(p.handle,''),COALESCE(p.name,''),COALESCE(ar.status,''),
+		'', '', COALESCE(ar.status,''),
 		COALESCE(ar.speaker_snapshot_json,''),COALESCE(ar.error_code,''),COALESCE(ar.error_message,'')
 		FROM delegation_groups g
 		JOIN delegation_items i ON i.group_id=g.id
-		JOIN agent_profile_versions v ON v.id=i.role_version_id
-		JOIN agent_profiles p ON p.id=v.agent_profile_id
 		LEFT JOIN agent_runs ar ON ar.id=i.child_run_id
 		WHERE g.parent_run_id=?
 		ORDER BY g.created_at,g.id,i.ordinal`, parentRunID)
@@ -1002,6 +1017,9 @@ type CreateChildRunInput struct {
 	// Background skips the waiting_children wake protocol: the parent stays
 	// running and delivery happens through the handle/completion projection.
 	Background bool
+	// Policies resolves the file-backed delegation policy (V2). When nil, the
+	// legacy global policy SQL is used for the root budget ledger.
+	Policies *fileconfig.PolicyStore
 }
 
 // CreateChildRun atomically: validates the parent is running and owns the item,
@@ -1009,6 +1027,9 @@ type CreateChildRunInput struct {
 // delegated_agent Run (format 2, private_to_parent, depth=parent+1), assigns
 // the item, and reserves the child budget row. All in one transaction.
 func (r *DelegationRepo) CreateChildRun(ctx context.Context, input CreateChildRunInput) (*domain.AgentRun, error) {
+	if input.Policies == nil {
+		input.Policies = r.Policies
+	}
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -1053,6 +1074,7 @@ func (r *DelegationRepo) CreateGroupWithChildren(ctx context.Context, input Crea
 		child, childErr := createChildRunTx(ctx, tx, CreateChildRunInput{
 			ParentRunID: input.ParentRunID, ItemID: item.ID, SessionID: sessionID,
 			Background: executionMode == domain.DelegationExecutionBackground,
+			Policies:   r.Policies,
 		})
 		if childErr != nil {
 			return nil, nil, nil, childErr
@@ -1109,15 +1131,16 @@ func createChildRunTx(ctx context.Context, tx *sql.Tx, input CreateChildRunInput
 		OutputContract string
 		BudgetJSON     string
 		CurrentStatus  domain.DelegationItemStatus
+		RoleMetaJSON   string
 	}
-	itemQuery := `SELECT group_id,name,role_version_id,assignment_json,output_contract,budget_json,status
+	itemQuery := `SELECT group_id,name,role_version_id,assignment_json,output_contract,budget_json,status,role_meta_json
 		FROM delegation_items WHERE id=?`
 	if input.Generation <= 0 {
 		itemQuery += ` AND child_run_id IS NULL`
 	}
 	if err := tx.QueryRowContext(ctx, itemQuery, input.ItemID).
 		Scan(&item.GroupID, &item.Name, &item.RoleVersionID, &item.AssignmentJSON, &item.OutputContract,
-			&item.BudgetJSON, &item.CurrentStatus); err != nil {
+			&item.BudgetJSON, &item.CurrentStatus, &item.RoleMetaJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("%w: item is not assignable", ErrDelegationItemNotFound)
 		}
@@ -1136,15 +1159,18 @@ func createChildRunTx(ctx context.Context, tx *sql.Tx, input CreateChildRunInput
 	}
 
 	var objectID, handle, displayName, configDigest string
-	if err := tx.QueryRowContext(ctx, `SELECT p.id,p.handle,p.name,v.config_digest
-		FROM agent_profile_versions v JOIN agent_profiles p ON p.id=v.agent_profile_id
-		WHERE v.id=? AND v.status='published'`, item.RoleVersionID).
-		Scan(&objectID, &handle, &displayName, &configDigest); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("Role version is unavailable for delegation")
-		}
-		return nil, err
+	if strings.TrimSpace(item.RoleMetaJSON) == "" || strings.TrimSpace(item.RoleMetaJSON) == "{}" {
+		return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
+			errors.New("child Run requires a frozen delegation Role meta"))
 	}
+	var meta DelegationRoleMeta
+	if err := json.Unmarshal([]byte(item.RoleMetaJSON), &meta); err != nil {
+		return nil, fmt.Errorf("decode frozen Role meta: %w", err)
+	}
+	objectID = meta.ObjectID
+	handle = meta.Handle
+	displayName = meta.DisplayName
+	configDigest = meta.ConfigDigest
 	speakerJSON, err := json.Marshal(map[string]string{
 		"kind": "role", "objectId": objectID, "versionId": item.RoleVersionID,
 		"handle": handle, "displayName": displayName, "configDigest": configDigest,
@@ -1228,7 +1254,7 @@ func createChildRunTx(ctx context.Context, tx *sql.Tx, input CreateChildRunInput
 	// Every child reservation contends on the root ledger of the top-level
 	// Host Run. Two concurrent groups cannot each fit by accident: the losing
 	// CAS rolls back this transaction entirely.
-	if err := ensureRootDelegationBudgetTx(ctx, tx, input.ParentRunID); err != nil {
+	if err := ensureRootDelegationBudgetTx(ctx, tx, input.ParentRunID, input.Policies); err != nil {
 		return nil, err
 	}
 	if err := reserveRootBudgetTx(ctx, tx, input.ParentRunID, 1, ceiling); err != nil {
@@ -1351,12 +1377,28 @@ func (r *DelegationRepo) AdmitModelCall(ctx context.Context, runID, modelProfile
 	var started sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT b.max_model_calls,b.max_total_tokens,b.max_output_tokens,
 		b.max_cost_usd_micros,b.max_wall_time_ms,b.consumed_model_calls,b.consumed_tokens,
-		b.consumed_output_tokens,b.consumed_cost_usd_micros,b.started_at,
-		m.input_cost_usd_micros_per_million,m.output_cost_usd_micros_per_million
-		FROM run_budgets b JOIN model_profiles m ON m.id=? WHERE b.run_id=?`, modelProfileID, runID).Scan(
+		b.consumed_output_tokens,b.consumed_cost_usd_micros,b.started_at
+		FROM run_budgets b WHERE b.run_id=?`, runID).Scan(
 		&maxModel, &maxTotal, &maxOutput, &maxCost, &maxWall, &consumedModel, &consumedTokens,
-		&consumedOutput, &consumedCost, &started, &inputRate, &outputRate); err != nil {
+		&consumedOutput, &consumedCost, &started); err != nil {
 		return 0, err
+	}
+	if r.Models != nil {
+		model, err := r.Models.FindByID(ctx, modelProfileID)
+		if err != nil || model == nil {
+			if err == nil {
+				err = fmt.Errorf("active model profile not found: %s", modelProfileID)
+			}
+			return 0, err
+		}
+		inputRate = model.InputCostUSDMicrosPerMillion
+		outputRate = model.OutputCostUSDMicrosPerMillion
+	} else {
+		if err := tx.QueryRowContext(ctx, `SELECT input_cost_usd_micros_per_million,
+			output_cost_usd_micros_per_million FROM model_profiles WHERE id=?`, modelProfileID).
+			Scan(&inputRate, &outputRate); err != nil {
+			return 0, err
+		}
 	}
 	now := time.Now().UTC()
 	if started.Valid && maxWall > 0 {
@@ -1415,10 +1457,22 @@ func (r *DelegationRepo) AdmitModelCall(ctx context.Context, runID, modelProfile
 
 func (r *DelegationRepo) CompleteModelCall(ctx context.Context, runID, modelProfileID string, usage domain.Usage) error {
 	var inputRate, outputRate int64
-	if err := r.DB.QueryRowContext(ctx, `SELECT input_cost_usd_micros_per_million,
-		output_cost_usd_micros_per_million FROM model_profiles WHERE id=?`, modelProfileID).
-		Scan(&inputRate, &outputRate); err != nil {
-		return err
+	if r.Models != nil {
+		model, err := r.Models.FindByID(ctx, modelProfileID)
+		if err != nil || model == nil {
+			if err == nil {
+				err = fmt.Errorf("active model profile not found: %s", modelProfileID)
+			}
+			return err
+		}
+		inputRate = model.InputCostUSDMicrosPerMillion
+		outputRate = model.OutputCostUSDMicrosPerMillion
+	} else {
+		if err := r.DB.QueryRowContext(ctx, `SELECT input_cost_usd_micros_per_million,
+			output_cost_usd_micros_per_million FROM model_profiles WHERE id=?`, modelProfileID).
+			Scan(&inputRate, &outputRate); err != nil {
+			return err
+		}
 	}
 	tokens := usage.InputTokens + usage.OutputTokens
 	cost := tokenCostMicros(usage.InputTokens, inputRate) + tokenCostMicros(usage.OutputTokens, outputRate)

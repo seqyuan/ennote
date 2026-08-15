@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
-	"github.com/seqyuan/ennote/ennoworker/internal/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -53,7 +52,7 @@ func TestDoctorCompletesMinimalGeneration(t *testing.T) {
 	require.Len(t, diagnostic.Stages, 4)
 	assert.Equal(t, "generation", diagnostic.Stages[3].Name)
 	assert.Equal(t, "passed", diagnostic.Stages[3].Status)
-	assert.Equal(t, "Bearer secret", receivedAuthorization)
+	assert.Equal(t, "Bearer sk-TEST_KEY", receivedAuthorization)
 }
 
 func TestDoctorClassifiesProviderFailureSafely(t *testing.T) {
@@ -76,7 +75,8 @@ func TestDoctorClassifiesProviderFailureSafely(t *testing.T) {
 
 func TestDoctorReportsCredentialAndModelConfigurationFailures(t *testing.T) {
 	service := testService("https://provider.test")
-	service.Credentials.LookupEnv = func(string) (string, bool) { return "", false }
+	service.Providers = providerStoreStub{profile: &domain.ProviderProfile{ID: "provider", ProviderType: domain.ProviderOpenAICompatible,
+		BaseURL: "https://provider.test", APIKey: "", Status: "active"}}
 	diagnostic, err := service.Diagnose(context.Background(), "provider", "")
 	require.NoError(t, err)
 	require.NotNil(t, diagnostic.Failure)
@@ -107,11 +107,41 @@ func TestDoctorBoundsProbeTimeout(t *testing.T) {
 func testService(baseURL string) *Service {
 	return &Service{
 		Providers: providerStoreStub{profile: &domain.ProviderProfile{ID: "provider", ProviderType: domain.ProviderOpenAICompatible,
-			BaseURL: baseURL, CredentialRef: "env:TEST_KEY", Status: "active"}},
-		Models: modelStoreStub{model: &domain.ModelProfile{ID: "model", ProviderID: "provider", ModelName: "test-model", MaxOutputTokens: 100}},
-		Credentials: llm.CredentialResolver{LookupEnv: func(name string) (string, bool) {
-			return "secret", name == "TEST_KEY"
-		}},
+			BaseURL: baseURL, APIKey: "sk-TEST_KEY", Status: "active"}},
+		Models:  modelStoreStub{model: &domain.ModelProfile{ID: "model", ProviderID: "provider", ModelName: "test-model", MaxOutputTokens: 100}},
 		Timeout: time.Second,
 	}
+}
+
+func TestDiscoverModelsFetchesCatalog(t *testing.T) {
+	var receivedAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		assert.Equal(t, "/models", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"object":"list","data":[{"id":"gpt-4o","object":"model"},{"id":"gpt-4o-mini","object":"model"}]}`)
+	}))
+	defer server.Close()
+
+	service := testService(server.URL)
+	models, err := service.DiscoverModels(context.Background(), DiscoverInput{BaseURL: server.URL, APIKey: "sk-discover"})
+	require.NoError(t, err)
+	require.Len(t, models, 2)
+	assert.Equal(t, "gpt-4o", models[0].ModelName)
+	assert.Equal(t, "gpt-4o-mini", models[1].ModelName)
+	assert.Equal(t, "Bearer sk-discover", receivedAuth)
+}
+
+func TestDiscoverModelsRejectsBadBaseURLAndEmptyCatalog(t *testing.T) {
+	service := testService("https://example.test")
+	_, err := service.DiscoverModels(context.Background(), DiscoverInput{BaseURL: "not-a-url"})
+	assert.ErrorContains(t, err, "absolute HTTP URL")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":[]}`)
+	}))
+	defer server.Close()
+	_, err = service.DiscoverModels(context.Background(), DiscoverInput{BaseURL: server.URL})
+	assert.ErrorContains(t, err, "empty model catalog")
 }

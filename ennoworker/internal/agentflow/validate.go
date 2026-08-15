@@ -195,8 +195,8 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 				}
 			}
 			// Writer class: any mutation-capable task is a candidate for the
-		// disjoint-writes parallel lane; declared scopes are validated here
-		// regardless of the flow flag (catches typos early).
+			// disjoint-writes parallel lane; declared scopes are validated here
+			// regardless of the flow flag (catches typos early).
 			if !readOnly {
 				for _, w := range task.Writes {
 					if err := validateWritesGlob(w); err != nil {
@@ -553,11 +553,11 @@ func writesDisjoint(a, b []string) bool {
 			pa, pb = strings.TrimSpace(pa), strings.TrimSpace(pb)
 			if pa == "" || pb == "" {
 				return false
-		}
+			}
 			prefA, prefB := literalPrefix(pa), literalPrefix(pb)
 			if strings.HasPrefix(prefA, prefB) || strings.HasPrefix(prefB, prefA) {
 				return false
-		}
+			}
 		}
 	}
 	return true

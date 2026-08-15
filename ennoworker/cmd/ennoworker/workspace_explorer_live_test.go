@@ -5,8 +5,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -19,46 +17,15 @@ import (
 )
 
 func TestLiveWorkspaceExplorerChildCompletesContractAndFoldsResult(t *testing.T) {
-	baseURL := strings.TrimSpace(os.Getenv("ENNOTE_LIVE_BASE_URL"))
-	apiKey := strings.TrimSpace(os.Getenv("ENNOTE_LIVE_API_KEY"))
-	model := strings.TrimSpace(os.Getenv("ENNOTE_LIVE_MODEL"))
-	if baseURL == "" || apiKey == "" || model == "" {
-		t.Skip("ENNOTE_LIVE_BASE_URL, ENNOTE_LIVE_API_KEY, and ENNOTE_LIVE_MODEL are required")
-	}
-	t.Setenv("ENNOTE_LIVE_API_KEY", apiKey)
-	t.Setenv("ENNOTE_HOME", t.TempDir())
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
-	db, err := store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
-
-	workspaceDir := t.TempDir()
-	project, _, err := (&store.ProjectRepo{DB: db}).CreateWithWorkspace(ctx, domain.CreateProjectInput{
-		Name: "explorer-live", HostPath: workspaceDir,
-	})
-	require.NoError(t, err)
-	provider, err := (&store.ProviderRepo{DB: db}).Create(ctx, store.CreateProviderInput{
-		Name: "explorer-provider", ProviderType: domain.ProviderOpenAICompatible,
-		BaseURL: baseURL, CredentialRef: "env:ENNOTE_LIVE_API_KEY",
-	})
-	require.NoError(t, err)
-	modelProfile, err := (&store.ModelRepo{DB: db}).Create(ctx, store.CreateModelInput{
-		ProviderID: provider.ID, ModelName: model, DisplayName: model,
-		ContextWindow: 64000, MaxOutputTokens: 512,
-		SupportsToolUse: true, SupportsThinking: true, IsDefault: true,
-	})
-	require.NoError(t, err)
-	modelProfileID := modelProfile.ID
-	sessionRepo := &store.SessionRepo{DB: db}
-	session, err := sessionRepo.Create(ctx, domain.CreateSessionInput{
-		ProjectID: project.ID, Title: "Explorer child", DefaultModelProfileID: &modelProfileID,
-	})
-	require.NoError(t, err)
+	stack := newLiveStack(t, "explorer-live")
+	db := stack.DB
+	session := stack.Session
 
 	hub := events.NewHub()
-	runRepo := &store.RunRepo{DB: db, Publisher: hub}
+	runRepo := &store.RunRepo{DB: db, Publisher: hub, Providers: stack.Providers,
+		Models: stack.ModelRepo, Policies: stack.Policies}
 	messageRepo := &store.MessageRepo{DB: db}
 
 	// ——— Parent Run: create, claim, freeze config (so child can inherit model) ———
@@ -83,6 +50,7 @@ func TestLiveWorkspaceExplorerChildCompletesContractAndFoldsResult(t *testing.T)
 			OutputContract: "text-v1",
 			Budget: domain.BudgetCeilingJSON{MaxModelCalls: 6, MaxToolCalls: 8, MaxTotalTokens: 20000,
 				MaxOutputTokens: 2048, MaxWallTimeMS: 120000},
+			RoleMeta: liveExplorerRoleMeta(stack.ModelID),
 		}},
 	})
 	require.NoError(t, err)
@@ -106,7 +74,7 @@ func TestLiveWorkspaceExplorerChildCompletesContractAndFoldsResult(t *testing.T)
 
 	executor := &agentExecutor{
 		db: db, writer: writer, homeDir: t.TempDir(), runs: runRepo, calls: callRepo,
-		sessionDB: sessionRepo, msgRepo: messageRepo,
+		sessionDB: &store.SessionRepo{DB: db}, msgRepo: messageRepo, projects: &store.ProjectRepo{Files: stack.Projects},
 		skillRepo: &store.SkillSnapshotRepo{DB: db}, skillsDir: emptySkills,
 		builtinDir: emptySkills, sandbox: "none",
 		hub:               hub,

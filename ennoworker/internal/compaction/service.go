@@ -158,8 +158,9 @@ func (s *Service) prepareWithoutCheckpoint(ctx context.Context, run *domain.Agen
 			"tokensBefore": plan.TokensBefore, "estimatedTokensAfter": plan.ProjectedTokens,
 		})
 	}
-	if config.Mode != domain.CompactionManualAndAuto || plan.ProjectedTokens < plan.TriggerLimit {
-		if config.Mode == domain.CompactionManualAndAuto && plan.ProjectedTokens < plan.TriggerLimit {
+	trigger := agent.CompactionTrigger{TriggerLimit: plan.TriggerLimit, MainUsable: plan.MainUsable}
+	if config.Mode != domain.CompactionManualAndAuto || trigger.ProjectionSufficient(plan.ProjectedTokens) {
+		if config.Mode == domain.CompactionManualAndAuto && trigger.ProjectionSufficient(plan.ProjectedTokens) {
 			if err := s.Repo.ResetIneffectiveBelowTrigger(ctx, run.SessionID); err != nil {
 				return PreparedContext{}, err
 			}

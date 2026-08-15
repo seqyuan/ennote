@@ -63,6 +63,23 @@ type PublishInput struct {
 	RetentionClass      string
 }
 
+// ForScope returns a new Service bound to the given database and artifact
+// root, preserving this Service's policy limits. The returned Service owns a
+// fresh mutex, so it is safe to use concurrently with the source Service.
+//
+// It must not copy the Service struct by value: Service contains a sync.Mutex,
+// and a copied mutex would not protect the shared DB/Root state.
+func (s *Service) ForScope(db *sql.DB, root string) *Service {
+	return &Service{
+		DB:               db,
+		Root:             root,
+		MaxImageBytes:    s.MaxImageBytes,
+		MaxArtifactBytes: s.MaxArtifactBytes,
+		MaxProjectBytes:  s.MaxProjectBytes,
+		MaxPixels:        s.MaxPixels,
+	}
+}
+
 func (s *Service) StoreImage(ctx context.Context, projectID, sessionID, name string, data []byte) (*domain.Artifact, error) {
 	maxBytes := s.MaxImageBytes
 	if maxBytes <= 0 {

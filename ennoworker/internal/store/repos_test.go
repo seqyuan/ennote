@@ -4,15 +4,19 @@ import (
 	"context"
 	"testing"
 
+	"encoding/json"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
+	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	stores "github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"os"
+	"path/filepath"
 )
 
 func TestCreateProjectWithWorkspace(t *testing.T) {
-	db := stores.SetupDB(t)
-	repo := &stores.ProjectRepo{DB: db}
+	repo := newFileProjects(t)
 	ctx := context.Background()
 
 	dir := t.TempDir()
@@ -37,8 +41,7 @@ func TestCreateProjectWithWorkspace(t *testing.T) {
 }
 
 func TestCreateProjectRejectsNonExistentPath(t *testing.T) {
-	db := stores.SetupDB(t)
-	repo := &stores.ProjectRepo{DB: db}
+	repo := newFileProjects(t)
 	ctx := context.Background()
 
 	_, _, err := repo.CreateWithWorkspace(ctx, domain.CreateProjectInput{
@@ -48,8 +51,7 @@ func TestCreateProjectRejectsNonExistentPath(t *testing.T) {
 }
 
 func TestFindProjectByID(t *testing.T) {
-	db := stores.SetupDB(t)
-	repo := &stores.ProjectRepo{DB: db}
+	repo := newFileProjects(t)
 	ctx := context.Background()
 
 	dir := t.TempDir()
@@ -63,51 +65,40 @@ func TestFindProjectByID(t *testing.T) {
 	require.NotNil(t, found)
 	assert.Equal(t, created.Name, found.Name)
 
-	// Non-existent returns nil
-	notFound, err := repo.FindByID(ctx, "nonexistent")
+	// A well-formed but non-existent id returns nil (V2: invalid ids error).
+	notFound, err := repo.FindByID(ctx, "00000000-0000-4000-8000-000000000000")
 	require.NoError(t, err)
 	assert.Nil(t, notFound)
 }
 
 func TestCreateSession(t *testing.T) {
-	db := stores.SetupDB(t)
-	projectRepo := &stores.ProjectRepo{DB: db}
-	sessionRepo := &stores.SessionRepo{DB: db}
 	ctx := context.Background()
-
-	dir := t.TempDir()
-	p, _, err := projectRepo.CreateWithWorkspace(ctx, domain.CreateProjectInput{
-		Name: "Test", HostPath: dir,
-	})
+	projects := &projectstore.Store{Root: t.TempDir()}
+	project, _, err := projects.CreateWithWorkspace(ctx,
+		domain.CreateProjectInput{Name: "Test", HostPath: t.TempDir()})
 	require.NoError(t, err)
+	manager := sessionstore.NewManager(projects.Root, projects)
+	t.Cleanup(func() { require.NoError(t, manager.Close()) })
+	sessionRepo := &stores.SessionRepo{Files: manager}
 
 	s, err := sessionRepo.Create(ctx, domain.CreateSessionInput{
-		ProjectID: p.ID, Title: "My First Chat",
+		ProjectID: project.ID, Title: "My First Chat",
 	})
 	require.NoError(t, err)
 	assert.NotEmpty(t, s.ID)
-	assert.Equal(t, p.ID, s.ProjectID)
+	assert.Equal(t, project.ID, s.ProjectID)
 	assert.Equal(t, "My First Chat", s.Title)
 
-	sessions, err := sessionRepo.ListByProject(ctx, p.ID)
+	sessions, err := sessionRepo.ListByProject(ctx, project.ID)
 	require.NoError(t, err)
 	assert.Len(t, sessions, 1)
 }
 
 func TestMessageLineage(t *testing.T) {
-	db := stores.SetupDB(t)
-	projectRepo := &stores.ProjectRepo{DB: db}
-	sessionRepo := &stores.SessionRepo{DB: db}
+	db, manager, s := newSessionDB(t)
+	sessionRepo := &stores.SessionRepo{Files: manager}
 	msgRepo := &stores.MessageRepo{DB: db}
 	ctx := context.Background()
-
-	dir := t.TempDir()
-	p, _, err := projectRepo.CreateWithWorkspace(ctx, domain.CreateProjectInput{
-		Name: "Test", HostPath: dir,
-	})
-	require.NoError(t, err)
-	s, err := sessionRepo.Create(ctx, domain.CreateSessionInput{ProjectID: p.ID, Title: "Test"})
-	require.NoError(t, err)
 
 	root, err := msgRepo.CreateUserMessage(ctx, s.ID, "", "Hello")
 	require.NoError(t, err)
@@ -130,8 +121,7 @@ func TestMessageLineage(t *testing.T) {
 }
 
 func TestArchiveProject(t *testing.T) {
-	db := stores.SetupDB(t)
-	repo := &stores.ProjectRepo{DB: db}
+	repo := newFileProjects(t)
 	ctx := context.Background()
 
 	dir := t.TempDir()
@@ -140,8 +130,14 @@ func TestArchiveProject(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = db.ExecContext(ctx, `UPDATE projects SET status = 'archived' WHERE id = ?`, p.ID)
+	// V2: archive is a manifest status; archived manifests are hidden from
+	// List. The legacy projects SQL table was removed.
+	manifest, err := repo.Files.ReadManifest(p.ID)
 	require.NoError(t, err)
+	manifest.Project.Status = "archived"
+	encoded, err := json.MarshalIndent(manifest, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(repo.Files.Root, p.ID, "project.json"), encoded, 0o600))
 
 	list, err := repo.List(ctx)
 	require.NoError(t, err)
@@ -151,16 +147,11 @@ func TestArchiveProject(t *testing.T) {
 }
 
 func TestMessageParentMustBeSameSession(t *testing.T) {
-	db := stores.SetupDB(t)
+	db, _, _ := newSessionDB(t)
 	msgRepo := &stores.MessageRepo{DB: db}
-	projectRepo := &stores.ProjectRepo{DB: db}
-	sessionRepo := &stores.SessionRepo{DB: db}
 	ctx := context.Background()
-
-	dir := t.TempDir()
-	p, _, _ := projectRepo.CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: "Test", HostPath: dir})
-	s1, _ := sessionRepo.Create(ctx, domain.CreateSessionInput{ProjectID: p.ID})
-	s2, _ := sessionRepo.Create(ctx, domain.CreateSessionInput{ProjectID: p.ID})
+	s1 := sqlCreateSession(t, db, "00000000-0000-4000-8000-000000000002")
+	s2 := sqlCreateSession(t, db, "00000000-0000-4000-8000-000000000002")
 	msgS2, _ := msgRepo.CreateUserMessage(ctx, s2.ID, "", "Other session")
 
 	_, err := msgRepo.CreateUserMessage(ctx, s1.ID, msgS2.ID, "Invalid cross-session")
@@ -168,15 +159,10 @@ func TestMessageParentMustBeSameSession(t *testing.T) {
 }
 
 func TestSwitchActiveLeaf(t *testing.T) {
-	db := stores.SetupDB(t)
+	db, manager, s := newSessionDB(t)
 	msgRepo := &stores.MessageRepo{DB: db}
-	projectRepo := &stores.ProjectRepo{DB: db}
-	sessionRepo := &stores.SessionRepo{DB: db}
 	ctx := context.Background()
-
-	dir := t.TempDir()
-	p, _, _ := projectRepo.CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: "Test", HostPath: dir})
-	s, _ := sessionRepo.Create(ctx, domain.CreateSessionInput{ProjectID: p.ID})
+	sessionRepo := &stores.SessionRepo{Files: manager}
 
 	a, _ := msgRepo.CreateUserMessage(ctx, s.ID, "", "A")
 	b, _ := msgRepo.CreateUserMessage(ctx, s.ID, a.ID, "B")
@@ -188,7 +174,7 @@ func TestSwitchActiveLeaf(t *testing.T) {
 	found, _ := sessionRepo.FindByID(ctx, s.ID)
 	assert.Equal(t, a.ID, *found.ActiveLeafMessageID)
 
-	other, _ := sessionRepo.Create(ctx, domain.CreateSessionInput{ProjectID: p.ID})
+	other := sqlCreateSession(t, db, "00000000-0000-4000-8000-000000000003")
 	otherMessage, _ := msgRepo.CreateUserMessage(ctx, other.ID, "", "Other")
 	err = sessionRepo.ActivateLeaf(ctx, s.ID, otherMessage.ID)
 	assert.ErrorContains(t, err, "session or message not found")

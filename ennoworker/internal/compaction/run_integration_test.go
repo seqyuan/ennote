@@ -36,13 +36,10 @@ func TestLoopRunCompactorFinalizesCompleteCanonicalTranscript(t *testing.T) {
 	db, err := store.OpenMemory()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
-	_, err = db.Exec(`UPDATE settings SET value='1' WHERE key='hosted_commit_format_version'`)
-	require.NoError(t, err)
+	require.NoError(t, store.MigrateFixtureSchema(db))
 	ctx := context.Background()
 	now := "2026-07-29T00:00:00Z"
-	_, err = db.Exec(`INSERT INTO projects(id,name,created_at,updated_at) VALUES('project','P',?,?);
-		INSERT INTO sessions(id,project_id,created_at,updated_at) VALUES('session','project',?,?)`, now, now, now, now)
+	_, err = db.Exec(`INSERT INTO sessions(id,project_id,created_at,updated_at) VALUES('session','project',?,?)`, now, now, now, now)
 	require.NoError(t, err)
 	runs := &store.RunRepo{DB: db}
 	submission, err := runs.SubmitTurn(ctx, domain.SubmitTurnInput{SessionID: "session",

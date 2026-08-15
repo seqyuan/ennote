@@ -64,10 +64,9 @@ test("file panel renders Markdown, code, and a floating preview", async ({ page 
 test("settings is modal and the theme preference stays synchronized", async ({ page }) => {
   await mockUI(page);
   await page.goto("/");
-  await page.getByRole("button", { name: "Choose theme" }).click();
-  await page.getByRole("menuitemradio", { name: "Dark theme" }).click();
+  await page.getByRole("button", { name: "Switch to dark mode" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await page.getByTitle("Settings").click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Settings" })).toHaveAttribute("aria-modal", "true");
 });
 

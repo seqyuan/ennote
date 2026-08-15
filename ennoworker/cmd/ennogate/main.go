@@ -51,7 +51,7 @@ func run() error {
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "30142"
+		port = "45131"
 	}
 	hostname := os.Getenv("ENNOTE_HOSTNAME")
 	if hostname == "" {
@@ -81,7 +81,7 @@ func run() error {
 	gate := &Gate{
 		HomeDir: home, Port: port,
 		WorkerURL: worker.state.URL,
-		Token: worker.state.BootstrapToken, StaticDir: staticDir,
+		Token:     worker.state.BootstrapToken, StaticDir: staticDir,
 	}
 	httpServer := &http.Server{
 		Handler: gate.handler(), ReadHeaderTimeout: 10 * time.Second,
@@ -129,8 +129,12 @@ func (w *managedWorker) exitError() error {
 	return w.err
 }
 
+func workerStatePath(home string) string {
+	return filepath.Join(home, "runtime", "worker-state.json")
+}
+
 func startOrReuseWorker(ctx context.Context, home string) (*managedWorker, error) {
-	statePath := filepath.Join(home, "data", "worker-state.json")
+	statePath := workerStatePath(home)
 	state, err := runtimeinfo.Load(statePath)
 	if err == nil {
 		if !processAlive(state.PID) {
@@ -353,6 +357,13 @@ func (g *Gate) handler() http.Handler {
 			if _, err := os.Stat(indexPath); err == nil {
 				http.ServeFile(w, r, indexPath)
 				return
+			}
+			flatPath := filepath.Join(g.StaticDir, strings.TrimPrefix(path, "/")+".html")
+			if path != "/" {
+				if _, err := os.Stat(flatPath); err == nil {
+					http.ServeFile(w, r, flatPath)
+					return
+				}
 			}
 			http.ServeFile(w, r, filepath.Join(g.StaticDir, "index.html"))
 			return

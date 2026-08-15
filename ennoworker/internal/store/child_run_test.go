@@ -11,20 +11,13 @@ import (
 )
 
 func TestCreateChildRunFrozenRoleAndConfigResolution(t *testing.T) {
-	repo, submission := setupSubmittedRun(t, "child-freeze")
+	fixture := newFileRunFixture(t, "child-freeze")
 	ctx := context.Background()
-	provider, err := (&store.ProviderRepo{DB: repo.DB}).Create(ctx, store.CreateProviderInput{
-		Name: "provider", ProviderType: domain.ProviderOpenAICompatible, BaseURL: "https://provider.test",
-		CredentialRef: "env:PROVIDER_KEY",
+	runs := fixture.Runs
+	submission, err := runs.SubmitTurn(ctx, domain.SubmitTurnInput{
+		SessionID: fixture.SessionID, ClientRequestID: "child-freeze", Text: "run",
 	})
 	require.NoError(t, err)
-	_, err = (&store.ModelRepo{DB: repo.DB}).Create(ctx, store.CreateModelInput{
-		ProviderID: provider.ID, ModelName: "child-model", ContextWindow: 32000, MaxOutputTokens: 2048,
-		SupportsThinking: true, ThinkingDialect: domain.ThinkingDialectOpenAIReasoningEffort,
-		SupportedThinkingEfforts: []domain.ThinkingEffort{domain.ThinkingDefault}, IsDefault: true,
-	})
-	require.NoError(t, err)
-	runs := &store.RunRepo{DB: repo.DB}
 	_, err = runs.Claim(ctx, submission.Run.ID)
 	require.NoError(t, err)
 	parentResolved, err := runs.ResolveAndFreezeConfig(ctx, &domain.AgentRun{ID: submission.Run.ID, TurnID: submission.TurnID,
@@ -32,7 +25,7 @@ func TestCreateChildRunFrozenRoleAndConfigResolution(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, parentResolved.Effective.ModelProfileID)
 
-	delegations := &store.DelegationRepo{DB: repo.DB}
+	delegations := fixture.Delegations()
 	group, err := delegations.CreateGroup(ctx, store.CreateDelegationGroupInput{
 		ParentRunID: submission.Run.ID, ParentToolCallID: "call-child", Strategy: domain.DelegationStrategySingle,
 		Items: []store.CreateDelegationItemInput{explorerItem()},

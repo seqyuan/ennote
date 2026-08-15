@@ -23,11 +23,18 @@ type AgentFlowRunRepo struct {
 }
 
 // CreateFlowRunInput freezes one flow run: the anchor run, the meta-Run row,
-// and every task node snapshot in one transaction.
+// and every task node snapshot in one transaction. DefinitionJSON and
+// ConfigDigest are the frozen execution plan (full FlowDefinition JSON and the
+// immutable Graph revision digest); execution never re-reads mutable files.
 type CreateFlowRunInput struct {
 	SessionID     string
 	ProjectID     string
 	FlowVersionID string
+	// DefinitionJSON is the complete frozen FlowDefinition for this version.
+	DefinitionJSON json.RawMessage
+	// ConfigDigest is the immutable Graph revision digest used for the
+	// manifest identity check during execution.
+	ConfigDigest string
 	// InputsJSON is the frozen run inputs + vars: {"inputs":{...},"vars":{...}}.
 	InputsJSON json.RawMessage
 }
@@ -45,6 +52,10 @@ type FlowNodeFreeze struct {
 	// frozen from the resolved Role definition and the task's declares.
 	ReadOnly bool
 	Writes   []string
+	// RoleDefinitionJSON is the full resolved RoleDefinition for the task's
+	// Role (or an inline task role). Required for executable tasks; empty for
+	// terminal/check gates that dispatch no child Run.
+	RoleDefinitionJSON json.RawMessage
 }
 
 // CreateFlowRun atomically materializes the anchor agent run, the meta-Run
@@ -55,15 +66,14 @@ func (r *AgentFlowRunRepo) CreateFlowRun(ctx context.Context, input CreateFlowRu
 	if input.SessionID == "" || input.ProjectID == "" || input.FlowVersionID == "" {
 		return nil, fmt.Errorf("session, project, and flow version are required")
 	}
-	version, err := (&AgentFlowProfileRepo{DB: r.DB}).GetVersion(ctx, input.FlowVersionID)
-	if err != nil {
-		return nil, fmt.Errorf("load flow version: %w", err)
-	}
 	var def domain.FlowDefinition
-	if err := json.Unmarshal(version.DefinitionJSON, &def); err != nil {
-		return nil, fmt.Errorf("decode flow version definition: %w", err)
+	if len(input.DefinitionJSON) == 0 || json.Unmarshal(input.DefinitionJSON, &def) != nil {
+		return nil, fmt.Errorf("flow definition snapshot is required")
 	}
-	manifestDigest, err := agentflow.ManifestDigest(version.ConfigDigest, input.InputsJSON)
+	if input.ConfigDigest == "" {
+		return nil, fmt.Errorf("flow config digest is required")
+	}
+	manifestDigest, err := agentflow.ManifestDigest(input.ConfigDigest, input.InputsJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +100,7 @@ func (r *AgentFlowRunRepo) CreateFlowRun(ctx context.Context, input CreateFlowRu
 	}
 	if err := insertMessageParts(ctx, tx, messageID, []domain.ContentBlock{{
 		Kind: domain.ContentText,
-		Text: fmt.Sprintf("Agent Flow %s v%d started.", def.ID, version.Version),
+		Text: fmt.Sprintf("Agent Flow %s v%d started.", def.ID, def.Version),
 	}}); err != nil {
 		return nil, fmt.Errorf("create flow anchor message parts: %w", err)
 	}
@@ -112,9 +122,6 @@ func (r *AgentFlowRunRepo) CreateFlowRun(ctx context.Context, input CreateFlowRu
 		input.SessionID).Scan(&modelProfileID); err != nil {
 		return nil, err
 	}
-	if modelProfileID == "" {
-		_ = tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, defaultModelSettingKey).Scan(&modelProfileID)
-	}
 	anchorConfig := map[string]any{}
 	if modelProfileID != "" {
 		anchorConfig["modelProfileId"] = modelProfileID
@@ -134,10 +141,10 @@ func (r *AgentFlowRunRepo) CreateFlowRun(ctx context.Context, input CreateFlowRu
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO run_agent_flow
 		(run_id, session_id, project_id, flow_version_id, manifest_digest, inputs_json, state,
-		 total_tokens_used, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+		 total_tokens_used, created_at, updated_at, definition_json, config_digest)
+		VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?)`,
 		runID, input.SessionID, input.ProjectID, input.FlowVersionID, manifestDigest,
-		string(inputsJSON), timestamp, timestamp); err != nil {
+		string(inputsJSON), timestamp, timestamp, string(input.DefinitionJSON), input.ConfigDigest); err != nil {
 		return nil, fmt.Errorf("create flow run: %w", err)
 	}
 	// Verify the freeze covers every task in the version (exact structural match).
@@ -164,12 +171,17 @@ func (r *AgentFlowRunRepo) CreateFlowRun(ctx context.Context, input CreateFlowRu
 			readOnly = 1
 		}
 		writesJSON, _ := json.Marshal(node.Writes)
+		roleDefJSON := node.RoleDefinitionJSON
+		if len(roleDefJSON) == 0 {
+			roleDefJSON = json.RawMessage(`{}`)
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO run_agent_flow_nodes
 			(run_id, task_index, handle, role_version_id, skill_digests_json, goal_digest, goal_text,
-			 budget_json, terminal_state, created_at, read_only, writes_json)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+			 budget_json, terminal_state, created_at, read_only, writes_json, role_definition_json)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
 			runID, node.TaskIndex, node.Handle, node.RoleVersionID, string(skillsJSON),
-			node.GoalDigest, node.GoalText, string(budgetJSON), timestamp, readOnly, string(writesJSON)); err != nil {
+			node.GoalDigest, node.GoalText, string(budgetJSON), timestamp, readOnly, string(writesJSON),
+			string(roleDefJSON)); err != nil {
 			return nil, fmt.Errorf("create flow node %d: %w", node.TaskIndex, err)
 		}
 	}
@@ -212,6 +224,22 @@ func (r *AgentFlowRunRepo) GetRun(ctx context.Context, runID string) (*domain.Ru
 	return &run, nil
 }
 
+// ListSessionRuns lists meta-Run records of one Session, newest first. It is
+// the V2 file-native surface for the Graph runs activity panel.
+func (r *AgentFlowRunRepo) ListSessionRuns(ctx context.Context, sessionID string, limit int) ([]*domain.RunAgentFlow, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := r.DB.QueryContext(ctx, `SELECT run_id, session_id, project_id, flow_version_id, manifest_digest,
+		inputs_json, state, total_tokens_used, terminal_reason, created_at, updated_at, finished_at
+		FROM run_agent_flow WHERE session_id=? ORDER BY created_at DESC LIMIT ?`, sessionID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanFlowRuns(rows)
+}
+
 // ListProjectRuns lists meta-Run records of one project, newest first.
 func (r *AgentFlowRunRepo) ListProjectRuns(ctx context.Context, projectID string, limit int) ([]*domain.RunAgentFlow, error) {
 	if limit <= 0 || limit > 200 {
@@ -224,6 +252,10 @@ func (r *AgentFlowRunRepo) ListProjectRuns(ctx context.Context, projectID string
 		return nil, err
 	}
 	defer rows.Close()
+	return scanFlowRuns(rows)
+}
+
+func scanFlowRuns(rows *sql.Rows) ([]*domain.RunAgentFlow, error) {
 	var runs []*domain.RunAgentFlow
 	for rows.Next() {
 		var run domain.RunAgentFlow
@@ -255,7 +287,7 @@ func (r *AgentFlowRunRepo) ListProjectRuns(ctx context.Context, projectID string
 func (r *AgentFlowRunRepo) ListNodes(ctx context.Context, runID string) ([]*domain.RunAgentFlowNode, error) {
 	rows, err := r.DB.QueryContext(ctx, `SELECT run_id, task_index, handle, role_version_id, skill_digests_json,
 		goal_digest, goal_text, budget_json, terminal_state, output_ref, child_run_id, child_run_ids_json, error_code, created_at, finished_at,
-		read_only, writes_json
+		read_only, writes_json, role_definition_json
 		FROM run_agent_flow_nodes WHERE run_id=? ORDER BY task_index`, runID)
 	if err != nil {
 		return nil, err
@@ -276,7 +308,7 @@ func (r *AgentFlowRunRepo) ListNodes(ctx context.Context, runID string) ([]*doma
 func (r *AgentFlowRunRepo) GetNode(ctx context.Context, runID string, taskIndex int) (*domain.RunAgentFlowNode, error) {
 	rows, err := r.DB.QueryContext(ctx, `SELECT run_id, task_index, handle, role_version_id, skill_digests_json,
 		goal_digest, goal_text, budget_json, terminal_state, output_ref, child_run_id, child_run_ids_json, error_code, created_at, finished_at,
-		read_only, writes_json
+		read_only, writes_json, role_definition_json
 		FROM run_agent_flow_nodes WHERE run_id=? AND task_index=?`, runID, taskIndex)
 	if err != nil {
 		return nil, err
@@ -430,120 +462,15 @@ func (r *AgentFlowRunRepo) TerminateAnchor(ctx context.Context, runID string, st
 	return tx.Commit()
 }
 
-// ResolveFlowRoleVersion resolves a role reference to a published immutable
-// role version inside the project's scope boundary. References may be
-// "handle@version" (shared catalog: project-scoped roles override
-// global/builtin, flow roles never match) or a bare "handle" resolved against
-// the owning flow's flow-scoped roles first (flow -> project ->
-// global/builtin precedence).
-func (r *AgentFlowRunRepo) ResolveFlowRoleVersion(ctx context.Context, roleRef, projectID, flowID string) (versionID string, definitionJSON json.RawMessage, err error) {
-	handle, versionText, hasVersion := strings.Cut(strings.TrimSpace(roleRef), "@")
-	handle = strings.TrimSpace(handle)
-	if handle == "" {
-		return "", nil, fmt.Errorf("role reference %q has an empty handle", roleRef)
-	}
-	if hasVersion {
-		versionText = strings.TrimSpace(versionText)
-		if versionText == "" {
-			return "", nil, fmt.Errorf("role reference %q must be handle@version", roleRef)
-		}
-		var versionNumber int
-		if _, err := fmt.Sscanf(versionText, "%d", &versionNumber); err != nil || versionNumber < 1 {
-			return "", nil, fmt.Errorf("role reference %q has an invalid version", roleRef)
-		}
-		// Shared catalog reference: flow-scoped roles never match a
-		// version-qualified handle@version lookup outside their own flow.
-		return r.resolveSharedRoleVersion(ctx, handle, versionNumber, projectID)
-	}
-	// Bare handle: flow-scoped role wins when the flow owns one; otherwise
-	// fall back to the shared catalog's current version.
-	if flowID != "" {
-		var scope, roleProject, definitionJSONOut sql.NullString
-		var versionIDOut string
-		err := r.DB.QueryRowContext(ctx, `SELECT v.id, p.scope, p.project_id, v.definition_json
-			FROM agent_profiles p JOIN agent_profile_versions v ON v.id=p.current_version_id
-			WHERE p.object_kind='role' AND p.handle=? AND p.scope='flow' AND p.flow_id=?
-			  AND p.status='active' AND p.current_version_id IS NOT NULL`, handle, flowID).
-			Scan(&versionIDOut, &scope, &roleProject, &definitionJSONOut)
-		if err == nil {
-			return versionIDOut, json.RawMessage(definitionJSONOut.String), nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return "", nil, err
-		}
-	}
-	// No flow-scoped match: resolve the current published shared role.
-	return r.resolveSharedRoleCurrent(ctx, handle, projectID)
-}
-
-// resolveSharedRoleVersion resolves a version-qualified handle@version against
-// the shared catalog (project > global/builtin; flow roles never match).
-func (r *AgentFlowRunRepo) resolveSharedRoleVersion(ctx context.Context, handle string, versionNumber int, projectID string) (string, json.RawMessage, error) {
-	var versionIDOut, definitionJSONOut string
-	var scope, roleProject sql.NullString
-	err := r.DB.QueryRowContext(ctx, `SELECT v.id, p.scope, p.project_id, v.definition_json
-		FROM agent_profiles p JOIN agent_profile_versions v ON v.agent_profile_id=p.id
-		WHERE p.object_kind='role' AND p.handle=? AND v.version=? AND v.status='published'
-		  AND p.status='active' AND p.scope!='flow' AND (p.project_id=? OR p.project_id IS NULL)
-		ORDER BY CASE WHEN p.project_id=? THEN 0 WHEN p.scope='builtin' THEN 1 ELSE 2 END LIMIT 1`,
-		handle, versionNumber, projectID, projectID).
-		Scan(&versionIDOut, &scope, &roleProject, &definitionJSONOut)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil, fmt.Errorf("role %q is not published in this project", fmt.Sprintf("%s@%d", handle, versionNumber))
-	}
-	if err != nil {
-		return "", nil, err
-	}
-	return versionIDOut, json.RawMessage(definitionJSONOut), nil
-}
-
-// resolveSharedRoleCurrent resolves the current published shared role version.
-func (r *AgentFlowRunRepo) resolveSharedRoleCurrent(ctx context.Context, handle, projectID string) (string, json.RawMessage, error) {
-	var versionIDOut, definitionJSONOut string
-	var scope, roleProject sql.NullString
-	err := r.DB.QueryRowContext(ctx, `SELECT v.id, p.scope, p.project_id, v.definition_json
-		FROM agent_profiles p JOIN agent_profile_versions v ON v.id=p.current_version_id
-		WHERE p.object_kind='role' AND p.handle=? AND p.status='active'
-		  AND p.scope!='flow' AND p.current_version_id IS NOT NULL
-		  AND (p.project_id=? OR p.project_id IS NULL)
-		ORDER BY CASE WHEN p.project_id=? THEN 0 WHEN p.scope='builtin' THEN 1 ELSE 2 END LIMIT 1`,
-		handle, projectID, projectID).
-		Scan(&versionIDOut, &scope, &roleProject, &definitionJSONOut)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil, fmt.Errorf("role %q is not published in this project", handle)
-	}
-	if err != nil {
-		return "", nil, err
-	}
-	return versionIDOut, json.RawMessage(definitionJSONOut), nil
-}
-
-// ResolveFlowSkills resolves skill names to catalog ids. Missing skills fail
-// loudly (fail-closed: no silent empty skill set).
-func (r *AgentFlowRunRepo) ResolveFlowSkills(ctx context.Context, names []string) ([]string, error) {
-	ids := make([]string, 0, len(names))
-	for _, name := range names {
-		if r.SkillCatalog == nil {
-			return nil, fmt.Errorf("skill catalog is unavailable")
-		}
-		id, ok := r.SkillCatalog[name]
-		if !ok {
-			return nil, fmt.Errorf("skill %q is not in the catalog", name)
-		}
-		ids = append(ids, id)
-	}
-	return ids, nil
-}
-
 func scanFlowNode(scan interface{ Scan(...any) error }) (*domain.RunAgentFlowNode, error) {
 	var node domain.RunAgentFlowNode
-	var roleVersionID, skillsJSON, goalDigest, goalText, budgetJSON, outputRef, childRunID, errorCode, createdAt, finishedAt sql.NullString
+	var roleVersionID, skillsJSON, goalDigest, goalText, budgetJSON, outputRef, childRunID, errorCode, createdAt, finishedAt, roleDefJSON sql.NullString
 	var childRunIDsJSON, writesJSON string
 	var readOnly int
 	if err := scan.Scan(&node.RunID, &node.TaskIndex, &node.Handle, &roleVersionID,
 		&skillsJSON, &goalDigest, &goalText, &budgetJSON, &node.TerminalState,
 		&outputRef, &childRunID, &childRunIDsJSON, &errorCode, &createdAt, &finishedAt,
-		&readOnly, &writesJSON); err != nil {
+		&readOnly, &writesJSON, &roleDefJSON); err != nil {
 		return nil, err
 	}
 	node.ReadOnly = readOnly != 0
@@ -576,6 +503,9 @@ func scanFlowNode(scan interface{ Scan(...any) error }) (*domain.RunAgentFlowNod
 	}
 	if childRunID.Valid {
 		node.ChildRunID = childRunID.String
+	}
+	if roleDefJSON.Valid && roleDefJSON.String != "" && roleDefJSON.String != "{}" {
+		node.RoleDefinitionJSON = json.RawMessage(roleDefJSON.String)
 	}
 	node.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt.String)
 	if finishedAt.Valid && finishedAt.String != "" {

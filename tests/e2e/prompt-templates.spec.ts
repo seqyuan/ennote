@@ -222,7 +222,7 @@ test("settings templates tab lists effective and global templates", async ({ pag
   await openSession(page);
 
   // Open settings.
-  await page.getByRole("button", { name: "Open settings" }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   // Click Templates tab.
   await page.getByRole("tab", { name: "Templates" }).click();
 
@@ -235,7 +235,7 @@ test("settings templates tab lists effective and global templates", async ({ pag
 
 test("settings create and delete template", async ({ page }) => {
   await openSession(page);
-  await page.getByRole("button", { name: "Open settings" }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("tab", { name: "Templates" }).click();
 
   const panel = page.locator('[role="tabpanel"]');
@@ -273,7 +273,7 @@ test("settings diagnostics shows info/warning not fatal errors", async ({ page }
     });
   });
 
-  await page.getByRole("button", { name: "Open settings" }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("tab", { name: "Templates" }).click();
 
   const banner = page.locator(".templates-diag-banner");

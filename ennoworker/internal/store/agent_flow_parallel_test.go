@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +12,8 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
+	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,50 +29,48 @@ func setupParallelFixture(t *testing.T) (db *sql.DB, projectID string, readerVer
 	t.Helper()
 	db = store.SetupDB(t)
 	ctx := context.Background()
-	projects := &store.ProjectRepo{DB: db}
+	projects := newFileProjects(t)
 	project, _, err := projects.CreateWithWorkspace(ctx,
 		domain.CreateProjectInput{Name: "Parallel", HostPath: t.TempDir()})
 	require.NoError(t, err)
-	provider, err := (&store.ProviderRepo{DB: db}).Create(ctx, store.CreateProviderInput{
-		Name: "Provider", ProviderType: domain.ProviderOpenAICompatible,
-		BaseURL: "https://provider.test", CredentialRef: "env:PAR_TEST_KEY",
-	})
-	require.NoError(t, err)
-	model, err := (&store.ModelRepo{DB: db}).Create(ctx, store.CreateModelInput{
-		ProviderID: provider.ID, ModelName: "par-model", ContextWindow: 32000, MaxOutputTokens: 2048,
+	stack := newFileConfigStack(t)
+	model, err := stack.Models.CreateModel(ctx, fileconfig.CreateModelInput{
+		ProviderID: "provider", ModelName: "par-model", ContextWindow: 32000, MaxOutputTokens: 2048,
 		SupportsToolUse: true, SupportsThinking: true,
 		ThinkingDialect:          domain.ThinkingDialectOpenAIReasoningEffort,
 		SupportedThinkingEfforts: []domain.ThinkingEffort{domain.ThinkingDefault, domain.ThinkingLow, domain.ThinkingMedium},
 	})
 	require.NoError(t, err)
-	roles := &store.RoleRepo{DB: db, KnownTools: map[string]bool{"read": true, "grep": true, "write": true}}
 
 	newRole := func(handle, authority string, tools []string) string {
-		def := validRoleDefinition(model.ID)
-		def.DelegationPolicy.Admission = domain.DelegationAutoWithinBudget
-		def.DelegationPolicy.AllowedCallerKinds = []string{"host"}
-		def.DelegationPolicy.MaxInvocationsPerParentRun = 64
-		def.DelegationPolicy.MaxConcurrentInstances = 64
-		def.DelegationPolicy.BudgetCeiling.MaxTotalTokens = 200000
-		def.DelegationPolicy.BudgetCeiling.MaxWallTimeMS = 1_800_000
-		def.Authority = domain.RoleAuthority(authority)
-		if authority == string(domain.RoleAuthorityReadOnly) {
-			def.PermissionCeiling = domain.PermissionDiscuss
-		} else {
-			def.PermissionCeiling = domain.PermissionAuto
+		document := &rolesource.Document{
+			SchemaVersion: 1, Handle: handle, Name: handle, Description: handle,
+			Positioning: handle, Icon: "bot", Color: "neutral",
+			Model:  rolesource.ModelBinding{Ref: model.ID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+			Skills: []rolesource.SkillBinding{}, Authority: domain.RoleAuthority(authority),
+			PermissionCeiling: domain.PermissionDiscuss,
+			AllowedTools:      tools,
+			Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextRoom,
+				AllowedModes: []domain.RoleContextMode{domain.RoleContextRoom}, OwnExecutionContinuity: domain.RoleContinuityNone},
+			Delegation: rolesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+				AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single", "parallel"},
+				MaxInvocationsPerParentRun: 64, MaxConcurrentInstances: 64,
+				BudgetCeiling: rolesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
+					MaxTotalTokens: 200000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 1_800_000}},
+			OutputContract: "text-v1", MaxLoopIterations: 8, Prompt: "Execute one task.",
 		}
-		def.AllowedTools = tools
-		role, err := roles.Create(ctx, store.CreateRoleInput{
-			Handle: handle, Name: handle, Description: handle, Positioning: handle,
-			Icon: "bot", Color: "neutral", Scope: domain.RoleScopeProject, ProjectID: &project.ID, Definition: def,
-		})
+		if authority == string(domain.RoleAuthorityMutation) {
+			document.PermissionCeiling = domain.PermissionAuto
+		}
+		_, _, err := stack.Sources.CreateRole(document)
 		require.NoError(t, err)
-		version, err := roles.Publish(ctx, role.ID, 0)
+		_, err = stack.Sources.PublishRoleRevision(handle)
 		require.NoError(t, err)
-		return version.ID
+		return handle + "@v000001"
 	}
 	readerID := newRole("par-reader", string(domain.RoleAuthorityReadOnly), []string{"read", "grep"})
 	writerID := newRole("par-writer", string(domain.RoleAuthorityMutation), []string{"read", "grep", "write"})
+	testFlowSources, testFlowModels = stack.Sources, stack.ModelRepo
 	return db, project.ID, readerID, writerID
 }
 
@@ -117,6 +118,7 @@ tasks:
 // order and the max number of concurrently in-flight children.
 type controllableChildren struct {
 	db          *sql.DB
+	policies    *fileconfig.PolicyStore
 	mu          sync.Mutex
 	created     []string
 	assignments []string
@@ -129,19 +131,21 @@ type controllableChildren struct {
 	counter     int
 }
 
-func newControllableChildren(db *sql.DB, hold []string) *controllableChildren {
+func newControllableChildren(t *testing.T, db *sql.DB, hold []string) *controllableChildren {
 	holds := map[string]bool{}
 	for _, h := range hold {
 		holds[h] = true
 	}
 	return &controllableChildren{
 		db: db, runIDs: map[string]string{}, itemIDs: map[string]string{}, hold: holds, fail: map[string]bool{},
+		policies: &fileconfig.PolicyStore{Path: filepath.Join(t.TempDir(), "config", "policies.json")},
 	}
 }
 
 func (c *controllableChildren) CreateTaskChild(ctx context.Context, parentRunID, sessionID string,
 	spec agentflow.ChildSpec) (agentflow.ChildInfo, error) {
-	info, err := (&store.OrchestratorChildren{DB: c.db, Delegations: &store.DelegationRepo{DB: c.db}}).
+	info, err := (&store.OrchestratorChildren{DB: c.db, Policies: c.policies,
+		Delegations: &store.DelegationRepo{DB: c.db, Policies: c.policies}}).
 		CreateTaskChild(ctx, parentRunID, sessionID, spec)
 	if err != nil {
 		return info, err
@@ -245,39 +249,27 @@ func (c *controllableChildren) maxConcurrency() int {
 }
 
 // runParallelFlow drives a published flow to terminal and returns the final run.
-func runParallelFlow(t *testing.T, db *sql.DB, profiles *store.AgentFlowProfileRepo, projectID string,
+func runParallelFlow(t *testing.T, db *sql.DB, projectID string,
 	def *domain.FlowDefinition, children *controllableChildren) *domain.RunAgentFlow {
 	t.Helper()
 	ctx := context.Background()
-	profile, err := profiles.CreateProfile(ctx, store.CreateAgentFlowProfileInput{
-		Name: def.ID, Slug: def.ID, SourceKind: domain.FlowSourceManaged,
-	})
-	require.NoError(t, err)
-	version, err := profiles.CreateVersion(ctx, profile.ID, def)
-	require.NoError(t, err)
-	session, err := (&store.SessionRepo{DB: db}).Create(ctx, domain.CreateSessionInput{
-		ProjectID: projectID, Title: "parallel session",
-	})
-	require.NoError(t, err)
-	bindings := &store.AgentFlowBindingRepo{DB: db}
-	binding, err := bindings.EnsureBindingExists(ctx, projectID, version.ID)
-	require.NoError(t, err)
-	_, err = bindings.Update(ctx, binding.ID, true)
-	require.NoError(t, err)
+	version := flowVersionFromDef(def)
 	inputs, err := store.NormalizeFlowInputs(def, map[string]any{"target": "pipeline"}, nil)
 	require.NoError(t, err)
 	flowRuns := &store.AgentFlowRunRepo{DB: db, SkillCatalog: map[string]string{"go-dev": "skill-go-dev"}}
-	freeze, diagnostics, err := flowRuns.FreezeFlowDefinition(ctx, projectID, "", def, inputs)
+	freeze, diagnostics, err := freezeFlowForTest(t, db, flowRuns, projectID, "", def, inputs)
 	require.NoError(t, err, diagnostics)
+	session := sqlCreateSession(t, db, projectID)
 	run, err := flowRuns.CreateFlowRun(ctx, store.CreateFlowRunInput{
-		SessionID: session.ID, ProjectID: projectID, FlowVersionID: version.ID, InputsJSON: inputs,
+		SessionID: session.ID, ProjectID: projectID, FlowVersionID: version.ID,
+		DefinitionJSON: version.DefinitionJSON, ConfigDigest: version.ConfigDigest, InputsJSON: inputs,
 	}, freeze)
 	require.NoError(t, err)
 
 	hub := events.NewHub()
 	writer := events.NewWriter(&store.EventRepo{DB: db}, hub)
 	orch := &agentflow.Orchestrator{
-		Store:        &store.OrchestratorStore{Runs: flowRuns, Profiles: profiles},
+		Store:        &store.OrchestratorStore{Runs: flowRuns},
 		Children:     children,
 		Events:       &store.FlowEventSink{Writer: writer},
 		PollInterval: 3 * time.Millisecond,
@@ -309,9 +301,9 @@ func TestParallelReadySetDispatchReaders(t *testing.T) {
 	def, err := agentflow.ParseDefinition([]byte(parallelFlowYAML("par-readers",
 		"par-reader", "parallelism:\n  max: 4\n", "")))
 	require.NoError(t, err)
-	children := newControllableChildren(db, []string{"a1", "a2", "a3"})
+	children := newControllableChildren(t, db, []string{"a1", "a2", "a3"})
 	flowRuns := &store.AgentFlowRunRepo{DB: db, SkillCatalog: map[string]string{"go-dev": "skill-go-dev"}}
-	run := runParallelFlow(t, db, &store.AgentFlowProfileRepo{DB: db}, projectID, def, children)
+	run := runParallelFlow(t, db, projectID, def, children)
 
 	// Wait until all three explores are dispatched (or the flow mis-terminates).
 	deadline := time.Now().Add(5 * time.Second)
@@ -349,9 +341,9 @@ func TestParallelWritersExclusiveLane(t *testing.T) {
 	def, err := agentflow.ParseDefinition([]byte(parallelFlowYAML("par-writers",
 		"par-writer", "", "")))
 	require.NoError(t, err)
-	children := newControllableChildren(db, []string{"a1", "a2", "a3"})
+	children := newControllableChildren(t, db, []string{"a1", "a2", "a3"})
 	flowRuns := &store.AgentFlowRunRepo{DB: db, SkillCatalog: map[string]string{"go-dev": "skill-go-dev"}}
-	run := runParallelFlow(t, db, &store.AgentFlowProfileRepo{DB: db}, projectID, def, children)
+	run := runParallelFlow(t, db, projectID, def, children)
 
 	// a0 dispatches, then exactly one writer; the others must stay pending.
 	deadline := time.Now().Add(3 * time.Second)
@@ -391,15 +383,15 @@ func TestParallelDisjointWriters(t *testing.T) {
 	def.Tasks["a3"] = t3
 
 	// Publish validation must accept the disjoint-scoped flow.
-	profiles := &store.AgentFlowProfileRepo{DB: db}
 	result := store.NewFlowValidator(store.FlowPublishOptions{
 		DB: db, ProjectID: projectID, Skills: map[string]bool{"go-dev": true},
+		Sources: testFlowSources, Models: testFlowModels,
 	}).Validate(ctx, def)
 	require.True(t, result.Valid, "disjoint writers must pass publish validation: %v", result.Diagnostics)
 
-	children := newControllableChildren(db, []string{"a1", "a2", "a3"})
+	children := newControllableChildren(t, db, []string{"a1", "a2", "a3"})
 	flowRuns := &store.AgentFlowRunRepo{DB: db, SkillCatalog: map[string]string{"go-dev": "skill-go-dev"}}
-	run := runParallelFlow(t, db, profiles, projectID, def, children)
+	run := runParallelFlow(t, db, projectID, def, children)
 
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) && children.createdCount() < 4 {
@@ -434,10 +426,10 @@ func TestParallelFailureCancelsSiblings(t *testing.T) {
 	def, err := agentflow.ParseDefinition([]byte(parallelFlowYAML("par-fail",
 		"par-reader", "parallelism:\n  max: 4\n", "")))
 	require.NoError(t, err)
-	children := newControllableChildren(db, []string{"a1", "a3"})
+	children := newControllableChildren(t, db, []string{"a1", "a3"})
 	children.fail["a2"] = true
 	flowRuns := &store.AgentFlowRunRepo{DB: db, SkillCatalog: map[string]string{"go-dev": "skill-go-dev"}}
-	run := runParallelFlow(t, db, &store.AgentFlowProfileRepo{DB: db}, projectID, def, children)
+	run := runParallelFlow(t, db, projectID, def, children)
 
 	finalRun := waitFlowTerminal(t, flowRuns, run.RunID)
 	assert.Equal(t, domain.FlowStateFailed, finalRun.State)
@@ -462,9 +454,9 @@ func TestParallelBudgetOverrunCancelsSiblings(t *testing.T) {
 		"par-reader", "parallelism:\n  max: 4\n", "")))
 	require.NoError(t, err)
 	def.Budget.MaxTotalTokens = 2500 // a0(1000) + a1(1000) + a2(1000) exceeds it
-	children := newControllableChildren(db, []string{"a2", "a3"})
+	children := newControllableChildren(t, db, []string{"a2", "a3"})
 	flowRuns := &store.AgentFlowRunRepo{DB: db, SkillCatalog: map[string]string{"go-dev": "skill-go-dev"}}
-	run := runParallelFlow(t, db, &store.AgentFlowProfileRepo{DB: db}, projectID, def, children)
+	run := runParallelFlow(t, db, projectID, def, children)
 
 	// a1 settles (2000 total), then settle a2 -> 3000 > 2500.
 	waitForCount(t, children, 4, 5*time.Second)
@@ -493,35 +485,24 @@ func TestParallelRecoveryRedispatchesAllInFlight(t *testing.T) {
 	require.NoError(t, err)
 	flowRuns := &store.AgentFlowRunRepo{DB: db, SkillCatalog: map[string]string{"go-dev": "skill-go-dev"}}
 
-	profile, err := (&store.AgentFlowProfileRepo{DB: db}).CreateProfile(ctx, store.CreateAgentFlowProfileInput{
-		Name: "par-recover", Slug: "par-recover", SourceKind: domain.FlowSourceManaged,
-	})
-	require.NoError(t, err)
-	version, err := (&store.AgentFlowProfileRepo{DB: db}).CreateVersion(ctx, profile.ID, def)
-	require.NoError(t, err)
-	session, err := (&store.SessionRepo{DB: db}).Create(ctx, domain.CreateSessionInput{
-		ProjectID: projectID, Title: "recover session",
-	})
-	require.NoError(t, err)
-	binding, err := (&store.AgentFlowBindingRepo{DB: db}).EnsureBindingExists(ctx, projectID, version.ID)
-	require.NoError(t, err)
-	_, err = (&store.AgentFlowBindingRepo{DB: db}).Update(ctx, binding.ID, true)
-	require.NoError(t, err)
+	version := flowVersionFromDef(def)
 	inputs, err := store.NormalizeFlowInputs(def, map[string]any{"target": "pipeline"}, nil)
 	require.NoError(t, err)
-	freeze, diagnostics, err := flowRuns.FreezeFlowDefinition(ctx, projectID, "", def, inputs)
+	freeze, diagnostics, err := freezeFlowForTest(t, db, flowRuns, projectID, "", def, inputs)
 	require.NoError(t, err, diagnostics)
+	session := sqlCreateSession(t, db, projectID)
 	run, err := flowRuns.CreateFlowRun(ctx, store.CreateFlowRunInput{
-		SessionID: session.ID, ProjectID: projectID, FlowVersionID: version.ID, InputsJSON: inputs,
+		SessionID: session.ID, ProjectID: projectID, FlowVersionID: version.ID,
+		DefinitionJSON: version.DefinitionJSON, ConfigDigest: version.ConfigDigest, InputsJSON: inputs,
 	}, freeze)
 	require.NoError(t, err)
 
 	// First orchestrator: dispatch a1,a2,a3 (held), then "crash" (context done).
-	children1 := newControllableChildren(db, []string{"a1", "a2", "a3"})
+	children1 := newControllableChildren(t, db, []string{"a1", "a2", "a3"})
 	hub := events.NewHub()
 	writer := events.NewWriter(&store.EventRepo{DB: db}, hub)
 	orch1 := &agentflow.Orchestrator{
-		Store: &store.OrchestratorStore{Runs: flowRuns, Profiles: &store.AgentFlowProfileRepo{DB: db}},
+		Store:    &store.OrchestratorStore{Runs: flowRuns},
 		Children: children1, Events: &store.FlowEventSink{Writer: writer}, PollInterval: 3 * time.Millisecond,
 	}
 	crashCtx, cancel := context.WithCancel(ctx)
@@ -550,9 +531,9 @@ func TestParallelRecoveryRedispatchesAllInFlight(t *testing.T) {
 
 	// Second orchestrator: reconcile re-dispatches every interrupted child
 	// (a0 stays folded; a1-a3 re-dispatched exactly once).
-	children2 := newControllableChildren(db, []string{"a1", "a2", "a3"})
+	children2 := newControllableChildren(t, db, []string{"a1", "a2", "a3"})
 	orch2 := &agentflow.Orchestrator{
-		Store: &store.OrchestratorStore{Runs: flowRuns, Profiles: &store.AgentFlowProfileRepo{DB: db}},
+		Store:    &store.OrchestratorStore{Runs: flowRuns},
 		Children: children2, Events: &store.FlowEventSink{Writer: writer}, PollInterval: 3 * time.Millisecond,
 	}
 	orch2.Start(ctx, run.RunID)

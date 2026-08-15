@@ -48,12 +48,12 @@ func (s FlowState) Terminal() bool {
 type FlowNodeState string
 
 const (
-	FlowNodePending    FlowNodeState = "pending"
-	FlowNodeRunning    FlowNodeState = "running"
-	FlowNodeCompleted  FlowNodeState = "completed"
-	FlowNodeFailed     FlowNodeState = "failed"
-	FlowNodeBlocked    FlowNodeState = "blocked"
-	FlowNodeCancelled  FlowNodeState = "cancelled"
+	FlowNodePending     FlowNodeState = "pending"
+	FlowNodeRunning     FlowNodeState = "running"
+	FlowNodeCompleted   FlowNodeState = "completed"
+	FlowNodeFailed      FlowNodeState = "failed"
+	FlowNodeBlocked     FlowNodeState = "blocked"
+	FlowNodeCancelled   FlowNodeState = "cancelled"
 	FlowNodeInterrupted FlowNodeState = "interrupted"
 )
 
@@ -152,26 +152,26 @@ const MaxFlowParallelismMax = 16
 // Max defaults to 10; AllowDisjointWriters is opt-in and gates parallel
 // mutation between tasks that declare pairwise-disjoint Writes scopes.
 type FlowParallelism struct {
-	Max                   int  `json:"max,omitempty" yaml:"max,omitempty"`
-	AllowDisjointWriters  bool `json:"allowDisjointWriters,omitempty" yaml:"allow_disjoint_writers,omitempty"`
+	Max                  int  `json:"max,omitempty" yaml:"max,omitempty"`
+	AllowDisjointWriters bool `json:"allowDisjointWriters,omitempty" yaml:"allow_disjoint_writers,omitempty"`
 }
 
 // FlowDefinition is the parsed flow contract. It is the authoring unit; the
 // store publishes immutable versions from it and computes a config digest over
 // its canonical JSON form.
 type FlowDefinition struct {
-	SchemaVersion int                     `json:"schemaVersion" yaml:"schemaVersion"`
-	ID            string                  `json:"id" yaml:"id"`
-	Version       int                     `json:"version,omitempty" yaml:"version,omitempty"`
-	Description   string                  `json:"description,omitempty" yaml:"description,omitempty"`
-	Inputs        map[string]FlowPort     `json:"inputs,omitempty" yaml:"inputs,omitempty"`
-	Outputs       map[string]FlowPort     `json:"outputs,omitempty" yaml:"outputs,omitempty"`
-	Budget        FlowBudget              `json:"budget" yaml:"budget"`
-	Tasks         map[string]FlowTask     `json:"tasks" yaml:"tasks"`
-	Convergence   []ConvergenceRule       `json:"convergence,omitempty" yaml:"convergence,omitempty"`
+	SchemaVersion int                 `json:"schemaVersion" yaml:"schemaVersion"`
+	ID            string              `json:"id" yaml:"id"`
+	Version       int                 `json:"version,omitempty" yaml:"version,omitempty"`
+	Description   string              `json:"description,omitempty" yaml:"description,omitempty"`
+	Inputs        map[string]FlowPort `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+	Outputs       map[string]FlowPort `json:"outputs,omitempty" yaml:"outputs,omitempty"`
+	Budget        FlowBudget          `json:"budget" yaml:"budget"`
+	Tasks         map[string]FlowTask `json:"tasks" yaml:"tasks"`
+	Convergence   []ConvergenceRule   `json:"convergence,omitempty" yaml:"convergence,omitempty"`
 	// Parallelism controls ready-set parallel dispatch (defaults: max 10,
 	// allowDisjointWriters false). Optional; nil means defaults.
-	Parallelism   *FlowParallelism        `json:"parallelism,omitempty" yaml:"parallelism,omitempty"`
+	Parallelism *FlowParallelism `json:"parallelism,omitempty" yaml:"parallelism,omitempty"`
 }
 
 // EffectiveParallelismMax returns the ready-set dispatch concurrency ceiling:
@@ -232,18 +232,18 @@ type ProjectAgentFlowBinding struct {
 // top-level agent run id so delegation children, events, and SSE all hang off
 // one durable run identity.
 type RunAgentFlow struct {
-	RunID            string          `json:"runId"`
-	SessionID        string          `json:"sessionId"`
-	ProjectID        string          `json:"projectId"`
-	FlowVersionID    string          `json:"flowVersionId"`
-	ManifestDigest   string          `json:"manifestDigest"`
-	State            FlowState       `json:"state"`
-	TotalTokensUsed  int64           `json:"totalTokensUsed"`
-	TerminalReason   string          `json:"terminalReason,omitempty"`
-	InputsJSON       json.RawMessage `json:"inputs,omitempty"`
-	CreatedAt        time.Time       `json:"createdAt"`
-	UpdatedAt        time.Time       `json:"updatedAt"`
-	FinishedAt       *time.Time      `json:"finishedAt,omitempty"`
+	RunID           string          `json:"runId"`
+	SessionID       string          `json:"sessionId"`
+	ProjectID       string          `json:"projectId"`
+	FlowVersionID   string          `json:"flowVersionId"`
+	ManifestDigest  string          `json:"manifestDigest"`
+	State           FlowState       `json:"state"`
+	TotalTokensUsed int64           `json:"totalTokensUsed"`
+	TerminalReason  string          `json:"terminalReason,omitempty"`
+	InputsJSON      json.RawMessage `json:"inputs,omitempty"`
+	CreatedAt       time.Time       `json:"createdAt"`
+	UpdatedAt       time.Time       `json:"updatedAt"`
+	FinishedAt      *time.Time      `json:"finishedAt,omitempty"`
 }
 
 // RunAgentFlowNode is one task checkpoint. terminal_state + output_ref is the
@@ -261,10 +261,10 @@ type RunAgentFlowNode struct {
 	OutputRef     json.RawMessage `json:"outputRef,omitempty"`
 	ChildRunID    string          `json:"childRunId,omitempty"`
 	// ChildRunIDs is the full set for fan_out tasks (parallel instances).
-	ChildRunIDs []string `json:"childRunIds,omitempty"`
-	ErrorCode   string   `json:"errorCode,omitempty"`
-	CreatedAt     time.Time       `json:"createdAt"`
-	FinishedAt    *time.Time      `json:"finishedAt,omitempty"`
+	ChildRunIDs []string   `json:"childRunIds,omitempty"`
+	ErrorCode   string     `json:"errorCode,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	FinishedAt  *time.Time `json:"finishedAt,omitempty"`
 	// ReadOnly is the frozen concurrency class: true = role cannot mutate the
 	// workspace (may run in parallel with other readers); false = writer
 	// (mutation lane, or disjoint-writes lane when the flow opts in).
@@ -272,11 +272,15 @@ type RunAgentFlowNode struct {
 	// Writes are the frozen declared writes scopes (globs relative to
 	// /workspace); empty means "whole workspace" (exclusive lane).
 	Writes []string `json:"writes,omitempty"`
+	// RoleDefinitionJSON is the full resolved RoleDefinition frozen at Run
+	// start (global revision, graph-local role, or inline task role). It is
+	// used to materialize child Runs without re-reading mutable files.
+	RoleDefinitionJSON json.RawMessage `json:"roleDefinition,omitempty"`
 }
 
 // FlowRunOutput is the folded flow output: the outputs port values plus the
 // per-task checkpoint map (output_ref for each completed task).
 type FlowRunOutput struct {
-	Outputs    map[string]any            `json:"outputs"`
+	Outputs    map[string]any             `json:"outputs"`
 	TaskOutput map[string]json.RawMessage `json:"taskOutput"`
 }

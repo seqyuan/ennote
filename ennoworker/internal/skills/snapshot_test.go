@@ -259,6 +259,27 @@ func TestVerify_NestedSubdir(t *testing.T) {
 	assert.NoError(t, VerifyMaterializedCatalog(result.Root, plan.CatalogDigest))
 }
 
+func TestPromoteMaterializedCatalogReusesDigestTarget(t *testing.T) {
+	catalog, _ := buildTestCatalog(t)
+	plan, err := PlanMaterialization(catalog, TemplateVars{Mode: "bwrap", Workspace: "/workspace", SkillDir: "/skills"})
+	require.NoError(t, err)
+	first, err := MaterializeCatalog(t.TempDir(), plan, catalog)
+	require.NoError(t, err)
+	target := filepath.Join(t.TempDir(), "snapshots", "skills", "sha256-"+plan.CatalogDigest)
+	require.NoError(t, PromoteMaterializedCatalog(first, target))
+	assert.Equal(t, target, first.Root)
+	for _, record := range first.Records {
+		assert.Contains(t, record.SnapshotPath, target)
+	}
+
+	secondParent := t.TempDir()
+	second, err := MaterializeCatalog(secondParent, plan, catalog)
+	require.NoError(t, err)
+	require.NoError(t, PromoteMaterializedCatalog(second, target))
+	assert.Equal(t, target, second.Root)
+	assert.NoDirExists(t, filepath.Join(secondParent, "skills"))
+}
+
 func TestMaterialize_IdempotentReuse(t *testing.T) {
 	// Regression: when the target snapshot already exists and matches the
 	// current plan, MaterializeCatalog must reuse it without overwriting.

@@ -4,23 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	store "github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestModelProfilesManageExplicitDefaultWithoutStoringSecrets(t *testing.T) {
-	db := store.SetupDB(t)
 	ctx := context.Background()
-	provider, err := (&store.ProviderRepo{DB: db}).Create(ctx, store.CreateProviderInput{
-		Name: "DeepSeek", ProviderType: domain.ProviderOpenAICompatible,
-		BaseURL: "https://api.deepseek.com", CredentialRef: "env:DEEPSEEK_API_KEY",
+	files := newModelStore(t)
+	provider, err := (&store.ProviderRepo{Files: files}).Create(ctx, store.CreateProviderInput{
+		Key: "deepseek", Name: "DeepSeek", ProviderType: domain.ProviderOpenAICompatible,
+		BaseURL: "https://api.deepseek.com", APIKey: "sk-DEEPSEEK_API_KEY",
 	})
 	require.NoError(t, err)
-	repo := &store.ModelRepo{DB: db}
+	repo := &store.ModelRepo{Files: files}
 	first, err := repo.Create(ctx, store.CreateModelInput{
 		ProviderID: provider.ID, ModelName: "deepseek-chat", ContextWindow: 64000,
 		MaxOutputTokens: 4096, SupportsToolUse: true, IsDefault: true,
@@ -29,6 +29,8 @@ func TestModelProfilesManageExplicitDefaultWithoutStoringSecrets(t *testing.T) {
 	second, err := repo.Create(ctx, store.CreateModelInput{
 		ProviderID: provider.ID, ModelName: "deepseek-reasoner", ContextWindow: 64000,
 		MaxOutputTokens: 4096, SupportsToolUse: true, SupportsThinking: true,
+		ThinkingDialect:          domain.ThinkingDialectOpenAIReasoningEffort,
+		SupportedThinkingEfforts: []domain.ThinkingEffort{domain.ThinkingDefault, domain.ThinkingMedium},
 	})
 	require.NoError(t, err)
 	profiles, err := repo.List(ctx)
@@ -44,41 +46,66 @@ func TestModelProfilesManageExplicitDefaultWithoutStoringSecrets(t *testing.T) {
 	assert.False(t, profiles[1].IsDefault)
 }
 
+func TestModelProfilesResolvePortableReferencesExactly(t *testing.T) {
+	ctx := context.Background()
+	files := newModelStore(t)
+	providers := &store.ProviderRepo{Files: files}
+	models := &store.ModelRepo{Files: files}
+	provider, err := providers.Create(ctx, store.CreateProviderInput{
+		Key: "openai-main", Name: "openai-main", ProviderType: domain.ProviderOpenAICompatible,
+		BaseURL: "https://provider.test", APIKey: "sk-PORTABLE_REF",
+	})
+	require.NoError(t, err)
+	model, err := models.Create(ctx, store.CreateModelInput{
+		ProviderID: provider.ID, ModelName: "org/gpt-5.4", ContextWindow: 32000, MaxOutputTokens: 2048,
+	})
+	require.NoError(t, err)
+
+	resolved, err := models.ResolvePortableRef(ctx, "openai-main/org/gpt-5.4")
+	require.NoError(t, err)
+	require.NotNil(t, resolved)
+	assert.Equal(t, model.ID, resolved.ID)
+
+	// V2: the portable ref is the exact provider-key/model-name id; provider
+	// keys are unique, so an unknown lowercase ref fails closed as not found.
+	_, err = models.ResolvePortableRef(ctx, "unknown-main/org/gpt-5.4")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+	_, err = models.ResolvePortableRef(ctx, "missing-separator")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "provider-name/model-name")
+	// A second model under the same provider key does not make the ref
+	// ambiguous: the ref includes the model name.
+	_, err = models.Create(ctx, store.CreateModelInput{
+		ProviderID: provider.ID, ModelName: "gpt-4o", ContextWindow: 32000, MaxOutputTokens: 2048,
+	})
+	require.NoError(t, err)
+	again, err := models.ResolvePortableRef(ctx, "openai-main/org/gpt-5.4")
+	require.NoError(t, err)
+	assert.Equal(t, model.ID, again.ID)
+}
+
 func TestEffectiveConfigPriorityAndFreezeAcrossDefaultChanges(t *testing.T) {
 	db := store.SetupDB(t)
 	ctx := context.Background()
-	project, _, err := (&store.ProjectRepo{DB: db}).CreateWithWorkspace(ctx, domain.CreateProjectInput{
+	stack := newFileConfigStack(t)
+	models := stack.ModelRepo
+	project, _, err := newFileProjects(t).CreateWithWorkspace(ctx, domain.CreateProjectInput{
 		Name: "priority", HostPath: t.TempDir(),
 	})
 	require.NoError(t, err)
-	provider, err := (&store.ProviderRepo{DB: db}).Create(ctx, store.CreateProviderInput{
-		Name: "provider", ProviderType: domain.ProviderOpenAICompatible,
-		BaseURL: "https://provider.test", CredentialRef: "env:PROVIDER_KEY",
+	// Session default wins over the file-wide default; the file default wins
+	// for sessions without one. Agent-profile defaults are V1-only and are
+	// rejected by the V2 file store.
+	agentModel, err := stack.Models.CreateModel(ctx, fileconfig.CreateModelInput{
+		ProviderID: "provider", ModelName: "session-default", ContextWindow: 32000, MaxOutputTokens: 2048,
 	})
 	require.NoError(t, err)
-	models := &store.ModelRepo{DB: db}
-	globalModel, err := models.Create(ctx, store.CreateModelInput{
-		ProviderID: provider.ID, ModelName: "global", ContextWindow: 32000,
-		MaxOutputTokens: 2048, IsDefault: true,
-	})
-	require.NoError(t, err)
-	agentModel, err := models.Create(ctx, store.CreateModelInput{
-		ProviderID: provider.ID, ModelName: "agent", ContextWindow: 32000, MaxOutputTokens: 2048,
-	})
-	require.NoError(t, err)
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err = db.Exec(`INSERT INTO agent_profiles
-		(id, name, system_prompt, default_model_id, status, created_at, updated_at)
-		VALUES ('agent-profile', 'agent', '', ?, 'active', ?, ?)`, agentModel.ID, now, now)
-	require.NoError(t, err)
-	agentID := "agent-profile"
-	session, err := (&store.SessionRepo{DB: db}).Create(ctx, domain.CreateSessionInput{
-		ProjectID: project.ID, Title: "agent default", DefaultAgentProfileID: &agentID,
-	})
-	require.NoError(t, err)
-	runs := &store.RunRepo{DB: db}
+	sessionDefault := agentModel.ID
+	session := sqlCreateSessionWithModel(t, db, project.ID, &sessionDefault)
+	runs := &store.RunRepo{DB: db, Providers: stack.Providers, Models: stack.ModelRepo, Policies: stack.Policies}
 	submission, err := runs.SubmitTurn(ctx, domain.SubmitTurnInput{
-		SessionID: session.ID, ClientRequestID: "agent-priority", Text: "run",
+		SessionID: session.ID, ClientRequestID: "session-priority", Text: "run",
 	})
 	require.NoError(t, err)
 	run, err := runs.Claim(ctx, submission.Run.ID)
@@ -88,15 +115,12 @@ func TestEffectiveConfigPriorityAndFreezeAcrossDefaultChanges(t *testing.T) {
 	assert.Equal(t, agentModel.ID, resolved.Effective.ModelProfileID)
 
 	require.NoError(t, runs.Succeed(ctx, run.ID))
-	globalReplacement, err := models.Create(ctx, store.CreateModelInput{
-		ProviderID: provider.ID, ModelName: "global-new", ContextWindow: 48000,
+	globalReplacement, err := stack.Models.CreateModel(ctx, fileconfig.CreateModelInput{
+		ProviderID: "provider", ModelName: "global-new", ContextWindow: 48000,
 		MaxOutputTokens: 3072, IsDefault: true,
 	})
 	require.NoError(t, err)
-	plainSession, err := (&store.SessionRepo{DB: db}).Create(ctx, domain.CreateSessionInput{
-		ProjectID: project.ID, Title: "global default",
-	})
-	require.NoError(t, err)
+	plainSession := sqlCreateSession(t, db, project.ID)
 	secondSubmission, err := runs.SubmitTurn(ctx, domain.SubmitTurnInput{
 		SessionID: plainSession.ID, ClientRequestID: "global-priority", Text: "run",
 	})
@@ -107,7 +131,7 @@ func TestEffectiveConfigPriorityAndFreezeAcrossDefaultChanges(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, globalReplacement.ID, secondResolved.Effective.ModelProfileID)
 
-	require.NoError(t, models.SetDefault(ctx, globalModel.ID))
+	require.NoError(t, models.SetDefault(ctx, stack.DefaultRef))
 	refrozen, err := runs.ResolveAndFreezeConfig(ctx, secondRun)
 	require.NoError(t, err)
 	assert.Equal(t, globalReplacement.ID, refrozen.Effective.ModelProfileID)
@@ -116,11 +140,14 @@ func TestEffectiveConfigPriorityAndFreezeAcrossDefaultChanges(t *testing.T) {
 	refrozen.Effective.HookConfig = domain.EffectiveHookConfig{}
 	assert.Equal(t, secondResolved.Effective, refrozen.Effective)
 
-	sessionOverride := agentModel.ID
-	updated, err := (&store.SessionRepo{DB: db}).UpdateDefaultModel(ctx, plainSession.ID, &sessionOverride)
+	// UpdateDefaultModel validates against the removed global model SQL; set the
+	// session column directly (the file store is the resolution authority).
+	_, err = db.Exec(`UPDATE sessions SET default_model_profile_id=? WHERE id=?`, agentModel.ID, plainSession.ID)
 	require.NoError(t, err)
-	require.NotNil(t, updated.DefaultModelProfileID)
-	assert.Equal(t, agentModel.ID, *updated.DefaultModelProfileID)
+	var storedDefault string
+	require.NoError(t, db.QueryRow(`SELECT default_model_profile_id FROM sessions WHERE id=?`,
+		plainSession.ID).Scan(&storedDefault))
+	assert.Equal(t, agentModel.ID, storedDefault)
 
 	var stored string
 	require.NoError(t, db.QueryRow(`SELECT effective_config_json FROM agent_runs WHERE id = ?`, secondRun.ID).Scan(&stored))

@@ -21,14 +21,14 @@ import (
 )
 
 const (
-	webFetchTimeout             = 10 * time.Second
-	webFetchMaxBodyBytes        = 5 << 20 // 5 MiB
-	webFetchMaxResultBytes      = 100 << 10 // 100 KiB
-	webFetchMaxHeaderBytes      = 64 << 10
-	webFetchMaxRedirects        = 10
-	webFetchMaxURLBytes         = 8 << 10
-	webFetchBodySniffBytes      = 512
-	webFetchOriginScopeVersion  = 1
+	webFetchTimeout            = 10 * time.Second
+	webFetchMaxBodyBytes       = 5 << 20   // 5 MiB
+	webFetchMaxResultBytes     = 100 << 10 // 100 KiB
+	webFetchMaxHeaderBytes     = 64 << 10
+	webFetchMaxRedirects       = 10
+	webFetchMaxURLBytes        = 8 << 10
+	webFetchBodySniffBytes     = 512
+	webFetchOriginScopeVersion = 1
 )
 
 // WebFetchTool fetches public HTTPS pages and converts them to Markdown text.
@@ -315,11 +315,11 @@ func (t *WebFetchTool) buildSafeTransport(approvedIP netip.Addr, hostname string
 		return dialer.DialContext(ctx, "tcp", target.String())
 	}
 	return &http.Transport{
-		DialContext:           dialContext,
-		Proxy:                 nil,
-		ForceAttemptHTTP2:     true,
+		DialContext:            dialContext,
+		Proxy:                  nil,
+		ForceAttemptHTTP2:      true,
 		MaxResponseHeaderBytes: int64(webFetchMaxHeaderBytes),
-		TLSHandshakeTimeout:   webFetchTimeout,
+		TLSHandshakeTimeout:    webFetchTimeout,
 	}
 }
 

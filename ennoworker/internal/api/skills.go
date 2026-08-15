@@ -401,10 +401,10 @@ func resolveSkillRootPath(explicitPath, agentKind, home string) (string, string,
 		return filepath.Clean(explicitPath), kind, nil
 	}
 	subdirs := map[string]string{
-		"pi":     filepath.Join(".pi", "agent", "skills"),
-		"claude": filepath.Join(".claude", "skills"),
-		"codex":  filepath.Join(".codex", "skills"),
-		"cursor": filepath.Join(".cursor", "skills"),
+		"pi":      filepath.Join(".pi", "agent", "skills"),
+		"claude":  filepath.Join(".claude", "skills"),
+		"codex":   filepath.Join(".codex", "skills"),
+		"cursor":  filepath.Join(".cursor", "skills"),
 		"generic": filepath.Join(".agents", "skills"),
 	}
 	subdir, ok := subdirs[kind]

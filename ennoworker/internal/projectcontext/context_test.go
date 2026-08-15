@@ -92,8 +92,8 @@ func TestBuildPrompt_EmptyContext(t *testing.T) {
 
 func TestTotalBytes(t *testing.T) {
 	ctx := &Context{
-		GlobalAGENTS:  "1234567890", // 10 bytes
-		ProjectMEMORY: "12345",      // 5 bytes
+		GlobalAGENTS:  "1234567890",      // 10 bytes
+		ProjectMEMORY: "12345",           // 5 bytes
 		ProjectAGENTS: "123456789012345", // 15 bytes
 	}
 	assert.Equal(t, 30, ctx.TotalBytes())

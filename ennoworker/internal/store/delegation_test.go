@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,15 +19,62 @@ func setupDelegationParent(t *testing.T) (*store.DelegationRepo, *store.RunRepo,
 	repo, submission := setupSubmittedRun(t, "delegation-parent")
 	_, err := repo.Claim(context.Background(), submission.Run.ID)
 	require.NoError(t, err)
-	return &store.DelegationRepo{DB: repo.DB}, repo, submission
+	return &store.DelegationRepo{DB: repo.DB,
+		Policies: &fileconfig.PolicyStore{Path: filepath.Join(t.TempDir(), "config", "policies.json")}}, repo, submission
+}
+
+// explorerRoleDefinitionV3 is the verbatim fixture definition of
+// builtin-workspace-explorer-v3, extended with a resolvable modelProfileId so
+// file-native child config freezing (validateFrozenDelegationMeta) can resolve
+// the frozen model. explorerItem() freezes it into the item's RoleMeta so
+// delegation validation never consults global role SQL (V2); keep it in
+// lockstep with fixture_tables.sql until that snapshot is removed.
+const explorerRoleDefinitionV3 = `{"schemaVersion":1,"rolePrompt":"You are the Workspace Explorer. Use read, ls, grep, and find to answer questions about workspace files. You may inspect git history and status with the git_readonly tool (status, diff, log, show, ls-files, blame). Every answer must be concise. End every turn by calling submit_result with a structured result. Never create, modify, or delete files, and never run arbitrary shell commands.","modelBinding":{"mode":"inherit","modelProfileId":"provider/model","thinkingEffort":"default","fallbackModelProfileIds":[],"overridableFields":[]},"skills":{"entries":[]},"authority":"read_only","permissionCeiling":"discuss","allowedTools":["read","ls","grep","find","git_readonly"],"contextPolicy":{"defaultMode":"task_only","allowedModes":["task_only"],"ownExecutionContinuity":"none"},"delegationPolicy":{"admission":"auto_within_budget","allowedCallerKinds":["host"],"allowedStrategies":["single","parallel"],"maxInvocationsPerParentRun":16,"maxConcurrentInstances":16,"budgetCeiling":{"maxModelCalls":6,"maxToolCalls":8,"maxTotalTokens":20000,"maxOutputTokens":4000,"maxCostUsdMicros":100000,"maxWallTimeMs":120000}},"outputContract":"text-v1","maxLoopIterations":8}`
+
+// explorerConfigDigestV3 is the fixture's stored config_digest for
+// builtin-workspace-explorer-v3. The frozen meta carries it so child speaker
+// snapshots match the published Role identity the legacy SQL config path still
+// validates against while the fixture snapshot exists.
+const explorerConfigDigestV3 = "sha256:c7cf36749030bd0626c24eea7ea325c2b70be64bd2f623b3c94b5fc8b81aa38b"
+
+// roleMetaFromDB freezes a RoleMeta from the fixture's published role version,
+// mirroring how production freezes a resolved file Role revision at Run start.
+// Identity fields (object id, config digest) are read from the fixture so the
+// frozen meta stays consistent with the snapshot role tables.
+func roleMetaFromDB(t *testing.T, db *sql.DB, versionID string) *store.DelegationRoleMeta {
+	t.Helper()
+	var objectID, handle, name, configDigest, definitionJSON string
+	require.NoError(t, db.QueryRow(`SELECT p.id,p.handle,p.name,v.config_digest,v.definition_json
+		FROM agent_profiles p JOIN agent_profile_versions v ON v.agent_profile_id=p.id
+		WHERE v.id=?`, versionID).Scan(&objectID, &handle, &name, &configDigest, &definitionJSON))
+	meta, err := store.NewDelegationRoleMeta(versionID, []byte(definitionJSON))
+	require.NoError(t, err)
+	meta.ObjectID = objectID
+	meta.Handle = handle
+	meta.DisplayName = name
+	meta.ConfigDigest = configDigest
+	return meta
 }
 
 func explorerItem() store.CreateDelegationItemInput {
+	var definition domain.RoleDefinition
+	if err := json.Unmarshal([]byte(explorerRoleDefinitionV3), &definition); err != nil {
+		panic(err)
+	}
+	meta := &store.DelegationRoleMeta{
+		ObjectID:     "builtin-workspace-explorer",
+		VersionID:    "builtin-workspace-explorer-v3",
+		Handle:       "workspace-explorer",
+		DisplayName:  "Workspace Explorer",
+		ConfigDigest: explorerConfigDigestV3,
+		Definition:   definition,
+	}
 	return store.CreateDelegationItemInput{
 		Name: "explore", RoleVersionID: "builtin-workspace-explorer-v3",
 		AssignmentJSON: json.RawMessage(`{"objective":"inspect the workspace"}`), OutputContract: "text-v1",
 		Budget: domain.BudgetCeilingJSON{MaxModelCalls: 4, MaxToolCalls: 8, MaxTotalTokens: 20000,
 			MaxOutputTokens: 4000, MaxCostMicros: 100000, MaxWallTimeMS: 120000},
+		RoleMeta: meta,
 	}
 }
 
@@ -173,7 +222,7 @@ func TestCreateGroupWithChildrenRollsBackWholeTreeOnChildFailure(t *testing.T) {
 func TestCreateGroupRejectsNonRunningAndNestedParents(t *testing.T) {
 	repo, submission := setupSubmittedRun(t, "delegation-guards")
 	ctx := context.Background()
-	delegations := &store.DelegationRepo{DB: repo.DB}
+	delegations := &store.DelegationRepo{DB: repo.DB, Policies: &fileconfig.PolicyStore{Path: filepath.Join(t.TempDir(), "config", "policies.json")}}
 
 	// Parent not running → reject.
 	_, err := delegations.CreateGroup(ctx, store.CreateDelegationGroupInput{
@@ -239,16 +288,24 @@ func TestRuntimeBudgetAdmissionCapsCallsUsageAndCost(t *testing.T) {
 	insertChildRun(t, delegations.DB, childID, submission.Run.SessionID, submission.Run.ID)
 	_, err = delegations.ReserveChildBudget(ctx, childID, items[0].ID)
 	require.NoError(t, err)
-	provider, err := (&store.ProviderRepo{DB: delegations.DB}).Create(ctx, store.CreateProviderInput{
-		Name: "budget-provider", ProviderType: domain.ProviderOpenAICompatible,
-		BaseURL: "https://provider.test", CredentialRef: "env:BUDGET_KEY",
+	// V2: the pricing model resolves from the file-native catalog wired into
+	// the DelegationRepo's Models.
+	files := fileconfig.NewModelStore(
+		filepath.Join(t.TempDir(), "config", "models.json"),
+		filepath.Join(t.TempDir(), "config", "provider-auth.json"),
+		filepath.Join(t.TempDir(), "config", "settings.json"),
+	)
+	provider, err := (&store.ProviderRepo{Files: files}).Create(ctx, store.CreateProviderInput{
+		Key: "budget-provider", Name: "budget-provider", ProviderType: domain.ProviderOpenAICompatible,
+		BaseURL: "https://provider.test", APIKey: "sk-BUDGET_KEY",
 	})
 	require.NoError(t, err)
-	model, err := (&store.ModelRepo{DB: delegations.DB}).Create(ctx, store.CreateModelInput{
+	model, err := (&store.ModelRepo{Files: files}).Create(ctx, store.CreateModelInput{
 		ProviderID: provider.ID, ModelName: "budget-model", ContextWindow: 32000, MaxOutputTokens: 8000,
 		InputCostUSDMicrosPerMillion: 1000000, OutputCostUSDMicrosPerMillion: 2000000,
 	})
 	require.NoError(t, err)
+	delegations.Models = &store.ModelRepo{Files: files}
 
 	allowed, err := delegations.AdmitModelCall(ctx, childID, model.ID, 1000, 10000)
 	require.NoError(t, err)

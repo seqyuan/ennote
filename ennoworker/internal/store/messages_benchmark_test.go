@@ -14,7 +14,7 @@ func BenchmarkMessagePage(b *testing.B) {
 		b.Run(fmt.Sprintf("messages_%d", count), func(b *testing.B) {
 			db := stores.SetupDB(b)
 			ctx := context.Background()
-			projects := &stores.ProjectRepo{DB: db}
+			projects := newFileProjects(b)
 			sessions := &stores.SessionRepo{DB: db}
 			messages := &stores.MessageRepo{DB: db}
 			project, _, err := projects.CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: "Benchmark", HostPath: b.TempDir()})

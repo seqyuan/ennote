@@ -39,7 +39,7 @@ func ensureTemplate() (string, error) {
 			migratedTemplateError = err
 			return
 		}
-		if err := Migrate(db); err != nil {
+		if err := MigrateFixtureSchema(db); err != nil {
 			_ = db.Close()
 			migratedTemplateError = err
 			return
@@ -102,8 +102,8 @@ func SetupDBFile(t *testing.T) *sql.DB {
 		t.Fatalf("open: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	if err := Migrate(db); err != nil {
-		t.Fatalf("migrate: %v", err)
+	if err := MigrateFixtureSchema(db); err != nil {
+		t.Fatalf("migrate fixture schema: %v", err)
 	}
 	return db
 }

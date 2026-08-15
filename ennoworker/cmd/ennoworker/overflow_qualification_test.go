@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -13,10 +14,12 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/compaction"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/seqyuan/ennote/ennoworker/internal/workspace"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"os"
 )
 
 func TestExecutorRecoversControlledFirstRequestOverflow(t *testing.T) {
@@ -47,23 +50,29 @@ func TestExecutorRecoversControlledFirstRequestOverflow(t *testing.T) {
 	t.Setenv("ENNOTE_QUALIFICATION_KEY", "local-test-key")
 	t.Setenv("ENNOTE_HOME", t.TempDir())
 	ctx := context.Background()
-	db, err := store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
+	db, _, _ := newSessionDB(t)
 
-	project, _, err := (&store.ProjectRepo{DB: db}).CreateWithWorkspace(ctx, domain.CreateProjectInput{
+	projectStore := newFileProjects(t)
+	project, _, err := projectStore.CreateWithWorkspace(ctx, domain.CreateProjectInput{
 		Name: "overflow qualification", HostPath: t.TempDir(),
 	})
 	require.NoError(t, err)
-	providerProfile, err := (&store.ProviderRepo{DB: db}).Create(ctx, store.CreateProviderInput{
-		Name: "controlled overflow", ProviderType: domain.ProviderOpenAICompatible,
-		BaseURL: provider.URL + "/v1", CredentialRef: "env:ENNOTE_QUALIFICATION_KEY",
+	// V2: provider/model + policies resolve from file stores; the legacy
+	// global provider/model/policy SQL path was removed.
+	home := t.TempDir()
+	models := fileconfig.NewModelStore(
+		filepath.Join(home, "config", "models.json"),
+		filepath.Join(home, "config", "provider-auth.json"),
+		filepath.Join(home, "config", "settings.json"),
+	)
+	_, err = models.CreateProvider(ctx, fileconfig.CreateProviderInput{
+		Key: "provider", Name: "controlled overflow", ProviderType: domain.ProviderOpenAICompatible,
+		BaseURL: provider.URL + "/v1", APIKey: os.Getenv("ENNOTE_QUALIFICATION_KEY"),
 	})
 	require.NoError(t, err)
-	modelProfile, err := (&store.ModelRepo{DB: db}).Create(ctx, store.CreateModelInput{
-		ProviderID: providerProfile.ID, ModelName: "qualification-model", DisplayName: "Qualification",
-		ContextWindow: 32000, MaxOutputTokens: 512, IsDefault: true,
+	modelProfile, err := models.CreateModel(ctx, fileconfig.CreateModelInput{
+		ProviderID: "provider", ModelName: "qualification-model", DisplayName: "Qualification",
+		ContextWindow: 32000, MaxOutputTokens: 512, SupportsToolUse: true, IsDefault: true,
 	})
 	require.NoError(t, err)
 
@@ -78,18 +87,15 @@ func TestExecutorRecoversControlledFirstRequestOverflow(t *testing.T) {
 	config.MaxOverflowRecoveries = 1
 	encodedPolicy, err := json.Marshal(config)
 	require.NoError(t, err)
-	policy, err := (&store.PolicyRepo{DB: db}).CreateVersion(ctx, store.CreatePolicyInput{
-		Name: "controlled overflow", Kind: domain.PolicyKindCompaction, Config: encodedPolicy,
-	})
+	policies := &fileconfig.PolicyStore{Path: filepath.Join(home, "config", "policies.json")}
+	policy, err := policies.CreateVersion(ctx, "controlled overflow", domain.PolicyKindCompaction, encodedPolicy)
 	require.NoError(t, err)
 
 	modelProfileID := modelProfile.ID
-	sessionRepo := &store.SessionRepo{DB: db}
-	session, err := sessionRepo.Create(ctx, domain.CreateSessionInput{
-		ProjectID: project.ID, Title: "overflow", DefaultModelProfileID: &modelProfileID,
-	})
-	require.NoError(t, err)
-	_, err = sessionRepo.UpdateCompactionPolicy(ctx, session.ID, &policy.ID)
+	session := sqlCreateSessionWithModel(t, db, project.ID, &modelProfileID)
+	// Set the session's compaction policy directly: UpdateCompactionPolicy
+	// validates against the removed global policy SQL.
+	_, err = db.Exec(`UPDATE sessions SET compaction_policy_profile_id=? WHERE id=?`, policy.ID, session.ID)
 	require.NoError(t, err)
 
 	messageRepo := &store.MessageRepo{DB: db}
@@ -100,10 +106,14 @@ func TestExecutorRecoversControlledFirstRequestOverflow(t *testing.T) {
 		require.NoError(t, createErr)
 		parentID = message.ID
 	}
-	require.NoError(t, sessionRepo.ActivateLeaf(ctx, session.ID, parentID))
+	_, err = db.Exec(`UPDATE session_branches SET leaf_message_id=? WHERE session_id=? AND label='Main'`, parentID, session.ID)
+	require.NoError(t, err)
+	_, err = db.Exec(`UPDATE sessions SET active_leaf_message_id=? WHERE id=?`, parentID, session.ID)
+	require.NoError(t, err)
 
 	hub := events.NewHub()
-	runRepo := &store.RunRepo{DB: db, Publisher: hub}
+	runRepo := &store.RunRepo{DB: db, Publisher: hub, Providers: &store.ProviderRepo{Files: models},
+		Models: &store.ModelRepo{Files: models}, Policies: policies}
 	submission, err := runRepo.SubmitTurn(ctx, domain.SubmitTurnInput{
 		SessionID: session.ID, ClientRequestID: "controlled-overflow",
 		Text:            "Return the qualification result after recovery.",
@@ -115,11 +125,11 @@ func TestExecutorRecoversControlledFirstRequestOverflow(t *testing.T) {
 
 	writer := events.NewWriter(&store.EventRepo{DB: db}, hub)
 	callRepo := &store.CallRepo{DB: db, Publisher: hub}
-	compactionRepo := &store.CompactionRepo{DB: db, Publisher: hub}
+	compactionRepo := &store.CompactionRepo{DB: db, Publisher: hub, Policies: policies}
 	emptySkills := t.TempDir()
 	executor := &agentExecutor{
 		db: db, writer: writer, homeDir: t.TempDir(), trustStore: nil, runs: runRepo, calls: callRepo,
-		sessionDB: sessionRepo, msgRepo: messageRepo,
+		sessionDB: &store.SessionRepo{DB: db}, msgRepo: messageRepo, projects: projectStore,
 		skillRepo: &store.SkillSnapshotRepo{DB: db}, skillsDir: emptySkills,
 		builtinDir: emptySkills, sandbox: "none",
 	}

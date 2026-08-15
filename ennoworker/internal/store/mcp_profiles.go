@@ -13,13 +13,20 @@ import (
 	"github.com/google/uuid"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/mcpclient"
+	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
 )
 
 // MCPProfileRepo persists MCP server profiles and immutable versions.
-type MCPProfileRepo struct{ DB *sql.DB }
+type MCPProfileRepo struct {
+	DB       *sql.DB
+	FilePath string
+}
 
 // MCPBindingRepo persists per-Project MCP bindings.
-type MCPBindingRepo struct{ DB *sql.DB }
+type MCPBindingRepo struct {
+	DB       *sql.DB
+	Projects *projectstore.Store
+}
 
 // CreateMCPProfileInput is the secret-free definition of a server profile.
 type CreateMCPProfileInput struct {
@@ -41,6 +48,9 @@ func (r *MCPProfileRepo) CreateProfile(ctx context.Context, input CreateMCPProfi
 	}
 	if input.SourceKind != domain.MCPSourceManaged && input.SourceKind != domain.MCPSourceProjectFile && input.SourceKind != domain.MCPSourceBundled {
 		return nil, fmt.Errorf("invalid source kind: %s", input.SourceKind)
+	}
+	if r.FilePath != "" {
+		return r.fileCreateProfile(input)
 	}
 	now := time.Now().UTC()
 	profile := &domain.MCPServerProfile{
@@ -64,6 +74,9 @@ func (r *MCPProfileRepo) CreateProfile(ctx context.Context, input CreateMCPProfi
 func (r *MCPProfileRepo) CreateVersion(ctx context.Context, profileID string, v *domain.MCPServerProfileVersion) error {
 	if v == nil {
 		return fmt.Errorf("version is required")
+	}
+	if r.FilePath != "" {
+		return r.fileCreateVersion(profileID, v)
 	}
 	version := v.Version
 	if version <= 0 {
@@ -132,6 +145,9 @@ func (r *MCPProfileRepo) CreateVersion(ctx context.Context, profileID string, v 
 
 // ListVersions returns all versions of a profile ordered by version number.
 func (r *MCPProfileRepo) ListVersions(ctx context.Context, profileID string) ([]*domain.MCPServerProfileVersion, error) {
+	if r.FilePath != "" {
+		return r.fileListVersions(profileID)
+	}
 	rows, err := r.DB.QueryContext(ctx, `SELECT id, profile_id, version, transport, executable, argv_json,
 		endpoint, env_literals_json, env_credentials_json, header_literals_json, header_credentials_json,
 		cwd, timeout_ms, network_policy, config_digest, created_at
@@ -173,6 +189,9 @@ func (r *MCPProfileRepo) ListVersions(ctx context.Context, profileID string) ([]
 
 // GetVersion fetches a specific immutable version.
 func (r *MCPProfileRepo) GetVersion(ctx context.Context, versionID string) (*domain.MCPServerProfileVersion, error) {
+	if r.FilePath != "" {
+		return r.fileGetVersion(versionID)
+	}
 	versions, err := r.queryVersions(ctx, `WHERE id = ?`, versionID)
 	if err != nil {
 		return nil, err
@@ -226,6 +245,9 @@ func (r *MCPProfileRepo) queryVersions(ctx context.Context, where string, args .
 
 // ListProfiles lists non-archived profiles with their latest version.
 func (r *MCPProfileRepo) ListProfiles(ctx context.Context) ([]*domain.MCPServerProfile, error) {
+	if r.FilePath != "" {
+		return r.fileListProfiles()
+	}
 	rows, err := r.DB.QueryContext(ctx, `SELECT p.id, p.display_name, p.slug, p.source_kind, p.project_scope,
 		p.source_locator, p.lifecycle_status, p.created_at, p.updated_at,
 		COALESCE(MAX(v.version), 0) AS latest
@@ -258,6 +280,9 @@ func (r *MCPProfileRepo) ListProfiles(ctx context.Context) ([]*domain.MCPServerP
 
 // GetProfile fetches a single active profile.
 func (r *MCPProfileRepo) GetProfile(ctx context.Context, profileID string) (*domain.MCPServerProfile, error) {
+	if r.FilePath != "" {
+		return r.fileGetProfile(profileID)
+	}
 	var p domain.MCPServerProfile
 	var scope sql.NullString
 	var createdAt, updatedAt string
@@ -282,6 +307,9 @@ func (r *MCPProfileRepo) GetProfile(ctx context.Context, profileID string) (*dom
 
 // Archive marks a profile inactive. Existing bindings and run snapshots stay.
 func (r *MCPProfileRepo) Archive(ctx context.Context, profileID string) error {
+	if r.FilePath != "" {
+		return r.fileArchive(profileID)
+	}
 	res, err := r.DB.ExecContext(ctx,
 		`UPDATE mcp_server_profiles SET lifecycle_status='archived', updated_at=? WHERE id=?`,
 		roleTime(time.Now().UTC()), profileID)
@@ -327,6 +355,9 @@ func sortedKeys[V any](m map[string]V) []string {
 // EnsureBindingExists creates a disabled binding if none exists for the pair.
 // Returns the existing binding when already present.
 func (r *MCPBindingRepo) EnsureBindingExists(ctx context.Context, projectID, profileVersionID string) (*domain.MCPProjectBinding, error) {
+	if r.Projects != nil {
+		return r.fileEnsure(ctx, projectID, profileVersionID)
+	}
 	existing, err := r.GetByProjectVersion(ctx, projectID, profileVersionID)
 	if err == nil {
 		return existing, nil
@@ -352,6 +383,18 @@ func (r *MCPBindingRepo) EnsureBindingExists(ctx context.Context, projectID, pro
 
 // GetByProjectVersion returns the binding for a project + profile version.
 func (r *MCPBindingRepo) GetByProjectVersion(ctx context.Context, projectID, profileVersionID string) (*domain.MCPProjectBinding, error) {
+	if r.Projects != nil {
+		bindings, err := r.fileList(ctx, projectID)
+		if err != nil {
+			return nil, err
+		}
+		for _, binding := range bindings {
+			if binding.ProfileVersionID == profileVersionID {
+				return binding, nil
+			}
+		}
+		return nil, sql.ErrNoRows
+	}
 	rows, err := r.queryBindings(ctx, `WHERE project_id = ? AND profile_version_id = ?`, projectID, profileVersionID)
 	if err != nil {
 		return nil, err
@@ -364,6 +407,9 @@ func (r *MCPBindingRepo) GetByProjectVersion(ctx context.Context, projectID, pro
 
 // ListByProject returns all bindings for a project.
 func (r *MCPBindingRepo) ListByProject(ctx context.Context, projectID string) ([]*domain.MCPProjectBinding, error) {
+	if r.Projects != nil {
+		return r.fileList(ctx, projectID)
+	}
 	return r.queryBindings(ctx, `WHERE project_id = ? ORDER BY created_at`, projectID)
 }
 
@@ -377,6 +423,9 @@ type MCPBindingUpdate struct {
 }
 
 func (r *MCPBindingRepo) Update(ctx context.Context, bindingID string, upd MCPBindingUpdate) (*domain.MCPProjectBinding, error) {
+	if r.Projects != nil {
+		return r.fileUpdate(ctx, bindingID, upd)
+	}
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -441,6 +490,9 @@ func (r *MCPBindingRepo) Update(ctx context.Context, bindingID string, upd MCPBi
 
 // Get fetches a binding by id.
 func (r *MCPBindingRepo) Get(ctx context.Context, bindingID string) (*domain.MCPProjectBinding, error) {
+	if r.Projects != nil {
+		return r.fileGet(ctx, bindingID)
+	}
 	rows, err := r.queryBindings(ctx, `WHERE id = ?`, bindingID)
 	if err != nil {
 		return nil, err
@@ -453,6 +505,9 @@ func (r *MCPBindingRepo) Get(ctx context.Context, bindingID string) (*domain.MCP
 
 // Delete removes a binding.
 func (r *MCPBindingRepo) Delete(ctx context.Context, bindingID string) error {
+	if r.Projects != nil {
+		return r.fileDelete(ctx, bindingID)
+	}
 	res, err := r.DB.ExecContext(ctx, `DELETE FROM project_mcp_bindings WHERE id=?`, bindingID)
 	if err != nil {
 		return err
@@ -511,6 +566,19 @@ func validateCredentialRefMap(refs map[string]string) error {
 // project scope. Used by candidate discovery to match project-file candidates
 // to already-materialized profiles.
 func (r *MCPProfileRepo) FindProfileBySource(ctx context.Context, slug, sourceKind string, projectScope *string) (*domain.MCPServerProfile, error) {
+	if r.FilePath != "" {
+		profiles, err := r.fileListProfiles()
+		if err != nil {
+			return nil, err
+		}
+		for _, profile := range profiles {
+			sameScope := profile.ProjectScope == nil && projectScope == nil || profile.ProjectScope != nil && projectScope != nil && *profile.ProjectScope == *projectScope
+			if profile.Slug == slug && profile.SourceKind == sourceKind && sameScope {
+				return profile, nil
+			}
+		}
+		return nil, sql.ErrNoRows
+	}
 	rows, err := r.queryProfiles(ctx, `WHERE p.slug = ? AND p.source_kind = ?
 		AND (p.project_scope IS ? OR (? IS NULL AND p.project_scope IS NULL))
 		AND p.lifecycle_status = 'active'`, slug, sourceKind, nullableString(projectScope), nullableString(projectScope))
@@ -557,6 +625,18 @@ func (r *MCPProfileRepo) queryProfiles(ctx context.Context, where string, args .
 // FindVersionByDigest locates a version of a profile with the exact config
 // digest, so candidate discovery can reuse an existing immutable version.
 func (r *MCPProfileRepo) FindVersionByDigest(ctx context.Context, profileID, configDigest string) (*domain.MCPServerProfileVersion, error) {
+	if r.FilePath != "" {
+		versions, err := r.fileListVersions(profileID)
+		if err != nil {
+			return nil, err
+		}
+		for _, version := range versions {
+			if version.ConfigDigest == configDigest {
+				return version, nil
+			}
+		}
+		return nil, sql.ErrNoRows
+	}
 	versions, err := r.queryVersions(ctx, `WHERE profile_id = ? AND config_digest = ?`, profileID, configDigest)
 	if err != nil {
 		return nil, err

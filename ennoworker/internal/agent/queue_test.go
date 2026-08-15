@@ -76,8 +76,9 @@ func TestFollowUpRunsOnlyAfterAgentWouldOtherwiseStop(t *testing.T) {
 		llm.FakeStep{Completion: domain.Completion{Content: []domain.ContentBlock{textBlock("summary")}, StopReason: "stop"}},
 	)
 	queue := &scriptedQueue{steerAt: -1, followAt: 1}
+	events := &memoryWriter{}
 	loop := &Loop{
-		Provider: provider, Tools: &fakeTools{}, Events: &memoryWriter{}, QueuedInputs: queue,
+		Provider: provider, Tools: &fakeTools{}, Events: events, QueuedInputs: queue,
 		SteeringMode: domain.QueueOneAtATime, FollowUpMode: domain.QueueOneAtATime,
 	}
 	result, err := loop.Run(context.Background(), RunInput{RunID: "run-follow", Model: "fake"})
@@ -89,4 +90,5 @@ func TestFollowUpRunsOnlyAfterAgentWouldOtherwiseStop(t *testing.T) {
 	assert.Equal(t, "also summarize", messageText(second[len(second)-1]))
 	assert.GreaterOrEqual(t, queue.steerCalls, 2)
 	assert.Equal(t, 2, queue.followCalls)
+	assert.Contains(t, events.types(), "follow_up_consumed")
 }

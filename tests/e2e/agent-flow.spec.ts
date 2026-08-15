@@ -1,344 +1,155 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-const now = "2026-08-05T00:00:00Z";
-const project = { id: "flow-project", name: "RNA screen", description: "", status: "active", createdAt: now, updatedAt: now };
-const profile = { id: "flow-profile", name: "Go Review", slug: "go-review", sourceKind: "managed",
-  projectScope: null, sourceLocator: "", lifecycleStatus: "active", createdAt: now, updatedAt: now, latestVersion: 1,
-  draftRevision: 1 };
-const version = { id: "flow-v1", profileId: profile.id, version: 1,
-  configDigest: "a".repeat(64),
-  definition: { schemaVersion: 1, id: "go-review", budget: { maxTotalTokens: 120000 },
-    tasks: { producer: { role: "flow-worker@1", goal: "Implement {inputs.target}" } } },
-  publishedAt: now };
-const role = { id: "role-1", handle: "flow-worker", name: "Flow Worker", description: "", positioning: "",
-  icon: "bot", color: "neutral", scope: "global", projectId: null, status: "active",
-  currentVersionId: "rv1", currentVersion: 1, updatedAt: now };
-const session = { id: "session-1", projectId: project.id, title: "RNA review", status: "active", mode: "hosted",
-  createdAt: now, updatedAt: now };
-const binding = { id: "flow-binding", projectId: project.id, flowVersionId: version.id, desiredEnabled: false,
-  revision: 1, createdAt: now, updatedAt: now };
-const flowRun = { runId: "flow-run-1", sessionId: "session-1", projectId: project.id, flowVersionId: version.id,
-  manifestDigest: "m".repeat(64), state: "running", totalTokensUsed: 0, inputs: {}, createdAt: now, updatedAt: now };
-const runDetail = {
-  run: { ...flowRun, state: "completed", totalTokensUsed: 1500 },
-  nodes: [
-    { runId: flowRun.runId, taskIndex: 0, handle: "producer", roleVersionId: "rv1", skillDigests: [],
-      goalDigest: "g".repeat(64), goalText: "Implement src/main.go", terminalState: "completed",
-      outputRef: { changedFiles: ["a.go"] }, childRunId: "child-1", createdAt: now },
-    { runId: flowRun.runId, taskIndex: 1, handle: "accept", terminalState: "completed", createdAt: now },
-  ],
-  flowVersion: 1,
-};
+test.describe.configure({ mode: "serial" });
+
+const now = "2026-08-08T00:00:00Z";
+const provider = { id: "provider-1", name: "anthropic", providerType: "openai-compatible", baseUrl: "https://example.test/v1", apiKey: "test", status: "active", createdAt: now, updatedAt: now };
+const model = { id: "model-1", providerId: provider.id, modelName: "claude-sonnet-4", displayName: "Claude Sonnet", contextWindow: 200000, maxOutputTokens: 8000, inputCostUsdMicrosPerMillion: 0, outputCostUsdMicrosPerMillion: 0, supportsVision: true, supportsToolUse: true, supportsThinking: true, thinkingDialect: "openai_reasoning_effort", supportedThinkingEfforts: ["default", "low", "medium", "high"], isDefault: true, status: "active", createdAt: now, updatedAt: now };
 
 function fulfill(route: Route, data: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ data }) });
 }
 
-async function selectProjectAndOpenFlows(page: Page) {
-  // Graphs moved from the settings dialog to the dedicated /graphs route.
-  await page.goto("/graphs");
-  // The WorkspaceNav project switcher needs an explicit selection (no auto-select).
-  await page.getByRole("button", { name: /Select project/ }).first().click();
-  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
+interface FixtureTask {
+  name: string;
+  goal: string;
+  role?: string;
+  model?: string;
+  thinking?: string;
+  skills?: string[];
 }
 
-async function mockFlows(page: Page) {
-  // Clone module-level fixtures per test so sequential runs within a file do
-  // not leak draft/desiredEnabled mutations across tests (each test owns its
-  // own mock state).
-  const localProfile = { ...profile };
-  const localBinding = { ...binding };
-  const bindings: typeof binding[] = [];
-  const runs: typeof flowRun[] = [];
-  let published = false;
+interface FixtureGraphDocument {
+  schemaVersion: number;
+  id: string;
+  name: string;
+  description: string;
+  tasks: Record<string, FixtureTask>;
+  graph: Record<string, string[]>;
+}
+
+function graphDocument(): FixtureGraphDocument {
+  return {
+    schemaVersion: 1, id: "rna-seq", name: "RNA-seq", description: "",
+    tasks: {
+      prepare_reference: { name: "Prepare reference", role: "local/reference-preparer", goal: "Prepare the genome index." },
+      align_1: { name: "Align batch 1", model: "anthropic/claude-sonnet-4", thinking: "high", skills: ["local/alignment", "global/report-writing"], goal: "Align paired-end reads." },
+    },
+    graph: { prepare_reference: [], align_1: ["prepare_reference"] },
+  };
+}
+
+async function openGraphs(page: Page) {
+  const secret = process.env.ENNOTE_E2E_PASSWORD ?? "preview1234";
+  await page.goto("/");
+  const headers = { Origin: new URL(page.url()).origin };
+  const statusResponse = await page.request.get("/api/auth/status");
+  if (statusResponse.ok() && statusResponse.headers()["content-type"]?.includes("application/json")) {
+    const status = await statusResponse.json() as { requiresPassword: boolean; authenticated: boolean };
+    if (!status.requiresPassword) {
+      await page.request.post("/api/auth/setup", { data: { password: secret }, headers });
+    }
+    if (!status.authenticated) {
+      const login = await page.request.post("/api/auth/login", { data: { password: secret }, headers });
+      expect(login.ok()).toBe(true);
+    }
+  }
+  await page.goto("/graphs");
+}
+
+async function mockGraphAuthoring(page: Page) {
+  let digest = "sha256:" + "a".repeat(64);
+  let document = graphDocument();
+  let builderThread: Record<string, unknown> = { graphId: "rna-seq", modelProfileId: model.id, messages: [] };
   await page.route("**/api/worker/v1/**", async (route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname.replace("/api/worker", "");
-    if (path === "/v1/projects") return fulfill(route, [project]);
-    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
-    if (path === "/v1/roles") return fulfill(route, { items: [role] });
-    if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
-    if (path === "/v1/agent-flows") {
-      if (route.request().method() === "POST") return fulfill(route, { ...localProfile, draftRevision: 0 }, 201);
-      return fulfill(route, [localProfile]);
-    }
-    if (path === `/v1/agent-flows/${localProfile.id}`) return fulfill(route, localProfile);
-    if (path === `/v1/agent-flows/${localProfile.id}/draft`) {
+    const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    const method = route.request().method();
+    if (path === "/v1/projects") return fulfill(route, []);
+    if (path === "/v1/provider-profiles") return fulfill(route, [provider]);
+    if (path === "/v1/model-profiles") return fulfill(route, [model]);
+    if (path === "/v1/policy-profiles") return fulfill(route, []);
+    if (path === "/v1/graphs" && method === "GET") return fulfill(route, [{ id: "rna-seq", name: "RNA-seq", path: "/home/graphs/rna-seq/graph.yaml", digest, latestVersion: 1 }]);
+    if (path === "/v1/graphs" && method === "POST") return fulfill(route, { id: "new-graph", name: "New Graph", path: "/home/graphs/new-graph/graph.yaml", digest, latestVersion: 0, document: { schemaVersion: 1, id: "new-graph", name: "New Graph", tasks: {}, graph: {} } }, 201);
+    if (path === "/v1/graphs/rna-seq" && method === "GET") return fulfill(route, { id: "rna-seq", name: document.name, path: "/home/graphs/rna-seq/graph.yaml", digest, latestVersion: 1, document });
+    if (path === "/v1/graphs/rna-seq" && method === "PATCH") {
       const body = JSON.parse(route.request().postData() ?? "{}");
-      localProfile.draftRevision = (body.expectedRevision ?? 0) + 1;
-      return fulfill(route, localProfile);
-    }
-    if (path === `/v1/agent-flows/${localProfile.id}/validate`) return fulfill(route, { valid: true, diagnostics: [] });
-    if (path === `/v1/agent-flows/${localProfile.id}/publish`) {
-      published = true;
-      return fulfill(route, version, 201);
-    }
-    if (path === `/v1/agent-flows/${localProfile.id}/versions`) return fulfill(route, published ? [version] : []);
-    if (path === `/v1/projects/${project.id}/agent-flows/candidates`) return fulfill(route, []);
-    if (path === `/v1/projects/${project.id}/agent-flows/bindings`) {
-      if (route.request().method() === "POST") {
-        bindings.push(localBinding);
-        return fulfill(route, localBinding, 201);
+      if (body.task) {
+        if (body.task.value) {
+          document = { ...document, tasks: { ...document.tasks, [body.task.id]: body.task.value }, graph: { ...document.graph, [body.task.id]: document.graph[body.task.id] ?? [] } };
+        } else {
+          const tasks = { ...document.tasks };
+          const graph = { ...document.graph };
+          delete tasks[body.task.id];
+          delete graph[body.task.id];
+          document = { ...document, tasks, graph };
+        }
       }
-      return fulfill(route, bindings);
+      if (body.dependencies) document = { ...document, graph: { ...document.graph, [body.dependencies.taskId]: body.dependencies.depends } };
+      digest = "sha256:" + "b".repeat(64);
+      return fulfill(route, { id: "rna-seq", name: document.name, path: "/home/graphs/rna-seq/graph.yaml", digest, latestVersion: 1, document });
     }
-    if (path === `/v1/projects/${project.id}/agent-flows/bindings/${localBinding.id}`) {
-      const body = JSON.parse(route.request().postData() ?? "{}");
-      if (typeof body.desiredEnabled === "boolean") localBinding.desiredEnabled = body.desiredEnabled;
-      return fulfill(route, localBinding);
+    if (path === "/v1/graphs/rna-seq/versions") return fulfill(route, [{ id: "graph-v1", profileId: "profile-1", version: 1, configDigest: "c".repeat(64), definition: {}, publishedAt: now }]);
+    if (path === "/v1/graphs/rna-seq/publish") return fulfill(route, { id: "graph-v2", profileId: "profile-1", version: 2, configDigest: "d".repeat(64), definition: {}, publishedAt: now }, 201);
+    if (path === "/v1/graphs/rna-seq/builder" && method === "GET") return fulfill(route, builderThread);
+    if (path === "/v1/graphs/rna-seq/builder/messages") {
+      builderThread = { graphId: "rna-seq", modelProfileId: model.id, messages: [
+        { id: "m1", graphId: "rna-seq", ordinal: 1, role: "user", content: "Add QC", createdAt: now },
+        { id: "m2", graphId: "rna-seq", ordinal: 2, role: "assistant", content: "Add a QC Task after alignment.", createdAt: now },
+      ], proposal: { id: "proposal-1", graphId: "rna-seq", baseDigest: digest, summary: "Add a QC Task after alignment.", status: "pending", diagnostics: [], createdAt: now, operations: [{ kind: "upsert_task", taskId: "qc" }, { kind: "set_dependencies", taskId: "qc", depends: ["align_1"] }] } };
+      return fulfill(route, builderThread, 201);
     }
-    if (path === `/v1/projects/${project.id}/agent-flows/bindings/${binding.id}/run`) {
-      const created = { ...flowRun };
-      runs.push(created);
-      return fulfill(route, created, 201);
+    if (path === "/v1/graphs/rna-seq/builder/proposals/proposal-1/apply") {
+      document = { ...document, tasks: { ...document.tasks, qc: { name: "QC", model: "anthropic/claude-sonnet-4", thinking: "default", skills: [], goal: "Review alignment quality." } }, graph: { ...document.graph, qc: ["align_1"] } };
+      builderThread = { ...builderThread, proposal: undefined };
+      return fulfill(route, { id: "rna-seq", name: document.name, path: "/home/graphs/rna-seq/graph.yaml", digest: "sha256:" + "e".repeat(64), latestVersion: 1, document });
     }
-    if (path === `/v1/projects/${project.id}/agent-flows/runs`) return fulfill(route, runs);
-    if (path === `/v1/projects/${project.id}/agent-flows/runs/${flowRun.runId}`) return fulfill(route, runDetail);
-    if (path === `/v1/projects/${project.id}/agent-flows/runs/${flowRun.runId}/cancel`) return fulfill(route, flowRun);
-    if (path === `/v1/projects/${project.id}/agent-flows/check-approvals`) return fulfill(route, []);
-    if (path === `/v1/runs/${flowRun.runId}/events`) return fulfill(route, []);
     return route.abort();
   });
 }
 
 for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
-  test(`Agent Flow editor, publish, bind, and timeline at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+  test(`Task-first global Graph editor at ${viewport.width}x${viewport.height}`, async ({ page }) => {
     await page.setViewportSize(viewport);
-    await mockFlows(page);
-    await selectProjectAndOpenFlows(page);
+    await mockGraphAuthoring(page);
+    await openGraphs(page);
 
-    // New flow -> editor opens with the first (entry) task.
-    await page.getByRole("button", { name: "+ New flow" }).click();
-    await page.getByPlaceholder("Go Change Review").fill("Go Review");
-    await page.getByPlaceholder("go-change-review").fill("go-review");
-    await page.getByRole("button", { name: "Create flow" }).click();
-    await expect(page.getByText("Edit go-review")).toBeVisible();
-    await expect(page.getByText("entry", { exact: true })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "RNA-seq" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Add Graph" })).toBeVisible();
+    await expect(page.getByText("Select project", { exact: false })).toHaveCount(0);
+    const task = page.locator('[data-task-id="align_1"]');
+    await expect(task.locator(".graph-task-form")).toHaveCount(0);
+    await task.locator(".graph-task-summary").click();
+    await expect(task.getByRole("button", { name: "Inline configuration" })).toHaveAttribute("aria-pressed", "true");
+    await expect(task.getByLabel("Model")).toHaveValue("anthropic/claude-sonnet-4");
+    await expect(task.getByLabel("Thinking")).toHaveValue("high");
 
-    // Add a second role task with a depends-selectable previous task and
-    // autocomplete chips for inputs / task outputs / flow vars (no prev.*).
-    await page.getByRole("button", { name: "+ Add task" }).click();
-    await expect(page.getByText("Dependency view")).toBeVisible();
-
-    // Auto budget button computes a suggestion from task budgets.
-    await page.getByTitle(/Suggested = 1.25/).scrollIntoViewIfNeeded();
-    await page.getByTitle(/Suggested = 1.25/).click();
-    const budgetValue = await page.locator('input[placeholder="e.g. 600000"]').inputValue();
-    expect(Number(budgetValue)).toBeGreaterThanOrEqual(10000);
-
-    // Parallelism: max concurrency input + the opt-in confirmation dialog
-    // before allow_disjoint_writers can be enabled.
-    await page.getByPlaceholder("10").fill("4");
-    await page.getByText("Allow parallel writes (disjoint scopes)").click();
-    await expect(page.getByText("Enable parallel writes?")).toBeVisible();
-    await page.getByRole("button", { name: "Cancel" }).click();
-    await expect(page.getByText("Enable parallel writes?")).toBeHidden();
-    await page.getByText("Allow parallel writes (disjoint scopes)").click();
-    await page.getByRole("button", { name: "Enable" }).click();
-    await expect(page.getByText(/Writers run concurrently only when every writer task declares/)).toBeVisible();
-
-    // Save + publish the draft.
-    await page.getByRole("button", { name: "Save draft" }).click();
-    await page.getByRole("button", { name: "Publish" }).click();
-
-    // Bind the published version -> binding appears Disabled.
-    await page.getByRole("button", { name: /Bind v1/ }).click();
-    await expect(page.getByRole("button", { name: "Disabled" })).toBeVisible();
-
-    // Enable + pick target session + run + timeline.
-    await page.getByRole("button", { name: "Disabled" }).click();
-    await expect(page.getByRole("button", { name: "Enabled" })).toBeVisible();
-    await page.getByRole("button", { name: "Run", exact: true }).click();
-    await expect(page.getByLabel("Target session for this flow run")).toBeVisible();
-    await page.getByLabel("Target session for this flow run").selectOption("session-1");
-    await page.getByRole("button", { name: "Start run" }).click();
-    await expect(page.getByText("flow-run-1".slice(0, 8))).toBeVisible();
-    await page.getByRole("button", { name: "Timeline" }).click();
-    await expect(page.getByText("Task checkpoints")).toBeVisible();
-    await expect(page.getByText("producer", { exact: true })).toBeVisible();
-    await expect(page.getByText(/2 tasks · 2 done/)).toBeVisible();
-    await expect(page.getByText(/changedFiles/)).toBeVisible();
-
-    // No horizontal overflow at either viewport.
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
-    expect(overflow).toBe(false);
+    if (viewport.width < 500) {
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+      await page.getByRole("button", { name: "Open navigation" }).click();
+      await expect(page.getByLabel("Workspace navigation")).toBeVisible();
+      await page.locator(".workspace-nav-close").click();
+      await page.getByRole("tab", { name: "graph", exact: true }).click();
+    }
+    await expect(page.getByText("Level 1", { exact: true })).toBeVisible();
+    await expect(page.getByText("Level 2", { exact: true })).toBeVisible();
   });
 }
 
-test("Agent Flow update diff is read-only and surfaces project file changes", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
-  const staleCandidate = {
-    slug: "pwn-flow", name: "pwn-flow", sourceKind: "project_file", sourceLocator: ".ennote/agent-flows/pwn-flow.yaml",
-    configDigest: "b".repeat(64), definition: { schemaVersion: 1, id: "pwn-flow", budget: { maxTotalTokens: 10000 },
-      tasks: { producer: { role: "flow-worker@1", goal: "new goal" } } },
-    alreadyBound: true, boundVersionId: "bound-v1", boundVersion: 1, updateAvailable: true, taskCount: 1, maxTotalTokens: 10000,
-  };
-  const boundVersion = { id: "bound-v1", profileId: "flow-profile", version: 1, configDigest: "a".repeat(64),
-    definition: { schemaVersion: 1, id: "pwn-flow", budget: { maxTotalTokens: 10000 },
-      tasks: { producer: { role: "flow-worker@1", goal: "old goal" } } },
-    publishedAt: now };
-  await page.route("**/api/worker/v1/**", async (route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname.replace("/api/worker", "");
-    if (path === "/v1/projects") return fulfill(route, [project]);
-    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
-    if (path === "/v1/roles") return fulfill(route, { items: [role] });
-    if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, []);
-    if (path === "/v1/agent-flows") return fulfill(route, [profile]);
-    if (path === `/v1/projects/${project.id}/agent-flows/candidates`) return fulfill(route, [staleCandidate]);
-    if (path === `/v1/projects/${project.id}/agent-flows/bindings`) return fulfill(route, []);
-    if (path === `/v1/projects/${project.id}/agent-flows/runs`) return fulfill(route, []);
-    if (path === `/v1/projects/${project.id}/agent-flows/check-approvals`) return fulfill(route, []);
-    if (path === "/v1/agent-flows/flow-profile/versions") return fulfill(route, [boundVersion]);
-    return route.abort();
-  });
-  await selectProjectAndOpenFlows(page);
-
-  await page.getByText("Update available").scrollIntoViewIfNeeded();
-  await expect(page.getByText("Update available")).toBeVisible();
-  await page.getByRole("button", { name: "View diff" }).click();
-  await expect(page.getByText("Read-only diff: bound version vs project file")).toBeVisible();
-  // The changed goal line is surfaced with +/- markers (JSON-pretty rows).
-  await expect(page.getByText(/"goal": "old goal"/)).toBeVisible();
-  await expect(page.getByText(/"goal": "new goal"/)).toBeVisible();
+test("Graph Builder persists a proposal and applies it explicitly", async ({ page }) => {
+  await mockGraphAuthoring(page);
+  await openGraphs(page);
+  await page.getByLabel("Graph Builder instruction").fill("Add QC");
+  await page.getByRole("button", { name: "Send Builder instruction" }).click();
+  await expect(page.getByText("Add a QC Task after alignment.", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("2 changes", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Apply proposal" }).click();
+  await expect(page.locator('[data-task-id="qc"]')).toBeVisible();
 });
 
-// Matrix 2E: /invoke_agent_flow resolves a bound+enabled flow by name and
-// starts a run in the current session; an unbound flow fails closed.
-test("Agent Flow Host invocation by name starts a run in the current session", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
-  const run = { runId: "invoke-run", sessionId: "marker-session", projectId: project.id, flowVersionId: version.id,
-    manifestDigest: "m".repeat(64), state: "running", totalTokensUsed: 0, createdAt: now, updatedAt: now };
-  let invokeCalls = 0;
-  let invokeBody: Record<string, unknown> | null = null;
-  await page.route("**/api/worker/v1/**", async (route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname.replace("/api/worker", "");
-    if (path === "/v1/projects") return fulfill(route, [project]);
-    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles") return fulfill(route, []);
-    if (path === "/v1/policy-profiles") return fulfill(route, [{ id: "builtin-tool-discuss-v1", name: "discuss", kind: "tool", version: 1, config: { mode: "discuss" }, status: "active", createdAt: now, updatedAt: now }]);
-    if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [{ id: "marker-session", projectId: project.id, title: "Marker review", status: "active", createdAt: now, updatedAt: now }]);
-    if (path.match(/^\/v1\/sessions\/[^/]+$/)) return fulfill(route, { id: "marker-session", projectId: project.id, title: "Marker review", status: "active", createdAt: now, updatedAt: now });
-    if (path.endsWith("/active-run")) return fulfill(route, null);
-    if (path.endsWith("/messages")) return fulfill(route, { messages: [], hasMore: false });
-    if (path.endsWith("/compactions")) return fulfill(route, []);
-    if (path === `/v1/projects/${project.id}/agent-flows/invoke`) {
-      invokeCalls++;
-      invokeBody = JSON.parse(route.request().postData() ?? "{}");
-      return fulfill(route, run, 201);
-    }
-    return route.abort();
-  });
-  await page.goto("/");
-  await page.getByTitle("Select project").click();
-  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
-  await page.getByRole("button", { name: "Marker review", exact: true }).click();
-  await page.getByPlaceholder(/Ask|Type|Message/).fill("/invoke_agent_flow go-review target=src/a.go");
-  await page.keyboard.press("Enter");
-  await expect.poll(() => invokeCalls).toBe(1);
-  expect(invokeBody).toMatchObject({ sessionId: "marker-session", name: "go-review", inputs: { target: "src/a.go" } });
-  // The input was cleared and no error surfaced.
-  await expect(page.getByPlaceholder(/Ask|Type|Message/)).toHaveValue("");
-
-  // @graph:name@version typed-target form also invokes.
-  await page.getByPlaceholder(/Ask|Type|Message/).fill("@graph:go-review@1");
-  await page.keyboard.press("Enter");
-  await expect.poll(() => invokeCalls).toBe(2);
-  expect(invokeBody).toMatchObject({ name: "go-review", version: 1 });
-});
-
-// Matrix 3C: import validates, reports missing dependencies, and creates a
-// managed draft (never publishes); export copies the draft YAML.
-test("Agent Flow import checks dependencies and exports YAML", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
-  let importCalls = 0;
-  let checkCalls = 0;
-  const importYaml = `schemaVersion: 1
-id: shared-flow
-budget:
-  max_total_tokens: 10000
-tasks:
-  producer:
-    role: flow-worker@1
-    goal: "do it"
-`;
-  await page.route("**/api/worker/v1/**", async (route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname.replace("/api/worker", "");
-    if (path === "/v1/projects") return fulfill(route, [project]);
-    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
-    if (path === "/v1/roles") return fulfill(route, { items: [role] });
-    if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, []);
-    if (path === "/v1/agent-flows") return fulfill(route, []);
-    if (path === `/v1/projects/${project.id}/agent-flows/candidates`) return fulfill(route, []);
-    if (path === `/v1/projects/${project.id}/agent-flows/bindings`) return fulfill(route, []);
-    if (path === `/v1/projects/${project.id}/agent-flows/runs`) return fulfill(route, []);
-    if (path === `/v1/projects/${project.id}/agent-flows/check-approvals`) return fulfill(route, []);
-    if (path === "/v1/agent-flows/check-dependencies") {
-      checkCalls++;
-      return fulfill(route, { valid: true, configDigest: "d".repeat(64), diagnostics: [],
-        dependencies: [{ kind: "role", name: "flow-worker", version: 1, present: true },
-          { kind: "skill", name: "phantom-skill", present: false, reason: "skill is not in the catalog" }] });
-    }
-    if (path === "/v1/agent-flows/import") {
-      importCalls++;
-      return fulfill(route, { profileId: "imported-profile", slug: "shared-flow", draftRevision: 1,
-        alreadyDrafted: false, configDigest: "d".repeat(64), dependencies: [] }, 201);
-    }
-    return route.abort();
-  });
-  await selectProjectAndOpenFlows(page);
-
-  await page.getByRole("button", { name: "Import YAML" }).click();
-  await page.getByPlaceholder(/schemaVersion: 1/).fill(importYaml);
-  await page.getByRole("button", { name: "Check dependencies" }).click();
-  await expect(page.getByText("Valid — ready to import as draft")).toBeVisible();
-  // The missing skill is reported, never installed.
-  await expect(page.getByText(/phantom-skill · missing/)).toBeVisible();
-  await page.getByRole("button", { name: "Import as draft" }).click();
-  await expect.poll(() => importCalls).toBe(1);
-});
-
-// The conversation surface shows pending check approvals for the current
-// session's flow runs and accepts a decision through the durable endpoint.
-test("pending flow check approval surfaces in the conversation and accepts a decision", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
-  const checkApproval = { runId: "check-run-1", taskIndex: 0, command: "go test ./...",
-    sessionId: session.id, flowVersionId: version.id, requestedAt: now };
-  let decideCalls = 0;
-  await page.route("**/api/worker/v1/**", async (route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname.replace("/api/worker", "");
-    if (path === "/v1/projects") return fulfill(route, [project]);
-    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles") return fulfill(route, []);
-    if (path === "/v1/policy-profiles") return fulfill(route, []);
-    if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
-    if (path === `/v1/sessions/${session.id}`) return fulfill(route, session);
-    if (path === `/v1/sessions/${session.id}/compactions` || path === `/v1/sessions/${session.id}/branches`) return fulfill(route, []);
-    if (path === `/v1/sessions/${session.id}/recovery`) return fulfill(route, null);
-    if (path.startsWith("/v1/roles")) return fulfill(route, { items: [], nextCursor: "" });
-    if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, null);
-    if (path === `/v1/sessions/${session.id}/messages`) return fulfill(route, { messages: [], hasMore: false });
-    if (path === `/v1/projects/${project.id}/agent-flows/check-approvals`) {
-      return fulfill(route, [checkApproval]);
-    }
-    if (path === `/v1/projects/${project.id}/agent-flows/check-approvals/${checkApproval.runId}/${checkApproval.taskIndex}/decide`) {
-      decideCalls++;
-      return route.fulfill({ status: 204 });
-    }
-    return route.abort();
-  });
-  await page.goto("/");
-  await page.getByTitle("Select project").click();
-  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
-  await page.getByRole("button", { name: session.title, exact: true }).click();
-
-  await expect(page.getByText("Flow check approval")).toBeVisible();
-  await expect(page.getByText(/go test \.\/\.\.\./)).toBeVisible();
-  await expect(page.getByText("1 pending")).toBeVisible();
-
-  await page.getByRole("button", { name: "Approve", exact: true }).click();
-  await expect.poll(() => decideCalls).toBe(1);
-  // The decided item is removed from the strip.
-  await expect(page.getByText("Flow check approval")).not.toBeVisible();
+test("Graph publication is explicit and updates the visible immutable version", async ({ page }) => {
+  await mockGraphAuthoring(page);
+  await openGraphs(page);
+  await expect(page.getByText("v1", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(page.getByText("v2", { exact: true })).toBeVisible();
 });

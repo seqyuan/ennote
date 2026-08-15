@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,42 +24,28 @@ import (
 // can consume it after the fact.
 
 func TestAgentFlowMatrixRunAndEventsPersisted(t *testing.T) {
-	db, _, _, profiles, bindings, _, projectID, _, roleVersionID := setupFlowFixture(t)
+	db, flowRuns, projectID, _, roleVersionID := setupFlowFixture(t)
 	ctx := context.Background()
 
-	profile, err := profiles.CreateProfile(ctx, store.CreateAgentFlowProfileInput{
-		Name: "Review", Slug: "review", SourceKind: domain.FlowSourceManaged,
-	})
-	require.NoError(t, err)
 	def, err := agentflow.ParseDefinition([]byte(flowYAML("review", "")))
 	require.NoError(t, err)
-	version, err := profiles.CreateVersion(ctx, profile.ID, def)
-	require.NoError(t, err)
-
-	session, err := (&store.SessionRepo{DB: db}).Create(ctx, domain.CreateSessionInput{
-		ProjectID: projectID, Title: "matrix session",
-	})
-	require.NoError(t, err)
-	binding, err := bindings.EnsureBindingExists(ctx, projectID, version.ID)
-	require.NoError(t, err)
-	_, err = bindings.Update(ctx, binding.ID, true)
-	require.NoError(t, err)
+	version := flowVersionFromDef(def)
 
 	inputs, err := store.NormalizeFlowInputs(def, map[string]any{"target": "src/main.go"}, nil)
 	require.NoError(t, err)
 	// Matrix 7: freeze before the first child — exact role version, skill id,
 	// goal digest, and per-task budget are captured in the node snapshots.
-	freeze, diagnostics, err := (&store.AgentFlowRunRepo{DB: db, SkillCatalog: map[string]string{"go-dev": "skill-go-dev"}}).
-		FreezeFlowDefinition(ctx, projectID, "", def, inputs)
+	freeze, diagnostics, err := freezeFlowForTest(t, db, flowRuns, projectID, "", def, inputs)
 	require.NoError(t, err, diagnostics)
 	require.Len(t, freeze, 3)
 	assert.Equal(t, roleVersionID, freeze[0].RoleVersionID)
 	assert.Equal(t, "skill-go-dev", freeze[0].SkillIDs[0])
 	assert.NotEmpty(t, freeze[0].GoalDigest)
 
-	flowRuns := &store.AgentFlowRunRepo{DB: db, SkillCatalog: map[string]string{"go-dev": "skill-go-dev"}}
+	session := sqlCreateSession(t, db, projectID)
 	run, err := flowRuns.CreateFlowRun(ctx, store.CreateFlowRunInput{
-		SessionID: session.ID, ProjectID: projectID, FlowVersionID: version.ID, InputsJSON: inputs,
+		SessionID: session.ID, ProjectID: projectID, FlowVersionID: version.ID,
+		DefinitionJSON: version.DefinitionJSON, ConfigDigest: version.ConfigDigest, InputsJSON: inputs,
 	}, freeze)
 	require.NoError(t, err)
 
@@ -65,9 +53,10 @@ func TestAgentFlowMatrixRunAndEventsPersisted(t *testing.T) {
 	// typed payload, reviewer consumes it (typed handoff), terminal completes.
 	hub := events.NewHub()
 	writer := events.NewWriter(&store.EventRepo{DB: db}, hub)
-	children := &stubMatrixChildren{db: db}
+	children := &stubMatrixChildren{db: db,
+		policies: &fileconfig.PolicyStore{Path: filepath.Join(t.TempDir(), "config", "policies.json")}}
 	orch := &agentflow.Orchestrator{
-		Store:        &store.OrchestratorStore{Runs: flowRuns, Profiles: profiles},
+		Store:        &store.OrchestratorStore{Runs: flowRuns},
 		Children:     children,
 		Events:       &store.FlowEventSink{Writer: writer},
 		PollInterval: 5 * time.Millisecond,
@@ -145,12 +134,14 @@ func TestAgentFlowMatrixRunAndEventsPersisted(t *testing.T) {
 // paths run) but settles children immediately with a typed payload.
 type stubMatrixChildren struct {
 	db          *sql.DB
+	policies    *fileconfig.PolicyStore
 	assignments []string
 }
 
 func (c *stubMatrixChildren) CreateTaskChild(ctx context.Context, parentRunID, sessionID string,
 	spec agentflow.ChildSpec) (agentflow.ChildInfo, error) {
-	info, err := (&store.OrchestratorChildren{DB: c.db, Delegations: &store.DelegationRepo{DB: c.db}}).
+	info, err := (&store.OrchestratorChildren{DB: c.db, Policies: c.policies,
+		Delegations: &store.DelegationRepo{DB: c.db, Policies: c.policies}}).
 		CreateTaskChild(ctx, parentRunID, sessionID, spec)
 	if err != nil {
 		return info, err

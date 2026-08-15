@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/mcpclient"
+	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -64,11 +66,13 @@ func TestMCPProfileAPI(t *testing.T) {
 }
 
 func TestMCPBindingAPI(t *testing.T) {
-	_, handler := setupServer(t, &fakeController{})
+	server, handler := setupServer(t, &fakeController{})
 	profileID := createMCPProfileWithVersion(t, handler)
+	project, _, err := server.Projects.CreateWithWorkspace(t.Context(), domain.CreateProjectInput{Name: "P", HostPath: t.TempDir()})
+	require.NoError(t, err)
 
 	// Create binding (disabled by default).
-	rec := request(t, handler, http.MethodPost, "/v1/projects/proj-1/mcp/bindings", map[string]any{
+	rec := request(t, handler, http.MethodPost, "/v1/projects/"+project.ID+"/mcp/bindings", map[string]any{
 		"profileVersionId": profileID,
 	}, true)
 	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
@@ -78,7 +82,7 @@ func TestMCPBindingAPI(t *testing.T) {
 	assert.True(t, binding.Required)
 
 	// Enable with tool selection.
-	rec = request(t, handler, http.MethodPatch, "/v1/projects/proj-1/mcp/bindings/"+binding.ID, map[string]any{
+	rec = request(t, handler, http.MethodPatch, "/v1/projects/"+project.ID+"/mcp/bindings/"+binding.ID, map[string]any{
 		"desiredEnabled": true, "selectedRemoteToolNames": []string{"search", "get"},
 	}, true)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -88,14 +92,14 @@ func TestMCPBindingAPI(t *testing.T) {
 	assert.Equal(t, 3, binding.Revision) // 1 create + POST upsert + PATCH
 
 	// List bindings.
-	rec = request(t, handler, http.MethodGet, "/v1/projects/proj-1/mcp/bindings", nil, true)
+	rec = request(t, handler, http.MethodGet, "/v1/projects/"+project.ID+"/mcp/bindings", nil, true)
 	require.Equal(t, http.StatusOK, rec.Code)
 	var bindings []domain.MCPProjectBinding
 	decodeData(t, rec, &bindings)
 	require.Len(t, bindings, 1)
 
 	// Delete.
-	rec = request(t, handler, http.MethodDelete, "/v1/projects/proj-1/mcp/bindings/"+binding.ID, nil, true)
+	rec = request(t, handler, http.MethodDelete, "/v1/projects/"+project.ID+"/mcp/bindings/"+binding.ID, nil, true)
 	require.Equal(t, http.StatusNoContent, rec.Code)
 }
 
@@ -125,16 +129,10 @@ func createMCPProfileWithVersion(t *testing.T, handler http.Handler) string {
 }
 
 func TestFreezeRunSnapshotsSemantics(t *testing.T) {
-	db, err := store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
-	profileRepo := &store.MCPProfileRepo{DB: db}
-	bindingRepo := &store.MCPBindingRepo{DB: db}
-	catalogRepo := &store.MCPCatalogRepo{DB: db}
+	profileRepo, bindingRepo, catalogRepo, runsRepo, projectID, _ := newAPIFileMCP(t)
 	mcp := &MCPServer{
 		Profiles: profileRepo, Bindings: bindingRepo, Catalogs: catalogRepo,
-		Runs: &store.MCPRunRepo{DB: db},
+		Runs: runsRepo,
 	}
 	mcp.DiscoverFn = func(ctx context.Context, binding *domain.MCPProjectBinding,
 		version *domain.MCPServerProfileVersion) ([]domain.MCPCatalogEntry, error) {
@@ -150,9 +148,9 @@ func TestFreezeRunSnapshotsSemantics(t *testing.T) {
 	require.NoError(t, profileRepo.CreateVersion(context.Background(), profile.ID, version))
 
 	// Disabled binding: no servers frozen.
-	disabledBinding, err := bindingRepo.EnsureBindingExists(context.Background(), "p1", version.ID)
+	disabledBinding, err := bindingRepo.EnsureBindingExists(context.Background(), projectID, version.ID)
 	require.NoError(t, err)
-	servers, err := mcp.FreezeRun(context.Background(), "run-1", "p1")
+	servers, err := mcp.FreezeRun(context.Background(), "run-1", projectID)
 	require.NoError(t, err)
 	assert.Empty(t, servers)
 
@@ -163,7 +161,7 @@ func TestFreezeRunSnapshotsSemantics(t *testing.T) {
 	updatedBinding, err := bindingRepo.Update(context.Background(), disabledBinding.ID, store.MCPBindingUpdate{DesiredEnabled: &enabled})
 	require.NoError(t, err)
 	_ = updatedBinding
-	servers, err = mcp.FreezeRun(context.Background(), "run-1", "p1")
+	servers, err = mcp.FreezeRun(context.Background(), "run-1", projectID)
 	require.NoError(t, err)
 	require.Len(t, servers, 1)
 	assert.True(t, servers[0].Snapshot.Required)
@@ -178,7 +176,7 @@ func TestFreezeRunSnapshotsSemantics(t *testing.T) {
 		CredentialRefs:          map[string]string{"GITHUB_TOKEN": "env:GITHUB_TOKEN"},
 	})
 	require.NoError(t, err)
-	servers, err = mcp.FreezeRun(context.Background(), "run-2", "p1")
+	servers, err = mcp.FreezeRun(context.Background(), "run-2", projectID)
 	require.NoError(t, err)
 	require.Len(t, servers, 1)
 	require.Len(t, servers[0].Tools, 1)
@@ -190,7 +188,7 @@ func TestFreezeRunSnapshotsSemantics(t *testing.T) {
 
 	// FreezeRun is idempotent per Run: a second call for run-2 reuses the
 	// frozen snapshots and never duplicates run_mcp_servers rows.
-	servers2, err := mcp.FreezeRun(context.Background(), "run-2", "p1")
+	servers2, err := mcp.FreezeRun(context.Background(), "run-2", projectID)
 	require.NoError(t, err)
 	require.Len(t, servers2, 1)
 	assert.Equal(t, servers[0].Snapshot.ID, servers2[0].Snapshot.ID)
@@ -205,7 +203,7 @@ func TestFreezeRunSnapshotsSemantics(t *testing.T) {
 	require.NoError(t, err)
 	uv := &domain.MCPServerProfileVersion{Transport: domain.MCPTransportStreamableHTTP, Endpoint: "https://127.0.0.1:1/mcp"}
 	require.NoError(t, profileRepo.CreateVersion(context.Background(), unreachable.ID, uv))
-	ub, err := bindingRepo.EnsureBindingExists(context.Background(), "p1", uv.ID)
+	ub, err := bindingRepo.EnsureBindingExists(context.Background(), projectID, uv.ID)
 	require.NoError(t, err)
 	_, err = bindingRepo.Update(context.Background(), ub.ID, store.MCPBindingUpdate{DesiredEnabled: &enabled})
 	require.NoError(t, err)
@@ -214,20 +212,15 @@ func TestFreezeRunSnapshotsSemantics(t *testing.T) {
 		version *domain.MCPServerProfileVersion) ([]domain.MCPCatalogEntry, error) {
 		return nil, fmt.Errorf("connection refused")
 	}
-	_, err = mcp.FreezeRun(context.Background(), "run-3", "p1")
+	_, err = mcp.FreezeRun(context.Background(), "run-3", projectID)
 	require.Error(t, err)
 }
 
 func TestFreezeRunOptionalUnavailableFreezesSnapshot(t *testing.T) {
-	db, err := store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
-	profileRepo := &store.MCPProfileRepo{DB: db}
-	bindingRepo := &store.MCPBindingRepo{DB: db}
+	profileRepo, bindingRepo, _, runsRepo, projectID, _ := newAPIFileMCP(t)
 	mcp := &MCPServer{
 		Profiles: profileRepo, Bindings: bindingRepo,
-		Runs: &store.MCPRunRepo{DB: db},
+		Runs: runsRepo,
 	}
 	mcp.DiscoverFn = func(ctx context.Context, binding *domain.MCPProjectBinding,
 		version *domain.MCPServerProfileVersion) ([]domain.MCPCatalogEntry, error) {
@@ -239,13 +232,13 @@ func TestFreezeRunOptionalUnavailableFreezesSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	version := &domain.MCPServerProfileVersion{Transport: domain.MCPTransportStreamableHTTP, Endpoint: "https://example.com/mcp"}
 	require.NoError(t, profileRepo.CreateVersion(context.Background(), profile.ID, version))
-	binding, err := bindingRepo.EnsureBindingExists(context.Background(), "p1", version.ID)
+	binding, err := bindingRepo.EnsureBindingExists(context.Background(), projectID, version.ID)
 	require.NoError(t, err)
 	required := false
 	_, err = bindingRepo.Update(context.Background(), binding.ID, store.MCPBindingUpdate{DesiredEnabled: ptr(true), Required: &required})
 	require.NoError(t, err)
 
-	servers, err := mcp.FreezeRun(context.Background(), "run-opt", "p1")
+	servers, err := mcp.FreezeRun(context.Background(), "run-opt", projectID)
 	require.NoError(t, err)
 	require.Len(t, servers, 1)
 	assert.False(t, servers[0].Snapshot.Required)
@@ -255,17 +248,17 @@ func TestFreezeRunOptionalUnavailableFreezesSnapshot(t *testing.T) {
 func ptr[V any](v V) *V { return &v }
 
 func TestMCPProjectFileDiscovery(t *testing.T) {
-	db, err := store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
-	projectRepo := &store.ProjectRepo{DB: db}
-	projects := &store.ProjectRepo{DB: db}
+	_, _, _, _, _, db := newAPIFileMCP(t)
+	home := t.TempDir()
+	projects := &projectstore.Store{Root: filepath.Join(home, "projects")}
+	projectRepo := projects
 	server := &Server{
-		DB: db, Token: "test-token", Projects: projects,
+		DB: db, Token: "test-token", Projects: &store.ProjectRepo{Files: projects},
 		MCP: &MCPServer{
-			Profiles: &store.MCPProfileRepo{DB: db}, Bindings: &store.MCPBindingRepo{DB: db},
-			Catalogs: &store.MCPCatalogRepo{DB: db}, Runs: &store.MCPRunRepo{DB: db},
+			Profiles: &store.MCPProfileRepo{FilePath: filepath.Join(home, "config", "mcp.json")},
+			Bindings: &store.MCPBindingRepo{Projects: projects},
+			Catalogs: &store.MCPCatalogRepo{CacheDir: filepath.Join(home, "cache", "mcp")},
+			Runs:     &store.MCPRunRepo{DB: db},
 		},
 	}
 	handler := server.Handler()
@@ -387,8 +380,8 @@ func TestMCPProjectFileMissing(t *testing.T) {
 	db, err := store.OpenMemory()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
-	projectRepo := &store.ProjectRepo{DB: db}
+	require.NoError(t, store.MigrateFixtureSchema(db))
+	projectRepo := newFileProjects(t)
 	server := &Server{
 		DB: db, Token: "test-token", Projects: projectRepo,
 		MCP: &MCPServer{
@@ -412,8 +405,8 @@ func TestMCPBundledCatalogAndCandidates(t *testing.T) {
 	db, err := store.OpenMemory()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
-	projectRepo := &store.ProjectRepo{DB: db}
+	require.NoError(t, store.MigrateFixtureSchema(db))
+	projectRepo := newFileProjects(t)
 
 	// P1 ships an empty bundled registry; the API plumbing still runs.
 	bundled := mcpclient.NewBundledRegistry()
@@ -442,4 +435,24 @@ func TestMCPBundledCatalogAndCandidates(t *testing.T) {
 	decodeData(t, rec, &candidates)
 	// Empty registry -> no bundled candidates (metadata-only, zero default).
 	assert.Empty(t, candidates)
+}
+
+// newAPIFileMCP wires the file-native MCP repos plus a Session-schema DB for
+// Run snapshots, mirroring production (V2).
+func newAPIFileMCP(t *testing.T) (profiles *store.MCPProfileRepo, bindings *store.MCPBindingRepo,
+	catalogs *store.MCPCatalogRepo, runs *store.MCPRunRepo, projectID string, db *sql.DB) {
+	t.Helper()
+	home := t.TempDir()
+	projects := &projectstore.Store{Root: filepath.Join(home, "projects")}
+	project, _, err := projects.CreateWithWorkspace(t.Context(),
+		domain.CreateProjectInput{Name: "P", HostPath: t.TempDir()})
+	require.NoError(t, err)
+	db, err = store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	require.NoError(t, store.MigrateSession(db))
+	return &store.MCPProfileRepo{FilePath: filepath.Join(home, "config", "mcp.json")},
+		&store.MCPBindingRepo{Projects: projects},
+		&store.MCPCatalogRepo{CacheDir: filepath.Join(home, "cache", "mcp")},
+		&store.MCPRunRepo{DB: db}, project.ID, db
 }

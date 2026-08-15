@@ -70,6 +70,11 @@ func TestProbeWorkerRequiresReadyAuthenticatedMatchingInstance(t *testing.T) {
 	assert.ErrorContains(t, probeWorker(context.Background(), state), "HTTP 503")
 }
 
+func TestWorkerStatePathUsesRuntimeDirectory(t *testing.T) {
+	home := t.TempDir()
+	assert.Equal(t, filepath.Join(home, "runtime", "worker-state.json"), workerStatePath(home))
+}
+
 func TestProcessAliveRecognizesCurrentAndMissingProcess(t *testing.T) {
 	assert.True(t, processAlive(os.Getpid()))
 	assert.False(t, processAlive(-1))
@@ -80,6 +85,7 @@ func TestGateRequiresSetupAndLoginBeforeStaticOrWorkerAccess(t *testing.T) {
 	staticDir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(home, "config"), 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("STATIC_APP"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(staticDir, "graphs.html"), []byte("GRAPHS_APP"), 0o600))
 	var upstreamCalls atomic.Int32
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upstreamCalls.Add(1)
@@ -147,6 +153,13 @@ func TestGateRequiresSetupAndLoginBeforeStaticOrWorkerAccess(t *testing.T) {
 	handler.ServeHTTP(staticResponse, staticRequest)
 	require.Equal(t, http.StatusOK, staticResponse.Code)
 	assert.Equal(t, "STATIC_APP", staticResponse.Body.String())
+
+	graphsRequest := httptest.NewRequest(http.MethodGet, "/graphs", nil)
+	graphsRequest.AddCookie(sessionCookie)
+	graphsResponse := httptest.NewRecorder()
+	handler.ServeHTTP(graphsResponse, graphsRequest)
+	require.Equal(t, http.StatusOK, graphsResponse.Code)
+	assert.Equal(t, "GRAPHS_APP", graphsResponse.Body.String())
 
 	proxyRequest := httptest.NewRequest(http.MethodGet, "/api/worker/v1/health/ready", nil)
 	proxyRequest.AddCookie(sessionCookie)

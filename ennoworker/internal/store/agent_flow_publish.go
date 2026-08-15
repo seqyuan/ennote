@@ -7,10 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 )
 
 var (
@@ -18,114 +18,27 @@ var (
 	ErrFlowValidation    = errors.New("flow validation failed")
 )
 
-// UpdateDraft stores the canonical draft (definition JSON + YAML text) and
-// bumps the revision with optimistic locking. The draft is the authoring
-// transport; nothing here publishes or executes.
-func (r *AgentFlowProfileRepo) UpdateDraft(ctx context.Context, profileID string,
-	def *domain.FlowDefinition, yamlText string, expectedRevision int) (*domain.AgentFlowProfile, error) {
-	encoded, err := json.Marshal(def)
-	if err != nil {
-		return nil, fmt.Errorf("encode flow draft: %w", err)
-	}
-	res, err := r.DB.ExecContext(ctx, `UPDATE agent_flow_profiles SET
-		draft_json=?, draft_yaml=?, draft_revision=draft_revision+1, updated_at=?
-		WHERE id=? AND lifecycle_status='active' AND draft_revision=?`,
-		string(encoded), yamlText, roleTime(time.Now().UTC()), profileID, expectedRevision)
-	if err != nil {
-		return nil, err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		var exists int
-		_ = r.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_flow_profiles WHERE id=?`, profileID).Scan(&exists)
-		if exists == 0 {
-			return nil, sql.ErrNoRows
-		}
-		return nil, ErrFlowDraftConflict
-	}
-	return r.GetProfile(ctx, profileID)
-}
-
-// FlowDraft is the stored authoring draft.
-type FlowDraft struct {
-	Definition domain.FlowDefinition
-	YAML       string
-	Revision   int
-}
-
-// GetDraft loads the stored draft of a profile.
-func (r *AgentFlowProfileRepo) GetDraft(ctx context.Context, profileID string) (*FlowDraft, error) {
-	var definitionJSON, yamlText sql.NullString
-	var revision int
-	if err := r.DB.QueryRowContext(ctx, `SELECT draft_json, draft_yaml, draft_revision
-		FROM agent_flow_profiles WHERE id=? AND lifecycle_status='active'`, profileID).
-		Scan(&definitionJSON, &yamlText, &revision); err != nil {
-		return nil, err
-	}
-	if !definitionJSON.Valid {
-		return nil, sql.ErrNoRows
-	}
-	draft := &FlowDraft{Revision: revision}
-	if yamlText.Valid {
-		draft.YAML = yamlText.String
-	}
-	if err := json.Unmarshal([]byte(definitionJSON.String), &draft.Definition); err != nil {
-		return nil, fmt.Errorf("decode flow draft: %w", err)
-	}
-	return draft, nil
-}
-
-// ValidateDraft runs the full publish validation against the stored draft.
-func (r *AgentFlowProfileRepo) ValidateDraft(ctx context.Context, profileID string,
-	validator *agentflow.Validator) (*agentflow.ValidationResult, error) {
-	draft, err := r.GetDraft(ctx, profileID)
-	if err != nil {
-		return nil, err
-	}
-	result := validator.Validate(ctx, &draft.Definition)
-	return result, nil
-}
-
-// Publish validates the stored draft and creates the next immutable version.
-// The draft is the transport; the published version is the frozen contract.
-func (r *AgentFlowProfileRepo) Publish(ctx context.Context, profileID string, expectedRevision int,
-	validator *agentflow.Validator) (*domain.AgentFlowVersion, error) {
-	draft, err := r.GetDraft(ctx, profileID)
-	if err != nil {
-		return nil, err
-	}
-	if draft.Revision != expectedRevision {
-		return nil, ErrFlowDraftConflict
-	}
-	result := validator.Validate(ctx, &draft.Definition)
-	if !result.Valid {
-		if len(result.Diagnostics) == 0 {
-			return nil, fmt.Errorf("%w: %s", ErrFlowValidation, "flow definition is invalid")
-		}
-		return nil, fmt.Errorf("%w: %s", ErrFlowValidation, result.Diagnostics[0].Code)
-	}
-	version, err := r.CreateVersion(ctx, profileID, &draft.Definition)
-	if err != nil {
-		return nil, err
-	}
-	return version, nil
-}
-
 // --- Publish resolver wiring ---
 
-// FlowPublishOptions wires the publish-time validator against live SQL.
+// FlowPublishOptions wires the publish-time validator. When Sources/Models
+// are set, role references resolve from the file-native Role catalog (V2);
+// otherwise the legacy global role SQL is used.
 type FlowPublishOptions struct {
 	DB             *sql.DB
 	ProjectID      string // optional project scope (project_file flows)
 	FlowID         string // optional owning flow (flow-local role references)
 	Skills         map[string]bool
 	CheckAllowlist []string
+	Sources        *globalsource.Store
+	Models         *ModelRepo
 }
 
-// NewFlowValidator builds the publish validator with a SQL-backed resolver.
+// NewFlowValidator builds the publish validator.
 func NewFlowValidator(opts FlowPublishOptions) *agentflow.Validator {
 	return &agentflow.Validator{
 		Resolver: &flowPublishResolver{
 			db: opts.DB, projectID: opts.ProjectID, flowID: opts.FlowID, skills: opts.Skills,
+			sources: opts.Sources, models: opts.Models,
 		},
 		CheckAllowlist: opts.CheckAllowlist,
 		MaxFanOut:      64,
@@ -138,6 +51,8 @@ type flowPublishResolver struct {
 	projectID string
 	flowID    string
 	skills    map[string]bool
+	sources   *globalsource.Store
+	models    *ModelRepo
 }
 
 // ResolveRole resolves a task role reference at publish time. A version-qualified
@@ -151,6 +66,21 @@ func (f *flowPublishResolver) ResolveRole(ctx context.Context, roleRef string) (
 	handle = strings.TrimSpace(handle)
 	if handle == "" {
 		return nil, fmt.Errorf("role reference %q has an empty handle", roleRef)
+	}
+	if f.sources != nil && f.models != nil {
+		// V2: role references resolve from the file-native Role catalog.
+		document, _, err := f.sources.ReadRoleRevision(handle, "v000001")
+		if err != nil {
+			return nil, fmt.Errorf("role %q is not published: %w", handle, err)
+		}
+		definition, diagnostics := (&RoleDiscovery{Models: f.models}).ResolveDocument(ctx, document)
+		if definition == nil {
+			if len(diagnostics) > 0 {
+				return nil, fmt.Errorf("role %q: %s", handle, diagnostics[0].Message)
+			}
+			return nil, fmt.Errorf("role %q failed to resolve", handle)
+		}
+		return &agentflow.RoleInfo{Definition: *definition}, nil
 	}
 	if !hasVersion {
 		// Bare handle: flow-local first, shared current fallback.
@@ -275,12 +205,4 @@ func roleDefinitionIsReadOnly(roleDef domain.RoleDefinition) bool {
 		}
 	}
 	return true
-}
-
-// CheckFlowDependencies resolves a flow definition's dependency manifest
-// against the target environment (global or project scope). Missing
-// dependencies are reported with reasons and never installed.
-func CheckFlowDependencies(ctx context.Context, opts FlowPublishOptions, def *domain.FlowDefinition) ([]agentflow.DependencyStatus, error) {
-	resolver := &flowPublishResolver{db: opts.DB, projectID: opts.ProjectID, skills: opts.Skills}
-	return agentflow.CheckDependencies(ctx, resolver, def), nil
 }

@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
+	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 )
 
 var (
@@ -25,8 +27,12 @@ type EventPublisher interface {
 }
 
 type RunRepo struct {
-	DB        *sql.DB
-	Publisher EventPublisher
+	DB          *sql.DB
+	Publisher   EventPublisher
+	Providers   *ProviderRepo
+	Models      *ModelRepo
+	Policies    *fileconfig.PolicyStore
+	RoleSources *globalsource.Store
 }
 
 func (r *RunRepo) SubmitTurn(ctx context.Context, input domain.SubmitTurnInput) (*domain.TurnSubmission, error) {
@@ -121,25 +127,36 @@ func (r *RunRepo) submitTurn(ctx context.Context, input domain.SubmitTurnInput, 
 	createParticipant := false
 	inviteParticipant := false
 	if target != nil {
-		var writerSetting string
-		if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='hosted_commit_format_version'`).Scan(&writerSetting); err != nil || writerSetting != "2" {
-			return nil, domain.NewCodedError(domain.ErrorCommitFormatNotEnabled, fmt.Errorf("format 2 writer is not enabled"))
-		}
-		var handle, name, icon, color, positioning, configDigest, definitionJSON string
-		err := tx.QueryRowContext(ctx, `SELECT p.handle,p.name,p.icon,p.color,p.positioning,v.config_digest,v.definition_json
-			FROM agent_profiles p JOIN agent_profile_versions v ON v.id=p.current_version_id
-			WHERE p.id=? AND v.id=? AND p.object_kind='role' AND p.status='active' AND v.status='published'
-			AND (p.project_id IS NULL OR p.project_id=?)`, target.ObjectID, target.VersionID, sessionProjectID).
-			Scan(&handle, &name, &icon, &color, &positioning, &configDigest, &definitionJSON)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("Role target is unavailable or not published"))
-		}
-		if err != nil {
-			return nil, fmt.Errorf("resolve Role target: %w", err)
-		}
+		var handle, name, icon, color, positioning, configDigest string
 		var definition domain.RoleDefinition
-		if err := json.Unmarshal([]byte(definitionJSON), &definition); err != nil {
-			return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("decode Role target: %w", err))
+		if r.RoleSources != nil {
+			resolved, err := r.resolveFileRole(ctx, target.ObjectID, target.VersionID)
+			if err != nil {
+				return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, err)
+			}
+			handle, name = resolved.Document.Handle, resolved.Document.Name
+			icon, color, positioning = resolved.Document.Icon, resolved.Document.Color, resolved.Document.Positioning
+			configDigest, definition = resolved.Revision.Digest, resolved.Definition
+		} else {
+			var writerSetting string
+			if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='hosted_commit_format_version'`).Scan(&writerSetting); err != nil || writerSetting != "2" {
+				return nil, domain.NewCodedError(domain.ErrorCommitFormatNotEnabled, fmt.Errorf("format 2 writer is not enabled"))
+			}
+			var definitionJSON string
+			err := tx.QueryRowContext(ctx, `SELECT p.handle,p.name,p.icon,p.color,p.positioning,v.config_digest,v.definition_json
+				FROM agent_profiles p JOIN agent_profile_versions v ON v.id=p.current_version_id
+				WHERE p.id=? AND v.id=? AND p.object_kind='role' AND p.status='active' AND v.status='published'
+				AND (p.project_id IS NULL OR p.project_id=?)`, target.ObjectID, target.VersionID, sessionProjectID).
+				Scan(&handle, &name, &icon, &color, &positioning, &configDigest, &definitionJSON)
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("Role target is unavailable or not published"))
+			}
+			if err != nil {
+				return nil, fmt.Errorf("resolve Role target: %w", err)
+			}
+			if err := json.Unmarshal([]byte(definitionJSON), &definition); err != nil {
+				return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("decode Role target: %w", err))
+			}
 		}
 		contextAllowed := false
 		for _, allowed := range definition.ContextPolicy.AllowedModes {
@@ -498,7 +515,7 @@ func (r *RunRepo) FinalizeSuccess(ctx context.Context, runID string, output doma
 		return domain.NewCodedError(domain.ErrorCommitFormatNotEnabled,
 			fmt.Errorf("run %s uses unsupported commit format %d", runID, commitFormat))
 	}
-	if commitFormat == domain.CommitFormatSpeakerV2 {
+	if commitFormat == domain.CommitFormatSpeakerV2 && r.RoleSources == nil {
 		var writerSetting string
 		if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='hosted_commit_format_version'`).Scan(&writerSetting); err != nil || writerSetting != "2" {
 			return domain.NewCodedError(domain.ErrorCommitFormatNotEnabled, fmt.Errorf("format 2 writer is not enabled"))

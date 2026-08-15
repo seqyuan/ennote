@@ -8,34 +8,29 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
-	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agent"
-	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/api"
 	"github.com/seqyuan/ennote/ennoworker/internal/artifacts"
+	"github.com/seqyuan/ennote/ennoworker/internal/capability"
 	"github.com/seqyuan/ennote/ennoworker/internal/compaction"
-	"github.com/seqyuan/ennote/ennoworker/internal/config"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
+	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/hooks"
 	"github.com/seqyuan/ennote/ennoworker/internal/llm"
 	"github.com/seqyuan/ennote/ennoworker/internal/mcpclient"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectcontext"
-	"github.com/seqyuan/ennote/ennoworker/internal/prompts"
-	"github.com/seqyuan/ennote/ennoworker/internal/providerdoctor"
 	"github.com/seqyuan/ennote/ennoworker/internal/runs"
-	"github.com/seqyuan/ennote/ennoworker/internal/runtimeinfo"
+	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/skills"
-	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
+	"github.com/seqyuan/ennote/ennoworker/internal/spill"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/seqyuan/ennote/ennoworker/internal/tools"
 	"github.com/seqyuan/ennote/ennoworker/internal/workspace"
@@ -95,10 +90,12 @@ type agentExecutor struct {
 	writer            *events.Writer
 	hub               *events.Hub
 	homeDir           string
+	sessionPath       string
 	trustStore        *workspace.TrustStore
 	outboxStore       *hooks.OutboxStore
 	runs              *store.RunRepo
 	calls             *store.CallRepo
+	projects          *store.ProjectRepo
 	sessionDB         *store.SessionRepo
 	msgRepo           *store.MessageRepo
 	skillRepo         *store.SkillSnapshotRepo
@@ -114,6 +111,66 @@ type agentExecutor struct {
 	OnChildRunsCreated func(ctx context.Context, runIDs []string)
 	// MCP wires the MCP tools-only client stores for Run freezing.
 	MCP *api.MCPServer
+}
+
+// delegationRepo returns the Session-scoped delegation repository with the
+// file-native Role resolver wired (V2). Host delegation resolves global Roles
+// from immutable file revisions, never from the removed global role SQL.
+func (e *agentExecutor) delegationRepo() *store.DelegationRepo {
+	var sources *globalsource.Store
+	var models *store.ModelRepo
+	var policies *fileconfig.PolicyStore
+	if e.runs != nil {
+		sources = e.runs.RoleSources
+		models = e.runs.Models
+		policies = e.runs.Policies
+	}
+	return &store.DelegationRepo{DB: e.db, RoleSources: sources, Models: models, Policies: policies}
+}
+
+type sessionExecutorRouter struct {
+	sessions *sessionstore.Manager
+	build    func(*sql.DB, string) (*agentExecutor, error)
+	onChild  func(context.Context, []string)
+}
+
+func (r *sessionExecutorRouter) Execute(ctx context.Context, run *domain.AgentRun) (domain.RunOutput, error) {
+	if r == nil || r.sessions == nil || r.build == nil {
+		return domain.RunOutput{}, fmt.Errorf("Session executor router is unavailable")
+	}
+	db, err := r.sessions.OpenSession(ctx, run.SessionID)
+	if err != nil {
+		return domain.RunOutput{}, err
+	}
+	path, err := r.sessions.SessionPath(run.SessionID)
+	if err != nil {
+		return domain.RunOutput{}, err
+	}
+	executor, err := r.build(db, path)
+	if err != nil {
+		return domain.RunOutput{}, err
+	}
+	executor.OnChildRunsCreated = r.onChild
+	return executor.Execute(ctx, run)
+}
+
+func (r *sessionExecutorRouter) CheckPrompt(ctx context.Context, sessionID, prompt string, parts []domain.ContentBlock) api.PromptHookOutcome {
+	if r == nil || r.sessions == nil || r.build == nil {
+		return api.PromptHookOutcome{Error: fmt.Errorf("Session prompt router is unavailable")}
+	}
+	db, err := r.sessions.OpenSession(ctx, sessionID)
+	if err != nil {
+		return api.PromptHookOutcome{Error: err}
+	}
+	path, err := r.sessions.SessionPath(sessionID)
+	if err != nil {
+		return api.PromptHookOutcome{Error: err}
+	}
+	executor, err := r.build(db, path)
+	if err != nil {
+		return api.PromptHookOutcome{Error: err}
+	}
+	return executor.CheckPrompt(ctx, sessionID, prompt, parts)
 }
 
 // freezeMCPIntoRegistry freezes the Run's MCP snapshots (atomic server+tool
@@ -204,7 +261,7 @@ func (e *agentExecutor) freezeMCPIntoRegistry(ctx context.Context, run *domain.A
 					return sess
 				},
 			}
-			if err := toolReg.Register(mcpTool); err != nil {
+			if _, err := toolReg.Register(mcpTool); err != nil {
 				connSet.Close()
 				return nil, fmt.Errorf("register mcp tool %s: %w", exposedName, err)
 			}
@@ -271,7 +328,7 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	if err != nil {
 		return domain.RunOutput{}, err
 	}
-	wSpace, err := loadProjectWorkspace(ctx, e.db, run.SessionID)
+	wSpace, err := e.loadProjectWorkspace(ctx, run.SessionID)
 	if err != nil {
 		return domain.RunOutput{}, fmt.Errorf("load project: %w", err)
 	}
@@ -293,6 +350,14 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 				break
 			}
 		}
+	}
+
+	// Project tool policy patch + hooks (design 一 Stage 2a/2b): a trusted
+	// workspace may whole-row replace the tool policy config and declare
+	// project listeners for FRESH runs only. Resume loads the already-frozen
+	// config and never re-reads workspace files (G5).
+	if err := e.applyWorkspaceToolPolicy(ctx, run, &resolved.Effective, canonicalRoot, trusted); err != nil {
+		return domain.RunOutput{}, err
 	}
 
 	// Resolve hooks config (Phase 2): global + workspace layers, trust-gated.
@@ -327,12 +392,20 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	}
 	router := &agent.SnapshotModelRouter{Factory: e.resolveRuntimeProvider}
 
-	wDir := filepath.Join(os.Getenv("ENNOTE_HOME"), "runtime", "runs", run.ID)
+	wDir := filepath.Join(e.homeDir, "runtime", "runs", run.ID)
 	ioDir := filepath.Join(wDir, "io")
 	if err := os.MkdirAll(ioDir, 0o700); err != nil {
 		return domain.RunOutput{}, fmt.Errorf("create runtime io dir: %w", err)
 	}
-	snapDir := filepath.Join(wDir, "skills")
+	snapshotRoot := filepath.Join(e.sessionPath, "snapshots", "runs", run.ID)
+	if e.sessionPath == "" {
+		snapshotRoot = wDir
+	}
+	snapDir := filepath.Join(snapshotRoot, "skills")
+	if e.sessionPath != "" && workspace.SandboxMode(e.sandbox) != workspace.SandboxNone && resumeState != nil &&
+		resumeState.SkillCatalogState == "materialized" && resumeState.SkillCatalogDigest != "" {
+		snapDir = filepath.Join(e.sessionPath, "snapshots", "skills", "sha256-"+resumeState.SkillCatalogDigest)
+	}
 
 	baseSystemPrompt := agent.BaseSystemPrompt(resolved.SystemPrompt.AgentPrompt)
 	if resolved.Effective.Role != nil {
@@ -386,7 +459,15 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 			if planErr != nil {
 				slog.Warn("plan materialization failed", "error", planErr)
 			} else {
-				result, matErr := skills.MaterializeCatalog(wDir, plan, catalog)
+				result, matErr := skills.MaterializeCatalog(snapshotRoot, plan, catalog)
+				if matErr == nil && e.sessionPath != "" && workspace.SandboxMode(e.sandbox) != workspace.SandboxNone {
+					target := filepath.Join(e.sessionPath, "snapshots", "skills", "sha256-"+result.CatalogDigest)
+					matErr = skills.PromoteMaterializedCatalog(result, target)
+					if matErr == nil {
+						snapDir = result.Root
+						_ = os.Remove(snapshotRoot)
+					}
+				}
 				if matErr != nil {
 					slog.Warn("materialize catalog failed", "error", matErr)
 				} else {
@@ -438,7 +519,7 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	}
 
 	todoStore := domain.NewTodoStore()
-	if err := toolReg.Register(&tools.TodoTool{Store: todoStore}); err != nil {
+	if _, err := toolReg.Register(&tools.TodoTool{Store: todoStore}); err != nil {
 		return domain.RunOutput{}, fmt.Errorf("register todo tool: %w", err)
 	}
 	// Register delegate_tasks with the Host delegation provider, plus its
@@ -446,10 +527,10 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	// persisted tool calls and approval records. Models only ever see
 	// delegate_tasks (aliases are hidden by the Registry).
 	delegateTasks := &tools.DelegateTasksTool{Provider: e.delegateProvider(run), RunID: run.ID, SessionID: run.SessionID}
-	if err := toolReg.Register(delegateTasks); err != nil {
+	if _, err := toolReg.Register(delegateTasks); err != nil {
 		return domain.RunOutput{}, fmt.Errorf("register delegate_tasks: %w", err)
 	}
-	if err := toolReg.RegisterAlias("delegate_roles", "delegate_tasks", delegateTasks.LegacySchema()); err != nil {
+	if _, err := toolReg.RegisterAlias("delegate_roles", "delegate_tasks", delegateTasks.LegacySchema()); err != nil {
 		return domain.RunOutput{}, fmt.Errorf("register delegate_roles alias: %w", err)
 	}
 	if resolved.Effective.Role != nil {
@@ -494,7 +575,7 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		if resumeState != nil {
 			historyTool.UseRunLocal(run.ID, resumeState.Generated, resumeState.MidRunCompaction.CoveredGenerated)
 		}
-		if err := toolReg.Register(historyTool); err != nil {
+		if _, err := toolReg.Register(historyTool); err != nil {
 			return domain.RunOutput{}, fmt.Errorf("register compacted history lookup: %w", err)
 		}
 	}
@@ -516,21 +597,51 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorToolPolicyFailed, policyErr)
 	}
 	var effectiveToolPolicy agent.ToolPolicy = tp
+	var knownTaskSkills map[string]bool
 	if resolved.Effective.Role == nil {
-		knownTaskSkills := make(map[string]bool)
+		knownTaskSkills = make(map[string]bool)
 		for _, skill := range skills.Discover(e.skillsDir, e.builtinDir) {
 			knownTaskSkills[skill.Manifest.ID] = true
 		}
 		effectiveToolPolicy = &delegationAdmissionToolPolicy{Base: tp,
-			Delegations: &store.DelegationRepo{DB: e.db}, SessionID: run.SessionID,
+			Delegations: e.delegationRepo(), SessionID: run.SessionID,
 			KnownSkills: knownTaskSkills}
 	}
+	var delegationHook agent.PreToolHook
+	if resolved.Effective.Role == nil {
+		delegationHook = delegationAdmissionHook(e.delegationRepo(), run.SessionID, knownTaskSkills)
+	}
+	// Single chain assembly path shared by fresh and resume runs (I6).
+	policyChain, chainErr := agent.BuildRunPolicyChain(resolved.Effective.ToolPolicy, resolved.Effective.ToolPolicyHooks, delegationHook)
+	if chainErr != nil {
+		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorToolPolicyFailed, chainErr)
+	}
+	// Spill policy (design 二 P2): enabled by the frozen tool policy config.
+	var toolPolicyCfg domain.ToolPolicyConfig
+	if json.Unmarshal(resolved.Effective.ToolPolicy.Config, &toolPolicyCfg) == nil && toolPolicyCfg.MaxInlineToolResultBytes > 0 {
+		spillStore := spill.NewLocal(filepath.Join(e.homeDir, "spill"))
+		if _, regErr := policyChain.RegisterPost(agent.SpillPostHook(spillStore, toolPolicyCfg.MaxInlineToolResultBytes, func(exec *agent.ToolExecution) spill.Owner {
+			return spill.Owner{SessionID: run.SessionID}
+		})); regErr != nil {
+			return domain.RunOutput{}, domain.NewCodedError(domain.ErrorToolPolicyFailed, regErr)
+		}
+	}
+	frozenChain, freezeErr := policyChain.Freeze()
+	if freezeErr != nil {
+		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorToolPolicyFailed, freezeErr)
+	}
+	// Stage 0 capability shell: frozen per-run views owned by the Run. The MCP
+	// connection set keeps its existing close site for now; Stage 1 folds it
+	// into this snapshot's disposer.
+	capSnapshot := capability.New(run.ID, run.ExecutionDepth, toolReg, frozenChain)
+	defer capSnapshot.Dispose()
 	loop := &agent.Loop{
 		Provider: provider, ModelRouter: router, TurnPlanner: agent.ContextTurnPlanner{},
 		MidRunCompactor:   runCompactor,
 		VisionResolver:    &agent.BuiltinVisionResolver{Loader: e.artifacts},
 		ImageDescriptions: &store.ImageDescriptionRepo{DB: e.db},
 		Tools:             toolReg, ToolPolicy: effectiveToolPolicy, ToolPolicySnapshot: resolved.Effective.ToolPolicy,
+		PolicyChain:           frozenChain,
 		StandingScopeResolver: toolReg, StandingApprovals: e.standingApprovals,
 		WorkspaceID: wSpace.ID, SessionID: session.ID, Events: e.writer, Hub: e.hub, Recorder: e.calls,
 		QueuedInputs: &queueAdapter{repo: &store.QueueRepo{DB: e.db}},
@@ -575,7 +686,7 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		if recoveryErr == nil && result.Checkpoint != nil && compactionConfig.AllowHistoryLookup {
 			if historyTool == nil {
 				historyTool = tools.NewCompactedHistoryTool(history, *result.Checkpoint)
-				if registerErr := toolReg.Register(historyTool); registerErr != nil {
+				if _, registerErr := toolReg.Register(historyTool); registerErr != nil {
 					return nil, registerErr
 				}
 			} else {
@@ -710,7 +821,7 @@ func (e *agentExecutor) enqueueQueuedChildren(ctx context.Context, parentRunID s
 // the assignment, restricts tools to the Role allowlist plus submit_result, and
 // requires the terminal contract to end the Run.
 func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.AgentRun) (domain.RunOutput, error) {
-	budget := &store.DelegationRepo{DB: e.db}
+	budget := e.delegationRepo()
 	remainingWall, err := budget.BeginBudget(ctx, run.ID)
 	if err != nil {
 		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorDelegationBudgetExceeded, err)
@@ -738,7 +849,7 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 	if err != nil || session == nil {
 		return domain.RunOutput{}, fmt.Errorf("load session: %w", err)
 	}
-	wSpace, err := loadProjectWorkspace(ctx, e.db, run.SessionID)
+	wSpace, err := e.loadProjectWorkspace(ctx, run.SessionID)
 	if err != nil {
 		return domain.RunOutput{}, fmt.Errorf("load project: %w", err)
 	}
@@ -757,7 +868,7 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 	}
 	router := &agent.SnapshotModelRouter{Factory: e.resolveRuntimeProvider}
 
-	wDir := filepath.Join(os.Getenv("ENNOTE_HOME"), "runtime", "runs", run.ID)
+	wDir := filepath.Join(e.homeDir, "runtime", "runs", run.ID)
 	ioDir := filepath.Join(wDir, "io")
 	if err := os.MkdirAll(ioDir, 0o700); err != nil {
 		return domain.RunOutput{}, fmt.Errorf("create runtime io dir: %w", err)
@@ -778,11 +889,11 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 		return domain.RunOutput{}, fmt.Errorf("create tools: %w", err)
 	}
 	todoStore := domain.NewTodoStore()
-	if err := toolReg.Register(&tools.TodoTool{Store: todoStore}); err != nil {
+	if _, err := toolReg.Register(&tools.TodoTool{Store: todoStore}); err != nil {
 		return domain.RunOutput{}, fmt.Errorf("register todo tool: %w", err)
 	}
 	toolReg.Restrict(resolved.Effective.Role.AllowedTools)
-	if err := toolReg.Register(&tools.SubmitResultTool{}); err != nil {
+	if _, err := toolReg.Register(&tools.SubmitResultTool{}); err != nil {
 		return domain.RunOutput{}, fmt.Errorf("register submit_result: %w", err)
 	}
 
@@ -833,11 +944,24 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 	if policyErr != nil {
 		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorToolPolicyFailed, policyErr)
 	}
+	policyChain, chainErr := agent.BuildRunPolicyChain(resolved.Effective.ToolPolicy, nil, nil)
+	if chainErr != nil {
+		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorToolPolicyFailed, chainErr)
+	}
+	frozenChain, freezeErr := policyChain.Freeze()
+	if freezeErr != nil {
+		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorToolPolicyFailed, freezeErr)
+	}
+	// Stage 0 capability shell for the delegated child. childMCPSet keeps its
+	// existing close site; Stage 1 folds it into the snapshot disposer.
+	capSnapshot := capability.New(run.ID, run.ExecutionDepth, toolReg, frozenChain)
+	defer capSnapshot.Dispose()
 	loop := &agent.Loop{
 		Provider: provider, ModelRouter: router, TurnPlanner: agent.ContextTurnPlanner{},
 		VisionResolver:    &agent.BuiltinVisionResolver{Loader: e.artifacts},
 		ImageDescriptions: &store.ImageDescriptionRepo{DB: e.db},
 		Tools:             toolReg, ToolPolicy: tp, ToolPolicySnapshot: resolved.Effective.ToolPolicy,
+		PolicyChain:           frozenChain,
 		StandingScopeResolver: toolReg, StandingApprovals: e.standingApprovals,
 		WorkspaceID: wSpace.ID, SessionID: session.ID, Events: e.writer, Hub: e.hub, Recorder: e.calls,
 		QueuedInputs: &queueAdapter{repo: &store.QueueRepo{DB: e.db}},
@@ -904,11 +1028,11 @@ func (e *agentExecutor) executeContextCompaction(ctx context.Context, run *domai
 	if err != nil {
 		return domain.RunOutput{}, err
 	}
-	workspaceRecord, err := loadProjectWorkspace(ctx, e.db, run.SessionID)
+	workspaceRecord, err := e.loadProjectWorkspace(ctx, run.SessionID)
 	if err != nil {
 		return domain.RunOutput{}, err
 	}
-	workDir := filepath.Join(os.Getenv("ENNOTE_HOME"), "runtime", "runs", run.ID)
+	workDir := filepath.Join(e.homeDir, "runtime", "runs", run.ID)
 	ioDir := filepath.Join(workDir, "io")
 	if err := os.MkdirAll(ioDir, 0o700); err != nil {
 		return domain.RunOutput{}, err
@@ -942,7 +1066,7 @@ func (e *agentExecutor) resolveProvider(resolved *store.ResolvedRunConfig) (llm.
 	if runtime.ModelProfileID == "" {
 		runtime = domain.ModelRuntimeSnapshot{ProviderProfileID: resolved.Provider.ID,
 			ModelProfileID: resolved.Model.ID, APIModel: resolved.Model.ModelName,
-			BaseURL: resolved.Provider.BaseURL, CredentialRef: resolved.Provider.CredentialRef,
+			BaseURL: resolved.Provider.BaseURL, APIKey: resolved.Provider.APIKey,
 			Proxy: resolved.Provider.Proxy, ContextTokens: resolved.Model.ContextWindow,
 			MaxOutputTokens: resolved.Model.MaxOutputTokens, SupportsVision: resolved.Model.SupportsVision,
 			SupportsToolUse: resolved.Model.SupportsToolUse, SupportsThinking: resolved.Model.SupportsThinking}
@@ -957,6 +1081,7 @@ func (e *agentExecutor) delegateProvider(run *domain.AgentRun) *agentExecutorDel
 		db: e.db, runs: e.runs, sessions: e.sessionDB,
 		skillsDir: e.skillsDir, builtinDir: e.builtinDir,
 		runID: run.ID, sessionID: run.SessionID,
+		delegations: e.delegationRepo(),
 	}
 }
 
@@ -965,6 +1090,96 @@ type delegationAdmissionToolPolicy struct {
 	Delegations *store.DelegationRepo
 	SessionID   string
 	KnownSkills map[string]bool
+}
+
+// delegationAdmissionHook is the per-exec chain-listener form of
+// delegationAdmissionToolPolicy.BeforeToolBatch (design 一 Stage 1/2). It runs
+// after the builtin listeners and upgrades/denies delegation tool calls.
+func delegationAdmissionHook(delegations *store.DelegationRepo, sessionID string, knownSkills map[string]bool) agent.PreToolHook {
+	return func(ctx context.Context, exec *agent.ToolExecution, next func(*agent.ToolExecution) (agent.PreToolDecision, error)) (agent.PreToolDecision, error) {
+		d, err := next(exec)
+		if err != nil {
+			return d, err
+		}
+		if !domain.IsDelegationToolName(exec.Effective.Name) || d.Action == agent.ToolTerminateBatch {
+			return d, nil
+		}
+		var input struct {
+			Tasks       []domain.TaskSpec `json:"tasks"`
+			Delegations []domain.TaskSpec `json:"delegations"` // legacy replay compat
+		}
+		effectiveArguments := exec.Effective.Arguments
+		if len(d.Arguments) > 0 {
+			effectiveArguments = d.Arguments
+		}
+		if json.Unmarshal(effectiveArguments, &input) != nil {
+			return d, nil // Registry schema validation reports malformed arguments.
+		}
+		specs := input.Tasks
+		if len(specs) == 0 {
+			specs = input.Delegations
+		}
+		if len(specs) == 0 {
+			return d, nil
+		}
+		if topologyErr := store.ValidateTaskTopology(specs); topologyErr != nil {
+			return agent.PreToolDecision{Action: agent.ToolDeny, Code: string(domain.ErrorDelegationDagInvalid),
+				Reason: topologyErr.Error(), RiskClass: domain.RiskDelegation}, nil
+		}
+		requiresApproval := false
+		denial := ""
+		denialCode := ""
+		for specIndex := range specs {
+			spec := &specs[specIndex]
+			spec.Normalize()
+			for _, rawSkillID := range spec.Skills {
+				skillID := strings.TrimSpace(rawSkillID)
+				if skillID == "" || !knownSkills[skillID] {
+					denial = fmt.Sprintf("Task %q references unavailable Skill %q", spec.Name, skillID)
+					denialCode = "skill_not_found"
+					break
+				}
+			}
+			if denial != "" {
+				break
+			}
+			snapshot, resolveErr := delegations.ResolveRoleForDelegation(ctx, sessionID, spec.Role)
+			if errors.Is(resolveErr, store.ErrDelegationRoleUnavailable) {
+				denial = fmt.Sprintf("Role %q is unavailable in this project", spec.Role)
+				break
+			}
+			if resolveErr != nil {
+				return agent.PreToolDecision{}, resolveErr
+			}
+			if !snapshot.DelegationEnabled || snapshot.Definition.DelegationPolicy.Admission == domain.DelegationDenied {
+				denial = fmt.Sprintf("Role %q does not allow Host delegation", spec.Role)
+				break
+			}
+			spec.RoleVersionID = snapshot.VersionID
+			requiresApproval = requiresApproval ||
+				snapshot.Definition.DelegationPolicy.Admission == domain.DelegationApprovalRequired
+		}
+		if denial != "" {
+			if denialCode == "" {
+				denialCode = string(domain.ErrorDelegationNotAuthorized)
+			}
+			return agent.PreToolDecision{Action: agent.ToolDeny, Code: denialCode, Reason: denial, RiskClass: domain.RiskDelegation}, nil
+		}
+		input.Tasks = specs
+		input.Delegations = nil
+		encodedArguments, err := json.Marshal(input)
+		if err != nil {
+			return agent.PreToolDecision{}, err
+		}
+		d.Arguments = encodedArguments
+		if requiresApproval && d.Action == agent.ToolAllow {
+			d.Action = agent.ToolRequireApproval
+			d.Code = "role_delegation_approval_required"
+			d.Reason = "The selected Role requires delegation approval"
+			d.RiskClass = domain.RiskDelegation
+		}
+		return d, nil
+	}
 }
 
 func (p *delegationAdmissionToolPolicy) BeforeToolBatch(ctx context.Context, batch agent.ToolBatchContext,
@@ -1066,13 +1281,14 @@ func (p *delegationAdmissionToolPolicy) AfterToolCall(ctx context.Context, callC
 }
 
 type agentExecutorDelegationProvider struct {
-	db         *sql.DB
-	runs       *store.RunRepo
-	sessions   *store.SessionRepo
-	skillsDir  string
-	builtinDir string
-	runID      string
-	sessionID  string
+	db          *sql.DB
+	runs        *store.RunRepo
+	sessions    *store.SessionRepo
+	skillsDir   string
+	builtinDir  string
+	runID       string
+	sessionID   string
+	delegations *store.DelegationRepo
 }
 
 func delegationStrategy(itemCount int) domain.DelegationStrategy {
@@ -1104,7 +1320,10 @@ func effectiveDelegationBudget(request domain.BudgetCeilingJSON, ceiling domain.
 }
 
 func (p *agentExecutorDelegationProvider) ExecuteDelegation(ctx context.Context, runID, sessionID, toolCallID string, specs []domain.TaskSpec) (*tools.DelegateTasksResult, error) {
-	delegations := &store.DelegationRepo{DB: p.db}
+	delegations := p.delegations
+	if delegations == nil {
+		delegations = &store.DelegationRepo{DB: p.db}
+	}
 	availableSkills := make(map[string]struct{})
 	for _, skill := range skills.Discover(p.skillsDir, p.builtinDir) {
 		availableSkills[skill.Manifest.ID] = struct{}{}
@@ -1161,6 +1380,16 @@ func (p *agentExecutorDelegationProvider) ExecuteDelegation(ctx context.Context,
 		if outputContract == "" {
 			outputContract = "text-v1"
 		}
+		definitionJSON, err := json.Marshal(r.snapshot.Definition)
+		if err != nil {
+			return nil, fmt.Errorf("encode role %q definition: %w", r.spec.Role, err)
+		}
+		roleMeta, err := store.NewDelegationRoleMeta(r.snapshot.VersionID, definitionJSON)
+		if err != nil {
+			return nil, fmt.Errorf("freeze role %q meta: %w", r.spec.Role, err)
+		}
+		roleMeta.Handle = r.spec.Role
+		roleMeta.DisplayName = r.spec.Role
 		items[i] = store.CreateDelegationItemInput{
 			Name:           r.spec.Name,
 			RoleVersionID:  r.snapshot.VersionID,
@@ -1169,6 +1398,7 @@ func (p *agentExecutorDelegationProvider) ExecuteDelegation(ctx context.Context,
 			Budget:         r.spec.Budget,
 			Skills:         append([]string(nil), r.spec.Skills...),
 			Depends:        r.spec.Depends,
+			RoleMeta:       roleMeta,
 		}
 	}
 
@@ -1307,14 +1537,12 @@ func (e *agentExecutor) taskPreloadPrompt(role *domain.FrozenRoleExecution, ids 
 }
 
 func (e *agentExecutor) resolveRuntimeProvider(runtime domain.ModelRuntimeSnapshot) (llm.Provider, error) {
-	resolver := llm.CredentialResolver{}
-	secret, err := resolver.Resolve(runtime.CredentialRef)
-	if err != nil {
+	if strings.TrimSpace(runtime.APIKey) == "" {
 		return nil, domain.NewCodedError(domain.ErrorProviderCredentialUnavailable,
-			fmt.Errorf("resolve credentials for provider %s: %w", runtime.ProviderProfileID, err))
+			fmt.Errorf("provider %s has no API key configured", runtime.ProviderProfileID))
 	}
 	provider, err := llm.NewOpenAIProvider(llm.OpenAIConfig{
-		BaseURL: runtime.BaseURL, APIKey: secret,
+		BaseURL: runtime.BaseURL, APIKey: llm.NewSecret(runtime.APIKey),
 		Model: runtime.APIModel, MaxTokens: runtime.MaxOutputTokens,
 	})
 	if err != nil {
@@ -1408,6 +1636,47 @@ func (e *agentExecutor) resolveAndFreezeHooks(ctx context.Context, run *domain.A
 	return nil
 }
 
+// applyWorkspaceToolPolicy applies a trusted workspace's toolPolicyPatch and
+// toolPolicyHooks to the effective config for a FRESH run only (design 一
+// Stage 2a/2b). Resume (run.BaseMessageID already set) and untrusted workspaces
+// are no-ops: the already-frozen config must not be re-derived from files (G5).
+func (e *agentExecutor) applyWorkspaceToolPolicy(ctx context.Context, run *domain.AgentRun, effective *domain.EffectiveRunConfig, canonicalRoot string, trusted bool) error {
+	if !trusted || run.BaseMessageID != "" {
+		return nil
+	}
+	patch, err := fileconfig.LoadWorkspaceToolPolicyPatch(canonicalRoot)
+	if err != nil {
+		return fmt.Errorf("tool policy patch: %w", err)
+	}
+	if patch != nil {
+		if patch.ID != effective.ToolPolicy.ID {
+			return domain.NewCodedError(domain.ErrorToolPolicyFailed,
+				fmt.Errorf("tool policy patch id %q does not match effective profile %q", patch.ID, effective.ToolPolicy.ID))
+		}
+		patchedConfig, source, applyErr := fileconfig.ApplyToolPolicyPatch(*patch)
+		if applyErr != nil {
+			return domain.NewCodedError(domain.ErrorToolPolicyFailed, applyErr)
+		}
+		encoded, encodeErr := json.Marshal(patchedConfig)
+		if encodeErr != nil {
+			return domain.NewCodedError(domain.ErrorToolPolicyFailed, encodeErr)
+		}
+		effective.ToolPolicy.Config = encoded
+		slog.Debug("tool policy patch applied", "run", run.ID, "source", source, "policyID", effective.ToolPolicy.ID)
+	}
+	projectHooks, hooksErr := agent.LoadWorkspaceToolPolicyHooks(canonicalRoot)
+	if hooksErr != nil {
+		return fmt.Errorf("tool policy hooks: %w", hooksErr)
+	}
+	for _, hook := range projectHooks {
+		if _, compileErr := agent.CompileProjectHook(hook); compileErr != nil {
+			return domain.NewCodedError(domain.ErrorToolPolicyFailed, compileErr)
+		}
+	}
+	effective.ToolPolicyHooks = projectHooks
+	return nil
+}
+
 func (e *agentExecutor) queueRunEndObserver(ctx context.Context, run *domain.AgentRun, session *domain.Session,
 	wSpace *domain.ProjectWorkspace, effective domain.EffectiveRunConfig, runErr error, iterations int) {
 	if e.outboxStore == nil || effective.HookConfig.IsEmpty() {
@@ -1458,7 +1727,7 @@ func (e *agentExecutor) queueRunEndObserver(ctx context.Context, run *domain.Age
 // CheckPrompt implements api.PromptHookGate: evaluates UserPromptSubmit hooks
 // before a new run is created. Fail-open on any infrastructure error.
 func (e *agentExecutor) CheckPrompt(ctx context.Context, sessionID, prompt string, parts []domain.ContentBlock) api.PromptHookOutcome {
-	wSpace, err := loadProjectWorkspace(ctx, e.db, sessionID)
+	wSpace, err := e.loadProjectWorkspace(ctx, sessionID)
 	if err != nil {
 		return api.PromptHookOutcome{Error: fmt.Errorf("load workspace for prompt hook: %w", err)}
 	}
@@ -1522,31 +1791,21 @@ func (e *agentExecutor) loadProjectContext(canonicalRoot string, trusted bool) (
 	return projectcontext.Load(sec, e.homeDir)
 }
 
-func loadProjectWorkspace(ctx context.Context, db *sql.DB, sessionID string) (*domain.ProjectWorkspace, error) {
-	sessionRepo := &store.SessionRepo{DB: db}
-	session, err := sessionRepo.FindByID(ctx, sessionID)
+func (e *agentExecutor) loadProjectWorkspace(ctx context.Context, sessionID string) (*domain.ProjectWorkspace, error) {
+	// V2: workspaces resolve from the file-native project store; the legacy
+	// global project_workspaces SQL table was removed.
+	if e.projects == nil {
+		return nil, fmt.Errorf("file-backed project store is required to resolve a workspace")
+	}
+	session, err := e.sessionDB.FindByID(ctx, sessionID)
 	if err != nil || session == nil {
-		return nil, fmt.Errorf("session not found: %s", sessionID)
+		return nil, fmt.Errorf("session not found: %w", err)
 	}
-	projectRepo := &store.ProjectRepo{DB: db}
-	project, err := projectRepo.FindByID(ctx, session.ProjectID)
-	if err != nil || project == nil {
-		return nil, fmt.Errorf("project not found: %s", session.ProjectID)
+	workspaceRecord, err := e.projects.FindWorkspaceByProjectID(ctx, session.ProjectID)
+	if err != nil || workspaceRecord == nil {
+		return nil, fmt.Errorf("workspace not found for project %s: %w", session.ProjectID, err)
 	}
-	_ = project
-	row := db.QueryRowContext(ctx,
-		`SELECT id, project_id, kind, host_path, virtual_path, status, path_fingerprint, created_at
-		 FROM project_workspaces WHERE project_id = ? AND status = 'active' LIMIT 1`,
-		project.ID,
-	)
-	var ws domain.ProjectWorkspace
-	var createdAt string
-	if err := row.Scan(&ws.ID, &ws.ProjectID, &ws.Kind, &ws.HostPath, &ws.VirtualPath,
-		&ws.Status, &ws.PathFingerprint, &createdAt); err != nil {
-		return nil, fmt.Errorf("workspace not found for project %s: %w", project.ID, err)
-	}
-	ws.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-	return &ws, nil
+	return workspaceRecord, nil
 }
 
 func msgToChat(msg domain.Message) domain.ChatMessage {
@@ -1558,393 +1817,6 @@ func main() {
 		slog.Error("ennoworker stopped", "error", err)
 		os.Exit(1)
 	}
-}
-
-func run() error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	if cfg.BootstrapToken == "" {
-		return fmt.Errorf("ENNOTE_BOOTSTRAP_TOKEN is required")
-	}
-
-	db, err := store.Open(cfg.DatabasePath)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	if err := store.Migrate(db); err != nil {
-		return fmt.Errorf("migrate database: %w", err)
-	}
-
-	hub := events.NewHub()
-	runRepo := &store.RunRepo{DB: db, Publisher: hub}
-	queuedRuns, err := runRepo.RecoverActive(context.Background())
-	if err != nil {
-		return fmt.Errorf("recover active runs: %w", err)
-	}
-	// Reap orphans AFTER RecoverActive: parents terminated by the recovery scan
-	// (e.g. interrupted waiting_children) may leave children with a terminal
-	// parent that this pass catches.
-	if _, err := (&store.DelegationRepo{DB: db}).ReapOrphans(context.Background()); err != nil {
-		return fmt.Errorf("reap orphaned children: %w", err)
-	}
-	// Settle any generation whose attempts are all terminal and re-reconcile
-	// terminal child budgets (idempotent).
-	if _, err := (&store.DelegationRepo{DB: db}).RecoverDelegation(context.Background()); err != nil {
-		return fmt.Errorf("recover delegation state: %w", err)
-	}
-	// Reconstruct any lost completion/delivery projections from terminal facts.
-	delegationRepo := &store.DelegationRepo{DB: db}
-	if _, err := delegationRepo.RebuildMissingCompletions(context.Background(), 100); err != nil {
-		return fmt.Errorf("rebuild delegation completions: %w", err)
-	}
-	if _, err := delegationRepo.RebuildMissingDeliveryEvents(context.Background(), 100); err != nil {
-		return fmt.Errorf("rebuild delivery events: %w", err)
-	}
-	// Reconstruct missing cross-session attention projections from source facts.
-	if _, err := (&store.AttentionRepo{DB: db}).RebuildAttention(context.Background(), 100); err != nil {
-		return fmt.Errorf("rebuild attention projections: %w", err)
-	}
-
-	eventWriter := events.NewWriter(&store.EventRepo{DB: db}, hub)
-	artifactService := &artifacts.Service{DB: db, Root: filepath.Join(cfg.HomeDir, "artifacts")}
-	if err := artifactService.Reconcile(context.Background()); err != nil {
-		return fmt.Errorf("reconcile artifact storage: %w", err)
-	}
-	callRepo := &store.CallRepo{DB: db, Publisher: hub}
-	compactionRepo := &store.CompactionRepo{DB: db, Publisher: hub}
-	runCompactionRepo := &store.RunCompactionRepo{DB: db, Publisher: hub}
-	approvalRepo := &store.ApprovalRepo{DB: db, Publisher: hub}
-	trustStore, err := workspace.NewTrustStore(cfg.HomeDir)
-	if err != nil {
-		return fmt.Errorf("init trust store: %w", err)
-	}
-	outboxStore := &hooks.OutboxStore{DB: db}
-	mcpServer := &api.MCPServer{
-		Profiles: &store.MCPProfileRepo{DB: db},
-		Bindings: &store.MCPBindingRepo{DB: db},
-		Catalogs: &store.MCPCatalogRepo{DB: db},
-		Runs:     &store.MCPRunRepo{DB: db},
-		ResolveSecret: func(ref string) (string, error) {
-			secret, err := (&llm.CredentialResolver{}).Resolve(ref)
-			if err != nil {
-				return "", err
-			}
-			return secret.Reveal(), nil
-		},
-		Logger:         slog.Default(),
-		AllowedPrivate: false,
-		Bundled:        mcpclient.NewBundledRegistry(),
-	}
-	executor := &agentExecutor{
-		db: db, writer: eventWriter, hub: hub, homeDir: cfg.HomeDir, trustStore: trustStore, outboxStore: outboxStore, runs: runRepo,
-		calls:     callRepo,
-		sessionDB: &store.SessionRepo{DB: db}, msgRepo: &store.MessageRepo{DB: db},
-		skillRepo: &store.SkillSnapshotRepo{DB: db},
-		skillsDir: cfg.SkillsDir, builtinDir: cfg.BuiltinSkillsDir,
-		sandbox: cfg.SandboxMode, artifacts: artifactService, approvals: approvalRepo,
-		standingApprovals: &store.StandingApprovalRepo{DB: db},
-		MCP:               mcpServer,
-	}
-	executor.compaction = &compaction.Service{Repo: compactionRepo, RunRepo: runCompactionRepo, Calls: callRepo,
-		Messages: executor.msgRepo, Events: eventWriter, Providers: executor.resolveRuntimeProvider}
-
-	// Background observer-hook outbox worker: at-least-once delivery of
-	// RunEnd / ApprovalRequested / Notification hooks across restarts.
-	outboxWorker := &hooks.OutboxWorker{
-		Store: outboxStore,
-		Resolver: func(ctx context.Context, runID string) (hooks.HookSet, string, string, error) {
-			stored, err := runRepo.Get(ctx, runID)
-			if err != nil {
-				return nil, "", "", err
-			}
-			var effective domain.EffectiveRunConfig
-			if err := json.Unmarshal(stored.EffectiveConfig, &effective); err != nil {
-				return nil, "", "", err
-			}
-			if effective.HookConfig.IsEmpty() {
-				return hooks.HookSet{}, effective.HookConfig.WorkspaceID, effective.HookConfig.WorkspaceRoot, nil
-			}
-			var set hooks.HookSet
-			if err := json.Unmarshal(effective.HookConfig.ResolvedHookSet, &set); err != nil {
-				return nil, "", "", err
-			}
-			return set, effective.HookConfig.WorkspaceID, effective.HookConfig.WorkspaceRoot, nil
-		},
-	}
-	outboxCtx, outboxCancel := context.WithCancel(context.Background())
-	defer outboxCancel()
-	go outboxWorker.Start(outboxCtx)
-
-	coordinator := runs.NewCoordinator(runRepo, executor, cfg.MaxConcurrentRuns)
-	coordinator.SetRunSettledHook(func(ctx context.Context, run *domain.AgentRun) error {
-		return tickSessionAutoResume(ctx, db, coordinator, run.SessionID)
-	})
-	// Wire child run enqueuing: when delegate_roles creates children,
-	// the executor notifies the coordinator to start executing them.
-	executor.OnChildRunsCreated = func(_ context.Context, ids []string) {
-		for _, id := range ids {
-			// A child is durable work. Do not derive its scheduler lifetime from
-			// the parent claim context, which is cancelled when the parent yields.
-			if err := coordinator.Enqueue(context.Background(), id); err != nil {
-				slog.Warn("enqueue child run failed", "runID", id, "error", err)
-			}
-		}
-	}
-	// Agent Flow meta-Run orchestrator (roadmap item 7, Phase 1). The
-	// orchestrator is a pure state machine: it dispatches one child Run per
-	// task and never calls a Provider itself.
-	flowSkillCatalog := make(map[string]string)
-	for _, skill := range skills.Discover(cfg.SkillsDir, cfg.BuiltinSkillsDir) {
-		flowSkillCatalog[skill.Manifest.ID] = skill.Manifest.ID
-	}
-	flowSkillKnown := make(map[string]bool)
-	for name := range flowSkillCatalog {
-		flowSkillKnown[name] = true
-	}
-	flowRuns := &store.AgentFlowRunRepo{DB: db, SkillCatalog: flowSkillCatalog}
-	flowProfiles := &store.AgentFlowProfileRepo{DB: db}
-	flowBindings := &store.AgentFlowBindingRepo{DB: db}
-	checkRunner := &store.CheckTaskRunner{
-		DB: db, MaxOutputBytes: 32 * 1024, DefaultTimeoutSeconds: 300,
-		ManagerBuilder: func(ctx context.Context, sessionID string) (*workspace.Manager, error) {
-			session, err := (&store.SessionRepo{DB: db}).FindByID(ctx, sessionID)
-			if err != nil {
-				return nil, fmt.Errorf("resolve check session: %w", err)
-			}
-			wSpace, err := (&store.ProjectRepo{DB: db}).FindWorkspaceByProjectID(ctx, session.ProjectID)
-			if err != nil {
-				return nil, fmt.Errorf("resolve check workspace: %w", err)
-			}
-			canonicalRoot, err := workspace.CanonicalWorkspaceRoot(wSpace.HostPath)
-			if err != nil {
-				return nil, fmt.Errorf("resolve canonical root: %w", err)
-			}
-			ioDir := filepath.Join(os.Getenv("ENNOTE_HOME"), "runtime", "flows", sessionID)
-			if err := os.MkdirAll(ioDir, 0o700); err != nil {
-				return nil, err
-			}
-			return workspace.NewManager(canonicalRoot, ioDir, "", workspace.SandboxMode(cfg.SandboxMode))
-		},
-	}
-	flowOrchestrator := &agentflow.Orchestrator{
-		Store:    &store.OrchestratorStore{Runs: flowRuns, Profiles: flowProfiles},
-		Children: &store.OrchestratorChildren{DB: db, Delegations: &store.DelegationRepo{DB: db}},
-		Events:   &store.FlowEventSink{Writer: eventWriter},
-		Checker:  checkRunner,
-		Enqueue: func(ctx context.Context, runID string) error {
-			return coordinator.Enqueue(ctx, runID)
-		},
-		PollInterval: 250 * time.Millisecond,
-	}
-	flowStartRun := func(ctx context.Context, projectID, flowVersionID, sessionID string,
-		inputs, vars map[string]any) (*domain.RunAgentFlow, error) {
-		version, err := flowProfiles.GetVersion(ctx, flowVersionID)
-		if err != nil {
-			return nil, fmt.Errorf("load flow version: %w", err)
-		}
-		var def domain.FlowDefinition
-		if err := json.Unmarshal(version.DefinitionJSON, &def); err != nil {
-			return nil, fmt.Errorf("decode flow version: %w", err)
-		}
-		inputsJSON, err := store.NormalizeFlowInputs(&def, inputs, vars)
-		if err != nil {
-			return nil, err
-		}
-		freeze, diagnostics, err := flowRuns.FreezeFlowDefinition(ctx, projectID, version.ProfileID, &def, inputsJSON)
-		if err != nil {
-			return nil, fmt.Errorf("freeze flow: %v", append([]string(nil), diagnostics...))
-		}
-		run, err := flowRuns.CreateFlowRun(ctx, store.CreateFlowRunInput{
-			SessionID: sessionID, ProjectID: projectID, FlowVersionID: flowVersionID, InputsJSON: inputsJSON,
-		}, freeze)
-		if err != nil {
-			return nil, err
-		}
-		flowOrchestrator.Start(ctx, run.RunID)
-		return run, nil
-	}
-	flowStartRecovered := func(ctx context.Context, runID string) error {
-		flowOrchestrator.Start(ctx, runID)
-		return nil
-	}
-	// Recover non-terminal meta-Runs after the delegation recovery passes have
-	// settled interrupted children; the orchestrator re-dispatches only
-	// incomplete tasks (checkpoint continuation).
-	if recoveredFlows, flowErr := flowRuns.ListRecoverableRuns(context.Background()); flowErr == nil {
-		for _, flowRunID := range recoveredFlows {
-			flowOrchestrator.Start(context.Background(), flowRunID)
-		}
-		if len(recoveredFlows) > 0 {
-			slog.Info("agent flow runs recovered", "count", len(recoveredFlows))
-		}
-	} else {
-		slog.Warn("agent flow recovery scan failed", "error", flowErr)
-	}
-	// Filter recovered queued runs through task-graph readiness: a task-graph
-	// child whose dependencies have not settled stays queued and is woken by
-	// enqueueReadySuccessors when its dependencies settle; top-level runs and
-	// ready children are re-enqueued now.
-	recovered, filterErr := (&store.DelegationRepo{DB: db}).ReadyChildrenForEnqueue(context.Background(), queuedRuns)
-	if filterErr != nil {
-		return fmt.Errorf("filter recovered runs by task readiness: %w", filterErr)
-	}
-	for _, runID := range recovered {
-		if err := coordinator.Enqueue(context.Background(), runID); err != nil {
-			return fmt.Errorf("re-enqueue recovered run %s: %w", runID, err)
-		}
-	}
-	if len(queuedRuns) > 0 {
-		slog.Info("queued runs recovered", "count", len(queuedRuns), "ready", len(recovered))
-	}
-	// Deliver any pending auto-resume completions for idle sessions, in
-	// sequence order. Each tick creates at most one continuation Run.
-	if err := tickIdleAutoResume(context.Background(), db, coordinator); err != nil {
-		return fmt.Errorf("deliver auto-resume completions: %w", err)
-	}
-	instanceID, err := runtimeinfo.NewInstanceID()
-	if err != nil {
-		return err
-	}
-	providerRepo := &store.ProviderRepo{DB: db}
-	modelRepo := &store.ModelRepo{DB: db}
-	knownSkills := make(map[string]bool)
-	for _, skill := range skills.Discover(cfg.SkillsDir, cfg.BuiltinSkillsDir) {
-		knownSkills[skill.Manifest.ID] = true
-	}
-	roleRepo := &store.RoleRepo{DB: db, KnownTools: map[string]bool{
-		"read": true, "write": true, "edit": true, "ls": true, "grep": true, "find": true,
-		"exec": true, "bash": true, "web_fetch": true, "publish_artifact": true,
-		"todo": true, "search_compacted_history": true, "git_readonly": true,
-		"submit_result": true, "delegate_tasks": true, "delegate_roles": true, // legacy alias stays known for old Role definitions
-	}, KnownSkills: knownSkills}
-	doctor := &providerdoctor.Service{Providers: providerRepo, Models: modelRepo,
-		Credentials: llm.CredentialResolver{}, Timeout: 15 * time.Second}
-
-	// Initialize prompts subsystem.
-	builtins, err := prompts.LoadBuiltins()
-	if err != nil {
-		return fmt.Errorf("load builtin prompts: %w", err)
-	}
-	globalStore, err := prompts.OpenGlobalStore(os.Getenv("ENNOTE_HOME"))
-	if err != nil {
-		return fmt.Errorf("open global prompt store: %w", err)
-	}
-	promptService := &prompts.Service{
-		HomeDir:     os.Getenv("ENNOTE_HOME"),
-		Projects:    &store.ProjectRepo{DB: db},
-		TrustStore:  trustStore,
-		Builtins:    builtins,
-		GlobalStore: globalStore,
-	}
-
-	// Seed ecosystem skill roots (pi/claude/codex/cursor) once at startup so
-	// existing marketplace installs appear in the catalog. Ecosystem dirs and
-	// the skills.sh global lock live under the OS user home, not ENNOTE_HOME.
-	userHome, _ := os.UserHomeDir()
-	seedSkillRoots(context.Background(), db, userHome)
-
-	server := &api.Server{
-		DB: db, Token: cfg.BootstrapToken, Sandbox: cfg.SandboxMode,
-		Projects: &store.ProjectRepo{DB: db}, Providers: providerRepo,
-		Models: modelRepo, Roles: roleRepo, Doctor: doctor, Policies: &store.PolicyRepo{DB: db}, Artifacts: artifactService,
-		Sessions: &store.SessionRepo{DB: db}, Branches: &store.BranchRepo{DB: db},
-		Messages: executor.msgRepo, Compactions: compactionRepo,
-		Approvals: approvalRepo, StandingApprovals: executor.standingApprovals, Delegations: &store.DelegationRepo{DB: db},
-		DelegationApprovals: &store.DelegationApprovalRepo{DB: db},
-		Attention:           &store.AttentionRepo{DB: db},
-		Runs:                runRepo, Queue: &store.QueueRepo{DB: db}, Events: &store.EventRepo{DB: db},
-		Hub: hub, Control: api.CoordinatorController{Coordinator: coordinator}, InstanceID: instanceID,
-		PromptGate: executor,
-		Prompts:    promptService,
-		MCP:        mcpServer,
-		Skills: &skillsmgmt.Service{
-			UserRoot:    cfg.SkillsDir,
-			BuiltinRoot: cfg.BuiltinSkillsDir,
-			HomeDir:     userHome, // OS user home: lock files + ecosystem dirs
-			AdditionalRoots: loadSkillRoots(db),
-		},
-		SkillRoots: &store.SkillRootRepo{DB: db},
-		Trust: trustStore,
-		AgentFlows: &api.AgentFlowServer{
-			Profiles: flowProfiles, Bindings: flowBindings, Runs: flowRuns,
-			Projects:  &store.ProjectRepo{DB: db},
-			Sessions:  &store.SessionRepo{DB: db},
-			Checks:    checkRunner,
-			Discovery: &store.AgentFlowDiscovery{Profiles: flowProfiles},
-			Skills:    flowSkillKnown,
-			StartRun:  flowStartRun, StartRecovered: flowStartRecovered,
-		},
-	}
-
-	listener, err := net.Listen("tcp", cfg.ListenAddr)
-	if err != nil {
-		return fmt.Errorf("listen on %s: %w", cfg.ListenAddr, err)
-	}
-	httpServer := &http.Server{
-		Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout: 30 * time.Second, WriteTimeout: 0, IdleTimeout: 90 * time.Second,
-	}
-	serverErrors := make(chan error, 1)
-	go func() { serverErrors <- httpServer.Serve(listener) }()
-	slog.Info("ennoworker ready", "address", listener.Addr().String(), "sandbox", cfg.SandboxMode)
-
-	stateFile := filepath.Join(filepath.Dir(cfg.DatabasePath), "worker-state.json")
-	if err := runtimeinfo.WriteAtomic(stateFile, runtimeinfo.WorkerState{
-		Version: runtimeinfo.StateVersion, URL: fmt.Sprintf("http://%s", listener.Addr().String()),
-		PID: os.Getpid(), InstanceID: instanceID, BootstrapToken: cfg.BootstrapToken,
-		StartedAt: time.Now().UTC(),
-	}); err != nil {
-		_ = httpServer.Close()
-		return fmt.Errorf("write worker runtime state: %w", err)
-	}
-	defer func() {
-		if err := runtimeinfo.RemoveIfOwner(stateFile, os.Getpid(), instanceID); err != nil {
-			slog.Warn("remove worker runtime state", "error", err)
-		}
-	}()
-
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
-	select {
-	case received := <-signals:
-		slog.Info("ennoworker shutting down", "signal", received.String())
-	case err := <-serverErrors:
-		return err
-	}
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	return httpServer.Shutdown(shutdownCtx)
-}
-
-// tickIdleAutoResume delivers one pending auto-resume completion per idle
-// active session, in completion sequence order, and enqueues the resulting
-// continuation Runs.
-func tickIdleAutoResume(ctx context.Context, db *sql.DB, coordinator *runs.Coordinator) error {
-	rows, err := db.QueryContext(ctx, `SELECT id FROM sessions WHERE status='active' ORDER BY updated_at`)
-	if err != nil {
-		return err
-	}
-	var sessionIDs []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return err
-		}
-		sessionIDs = append(sessionIDs, id)
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	for _, sessionID := range sessionIDs {
-		if err := tickSessionAutoResume(ctx, db, coordinator, sessionID); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func tickSessionAutoResume(ctx context.Context, db *sql.DB, coordinator *runs.Coordinator, sessionID string) error {
@@ -1959,64 +1831,4 @@ func tickSessionAutoResume(ctx context.Context, db *sql.DB, coordinator *runs.Co
 		return fmt.Errorf("enqueue continuation run %s: %w", continuation.ID, err)
 	}
 	return nil
-}
-
-// seedSkillRoots inserts enabled roots for existing pi/claude/codex/cursor
-// ecosystem skill directories on first run, so marketplace-installed skills
-// appear in the catalog without manual setup. Existing rows are left alone.
-func seedSkillRoots(ctx context.Context, db *sql.DB, homeDir string) {
-	repo := &store.SkillRootRepo{DB: db}
-	existing, err := repo.List(ctx)
-	if err != nil {
-		slog.Warn("skill root seeding skipped", "error", err)
-		return
-	}
-	havePath := map[string]bool{}
-	for _, root := range existing {
-		havePath[root.Path] = true
-	}
-	kinds := []struct {
-		kind string
-		sub  string
-	}{
-		{"pi", filepath.Join(".pi", "agent", "skills")},
-		{"claude", filepath.Join(".claude", "skills")},
-		{"codex", filepath.Join(".codex", "skills")},
-		{"cursor", filepath.Join(".cursor", "skills")},
-	}
-	priority := 10
-	for _, k := range kinds {
-		p := filepath.Join(homeDir, k.sub)
-		if havePath[p] {
-			priority += 10
-			continue
-		}
-		st, err := os.Stat(p)
-		if err != nil || !st.IsDir() {
-			priority += 10
-			continue
-		}
-		if _, err := repo.Create(ctx, store.CreateSkillRootInput{
-			Name: k.kind, Path: p, AgentKind: k.kind, Priority: priority, Enabled: true,
-		}); err != nil {
-			slog.Warn("skill root seed failed", "kind", k.kind, "error", err)
-		}
-		priority += 10
-	}
-}
-
-// loadSkillRoots returns the enabled additional roots for the skills service.
-func loadSkillRoots(db *sql.DB) []skillsmgmt.Root {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	roots, err := (&store.SkillRootRepo{DB: db}).EnabledPaths(ctx)
-	if err != nil {
-		slog.Warn("load additional skill roots failed", "error", err)
-		return nil
-	}
-	out := make([]skillsmgmt.Root, 0, len(roots))
-	for _, root := range roots {
-		out = append(out, skillsmgmt.Root{Name: root.Name, Path: root.Path, Priority: root.Priority})
-	}
-	return out
 }

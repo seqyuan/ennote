@@ -114,7 +114,7 @@ func TestHTTPHeaderInjection(t *testing.T) {
 
 	version := &domain.MCPServerProfileVersion{
 		Transport: domain.MCPTransportStreamableHTTP, Endpoint: ts.URL + "/mcp",
-		TimeoutMS: 10000,
+		TimeoutMS:      10000,
 		HeaderLiterals: map[string]string{"X-API-Key": "literal-value"},
 		HeaderCreds:    map[string]string{"Authorization": "env:TEST_BEARER"},
 	}

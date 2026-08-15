@@ -1,5 +1,7 @@
 export type PermissionMode = "discuss" | "ask" | "auto";
 
+export type ThinkingEffort = "default" | "low" | "medium" | "high";
+
 export interface PermissionPolicyProfile {
   id: string;
   kind: string;
@@ -26,12 +28,14 @@ export function withRunConfig<T extends Record<string, unknown>>(
   payload: T,
   policyID: string,
   modelProfileID?: string | null,
-): T & { config: { toolPolicyProfileId: string; modelProfileId?: string } } {
+  thinkingEffort?: ThinkingEffort | null,
+): T & { config: { toolPolicyProfileId: string; modelProfileId?: string; thinkingEffort?: ThinkingEffort } } {
   return {
     ...payload,
     config: {
       toolPolicyProfileId: policyID,
       ...(modelProfileID ? { modelProfileId: modelProfileID } : {}),
+      ...(thinkingEffort ? { thinkingEffort } : {}),
     },
   };
 }

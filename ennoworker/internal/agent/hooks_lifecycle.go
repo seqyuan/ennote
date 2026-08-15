@@ -21,10 +21,10 @@ import (
 // methods tailored to each lifecycle point. A nil *HookLifecycle is a valid
 // no-op (all methods return zero values).
 type HookLifecycle struct {
-	d          *hooks.Dispatcher
-	runID      string
-	sessionID  string
-	workspaceID  string
+	d             *hooks.Dispatcher
+	runID         string
+	sessionID     string
+	workspaceID   string
 	workspaceRoot string
 }
 

@@ -11,9 +11,6 @@ const olderRun = { runId: "run-old", sessionId: session.id, projectId: project.i
 const newerRun = { runId: "run-new", sessionId: session.id, projectId: project.id, flowVersionId: "v1",
   manifestDigest: "b".repeat(64), state: "running", totalTokensUsed: 40, inputs: { name: "New flow" },
   createdAt: later, updatedAt: later };
-const otherSessionRun = { runId: "run-other", sessionId: "other-sess", projectId: project.id, flowVersionId: "v1",
-  manifestDigest: "c".repeat(64), state: "completed", totalTokensUsed: 50, inputs: { name: "Other" },
-  createdAt: later, updatedAt: later };
 const nodes = [
   { runId: newerRun.runId, taskIndex: 0, handle: "producer", terminalState: "completed", goalText: "produce", createdAt: now },
   { runId: newerRun.runId, taskIndex: 1, handle: "reviewer", terminalState: "running", goalText: "review", createdAt: now },
@@ -30,14 +27,13 @@ async function mockGraphTab(page: Page) {
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/provider-profiles" || path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
-    if (path === `/v1/projects/${project.id}/agent-flows/runs`) {
-      // Returns ALL project runs; the panel filters by the current session.
-      return fulfill(route, [otherSessionRun, newerRun, olderRun]);
+    if (path === `/v1/sessions/${session.id}/graph-runs`) {
+      return fulfill(route, [newerRun, olderRun]);
     }
-    if (path === `/v1/projects/${project.id}/agent-flows/runs/run-new`) {
+    if (path === `/v1/sessions/${session.id}/graph-runs/run-new`) {
       return fulfill(route, { run: newerRun, nodes, flowVersion: 1 });
     }
-    if (path === `/v1/projects/${project.id}/agent-flows/runs/run-old`) {
+    if (path === `/v1/sessions/${session.id}/graph-runs/run-old`) {
       return fulfill(route, { run: olderRun, nodes: [], flowVersion: 1 });
     }
     if (path === `/v1/sessions/${session.id}`) return fulfill(route, session);

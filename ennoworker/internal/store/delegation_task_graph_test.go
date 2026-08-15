@@ -71,8 +71,8 @@ func TestDelegationTaskTopologyAllowsLegacyAndValidChains(t *testing.T) {
 		delegations, _, submission := setupRootBudgetParent(t, "dag-topo-dup")
 		_, _, children, err := delegations.CreateGroupWithChildren(ctx, store.CreateDelegationGroupInput{
 			ParentRunID: submission.Run.ID, ParentToolCallID: "call-1",
-			Strategy:    domain.DelegationStrategyParallel,
-			Items:       []store.CreateDelegationItemInput{explorerItem(), explorerItem()},
+			Strategy: domain.DelegationStrategyParallel,
+			Items:    []store.CreateDelegationItemInput{explorerItem(), explorerItem()},
 		}, submission.Run.SessionID)
 		require.NoError(t, err)
 		require.Len(t, children, 2)
@@ -111,21 +111,24 @@ func TestDelegationTaskChainReadinessAndSuccession(t *testing.T) {
 	require.Equal(t, []string{children[0].ID}, ready, "only the entry task may start first")
 
 	// A succeeds -> B becomes ready.
-	_, err = runs.Claim(ctx, byName["a"].ID); require.NoError(t, err)
+	_, err = runs.Claim(ctx, byName["a"].ID)
+	require.NoError(t, err)
 	require.NoError(t, runs.FinalizeChildSuccess(ctx, byName["a"].ID, settledOutput("a done")))
 	ready, err = runs.ReadySuccessorRuns(ctx, byName["a"].ID)
 	require.NoError(t, err)
 	require.Equal(t, []string{byName["b"].ID}, ready, "B must start after A settles")
 
 	// B succeeds -> C becomes ready.
-	_, err = runs.Claim(ctx, byName["b"].ID); require.NoError(t, err)
+	_, err = runs.Claim(ctx, byName["b"].ID)
+	require.NoError(t, err)
 	require.NoError(t, runs.FinalizeChildSuccess(ctx, byName["b"].ID, settledOutput("b done")))
 	ready, err = runs.ReadySuccessorRuns(ctx, byName["b"].ID)
 	require.NoError(t, err)
 	require.Equal(t, []string{byName["c"].ID}, ready, "C must start after B settles")
 
 	// C succeeds -> group settles.
-	_, err = runs.Claim(ctx, byName["c"].ID); require.NoError(t, err)
+	_, err = runs.Claim(ctx, byName["c"].ID)
+	require.NoError(t, err)
 	require.NoError(t, runs.FinalizeChildSuccess(ctx, byName["c"].ID, settledOutput("c done")))
 	var groupStatus string
 	require.NoError(t, delegations.DB.QueryRow(`SELECT status FROM delegation_groups WHERE id=?`, group.ID).Scan(&groupStatus))
@@ -150,15 +153,18 @@ func TestDelegationTaskFanOutFanIn(t *testing.T) {
 	byName := map[string]*domain.AgentRun{"a": children[0], "b": children[1], "c": children[2], "d": children[3]}
 
 	// A settles -> B and C become ready (parallel fan-out).
-	_, err = runs.Claim(ctx, byName["a"].ID); require.NoError(t, err)
+	_, err = runs.Claim(ctx, byName["a"].ID)
+	require.NoError(t, err)
 	require.NoError(t, runs.FinalizeChildSuccess(ctx, byName["a"].ID, settledOutput("a done")))
 	ready, err := runs.ReadySuccessorRuns(ctx, byName["a"].ID)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{byName["b"].ID, byName["c"].ID}, ready, "fan-out: B and C ready after A")
 
 	// Start both B and C (the coordinator enqueues every ready successor).
-	_, err = runs.Claim(ctx, byName["b"].ID); require.NoError(t, err)
-	_, err = runs.Claim(ctx, byName["c"].ID); require.NoError(t, err)
+	_, err = runs.Claim(ctx, byName["b"].ID)
+	require.NoError(t, err)
+	_, err = runs.Claim(ctx, byName["c"].ID)
+	require.NoError(t, err)
 
 	// Only B settles -> D stays pending (C not settled yet); C is already
 	// running and is not reported again.
@@ -173,7 +179,8 @@ func TestDelegationTaskFanOutFanIn(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{byName["d"].ID}, ready, "fan-in: D ready after B and C")
 
-	_, err = runs.Claim(ctx, byName["d"].ID); require.NoError(t, err)
+	_, err = runs.Claim(ctx, byName["d"].ID)
+	require.NoError(t, err)
 	require.NoError(t, runs.FinalizeChildSuccess(ctx, byName["d"].ID, settledOutput("d done")))
 }
 
@@ -191,7 +198,8 @@ func TestDelegationTaskFailureBlocksDescendantsAndSettlesGroup(t *testing.T) {
 	byName := map[string]*domain.AgentRun{"a": children[0], "b": children[1], "c": children[2]}
 
 	// A fails -> B and C become blocked (transitive), zero budget consumed.
-	_, err = runs.Claim(ctx, byName["a"].ID); require.NoError(t, err)
+	_, err = runs.Claim(ctx, byName["a"].ID)
+	require.NoError(t, err)
 	_, _, err = runs.FinalizeChildFailure(ctx, byName["a"].ID, "boom", "explosion")
 	require.NoError(t, err)
 
@@ -236,7 +244,8 @@ func TestDelegationTaskRetryLiftsBlockedDescendants(t *testing.T) {
 	aItemID, bItemID := items[0].ID, items[1].ID
 
 	// A fails -> B blocked (see TestDelegationTaskFailureBlocksDescendants...).
-	_, err = runs.Claim(ctx, byName["a"].ID); require.NoError(t, err)
+	_, err = runs.Claim(ctx, byName["a"].ID)
+	require.NoError(t, err)
 	_, _, err = runs.FinalizeChildFailure(ctx, byName["a"].ID, "boom", "explosion")
 	require.NoError(t, err)
 
@@ -258,14 +267,16 @@ func TestDelegationTaskRetryLiftsBlockedDescendants(t *testing.T) {
 	require.Len(t, ready, 1, "only the retried dependency may start first")
 
 	// A retry succeeds -> B retry becomes ready and lifts the blocked state.
-	_, err = runs.Claim(ctx, retryChildren[0].ID); require.NoError(t, err)
+	_, err = runs.Claim(ctx, retryChildren[0].ID)
+	require.NoError(t, err)
 	require.NoError(t, runs.FinalizeChildSuccess(ctx, retryChildren[0].ID, settledOutput("a retried")))
 	ready, err = runs.ReadySuccessorRuns(ctx, retryChildren[0].ID)
 	require.NoError(t, err)
 	require.Equal(t, []string{retryChildren[1].ID}, ready, "blocked descendant must resume after dependency retry succeeds")
 
 	// B retry succeeds -> whole flow completes.
-	_, err = runs.Claim(ctx, retryChildren[1].ID); require.NoError(t, err)
+	_, err = runs.Claim(ctx, retryChildren[1].ID)
+	require.NoError(t, err)
 	require.NoError(t, runs.FinalizeChildSuccess(ctx, retryChildren[1].ID, settledOutput("b done")))
 	var genStatus string
 	require.NoError(t, delegations.DB.QueryRow(
@@ -287,7 +298,8 @@ func TestDelegationTaskRetryFailureKeepsDescendantsBlocked(t *testing.T) {
 	require.Len(t, items, 2)
 	byName := map[string]*domain.AgentRun{"a": children[0], "b": children[1]}
 
-	_, err = runs.Claim(ctx, byName["a"].ID); require.NoError(t, err)
+	_, err = runs.Claim(ctx, byName["a"].ID)
+	require.NoError(t, err)
 	_, _, err = runs.FinalizeChildFailure(ctx, byName["a"].ID, "boom", "explosion")
 	require.NoError(t, err)
 
@@ -299,7 +311,8 @@ func TestDelegationTaskRetryFailureKeepsDescendantsBlocked(t *testing.T) {
 	require.Len(t, retryChildren, 2)
 
 	// A retry fails again -> B retry is blocked again, never started.
-	_, err = runs.Claim(ctx, retryChildren[0].ID); require.NoError(t, err)
+	_, err = runs.Claim(ctx, retryChildren[0].ID)
+	require.NoError(t, err)
 	_, _, err = runs.FinalizeChildFailure(ctx, retryChildren[0].ID, "boom2", "explosion again")
 	require.NoError(t, err)
 	var bAttemptStatus string

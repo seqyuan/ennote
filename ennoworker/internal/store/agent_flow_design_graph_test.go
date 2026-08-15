@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -77,13 +79,9 @@ tasks:
 }
 
 func TestDesignGraphMultiTierSynthesis(t *testing.T) {
-	db, _, _, profiles, bindings, _, projectID, _, roleVersionID := setupFlowFixture(t)
+	db, flowRuns, projectID, _, roleVersionID := setupFlowFixture(t)
 	ctx := context.Background()
 
-	profile, err := profiles.CreateProfile(ctx, store.CreateAgentFlowProfileInput{
-		Name: "Design Synthesis", Slug: "design-synthesis", SourceKind: domain.FlowSourceManaged,
-	})
-	require.NoError(t, err)
 	def, err := agentflow.ParseDefinition([]byte(designGraphYAML("design-synthesis")))
 	require.NoError(t, err)
 
@@ -99,6 +97,7 @@ func TestDesignGraphMultiTierSynthesis(t *testing.T) {
 	threeEntry.Tasks = withoutDispatcher
 	result := store.NewFlowValidator(store.FlowPublishOptions{
 		DB: db, ProjectID: projectID, Skills: map[string]bool{"go-dev": true},
+		Sources: testFlowSources, Models: testFlowModels,
 	}).Validate(ctx, threeEntry)
 	assertEntryFailure := false
 	for _, diag := range result.Diagnostics {
@@ -109,36 +108,28 @@ func TestDesignGraphMultiTierSynthesis(t *testing.T) {
 	}
 	assert.True(t, assertEntryFailure, "3 entry tasks must be rejected")
 
-	// Publish the real (single-entry) graph and run it.
-	version, err := profiles.CreateVersion(ctx, profile.ID, def)
-	require.NoError(t, err)
-	session, err := (&store.SessionRepo{DB: db}).Create(ctx, domain.CreateSessionInput{
-		ProjectID: projectID, Title: "design synthesis session",
-	})
-	require.NoError(t, err)
-	binding, err := bindings.EnsureBindingExists(ctx, projectID, version.ID)
-	require.NoError(t, err)
-	_, err = bindings.Update(ctx, binding.ID, true)
-	require.NoError(t, err)
+	// Freeze and run the real (single-entry) graph.
+	version := flowVersionFromDef(def)
 
 	inputs, err := store.NormalizeFlowInputs(def, map[string]any{"target": "pipeline"}, nil)
 	require.NoError(t, err)
-	freeze, diagnostics, err := (&store.AgentFlowRunRepo{DB: db, SkillCatalog: map[string]string{"go-dev": "skill-go-dev"}}).
-		FreezeFlowDefinition(ctx, projectID, "", def, inputs)
+	freeze, diagnostics, err := freezeFlowForTest(t, db, flowRuns, projectID, "", def, inputs)
 	require.NoError(t, err, diagnostics)
 	require.Len(t, freeze, 9) // a0,a1,a2,a3,b1,b2,c1,d1 role nodes + accept terminal node
 
-	flowRuns := &store.AgentFlowRunRepo{DB: db, SkillCatalog: map[string]string{"go-dev": "skill-go-dev"}}
+	session := sqlCreateSession(t, db, projectID)
 	run, err := flowRuns.CreateFlowRun(ctx, store.CreateFlowRunInput{
-		SessionID: session.ID, ProjectID: projectID, FlowVersionID: version.ID, InputsJSON: inputs,
+		SessionID: session.ID, ProjectID: projectID, FlowVersionID: version.ID,
+		DefinitionJSON: version.DefinitionJSON, ConfigDigest: version.ConfigDigest, InputsJSON: inputs,
 	}, freeze)
 	require.NoError(t, err)
 
 	hub := events.NewHub()
 	writer := events.NewWriter(&store.EventRepo{DB: db}, hub)
-	children := &counterStubChildren{db: db}
+	children := &counterStubChildren{db: db,
+		policies: &fileconfig.PolicyStore{Path: filepath.Join(t.TempDir(), "config", "policies.json")}}
 	orch := &agentflow.Orchestrator{
-		Store:        &store.OrchestratorStore{Runs: flowRuns, Profiles: profiles},
+		Store:        &store.OrchestratorStore{Runs: flowRuns},
 		Children:     children,
 		Events:       &store.FlowEventSink{Writer: writer},
 		PollInterval: 5 * time.Millisecond,
@@ -157,6 +148,7 @@ func TestDesignGraphMultiTierSynthesis(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	require.NotNil(t, finalRun, "flow run must terminalize")
+	t.Logf("PROBE terminal state=%s reason=%q", finalRun.State, finalRun.TerminalReason)
 	assert.Equal(t, domain.FlowStateCompleted, finalRun.State)
 
 	// 1. Strict serial topological dispatch order.
@@ -202,13 +194,15 @@ func TestDesignGraphMultiTierSynthesis(t *testing.T) {
 // the creation counter, so fan-in references resolve to distinct values.
 type counterStubChildren struct {
 	db          *sql.DB
+	policies    *fileconfig.PolicyStore
 	assignments []string
 	counter     int
 }
 
 func (c *counterStubChildren) CreateTaskChild(ctx context.Context, parentRunID, sessionID string,
 	spec agentflow.ChildSpec) (agentflow.ChildInfo, error) {
-	info, err := (&store.OrchestratorChildren{DB: c.db, Delegations: &store.DelegationRepo{DB: c.db}}).
+	info, err := (&store.OrchestratorChildren{DB: c.db, Policies: c.policies,
+		Delegations: &store.DelegationRepo{DB: c.db, Policies: c.policies}}).
 		CreateTaskChild(ctx, parentRunID, sessionID, spec)
 	if err != nil {
 		return info, err

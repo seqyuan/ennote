@@ -8,30 +8,22 @@ import (
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
-	"github.com/seqyuan/ennote/ennoworker/migrations"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // setupRootBudgetParent creates a running top-level Host Run with a frozen
-// effective config, which must carry the DelegationPolicySnapshot and create
-// the root budget ledger row.
+// effective config (file-native V2 stack), which must carry the
+// DelegationPolicySnapshot and create the root budget ledger row.
 func setupRootBudgetParent(t *testing.T, requestID string) (*store.DelegationRepo, *store.RunRepo, *domain.TurnSubmission) {
 	t.Helper()
-	repo, submission := setupSubmittedRun(t, requestID)
+	fixture := newFileRunFixture(t, requestID)
 	ctx := context.Background()
-	provider, err := (&store.ProviderRepo{DB: repo.DB}).Create(ctx, store.CreateProviderInput{
-		Name: "provider", ProviderType: domain.ProviderOpenAICompatible, BaseURL: "https://provider.test",
-		CredentialRef: "env:PROVIDER_KEY",
+	runs := fixture.Runs
+	submission, err := runs.SubmitTurn(ctx, domain.SubmitTurnInput{
+		SessionID: fixture.SessionID, ClientRequestID: requestID, Text: "run",
 	})
 	require.NoError(t, err)
-	_, err = (&store.ModelRepo{DB: repo.DB}).Create(ctx, store.CreateModelInput{
-		ProviderID: provider.ID, ModelName: "m", ContextWindow: 32000, MaxOutputTokens: 2048,
-		SupportsThinking: true, ThinkingDialect: domain.ThinkingDialectOpenAIReasoningEffort,
-		SupportedThinkingEfforts: []domain.ThinkingEffort{domain.ThinkingDefault}, IsDefault: true,
-	})
-	require.NoError(t, err)
-	runs := &store.RunRepo{DB: repo.DB}
 	_, err = runs.Claim(ctx, submission.Run.ID)
 	require.NoError(t, err)
 	parentRun, err := runs.Get(ctx, submission.Run.ID)
@@ -39,7 +31,7 @@ func setupRootBudgetParent(t *testing.T, requestID string) (*store.DelegationRep
 	resolved, err := runs.ResolveAndFreezeConfig(ctx, parentRun)
 	require.NoError(t, err)
 	require.NotNil(t, resolved.Effective.Delegation, "top-level Host Run must freeze a delegation policy snapshot")
-	return &store.DelegationRepo{DB: repo.DB}, runs, submission
+	return fixture.Delegations(), runs, submission
 }
 
 func readRootLedger(t *testing.T, db *sql.DB, rootRunID string) map[string]any {
@@ -284,106 +276,4 @@ func TestRootBudgetReconcilesInterruptedChildViaOrphanSweep(t *testing.T) {
 	ledger := readRootLedger(t, delegations.DB, submission.Run.ID)
 	assert.EqualValues(t, 0, ledger["reserved_model_calls"])
 	assert.EqualValues(t, 0, ledger["active_children"])
-}
-
-func TestMigration23UpgradesPreserveDelegationHistory(t *testing.T) {
-	db, err := store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	_, err = db.Exec("PRAGMA foreign_keys = OFF")
-	require.NoError(t, err)
-	for _, migration := range migrations.Sorted() {
-		if migration.Version > 22 {
-			break
-		}
-		_, err = db.Exec(migration.SQL)
-		require.NoError(t, err)
-	}
-
-	// Seed a migration-22 dataset: one settled group with one child and one
-	// consumed child budget row, plus one pending group.
-	_, err = db.Exec(`INSERT INTO projects (id,name,created_at,updated_at) VALUES ('p1','p',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
-	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO sessions (id,project_id,title,created_at,updated_at) VALUES ('s1','p1','s',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
-	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO messages (id,session_id,role,status,created_at) VALUES ('m1','s1','user','complete',CURRENT_TIMESTAMP)`)
-	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO turns (id,session_id,client_request_id,user_message_id,status,created_at,updated_at)
-		VALUES ('t1','s1','req','m1','pending',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
-	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO agent_runs
-		(id,turn_id,session_id,run_kind,status,publish_mode,commit_format_version,created_at)
-		VALUES ('parent','t1','s1','agent','running','public_final',2,CURRENT_TIMESTAMP)`)
-	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO agent_runs
-		(id,session_id,run_kind,status,parent_run_id,publish_mode,commit_format_version,created_at)
-		VALUES ('child','s1','delegated_agent','succeeded','parent','private_to_parent',2,CURRENT_TIMESTAMP)`)
-	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO delegation_groups (id,parent_run_id,parent_tool_call_id,strategy,status,created_at)
-		VALUES ('g1','parent','call-1','single','settled',CURRENT_TIMESTAMP),
-		       ('g2','parent','call-2','single','waiting_children',CURRENT_TIMESTAMP)`)
-	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO delegation_items
-		(id,group_id,child_run_id,name,role_version_id,assignment_json,output_contract,budget_json,result_json,status,ordinal,created_at)
-		VALUES ('i1','g1','child','explore','builtin-workspace-explorer-v2','{}','text-v1',
-		        '{"maxModelCalls":4,"maxToolCalls":8,"maxTotalTokens":20000,"maxOutputTokens":4000,"maxCostUsdMicros":100000,"maxWallTimeMs":120000}',
-		        '{"status":"completed","summary":"ok"}','succeeded',0,CURRENT_TIMESTAMP),
-		       ('i2','g2',NULL,'explore2','builtin-workspace-explorer-v2','{}','text-v1',
-		        '{"maxModelCalls":4,"maxToolCalls":8,"maxTotalTokens":20000,"maxOutputTokens":4000,"maxCostUsdMicros":100000,"maxWallTimeMs":120000}',
-		        NULL,'pending',0,CURRENT_TIMESTAMP)`)
-	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO run_budgets
-		(run_id,max_model_calls,max_tool_calls,max_total_tokens,max_output_tokens,max_cost_usd_micros,max_wall_time_ms,
-		 consumed_model_calls,consumed_tool_calls,consumed_tokens,reserved_at)
-		VALUES ('child',4,8,20000,4000,100000,120000,2,3,1000,CURRENT_TIMESTAMP)`)
-	require.NoError(t, err)
-
-	// Apply migration 23.
-	for _, migration := range migrations.Sorted() {
-		if migration.Version != 23 {
-			continue
-		}
-		_, err = db.Exec(migration.SQL)
-		require.NoError(t, err)
-	}
-
-	var groups, items, budgets int
-	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM delegation_groups`).Scan(&groups))
-	assert.Equal(t, 2, groups)
-	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM delegation_items`).Scan(&items))
-	assert.Equal(t, 2, items)
-	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM run_budgets WHERE run_id='child'`).Scan(&budgets))
-	assert.Equal(t, 1, budgets)
-	var consumedTokens int64
-	require.NoError(t, db.QueryRow(`SELECT consumed_tokens FROM run_budgets WHERE run_id='child'`).Scan(&consumedTokens))
-	assert.EqualValues(t, 1000, consumedTokens)
-
-	var builtin int
-	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM policy_profiles WHERE id='builtin-hosted-delegation-v1'
-		AND kind='delegation' AND status='active'`).Scan(&builtin))
-	assert.Equal(t, 1, builtin)
-	var sessionPolicy string
-	require.NoError(t, db.QueryRow(`SELECT delegation_policy_profile_id FROM sessions WHERE id='s1'`).Scan(&sessionPolicy))
-	assert.Equal(t, "builtin-hosted-delegation-v1", sessionPolicy)
-
-	// Schema surfaces exist.
-	for table, column := range map[string]string{
-		"delegation_root_budgets": "",
-		"run_budgets":             "root_reconciled_at",
-	} {
-		if column == "" {
-			var exists int
-			require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&exists))
-			assert.Equal(t, 1, exists, "table %s", table)
-			continue
-		}
-		var count int
-		require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name=?`, table, column).Scan(&count))
-		assert.Equal(t, 1, count, "%s.%s", table, column)
-	}
-
-	rows, err := db.Query("PRAGMA foreign_key_check")
-	require.NoError(t, err)
-	defer rows.Close()
-	assert.False(t, rows.Next(), "migration 23 must leave no broken foreign keys")
 }

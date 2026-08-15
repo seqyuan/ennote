@@ -93,6 +93,16 @@ func (p *BuiltinToolPolicy) AfterToolCall(_ context.Context, _ ToolCallContext, 
 }
 
 func (p *BuiltinToolPolicy) validateExec(raw json.RawMessage) error {
+	return validateExecArgs(p.config, raw)
+}
+
+func (p *BuiltinToolPolicy) validateBash(raw json.RawMessage) error {
+	return validateBashArgs(p.config, raw)
+}
+
+// validateExecArgs is the standalone exec-arguments validation shared by the
+// legacy BuiltinToolPolicy and the split pre listener (design 一 Stage 1).
+func validateExecArgs(config domain.ToolPolicyConfig, raw json.RawMessage) error {
 	var args struct {
 		Argv           []string `json:"argv"`
 		TimeoutSeconds int      `json:"timeoutSeconds"`
@@ -103,13 +113,14 @@ func (p *BuiltinToolPolicy) validateExec(raw json.RawMessage) error {
 	if len(args.Argv) == 0 {
 		return fmt.Errorf("argv is empty")
 	}
-	if err := p.validateCommand(args.Argv); err != nil {
+	if err := validateCommandArgs(config, args.Argv); err != nil {
 		return err
 	}
-	return p.validateTimeout(args.TimeoutSeconds)
+	return validateTimeoutArgs(config, args.TimeoutSeconds)
 }
 
-func (p *BuiltinToolPolicy) validateBash(raw json.RawMessage) error {
+// validateBashArgs is the standalone bash-arguments validation.
+func validateBashArgs(config domain.ToolPolicyConfig, raw json.RawMessage) error {
 	var args struct {
 		Command        string `json:"command"`
 		TimeoutSeconds int    `json:"timeoutSeconds"`
@@ -117,7 +128,7 @@ func (p *BuiltinToolPolicy) validateBash(raw json.RawMessage) error {
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return err
 	}
-	if err := p.validateTimeout(args.TimeoutSeconds); err != nil {
+	if err := validateTimeoutArgs(config, args.TimeoutSeconds); err != nil {
 		return err
 	}
 	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(args.Command), "")
@@ -131,13 +142,13 @@ func (p *BuiltinToolPolicy) validateBash(raw json.RawMessage) error {
 		}
 		switch value := node.(type) {
 		case *syntax.CmdSubst:
-			if !p.config.AllowCommandSubstitution {
+			if !config.AllowCommandSubstitution {
 				validationErr = fmt.Errorf("command substitution is not allowed")
 			}
 		case *syntax.ProcSubst:
 			validationErr = fmt.Errorf("process substitution is not allowed")
 		case *syntax.BinaryCmd:
-			if (value.Op == syntax.Pipe || value.Op == syntax.PipeAll) && p.config.AllowPipes {
+			if (value.Op == syntax.Pipe || value.Op == syntax.PipeAll) && config.AllowPipes {
 				break
 			}
 			validationErr = fmt.Errorf("shell operator %s is not allowed", value.Op)
@@ -153,10 +164,10 @@ func (p *BuiltinToolPolicy) validateBash(raw json.RawMessage) error {
 					return false
 				}
 			}
-			validationErr = p.validateCommand(argv)
+			validationErr = validateCommandArgs(config, argv)
 		case *syntax.Redirect:
 			path := value.Word.Lit()
-			if path == "" || !p.allowedPath(path) {
+			if path == "" || !allowedPathArgs(config, path) {
 				validationErr = fmt.Errorf("redirection path is not allowed")
 			}
 		}
@@ -166,30 +177,42 @@ func (p *BuiltinToolPolicy) validateBash(raw json.RawMessage) error {
 }
 
 func (p *BuiltinToolPolicy) validateCommand(argv []string) error {
+	return validateCommandArgs(p.config, argv)
+}
+
+func validateCommandArgs(config domain.ToolPolicyConfig, argv []string) error {
 	executable := filepath.Base(argv[0])
-	if len(p.config.AllowedExecutables) > 0 && !containsString(p.config.AllowedExecutables, executable) &&
-		!containsString(p.config.AllowedExecutables, argv[0]) {
+	if len(config.AllowedExecutables) > 0 && !containsString(config.AllowedExecutables, executable) &&
+		!containsString(config.AllowedExecutables, argv[0]) {
 		return fmt.Errorf("executable %q is not allowed", executable)
 	}
-	if len(argv) > 1 && containsString(p.config.DeniedSubcommands[executable], argv[1]) {
+	if len(argv) > 1 && containsString(config.DeniedSubcommands[executable], argv[1]) {
 		return fmt.Errorf("subcommand %s %s is denied", executable, argv[1])
 	}
 	return nil
 }
 
 func (p *BuiltinToolPolicy) validateTimeout(seconds int) error {
-	if p.config.MaxTimeoutSeconds > 0 && seconds > p.config.MaxTimeoutSeconds {
+	return validateTimeoutArgs(p.config, seconds)
+}
+
+func validateTimeoutArgs(config domain.ToolPolicyConfig, seconds int) error {
+	if config.MaxTimeoutSeconds > 0 && seconds > config.MaxTimeoutSeconds {
 		return fmt.Errorf("timeout exceeds policy maximum")
 	}
 	return nil
 }
 
 func (p *BuiltinToolPolicy) allowedPath(path string) bool {
+	return allowedPathArgs(p.config, path)
+}
+
+func allowedPathArgs(config domain.ToolPolicyConfig, path string) bool {
 	clean := filepath.Clean(path)
 	if !filepath.IsAbs(clean) {
 		return clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator))
 	}
-	for _, root := range p.config.AllowedWriteRoots {
+	for _, root := range config.AllowedWriteRoots {
 		root = filepath.Clean(root)
 		if clean == root || strings.HasPrefix(clean, root+string(filepath.Separator)) {
 			return true

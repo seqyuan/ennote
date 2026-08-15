@@ -128,9 +128,11 @@ func TestSecurityMatrixKillSwitchAndDepth(t *testing.T) {
 	delegations, _, _, group, failedItemID := settleMixedGroup(t)
 	ctx := context.Background()
 
-	// Kill switch denies a retry with zero child Provider calls (no child rows).
-	_, err := delegations.DB.Exec(`UPDATE agent_profiles SET delegation_enabled=0
-		WHERE id='builtin-workspace-explorer'`)
+	// V2 kill switch: the frozen Role meta is the only runtime authority for a
+	// retry. Simulate a revoked identity by clearing the item's frozen meta;
+	// the retry is denied with zero child Provider calls (no child rows).
+	_, err := delegations.DB.Exec(`UPDATE delegation_items SET role_meta_json='{}'
+		WHERE id=?`, failedItemID)
 	require.NoError(t, err)
 	_, children, _, err := delegations.RetryGeneration(ctx, group.ID, domain.RetryDelegationInput{
 		ExpectedGeneration: 0, ItemIDs: []string{failedItemID}, ClientRequestID: "matrix-kill",
@@ -140,9 +142,6 @@ func TestSecurityMatrixKillSwitchAndDepth(t *testing.T) {
 	var childRuns int
 	require.NoError(t, delegations.DB.QueryRow(`SELECT COUNT(*) FROM agent_runs WHERE parent_run_id=?`, group.ParentRunID).Scan(&childRuns))
 	assert.Equal(t, 2, childRuns)
-	_, err = delegations.DB.Exec(`UPDATE agent_profiles SET delegation_enabled=1
-		WHERE id='builtin-workspace-explorer'`)
-	require.NoError(t, err)
 
 	// A delegated Role must never receive delegate_tasks: verify the child tool
 	// registry excludes it by checking a depth-two materialization is refused.

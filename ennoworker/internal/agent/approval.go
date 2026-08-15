@@ -214,15 +214,15 @@ func (p *BuiltinToolPolicy) DelegationApprovalPreview(call domain.ToolCall) []do
 			outputContract = "text-v1"
 		}
 		previews = append(previews, domain.DelegationApprovalPreview{
-			Name:           spec.Name,
-			Role:           spec.Role,
-			RoleHandle:     spec.Role,
-			GoalPreview:    truncateApprovalRunes(goal, delegationAssignmentPreviewLimit),
+			Name:              spec.Name,
+			Role:              spec.Role,
+			RoleHandle:        spec.Role,
+			GoalPreview:       truncateApprovalRunes(goal, delegationAssignmentPreviewLimit),
 			AssignmentPreview: truncateApprovalRunes(goal, delegationAssignmentPreviewLimit),
-			Skills:         spec.Skills,
-			Depends:        spec.Depends,
-			OutputContract: outputContract,
-			Budget:         spec.Budget,
+			Skills:            spec.Skills,
+			Depends:           spec.Depends,
+			OutputContract:    outputContract,
+			Budget:            spec.Budget,
 		})
 	}
 	return previews

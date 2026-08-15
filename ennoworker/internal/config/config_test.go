@@ -53,11 +53,15 @@ func TestCustomEnnoteHome(t *testing.T) {
 	assert.Equal(t, tmp, cfg.HomeDir)
 }
 
-func TestDataDir(t *testing.T) {
+func TestStorageLayoutPaths(t *testing.T) {
 	t.Setenv("ENNOTE_HOME", "/tmp/ennote-test")
 	cfg, err := config.Load()
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/ennote-test/data/ennote.db", cfg.DatabasePath)
+	assert.Equal(t, "/tmp/ennote-test/config/models.json", cfg.Layout.Models)
+	assert.Equal(t, "/tmp/ennote-test/config/provider-auth.json", cfg.Layout.ProviderAuth)
+	assert.Equal(t, "/tmp/ennote-test/projects", cfg.Layout.Projects)
+	assert.Equal(t, "/tmp/ennote-test/data/catalog.db", cfg.Layout.CatalogDB)
+	assert.Equal(t, "/tmp/ennote-test/data/usage.db", cfg.Layout.UsageDB)
 }
 
 func TestSkillsDirEnvOverride(t *testing.T) {
@@ -87,4 +91,32 @@ func TestSkillsDirIgnoresEcosystemDirsForDefault(t *testing.T) {
 	// The default root stays ennote's own; pi is an additional root instead.
 	assert.Equal(t, filepath.Join(cfg.HomeDir, "skills"), cfg.SkillsDir)
 	assert.NotEqual(t, piDir, cfg.SkillsDir)
+}
+
+// TestLoadHasNoCloudDependency pins the V2 local-first invariant: worker
+// startup configuration must not read or require any cloud Relay/connector/
+// account credential. The only credential is the loopback BFF BootstrapToken.
+// This is the "cloud unavailable / local available" qualification: a Worker
+// starts, computes, and serves entirely from local files.
+func TestLoadHasNoCloudDependency(t *testing.T) {
+	t.Setenv("ENNOTE_HOME", t.TempDir())
+	t.Setenv("ENNOTE_RELAY_URL", "https://unreachable.invalid")
+	t.Setenv("ENNOTE_CONNECT_TOKEN", "not-a-real-token")
+	t.Setenv("ENNOTE_ACCOUNT_ID", "not-a-real-account")
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	// Loopback bind + local home are the only requirements.
+	assert.Equal(t, "127.0.0.1:0", cfg.ListenAddr)
+	assert.NotEmpty(t, cfg.HomeDir)
+
+	// The Config type carries no cloud surface: only the local BFF token.
+	fields := map[string]bool{
+		"HomeDir": true, "ListenAddr": true, "MaxConcurrentRuns": true,
+		"Layout": true, "SandboxMode": true, "LogLevel": true,
+		"BootstrapToken": true, "SkillsDir": true, "BuiltinSkillsDir": true,
+	}
+	for _, name := range []string{"RelayURL", "ConnectToken", "AccountID", "RemoteConnector", "CloudAPI"} {
+		assert.NotContains(t, fields, name, "config must not expose a cloud field %q", name)
+	}
 }

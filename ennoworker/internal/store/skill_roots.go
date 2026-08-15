@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 )
 
 // ErrSkillRootNotFound is returned when a skill root does not exist.
@@ -37,10 +38,16 @@ type CreateSkillRootInput struct {
 }
 
 // SkillRootRepo persists additional skill roots.
-type SkillRootRepo struct{ DB *sql.DB }
+type SkillRootRepo struct {
+	DB       *sql.DB
+	Settings *fileconfig.SettingsStore
+}
 
 // List returns all roots ordered by priority ascending (lower wins).
 func (r *SkillRootRepo) List(ctx context.Context) ([]SkillRoot, error) {
+	if r.Settings != nil {
+		return r.listFileRoots()
+	}
 	rows, err := r.DB.QueryContext(ctx, `
 		SELECT id, name, path, agent_kind, priority, enabled, created_at, updated_at
 		FROM skill_roots ORDER BY priority ASC, created_at ASC`)
@@ -68,6 +75,9 @@ func (r *SkillRootRepo) List(ctx context.Context) ([]SkillRoot, error) {
 // Create inserts a new root. Priority <= 0 is normalized to 10; duplicate
 // paths are rejected with a descriptive error.
 func (r *SkillRootRepo) Create(ctx context.Context, input CreateSkillRootInput) (*SkillRoot, error) {
+	if r.Settings != nil {
+		return r.createFileRoot(input)
+	}
 	input.Name = strings.TrimSpace(input.Name)
 	input.Path = strings.TrimSpace(input.Path)
 	if input.Name == "" || input.Path == "" {
@@ -111,6 +121,9 @@ func (r *SkillRootRepo) Update(ctx context.Context, id string, patch struct {
 	Priority  *int
 	Enabled   *bool
 }) (*SkillRoot, error) {
+	if r.Settings != nil {
+		return r.updateFileRoot(id, patch)
+	}
 	current, err := r.Get(ctx, id)
 	if err != nil {
 		return nil, err
@@ -145,6 +158,9 @@ func (r *SkillRootRepo) Update(ctx context.Context, id string, patch struct {
 
 // Delete removes a root.
 func (r *SkillRootRepo) Delete(ctx context.Context, id string) error {
+	if r.Settings != nil {
+		return r.deleteFileRoot(id)
+	}
 	res, err := r.DB.ExecContext(ctx, `DELETE FROM skill_roots WHERE id = ?`, id)
 	if err != nil {
 		return err
@@ -161,6 +177,9 @@ func (r *SkillRootRepo) Delete(ctx context.Context, id string) error {
 
 // Get loads one root.
 func (r *SkillRootRepo) Get(ctx context.Context, id string) (*SkillRoot, error) {
+	if r.Settings != nil {
+		return r.getFileRoot(id)
+	}
 	row := r.DB.QueryRowContext(ctx, `
 		SELECT id, name, path, agent_kind, priority, enabled, created_at, updated_at
 		FROM skill_roots WHERE id = ?`, id)
@@ -182,6 +201,9 @@ func (r *SkillRootRepo) Get(ctx context.Context, id string) (*SkillRoot, error) 
 
 // EnabledPaths returns the paths of enabled roots sorted by priority.
 func (r *SkillRootRepo) EnabledPaths(ctx context.Context) ([]SkillRoot, error) {
+	if r.Settings != nil {
+		return r.listFileRoots()
+	}
 	rows, err := r.DB.QueryContext(ctx, `
 		SELECT id, name, path, agent_kind, priority, enabled, created_at, updated_at
 		FROM skill_roots WHERE enabled = 1 ORDER BY priority ASC, created_at ASC`)
@@ -205,4 +227,3 @@ func (r *SkillRootRepo) EnabledPaths(ctx context.Context) ([]SkillRoot, error) {
 	}
 	return roots, rows.Err()
 }
-

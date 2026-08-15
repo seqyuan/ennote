@@ -59,7 +59,7 @@ func (t *CompactedHistoryTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{Name: "search_compacted_history",
 		Description: "Search safe exact details in canonical or current-Run messages covered by context compaction. Use only when the compacted summary lacks a necessary identifier, path, value, or decision. Raw tool-result bodies are never returned.",
 		Parameters:  json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"query":{"type":"string"},"fromMessageId":{"type":"string"},"throughMessageId":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":20},"cursor":{"type":"string"}}}`),
-		RiskClass:    domain.RiskReadOnly}
+		RiskClass:   domain.RiskReadOnly}
 }
 
 func (t *CompactedHistoryTool) ExecutionClass() domain.ExecutionClass {

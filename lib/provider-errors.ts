@@ -18,3 +18,15 @@ export function runFailureMessage(errorCode: unknown): string {
   const code = typeof errorCode === "string" ? errorCode : "";
   return messages[code] ?? (code ? `The run failed (${code}).` : "The run failed.");
 }
+
+// errorMessage normalizes an unknown rejection into a user-visible message.
+// A non-Error rejection (e.g. a bare string or a thrown null) would otherwise
+// yield an empty `(err as Error).message` and silently drop the failure state;
+// the console.warn records the raw reason so a composer input failure can be
+// reproduced from the browser console without code changes.
+export function errorMessage(reason: unknown, fallback: string): string {
+  if (reason instanceof Error && reason.message) return reason.message;
+  if (typeof reason === "string" && reason.trim()) return reason;
+  console.warn("[ennote] non-Error rejection captured", reason);
+  return fallback;
+}

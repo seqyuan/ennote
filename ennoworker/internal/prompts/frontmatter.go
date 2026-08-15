@@ -222,9 +222,9 @@ func splitFrontmatter(text string) (body string, fm string, has bool, err error)
 // frontmatterResult holds the parsed presence of the three allowed keys.
 // A nil node means the key was absent from the mapping entirely.
 type frontmatterResult struct {
-	name     *yaml.Node // absent → nil; present → non-nil
-	desc     *yaml.Node // absent → nil; present → non-nil
-	argHint  *yaml.Node // absent → nil; present → non-nil
+	name    *yaml.Node // absent → nil; present → non-nil
+	desc    *yaml.Node // absent → nil; present → non-nil
+	argHint *yaml.Node // absent → nil; present → non-nil
 }
 
 // parseFrontmatter decodes the frontmatter text as YAML into a yaml.Node tree,

@@ -7,7 +7,6 @@ import { McpSettings } from "@/components/settings/McpSettings";
 import { SkillsSettings } from "@/components/settings/SkillsSettings";
 import { ModelsSettings } from "@/components/settings/ModelsSettings";
 import { PoliciesSettings } from "@/components/settings/PoliciesSettings";
-import { ProvidersSettings } from "@/components/settings/ProvidersSettings";
 import { TemplatesSettings } from "@/components/settings/TemplatesSettings";
 import type { ModelProfile, PolicyProfile, ProviderProfile, Session, SettingsTab } from "@/components/settings/types";
 
@@ -28,16 +27,6 @@ function SettingsIcon() {
 }
 
 function tabIcon(id: SettingsTab) {
-  if (id === "providers") {
-    return (
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
-        <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
-        <line x1="6" y1="6" x2="6.01" y2="6" />
-        <line x1="6" y1="18" x2="6.01" y2="18" />
-      </svg>
-    );
-  }
   if (id === "models") {
     return (
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -95,7 +84,7 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
   onSessionUpdated: (session: Session) => void;
   projectId: string | null;
 }) {
-  const [activeTab, setActiveTab] = useState<SettingsTab>("providers");
+  const [activeTab, setActiveTab] = useState<SettingsTab>("models");
   const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -134,8 +123,7 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
   if (!open) return null;
 
   const tabs: TabItem[] = [
-    { id: "providers", label: "Providers", description: "API connection profiles and credentials", icon: tabIcon("providers") },
-    { id: "models", label: "Models", description: "Configure and assign model profiles", icon: tabIcon("models") },
+    { id: "models", label: "Models", description: "Providers, API keys, and model profiles", icon: tabIcon("models") },
     { id: "policies", label: "Policies", description: "Tool permission and routing policies", icon: tabIcon("policies") },
     { id: "context", label: "Context & session", description: session ? "Session defaults and compaction" : "Compaction policy defaults", icon: tabIcon("context") },
     { id: "templates", label: "Templates", description: "Slash-command prompt templates", icon: tabIcon("templates") },
@@ -262,11 +250,6 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
             id={`settings-panel-${activeTab}`}
             aria-labelledby={`settings-tab-${activeTab}`}
           >
-            {activeTab === "providers" && (
-              <div style={{ height: "100%", overflowY: "auto" }}>
-                <ProvidersSettings providers={providers} models={models} refresh={refresh} setError={setError} />
-              </div>
-            )}
             {activeTab === "models" && (
               <div style={{ height: "100%", overflowY: "auto" }}>
                 <ModelsSettings providers={providers} models={models} refresh={refresh} setError={setError} />

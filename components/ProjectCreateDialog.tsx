@@ -61,10 +61,10 @@ export function ProjectCreateDialog({ busy, error, onCreate, onClose }: {
           <input
             value={hostPath}
             onChange={(event) => setHostPath(event.target.value)}
-            placeholder="/data/projects/rna-screen"
+            placeholder="~/projects/rna-screen"
             required
           />
-          <small>Directory on this machine; the Worker maps it into a jailed workspace.</small>
+          <small>Directory on this machine; supports <code>~/...</code> shortcuts. The Worker maps it into a jailed workspace. (Native folder picker arrives with the Tauri shell.)</small>
         </label>
         {error && <div className="project-create-error" role="alert">{error}</div>}
         <div className="project-create-actions">

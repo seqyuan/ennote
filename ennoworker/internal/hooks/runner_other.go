@@ -2,5 +2,5 @@
 
 package hooks
 
-func isLinux() bool                                       { return false }
+func isLinux() bool                { return false }
 func linuxProcessGroup() *struct{} { return nil }

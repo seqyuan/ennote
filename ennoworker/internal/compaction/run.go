@@ -64,7 +64,8 @@ func (c *RunCompactor) CompactRunContext(ctx context.Context,
 		}
 		return c.failOrOpen(request, unchanged, 0, 0, err)
 	}
-	if request.Reason == agent.MidRunCompactionThreshold && plan.TokensBefore < plan.TriggerLimit {
+	if request.Reason == agent.MidRunCompactionThreshold &&
+		(agent.CompactionTrigger{TriggerLimit: plan.TriggerLimit, MainUsable: plan.MainUsable}).BelowTrigger(plan.TokensBefore) {
 		return unchanged, nil
 	}
 	if request.Previous.Attempts >= maxMidRunCompactions {
@@ -191,7 +192,8 @@ func (c *RunCompactor) completedResult(request agent.MidRunCompactionRequest, pl
 
 func (c *RunCompactor) failOrOpen(request agent.MidRunCompactionRequest,
 	unchanged agent.MidRunCompactionResult, tokensBefore, mainUsable int, cause error) (agent.MidRunCompactionResult, error) {
-	if request.Reason == agent.MidRunCompactionThreshold && (tokensBefore == 0 || tokensBefore <= mainUsable) {
+	if request.Reason == agent.MidRunCompactionThreshold &&
+		(agent.CompactionTrigger{MainUsable: mainUsable}).NoMeaningfulWork(tokensBefore) {
 		return unchanged, nil
 	}
 	return unchanged, domain.NewCodedError(domain.ErrorContextCompactionRequired, cause)

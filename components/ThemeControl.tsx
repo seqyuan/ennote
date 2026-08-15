@@ -1,62 +1,28 @@
 "use client";
 
-import { Check, Monitor, Moon, Sun } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { useTheme, type ThemeMode } from "@/hooks/useTheme";
+import { Moon, Sun } from "lucide-react";
+import { useTheme } from "@/hooks/useTheme";
 
-const options: Array<{ value: ThemeMode; label: string; Icon: typeof Monitor }> = [
-  { value: "system", label: "System theme", Icon: Monitor },
-  { value: "light", label: "Light theme", Icon: Sun },
-  { value: "dark", label: "Dark theme", Icon: Moon },
-];
-
+/**
+ * Single-button theme toggle (annodex style): clicking switches between light
+ * and dark with the circular wipe transition. No "system" picker — the first
+ * visit still follows the OS preference until the user chooses explicitly.
+ */
 export function ThemeControl() {
-  const { mode, setThemeMode } = useTheme();
-  const [open, setOpen] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
-  const current = options.find((option) => option.value === mode) ?? options[0];
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: PointerEvent) => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("pointerdown", close);
-    window.addEventListener("keydown", escape);
-    return () => {
-      window.removeEventListener("pointerdown", close);
-      window.removeEventListener("keydown", escape);
-    };
-  }, [open]);
-
+  const { isDark, toggleTheme } = useTheme();
   return (
-    <div className="theme-control" ref={root}>
-      <button type="button" className="topbar-icon-button" aria-label="Choose theme" title="Choose theme" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-        <current.Icon size={15} aria-hidden="true" />
-      </button>
-      {open && (
-        <div className="theme-menu" role="menu" aria-label="Theme">
-          {options.map(({ value, label, Icon }) => (
-            <button
-              key={value}
-              type="button"
-              role="menuitemradio"
-              aria-checked={mode === value}
-              onClick={(event) => {
-                setThemeMode(value, { x: event.clientX, y: event.clientY });
-                setOpen(false);
-              }}
-            >
-              <Icon size={15} aria-hidden="true" />
-              <span>{label}</span>
-              {mode === value && <Check size={14} aria-hidden="true" />}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+    <button
+      type="button"
+      className="topbar-icon-button"
+      onClick={(event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        toggleTheme({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+      }}
+      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      aria-pressed={isDark}
+    >
+      {isDark ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}
+    </button>
   );
 }

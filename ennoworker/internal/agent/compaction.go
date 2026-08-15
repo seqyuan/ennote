@@ -104,6 +104,38 @@ func safetyMargin(window int) int {
 	return margin
 }
 
+// CompactionTrigger is the pure threshold predicate for compaction (design 二
+// P1). It owns only token-state decisions and carries no side effects; the
+// trigger limits and usable budget are resolved once by the caller.
+type CompactionTrigger struct {
+	TriggerLimit int
+	MainUsable   int
+}
+
+// BelowTrigger reports whether the current token count is below the summary
+// trigger, so no summary is due.
+func (t CompactionTrigger) BelowTrigger(tokens int) bool {
+	return tokens < t.TriggerLimit
+}
+
+// ProjectionSufficient reports whether tail projection alone brings the context
+// back under the trigger without a summary.
+func (t CompactionTrigger) ProjectionSufficient(projectedTokens int) bool {
+	return projectedTokens < t.TriggerLimit
+}
+
+// ShouldSummarize reports whether summary compaction is warranted: the context
+// still exceeds the trigger after projecting the protected tail.
+func (t CompactionTrigger) ShouldSummarize(tokensBefore, projectedTokens int) bool {
+	return tokensBefore >= t.TriggerLimit && projectedTokens >= t.TriggerLimit
+}
+
+// NoMeaningfulWork reports whether the context already fits the usable budget,
+// so compaction has nothing to reclaim.
+func (t CompactionTrigger) NoMeaningfulWork(tokensBefore int) bool {
+	return tokensBefore == 0 || tokensBefore <= t.MainUsable
+}
+
 func BuildCompactionPlan(lineage []domain.Message, previous *domain.ContextCompaction,
 	policy domain.PolicySnapshot, config domain.CompactionPolicyConfig, mainRuntime, summaryRuntime domain.ModelRuntimeSnapshot,
 	systemPrompt string, tools []domain.ToolDefinition, customInstructions string) (CompactionPlan, error) {

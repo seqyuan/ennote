@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 )
 
 // CommandType is the only hook type supported in v1.
@@ -50,9 +52,10 @@ type HookSet map[string]EventHookSet
 // HookLayer represents a single configuration source (global, env-override,
 // or workspace).
 type HookLayer struct {
-	Source   string            `json:"-"`
-	Hooks    map[string]string `json:"-"`
-	RawHooks json.RawMessage   `json:"hooks,omitempty"`
+	Source      string            `json:"-"`
+	Hooks       map[string]string `json:"-"`
+	RawHooks    json.RawMessage   `json:"hooks,omitempty"`
+	HookPatches json.RawMessage   `json:"hookPatches,omitempty"` // per-matcher patches, applied after the append/replace merge
 }
 
 // LoadGlobalHookLayer reads the hooks section from $ENNOTE_HOME/config.json.
@@ -105,8 +108,10 @@ func ResolveHookSet(layers ...*HookLayer) (HookSet, error) {
 			continue
 		}
 		var hooks map[string]EventHookSet
-		if err := json.Unmarshal(layer.RawHooks, &hooks); err != nil {
-			return nil, fmt.Errorf("hooks: decode %s layer: %w", layer.Source, err)
+		if len(layer.RawHooks) > 0 {
+			if err := json.Unmarshal(layer.RawHooks, &hooks); err != nil {
+				return nil, fmt.Errorf("hooks: decode %s layer: %w", layer.Source, err)
+			}
 		}
 		for event, eventSet := range hooks {
 			event = strings.TrimSpace(event)
@@ -124,8 +129,67 @@ func ResolveHookSet(layers ...*HookLayer) (HookSet, error) {
 			}
 			set[event] = existing
 		}
+		if len(layer.HookPatches) > 0 {
+			var patches []fileconfig.PatchOp
+			if err := json.Unmarshal(layer.HookPatches, &patches); err != nil {
+				return nil, fmt.Errorf("hooks: decode %s patches: %w", layer.Source, err)
+			}
+			for i := range patches {
+				if patches[i].Source == "" {
+					patches[i].Source = layer.Source
+				}
+			}
+			if err := applyHookPatches(set, patches); err != nil {
+				return nil, fmt.Errorf("hooks: %s layer: %w", layer.Source, err)
+			}
+		}
 	}
 	return set, nil
+}
+
+// applyHookPatches applies per-matcher patches (design 六 P1) to the resolved
+// set. Each patch replaces one matcher by id across all events (whole-row
+// replacement) or deletes it when Set is empty. A patch targeting an unknown
+// matcher id fails loud.
+func applyHookPatches(set HookSet, patches []fileconfig.PatchOp) error {
+	for _, op := range patches {
+		if op.ID == "" {
+			return fmt.Errorf("patch id is required")
+		}
+		found := false
+		for event, eventSet := range set {
+			for i, m := range eventSet.Matchers {
+				if m.ID != op.ID {
+					continue
+				}
+				found = true
+				if len(op.Set) == 0 {
+					eventSet.Matchers = append(eventSet.Matchers[:i], eventSet.Matchers[i+1:]...)
+					set[event] = eventSet
+					break
+				}
+				var replacement HookMatcherConfig
+				if err := json.Unmarshal(op.Set, &replacement); err != nil {
+					return fmt.Errorf("patch %q: decode matcher: %w", op.ID, err)
+				}
+				if strings.TrimSpace(replacement.ID) == "" {
+					replacement.ID = op.ID // patch target keeps its id when omitted
+				} else if replacement.ID != op.ID {
+					return fmt.Errorf("patch %q must not change matcher id to %q", op.ID, replacement.ID)
+				}
+				eventSet.Matchers[i] = replacement
+				set[event] = eventSet
+				break
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("patch %q targets unknown matcher id", op.ID)
+		}
+	}
+	return nil
 }
 
 func validateMatchers(event string, matchers []HookMatcherConfig) error {

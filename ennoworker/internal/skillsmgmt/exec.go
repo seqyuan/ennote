@@ -16,10 +16,10 @@ import (
 )
 
 const (
-	checkTimeoutMS  = 15_000
-	execTimeout     = 60 * time.Second
+	checkTimeoutMS   = 15_000
+	execTimeout      = 60 * time.Second
 	searchAPIDefault = "https://skills.sh"
-	gitCheckTimeout = 30 * time.Second
+	gitCheckTimeout  = 30 * time.Second
 )
 
 var ansiRE = regexp.MustCompile(`\x1B\[[0-9;]*m`)
@@ -35,10 +35,10 @@ type SearchResult struct {
 type UpdateState string
 
 const (
-	UpdateUpToDate       UpdateState = "up-to-date"
-	UpdateAvailable      UpdateState = "update-available"
-	UpdateError          UpdateState = "error"
-	UpdateUnsupported    UpdateState = "unsupported"
+	UpdateUpToDate    UpdateState = "up-to-date"
+	UpdateAvailable   UpdateState = "update-available"
+	UpdateError       UpdateState = "error"
+	UpdateUnsupported UpdateState = "unsupported"
 )
 
 // UpdateResult mirrors pi-web's SkillUpdateResult.

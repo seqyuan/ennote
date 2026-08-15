@@ -84,8 +84,7 @@ func TestLoopResumeApproveExecutesSavedBatchWithoutRepeatingModelCall(t *testing
 }
 
 func TestLoopApprovalResumeYieldsImmediatelyAfterDelegation(t *testing.T) {
-	completion := domain.Completion{StopReason: domain.StopReasonToolCalls, ActualModel: "fake", ToolCalls: []domain.ToolCall{{ID: "delegate-call", Name: "delegate_tasks", Arguments: json.RawMessage(`{"tasks":[{"name":"inspect","role":"explorer","goal":"inspect","budget":{"maxModelCalls":4,"maxToolCalls":8}}]}`),
-	}}}
+	completion := domain.Completion{StopReason: domain.StopReasonToolCalls, ActualModel: "fake", ToolCalls: []domain.ToolCall{{ID: "delegate-call", Name: "delegate_tasks", Arguments: json.RawMessage(`{"tasks":[{"name":"inspect","role":"explorer","goal":"inspect","budget":{"maxModelCalls":4,"maxToolCalls":8}}]}`)}}}
 	provider := llm.NewFakeProvider(llm.FakeStep{Completion: completion})
 	tools := &fakeTools{result: domain.ToolResult{Content: `{"status":"delegated"}`}}
 	policy := askPolicy(t)

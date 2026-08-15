@@ -10,10 +10,10 @@ import (
 
 // DelegateTasksResult is the placeholder returned by delegate_tasks.
 type DelegateTasksResult struct {
-	Status        string                   `json:"status"`
-	GroupID       string                   `json:"groupId"`
-	HandleID      string                   `json:"handleId,omitempty"`
-	ExecutionMode string                   `json:"executionMode"`
+	Status        string                    `json:"status"`
+	GroupID       string                    `json:"groupId"`
+	HandleID      string                    `json:"handleId,omitempty"`
+	ExecutionMode string                    `json:"executionMode"`
 	Items         []DelegateTasksItemResult `json:"items"`
 }
 

@@ -32,12 +32,12 @@ func setupPromptServer(t *testing.T) (*Server, http.Handler, string) {
 	db, err := store.OpenMemory()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.Migrate(db))
+	require.NoError(t, store.MigrateFixtureSchema(db))
 
 	trustStore, err := workspace.NewTrustStore(home)
 	require.NoError(t, err)
 
-	projectRepo := &store.ProjectRepo{DB: db}
+	projectRepo := newFileProjects(t)
 
 	promptsSvc := &prompts.Service{
 		HomeDir:     home,

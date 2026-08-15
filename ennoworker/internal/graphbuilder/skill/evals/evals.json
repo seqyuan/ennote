@@ -1,0 +1,23 @@
+{
+  "skill_name": "graph-builder",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Build an RNA-seq Graph with three parallel alignment Tasks after reference preparation, then merge the outputs. Use inline Claude tasks for alignment and a local reference-preparer Role for the first Task.",
+      "expected_output": "JSON-only proposal that creates all five Tasks before assigning an acyclic prepare -> align_1/2/3 -> merge dependency graph, with mutually exclusive Role and inline execution fields.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Change the existing merge Task to use global/bioinformatics-reviewer. Keep its goal and dependencies unchanged.",
+      "expected_output": "A minimal upsert_task operation using role: global/bioinformatics-reviewer with no model, thinking, or skills fields and no dependency operation.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Make task_a depend on task_b and task_b depend on task_a.",
+      "expected_output": "The proposal may represent the request, but Worker validation must identify the dependency cycle and prevent Apply.",
+      "files": []
+    }
+  ]
+}
