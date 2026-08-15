@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, createContext, useContext, type ReactNode } from "react";
+import { useCallback, useEffect, useState, createContext, useContext, type ReactNode } from "react";
 import type { components } from "@/lib/worker-api.gen";
 import { apiFetch } from "@/lib/worker-api.client";
 

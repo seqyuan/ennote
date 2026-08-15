@@ -44,9 +44,8 @@ function defaultRoleDefinition(model: ModelProfile): RoleIdentity["draft"] {
  * references (bare handle) and never from delegate_tasks. The section lists,
  * creates, and edits them inline via the shared RoleEditor.
  */
-export function FlowRolesSection({ flowId, projectId, setError, onRolesChanged }: {
+export function FlowRolesSection({ flowId, setError, onRolesChanged }: {
   flowId: string;
-  projectId: string | null;
   setError: (message: string | null) => void;
   onRolesChanged?: () => void;
 }) {

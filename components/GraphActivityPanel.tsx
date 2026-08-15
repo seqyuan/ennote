@@ -56,14 +56,12 @@ function nodeStateColor(state?: string): string {
  * card; the most recent run is expanded by default. Running runs poll while
  * active so task progress stays live without an SSE subscription.
  */
-export function GraphActivityPanel({ projectId, sessionId }: {
-  projectId: string | null;
+export function GraphActivityPanel({ sessionId }: {
   sessionId: string | null;
 }) {
   const [runs, setRuns] = useState<RunAgentFlow[]>([]);
   const [nodes, setNodes] = useState<Record<string, RunAgentFlowNode[]>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -146,7 +144,7 @@ export function GraphActivityPanel({ projectId, sessionId }: {
           </div>
         ) : runs.length === 0 ? (
           <div style={{ padding: 16, color: "var(--text-dim)", fontSize: 12, textAlign: "center" }}>
-            {loading ? "Loading…" : "No graph runs in this session yet."}
+            No graph runs in this session yet.
           </div>
         ) : (
           runs.map((run) => (

@@ -995,7 +995,6 @@ export function AppShell() {
 
           {/* Chat area */}
           <ChatWindow
-            projectId={selectedProject}
             selectedSession={selectedSession}
             activeLeafMessageId={selectedSessionRecord?.activeLeafMessageId}
             activeBranchId={activeBranchId}
@@ -1123,7 +1122,6 @@ export function AppShell() {
             )}
             {activeRightTabId === "graph" && (
               <GraphActivityPanel
-                projectId={currentProjectId ?? null}
                 sessionId={selectedSession}
               />
             )}

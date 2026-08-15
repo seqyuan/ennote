@@ -16,7 +16,6 @@ import type { components } from "@/lib/worker-api.gen";
 type RunRecovery = components["schemas"]["RunRecovery"];
 
 interface ChatWindowProps {
-  projectId: string | null;
   selectedSession: string | null;
   activeLeafMessageId?: string;
   activeBranchId?: string;
@@ -85,7 +84,7 @@ interface ChatWindowProps {
 }
 
 export function ChatWindow({
-  projectId, selectedSession, activeLeafMessageId, activeBranchId, branchChanging,
+  selectedSession, activeLeafMessageId, activeBranchId, branchChanging,
   createBranch, recovery, retrying, retryRun, messages, historyLoading, historyLoadingOlder, historyError,
   hasMoreHistory, loadOlderHistory, error, clearError, status, input, setInput, activeRun, activeRunStatus, compacting,
   permissionMode, permissionReady, setPermissionMode, pendingApproval, resolvingApproval, decideApproval,
