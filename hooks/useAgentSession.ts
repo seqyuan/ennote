@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ActiveRunState, AgentRun, ApprovalDecision, ToolApprovalRequest } from "@/lib/approval";
+import type { RunUsage } from "@/hooks/chat-controller-types";
 import type { TurnMessage } from "@/lib/chat-messages";
 import { runFailureMessage, errorMessage } from "@/lib/provider-errors";
 import { registerChildProgress } from "@/hooks/useChildProgress";
@@ -28,6 +29,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
   const [resolvingApproval, setResolvingApproval] = useState<ApprovalDecision | null>(null);
   const [delegationActive, setDelegationActive] = useState(false);
   const [status, setStatus] = useState("");
+  const [usage, setUsage] = useState<RunUsage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingFollowUps, setPendingFollowUps] = useState<{ id: string; text: string }[]>([]);
   const streamController = useRef<AbortController | null>(null);
@@ -71,13 +73,14 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
     setStatus(restoredApproval ? "Waiting for approval" : run.runKind === "context_compaction" ? "Compaction queued…" :
       run.status === "waiting_children" ? "Delegated roles are working…" :
       run.status === "waiting_delegation_admission" ? "Waiting for delegation approval" : "Running…");
+    setUsage(null);
     let terminal = false;
     streamConnected.current = true;
     try {
       if (run.runKind === "context_compaction") {
         terminal = await streamCompactionEvents(run.id, setStatus, controller.signal);
       } else {
-        terminal = await streamAgentEvents(run.id, upsertMessage, setStatus, controller.signal, {
+        terminal = await streamAgentEvents(run.id, upsertMessage, setStatus, setUsage, controller.signal, {
           requested: () => void refreshPendingApproval(run.id, version),
           resolved: () => { if (generation.current === version) setPendingApproval(null); },
           delegated: () => { if (generation.current === version) setDelegationActive(true); },
@@ -262,6 +265,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
     resolvingApproval,
     status,
     setStatus,
+    usage,
     error,
     setError,
     watchRun,
@@ -314,6 +318,7 @@ async function streamAgentEvents(
   runId: string,
   upsertMessage: (message: TurnMessage) => void,
   setStatus: (status: string) => void,
+  setUsage: (usage: RunUsage) => void,
   signal: AbortSignal,
   approval: { requested: () => void; resolved: () => void; delegated: () => void; followUpConsumed: () => void },
 ): Promise<boolean> {
@@ -334,6 +339,8 @@ async function streamAgentEvents(
   // rendering deltas to avoid duplicate text. Durable delta types are ignored.
   let currentEventName: string | null = null;
   let liveFrame = false;
+  // Accumulated per-call usage across the run (usage_updated fires per model call).
+  const usageTotal: RunUsage = { inputTokens: 0, outputTokens: 0, cachedTokens: 0, reasoningTokens: 0 };
 
   function assistant(iteration: number) {
     const value = assistants.get(iteration) ?? { text: "", thinking: "" };
@@ -386,6 +393,17 @@ async function streamAgentEvents(
         const payload = (event.payload ?? {}) as Record<string, unknown>;
         const iteration = typeof payload.iteration === "number" ? payload.iteration : 1;
         switch (event.type) {
+          case "usage_updated": {
+            const usage = payload.usage as Partial<RunUsage> | undefined;
+            if (usage) {
+              usageTotal.inputTokens += Number(usage.inputTokens ?? 0);
+              usageTotal.outputTokens += Number(usage.outputTokens ?? 0);
+              usageTotal.cachedTokens += Number(usage.cachedTokens ?? 0);
+              usageTotal.reasoningTokens += Number(usage.reasoningTokens ?? 0);
+              setUsage({ ...usageTotal });
+            }
+            break;
+          }
           case "text_delta": case "thinking_delta": {
             // Consume only live-frame deltas to avoid duplicates.
             if (!wasLive) break;

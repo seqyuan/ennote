@@ -102,6 +102,29 @@ func TestOpenAIStreamTextThinkingToolsAndUsage(t *testing.T) {
 	assert.Equal(t, "effective-api-model", requestBody["model"])
 }
 
+func TestOpenAIStreamParsesDeepSeekNativeCacheHits(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"prompt_cache_hit_tokens\":40,\"prompt_cache_miss_tokens\":60}}\n\n")
+		flusher.Flush()
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider, err := NewOpenAIProvider(OpenAIConfig{BaseURL: server.URL + "/v1", APIKey: NewSecret("sk-test"), Model: "deepseek", MaxTokens: 2048})
+	require.NoError(t, err)
+	completion, err := provider.Stream(context.Background(), domain.CompletionRequest{
+		Model:    "deepseek-chat",
+		Messages: []domain.ChatMessage{{Role: domain.RoleUser, Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: "hi"}}}},
+	}, &recordingSink{})
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(100), completion.Usage.InputTokens)
+	assert.Equal(t, int64(20), completion.Usage.OutputTokens)
+	assert.Equal(t, int64(40), completion.Usage.CachedTokens)
+}
+
 func TestOpenAIReasoningEffortWireMappingAndDefaultOmission(t *testing.T) {
 	provider, err := NewOpenAIProvider(OpenAIConfig{BaseURL: "https://example.test", Model: "m"})
 	require.NoError(t, err)

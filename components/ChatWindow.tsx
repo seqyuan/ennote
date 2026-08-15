@@ -97,6 +97,7 @@ export function ChatWindow({
           waiting={waiting}
           reconnecting={reconnecting}
           compacting={run.compacting}
+          cacheTokens={run.usage?.cachedTokens ?? 0}
         />
         <div ref={bottomRef} />
       </div>

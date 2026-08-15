@@ -20,10 +20,18 @@ export type HistoryView = {
   loadOlder: () => Promise<boolean>;
 };
 
+export type RunUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  reasoningTokens: number;
+};
+
 export type RunView = {
   activeRun: string | null;
   activeRunStatus?: string;
   status: string;
+  usage: RunUsage | null;
   compacting: boolean;
   pendingApproval: ToolApprovalRequest | null;
   resolvingApproval: ApprovalDecision | null;

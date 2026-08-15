@@ -8,9 +8,11 @@ interface StreamingStatusBarProps {
   waiting: boolean;
   reconnecting: boolean;
   compacting: boolean;
+  /** Cumulative provider cache-hit tokens for the active run. */
+  cacheTokens?: number;
 }
 
-export function StreamingStatusBar({ status, activeRun, waiting, reconnecting, compacting }: StreamingStatusBarProps) {
+export function StreamingStatusBar({ status, activeRun, waiting, reconnecting, compacting, cacheTokens = 0 }: StreamingStatusBarProps) {
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [clock, setClock] = useState(0);
 
@@ -39,9 +41,15 @@ export function StreamingStatusBar({ status, activeRun, waiting, reconnecting, c
 
   return (
     <div className="streaming-status" role="status" aria-live="polite">
-      <span>{label}{startedAt ? `  ${formatElapsed(elapsed)}` : ""}</span>
+      <span>{label}{startedAt ? `  ${formatElapsed(elapsed)}` : ""}{cacheTokens > 0 ? `  · cache ${formatTokens(cacheTokens)}` : ""}</span>
     </div>
   );
+}
+
+function formatTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
+  return String(tokens);
 }
 
 function formatElapsed(seconds: number): string {

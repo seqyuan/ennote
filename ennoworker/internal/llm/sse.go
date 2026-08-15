@@ -181,10 +181,12 @@ type openAIFunctionCallDelta struct {
 }
 
 type openAIUsage struct {
-	PromptTokens        int64 `json:"prompt_tokens"`
-	CompletionTokens    int64 `json:"completion_tokens"`
-	CachedTokens        int64 `json:"cached_tokens"`
-	ReasoningTokens     int64 `json:"reasoning_tokens"`
+	PromptTokens         int64 `json:"prompt_tokens"`
+	CompletionTokens     int64 `json:"completion_tokens"`
+	CachedTokens         int64 `json:"cached_tokens"`
+	ReasoningTokens      int64 `json:"reasoning_tokens"`
+	PromptCacheHitTokens int64 `json:"prompt_cache_hit_tokens"`
+	PromptCacheMissTokens int64 `json:"prompt_cache_miss_tokens"`
 	PromptTokensDetails struct {
 		CachedTokens int64 `json:"cached_tokens"`
 	} `json:"prompt_tokens_details"`
@@ -194,9 +196,15 @@ type openAIUsage struct {
 }
 
 func (u openAIUsage) domainUsage() domain.Usage {
-	cached := u.CachedTokens
+	// Cache-hit precedence: DeepSeek's native prompt_cache_hit_tokens first
+	// (what deepseek-chat/deepseek-reasoner return), then the OpenAI-compat
+	// prompt_tokens_details.cached_tokens, then the bare cached_tokens alias.
+	cached := u.PromptCacheHitTokens
 	if cached == 0 {
 		cached = u.PromptTokensDetails.CachedTokens
+	}
+	if cached == 0 {
+		cached = u.CachedTokens
 	}
 	reasoning := u.ReasoningTokens
 	if reasoning == 0 {

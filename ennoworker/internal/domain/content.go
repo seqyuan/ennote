@@ -99,10 +99,10 @@ type ToolDefinition struct {
 }
 
 type Usage struct {
-	InputTokens     int64
-	OutputTokens    int64
-	CachedTokens    int64
-	ReasoningTokens int64
+	InputTokens     int64 `json:"inputTokens"`
+	OutputTokens    int64 `json:"outputTokens"`
+	CachedTokens    int64 `json:"cachedTokens"`
+	ReasoningTokens int64 `json:"reasoningTokens"`
 }
 
 type CompletionRequest struct {

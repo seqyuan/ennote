@@ -111,6 +111,7 @@ export function useChatController(deps: ChatControllerDeps) {
     activeRun: agent.activeRunID,
     activeRunStatus: agent.activeRun?.status,
     status: agent.status,
+    usage: agent.usage,
     compacting: agent.compacting,
     pendingApproval: agent.pendingApproval,
     resolvingApproval: agent.resolvingApproval,
