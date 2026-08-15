@@ -50,7 +50,7 @@ async function openSurface(page: Page) {
   await mockSurface(page);
   await page.goto("/");
   if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.getByTitle("Select project").click();
+  await page.getByTitle("Select project").first().click();
   await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
   if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("button", { name: session.title, exact: true }).click();
@@ -81,7 +81,7 @@ test("theme control applies and persists light and dark preferences", async ({ p
   expect(await page.evaluate(() => localStorage.getItem("ennote-theme"))).toBe("dark");
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await page.getByTitle("Select project").click();
+  await page.getByTitle("Select project").first().click();
   await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
   await page.getByRole("button", { name: session.title, exact: true }).click();
   await page.screenshot({ path: "/tmp/ennote-conversation-surface-dark.png", fullPage: true });
@@ -118,7 +118,7 @@ test("a nonterminal stream EOF reconnects the same run and refreshes canonical h
     return route.abort();
   });
   await page.goto("/");
-  await page.getByTitle("Select project").click();
+  await page.getByTitle("Select project").first().click();
   await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
   await page.getByRole("button", { name: session.title, exact: true }).click();
   await expect.poll(() => streams, { timeout: 5000 }).toBe(2);

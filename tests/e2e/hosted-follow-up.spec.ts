@@ -14,7 +14,7 @@ async function fulfill(route: Route, data: unknown, status = 200) {
 
 async function selectSession(page: Page) {
   await page.goto("/");
-  await page.getByTitle("Select project").click();
+  await page.getByTitle("Select project").first().click();
   await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
   await page.getByRole("button", { name: session.title, exact: true }).click();
 }

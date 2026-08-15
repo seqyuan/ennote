@@ -45,7 +45,7 @@ async function fulfill(route: Route, data: unknown) {
 test("opening a session restores and paginates its active message branch", async ({ page }) => {
   await mockHistoryAPI(page);
   await page.goto("/");
-  await page.getByTitle("Select project").click();
+  await page.getByTitle("Select project").first().click();
   await page.getByText(project.name, { exact: true }).click();
   await page.getByText(session.title, { exact: true }).click();
 
@@ -66,7 +66,7 @@ test("restores hosted history at 390x844 without horizontal overflow", async ({ 
   await mockHistoryAPI(page);
   await page.goto("/");
   await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.getByTitle("Select project").click();
+  await page.getByTitle("Select project").first().click();
   await page.getByText(project.name, { exact: true }).click();
   await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByText(session.title, { exact: true }).click();
@@ -97,7 +97,7 @@ test("a late history response cannot overwrite a newly selected session", async 
   });
 
   await page.goto("/");
-  await page.getByTitle("Select project").click();
+  await page.getByTitle("Select project").first().click();
   await page.getByText(project.name, { exact: true }).click();
   await page.getByText(slow.title, { exact: true }).click();
   await page.getByText(fast.title, { exact: true }).click();

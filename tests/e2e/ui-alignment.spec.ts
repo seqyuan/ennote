@@ -40,7 +40,7 @@ async function mockUI(page: Page) {
 }
 
 async function selectProject(page: Page) {
-  await page.getByTitle("Select project").click();
+  await page.getByTitle("Select project").first().click();
   await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
 }
 

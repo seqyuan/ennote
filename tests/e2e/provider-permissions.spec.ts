@@ -42,7 +42,7 @@ test("each turn freezes the selected permission profile", async ({ page }) => {
   let turnBody: Record<string, unknown> | undefined;
   await mockApp(page, body => { turnBody = body; });
   await page.goto("/");
-  await page.getByTitle("Select project").click();
+  await page.getByTitle("Select project").first().click();
   await page.getByText(project.name, { exact: true }).click();
   await page.getByText(session.title, { exact: true }).click();
 
@@ -90,7 +90,7 @@ test.describe("mobile", () => {
     await mockApp(page);
     await page.goto("/");
     await page.getByRole("button", { name: "Open navigation" }).click();
-    await page.getByTitle("Select project").click();
+    await page.getByTitle("Select project").first().click();
     await page.getByText(project.name, { exact: true }).click();
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByText(session.title, { exact: true }).click();

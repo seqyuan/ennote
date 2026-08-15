@@ -70,7 +70,7 @@ async function openArtifacts(page: Page) {
   await mockArtifacts(page);
   await page.goto("/");
   if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.getByTitle("Select project").click();
+  await page.getByTitle("Select project").first().click();
   await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
   if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("button", { name: session.title, exact: true }).click();

@@ -46,7 +46,7 @@ async function mockGraphTab(page: Page) {
 async function openGraphTab(page: Page) {
   await mockGraphTab(page);
   await page.goto("/");
-  await page.getByTitle("Select project").click();
+  await page.getByTitle("Select project").first().click();
   await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
   await page.getByRole("button", { name: session.title, exact: true }).click();
   await page.getByTitle("Show panel").click();
