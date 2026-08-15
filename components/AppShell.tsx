@@ -46,7 +46,7 @@ export function AppShell() {
   }, []);
 
   // Resizable panels
-  const sidebarResize = useResizable({ initialWidth: 260, minWidth: 180, maxWidth: 500, storageKey: "--ennote-sidebar-width" });
+  const sidebarResize = useResizable({ initialWidth: 280, minWidth: 264, maxWidth: 420, storageKey: "--ennote-sidebar-width" });
   const rightPanelResize = useResizable({ initialWidth: 420, minWidth: 280, maxWidth: 1000, storageKey: "--ennote-right-panel-width", direction: "left" });
 
   // Right panel layout state (file tabs live in useFileTabs)
@@ -251,6 +251,8 @@ export function AppShell() {
       openSettings={openSettings}
       closeNavigation={closeMobileNavigation}
       runningSessionIds={runningSessionIds}
+      railMode={!sidebarOpen && !isMobile}
+      onToggleSidebar={() => setSidebarOpen((v) => !v)}
     />
   );
 
@@ -276,21 +278,21 @@ export function AppShell() {
           aria-label={isMobile && sidebarOpen ? "Navigation" : undefined}
           id="workspace-navigation"
           style={{
-            width: sidebarResize.width,
-            minWidth: sidebarResize.width,
+            width: isMobile ? undefined : sidebarOpen ? sidebarResize.width : 56,
+            minWidth: isMobile ? undefined : sidebarOpen ? sidebarResize.width : 56,
             transition: sidebarOpen || sidebarResize.isResizing ? "none" : undefined,
           }}
         >
           {sidebar}
         </div>
 
-        {sidebarOpen && (
+        {sidebarOpen && !isMobile && (
           <ResizeHandle
             side="right"
             ariaLabel="Resize sidebar"
             value={sidebarResize.width}
-            min={180}
-            max={500}
+            min={264}
+            max={420}
             onResizeStart={sidebarResize.beginResize}
             onResize={sidebarResize.resizeBy}
             onResizeEnd={sidebarResize.endResize}
