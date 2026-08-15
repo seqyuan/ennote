@@ -455,6 +455,54 @@ export function useChatController(deps: ChatControllerDeps): ChatController {
 
   const policyId = selectedPermissionPolicyID();
 
+  // Shared slash-expansion gate for submit and steer (§4.1.4): entry resets,
+  // expansion request, stale-guard and finally-reset live here in one copy.
+  // Caller-specific behavior (expandDiag on submit, fallback action) is left to
+  // the caller via the structured outcome.
+  type ExpandCtx = { project: string; session: string | null; draftVersion: number };
+  type ExpansionOutcome =
+    | { status: "matched"; text: string; diagnostics: { level: string; code: string; message: string }[] }
+    | { status: "empty" }
+    | { status: "fallthrough" };
+
+  const expandDraftOrFallback = useCallback(async (
+    draft: string,
+    ctx: ExpandCtx,
+    errorLabel: string,
+  ): Promise<ExpansionOutcome | null> => {
+    setExpanding(true);
+    setExpandDiag(null);
+    try {
+      const result = await handleExpand(draft, ctx.project);
+      if (!result) return null; // aborted
+      // Stale-guard: context changed during request.
+      if (ctx.project !== selectedProject || ctx.session !== selectedSession || ctx.draftVersion !== draftVersion) {
+        return null;
+      }
+      switch (result.case) {
+        case "matched": {
+          const text = result.text.trim();
+          if (!text) {
+            agent.setError("Expanded prompt is empty.");
+            return { status: "empty" };
+          }
+          setInput(text);
+          setDraftVersion((v) => v + 1);
+          setExpandedVersion(draftVersion + 1);
+          return { status: "matched", text, diagnostics: result.diagnostics };
+        }
+        case "not_found":
+        case "invalid_invocation":
+          return { status: "fallthrough" };
+      }
+    } catch (err: unknown) {
+      agent.setError(errorMessage(err, errorLabel));
+      return null;
+    } finally {
+      setExpanding(false);
+    }
+  }, [agent, selectedProject, selectedSession, draftVersion, handleExpand, setInput, setDraftVersion, setExpandedVersion, setExpanding, setExpandDiag]);
+
   const submit = useCallback(async () => {
     if (!selectedSession || (!input.trim() && !pendingImage && textAttachments.length === 0) || agent.activeRunID) return;
 
@@ -480,87 +528,42 @@ export function useChatController(deps: ChatControllerDeps): ChatController {
 
     // Slash expansion gate: intercept drafts starting with "/".
     if (input.startsWith("/") && expandedVersion !== draftVersion && selectedProject) {
-      setExpanding(true);
-      setExpandDiag(null);
-      const actionProject = selectedProject;
-      const actionDraftVer = draftVersion;
-      const actionSession = selectedSession;
-      try {
-        const result = await handleExpand(input, selectedProject);
-        if (!result) return; // aborted
-        // Stale-guard: context changed during request.
-        if (selectedProject !== actionProject || selectedSession !== actionSession || draftVersion !== actionDraftVer) {
-          return;
+      const outcome = await expandDraftOrFallback(input, {
+        project: selectedProject, session: selectedSession, draftVersion,
+      }, "Failed to expand prompt template");
+      if (!outcome) return; // aborted or stale
+      if (outcome.status === "matched") {
+        if (outcome.diagnostics.some((d) => d.code === "arguments_fallback")) {
+          setExpandDiag("Arguments could not be fully parsed; using raw input.");
         }
-        switch (result.case) {
-          case "matched": {
-            const text = result.text.trim();
-            if (!text) {
-              agent.setError("Expanded prompt is empty.");
-              break;
-            }
-            setInput(text);
-            setDraftVersion((v) => v + 1);
-            setExpandedVersion(draftVersion + 1);
-            if (result.diagnostics.some((d) => d.code === "arguments_fallback")) {
-              setExpandDiag("Arguments could not be fully parsed; using raw input.");
-            }
-            break;
-          }
-          case "not_found":
-          case "invalid_invocation":
-            // Fall through: send the original draft as a normal message.
-            void sendTurn(input, policyId ?? "");
-            break;
-        }
-      } catch (err: unknown) {
-        agent.setError(errorMessage(err, "Failed to expand prompt template"));
-      } finally {
-        setExpanding(false);
+        return;
+      }
+      if (outcome.status === "fallthrough") {
+        // Fall through: send the original draft as a normal message.
+        void sendTurn(input, policyId ?? "");
       }
       return;
     }
 
     void sendTurn(input, policyId ?? "");
   }, [selectedSession, input, pendingImage, textAttachments.length, policyId, permissionMode,
-     agent, sendTurn, selectedProject, selectedRoleId, expandedVersion, draftVersion, handleExpand, invokeAgentFlow]);
+     agent, sendTurn, selectedProject, selectedRoleId, expandedVersion, draftVersion, invokeAgentFlow, expandDraftOrFallback]);
 
   const steer = useCallback(async () => {
     if (!agent.activeRunID || !input.trim()) return;
 
     // Same slash expansion gate for steer.
     if (input.startsWith("/") && expandedVersion !== draftVersion && selectedProject) {
-      setExpanding(true);
-      setExpandDiag(null);
-      const actionProject = selectedProject;
-      const actionDraftVer = draftVersion;
-      const actionSession = selectedSession;
-      try {
-        const result = await handleExpand(input, selectedProject);
-        if (!result) return;
-        if (selectedProject !== actionProject || selectedSession !== actionSession || draftVersion !== actionDraftVer) return;
-        switch (result.case) {
-          case "matched": {
-            const text = result.text.trim();
-            if (!text) { agent.setError("Expanded prompt is empty."); break; }
-            setInput(text);
-            setDraftVersion((v) => v + 1);
-            setExpandedVersion(draftVersion + 1);
-            break;
-          }
-          case "not_found":
-          case "invalid_invocation": {
-            const text = input;
-            setInputVersioned("");
-            const queued = await agent.steer(text);
-            if (!queued) setInputVersioned(text);
-            break;
-          }
-        }
-      } catch (err: unknown) {
-        agent.setError(errorMessage(err, "Failed to expand"));
-      } finally {
-        setExpanding(false);
+      const outcome = await expandDraftOrFallback(input, {
+        project: selectedProject, session: selectedSession, draftVersion,
+      }, "Failed to expand");
+      if (!outcome) return; // aborted or stale
+      if (outcome.status === "matched") return;
+      if (outcome.status === "fallthrough") {
+        const text = input;
+        setInputVersioned("");
+        const queued = await agent.steer(text);
+        if (!queued) setInputVersioned(text);
       }
       return;
     }
@@ -569,7 +572,7 @@ export function useChatController(deps: ChatControllerDeps): ChatController {
     setInputVersioned("");
     const queued = await agent.steer(text);
     if (!queued) setInputVersioned(text);
-  }, [agent, input, selectedProject, expandedVersion, draftVersion, handleExpand, selectedSession, setInputVersioned]);
+  }, [agent, input, selectedProject, selectedSession, expandedVersion, draftVersion, setInputVersioned, expandDraftOrFallback]);
 
   const followUp = useCallback(async () => {
     if (!agent.activeRunID || !input.trim()) return;
