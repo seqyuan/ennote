@@ -2,12 +2,11 @@
 
 import { ArrowLeft } from "lucide-react";
 import { useState, useCallback, useRef, useEffect, useSyncExternalStore } from "react";
-import { AttentionPanel } from "@/components/AttentionPanel";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import type { TextAttachment } from "./Composer";
 import type { RunAgentFlow } from "@/components/settings/types";
-import { BranchControl } from "./BranchControl";
+import { TopBar } from "./TopBar";
 import { FileTreePanel } from "./FileTreePanel";
 import { FileViewer } from "./FileViewer";
 import { FilePreviewWindow } from "./FilePreviewWindow";
@@ -15,7 +14,6 @@ import { ResizeHandle } from "./ResizeHandle";
 import { TabBar, type Tab } from "./TabBar";
 import { ProjectCreateDialog } from "./ProjectCreateDialog";
 import { SettingsDialog } from "./settings/SettingsDialog";
-import { ThemeControl } from "./ThemeControl";
 import { useResizable } from "@/hooks/useResizable";
 import { useFileTabs } from "@/hooks/useFileTabs";
 import { useSessionTitle } from "@/hooks/useSessionTitle";
@@ -716,10 +714,6 @@ export function AppShell() {
 
   // Title editing
   const titleEdit = useSessionTitle({ session: selectedSessionRecord, replaceSession: sessionNavigation.replaceSession });
-  const {
-    title: topBarSessionTitle, editing: editingTitle, draft: titleDraft, setDraft: setTitleDraft,
-    startEdit: handleStartTitleEdit, save: handleSaveTitle, keyDown: handleTitleKeyDown, inputRef: titleInputRef,
-  } = titleEdit;
 
   const topBarProjectName = currentCwd
     ? currentCwd.replace(/\/+$/, "").split(/[\\/]/).filter(Boolean).pop() || currentCwd
@@ -810,143 +804,31 @@ export function AppShell() {
         {/* Center: chat */}
         <div className="workspace-content" inert={isMobile && sidebarOpen} style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
           {/* Top bar */}
-          <div className="app-topbar">
-            {/* Sidebar toggle */}
-            <button
-              ref={navigationTriggerRef}
-              className="topbar-sidebar-toggle"
-              onClick={() => setSidebarOpen((v) => !v)}
-              title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-              aria-label="Open navigation"
-              aria-expanded={sidebarOpen}
-              aria-controls="workspace-navigation"
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: 32, height: 32, padding: 0,
-                background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 7,
-                color: "var(--text-muted)", cursor: "pointer", flexShrink: 0, transition: "color 0.12s, background 0.12s",
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "var(--bg-panel)"; }}
-            >
-              {sidebarOpen ? (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="9" y1="3" x2="9" y2="21" />
-                </svg>
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
-                </svg>
-              )}
-            </button>
-
-            {/* Session title area */}
-            <div className="topbar-title-area" style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0, flex: 1 }}>
-              <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 6 }}>
-                {editingTitle && selectedSessionRecord ? (
-                  <input
-                    ref={titleInputRef}
-                    value={titleDraft}
-                    onChange={(e) => setTitleDraft(e.target.value)}
-                    onKeyDown={handleTitleKeyDown}
-                    onBlur={() => void handleSaveTitle()}
-                    style={{
-                      width: "min(360px, 34vw)", height: 28, boxSizing: "border-box",
-                      border: "1px solid var(--border)", borderRadius: 6,
-                      background: "var(--bg-panel)", color: "var(--text)",
-                      padding: "0 8px", fontSize: 13, fontWeight: 500, outline: "none",
-                    }}
-                  />
-                ) : (
-                  <>
-                    <div
-                      className="topbar-session-title"
-                      title={topBarSessionTitle}
-                      style={{
-                        minWidth: 0, maxWidth: "min(420px, 36vw)",
-                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                        color: "var(--text)", fontSize: 14, fontWeight: 600, lineHeight: 1.2,
-                      }}
-                    >
-                      {topBarSessionTitle}
-                    </div>
-                    {selectedSessionRecord && (
-                      <button
-                        type="button"
-                        onClick={handleStartTitleEdit}
-                        title="Rename session"
-                        style={{
-                          width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center",
-                          padding: 0, border: "none", borderRadius: 5,
-                          background: "transparent", color: "var(--text-dim)", cursor: "pointer", flexShrink: 0,
-                        }}
-                        onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "transparent"; }}
-                      >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                        </svg>
-                      </button>
-                    )}
-                  </>
-                )}
-              </div>
-              {topBarProjectName && (
-                <>
-                  <span className="topbar-project-crumb" style={{ color: "var(--text-dim)", fontSize: 12, flexShrink: 0 }}>/</span>
-                  <span className="topbar-project-crumb" title={currentCwd || topBarProjectName}
-                    style={{ minWidth: 0, maxWidth: "min(280px, 24vw)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-muted)", fontSize: 12, lineHeight: 1.2 }}>
-                    {topBarProjectName}
-                  </span>
-                </>
-              )}
-            </div>
-
-            {selectedSession && (
-              <BranchControl
-                branches={branches.branches}
-                activeBranchId={activeBranchId}
-                loading={branches.loading}
-                changing={branches.changing}
-                disabled={Boolean(activeRun)}
-                activate={(branchId) => void activateBranch(branchId)}
-              />
-            )}
-
-            <ThemeControl />
-
-            {/* Right panel toggle */}
-            <button
-              type="button"
-              onClick={() => setRightPanelOpen((v) => !v)}
-              title={rightPanelOpen ? "Hide panel" : "Show panel"}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: 32, height: 32, padding: 0,
-                background: rightPanelOpen ? "var(--bg-selected)" : "var(--bg-panel)",
-                border: "1px solid var(--border)", borderRadius: 7,
-                color: rightPanelOpen ? "var(--accent)" : "var(--text-muted)", cursor: "pointer", flexShrink: 0,
-                transition: "color 0.12s, background 0.12s",
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.color = rightPanelOpen ? "var(--accent)" : "var(--text-muted)";
-                e.currentTarget.style.background = rightPanelOpen ? "var(--bg-selected)" : "var(--bg-panel)";
-              }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="14" y="3" width="7" height="18" rx="1" /><rect x="3" y="3" width="7" height="18" rx="1" />
-              </svg>
-            </button>
-
-            {/* Global attention */}
-            <AttentionPanel
-              projectId={selectedProject ?? currentProjectId ?? undefined}
-              onNavigate={item => {
+          <TopBar
+            sidebarOpen={sidebarOpen}
+            onToggleSidebar={() => setSidebarOpen((v) => !v)}
+            navigationTriggerRef={navigationTriggerRef}
+            session={selectedSessionRecord}
+            title={titleEdit}
+            projectName={topBarProjectName}
+            projectPath={currentCwd}
+            branch={{
+              branches: branches.branches,
+              activeBranchId,
+              loading: branches.loading,
+              changing: branches.changing,
+              disabled: Boolean(activeRun),
+              onActivate: (branchId) => void activateBranch(branchId),
+            }}
+            rightPanelOpen={rightPanelOpen}
+            onToggleRightPanel={() => setRightPanelOpen((v) => !v)}
+            attention={{
+              projectId: selectedProject ?? currentProjectId ?? undefined,
+              onNavigate: (item) => {
                 if (item.sessionId && item.sessionId !== selectedSession) switchSession(item.sessionId);
-              }}
-            />
-          </div>
+              },
+            }}
+          />
 
           {/* Chat area */}
           <ChatWindow
