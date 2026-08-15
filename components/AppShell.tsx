@@ -17,6 +17,7 @@ import { ProjectCreateDialog } from "./ProjectCreateDialog";
 import { SettingsDialog } from "./settings/SettingsDialog";
 import { ThemeControl } from "./ThemeControl";
 import { useResizable } from "@/hooks/useResizable";
+import { useFileTabs } from "@/hooks/useFileTabs";
 import { useProjectSessions } from "@/hooks/useProjectSessions";
 import { useSidebarProjectGroups } from "@/hooks/useSidebarProjectGroups";
 import { useSessionBranches } from "@/hooks/useSessionBranches";
@@ -150,9 +151,7 @@ export function AppShell() {
   const sidebarResize = useResizable({ initialWidth: 260, minWidth: 180, maxWidth: 500, storageKey: "--ennote-sidebar-width" });
   const rightPanelResize = useResizable({ initialWidth: 420, minWidth: 280, maxWidth: 1000, storageKey: "--ennote-right-panel-width", direction: "left" });
 
-  // Right panel state
-  const [fileTabs, setFileTabs] = useState<Tab[]>([]);
-  const [activeRightTabId, setActiveRightTabId] = useState<string>("files");
+  // Right panel layout state (file tabs live in useFileTabs)
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<{ projectId: string; path: string; name: string } | null>(null);
 
@@ -704,34 +703,18 @@ export function AppShell() {
     // workspaceFor is stable via context; re-run on project switch.
   }, [currentProjectId, setError, workspaceFor]);
 
+  const fileTabsState = useFileTabs(currentProjectId);
+  const { fileTabs, activeTabId: activeRightTabId, setActiveTabId: setActiveRightTabId, openFile, closeTab } = fileTabsState;
+
   const handleOpenFile = useCallback((filePath: string, fileName: string) => {
-    if (!currentProjectId) return;
-    const tabId = `file:${currentProjectId}:${filePath}`;
-    setFileTabs((previous) => {
-      if (previous.find((tab) => tab.id === tabId)) return previous;
-      return [...previous, { id: tabId, label: fileName, filePath, projectId: currentProjectId }];
-    });
-    setActiveRightTabId(tabId);
+    openFile(filePath, fileName);
     setRightPanelOpen(true);
-  }, [currentProjectId]);
+  }, [openFile, setRightPanelOpen]);
 
   const handlePreviewFile = useCallback((filePath: string, fileName: string) => {
     if (!currentProjectId) return;
     setPreviewFile({ projectId: currentProjectId, path: filePath, name: fileName });
   }, [currentProjectId]);
-
-  const handleCloseFileTab = useCallback((tabId: string) => {
-    if (tabId === "files" || tabId === "tools") return;
-    setFileTabs((prev) => {
-      const next = prev.filter((t) => t.id !== tabId);
-      return next;
-    });
-    setActiveRightTabId((cur) => {
-      if (cur !== tabId) return cur;
-      const remaining = fileTabs.filter((t) => t.id !== tabId);
-      return remaining.length > 0 ? remaining[remaining.length - 1].id : "files";
-    });
-  }, [fileTabs]);
 
   // Title editing
   const getSessionTitle = useCallback((session: typeof selectedSessionRecord) => {
@@ -1108,7 +1091,7 @@ export function AppShell() {
             tabs={rightTabs}
             activeTabId={activeRightTabId}
             onSelectTab={setActiveRightTabId}
-            onCloseTab={handleCloseFileTab}
+            onCloseTab={closeTab}
           />
           <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
             {activeRightTabId === "files" && (
