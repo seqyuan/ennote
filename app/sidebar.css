@@ -1,0 +1,302 @@
+/* Sidebar design tokens, aligned to deepseek-harness --dsw-* values.
+   Scoped to .sidebar-container so the rest of the app keeps its palette. */
+.sidebar-container {
+  --sb-fill: #f9fafb;                        /* dsw neutral-bluish-50 */
+  --sb-text-primary: rgb(15, 17, 21);        /* neutral-bluish-1000 */
+  --sb-text-secondary: rgb(97, 102, 107);    /* neutral-bluish-700 */
+  --sb-text-tertiary: rgb(129, 133, 140);    /* neutral-bluish-600 */
+  --sb-border-l1: rgba(0, 0, 0, 0.04);
+  --sb-border-l2: rgba(0, 0, 0, 0.10);
+  --sb-hover: rgba(38, 49, 72, 0.06);
+  --sb-active: rgb(235, 238, 242);           /* neutral-bluish-100 */
+  --sb-active-accent: rgb(228, 237, 253);    /* deepseek-100 */
+  --sb-button-fill: #ffffff;
+  --sb-button-hover: rgb(241, 243, 245);     /* neutral-bluish-75 */
+  --sb-brand: rgb(65, 118, 230);             /* deepseek-500 */
+  --sb-radius: 12px;
+  --sb-radius-row: 8px;
+  --sb-rail: 56px;
+  --sb-pad-x: 12px;
+
+  background: var(--sb-fill);
+  border-right: 1px solid var(--sb-border-l1);
+}
+
+html.dark .sidebar-container {
+  --sb-fill: rgb(27, 27, 28);                /* neutral-bluish-900 */
+  --sb-text-primary: rgb(249, 250, 251);     /* neutral-bluish-50 */
+  --sb-text-secondary: rgb(207, 211, 214);   /* neutral-bluish-300 */
+  --sb-text-tertiary: rgb(151, 157, 166);    /* neutral-bluish-500 */
+  --sb-border-l1: rgba(255, 255, 255, 0.06);
+  --sb-border-l2: rgba(255, 255, 255, 0.12);
+  --sb-hover: rgba(255, 255, 255, 0.08);
+  --sb-active: rgb(44, 44, 46);              /* neutral-bluish-750 */
+  --sb-active-accent: rgb(53, 54, 56);       /* neutral-bluish-800 */
+  --sb-button-fill: rgb(44, 44, 46);
+  --sb-button-hover: rgb(53, 54, 56);
+  --sb-brand: rgb(103, 158, 254);            /* deepseek-400 */
+}
+
+/* ---- Sidebar shell ---- */
+.sidebar {
+  padding: 6px var(--sb-pad-x);
+  color: var(--sb-text-primary);
+  font-size: 14px;
+}
+
+/* Desktop: collapse = 56px rail (override globals' width:0) + free the
+   nested 180px min-width that would break the rail. */
+@media (min-width: 641px) {
+  .sidebar-container.sidebar-closed {
+    width: var(--sb-rail) !important;
+    min-width: var(--sb-rail) !important;
+    border-right: 1px solid var(--sb-border-l1) !important;
+  }
+  .sidebar-container.sidebar-closed > * {
+    width: var(--sb-rail);
+    min-width: var(--sb-rail);
+  }
+}
+
+/* ---- Logo row (dsh SidebarRoot .logoRow) ---- */
+.sidebar-logo-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  height: 60px;
+  padding: 8px 0 8px 4px;
+  margin-bottom: 8px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.sidebar-brand {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  color: var(--sb-text-primary);
+}
+.sidebar-brand strong { font-size: 13px; font-weight: 600; }
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 23px;
+  height: 23px;
+  border: 1px solid var(--sb-text-tertiary);
+  border-radius: 6px;
+  background: var(--sb-button-fill);
+  color: var(--sb-brand);
+  font: 800 12px var(--font-mono);
+}
+
+/* Desktop toggle (panel-left icon), right edge of the logo row. */
+.sidebar-collapse-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  color: var(--sb-text-secondary);
+  cursor: pointer;
+}
+.sidebar-collapse-toggle:hover { background: var(--sb-hover); }
+
+/* Mobile close (X) — hidden on desktop, shown only in the drawer. */
+.sidebar-close-nav {
+  display: none;
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--sb-text-secondary);
+  cursor: pointer;
+}
+.sidebar-close-nav:hover { background: var(--sb-hover); color: var(--sb-text-primary); }
+@media (max-width: 640px) {
+  .sidebar-close-nav { display: grid; }
+  .sidebar-collapse-toggle { display: none; }
+}
+
+/* ---- New Session bar (dsh .newSession) ---- */
+.sidebar-new-session {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 38px;
+  padding: 8px 16px;
+  margin: 0 2px 8px;
+  box-sizing: border-box;
+  border: 1px solid var(--sb-border-l2);
+  border-radius: var(--sb-radius);
+  background: var(--sb-button-fill);
+  color: var(--sb-text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+  cursor: pointer;
+}
+.sidebar-new-session:hover:not(:disabled) { background: var(--sb-button-hover); }
+.sidebar-new-session:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ---- Nav item (Roles / Graphs, below New Session) ---- */
+.sidebar-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: var(--sb-radius-row);
+  color: var(--sb-text-secondary);
+  font-size: 13px;
+  text-decoration: none;
+}
+.sidebar-nav-item:hover { background: var(--sb-hover); color: var(--sb-text-primary); }
+.sidebar-nav-item.active {
+  background: var(--sb-active);
+  color: var(--sb-text-primary);
+  font-weight: 600;
+}
+.sidebar-nav-item .nav-icon { color: var(--sb-text-secondary); }
+.sidebar-nav-item.active .nav-icon { color: var(--sb-brand); }
+
+/* ---- Sessions header row ---- */
+.sidebar-sessions-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px 4px;
+}
+.sidebar-sessions-head .sessions-label {
+  color: var(--sb-text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ---- Rows (session/project), scoped overrides of globals' .sidebar-item ---- */
+.sidebar .sidebar-item {
+  padding: 6px 10px;
+  border-radius: var(--sb-radius-row);
+  color: var(--sb-text-secondary);
+  font-size: 13px;
+}
+.sidebar .sidebar-item:hover { background: var(--sb-hover); color: var(--sb-text-primary); }
+.sidebar .sidebar-item.active { background: var(--sb-active); color: var(--sb-text-primary); font-weight: 600; }
+.sidebar .session-action-trigger,
+.sidebar .sidebar-icon-btn,
+.sidebar .sidebar-archived-toggle {
+  color: var(--sb-text-tertiary);
+}
+.sidebar .session-action-trigger:hover,
+.sidebar .sidebar-icon-btn:hover,
+.sidebar .sidebar-archived-toggle:hover {
+  background: var(--sb-hover);
+  color: var(--sb-text-secondary);
+}
+.sidebar-project-group > div:nth-child(2) { margin: 0 4px; }
+.sidebar .sidebar-project-group [role="button"] {
+  border-radius: var(--sb-radius-row);
+}
+
+/* ---- Rail (collapsed desktop) ---- */
+.sidebar.sidebar-rail {
+  padding: 18px 10px 6px;
+  align-items: center;
+}
+.sidebar.sidebar-rail .sidebar-logo-row {
+  height: 36px;
+  padding: 0;
+  margin-bottom: 12px;
+  justify-content: center;
+}
+.sidebar.sidebar-rail .sidebar-brand strong { display: none; }
+.sidebar.sidebar-rail .sidebar-collapse-toggle { width: 36px; height: 36px; color: var(--sb-text-primary); }
+.sidebar.sidebar-rail .sidebar-new-session {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  margin: 0 0 12px;
+  gap: 0;
+  border-color: transparent;
+  background: transparent;
+}
+.sidebar.sidebar-rail .sidebar-new-session:hover { background: var(--sb-hover); }
+.sidebar.sidebar-rail .sidebar-nav-item {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  justify-content: center;
+}
+.sidebar.sidebar-rail .sidebar-nav-item span,
+.sidebar.sidebar-rail .sidebar-new-session span { display: none; }
+.sidebar.sidebar-rail .sidebar-sessions-head .sessions-label { display: none; }
+
+/* ---- Search trigger (wide) and rail search icon. ---- */
+.sidebar-search-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--sb-border-l2);
+  border-radius: var(--sb-radius-row);
+  background: var(--sb-button-fill);
+  color: var(--sb-text-tertiary);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+.sidebar-search-trigger:hover { background: var(--sb-button-hover); color: var(--sb-text-secondary); }
+
+.sidebar-rail-icon {
+  width: 36px;
+  height: 36px;
+  margin-bottom: 12px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--sb-text-primary);
+  cursor: pointer;
+}
+.sidebar-rail-icon:hover { background: var(--sb-hover); }
+
+/* Rail settings button: icon-only, centered. */
+.sidebar-rail .sidebar-settings {
+  margin-top: auto;
+  border-top: 1px solid var(--sb-border-l1);
+  padding-top: 6px;
+}
+.sidebar-rail .sidebar-settings .sidebar-item {
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  margin: 0 auto;
+}
+.sidebar-rail .sidebar-settings .sidebar-item span { display: none; }
+
+/* Desktop: the sidebar owns the collapse toggle now; keep the topbar hamburger
+   only for the mobile off-canvas drawer. */
+@media (min-width: 641px) {
+  .topbar-sidebar-toggle { display: none !important; }
+}
