@@ -18,6 +18,7 @@ import { SettingsDialog } from "./settings/SettingsDialog";
 import { ThemeControl } from "./ThemeControl";
 import { useResizable } from "@/hooks/useResizable";
 import { useFileTabs } from "@/hooks/useFileTabs";
+import { useSessionTitle } from "@/hooks/useSessionTitle";
 import { useProjectSessions } from "@/hooks/useProjectSessions";
 import { useSidebarProjectGroups } from "@/hooks/useSidebarProjectGroups";
 import { useSessionBranches } from "@/hooks/useSessionBranches";
@@ -157,9 +158,6 @@ export function AppShell() {
 
   // Top bar
   const navigationTriggerRef = useRef<HTMLButtonElement>(null);
-  const [editingTitle, setEditingTitle] = useState(false);
-  const [titleDraft, setTitleDraft] = useState("");
-  const titleInputRef = useRef<HTMLInputElement>(null);
 
   const closeMobileNavigation = useCallback(() => {
     setSidebarOpen(false);
@@ -717,38 +715,12 @@ export function AppShell() {
   }, [currentProjectId]);
 
   // Title editing
-  const getSessionTitle = useCallback((session: typeof selectedSessionRecord) => {
-    if (!session) return "";
-    return session.title || session.id?.slice(0, 12) || "";
-  }, []);
+  const titleEdit = useSessionTitle({ session: selectedSessionRecord, replaceSession: sessionNavigation.replaceSession });
+  const {
+    title: topBarSessionTitle, editing: editingTitle, draft: titleDraft, setDraft: setTitleDraft,
+    startEdit: handleStartTitleEdit, save: handleSaveTitle, keyDown: handleTitleKeyDown, inputRef: titleInputRef,
+  } = titleEdit;
 
-  const handleStartTitleEdit = useCallback(() => {
-    if (!selectedSessionRecord) return;
-    setTitleDraft(selectedSessionRecord.title || getSessionTitle(selectedSessionRecord));
-    setEditingTitle(true);
-    setTimeout(() => titleInputRef.current?.select(), 0);
-  }, [getSessionTitle, selectedSessionRecord]);
-
-  const handleSaveTitle = useCallback(async () => {
-    if (!selectedSessionRecord) { setEditingTitle(false); return; }
-    const name = titleDraft.trim();
-    setEditingTitle(false);
-    if (name === (selectedSessionRecord.title ?? "")) return;
-    try {
-      const res = await apiFetch<Session>(`/v1/sessions/${encodeURIComponent(selectedSessionRecord.id)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ title: name }),
-      });
-      sessionNavigation.replaceSession(res);
-    } catch { /* keep local title unchanged */ }
-  }, [selectedSessionRecord, titleDraft, sessionNavigation]);
-
-  const handleTitleKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Enter") { event.preventDefault(); void handleSaveTitle(); }
-    else if (event.key === "Escape") setEditingTitle(false);
-  }, [handleSaveTitle]);
-
-  const topBarSessionTitle = selectedSessionRecord ? getSessionTitle(selectedSessionRecord) : "No session";
   const topBarProjectName = currentCwd
     ? currentCwd.replace(/\/+$/, "").split(/[\\/]/).filter(Boolean).pop() || currentCwd
     : "";
