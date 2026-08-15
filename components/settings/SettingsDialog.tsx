@@ -3,6 +3,7 @@
 import { X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ContextSettings } from "@/components/settings/ContextSettings";
+import { GeneralSettings } from "@/components/settings/GeneralSettings";
 import { McpSettings } from "@/components/settings/McpSettings";
 import { SkillsSettings } from "@/components/settings/SkillsSettings";
 import { ModelsSettings } from "@/components/settings/ModelsSettings";
@@ -27,6 +28,21 @@ function SettingsIcon() {
 }
 
 function tabIcon(id: SettingsTab) {
+  if (id === "general") {
+    return (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="4" y1="21" x2="4" y2="14" />
+        <line x1="4" y1="10" x2="4" y2="3" />
+        <line x1="12" y1="21" x2="12" y2="12" />
+        <line x1="12" y1="8" x2="12" y2="3" />
+        <line x1="20" y1="21" x2="20" y2="16" />
+        <line x1="20" y1="12" x2="20" y2="3" />
+        <line x1="1" y1="14" x2="7" y2="14" />
+        <line x1="9" y1="8" x2="15" y2="8" />
+        <line x1="17" y1="16" x2="23" y2="16" />
+      </svg>
+    );
+  }
   if (id === "models") {
     return (
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -123,6 +139,7 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
   if (!open) return null;
 
   const tabs: TabItem[] = [
+    { id: "general", label: "General", description: "Appearance and theme", icon: tabIcon("general") },
     { id: "models", label: "Models", description: "Providers, API keys, and model profiles", icon: tabIcon("models") },
     { id: "policies", label: "Policies", description: "Tool permission and routing policies", icon: tabIcon("policies") },
     { id: "context", label: "Context & session", description: session ? "Session defaults and compaction" : "Compaction policy defaults", icon: tabIcon("context") },
@@ -210,34 +227,16 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
                     setActiveTab(nextTab.id);
                     window.requestAnimationFrame(() => document.getElementById(`settings-tab-${nextTab.id}`)?.focus());
                   }}
-                  className="settings-dialog-tab"
+                  className={`settings-dialog-tab ${active ? "active" : ""}`}
                   role="tab"
                   id={`settings-tab-${tab.id}`}
                   aria-selected={active}
                   aria-controls={`settings-panel-${tab.id}`}
-                  style={{
-                    background: active ? "var(--bg-selected)" : "transparent",
-                    color: active ? "var(--text)" : "var(--text-muted)",
-                    cursor: "pointer",
-                  }}
-                  onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = "var(--bg-hover)"; }}
-                  onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}
                 >
-                  <span style={{ flexShrink: 0, color: active ? "var(--accent)" : "currentColor", display: "flex" }}>
+                  <span className="settings-tab-icon">
                     {tab.icon}
                   </span>
-                  <span style={{ minWidth: 0, flex: 1 }}>
-                    <span style={{ display: "block", fontSize: 12, fontWeight: active ? 700 : 600, lineHeight: 1.25 }}>
-                      {tab.label}
-                    </span>
-                    <span style={{
-                      display: "block", marginTop: 2, fontSize: 10,
-                      color: "var(--text-dim)", lineHeight: 1.25,
-                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                    }}>
-                      {tab.description}
-                    </span>
-                  </span>
+                  <span className="settings-tab-label">{tab.label}</span>
                 </button>
               );
             })}
@@ -250,6 +249,11 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
             id={`settings-panel-${activeTab}`}
             aria-labelledby={`settings-tab-${activeTab}`}
           >
+            {activeTab === "general" && (
+              <div style={{ height: "100%", overflowY: "auto" }}>
+                <GeneralSettings />
+              </div>
+            )}
             {activeTab === "models" && (
               <div style={{ height: "100%", overflowY: "auto" }}>
                 <ModelsSettings providers={providers} models={models} refresh={refresh} setError={setError} />

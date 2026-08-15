@@ -1,0 +1,249 @@
+/* Settings tokens + dsh-aligned shell and Models/General visual overrides.
+   Scoped to the settings backdrop so only the settings surfaces change. */
+.settings-dialog-backdrop {
+  --stg-text-primary: #1a1a1a;
+  --stg-text-secondary: #6b7280;
+  --stg-text-tertiary: #9ca3af;
+  --stg-hover: rgba(38, 49, 72, 0.06);
+  --stg-nav-hover: rgb(241, 243, 245);
+  --stg-nav-active: rgb(235, 238, 242);
+  --stg-border-l2: rgba(0, 0, 0, 0.10);
+  --stg-border-l3: rgba(0, 0, 0, 0.12);
+  --stg-fill: #ffffff;
+  --stg-input-fill: #ffffff;
+  --stg-module: #f5f5f5;
+  --stg-brand: rgb(65, 118, 230);
+  --stg-shadow: 0 16px 48px rgba(0, 0, 0, 0.20);
+  --stg-danger: #b33b32;
+}
+
+html.dark .settings-dialog-backdrop {
+  --stg-text-primary: #e8e8e8;
+  --stg-text-secondary: #9ca3af;
+  --stg-text-tertiary: #6b7280;
+  --stg-hover: rgba(255, 255, 255, 0.08);
+  --stg-nav-hover: rgb(53, 54, 56);
+  --stg-nav-active: rgb(44, 44, 46);
+  --stg-border-l2: rgba(255, 255, 255, 0.12);
+  --stg-border-l3: rgba(255, 255, 255, 0.16);
+  --stg-fill: rgb(27, 27, 28);
+  --stg-input-fill: rgb(44, 44, 46);
+  --stg-module: rgb(53, 54, 56);
+  --stg-brand: rgb(103, 158, 254);
+  --stg-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  --stg-danger: #ed8178;
+}
+
+/* ---- Shell (dsh SettingsRoot): centered 800px, r24, 188px rail. ---- */
+.settings-dialog-shell {
+  width: 800px;
+  height: min(800px, calc(100vh - 48px));
+  max-width: calc(100vw - 48px);
+  border: none;
+  border-radius: 24px;
+  background: var(--stg-fill);
+  box-shadow: var(--stg-shadow);
+}
+
+.settings-dialog-header {
+  height: 54px;
+  padding: 20px 14px 8px 10px;
+  border-bottom: none;
+  background: transparent;
+  align-items: flex-start;
+}
+
+.settings-dialog-body {
+  display: flex;
+  overflow: hidden;
+}
+
+.settings-dialog-tabs {
+  width: 188px;
+  padding: 12px 12px 0;
+  gap: 4px;
+  border-right: none;
+  background: transparent;
+}
+
+.settings-dialog-tab {
+  height: 40px;
+  padding: 9px 16px 9px 12px;
+  gap: 8px;
+  border-radius: 12px;
+  color: var(--stg-text-primary);
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 400;
+  cursor: pointer;
+}
+.settings-dialog-tab:hover { background: var(--stg-nav-hover); }
+.settings-dialog-tab.active { background: var(--stg-nav-active); }
+.settings-dialog-tab .settings-tab-icon { color: var(--stg-text-secondary); }
+.settings-dialog-tab.active .settings-tab-icon { color: var(--stg-brand); }
+.settings-dialog-tab .settings-tab-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.settings-dialog-panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: transparent;
+}
+
+/* ---- Section & forms ---- */
+.settings-dialog-shell .settings-tab-section {
+  padding: 20px 24px 24px;
+  max-width: 720px;
+}
+.settings-dialog-shell .settings-tab-section > header h2 {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+}
+.settings-dialog-shell .settings-tab-section > header p {
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--stg-text-tertiary);
+}
+
+.settings-dialog-shell .settings-form {
+  gap: 12px;
+  max-width: 720px;
+  align-items: stretch;
+}
+.settings-dialog-shell .settings-form label {
+  gap: 6px;
+  color: var(--stg-text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+}
+.settings-dialog-shell .settings-form input,
+.settings-dialog-shell .settings-form select,
+.settings-dialog-shell .settings-form textarea {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--stg-border-l2);
+  border-radius: 8px;
+  background: var(--stg-input-fill);
+  color: var(--stg-text-primary);
+  font: 14px/22px var(--font-sans);
+}
+.settings-dialog-shell .settings-form textarea { height: 68px; padding: 8px 10px; }
+.settings-dialog-shell .settings-form input:focus,
+.settings-dialog-shell .settings-form select:focus,
+.settings-dialog-shell .settings-form textarea:focus {
+  outline: none;
+  border-color: var(--stg-brand);
+}
+.settings-dialog-shell .settings-form button {
+  min-height: 36px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 18px;
+  background: var(--stg-brand);
+  color: #fff;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+/* ---- Secondary capsule buttons ---- */
+.settings-dialog-shell .secondary-btn {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--stg-border-l2);
+  border-radius: 18px;
+  background: transparent;
+  color: var(--stg-text-primary);
+  font-weight: 400;
+}
+.settings-dialog-shell .secondary-btn:hover:not(:disabled) { background: var(--stg-hover); }
+
+/* ---- Provider cards (dsh rowCard) ---- */
+.settings-dialog-shell .settings-list { max-width: 720px; }
+.settings-dialog-shell .settings-list .provider-settings-row {
+  flex-direction: column;
+  align-items: stretch;
+  border: 1px solid var(--stg-border-l2);
+  border-bottom: 1px solid var(--stg-border-l2);
+  border-radius: 12px;
+  padding: 12px 14px;
+  gap: 12px;
+}
+.settings-dialog-shell .provider-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.settings-dialog-shell .provider-head .settings-primary {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.settings-dialog-shell .provider-head .provider-controls {
+  margin-left: auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+.settings-dialog-shell .provider-controls .secondary-btn {
+  height: 28px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 14px;
+  font-size: 12px;
+}
+
+/* Model rows inside a provider card: hairline-separated, no bottom border. */
+.settings-dialog-shell .provider-settings-row .settings-row {
+  border-bottom: none;
+  border-top: 1px solid var(--stg-border-l2);
+  padding-top: 8px;
+}
+
+/* ---- General: appearance cubes (dsh AppearanceRow) ---- */
+.settings-dialog-shell .appearance-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 0;
+}
+.settings-dialog-shell .appearance-title {
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 500;
+  color: var(--stg-text-primary);
+}
+.settings-dialog-shell .appearance-cubes {
+  display: flex;
+  gap: 8px;
+}
+.settings-dialog-shell .appearance-cube {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--stg-border-l2);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--stg-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.settings-dialog-shell .appearance-cube:hover { background: var(--stg-hover); }
+.settings-dialog-shell .appearance-cube.selected {
+  background: var(--stg-nav-active);
+  border-color: var(--stg-border-l3);
+  color: var(--stg-text-primary);
+}
+.settings-dialog-shell .appearance-cube.selected svg { color: var(--stg-brand); }

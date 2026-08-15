@@ -119,6 +119,7 @@ function ProviderCard({ provider, models, collapsed, onToggleCollapsed, refresh,
   };
 
   return <div className="settings-row provider-settings-row">
+    <div className="provider-head">
     <div className="settings-primary" style={{ cursor: "pointer", minWidth: 0 }} onClick={onToggleCollapsed}>
       <strong style={{ display: "flex", alignItems: "center", gap: 5 }}>
         <ChevronRight size={13} style={{ transform: collapsed ? "none" : "rotate(90deg)", transition: "transform 0.15s", color: "var(--text-dim)" }} />
@@ -137,6 +138,7 @@ function ProviderCard({ provider, models, collapsed, onToggleCollapsed, refresh,
         disabled={busy} onClick={deleteProvider}>
         <Trash2 size={13} aria-hidden="true" />
       </button>
+    </div>
     </div>
     {diagnostic && (
       <div className="provider-diagnostic" data-testid={`provider-diagnostic-${provider.id}`}>
