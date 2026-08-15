@@ -11,6 +11,8 @@ export default defineConfig({
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:45131",
     trace: "on-first-retry",
+    // Session cookie seeded by global-setup against the running gate.
+    storageState: ".auth/ennote-auth.json",
     launchOptions: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
       ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE }
       : undefined,
