@@ -1,17 +1,15 @@
 "use client";
 
-import { ArrowLeft } from "lucide-react";
 import { useState, useCallback, useRef, useEffect, useSyncExternalStore } from "react";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import type { TextAttachment } from "./Composer";
 import type { RunAgentFlow } from "@/components/settings/types";
 import { TopBar } from "./TopBar";
-import { FileTreePanel } from "./FileTreePanel";
-import { FileViewer } from "./FileViewer";
+import { RightPanel } from "./RightPanel";
 import { FilePreviewWindow } from "./FilePreviewWindow";
 import { ResizeHandle } from "./ResizeHandle";
-import { TabBar, type Tab } from "./TabBar";
+import type { Tab } from "./TabBar";
 import { ProjectCreateDialog } from "./ProjectCreateDialog";
 import { SettingsDialog } from "./settings/SettingsDialog";
 import { useResizable } from "@/hooks/useResizable";
@@ -28,7 +26,6 @@ import { useRunRecovery } from "@/hooks/useRunRecovery";
 import { useRunningSessionIds } from "@/hooks/useRunningSessionIds";
 import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
 import { usePromptTemplates } from "@/hooks/usePromptTemplates";
-import { GraphActivityPanel } from "./GraphActivityPanel";
 import { permissionModeForPolicyID, permissionPolicyID, withRunConfig, type PermissionMode, type ThinkingEffort } from "@/lib/permission-mode";
 import { errorMessage } from "@/lib/provider-errors";
 import { apiFetch } from "@/lib/worker-api.client";
@@ -925,67 +922,25 @@ export function AppShell() {
         )}
 
         {/* Right panel */}
-        <div
-          className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}`}
-          style={{
-            background: "var(--bg)",
-            borderLeft: "1px solid var(--border)",
-            display: "flex",
-            flexDirection: "column",
-            width: rightPanelResize.width,
-            minWidth: rightPanelResize.width,
-            transition: rightPanelResize.isResizing ? "none" : undefined,
-          }}
-        >
-          <button type="button" className="right-panel-back-button" onClick={() => setRightPanelOpen(false)}>
-            <ArrowLeft size={15} aria-hidden="true" />
-            Back to conversation
-          </button>
-          <TabBar
-            tabs={rightTabs}
-            activeTabId={activeRightTabId}
-            onSelectTab={setActiveRightTabId}
-            onCloseTab={closeTab}
-          />
-          <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
-            {activeRightTabId === "files" && (
-              <FileTreePanel
-                key={currentProjectId ?? "no-project"}
-                projectId={currentProjectId ?? null}
-                displayPath={currentCwd}
-                onOpenFile={handleOpenFile}
-                onPreviewFile={handlePreviewFile}
-              />
-            )}
-            {activeRightTabId === "graph" && (
-              <GraphActivityPanel
-                sessionId={selectedSession}
-              />
-            )}
-            {activeRightTabId === "tools" && (
-              <div style={{ padding: 18, color: "var(--text-muted)", fontSize: 13 }}>
-                <div style={{ fontWeight: 600, marginBottom: 12 }}>Session Status</div>
-                <div style={{ fontSize: 12 }}>
-                  {selectedSession ? (
-                    <>
-                      <div>Session: {selectedSessionRecord?.title || selectedSession}</div>
-                      <div>Active run: {activeRun || "none"}</div>
-                      <div>Status: {status || "idle"}</div>
-                      <div>Permission: {permissionMode}</div>
-                    </>
-                  ) : (
-                    <div>No session selected</div>
-                  )}
-                </div>
-              </div>
-            )}
-            {fileTabs.find((t) => t.id === activeRightTabId) && (() => {
-              const tab = fileTabs.find((t) => t.id === activeRightTabId)!;
-              if (!tab.projectId || !tab.filePath) return null;
-              return <FileViewer projectId={tab.projectId} filePath={tab.filePath} fileName={tab.label} />;
-            })()}
-          </div>
-        </div>
+        <RightPanel
+          open={rightPanelOpen}
+          onClose={() => setRightPanelOpen(false)}
+          resize={rightPanelResize}
+          tabs={rightTabs}
+          activeTabId={activeRightTabId}
+          onSelectTab={setActiveRightTabId}
+          onCloseTab={closeTab}
+          projectId={currentProjectId ?? null}
+          displayPath={currentCwd}
+          onOpenFile={handleOpenFile}
+          onPreviewFile={handlePreviewFile}
+          selectedSession={selectedSession}
+          sessionTitle={selectedSessionRecord?.title || selectedSession || ""}
+          activeRun={activeRun}
+          status={status}
+          permissionMode={permissionMode}
+        />
+
       </div>
 
       {previewFile && (
