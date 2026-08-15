@@ -15,10 +15,10 @@ import {
 import { errorMessage } from "@/lib/provider-errors";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
-import type { useAgentSession } from "@/hooks/useAgentSession";
-import type { useSessionMessages } from "@/hooks/useSessionMessages";
-import type { useRunRecovery } from "@/hooks/useRunRecovery";
-import type { useSessionBranches } from "@/hooks/useSessionBranches";
+import { useAgentSession } from "@/hooks/useAgentSession";
+import { useSessionMessages } from "@/hooks/useSessionMessages";
+import { useRunRecovery } from "@/hooks/useRunRecovery";
+import { useSessionBranches } from "@/hooks/useSessionBranches";
 import type { usePromptTemplates } from "@/hooks/usePromptTemplates";
 import type { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
 
@@ -57,20 +57,10 @@ function appendTextAttachments(text: string, attachments: TextAttachment[]): str
   return [text.trim(), ...sections].filter(Boolean).join("\n\n");
 }
 
-/**
- * Session data hooks are owned by AppShell during the transitional step and
- * injected here as `sessionData`; in the final shape useChatController calls
- * the four hooks internally and derives the same shape, so the controller
- * signature does not change.
- */
-export type SessionDataInput = {
-  messages: ReturnType<typeof useSessionMessages>;
-  agent: ReturnType<typeof useAgentSession>;
-  recovery: ReturnType<typeof useRunRecovery>;
-  branches: ReturnType<typeof useSessionBranches>;
-  refreshSelectedSession: () => Promise<Session | null>;
-};
-
+// The session data hooks (useSessionMessages / useAgentSession / useRunRecovery /
+// useSessionBranches) are owned inside useChatController and surfaced as the
+// composed history/run/branches views. AppShell only passes navigation-level
+// inputs (selectedSession, sessionRecord, promptCatalog, settings, replaceSession).
 export type ChatControllerDeps = {
   selectedSession: string | null;
   sessionRecord: Session | null | undefined;
@@ -78,7 +68,6 @@ export type ChatControllerDeps = {
   promptCatalog: ReturnType<typeof usePromptTemplates>;
   settings: ReturnType<typeof useSettingsProfiles>;
   replaceSession: (s: Session) => void;
-  sessionData: SessionDataInput;
 };
 
 export type HistoryView = {
@@ -185,13 +174,30 @@ export type ChatController = {
 
 export function useChatController(deps: ChatControllerDeps): ChatController {
   const {
-    selectedSession, sessionRecord, selectedProject, promptCatalog, settings, sessionData,
+    selectedSession, sessionRecord, selectedProject, promptCatalog, settings, replaceSession,
   } = deps;
-  const agent = sessionData.agent;
-  const messagesData = sessionData.messages;
-  const recoveryData = sessionData.recovery;
-  const branchesData = sessionData.branches;
-  const refreshSelectedSession = sessionData.refreshSelectedSession;
+
+  // Session lineage derivations come from the session record (owned by the
+  // caller's project-sessions store).
+  const activeBranchId = sessionRecord?.activeBranchId;
+  const activeLeafMessageId = sessionRecord?.activeLeafMessageId;
+  const updateSession = useCallback((session: Session) => replaceSession(session), [replaceSession]);
+  const refreshSelectedSession = useCallback(async () => {
+    if (!selectedSession) return null;
+    const current = await apiFetch<Session>(`/v1/sessions/${encodeURIComponent(selectedSession)}`);
+    replaceSession(current);
+    return current;
+  }, [replaceSession, selectedSession]);
+
+  // Session data hooks (owned here; AppShell only receives the composed views).
+  const messagesData = useSessionMessages(selectedSession, activeBranchId);
+  const agent = useAgentSession({
+    sessionId: selectedSession, lineageId: activeBranchId, appendMessage: messagesData.appendTransient,
+    upsertMessage: messagesData.upsertTransient, refreshLatest: messagesData.refreshLatest,
+    refreshSession: refreshSelectedSession,
+  });
+  const recoveryData = useRunRecovery(selectedSession, activeBranchId, agent.activeRunID);
+  const branchesData = useSessionBranches({ sessionId: selectedSession, activeBranchId, onSessionUpdated: updateSession });
 
   // Composer state (owned here; reset declaratively on session switch).
   const [input, setInput] = useState("");
@@ -334,8 +340,6 @@ export function useChatController(deps: ChatControllerDeps): ChatController {
   }, [commandPanelOpen, promptCatalog, refreshFlowCatalog]);
 
   // Derived composer inputs.
-  const activeBranchId = sessionRecord?.activeBranchId;
-  const activeLeafMessageId = sessionRecord?.activeLeafMessageId;
   const selectedModelId = selectedSession
     ? modelOverrides[selectedSession]
       ?? sessionRecord?.defaultModelProfileId

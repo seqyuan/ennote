@@ -15,12 +15,8 @@ import { useFileTabs } from "@/hooks/useFileTabs";
 import { useSessionTitle } from "@/hooks/useSessionTitle";
 import { useProjectSessions } from "@/hooks/useProjectSessions";
 import { useSidebarProjectGroups } from "@/hooks/useSidebarProjectGroups";
-import { useSessionBranches } from "@/hooks/useSessionBranches";
-import { useSessionMessages } from "@/hooks/useSessionMessages";
-import { useAgentSession } from "@/hooks/useAgentSession";
 import { ChildProgressProvider } from "@/hooks/useChildProgress";
 import { useWorkspace } from "./WorkspaceProvider";
-import { useRunRecovery } from "@/hooks/useRunRecovery";
 import { useRunningSessionIds } from "@/hooks/useRunningSessionIds";
 import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
 import { usePromptTemplates } from "@/hooks/usePromptTemplates";
@@ -111,40 +107,18 @@ export function AppShell() {
   }, [closeMobileNavigation, isMobile, sidebarOpen]);
 
   // Session data (navigation/workspace domain stays here; the chat session
-  // hooks are still called here and injected into useChatController as a
-  // transitional step — the controller takes them over in a later step).
+  // hooks live inside useChatController and surface as composed views).
   const sessionNavigation = useProjectSessions(selectedProject);
   const sidebarGroups = useSidebarProjectGroups(projects, pinnedProjectIds, selectedProject);
   const settings = useSettingsProfiles();
   const replaceSession = sessionNavigation.replaceSession;
   const selectedSessionRecord = sessionNavigation.activeSessions.find(s => s.id === selectedSession);
-  const activeBranchId = selectedSessionRecord?.activeBranchId;
-  const updateSession = useCallback((session: Session) => replaceSession(session), [replaceSession]);
-
-  const sessionBranches = useSessionBranches({ sessionId: selectedSession, activeBranchId, onSessionUpdated: updateSession });
-  const sessionMessages = useSessionMessages(selectedSession, activeBranchId);
-
-  const refreshSelectedSession = useCallback(async () => {
-    if (!selectedSession) return null;
-    const current = await apiFetch<Session>(`/v1/sessions/${encodeURIComponent(selectedSession)}`);
-    replaceSession(current);
-    return current;
-  }, [replaceSession, selectedSession]);
-
-  const agentSession = useAgentSession({
-    sessionId: selectedSession, lineageId: activeBranchId, appendMessage: sessionMessages.appendTransient,
-    upsertMessage: sessionMessages.upsertTransient, refreshLatest: sessionMessages.refreshLatest,
-    refreshSession: refreshSelectedSession,
-  });
-  const recovery = useRunRecovery(selectedSession, activeBranchId, agentSession.activeRunID);
-  const runningSessionIds = useRunningSessionIds(
-    sidebarGroups.groups.flatMap((group) => group.sessions.map((session) => session.id)),
-    agentSession.activeRunID ? selectedSession : null,
-  );
 
   const promptCatalog = usePromptTemplates(selectedProject);
 
-  // Chat domain: composer state + all chat actions live in the controller.
+  // Chat domain: composer state, session data hooks and all chat actions live
+  // in the controller; AppShell reads only the composed views plus the run id
+  // for sidebar run indicators.
   const chat = useChatController({
     selectedSession,
     sessionRecord: selectedSessionRecord,
@@ -152,14 +126,12 @@ export function AppShell() {
     promptCatalog,
     settings,
     replaceSession,
-    sessionData: {
-      messages: sessionMessages,
-      agent: agentSession,
-      recovery,
-      branches: sessionBranches,
-      refreshSelectedSession,
-    },
   });
+
+  const runningSessionIds = useRunningSessionIds(
+    sidebarGroups.groups.flatMap((group) => group.sessions.map((session) => session.id)),
+    chat.run.activeRun ? selectedSession : null,
+  );
 
   const refreshSettings = settings.refresh;
   const openSettings = useCallback(() => {
