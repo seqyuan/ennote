@@ -1,6 +1,6 @@
 "use client";
 
-import { ImagePlus, ListPlus, Minimize2, Paperclip, Plus } from "lucide-react";
+import { Bot, ImagePlus, ListPlus, Minimize2, Paperclip, Plus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
 import { RoleTargetPicker } from "@/components/RoleTargetPicker";
 import type { ModelProfile, RoleSummary } from "@/components/settings/types";
@@ -301,18 +301,37 @@ export function Composer({
             }}
           />
           <div className="composer-toolbar-row">
-            <button
-              type="button"
-              className="composer-plus"
-              aria-expanded={configOpen}
-              aria-label="Configure run"
-              title="Configure run"
-              disabled={!selectedSession || compacting}
-              onClick={() => setConfigOpen((value) => !value)}
-            >
-              <Plus size={15} aria-hidden="true" />
-              {configDot && <span className="composer-plus-dot" aria-hidden="true" />}
-            </button>
+            <div className="composer-tools">
+              <button
+                type="button"
+                className="composer-plus"
+                aria-expanded={configOpen}
+                aria-label="Configure run"
+                title="Configure run"
+                disabled={!selectedSession || compacting}
+                onClick={() => setConfigOpen((value) => !value)}
+              >
+                <Plus size={15} aria-hidden="true" />
+                {configDot && <span className="composer-plus-dot" aria-hidden="true" />}
+              </button>
+              {selectedSession && (
+                <>
+                  <span
+                    className="composer-tag"
+                    title="Permission mode"
+                    aria-label={`Permission mode: ${permissionMode === "discuss" ? "Discuss" : permissionMode === "ask" ? "Ask" : "Auto"}`}
+                  >
+                    {permissionMode === "discuss" ? "Discuss" : permissionMode === "ask" ? "Ask" : "Auto"}
+                  </span>
+                  {selectedRoleId && (
+                    <span className="composer-tag composer-tag-role" title="Role target">
+                      <Bot size={11} aria-hidden="true" />
+                      <span>{roles.find((role) => role.id === selectedRoleId)?.name ?? "Role"}</span>
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
             <div className="composer-trailing">
               <ThinkingPicker
                 models={models}

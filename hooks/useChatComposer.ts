@@ -12,7 +12,7 @@ import {
   type PermissionMode,
   type ThinkingEffort,
 } from "@/lib/permission-mode";
-import { readDefaultPermissionMode } from "@/lib/default-permission";
+import { DEFAULT_PERMISSION_EVENT, readDefaultPermissionMode } from "@/lib/default-permission";
 import { errorMessage } from "@/lib/provider-errors";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
@@ -90,10 +90,17 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("discuss");
 
   // Adopt the persisted new-session permission default once mounted (client-only,
-  // so the SSR paint stays deterministic and hydration-safe).
+  // so the SSR paint stays deterministic and hydration-safe), and follow live
+  // changes made from the settings General tab.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setPermissionMode(readDefaultPermissionMode());
+    const onDefaultChange = (event: Event) => {
+      const mode = (event as CustomEvent<PermissionMode>).detail;
+      if (mode === "discuss" || mode === "ask" || mode === "auto") setPermissionMode(mode);
+    };
+    window.addEventListener(DEFAULT_PERMISSION_EVENT, onDefaultChange);
+    return () => window.removeEventListener(DEFAULT_PERMISSION_EVENT, onDefaultChange);
   }, []);
   const [thinkingEffort, setThinkingEffort] = useState<ThinkingEffort>("default");
   const [compactionPrompt, setCompactionPrompt] = useState<{ open: boolean; instructions: string; busy: boolean }>({

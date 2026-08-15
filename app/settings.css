@@ -15,6 +15,9 @@
   --stg-brand: rgb(65, 118, 230);
   --stg-shadow: 0 16px 48px rgba(0, 0, 0, 0.20);
   --stg-danger: #b33b32;
+  /* Fallback width: 800 = dsh-faithful, 960 = roomier for Skills/MCP content.
+     Flip this one token to widen without touching any other rule. */
+  --stg-shell-width: 960px;
 }
 
 html.dark .settings-dialog-backdrop {
@@ -36,7 +39,7 @@ html.dark .settings-dialog-backdrop {
 
 /* ---- Shell (dsh SettingsRoot): centered 800px, r24, 188px rail. ---- */
 .settings-dialog-shell {
-  width: 800px;
+  width: var(--stg-shell-width);
   height: min(800px, calc(100vh - 48px));
   max-width: calc(100vw - 48px);
   border: none;
