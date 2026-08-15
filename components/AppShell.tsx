@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect, useSyncExternalStore } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import { TopBar } from "./TopBar";
@@ -21,24 +21,15 @@ import { useRunningSessionIds } from "@/hooks/useRunningSessionIds";
 import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
 import { usePromptTemplates } from "@/hooks/usePromptTemplates";
 import { useChatController } from "@/hooks/useChatController";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { Session } from "@/components/settings/types";
 import type { components } from "@/lib/worker-api.gen";
 
 type ProjectWorkspace = components["schemas"]["ProjectWorkspace"];
 
-function subscribeMobile(listener: () => void) {
-  const media = window.matchMedia("(max-width: 640px)");
-  media.addEventListener("change", listener);
-  return () => media.removeEventListener("change", listener);
-}
-
-function useIsMobile() {
-  return useSyncExternalStore(subscribeMobile, () => window.matchMedia("(max-width: 640px)").matches, () => false);
-}
-
 export function AppShell() {
-  const isMobile = useIsMobile();
+  const isMobile = useMediaQuery("(max-width: 640px)");
   const {
     projects, selectedProject, switchProject: workspaceSwitchProject,
     createProjectOpen, openCreateProject, confirmCreateProject, cancelCreateProject, createProjectBusy,
