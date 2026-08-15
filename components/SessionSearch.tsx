@@ -12,7 +12,7 @@ export function SessionSearch(props: {
   const { value, onChange, onClear, onEscape } = props;
 
   return (
-    <div style={{ flexShrink: 0, padding: "8px 10px 0" }}>
+    <div className="sidebar-sessions-search" style={{ flexShrink: 0 }}>
       <label className="session-search" style={{ margin: 0 }}>
         <Search size={14} aria-hidden="true" />
         <span className="sr-only">Search sessions</span>
