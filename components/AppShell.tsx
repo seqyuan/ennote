@@ -81,7 +81,7 @@ export function AppShell() {
       if (event.key !== "Tab") return;
       const focusable = Array.from(navigation.querySelectorAll<HTMLElement>(
         'button:not(:disabled), input:not(:disabled), select:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
-      ));
+      )).filter((element) => element.getClientRects().length > 0);
       if (!focusable.length) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
