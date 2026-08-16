@@ -31,10 +31,9 @@ export function ModelsSettings({ providers, models, refresh, setError }: {
         {t("settings.models.savedProvider").replace("{provider}", savedName)}
       </p>
     )}
-    <AddProviderForm refresh={refresh} setError={setError} />
     {!customOpen ? (
       <button type="button" className="secondary-btn" style={{ marginBottom: 12 }} onClick={() => setCustomOpen(true)}>
-        Add a custom provider
+        Add provider
       </button>
     ) : (
       <CustomProviderCard taken={providers.map(provider => provider.id)}
@@ -53,36 +52,6 @@ export function ModelsSettings({ providers, models, refresh, setError }: {
       )}
     </div>
   </section>;
-}
-
-function AddProviderForm({ refresh, setError }: {
-  refresh: () => Promise<void>;
-  setError: (value: string | null) => void;
-}) {
-  const [apiKey, setApiKey] = useState("");
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    try {
-      await apiFetch("/v1/provider-profiles", { method: "POST", body: JSON.stringify({
-        name: data.get("name"), providerType: "openai-compatible",
-        baseUrl: data.get("baseUrl"), apiKey,
-      }) });
-      form.reset();
-      setApiKey("");
-      setError(null);
-      await refresh();
-    } catch (reason) {
-      setError((reason as Error).message);
-    }
-  }
-  return <form className="settings-form provider-form" onSubmit={submit}>
-    <label>Name<input name="name" required placeholder="openai-main" /></label>
-    <label>Base URL<input name="baseUrl" type="url" required placeholder="https://api.openai.com/v1" /></label>
-    <label>API key<SecretTextInput value={apiKey} onChange={setApiKey} /></label>
-    <button type="submit">Add provider</button>
-  </form>;
 }
 
 function ProviderCard({ provider, models, collapsed, onToggleCollapsed, refresh, setError, onSaved }: {
