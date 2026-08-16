@@ -104,6 +104,37 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
 	assert.ErrorIs(t, err, ErrIncompleteStream)
 }
 
+func TestParseAnthropicStreamPreservesToolCallOrder(t *testing.T) {
+	// Two tool_use blocks arrive out of order (index 2 before index 1); the
+	// completion must list tool calls in ascending index order, not map order.
+	stream := `event: message_start
+data: {"type":"message_start","message":{"id":"msg_1","model":"m","usage":{"input_tokens":1,"output_tokens":1}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_2","name":"second"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"v\":2}"}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"first"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"v\":1}"}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`
+	completion, err := parseAnthropicStream(context.Background(), strings.NewReader(stream), NopSink{}, "m")
+	require.NoError(t, err)
+	require.Len(t, completion.ToolCalls, 2)
+	assert.Equal(t, "first", completion.ToolCalls[0].Name)
+	assert.Equal(t, "second", completion.ToolCalls[1].Name)
+}
+
 func TestMapAnthropicStopReason(t *testing.T) {
 	assert.Equal(t, domain.StopReasonToolCalls, mapAnthropicStopReason("tool_use"))
 	assert.Equal(t, domain.StopReasonLength, mapAnthropicStopReason("max_tokens"))

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -110,6 +111,9 @@ func (p *AnthropicProvider) buildRequest(request domain.CompletionRequest) (anth
 	maxTokens := request.MaxTokens
 	if maxTokens <= 0 {
 		maxTokens = p.config.MaxTokens
+	}
+	if maxTokens <= 0 {
+		return anthropicRequest{}, fmt.Errorf("max_tokens is required for anthropic-messages")
 	}
 	wire := anthropicRequest{
 		Model: model, Messages: messages, System: system,
@@ -379,7 +383,13 @@ func parseAnthropicStream(ctx context.Context, reader io.Reader, sink StreamSink
 	if text.Len() > 0 {
 		completion.Content = append(completion.Content, domain.ContentBlock{Kind: domain.ContentText, Text: text.String()})
 	}
-	for index, builder := range toolCalls {
+	indexes := make([]int, 0, len(toolCalls))
+	for index := range toolCalls {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+	for _, index := range indexes {
+		builder := toolCalls[index]
 		fragment := strings.TrimSpace(builder.arguments.String())
 		arguments := fragment
 		if arguments == "" {
