@@ -4,6 +4,7 @@ import { ChevronRight, Download, Trash2, WandSparkles } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { SecretTextInput } from "@/components/settings/SecretTextInput";
 import { CredentialDot } from "@/components/settings/models/CredentialDot";
+import { CustomProviderCard } from "@/components/settings/models/CustomProviderCard";
 import { DeleteProviderModal } from "@/components/settings/models/DeleteProviderModal";
 import type { DiscoveredModel, ModelProfile, ProviderDiagnostic, ProviderProfile } from "@/components/settings/types";
 import { apiFetch } from "@/lib/worker-api.client";
@@ -16,11 +17,20 @@ export function ModelsSettings({ providers, models, refresh, setError }: {
   setError: (value: string | null) => void;
 }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [customOpen, setCustomOpen] = useState(false);
 
   return <section className="settings-tab-section" aria-labelledby="settings-models-heading">
     <header><h2 id="settings-models-heading">Models</h2>
       <p>Providers own their model catalog. Add a connection, then import models from its API or add them by hand.</p></header>
     <AddProviderForm refresh={refresh} setError={setError} />
+    {!customOpen ? (
+      <button type="button" className="secondary-btn" style={{ marginBottom: 12 }} onClick={() => setCustomOpen(true)}>
+        Add a custom provider
+      </button>
+    ) : (
+      <CustomProviderCard taken={providers.map(provider => provider.id)}
+        onClose={() => setCustomOpen(false)} refresh={refresh} setError={setError} />
+    )}
     <div className="settings-list">
       {providers.map(provider => (
         <ProviderCard key={provider.id} provider={provider}
