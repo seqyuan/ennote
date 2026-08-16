@@ -1,8 +1,9 @@
 "use client";
 
-import { CornerDownRight, GitFork, Wrench } from "lucide-react";
+import { CornerDownRight, Wrench } from "lucide-react";
 import { ApprovalPanel } from "@/components/ApprovalPanel";
 import { AssistantMessage } from "@/components/AssistantMessage";
+import { MessageActions } from "@/components/MessageActions";
 import { MessageView } from "@/components/MessageView";
 import { RunStatus, type RunStatusProps } from "@/components/RunStatus";
 import { ToolCallView } from "@/components/ToolCallView";
@@ -29,16 +30,14 @@ export function ConversationTurn({ sessionId, turn, active = false, pendingAppro
   return <article className={`conversation-turn ${active ? "is-active" : ""}`} data-turn-id={turn.id}>
     {turn.user && <div className="user-row" data-message-id={turn.user.sourceMessageId ?? turn.user.id}>
       <div className="user-message"><MessageView text={turn.user.text} /></div>
-      {turn.user.sourceMessageId && turn.user.sourceMessageId !== activeLeafMessageId && createBranch &&
-        <button type="button" className="branch-from-message" aria-label="Branch from this message"
-          title="Branch from this message" disabled={branchDisabled}
-          onClick={() => createBranch(turn.user!.sourceMessageId!)}>
-          <GitFork size={14} aria-hidden="true" />
-        </button>}
+      <MessageActions text={turn.user.text} time={turn.user.createdAt}
+        branchMessageId={turn.user.sourceMessageId !== activeLeafMessageId ? turn.user.sourceMessageId : undefined}
+        branchDisabled={branchDisabled} onBranch={createBranch} />
     </div>}
     <div className="agent-flow">
       {turn.steps.map(step => {
-        if (step.kind === "assistant") return <AssistantMessage step={step} key={step.id} />;
+        if (step.kind === "assistant") return <AssistantMessage step={step} key={step.id}
+          activeLeafMessageId={activeLeafMessageId} branchDisabled={branchDisabled} createBranch={createBranch} />;
         if (step.kind === "steer") return <div className="steer-message" key={step.id}>
           <CornerDownRight size={14} aria-hidden="true" /><span>{step.text}</span>
         </div>;

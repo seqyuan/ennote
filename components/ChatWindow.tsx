@@ -98,6 +98,8 @@ export function ChatWindow({
           reconnecting={reconnecting}
           compacting={run.compacting}
           cacheTokens={run.usage?.cachedTokens ?? 0}
+          inputTokens={run.usage?.inputTokens ?? 0}
+          outputTokens={run.usage?.outputTokens ?? 0}
         />
         <div ref={bottomRef} />
       </div>

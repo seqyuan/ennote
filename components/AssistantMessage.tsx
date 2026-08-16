@@ -1,13 +1,22 @@
 "use client";
 
 import { Bot, ImageIcon } from "lucide-react";
+import { MessageActions } from "@/components/MessageActions";
 import { MessageView } from "@/components/MessageView";
 import { ThinkingBlock } from "@/components/ThinkingBlock";
 import type { AssistantStep } from "@/lib/chat-messages";
 
-export function AssistantMessage({ step }: { step: AssistantStep }) {
+interface AssistantMessageProps {
+  step: AssistantStep;
+  activeLeafMessageId?: string;
+  branchDisabled?: boolean;
+  createBranch?: (messageId: string) => void;
+}
+
+export function AssistantMessage({ step, activeLeafMessageId, branchDisabled, createBranch }: AssistantMessageProps) {
   const roleSpeaker = step.speaker?.kind === "role";
   const label = step.speaker?.handle ? `@${step.speaker.handle}` : (step.speaker?.displayName || "Host");
+  const copyText = step.blocks.filter(block => block.kind === "text").map(block => block.text).join("\n\n");
   return <section className="assistant-step" data-message-id={step.sourceMessageId}>
     <div className={roleSpeaker ? "assistant-speaker role" : "assistant-speaker"}>
       <span style={step.speaker?.color ? { color: step.speaker.color } : undefined}><Bot size={13} aria-hidden="true" /></span>
@@ -23,5 +32,8 @@ export function AssistantMessage({ step }: { step: AssistantStep }) {
         <summary>Image description</summary><div>{block.text}</div>
       </details>;
     })}
+    <MessageActions text={copyText} time={step.createdAt}
+      branchMessageId={step.sourceMessageId !== activeLeafMessageId ? step.sourceMessageId : undefined}
+      branchDisabled={branchDisabled} onBranch={createBranch} />
   </section>;
 }

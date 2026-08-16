@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { formatTokenCount } from "@/lib/message-chrome";
 
 interface StreamingStatusBarProps {
   status: string;
@@ -10,9 +11,13 @@ interface StreamingStatusBarProps {
   compacting: boolean;
   /** Cumulative provider cache-hit tokens for the active run. */
   cacheTokens?: number;
+  /** Cumulative provider input tokens for the active run. */
+  inputTokens?: number;
+  /** Cumulative provider output tokens for the active run. */
+  outputTokens?: number;
 }
 
-export function StreamingStatusBar({ status, activeRun, waiting, reconnecting, compacting, cacheTokens = 0 }: StreamingStatusBarProps) {
+export function StreamingStatusBar({ status, activeRun, waiting, reconnecting, compacting, cacheTokens = 0, inputTokens = 0, outputTokens = 0 }: StreamingStatusBarProps) {
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [clock, setClock] = useState(0);
 
@@ -41,15 +46,9 @@ export function StreamingStatusBar({ status, activeRun, waiting, reconnecting, c
 
   return (
     <div className="streaming-status" role="status" aria-live="polite">
-      <span>{label}{startedAt ? `  ${formatElapsed(elapsed)}` : ""}{cacheTokens > 0 ? `  · cache ${formatTokens(cacheTokens)}` : ""}</span>
+      <span>{label}{startedAt ? `  ${formatElapsed(elapsed)}` : ""}{cacheTokens > 0 ? `  · cache ${formatTokenCount(cacheTokens)}` : ""}{(inputTokens > 0 || outputTokens > 0) ? `  · ↑${formatTokenCount(inputTokens)} ↓${formatTokenCount(outputTokens)}` : ""}</span>
     </div>
   );
-}
-
-function formatTokens(tokens: number): string {
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
-  return String(tokens);
 }
 
 function formatElapsed(seconds: number): string {
