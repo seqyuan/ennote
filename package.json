@@ -1,6 +1,6 @@
 {
   "name": "@seqyuan/ennote",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "AI-native bioinformatics agent workspace",
   "license": "MIT",
   "bin": {
