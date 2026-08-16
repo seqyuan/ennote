@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { TextAttachment } from "@/components/Composer";
-import type { RunAgentFlow, RoleSummary, Session } from "@/components/settings/types";
+import type { RunAgentFlow, Session } from "@/components/settings/types";
 import type { AgentRun } from "@/lib/approval";
 import type { TurnMessage } from "@/lib/chat-messages";
 import {
@@ -18,29 +18,16 @@ import { apiFetch } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
 import type { usePromptTemplates } from "@/hooks/usePromptTemplates";
 import type { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
+import { useRoleSelection } from "./useRoleSelection";
+import { useAttachments } from "./useAttachments";
 import type { ChatActions, ComposerView } from "./chat-controller-types";
 
 type TurnSubmission = components["schemas"]["TurnSubmission"];
-type ImageArtifact = components["schemas"]["ImageArtifact"];
 type CompactionSubmission = components["schemas"]["CompactionSubmission"];
-type GlobalRoleSummary = components["schemas"]["GlobalRoleSummary"];
-type GlobalRoleDetail = components["schemas"]["GlobalRoleDetail"];
-type FileRevision = { version: number; publishedAt: string };
 
 function genId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
-}
-
-const TEXT_ATTACHMENT_EXTENSIONS = new Set([
-  "txt", "md", "mdx", "json", "yaml", "yml", "toml", "csv", "tsv", "log", "js", "jsx", "ts", "tsx",
-  "py", "r", "go", "rs", "java", "c", "cpp", "h", "hpp", "css", "html", "xml", "sh", "bash", "sql",
-]);
-
-function isSupportedTextAttachment(file: File): boolean {
-  if (file.type.startsWith("text/")) return true;
-  const extension = file.name.toLowerCase().split(".").pop() ?? "";
-  return TEXT_ATTACHMENT_EXTENSIONS.has(extension) || ["dockerfile", "makefile"].includes(file.name.toLowerCase());
 }
 
 function appendTextAttachments(text: string, attachments: TextAttachment[]): string {
@@ -84,8 +71,11 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
 
   // Composer state (owned here; reset declaratively on session switch).
   const [input, setInput] = useState("");
-  const [pendingImage, setPendingImage] = useState<ImageArtifact | null>(null);
-  const [textAttachments, setTextAttachments] = useState<TextAttachment[]>([]);
+  const {
+    pendingImage, textAttachments,
+    uploadImage, attachFiles, removeTextAttachment,
+    clearPendingImage, clearAttachments, restoreAttachments,
+  } = useAttachments({ selectedProject, selectedSession, runtime: agent });
   const [modelOverrides, setModelOverrides] = useState<Record<string, string>>({});
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("discuss");
 
@@ -106,8 +96,7 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
   const [compactionPrompt, setCompactionPrompt] = useState<{ open: boolean; instructions: string; busy: boolean }>({
     open: false, instructions: "", busy: false,
   });
-  const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
-  const [roles, setRoles] = useState<RoleSummary[]>([]);
+  const { roles, selectedRoleId, setSelectedRoleId } = useRoleSelection(selectedProject);
   const selectedSessionRef = useRef<string | null>(selectedSession);
 
   // Prompt template expansion state.
@@ -144,62 +133,8 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
     // selectSession used to do; cascading-state rule bypassed intentionally.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setInputVersioned("");
-    setPendingImage(null);
-    setTextAttachments([]);
-  }, [selectedSession, setInputVersioned]);
-
-  // Role selection does not survive a project switch (declarative, §4.1.3).
-  useLayoutEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSelectedRoleId(null);
-  }, [selectedProject]);
-
-  // Role catalog: global roles with a /v1/roles fallback.
-  useEffect(() => {
-    if (!selectedProject) return;
-    let cancelled = false;
-    void apiFetch<GlobalRoleSummary[]>("/v1/global-roles")
-      .then(async (catalog) => {
-        const resolved = await Promise.all(catalog.filter((entry) => !entry.error).map(async (entry): Promise<RoleSummary | null> => {
-          try {
-            const [detail, revisions] = await Promise.all([
-              apiFetch<GlobalRoleDetail>(`/v1/global-roles/${encodeURIComponent(entry.id)}`),
-              apiFetch<FileRevision[]>(`/v1/global-roles/${encodeURIComponent(entry.id)}/versions`),
-            ]);
-            const latest = revisions.at(-1);
-            if (!latest) return null;
-            return {
-              id: entry.id, handle: detail.document.handle, name: detail.document.name,
-              description: detail.document.description, positioning: detail.document.positioning,
-              icon: detail.document.icon, color: detail.document.color, scope: "global", status: "active",
-              sourceKind: "managed", sourceLocator: detail.path,
-              currentVersionId: `v${String(latest.version).padStart(6, "0")}`,
-              currentVersion: latest.version, updatedAt: latest.publishedAt,
-            };
-          } catch {
-            return null;
-          }
-        }));
-        if (cancelled) return;
-        const published = resolved.filter((role): role is RoleSummary => role !== null);
-        setRoles(published);
-        setSelectedRoleId((current) => published.some((role) => role.id === current) ? current : null);
-      })
-      .catch(async () => {
-        // SQL-backed API test adapters expose the managed Role catalog.
-        try {
-          const params = new URLSearchParams({ projectId: selectedProject, status: "active", limit: "100" });
-          const page = await apiFetch<{ items: RoleSummary[] }>(`/v1/roles?${params}`);
-          if (cancelled) return;
-          const published = page.items.filter((role) => Boolean(role.currentVersionId));
-          setRoles(published);
-          setSelectedRoleId((current) => published.some((role) => role.id === current) ? current : null);
-        } catch {
-          if (!cancelled) setRoles([]);
-        }
-      });
-    return () => { cancelled = true; };
-  }, [selectedProject]);
+    clearAttachments();
+  }, [selectedSession, setInputVersioned, clearAttachments]);
 
   // Graph catalog for @graph addressing; refreshed on mount and whenever the
   // command panel transitions closed -> open.
@@ -264,8 +199,7 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
     const contextualText = appendTextAttachments(text, attachments);
     const attachmentSummary = attachments.length ? `[Files: ${attachments.map((item) => item.name).join(", ")}]` : "";
     setInputVersioned("");
-    setPendingImage(null);
-    setTextAttachments([]);
+    clearAttachments();
     agent.setStatus("sending...");
     agent.appendTransient({ id: genId(), role: "user", text: [text, image ? `[Image: ${image.name}]` : "", attachmentSummary].filter(Boolean).join("\n") });
     try {
@@ -286,13 +220,12 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
       void agent.watchRun(turn.run as AgentRun);
     } catch (reason) {
       if (selectedSessionRef.current === sessionAtSend) {
-        setPendingImage(image);
-        setTextAttachments(attachments);
+        restoreAttachments(image, attachments);
         agent.setError(errorMessage(reason, "Failed to send the message"));
       }
     }
   }, [selectedSession, pendingImage, textAttachments, agent, selectedModelId,
-    selectedRoleId, roles, setInputVersioned, thinkingEffort]);
+    selectedRoleId, roles, setInputVersioned, thinkingEffort, clearAttachments, restoreAttachments]);
 
   type ExpandResponse = {
     case: "matched"; name: string; text: string; diagnostics: { level: string; code: string; message: string }[];
@@ -485,54 +418,6 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
     setInputVersioned(text);
   }, [agent, input, sendTurn, policyId, selectedSession, setInputVersioned]);
 
-  const uploadImage = useCallback(async (file: File) => {
-    if (!selectedProject || !selectedSession) return;
-    const data = new FormData();
-    data.set("sessionId", selectedSession);
-    data.set("file", file);
-    try {
-      agent.setStatus("uploading image...");
-      const artifact = await apiFetch<ImageArtifact>(`/v1/projects/${encodeURIComponent(selectedProject)}/attachments/images`, {
-        method: "POST", body: data,
-      });
-      setPendingImage(artifact);
-      agent.setError(null);
-    } catch (reason) {
-      agent.setError(errorMessage(reason, "Failed to attach the image"));
-    } finally {
-      agent.setStatus("");
-    }
-  }, [selectedProject, selectedSession, agent]);
-
-  const attachFiles = useCallback(async (files: File[]) => {
-    if (!selectedSession) return;
-    const images = files.filter((file) => file.type.startsWith("image/"));
-    const documents = files.filter((file) => !file.type.startsWith("image/"));
-    if (images[0]) await uploadImage(images[0]);
-    if (images.length > 1) agent.setError("Only one image can be attached to a turn.");
-
-    const accepted: TextAttachment[] = [];
-    for (const file of documents) {
-      if (!isSupportedTextAttachment(file)) {
-        agent.setError(`${file.name} is not a supported text attachment.`);
-        continue;
-      }
-      if (file.size > 1 << 20) {
-        agent.setError(`${file.name} exceeds the 1 MiB text attachment limit.`);
-        continue;
-      }
-      accepted.push({ id: genId(), name: file.name, size: file.size, text: await file.text() });
-    }
-    if (accepted.length) {
-      setTextAttachments((current) => [...current, ...accepted].slice(0, 3));
-      if (textAttachments.length + accepted.length > 3) agent.setError("A turn can include at most three text files.");
-    }
-  }, [selectedSession, agent, textAttachments.length, uploadImage]);
-
-  const removeTextAttachment = useCallback((id: string) => {
-    setTextAttachments((current) => current.filter((item) => item.id !== id));
-  }, []);
-
   const selectModel = useCallback((modelId: string) => {
     if (!selectedSession) return;
     setModelOverrides((current) => ({ ...current, [selectedSession]: modelId }));
@@ -584,7 +469,7 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
     input,
     setInput: setInputVersioned,
     pendingImage,
-    clearPendingImage: () => setPendingImage(null),
+    clearPendingImage,
     uploadImage: (file) => void uploadImage(file),
     textAttachments,
     removeTextAttachment,
