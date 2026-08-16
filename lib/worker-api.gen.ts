@@ -570,7 +570,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
+        put: operations["updateProviderProfile"];
         post?: never;
         delete: operations["deleteProviderProfile"];
         options?: never;
@@ -695,6 +695,22 @@ export interface paths {
         put?: never;
         post?: never;
         delete: operations["deactivatePolicyProfile"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/host/directories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listHostDirectories"];
+        put?: never;
+        post: operations["createHostDirectory"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1068,6 +1084,60 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["restoreSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{sessionID}/turn-metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getSessionTurnMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{sessionID}/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getSessionStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{sessionID}/context-usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getSessionContextUsage"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2107,6 +2177,8 @@ export interface components {
             credentialConfigured: boolean;
             proxy?: string;
             status: string;
+            custom?: boolean;
+            modelsCustomized?: boolean;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -2311,6 +2383,18 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
+        HostDirectoryEntry: {
+            name: string;
+            path: string;
+            hidden: boolean;
+        };
+        HostDirectoryListing: {
+            path: string;
+            home: string;
+            crumbs: components["schemas"]["HostDirectoryEntry"][];
+            entries: components["schemas"]["HostDirectoryEntry"][];
+            truncated: boolean;
+        };
         WorkspaceFileEntry: {
             name: string;
             path: string;
@@ -2319,6 +2403,45 @@ export interface components {
             size: number;
             /** Format: date-time */
             modifiedAt: string;
+        };
+        SessionContextUsage: {
+            contextWindow: number;
+            projectedTokens: number;
+            systemTokens: number;
+            toolsTokens: number;
+            messageTokens: number;
+        };
+        SessionStats: {
+            turns: number;
+            steps: number;
+            /** Format: int64 */
+            llmMs: number;
+            /** Format: int64 */
+            toolMs: number;
+            /** Format: int64 */
+            ttftMs: number;
+            ttftSteps: number;
+            /** Format: int64 */
+            decodeMs: number;
+            /** Format: int64 */
+            decodeTokens: number;
+            /** Format: int64 */
+            uncachedInputTokens: number;
+            /** Format: int64 */
+            cacheReadTokens: number;
+            /** Format: int64 */
+            cacheWriteTokens: number;
+            /** Format: int64 */
+            outputTokens: number;
+        };
+        TurnMetric: {
+            runId: string;
+            /** Format: int64 */
+            runMs?: number;
+            /** Format: int64 */
+            ttftMs?: number;
+            /** Format: double */
+            tokensPerSecond?: number;
         };
         Session: {
             id: string;
@@ -2483,7 +2606,7 @@ export interface components {
             /** Format: int64 */
             seq: number;
             /** @enum {string} */
-            type: "run_queued" | "run_started" | "context_warning" | "context_pruned" | "context_compaction_planned" | "context_compaction_started" | "context_compaction_retry_scheduled" | "context_compaction_retry_started" | "context_compaction_completed" | "context_compaction_failed" | "context_compaction_cancelled" | "context_checkpoint_selected" | "context_checkpoint_invalid" | "context_overflow_recovery_started" | "context_overflow_recovery_completed" | "run_context_compaction_planned" | "run_context_compaction_started" | "run_context_compaction_retry_scheduled" | "run_context_compaction_completed" | "run_context_compaction_failed" | "run_context_compaction_cancelled" | "model_route_selected" | "model_call_started" | "vision_fallback_started" | "vision_description_delta" | "vision_fallback_attempt_failed" | "vision_fallback_completed" | "vision_fallback_failed" | "model_call_attempt_failed" | "model_call_retry_scheduled" | "text_delta" | "thinking_delta" | "tool_call_delta" | "usage_updated" | "model_call_completed" | "model_call_failed" | "output_truncated" | "tool_call_started" | "tool_call_completed" | "tool_call_failed" | "tool_call_skipped" | "tool_policy_denied" | "tool_policy_terminated" | "tool_result_projected" | "approval_requested" | "approval_resolved" | "turn_stop_requested" | "stuck_tool_loop" | "message_committed" | "run_transcript_committed" | "run_succeeded" | "run_failed" | "run_cancelled" | "run_interrupted";
+            type: "run_queued" | "run_started" | "context_warning" | "context_pruned" | "context_compaction_planned" | "context_compaction_started" | "context_compaction_retry_scheduled" | "context_compaction_retry_started" | "context_compaction_completed" | "context_compaction_failed" | "context_compaction_cancelled" | "context_checkpoint_selected" | "context_checkpoint_invalid" | "context_overflow_recovery_started" | "context_overflow_recovery_completed" | "run_context_compaction_planned" | "run_context_compaction_started" | "run_context_compaction_retry_scheduled" | "run_context_compaction_completed" | "run_context_compaction_failed" | "run_context_compaction_cancelled" | "model_route_selected" | "model_call_started" | "vision_fallback_started" | "vision_description_delta" | "vision_fallback_attempt_failed" | "vision_fallback_completed" | "vision_fallback_failed" | "model_call_attempt_failed" | "model_call_retry_scheduled" | "text_delta" | "thinking_delta" | "tool_call_delta" | "usage_updated" | "context_usage" | "model_call_completed" | "model_call_failed" | "output_truncated" | "tool_call_started" | "tool_call_completed" | "tool_call_failed" | "tool_call_skipped" | "tool_policy_denied" | "tool_policy_terminated" | "tool_result_projected" | "approval_requested" | "approval_resolved" | "turn_stop_requested" | "stuck_tool_loop" | "message_committed" | "run_transcript_committed" | "run_succeeded" | "run_failed" | "run_cancelled" | "run_interrupted";
             payload: {
                 [key: string]: unknown;
             };
@@ -4405,6 +4528,7 @@ export interface operations {
             content: {
                 "application/json": {
                     name: string;
+                    key?: string;
                     /** @enum {string} */
                     providerType: "openai-compatible" | "anthropic";
                     /** Format: uri */
@@ -4461,6 +4585,41 @@ export interface operations {
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];
             502: components["responses"]["Error"];
+        };
+    };
+    updateProviderProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                providerID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    /** Format: uri */
+                    baseUrl?: string;
+                    apiKey?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Provider profile updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ProviderProfile"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     deleteProviderProfile: {
@@ -4730,6 +4889,65 @@ export interface operations {
                 content?: never;
             };
             404: components["responses"]["Error"];
+        };
+    };
+    listHostDirectories: {
+        parameters: {
+            query?: {
+                /** @description Fully-qualified host directory path; defaults to the Worker user's home directory */
+                path?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One host directory level for the workspace picker */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["HostDirectoryListing"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    createHostDirectory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    path: string;
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Host directory created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            path: string;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     listProjects: {
@@ -5491,6 +5709,81 @@ export interface operations {
             };
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    getSessionTurnMetrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per-turn footer readings for every completed agent run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TurnMetric"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    getSessionStats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Aggregate session statistics for the composer StatsLine */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SessionStats"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    getSessionContextUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Latest context-occupancy projection for the Session, or null before the first report */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SessionContextUsage"] | null;
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
         };
     };
     listSessionMessages: {

@@ -698,6 +698,7 @@ paths:
               additionalProperties: false
               properties:
                 name: { type: string, minLength: 1 }
+                key: { type: string }
                 providerType: { type: string, enum: [openai-compatible, anthropic] }
                 baseUrl: { type: string, format: uri }
                 apiKey: { type: string }
@@ -750,6 +751,31 @@ paths:
         in: path
         required: true
         schema: { type: string }
+    put:
+      operationId: updateProviderProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name: { type: string, minLength: 1 }
+                baseUrl: { type: string, format: uri }
+                apiKey: { type: string }
+      responses:
+        "200":
+          description: Provider profile updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/ProviderProfile" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
     delete:
       operationId: deleteProviderProfile
       responses:
@@ -951,6 +977,56 @@ paths:
       responses:
         "204": { description: Policy profile deactivated }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/host/directories:
+    get:
+      operationId: listHostDirectories
+      parameters:
+        - name: path
+          in: query
+          description: Fully-qualified host directory path; defaults to the Worker user's home directory
+          schema: { type: string }
+      responses:
+        "200":
+          description: One host directory level for the workspace picker
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/HostDirectoryListing" }
+        "400": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createHostDirectory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path, name]
+              additionalProperties: false
+              properties:
+                path: { type: string, minLength: 1 }
+                name: { type: string, minLength: 1 }
+      responses:
+        "201":
+          description: Host directory created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [path]
+                        properties:
+                          path: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /v1/projects:
     get:
       operationId: listProjects
@@ -1538,6 +1614,62 @@ paths:
                       data: { $ref: "#/components/schemas/Session" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/turn-metrics:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    get:
+      operationId: getSessionTurnMetrics
+      responses:
+        "200":
+          description: Per-turn footer readings for every completed agent run
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/TurnMetric" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/stats:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    get:
+      operationId: getSessionStats
+      responses:
+        "200":
+          description: Aggregate session statistics for the composer StatsLine
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SessionStats" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/context-usage:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    get:
+      operationId: getSessionContextUsage
+      responses:
+        "200":
+          description: Latest context-occupancy projection for the Session, or null before the first report
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        oneOf:
+                          - { $ref: "#/components/schemas/SessionContextUsage" }
+                          - { type: "null" }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/sessions/{sessionID}/messages:
     parameters:
       - $ref: "#/components/parameters/SessionID"
@@ -3177,6 +3309,8 @@ components:
         credentialConfigured: { type: boolean }
         proxy: { type: string }
         status: { type: string }
+        custom: { type: boolean }
+        modelsCustomized: { type: boolean }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     DiscoveredModel:
@@ -3422,6 +3556,28 @@ components:
         status: { type: string }
         pathFingerprint: { type: string }
         createdAt: { type: string, format: date-time }
+    HostDirectoryEntry:
+      type: object
+      required: [name, path, hidden]
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        path: { type: string }
+        hidden: { type: boolean }
+    HostDirectoryListing:
+      type: object
+      required: [path, home, crumbs, entries, truncated]
+      additionalProperties: false
+      properties:
+        path: { type: string }
+        home: { type: string }
+        crumbs:
+          type: array
+          items: { $ref: "#/components/schemas/HostDirectoryEntry" }
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/HostDirectoryEntry" }
+        truncated: { type: boolean }
     WorkspaceFileEntry:
       type: object
       required: [name, path, isDir, size, modifiedAt]
@@ -3432,6 +3588,42 @@ components:
         isDir: { type: boolean }
         size: { type: integer, format: int64, minimum: 0 }
         modifiedAt: { type: string, format: date-time }
+    SessionContextUsage:
+      type: object
+      additionalProperties: false
+      required: [contextWindow, projectedTokens, systemTokens, toolsTokens, messageTokens]
+      properties:
+        contextWindow: { type: integer, minimum: 0 }
+        projectedTokens: { type: integer, minimum: 0 }
+        systemTokens: { type: integer, minimum: 0 }
+        toolsTokens: { type: integer, minimum: 0 }
+        messageTokens: { type: integer, minimum: 0 }
+    SessionStats:
+      type: object
+      additionalProperties: false
+      required: [turns, steps, llmMs, toolMs, ttftMs, ttftSteps, decodeMs, decodeTokens, uncachedInputTokens, cacheReadTokens, cacheWriteTokens, outputTokens]
+      properties:
+        turns: { type: integer, minimum: 0 }
+        steps: { type: integer, minimum: 0 }
+        llmMs: { type: integer, format: int64, minimum: 0 }
+        toolMs: { type: integer, format: int64, minimum: 0 }
+        ttftMs: { type: integer, format: int64, minimum: 0 }
+        ttftSteps: { type: integer, minimum: 0 }
+        decodeMs: { type: integer, format: int64, minimum: 0 }
+        decodeTokens: { type: integer, format: int64, minimum: 0 }
+        uncachedInputTokens: { type: integer, format: int64, minimum: 0 }
+        cacheReadTokens: { type: integer, format: int64, minimum: 0 }
+        cacheWriteTokens: { type: integer, format: int64, minimum: 0 }
+        outputTokens: { type: integer, format: int64, minimum: 0 }
+    TurnMetric:
+      type: object
+      additionalProperties: false
+      required: [runId]
+      properties:
+        runId: { type: string }
+        runMs: { type: integer, format: int64, minimum: 0 }
+        ttftMs: { type: integer, format: int64, minimum: 0 }
+        tokensPerSecond: { type: number, format: double, minimum: 0 }
     Session:
       type: object
       additionalProperties: false
@@ -3671,6 +3863,7 @@ components:
             - thinking_delta
             - tool_call_delta
             - usage_updated
+            - context_usage
             - model_call_completed
             - model_call_failed
             - output_truncated

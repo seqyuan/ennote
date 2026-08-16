@@ -143,6 +143,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/provider-profiles", s.createProviderProfile)
 	mux.HandleFunc("POST /v1/provider-profiles/discover-models", s.discoverProviderModels)
 	mux.HandleFunc("POST /v1/provider-profiles/{providerID}/test", s.testProviderProfile)
+	mux.HandleFunc("PUT /v1/provider-profiles/{providerID}", s.updateProviderProfile)
 	mux.HandleFunc("DELETE /v1/provider-profiles/{providerID}", s.deleteProviderProfile)
 	mux.HandleFunc("GET /v1/model-profiles", s.listModelProfiles)
 	mux.HandleFunc("POST /v1/model-profiles", s.createModelProfile)
@@ -159,6 +160,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/policy-profiles", s.createPolicyProfile)
 	mux.HandleFunc("PUT /v1/policy-profiles/{policyID}/default", s.setDefaultPolicyProfile)
 	mux.HandleFunc("DELETE /v1/policy-profiles/{policyID}", s.deactivatePolicyProfile)
+	mux.HandleFunc("GET /v1/host/directories", s.listHostDirectories)
+	mux.HandleFunc("POST /v1/host/directories", s.createHostDirectory)
 	mux.HandleFunc("GET /v1/projects", s.listProjects)
 	mux.HandleFunc("POST /v1/projects", s.createProject)
 	mux.HandleFunc("GET /v1/projects/{projectID}/workspace", s.getProjectWorkspace)
@@ -168,6 +171,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/projects/{projectID}/sessions", s.createSession)
 	mux.HandleFunc("POST /v1/projects/{projectID}/attachments/images", s.uploadImage)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}", s.getSession)
+	mux.HandleFunc("GET /v1/sessions/{sessionID}/context-usage", s.getSessionContextUsage)
+	mux.HandleFunc("GET /v1/sessions/{sessionID}/stats", s.getSessionStats)
+	mux.HandleFunc("GET /v1/sessions/{sessionID}/turn-metrics", s.getSessionTurnMetrics)
 	mux.HandleFunc("PATCH /v1/sessions/{sessionID}", s.updateSession)
 	mux.HandleFunc("POST /v1/sessions/{sessionID}/archive", s.archiveSession)
 	mux.HandleFunc("POST /v1/sessions/{sessionID}/restore", s.restoreSession)
@@ -344,6 +350,7 @@ func (s *Server) listProviderProfiles(w http.ResponseWriter, r *http.Request) {
 func (s *Server) createProviderProfile(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Name         string              `json:"name"`
+		Key          string              `json:"key"`
 		ProviderType domain.ProviderType `json:"providerType"`
 		BaseURL      string              `json:"baseUrl"`
 		APIKey       string              `json:"apiKey"`
@@ -353,7 +360,7 @@ func (s *Server) createProviderProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	profile, err := s.Providers.Create(r.Context(), store.CreateProviderInput{
-		Name: input.Name, ProviderType: input.ProviderType, BaseURL: input.BaseURL,
+		Key: input.Key, Name: input.Name, ProviderType: input.ProviderType, BaseURL: input.BaseURL,
 		APIKey: input.APIKey, Proxy: input.Proxy,
 	})
 	if err != nil {
@@ -363,6 +370,27 @@ func (s *Server) createProviderProfile(w http.ResponseWriter, r *http.Request) {
 	profile.CredentialConfigured = profile.CredentialConfigured || profile.APIKey != ""
 	profile.APIKey = ""
 	writeData(w, http.StatusCreated, profile)
+}
+
+func (s *Server) updateProviderProfile(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Name    string `json:"name"`
+		BaseURL string `json:"baseUrl"`
+		APIKey  string `json:"apiKey"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	profile, err := s.Providers.Update(r.Context(), r.PathValue("providerID"), store.UpdateProviderInput{
+		Name: input.Name, BaseURL: input.BaseURL, APIKey: input.APIKey,
+	})
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_provider_profile", err.Error(), false)
+		return
+	}
+	profile.CredentialConfigured = profile.CredentialConfigured || profile.APIKey != ""
+	profile.APIKey = ""
+	writeData(w, http.StatusOK, profile)
 }
 
 func (s *Server) deleteProviderProfile(w http.ResponseWriter, r *http.Request) {
@@ -666,6 +694,48 @@ func (s *Server) restoreSession(w http.ResponseWriter, r *http.Request) {
 	}
 	s.drainSessionProjection(r.Context(), session.ID)
 	writeData(w, http.StatusOK, session)
+}
+
+func (s *Server) getSessionContextUsage(w http.ResponseWriter, r *http.Request) {
+	if s.SessionStores == nil {
+		writeData(w, http.StatusOK, nil)
+		return
+	}
+	usage, err := s.SessionStores.ContextUsage(r.Context(), r.PathValue("sessionID"))
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	writeData(w, http.StatusOK, usage)
+}
+
+func (s *Server) getSessionStats(w http.ResponseWriter, r *http.Request) {
+	if s.SessionStores == nil {
+		writeData(w, http.StatusOK, nil)
+		return
+	}
+	stats, err := s.SessionStores.Stats(r.Context(), r.PathValue("sessionID"))
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	writeData(w, http.StatusOK, stats)
+}
+
+func (s *Server) getSessionTurnMetrics(w http.ResponseWriter, r *http.Request) {
+	if s.SessionStores == nil {
+		writeData(w, http.StatusOK, []domain.TurnMetric{})
+		return
+	}
+	metrics, err := s.SessionStores.TurnMetrics(r.Context(), r.PathValue("sessionID"))
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	if metrics == nil {
+		metrics = []domain.TurnMetric{}
+	}
+	writeData(w, http.StatusOK, metrics)
 }
 
 func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
