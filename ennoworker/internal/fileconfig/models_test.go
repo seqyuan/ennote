@@ -264,7 +264,9 @@ func TestModelStoreRecoversAfterFileRepair(t *testing.T) {
 	require.NoError(t, os.WriteFile(store.Models, []byte(`{invalid`), 0o600))
 	models, err := store.ListModels(ctx)
 	require.NoError(t, err)
-	require.Len(t, models, 0) // no model was created; degraded snapshot has no models
+	// Catalog inheritance (D6): a known provider with an empty model list
+	// serves its built-in catalog even from the degraded snapshot.
+	require.Len(t, models, 3)
 
 	// Repair the file; the next read picks up the repaired content.
 	require.NoError(t, os.WriteFile(store.Models, []byte(`{"schemaVersion":1,"providers":{"deepseek":{"name":"DeepSeek","type":"openai-compatible","api":"openai-completions","baseUrl":"https://api.deepseek.com","credential":"deepseek","models":[{"id":"deepseek-chat"}]}}}`), 0o600))
@@ -341,3 +343,89 @@ func TestRejectsMismatchedTypeAndAPI(t *testing.T) {
 	assert.Contains(t, err.Error(), "incompatible with type")
 }
 
+
+func TestListModelsInheritsCatalogWhenProviderListEmpty(t *testing.T) {
+	store := newModelStore(t)
+	ctx := context.Background()
+	// key "deepseek" matches the catalog; no explicit models declared.
+	_, err := store.CreateProvider(ctx, fileconfig.CreateProviderInput{
+		Key: "deepseek", Name: "DeepSeek", ProviderType: domain.ProviderOpenAICompatible,
+		BaseURL: "https://api.deepseek.com",
+	})
+	require.NoError(t, err)
+
+	providers, err := store.ListProviders(ctx)
+	require.NoError(t, err)
+	require.Len(t, providers, 1)
+	assert.False(t, providers[0].Custom)
+	assert.False(t, providers[0].ModelsCustomized)
+
+	models, err := store.ListModels(ctx)
+	require.NoError(t, err)
+	assert.Len(t, models, 3) // deepseek-chat, deepseek-reasoner, deepseek-v4-flash
+	ids := map[string]bool{}
+	for _, m := range models {
+		ids[m.ModelName] = true
+	}
+	assert.True(t, ids["deepseek-chat"])
+	assert.True(t, ids["deepseek-reasoner"])
+	assert.True(t, ids["deepseek-v4-flash"])
+}
+
+func TestListModelsEmptyForCustomProvider(t *testing.T) {
+	store := newModelStore(t)
+	ctx := context.Background()
+	_, err := store.CreateProvider(ctx, fileconfig.CreateProviderInput{
+		Key: "acme-gateway", Name: "Acme", ProviderType: domain.ProviderOpenAICompatible,
+		BaseURL: "https://gateway.example/v1",
+	})
+	require.NoError(t, err)
+
+	providers, err := store.ListProviders(ctx)
+	require.NoError(t, err)
+	require.Len(t, providers, 1)
+	assert.True(t, providers[0].Custom)
+	assert.False(t, providers[0].ModelsCustomized)
+
+	models, err := store.ListModels(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, models)
+}
+
+func TestUpdateProviderEditsNameBaseURLAndKey(t *testing.T) {
+	store := newModelStore(t)
+	ctx := context.Background()
+	_, err := store.CreateProvider(ctx, fileconfig.CreateProviderInput{
+		Key: "acme", Name: "Acme", ProviderType: domain.ProviderOpenAICompatible,
+		BaseURL: "https://old.example/v1", APIKey: "sk-first",
+	})
+	require.NoError(t, err)
+
+	// Blank key preserves the stored credential; name/baseURL update.
+	updated, err := store.UpdateProvider(ctx, "acme", fileconfig.UpdateProviderInput{
+		Name: "Acme Gateway", BaseURL: "https://new.example/v1",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "Acme Gateway", updated.Name)
+	assert.Equal(t, "https://new.example/v1", updated.BaseURL)
+	assert.True(t, updated.CredentialConfigured)
+
+	resolved, err := store.FindProvider(ctx, "acme")
+	require.NoError(t, err)
+	assert.Equal(t, "sk-first", resolved.APIKey)
+
+	// A non-blank key replaces the credential.
+	_, err = store.UpdateProvider(ctx, "acme", fileconfig.UpdateProviderInput{APIKey: "sk-second"})
+	require.NoError(t, err)
+	resolved, err = store.FindProvider(ctx, "acme")
+	require.NoError(t, err)
+	assert.Equal(t, "sk-second", resolved.APIKey)
+	assert.Equal(t, "Acme Gateway", resolved.Name)
+}
+
+func TestUpdateProviderRejectsUnknownProvider(t *testing.T) {
+	store := newModelStore(t)
+	_, err := store.UpdateProvider(context.Background(), "missing", fileconfig.UpdateProviderInput{Name: "X"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}

@@ -21,6 +21,8 @@ type ProviderRepo struct {
 
 type CreateProviderInput = fileconfig.CreateProviderInput
 
+type UpdateProviderInput = fileconfig.UpdateProviderInput
+
 func (r *ProviderRepo) Create(ctx context.Context, input CreateProviderInput) (*domain.ProviderProfile, error) {
 	if r == nil || r.Files == nil {
 		return nil, ErrFileBackedStoreRequired
@@ -40,6 +42,13 @@ func (r *ProviderRepo) List(ctx context.Context) ([]domain.ProviderProfile, erro
 		return nil, ErrFileBackedStoreRequired
 	}
 	return r.Files.ListProviders(ctx)
+}
+
+func (r *ProviderRepo) Update(ctx context.Context, id string, input UpdateProviderInput) (*domain.ProviderProfile, error) {
+	if r == nil || r.Files == nil {
+		return nil, ErrFileBackedStoreRequired
+	}
+	return r.Files.UpdateProvider(ctx, id, input)
 }
 
 // Delete soft-deletes a provider profile and hides its models.

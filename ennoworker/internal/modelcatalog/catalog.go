@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
@@ -179,6 +180,22 @@ func Lookup(providerKey, modelID string) (ModelDefaults, bool) {
 func HasProvider(providerKey string) bool {
 	_, ok := catalog.Providers[providerKey]
 	return ok
+}
+
+// ProviderModelIDs returns the catalog's model ids for a provider, sorted. An
+// unknown provider yields nil. This is the "inherited" model list a provider
+// with no explicitly declared models serves.
+func ProviderModelIDs(providerKey string) []string {
+	provider, ok := catalog.Providers[providerKey]
+	if !ok {
+		return nil
+	}
+	ids := make([]string, 0, len(provider.Models))
+	for id := range provider.Models {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // ProviderDefaultAPI returns the default wire protocol for a provider.

@@ -62,6 +62,15 @@ type CreateProviderInput struct {
 	Proxy        string
 }
 
+// UpdateProviderInput carries the fields the Models tab can edit on an existing
+// provider. Zero/empty fields mean "leave unchanged" — an empty APIKey never
+// deletes a stored credential.
+type UpdateProviderInput struct {
+	Name    string
+	BaseURL string
+	APIKey  string
+}
+
 type CreateModelInput struct {
 	ProviderID                    string
 	ModelName                     string
@@ -142,8 +151,59 @@ func (s *ModelStore) CreateProvider(_ context.Context, input CreateProviderInput
 	return &domain.ProviderProfile{
 		ID: input.Key, Name: input.Name, ProviderType: input.ProviderType, API: api,
 		BaseURL: strings.TrimSpace(input.BaseURL), CredentialConfigured: strings.TrimSpace(input.APIKey) != "",
-		Proxy: strings.TrimSpace(input.Proxy), Status: "active", CreatedAt: now, UpdatedAt: now,
+		Proxy: strings.TrimSpace(input.Proxy), Status: "active", Custom: !modelcatalog.HasProvider(input.Key),
+		ModelsCustomized: false, CreatedAt: now, UpdatedAt: now,
 	}, nil
+}
+
+// UpdateProvider edits the name, base URL, and (optionally) API key of an
+// existing provider. A blank API key leaves the stored credential untouched;
+// a non-blank key replaces it through the credential store.
+func (s *ModelStore) UpdateProvider(_ context.Context, id string, input UpdateProviderInput) (*domain.ProviderProfile, error) {
+	id = strings.TrimSpace(id)
+	if !providerKeyPattern.MatchString(id) {
+		return nil, fmt.Errorf("provider key must match %s", providerKeyPattern)
+	}
+	input.Name = strings.TrimSpace(input.Name)
+	input.BaseURL = strings.TrimSpace(input.BaseURL)
+	if input.BaseURL != "" {
+		if err := validateBaseURL(input.BaseURL); err != nil {
+			return nil, err
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	document, modifiedAt, err := s.load()
+	if err != nil {
+		return nil, err
+	}
+	provider, exists := document.Providers[id]
+	if !exists {
+		return nil, fmt.Errorf("provider profile not found: %s", id)
+	}
+	if input.Name != "" {
+		provider.Name = input.Name
+	}
+	if input.BaseURL != "" {
+		provider.BaseURL = input.BaseURL
+	}
+	if strings.TrimSpace(input.APIKey) != "" {
+		if err := s.Credentials.Put(provider.Credential, input.APIKey); err != nil {
+			return nil, err
+		}
+	}
+	document.Providers[id] = provider
+	if err := writeJSONAtomic(s.Models, document, 0o600); err != nil {
+		return nil, fmt.Errorf("write models catalog: %w", err)
+	}
+	profile := providerProfile(id, provider, "", maxTime(modifiedAt, s.now()))
+	if value, resolveErr := s.Credentials.Resolve(provider.Credential); resolveErr == nil && value != "" {
+		profile.CredentialConfigured = true
+	} else if resolveErr != nil && !IsCredentialUnavailable(resolveErr) {
+		return nil, resolveErr
+	}
+	return &profile, nil
 }
 
 func (s *ModelStore) ListProviders(_ context.Context) ([]domain.ProviderProfile, error) {
@@ -271,7 +331,17 @@ func (s *ModelStore) ListModels(_ context.Context) ([]domain.ModelProfile, error
 	}
 	profiles := make([]domain.ModelProfile, 0)
 	for providerID, provider := range document.Providers {
-		for _, model := range provider.Models {
+		// An empty model list means "serve this provider's built-in catalog":
+		// materialize each catalog model as an overlay-only entry (nil fields,
+		// filled by overlayModel below). A provider the catalog does not
+		// describe therefore still lists nothing.
+		models := provider.Models
+		if len(models) == 0 {
+			for _, catalogID := range modelcatalog.ProviderModelIDs(providerID) {
+				models = append(models, ModelConfig{ID: catalogID})
+			}
+		}
+		for _, model := range models {
 			resolved := overlayModel(providerID, model)
 			ref := providerID + "/" + resolved.ID
 			profiles = append(profiles, *modelProfile(providerID, resolved, ref == settings.DefaultModel, modifiedAt))
@@ -685,7 +755,9 @@ func providerProfile(id string, provider ProviderConfig, apiKey string, modified
 	return domain.ProviderProfile{
 		ID: id, Name: provider.Name, ProviderType: provider.Type, API: provider.API, BaseURL: provider.BaseURL,
 		CredentialRef: provider.Credential, APIKey: apiKey, CredentialConfigured: apiKey != "", Proxy: provider.Proxy, Status: "active",
-		CreatedAt: modifiedAt, UpdatedAt: modifiedAt,
+		Custom:           !modelcatalog.HasProvider(id),
+		ModelsCustomized: len(provider.Models) > 0,
+		CreatedAt:        modifiedAt, UpdatedAt: modifiedAt,
 	}
 }
 

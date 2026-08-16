@@ -104,8 +104,14 @@ type ProviderProfile struct {
 	CredentialConfigured bool         `json:"credentialConfigured"`
 	Proxy                string       `json:"proxy,omitempty"`
 	Status               string       `json:"status"`
-	CreatedAt            time.Time    `json:"createdAt"`
-	UpdatedAt            time.Time    `json:"updatedAt"`
+	// Custom is true when the built-in catalog does not describe this provider
+	// key (a hand-declared route), which is what drives the Models tab's Custom tag.
+	Custom bool `json:"custom"`
+	// ModelsCustomized is true when the provider declares its own model list;
+	// false means an empty list, which serves the built-in catalog for known keys.
+	ModelsCustomized bool      `json:"modelsCustomized"`
+	CreatedAt        time.Time `json:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt"`
 }
 
 type ModelProfile struct {
