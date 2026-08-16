@@ -429,3 +429,46 @@ func TestUpdateProviderRejectsUnknownProvider(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
+
+func TestUpdateModelEditsDisplayNameAndCapacities(t *testing.T) {
+	store := newModelStore(t)
+	ctx := context.Background()
+	_, err := store.CreateProvider(ctx, fileconfig.CreateProviderInput{
+		Key: "deepseek", Name: "DeepSeek", ProviderType: domain.ProviderOpenAICompatible,
+		BaseURL: "https://api.deepseek.com",
+	})
+	require.NoError(t, err)
+	_, err = store.CreateModel(ctx, fileconfig.CreateModelInput{
+		ProviderID: "deepseek", ModelName: "deepseek-chat", DisplayName: "DeepSeek Chat",
+		ContextWindow: 64000, MaxOutputTokens: 4000, SupportsToolUse: true,
+		ThinkingDialect:          domain.ThinkingDialectNone,
+		SupportedThinkingEfforts: []domain.ThinkingEffort{domain.ThinkingDefault},
+	})
+	require.NoError(t, err)
+
+	cw := 256000
+	mt := 32000
+	name := "DeepSeek Chat (latest)"
+	updated, err := store.UpdateModel(ctx, "deepseek/deepseek-chat", fileconfig.UpdateModelInput{
+		DisplayName: &name, ContextWindow: &cw, MaxTokens: &mt,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "DeepSeek Chat (latest)", updated.DisplayName)
+	assert.Equal(t, 256000, updated.ContextWindow)
+	assert.Equal(t, 32000, updated.MaxOutputTokens)
+	assert.Equal(t, "deepseek/deepseek-chat", updated.ID)
+
+	// Empty input clears all three: name falls back to id, capacities to catalog.
+	cleared, err := store.UpdateModel(ctx, "deepseek/deepseek-chat", fileconfig.UpdateModelInput{})
+	require.NoError(t, err)
+	assert.Equal(t, "deepseek-chat", cleared.DisplayName)
+	assert.Equal(t, 131072, cleared.ContextWindow)
+	assert.Equal(t, 8192, cleared.MaxOutputTokens)
+}
+
+func TestUpdateModelRejectsUnknownModel(t *testing.T) {
+	store := newModelStore(t)
+	_, err := store.UpdateModel(context.Background(), "missing/nope", fileconfig.UpdateModelInput{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}

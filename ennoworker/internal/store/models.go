@@ -16,6 +16,8 @@ type ModelRepo struct {
 
 type CreateModelInput = fileconfig.CreateModelInput
 
+type UpdateModelInput = fileconfig.UpdateModelInput
+
 func (r *ModelRepo) Create(ctx context.Context, input CreateModelInput) (*domain.ModelProfile, error) {
 	if r == nil || r.Files == nil {
 		return nil, ErrFileBackedStoreRequired
@@ -60,6 +62,13 @@ func (r *ModelRepo) SetDefault(ctx context.Context, modelID string) error {
 		return ErrFileBackedStoreRequired
 	}
 	return r.Files.SetDefault(ctx, modelID)
+}
+
+func (r *ModelRepo) Update(ctx context.Context, modelID string, input UpdateModelInput) (*domain.ModelProfile, error) {
+	if r == nil || r.Files == nil {
+		return nil, ErrFileBackedStoreRequired
+	}
+	return r.Files.UpdateModel(ctx, modelID, input)
 }
 
 func (r *ModelRepo) Delete(ctx context.Context, modelID string) error {

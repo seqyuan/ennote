@@ -87,6 +87,17 @@ type CreateModelInput struct {
 	IsDefault                     bool
 }
 
+// UpdateModelInput replaces the three fields the Models tab's list editor
+// edits. A nil pointer clears the field to its default (the display name falls
+// back to the model id; capacities fall back to the built-in catalog), while a
+// non-nil pointer sets it explicitly. This endpoint is a full replace of these
+// three fields, not a partial patch: the caller always sends all three.
+type UpdateModelInput struct {
+	DisplayName   *string
+	ContextWindow *int
+	MaxTokens     *int
+}
+
 type ModelStore struct {
 	Models      string
 	Credentials *CredentialStore
@@ -316,6 +327,62 @@ func (s *ModelStore) CreateModel(_ context.Context, input CreateModelInput) (*do
 		}
 	}
 	return modelProfile(input.ProviderID, resolved, input.IsDefault, maxTime(modifiedAt, s.now())), nil
+}
+
+// UpdateModel replaces the display name and capacities of one model in place.
+// The default flag is read from settings and preserved (update never changes
+// which model is default). A nil input field clears that field to its default.
+func (s *ModelStore) UpdateModel(_ context.Context, ref string, input UpdateModelInput) (*domain.ModelProfile, error) {
+	providerID, modelID, err := SplitModelRef(ref)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	document, modifiedAt, err := s.load()
+	if err != nil {
+		return nil, err
+	}
+	provider, exists := document.Providers[providerID]
+	if !exists {
+		return nil, fmt.Errorf("model profile not found: %s", ref)
+	}
+	for i := range provider.Models {
+		if provider.Models[i].ID != modelID {
+			continue
+		}
+		model := &provider.Models[i]
+		if input.DisplayName == nil {
+			model.Name = ""
+		} else {
+			model.Name = strings.TrimSpace(*input.DisplayName)
+		}
+		model.ContextWindow = intOrNil(input.ContextWindow)
+		model.MaxTokens = intOrNil(input.MaxTokens)
+		resolved := overlayModel(providerID, *model)
+		if err := validateModel(resolved); err != nil {
+			return nil, err
+		}
+		document.Providers[providerID] = provider
+		if err := writeJSONAtomic(s.Models, document, 0o600); err != nil {
+			return nil, fmt.Errorf("write models catalog: %w", err)
+		}
+		settings, err := s.Settings.Read()
+		if err != nil {
+			return nil, err
+		}
+		return modelProfile(providerID, resolved, ref == settings.DefaultModel, maxTime(modifiedAt, s.now())), nil
+	}
+	return nil, fmt.Errorf("model profile not found: %s", ref)
+}
+
+// intOrNil copies a nullable int, returning nil when the pointer is nil.
+func intOrNil(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 func (s *ModelStore) ListModels(_ context.Context) ([]domain.ModelProfile, error) {

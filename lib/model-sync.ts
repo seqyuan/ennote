@@ -8,7 +8,6 @@ export interface BeforeModel {
   displayName: string;
   contextWindow: number;
   maxOutputTokens: number;
-  isDefault?: boolean;
 }
 
 /** A model-profile create payload. */
@@ -21,26 +20,62 @@ export interface ModelCreateInput {
   supportsToolUse: boolean;
 }
 
+/** A model-profile update payload (null clears the field to its default). */
+export interface ModelUpdateInput {
+  displayName: string | null;
+  contextWindow: number | null;
+  maxOutputTokens: number | null;
+}
+
 /** What a provider-edit Apply must do to reconcile the drafted list. */
 export interface ModelSyncPlan {
   /** Create these models (drafted ids with no existing profile). */
   toCreate: ModelCreateInput[];
   /** Delete these existing model profile ids (removed from the draft). */
   toDelete: string[];
-  /** Recreate these existing profiles that changed (the API has no update). */
-  toRecreate: Array<{ deleteId: string; input: ModelCreateInput; wasDefault: boolean }>;
+  /** Update these existing models (fields the draft changed). */
+  toUpdate: Array<{ id: string; input: ModelUpdateInput }>;
+}
+
+function textField(draft: ModelDraft, key: string): string | undefined {
+  const value = draft[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function numberField(draft: ModelDraft, key: string): number | undefined {
+  const value = draft[key];
+  return typeof value === "number" ? value : undefined;
+}
+
+/**
+ * Whether the draft's edited fields differ from the existing resolved model.
+ * A cleared field (absent from the draft) reads as a change when the existing
+ * profile carries a value, so an explicit clear lands as a null in the update.
+ * @param draft - the drafted row.
+ * @param before - the provider's current resolved model.
+ */
+export function draftChanged(draft: ModelDraft, before: BeforeModel): boolean {
+  const name = textField(draft, "name");
+  const beforeName = before.displayName && before.displayName !== before.modelName
+    ? before.displayName
+    : undefined;
+  if (name !== beforeName) return true;
+  const contextWindow = numberField(draft, "contextWindow");
+  if (contextWindow !== before.contextWindow) return true;
+  const maxTokens = numberField(draft, "maxTokens");
+  if (maxTokens !== before.maxOutputTokens) return true;
+  return false;
 }
 
 /**
  * Plan the reconciliation between the existing models of a provider and the
- * drafted list the editor holds. Because the model-profiles API only creates
- * and deletes, a changed existing model is recreated (delete + create), and an
- * existing default is re-promoted after recreation.
+ * drafted list the editor holds. Models present in both are updated in place
+ * (the API now has an update endpoint); new ids are created and dropped ids
+ * are deleted.
  * @param providerId - provider key.
  * @param before - the provider's current model profiles.
  * @param after - the drafted rows (from {@link ModelDraft}).
- * @param fallbackContextWindow - capacity used when a drafted row omits it and
- * no existing profile supplies one.
+ * @param fallbackContextWindow - capacity used when a created row omits it.
  * @param fallbackMaxTokens - same, for the output cap.
  */
 export function planModelSync(
@@ -50,40 +85,34 @@ export function planModelSync(
   fallbackContextWindow = 131072,
   fallbackMaxTokens = 16384,
 ): ModelSyncPlan {
-  const plan: ModelSyncPlan = { toCreate: [], toDelete: [], toRecreate: [] };
+  const plan: ModelSyncPlan = { toCreate: [], toDelete: [], toUpdate: [] };
   const beforeByKey = new Map(before.map(model => [model.modelName, model]));
   const afterIds = new Set<string>();
   for (const draft of after) {
-    const id = typeof draft.id === "string" ? draft.id.trim() : "";
-    if (id.length === 0) continue;
+    const id = textField(draft, "id");
+    if (id === undefined) continue;
     afterIds.add(id);
     const existing = beforeByKey.get(id);
-    const contextWindow = typeof draft.contextWindow === "number"
-      ? draft.contextWindow
-      : existing?.contextWindow ?? fallbackContextWindow;
-    const maxTokens = typeof draft.maxTokens === "number"
-      ? draft.maxTokens
-      : existing?.maxOutputTokens ?? fallbackMaxTokens;
-    const displayName = typeof draft.name === "string" && draft.name.trim().length > 0
-      ? draft.name.trim()
-      : undefined;
-    const input: ModelCreateInput = {
-      providerId,
-      modelName: id,
-      ...(displayName === undefined ? {} : { displayName }),
-      contextWindow,
-      maxOutputTokens: maxTokens,
-      supportsToolUse: true,
-    };
     if (existing === undefined) {
-      plan.toCreate.push(input);
+      plan.toCreate.push({
+        providerId,
+        modelName: id,
+        ...(textField(draft, "name") === undefined ? {} : { displayName: textField(draft, "name") }),
+        contextWindow: numberField(draft, "contextWindow") ?? fallbackContextWindow,
+        maxOutputTokens: numberField(draft, "maxTokens") ?? fallbackMaxTokens,
+        supportsToolUse: true,
+      });
       continue;
     }
-    const changed = displayName !== undefined && displayName !== existing.displayName
-      || contextWindow !== existing.contextWindow
-      || maxTokens !== existing.maxOutputTokens;
-    if (changed) {
-      plan.toRecreate.push({ deleteId: existing.id, input, wasDefault: existing.isDefault === true });
+    if (draftChanged(draft, existing)) {
+      plan.toUpdate.push({
+        id: existing.id,
+        input: {
+          displayName: textField(draft, "name") ?? null,
+          contextWindow: numberField(draft, "contextWindow") ?? null,
+          maxOutputTokens: numberField(draft, "maxTokens") ?? null,
+        },
+      });
     }
   }
   for (const model of before) {

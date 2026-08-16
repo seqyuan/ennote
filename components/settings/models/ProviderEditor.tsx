@@ -26,17 +26,13 @@ function toDrafts(models: readonly ModelProfile[]): ModelDraft[] {
   }));
 }
 
-/** Apply a model-sync plan through the wire, re-promoting recreated defaults. */
+/** Apply a model-sync plan through the wire. */
 async function applySync(plan: ReturnType<typeof planModelSync>): Promise<void> {
   for (const id of plan.toDelete) {
     await apiFetch(`/v1/model-profiles/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
-  for (const { deleteId, input, wasDefault } of plan.toRecreate) {
-    await apiFetch(`/v1/model-profiles/${encodeURIComponent(deleteId)}`, { method: "DELETE" });
-    const created = await apiFetch<{ id: string }>("/v1/model-profiles", { method: "POST", body: JSON.stringify(input) });
-    if (wasDefault && created?.id) {
-      await apiFetch(`/v1/model-profiles/${encodeURIComponent(created.id)}/default`, { method: "PUT" });
-    }
+  for (const { id, input } of plan.toUpdate) {
+    await apiFetch(`/v1/model-profiles/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(input) });
   }
   for (const input of plan.toCreate) {
     await apiFetch("/v1/model-profiles", { method: "POST", body: JSON.stringify(input) });
@@ -76,7 +72,6 @@ export function ProviderEditor({ provider, models, onClose, refresh, setError, o
     displayName: model.displayName,
     contextWindow: model.contextWindow,
     maxOutputTokens: model.maxOutputTokens,
-    isDefault: model.isDefault,
   }));
 
   async function apply(): Promise<void> {

@@ -622,7 +622,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
+        put: operations["updateModelProfile"];
         post?: never;
         delete: operations["deleteModelProfile"];
         options?: never;
@@ -4739,6 +4739,40 @@ export interface operations {
                 };
             };
             400: components["responses"]["Error"];
+        };
+    };
+    updateModelProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                modelID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    displayName?: string | null;
+                    contextWindow?: number | null;
+                    maxOutputTokens?: number | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Model profile updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ModelProfile"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     deleteModelProfile: {

@@ -874,6 +874,31 @@ paths:
         in: path
         required: true
         schema: { type: string }
+    put:
+      operationId: updateModelProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                displayName: { type: string, nullable: true }
+                contextWindow: { type: integer, minimum: 1, nullable: true }
+                maxOutputTokens: { type: integer, minimum: 1, nullable: true }
+      responses:
+        "200":
+          description: Model profile updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/ModelProfile" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
     delete:
       operationId: deleteModelProfile
       responses:

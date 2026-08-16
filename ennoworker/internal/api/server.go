@@ -147,6 +147,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("DELETE /v1/provider-profiles/{providerID}", s.deleteProviderProfile)
 	mux.HandleFunc("GET /v1/model-profiles", s.listModelProfiles)
 	mux.HandleFunc("POST /v1/model-profiles", s.createModelProfile)
+	mux.HandleFunc("PUT /v1/model-profiles/{modelID}", s.updateModelProfile)
 	mux.HandleFunc("PUT /v1/model-profiles/{modelID}/default", s.setDefaultModelProfile)
 	mux.HandleFunc("DELETE /v1/model-profiles/{modelID}", s.deleteModelProfile)
 	mux.HandleFunc("GET /v1/policy-profiles", s.listPolicyProfiles)
@@ -407,6 +408,25 @@ func (s *Server) deleteModelProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) updateModelProfile(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		DisplayName   *string `json:"displayName"`
+		ContextWindow *int    `json:"contextWindow"`
+		MaxTokens     *int    `json:"maxOutputTokens"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	profile, err := s.Models.Update(r.Context(), r.PathValue("modelID"), store.UpdateModelInput{
+		DisplayName: input.DisplayName, ContextWindow: input.ContextWindow, MaxTokens: input.MaxTokens,
+	})
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_model_profile", err.Error(), false)
+		return
+	}
+	writeData(w, http.StatusOK, profile)
 }
 
 func (s *Server) listModelProfiles(w http.ResponseWriter, r *http.Request) {
