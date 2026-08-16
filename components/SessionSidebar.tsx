@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import type { Session } from "@/components/settings/types";
 import type { SidebarProjectGroup } from "@/hooks/useSidebarProjectGroups";
 import { useProjectSelector } from "@/hooks/useProjectSelector";
+import { useT } from "@/components/LocaleProvider";
 import { SidebarLogoRow } from "./SidebarLogoRow";
 import { NewSessionButton } from "./NewSessionButton";
 import { NavLink } from "./NavLink";
@@ -55,6 +56,7 @@ export function SessionSidebar({
   railMode, onToggleSidebar,
 }: SessionSidebarProps) {
   const projectSelector = useProjectSelector();
+  const t = useT();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const pendingSearchFocus = useRef(false);
 
@@ -67,7 +69,7 @@ export function SessionSidebar({
   }, [railMode]);
 
   return (
-    <aside className={`sidebar ${railMode ? "sidebar-rail" : ""}`} aria-label="Projects and sessions">
+    <aside className={`sidebar ${railMode ? "sidebar-rail" : ""}`} aria-label={t("sidebar.aria")}>
       <SidebarLogoRow
         collapsed={railMode}
         onToggleSidebar={onToggleSidebar}
@@ -78,13 +80,13 @@ export function SessionSidebar({
 
       {/* Roles / Graphs below New Session (dsh nav-item style) */}
       <nav style={{ flexShrink: 0, padding: "0 0 8px", display: "flex", flexDirection: "column", gap: 2 }} aria-label="Workspace">
-        <NavLink href="/roles" label="Roles" icon={<Bot size={15} />} />
-        <NavLink href="/graphs" label="Graphs" icon={<Workflow size={15} />} />
+        <NavLink href="/roles" label={t("sidebar.roles")} icon={<Bot size={15} />} />
+        <NavLink href="/graphs" label={t("sidebar.graphs")} icon={<Workflow size={15} />} />
       </nav>
 
       {/* Rail search: expand then focus the inline header search. */}
       {railMode && (
-        <button type="button" className="sidebar-rail-icon" aria-label="Search sessions" onClick={() => { pendingSearchFocus.current = true; onToggleSidebar(); }}>
+        <button type="button" className="sidebar-rail-icon" aria-label={t("sidebar.searchSessions")} onClick={() => { pendingSearchFocus.current = true; onToggleSidebar(); }}>
           <Search size={18} aria-hidden="true" />
         </button>
       )}
@@ -106,31 +108,31 @@ export function SessionSidebar({
       {!railMode && selectedProject && (
         <section className="sidebar-section sidebar-sessions" aria-labelledby="sessions-heading" style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" }}>
           <div className="sidebar-sessions-head">
-            <span id="sessions-heading" className="sessions-label">Sessions</span>
+            <span id="sessions-heading" className="sessions-label">{t("sidebar.sessions")}</span>
             <div className="sessions-search">
               <Search size={13} aria-hidden="true" />
               <input
                 ref={searchInputRef}
                 type="search"
                 value={query}
-                placeholder="Search"
-                aria-label="Search sessions"
+                placeholder={t("sidebar.search")}
+                aria-label={t("sidebar.searchSessions")}
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => { if (event.key === "Escape") { setQuery(""); event.currentTarget.blur(); } }}
               />
               {query && (
-                <button type="button" aria-label="Clear search" onClick={() => setQuery("")}>
+                <button type="button" aria-label={t("sidebar.clearSearch")} onClick={() => setQuery("")}>
                   <X size={13} aria-hidden="true" />
                 </button>
               )}
             </div>
-            <button type="button" onClick={refreshGroups} title="Refresh sessions" aria-label="Refresh sessions" className="sidebar-icon-btn">
+            <button type="button" onClick={refreshGroups} title={t("sidebar.refresh")} aria-label={t("sidebar.refresh")} className="sidebar-icon-btn">
               <RefreshCw size={12} aria-hidden="true" />
             </button>
           </div>
           <div style={{ flex: "1 1 auto", overflowY: "auto", minHeight: 0, padding: "0 6px 8px" }}>
             {groups.length === 0 ? (
-              <div className="sidebar-empty">Loading sessions…</div>
+              <div className="sidebar-empty">{t("sidebar.loadingSessions")}</div>
             ) : (
               groups.map((group) => (
                 <ProjectGroup
@@ -160,10 +162,10 @@ export function SessionSidebar({
       {!railMode && !selectedProject && (
         <div style={{ flex: "1 1 auto", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
           <div style={{ textAlign: "center", color: "var(--text-dim)", fontSize: 12 }}>
-            <div>Choose a project to start.</div>
+            <div>{t("sidebar.chooseProject")}</div>
             <button onClick={createProject} style={{ marginTop: 12, padding: "6px 14px", border: "1px solid var(--accent)", borderRadius: 6, background: "transparent", color: "var(--accent)", cursor: "pointer", fontSize: 12 }}>
               <Plus size={12} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
-              New Project
+              {t("sidebar.newProject")}
             </button>
           </div>
         </div>
@@ -180,7 +182,7 @@ export function SessionSidebar({
           aria-expanded={settingsOpen}
         >
           <Settings2 size={15} aria-hidden="true" />
-          {!railMode && <span>Settings</span>}
+          {!railMode && <span>{t("sidebar.settings")}</span>}
         </button>
       </div>
     </aside>

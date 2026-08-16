@@ -1,6 +1,7 @@
 "use client";
 
 import { Plus } from "lucide-react";
+import { useT } from "@/components/LocaleProvider";
 
 export function NewSessionButton(props: {
   disabled: boolean;
@@ -8,17 +9,18 @@ export function NewSessionButton(props: {
   onClick: () => void;
 }) {
   const { disabled, collapsed, onClick } = props;
+  const t = useT();
   return (
     <button
       type="button"
       className="sidebar-new-session"
       disabled={disabled}
       onClick={onClick}
-      aria-label="New chat"
-      title={disabled ? "Select a project first" : "New chat"}
+      aria-label={t("sidebar.newChatAria")}
+      title={disabled ? t("sidebar.selectProjectFirst") : t("sidebar.newChatAria")}
     >
       <Plus size={14} aria-hidden="true" />
-      {!collapsed && <span>New Chat</span>}
+      {!collapsed && <span>{t("sidebar.newChat")}</span>}
     </button>
   );
 }

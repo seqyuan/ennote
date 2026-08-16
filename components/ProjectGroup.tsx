@@ -2,6 +2,7 @@
 
 import { Archive, ChevronRight, Star } from "lucide-react";
 import { useState } from "react";
+import { useT } from "@/components/LocaleProvider";
 import type { Session } from "@/components/settings/types";
 import type { SidebarProjectGroup } from "@/hooks/useSidebarProjectGroups";
 import { buildSessionTree, renderSessionTree } from "./SessionTree";
@@ -28,6 +29,7 @@ export function ProjectGroup({
   runningSessionIds?: Set<string>;
 }) {
   const [archivedOpen, setArchivedOpen] = useState(false);
+  const t = useT();
   const matching = query
     ? group.sessions.filter((s) => s.title.toLowerCase().includes(query))
     : group.sessions;
@@ -45,10 +47,10 @@ export function ProjectGroup({
         <div>
           {group.error && <div className="sidebar-empty" style={{ color: "var(--danger)" }}>{group.error}</div>}
           {group.loading && matching.length === 0 ? (
-            <div className="sidebar-empty">Loading…</div>
+            <div className="sidebar-empty">{t("sidebar.loading")}</div>
           ) : matching.length === 0 ? (
             <div className="sidebar-empty" role="status">
-              {query ? `No sessions match "${query}"` : "No sessions yet."}
+              {query ? `${t("sidebar.noSessionsMatch")} "${query}"` : t("sidebar.noSessions")}
             </div>
           ) : (
             <ul className="session-list" aria-label={`Sessions in ${group.projectName}`} style={{ padding: "0 0 2px" }}>
@@ -61,7 +63,7 @@ export function ProjectGroup({
             if (next) onOpenArchived();
           }}>
             <Archive size={12} aria-hidden="true" />
-            {archivedOpen ? "Hide archived sessions" : "Show archived sessions"}
+            {archivedOpen ? t("sidebar.hideArchived") : t("sidebar.showArchived")}
           </button>
           {archivedOpen && archived.length > 0 && (
             <ul className="session-list" aria-label={`Archived sessions in ${group.projectName}`} style={{ padding: "0 0 6px" }}>
@@ -69,7 +71,7 @@ export function ProjectGroup({
             </ul>
           )}
           {archivedOpen && archived.length === 0 && (
-            <div className="sidebar-empty">No archived sessions.</div>
+            <div className="sidebar-empty">{t("sidebar.noArchived")}</div>
           )}
         </div>
       )}
@@ -87,6 +89,7 @@ function ProjectGroupHeader({
   onToggleCollapsed: () => void;
   onTogglePin: () => void;
 }) {
+  const t = useT();
   const count = group.sessions.length;
   return (
     <div
@@ -109,11 +112,11 @@ function ProjectGroupHeader({
       <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: isCurrent ? 650 : 550 }}>
         {group.projectName}
       </span>
-      {count > 0 && <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>{count} {count === 1 ? "chat" : "chats"}</span>}
+      {count > 0 && <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>{count} {count === 1 ? t("sidebar.chat") : t("sidebar.chats")}</span>}
       <button
         type="button"
-        title={`${isPinned ? "Unpin" : "Pin"} project ${group.projectName}`}
-        aria-label={isPinned ? "Unpin project" : "Pin project"}
+        title={`${isPinned ? t("sidebar.unpin") : t("sidebar.pin")} ${group.projectName}`}
+        aria-label={isPinned ? t("sidebar.unpin") : t("sidebar.pin")}
         onClick={(e) => { e.stopPropagation(); onTogglePin(); }}
         style={{ display: "grid", placeItems: "center", width: 22, height: 22, padding: 0, border: "none", borderRadius: 5, background: "transparent", cursor: "pointer", flexShrink: 0, color: isPinned ? "#ca8a04" : "var(--text-dim)", opacity: isPinned ? 1 : 0.45 }}
       >

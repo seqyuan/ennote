@@ -1,6 +1,7 @@
 "use client";
 
 import { Plus, Star } from "lucide-react";
+import { useT } from "@/components/LocaleProvider";
 import type { useProjectSelector } from "@/hooks/useProjectSelector";
 
 interface SidebarProject { id: string; name: string }
@@ -16,6 +17,7 @@ export function ProjectSelector(props: {
 }) {
   const { projects, selectedProject, pinnedProjectIds, togglePinProject, onSelect, onCreate, control } = props;
   const { open: projectDropdownOpen, toggle, close, rootRef: controlRootRef } = control;
+  const t = useT();
 
   return (
     <div ref={controlRootRef} style={{ position: "relative", marginTop: 8, padding: "0 10px", display: "flex", alignItems: "stretch", gap: 4 }}>
@@ -31,7 +33,7 @@ export function ProjectSelector(props: {
           borderRadius: 7, cursor: "pointer",
           fontSize: 12, color: "var(--text)", textAlign: "left" as const,
         }}
-        title={selectedProject ? projects.find((p) => p.id === selectedProject)?.name ?? "Select project" : "Select project"}
+        title={selectedProject ? projects.find((p) => p.id === selectedProject)?.name ?? t("sidebar.selectProject") : t("sidebar.selectProject")}
         aria-haspopup="menu"
         aria-expanded={projectDropdownOpen}
       >
@@ -39,7 +41,7 @@ export function ProjectSelector(props: {
           <path d="M1.5 5A1.5 1.5 0 0 1 3 3.5h3l1.2 1.5H13A1.5 1.5 0 0 1 14.5 6.5L13.6 11A1.5 1.5 0 0 1 12.1 12.5H3A1.5 1.5 0 0 1 1.5 11V5Z" />
         </svg>
         <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "var(--font-mono)", fontSize: 11, color: selectedProject ? "var(--text)" : "var(--text-dim)" }}>
-          {selectedProject ? (projects.find((p) => p.id === selectedProject)?.name ?? "Unknown") : "Select project..."}
+          {selectedProject ? (projects.find((p) => p.id === selectedProject)?.name ?? t("sidebar.unknown")) : t("sidebar.selectProjectEllipsis")}
         </span>
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--text-dim)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, transform: projectDropdownOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
           <polyline points="2 3.5 5 6.5 8 3.5" />
@@ -57,7 +59,7 @@ export function ProjectSelector(props: {
           }}
         >
           {projects.length === 0 && (
-            <div style={{ padding: "10px 12px", color: "var(--text-dim)", fontSize: 11 }}>No projects yet</div>
+            <div style={{ padding: "10px 12px", color: "var(--text-dim)", fontSize: 11 }}>{t("sidebar.noProjects")}</div>
           )}
           {projects.map((project) => (
             <div key={project.id} style={{ display: "flex", alignItems: "center" }}>
@@ -85,8 +87,8 @@ export function ProjectSelector(props: {
               </button>
               <button
                 type="button"
-                title={`${pinnedProjectIds.includes(project.id) ? "Unpin" : "Pin"} project ${project.name}`}
-                aria-label={pinnedProjectIds.includes(project.id) ? "Unpin project" : "Pin project"}
+                title={`${pinnedProjectIds.includes(project.id) ? t("sidebar.unpin") : t("sidebar.pin")} ${project.name}`}
+                aria-label={pinnedProjectIds.includes(project.id) ? t("sidebar.unpin") : t("sidebar.pin")}
                 onClick={() => togglePinProject(project.id)}
                 style={{ display: "grid", placeItems: "center", width: 26, height: 30, marginRight: 2, padding: 0, border: "none", borderRadius: 5, background: "transparent", cursor: "pointer", flexShrink: 0, color: pinnedProjectIds.includes(project.id) ? "#ca8a04" : "var(--text-dim)" }}
               >
@@ -109,7 +111,7 @@ export function ProjectSelector(props: {
             }}
           >
             <Plus size={12} />
-            Add project...
+            {t("sidebar.addProject")}
           </button>
         </div>
       )}

@@ -1,6 +1,7 @@
 "use client";
 
 import { X } from "lucide-react";
+import { useT } from "@/components/LocaleProvider";
 
 export function SidebarLogoRow(props: {
   collapsed: boolean;
@@ -8,6 +9,7 @@ export function SidebarLogoRow(props: {
   onCloseNavigation: () => void;
 }) {
   const { collapsed, onToggleSidebar, onCloseNavigation } = props;
+  const t = useT();
   return (
     <div className="sidebar-logo-row">
       <div className="sidebar-brand">
@@ -21,8 +23,8 @@ export function SidebarLogoRow(props: {
         type="button"
         className="sidebar-collapse-toggle"
         onClick={onToggleSidebar}
-        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        aria-label={collapsed ? "Open navigation" : "Collapse navigation"}
+        title={collapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+        aria-label={collapsed ? t("sidebar.openNav") : t("sidebar.collapseNav")}
         aria-expanded={!collapsed}
         aria-controls="workspace-navigation"
       >
@@ -36,7 +38,7 @@ export function SidebarLogoRow(props: {
         type="button"
         className="sidebar-close-nav navigation-close"
         onClick={onCloseNavigation}
-        aria-label="Close navigation"
+        aria-label={t("sidebar.closeNav")}
       >
         <X size={15} />
       </button>

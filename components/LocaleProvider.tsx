@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { applyLocaleAttribute, readLocale, writeLocale, type Locale } from "@/lib/locale";
+import { translate } from "@/lib/messages";
 
 interface LocaleContextValue {
   locale: Locale;
@@ -30,4 +31,10 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
 
 export function useLocale(): LocaleContextValue {
   return useContext(LocaleContext);
+}
+
+/** Convenience translator bound to the active locale. */
+export function useT(): (key: string) => string {
+  const { locale } = useLocale();
+  return (key: string) => translate(locale, key);
 }
