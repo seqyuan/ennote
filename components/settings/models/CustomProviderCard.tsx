@@ -29,11 +29,12 @@ const inputStyle: React.CSSProperties = {
  * route id is being chosen here and the settings address does not exist until
  * the create lands.
  */
-export function CustomProviderCard({ taken, onClose, refresh, setError }: {
+export function CustomProviderCard({ taken, onClose, refresh, setError, onSaved }: {
   taken: readonly string[];
   onClose: (changed: boolean) => void;
   refresh: () => Promise<void>;
   setError: (value: string | null) => void;
+  onSaved?: (name: string) => void;
 }) {
   const t = useT();
   const [route, setRoute] = useState("");
@@ -88,6 +89,7 @@ export function CustomProviderCard({ taken, onClose, refresh, setError }: {
         }) });
       }
       setError(null);
+      onSaved?.(displayName.trim() || route);
       await refresh();
       onClose(true);
     } catch (reason) {

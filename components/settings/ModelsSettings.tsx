@@ -2,6 +2,7 @@
 
 import { ChevronRight, Download, Trash2, WandSparkles } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useT } from "@/components/LocaleProvider";
 import { SecretTextInput } from "@/components/settings/SecretTextInput";
 import { CredentialDot } from "@/components/settings/models/CredentialDot";
 import { CustomProviderCard } from "@/components/settings/models/CustomProviderCard";
@@ -17,12 +18,19 @@ export function ModelsSettings({ providers, models, refresh, setError }: {
   refresh: () => Promise<void>;
   setError: (value: string | null) => void;
 }) {
+  const t = useT();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [customOpen, setCustomOpen] = useState(false);
+  const [savedName, setSavedName] = useState<string | null>(null);
 
   return <section className="settings-tab-section" aria-labelledby="settings-models-heading">
     <header><h2 id="settings-models-heading">Models</h2>
       <p>Providers own their model catalog. Add a connection, then import models from its API or add them by hand.</p></header>
+    {savedName && (
+      <p role="status" aria-live="polite" style={{ margin: 0, fontSize: 12, lineHeight: "18px", color: "var(--stg-text-tertiary)" }}>
+        {t("settings.models.savedProvider").replace("{provider}", savedName)}
+      </p>
+    )}
     <AddProviderForm refresh={refresh} setError={setError} />
     {!customOpen ? (
       <button type="button" className="secondary-btn" style={{ marginBottom: 12 }} onClick={() => setCustomOpen(true)}>
@@ -30,7 +38,7 @@ export function ModelsSettings({ providers, models, refresh, setError }: {
       </button>
     ) : (
       <CustomProviderCard taken={providers.map(provider => provider.id)}
-        onClose={() => setCustomOpen(false)} refresh={refresh} setError={setError} />
+        onClose={() => setCustomOpen(false)} refresh={refresh} setError={setError} onSaved={setSavedName} />
     )}
     <div className="settings-list">
       {providers.map(provider => (
@@ -38,7 +46,7 @@ export function ModelsSettings({ providers, models, refresh, setError }: {
           models={models.filter(model => model.providerId === provider.id)}
           collapsed={Boolean(collapsed[provider.id])}
           onToggleCollapsed={() => setCollapsed(cur => ({ ...cur, [provider.id]: !cur[provider.id] }))}
-          refresh={refresh} setError={setError} />
+          refresh={refresh} setError={setError} onSaved={setSavedName} />
       ))}
       {providers.length === 0 && (
         <div className="settings-empty">No providers yet — add one above to start wiring models.</div>
@@ -77,13 +85,14 @@ function AddProviderForm({ refresh, setError }: {
   </form>;
 }
 
-function ProviderCard({ provider, models, collapsed, onToggleCollapsed, refresh, setError }: {
+function ProviderCard({ provider, models, collapsed, onToggleCollapsed, refresh, setError, onSaved }: {
   provider: ProviderProfile;
   models: ModelProfile[];
   collapsed: boolean;
   onToggleCollapsed: () => void;
   refresh: () => Promise<void>;
   setError: (value: string | null) => void;
+  onSaved: (name: string) => void;
 }) {
   const [diagnostic, setDiagnostic] = useState<ProviderDiagnostic | null>(null);
   const [checking, setChecking] = useState(false);
@@ -172,7 +181,7 @@ function ProviderCard({ provider, models, collapsed, onToggleCollapsed, refresh,
       </div>
     )}
     {editing && (
-      <ProviderEditor provider={provider} models={models} onClose={() => setEditing(false)} refresh={refresh} setError={setError} />
+      <ProviderEditor provider={provider} models={models} onClose={(changed) => { setEditing(false); if (changed) onSaved(provider.name); }} refresh={refresh} setError={setError} />
     )}
     {!collapsed && (
       <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 8 }}>

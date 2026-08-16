@@ -51,12 +51,13 @@ async function applySync(plan: ReturnType<typeof planModelSync>): Promise<void> 
  * fields through PUT and reconciles the model list through the model-profiles
  * endpoints.
  */
-export function ProviderEditor({ provider, models, onClose, refresh, setError }: {
+export function ProviderEditor({ provider, models, onClose, refresh, setError, onSaved }: {
   provider: ProviderProfile;
   models: readonly ModelProfile[];
   onClose: (changed: boolean) => void;
   refresh: () => Promise<void>;
   setError: (value: string | null) => void;
+  onSaved?: (name: string) => void;
 }) {
   const t = useT();
   const [keyDraft, setKeyDraft] = useState("");
@@ -94,6 +95,7 @@ export function ProviderEditor({ provider, models, onClose, refresh, setError }:
       const plan = planModelSync(provider.id, before, drafts);
       await applySync(plan);
       setError(null);
+      onSaved?.(displayName.trim() || provider.id);
       await refresh();
       onClose(true);
     } catch (reason) {
