@@ -32,23 +32,83 @@ const (
 )
 
 type CompactionPolicyConfig struct {
-	Mode                     CompactionMode `json:"mode"`
-	TriggerRatio             float64        `json:"triggerRatio"`
-	KeepRecentTurns          int            `json:"keepRecentTurns"`
-	TailTokenRatio           float64        `json:"tailTokenRatio"`
-	TailMinTokens            int            `json:"tailMinTokens"`
-	TailMaxTokens            int            `json:"tailMaxTokens"`
-	SummaryInputRatio        float64        `json:"summaryInputRatio"`
-	CompactionModelProfileID *string        `json:"compactionModelProfileId"`
-	SummaryMaxOutputTokens   int            `json:"summaryMaxOutputTokens"`
-	IncludeReasoning         bool           `json:"includeReasoning"`
-	AllowHistoryLookup       bool           `json:"allowHistoryLookup"`
-	AllowOverflowRecovery    bool           `json:"allowOverflowRecovery"`
-	MaxOverflowRecoveries    int            `json:"maxOverflowRecoveries"`
-	IneffectiveReclaimRatio  float64        `json:"ineffectiveReclaimRatio"`
-	IneffectiveLimit         int            `json:"ineffectiveLimit"`
-	FailureCooldownSeconds   int            `json:"failureCooldownSeconds"`
-	PromptVersion            string         `json:"promptVersion"`
+	Mode                     CompactionMode          `json:"mode"`
+	TriggerRatio             float64                 `json:"triggerRatio"`
+	KeepRecentTurns          int                     `json:"keepRecentTurns"`
+	TailTokenRatio           float64                 `json:"tailTokenRatio"`
+	TailMinTokens            int                     `json:"tailMinTokens"`
+	TailMaxTokens            int                     `json:"tailMaxTokens"`
+	SummaryInputRatio        float64                 `json:"summaryInputRatio"`
+	CompactionModelProfileID *string                 `json:"compactionModelProfileId"`
+	SummaryMaxOutputTokens   int                     `json:"summaryMaxOutputTokens"`
+	ModelPolicies            []CompactionModelPolicy `json:"modelPolicies,omitempty"`
+	IncludeReasoning         bool                    `json:"includeReasoning"`
+	AllowHistoryLookup       bool                    `json:"allowHistoryLookup"`
+	AllowOverflowRecovery    bool                    `json:"allowOverflowRecovery"`
+	MaxOverflowRecoveries    int                     `json:"maxOverflowRecoveries"`
+	IneffectiveReclaimRatio  float64                 `json:"ineffectiveReclaimRatio"`
+	IneffectiveLimit         int                     `json:"ineffectiveLimit"`
+	FailureCooldownSeconds   int                     `json:"failureCooldownSeconds"`
+	PromptVersion            string                  `json:"promptVersion"`
+}
+
+// CompactionModelPolicy overrides the compaction budget knobs for one routed
+// model. A policy matches by ModelProfileID (and optionally ProviderProfileID);
+// only the non-nil fields override the top-level defaults.
+type CompactionModelPolicy struct {
+	ProviderProfileID      string   `json:"providerProfileId,omitempty"`
+	ModelProfileID         string   `json:"modelProfileId"`
+	TriggerRatio           *float64 `json:"triggerRatio,omitempty"`
+	TailTokenRatio         *float64 `json:"tailTokenRatio,omitempty"`
+	TailMinTokens          *int     `json:"tailMinTokens,omitempty"`
+	TailMaxTokens          *int     `json:"tailMaxTokens,omitempty"`
+	SummaryInputRatio      *float64 `json:"summaryInputRatio,omitempty"`
+	SummaryMaxOutputTokens *int     `json:"summaryMaxOutputTokens,omitempty"`
+}
+
+// ResolveFor returns the effective compaction config for the routed main model,
+// merging the first matching per-model policy over the top-level defaults.
+func (c CompactionPolicyConfig) ResolveFor(runtime ModelRuntimeSnapshot) CompactionPolicyConfig {
+	out := c
+	out.ModelPolicies = nil
+	for _, policy := range c.ModelPolicies {
+		if !policy.matches(runtime) {
+			continue
+		}
+		if policy.TriggerRatio != nil {
+			out.TriggerRatio = *policy.TriggerRatio
+		}
+		if policy.TailTokenRatio != nil {
+			out.TailTokenRatio = *policy.TailTokenRatio
+		}
+		if policy.TailMinTokens != nil {
+			out.TailMinTokens = *policy.TailMinTokens
+		}
+		if policy.TailMaxTokens != nil {
+			out.TailMaxTokens = *policy.TailMaxTokens
+		}
+		if policy.SummaryInputRatio != nil {
+			out.SummaryInputRatio = *policy.SummaryInputRatio
+		}
+		if policy.SummaryMaxOutputTokens != nil {
+			out.SummaryMaxOutputTokens = *policy.SummaryMaxOutputTokens
+		}
+		break
+	}
+	return out
+}
+
+func (p CompactionModelPolicy) matches(runtime ModelRuntimeSnapshot) bool {
+	if p.ModelProfileID == "" {
+		return false
+	}
+	if p.ModelProfileID != runtime.ModelProfileID {
+		return false
+	}
+	if p.ProviderProfileID != "" && p.ProviderProfileID != runtime.ProviderProfileID {
+		return false
+	}
+	return true
 }
 
 func DefaultCompactionPolicy() CompactionPolicyConfig {

@@ -212,6 +212,40 @@ html.dark .settings-dialog-backdrop {
   padding-top: 8px;
 }
 
+/* ---- Per-model compaction overrides ---- */
+.settings-dialog-shell .compaction-model-policies {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0 0;
+  border-top: 1px solid var(--stg-border-l2);
+}
+.settings-dialog-shell .compaction-model-policies header h4 {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--stg-text-primary);
+}
+.settings-dialog-shell .compaction-model-policies header p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--stg-text-tertiary);
+}
+.settings-dialog-shell .model-policy-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1.5fr) repeat(3, minmax(90px, 1fr)) auto;
+  gap: 6px;
+  align-items: center;
+}
+.settings-dialog-shell .model-policy-row .secondary-btn {
+  min-height: 30px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 15px;
+}
+
 /* ---- General: appearance + permission + language rows ---- */
 .settings-dialog-shell .appearance-group,
 .settings-dialog-shell .permission-group,

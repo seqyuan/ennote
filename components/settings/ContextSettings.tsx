@@ -5,6 +5,13 @@ import { useEffect, useState, useCallback } from "react";
 import type { ModelProfile, PolicyProfile, Session, StandingApproval } from "@/components/settings/types";
 import { apiFetch } from "@/lib/worker-api.client";
 
+interface ModelOverride {
+  modelProfileId: string;
+  triggerRatio?: number;
+  tailMaxTokens?: number;
+  summaryMaxOutputTokens?: number;
+}
+
 export function ContextSettings({ policies, models, session, refresh, setError, onSessionUpdated }: {
   policies: PolicyProfile[];
   models: ModelProfile[];
@@ -77,12 +84,26 @@ function CompactionPolicyEditor({ policies, models, onCreate, onDefault }: {
   onCreate: (name: string, config: Record<string, unknown>) => Promise<void>;
   onDefault: (policyId: string) => Promise<void>;
 }) {
+  const [modelPolicies, setModelPolicies] = useState<ModelOverride[]>([]);
+  const addOverride = () => setModelPolicies((current) => [...current, { modelProfileId: "" }]);
+  const removeOverride = (index: number) => setModelPolicies((current) => current.filter((_, i) => i !== index));
+  const updateOverride = (index: number, patch: Partial<ModelOverride>) =>
+    setModelPolicies((current) => current.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
     const mode = String(data.get("mode"));
     const overflow = mode === "manual_and_auto" && data.get("allowOverflowRecovery") === "on";
+    const modelPolicyPayload = modelPolicies
+      .filter((row) => row.modelProfileId)
+      .map((row) => ({
+        modelProfileId: row.modelProfileId,
+        ...(row.triggerRatio !== undefined ? { triggerRatio: row.triggerRatio } : {}),
+        ...(row.tailMaxTokens !== undefined ? { tailMaxTokens: row.tailMaxTokens } : {}),
+        ...(row.summaryMaxOutputTokens !== undefined ? { summaryMaxOutputTokens: row.summaryMaxOutputTokens } : {}),
+      }));
     await onCreate(String(data.get("name")), {
       mode,
       triggerRatio: Number(data.get("triggerRatio")),
@@ -93,6 +114,7 @@ function CompactionPolicyEditor({ policies, models, onCreate, onDefault }: {
       summaryInputRatio: Number(data.get("summaryInputRatio")),
       compactionModelProfileId: data.get("compactionModelProfileId") || null,
       summaryMaxOutputTokens: Number(data.get("summaryMaxOutputTokens")),
+      ...(modelPolicyPayload.length > 0 ? { modelPolicies: modelPolicyPayload } : {}),
       includeReasoning: data.get("includeReasoning") === "on",
       allowHistoryLookup: data.get("allowHistoryLookup") === "on",
       allowOverflowRecovery: overflow,
@@ -103,6 +125,7 @@ function CompactionPolicyEditor({ policies, models, onCreate, onDefault }: {
       promptVersion: "v1",
     });
     form.reset();
+    setModelPolicies([]);
   }
 
   return <section className="settings-subsection">
@@ -127,6 +150,25 @@ function CompactionPolicyEditor({ policies, models, onCreate, onDefault }: {
         <label><input name="allowHistoryLookup" type="checkbox" defaultChecked /> History lookup</label>
         <label><input name="allowOverflowRecovery" type="checkbox" defaultChecked /> Overflow recovery</label>
         <label><input name="includeReasoning" type="checkbox" /> Include reasoning</label>
+      </div>
+      <div className="settings-subsection compaction-model-policies">
+        <header><h4>Per-model overrides</h4><p>Optional budget overrides for a specific model.</p></header>
+        {modelPolicies.map((row, index) => (
+          <div key={index} className="model-policy-row">
+            <select value={row.modelProfileId} onChange={(event) => updateOverride(index, { modelProfileId: event.target.value })} aria-label={`Override model ${index + 1}`}>
+              <option value="">Select model…</option>
+              {models.map((model) => <option key={model.id} value={model.id}>{model.displayName || model.modelName}</option>)}
+            </select>
+            <input type="number" step="0.01" min="0.01" max="0.99" placeholder="Trigger ratio" value={row.triggerRatio ?? ""}
+              onChange={(event) => updateOverride(index, { triggerRatio: event.target.value === "" ? undefined : Number(event.target.value) })} />
+            <input type="number" step="1" min="1" placeholder="Tail max tokens" value={row.tailMaxTokens ?? ""}
+              onChange={(event) => updateOverride(index, { tailMaxTokens: event.target.value === "" ? undefined : Number(event.target.value) })} />
+            <input type="number" step="1" min="1" placeholder="Summary output" value={row.summaryMaxOutputTokens ?? ""}
+              onChange={(event) => updateOverride(index, { summaryMaxOutputTokens: event.target.value === "" ? undefined : Number(event.target.value) })} />
+            <button type="button" className="secondary-btn" onClick={() => removeOverride(index)} aria-label={`Remove override ${index + 1}`}>✕</button>
+          </div>
+        ))}
+        <button type="button" className="secondary-btn" onClick={addOverride}>+ Add override</button>
       </div>
       <button type="submit">Create version</button>
     </form>

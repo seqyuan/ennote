@@ -42,6 +42,9 @@ func BuildRunCompactionPlan(messages, generated []domain.ChatMessage, previous M
 	}
 
 	mainUsable := MainUsableTokens(mainRuntime)
+	// Per-model overrides: resolve the effective budget knobs for the routed
+	// main model before any trigger/tail/retention math.
+	config = config.ResolveFor(mainRuntime)
 	compactionUsable := CompactionUsableTokens(summaryRuntime, config)
 	triggerLimit := TriggerLimit(mainRuntime, summaryRuntime, config)
 	if mainUsable <= 0 || compactionUsable <= 0 || triggerLimit <= 0 {
