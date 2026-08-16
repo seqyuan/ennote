@@ -20,6 +20,7 @@ import type { usePromptTemplates } from "@/hooks/usePromptTemplates";
 import type { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
 import { useRoleSelection } from "./useRoleSelection";
 import { useAttachments } from "./useAttachments";
+import { usePromptExpansion } from "./usePromptExpansion";
 import type { ChatActions, ComposerView } from "./chat-controller-types";
 
 type TurnSubmission = components["schemas"]["TurnSubmission"];
@@ -99,25 +100,15 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
   const { roles, selectedRoleId, setSelectedRoleId } = useRoleSelection(selectedProject);
   const selectedSessionRef = useRef<string | null>(selectedSession);
 
-  // Prompt template expansion state.
-  const [draftVersion, setDraftVersion] = useState(0);
-  const [expandedVersion, setExpandedVersion] = useState<number | null>(null);
-  const [expanding, setExpanding] = useState(false);
-  const [expandDiag, setExpandDiag] = useState<string | null>(null);
-  const [promptPanelDismissed, setPromptPanelDismissed] = useState(false);
-  const expandAbortRef = useRef<AbortController | null>(null);
-  const [flowCatalog, setFlowCatalog] = useState<{ name: string; version?: number }[]>([]);
-
-  const setInputVersioned = useCallback((value: string) => {
-    setInput(value);
-    setDraftVersion((v) => v + 1);
-    setExpandedVersion(null);
-    // Keep an explicit dismissal while editing one slash token, then re-arm
-    // once the input is no longer eligible for the command panel.
-    if (!value.startsWith("/") || /\s/.test(value.slice(1))) {
-      setPromptPanelDismissed(false);
-    }
-  }, []);
+  // Command expansion + panel (usePromptExpansion). Local aliases preserve every
+  // existing reference below.
+  const {
+    setInputVersioned, expandDraftOrFallback, expandedVersion, draftVersion,
+    flowCatalog, commandPanelOpen, promptPanelDismissed, setPromptPanelDismissed,
+    expanding, expandDiag, setExpandDiag,
+  } = usePromptExpansion({
+    selectedProject, selectedSession, input, promptCatalog, roles, setInput, setError: agent.setError,
+  });
 
   useEffect(() => {
     selectedSessionRef.current = selectedSession;
@@ -131,45 +122,9 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
   useLayoutEffect(() => {
     // Deliberate declarative reset (§4.1.2): mirrors the synchronous clearing
     // selectSession used to do; cascading-state rule bypassed intentionally.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setInputVersioned("");
     clearAttachments();
   }, [selectedSession, setInputVersioned, clearAttachments]);
-
-  // Graph catalog for @graph addressing; refreshed on mount and whenever the
-  // command panel transitions closed -> open.
-  const refreshFlowCatalog = useCallback(async () => {
-    try {
-      const graphs = await apiFetch<Array<{ id: string; latestVersion?: number }>>("/v1/graphs");
-      setFlowCatalog((graphs ?? [])
-        .filter((graph) => (graph.latestVersion ?? 0) > 0)
-        .map((graph) => ({ name: graph.id, version: graph.latestVersion })));
-    } catch { /* panel is a convenience; failures surface elsewhere */ }
-  }, []);
-
-  useEffect(() => {
-    const t0 = window.setTimeout(() => void refreshFlowCatalog(), 0);
-    return () => window.clearTimeout(t0);
-  }, [refreshFlowCatalog]);
-
-  const commandPanelOpen = Boolean(
-    selectedProject
-    && !input.slice(1).match(/[\s]/)
-    && (
-      (input.startsWith("/") && promptCatalog.templates.length > 0)
-      || (input.startsWith("@role") && roles.length > 0)
-      || (input.startsWith("@graph") && flowCatalog.length > 0)
-      || (input.startsWith("@") && (roles.length > 0 || flowCatalog.length > 0))
-    ),
-  );
-  const wasPanelOpen = useRef(false);
-  useEffect(() => {
-    if (commandPanelOpen && !wasPanelOpen.current) {
-      void promptCatalog.refresh();
-      void refreshFlowCatalog();
-    }
-    wasPanelOpen.current = commandPanelOpen;
-  }, [commandPanelOpen, promptCatalog, refreshFlowCatalog]);
 
   // Derived composer inputs.
   const selectedModelId = selectedSession
@@ -227,31 +182,6 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
   }, [selectedSession, pendingImage, textAttachments, agent, selectedModelId,
     selectedRoleId, roles, setInputVersioned, thinkingEffort, clearAttachments, restoreAttachments]);
 
-  type ExpandResponse = {
-    case: "matched"; name: string; text: string; diagnostics: { level: string; code: string; message: string }[];
-  } | {
-    case: "not_found"; name: string; diagnostics: { level: string; code: string; message: string }[];
-  } | {
-    case: "invalid_invocation"; diagnostics: never[];
-  };
-
-  const handleExpand = useCallback(async (invocation: string, projectId: string): Promise<ExpandResponse | null> => {
-    expandAbortRef.current?.abort();
-    const controller = new AbortController();
-    expandAbortRef.current = controller;
-    try {
-      const data = await apiFetch<ExpandResponse>(
-        `/v1/projects/${encodeURIComponent(projectId)}/prompt-templates/expand`,
-        { method: "POST", body: JSON.stringify({ invocation }), signal: controller.signal },
-      );
-      if (controller.signal.aborted) return null;
-      return data;
-    } catch (err: unknown) {
-      if (controller.signal.aborted) return null;
-      throw err;
-    }
-  }, []);
-
   // Graph invocation is global; the Worker derives Project and workspace from
   // the selected Session when it creates the Run.
   const invokeAgentFlow = useCallback(async (name: string, version?: number, rawParams?: string) => {
@@ -284,54 +214,6 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
   }, [selectedSession, agent, setInputVersioned]);
 
   const policyId = selectedPermissionPolicyID();
-
-  // Shared slash-expansion gate for submit and steer (§4.1.4): entry resets,
-  // expansion request, stale-guard and finally-reset live here in one copy.
-  // Caller-specific behavior (expandDiag on submit, fallback action) is left to
-  // the caller via the structured outcome.
-  type ExpandCtx = { project: string; session: string | null; draftVersion: number };
-  type ExpansionOutcome =
-    | { status: "matched"; text: string; diagnostics: { level: string; code: string; message: string }[] }
-    | { status: "empty" }
-    | { status: "fallthrough" };
-
-  const expandDraftOrFallback = useCallback(async (
-    draft: string,
-    ctx: ExpandCtx,
-    errorLabel: string,
-  ): Promise<ExpansionOutcome | null> => {
-    setExpanding(true);
-    setExpandDiag(null);
-    try {
-      const result = await handleExpand(draft, ctx.project);
-      if (!result) return null; // aborted
-      // Stale-guard: context changed during request.
-      if (ctx.project !== selectedProject || ctx.session !== selectedSession || ctx.draftVersion !== draftVersion) {
-        return null;
-      }
-      switch (result.case) {
-        case "matched": {
-          const text = result.text.trim();
-          if (!text) {
-            agent.setError("Expanded prompt is empty.");
-            return { status: "empty" };
-          }
-          setInput(text);
-          setDraftVersion((v) => v + 1);
-          setExpandedVersion(draftVersion + 1);
-          return { status: "matched", text, diagnostics: result.diagnostics };
-        }
-        case "not_found":
-        case "invalid_invocation":
-          return { status: "fallthrough" };
-      }
-    } catch (err: unknown) {
-      agent.setError(errorMessage(err, errorLabel));
-      return null;
-    } finally {
-      setExpanding(false);
-    }
-  }, [agent, selectedProject, selectedSession, draftVersion, handleExpand, setInput, setDraftVersion, setExpandedVersion, setExpanding, setExpandDiag]);
 
   const submit = useCallback(async () => {
     if (!selectedSession || (!input.trim() && !pendingImage && textAttachments.length === 0) || agent.activeRunID) return;
@@ -377,7 +259,7 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
 
     void sendTurn(input, policyId ?? "");
   }, [selectedSession, input, pendingImage, textAttachments.length, policyId, permissionMode,
-     agent, sendTurn, selectedProject, selectedRoleId, expandedVersion, draftVersion, invokeAgentFlow, expandDraftOrFallback]);
+     agent, sendTurn, selectedProject, selectedRoleId, expandedVersion, draftVersion, invokeAgentFlow, expandDraftOrFallback, setExpandDiag]);
 
   const steer = useCallback(async () => {
     if (!agent.activeRunID || !input.trim()) return;
