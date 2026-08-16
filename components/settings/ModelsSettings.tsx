@@ -3,6 +3,8 @@
 import { ChevronRight, Download, Trash2, WandSparkles } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { SecretTextInput } from "@/components/settings/SecretTextInput";
+import { CredentialDot } from "@/components/settings/models/CredentialDot";
+import { DeleteProviderModal } from "@/components/settings/models/DeleteProviderModal";
 import type { DiscoveredModel, ModelProfile, ProviderDiagnostic, ProviderProfile } from "@/components/settings/types";
 import { apiFetch } from "@/lib/worker-api.client";
 
@@ -76,6 +78,8 @@ function ProviderCard({ provider, models, collapsed, onToggleCollapsed, refresh,
   const [checking, setChecking] = useState(false);
   const [discoverOpen, setDiscoverOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteFailure, setDeleteFailure] = useState<string | undefined>(undefined);
   const requestVersion = useRef(0);
   const controller = useRef<AbortController | null>(null);
 
@@ -105,14 +109,15 @@ function ProviderCard({ provider, models, collapsed, onToggleCollapsed, refresh,
   }, [models, provider.id, setError]);
 
   const deleteProvider = async () => {
-    if (!window.confirm(`Delete provider "${provider.name}" and all its models?`)) return;
     setBusy(true);
+    setDeleteFailure(undefined);
     try {
       await apiFetch(`/v1/provider-profiles/${encodeURIComponent(provider.id)}`, { method: "DELETE" });
       setError(null);
+      setDeleteOpen(false);
       await refresh();
     } catch (reason) {
-      setError((reason as Error).message);
+      setDeleteFailure((reason as Error).message);
     } finally {
       setBusy(false);
     }
@@ -124,6 +129,8 @@ function ProviderCard({ provider, models, collapsed, onToggleCollapsed, refresh,
       <strong style={{ display: "flex", alignItems: "center", gap: 5 }}>
         <ChevronRight size={13} style={{ transform: collapsed ? "none" : "rotate(90deg)", transition: "transform 0.15s", color: "var(--text-dim)" }} />
         {provider.name}
+        {provider.custom ? <span style={{ fontSize: 10, fontWeight: 500, color: "var(--stg-text-tertiary)", border: "1px solid var(--stg-border-l2)", borderRadius: 4, padding: "0 5px", lineHeight: "16px" }}>Custom</span> : null}
+        <CredentialDot configured={provider.credentialConfigured} missing={!provider.credentialConfigured} />
       </strong>
       <span>{provider.baseUrl} · {models.length} {models.length === 1 ? "model" : "models"} · {provider.credentialConfigured ? "Credential saved" : "No credential"}</span>
     </div>
@@ -135,7 +142,7 @@ function ProviderCard({ provider, models, collapsed, onToggleCollapsed, refresh,
         <WandSparkles size={13} aria-hidden="true" /> Discover models
       </button>
       <button type="button" className="secondary-btn" title="Delete provider" aria-label={`Delete provider ${provider.name}`}
-        disabled={busy} onClick={deleteProvider}>
+        disabled={busy} onClick={() => setDeleteOpen(true)}>
         <Trash2 size={13} aria-hidden="true" />
       </button>
     </div>
@@ -161,6 +168,8 @@ function ProviderCard({ provider, models, collapsed, onToggleCollapsed, refresh,
     {discoverOpen && (
       <DiscoverModelsDialog provider={provider} existingModels={models} onClose={() => setDiscoverOpen(false)} refresh={refresh} setError={setError} />
     )}
+    <DeleteProviderModal open={deleteOpen} providerName={provider.name} busy={busy} failure={deleteFailure}
+      onCancel={() => { if (!busy) { setDeleteOpen(false); setDeleteFailure(undefined); } }} onConfirm={deleteProvider} />
   </div>;
 }
 
