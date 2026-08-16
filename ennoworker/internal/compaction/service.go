@@ -189,7 +189,7 @@ func (s *Service) prepareWithoutCheckpoint(ctx context.Context, run *domain.Agen
 	if err != nil {
 		return PreparedContext{}, err
 	}
-	completed, err := s.compactWithPlan(ctx, run, planned, lineage, effective, config, plan, 0)
+	completed, err := s.compactWithPlan(ctx, run, planned, lineage, effective, config, plan, systemPrompt, tools, 0)
 	if err != nil {
 		if plan.ProjectedTokens <= plan.MainUsable {
 			return PreparedContext{Messages: projected, Projected: true}, nil
@@ -229,12 +229,13 @@ func (s *Service) compact(ctx context.Context, run *domain.AgentRun, checkpoint 
 		_ = s.fail(ctx, checkpoint, run.ID, config, err)
 		return nil, err
 	}
-	return s.compactWithPlan(ctx, run, checkpoint, lineage, effective, config, plan, requestGeneration)
+	return s.compactWithPlan(ctx, run, checkpoint, lineage, effective, config, plan, systemPrompt, tools, requestGeneration)
 }
 
 func (s *Service) compactWithPlan(ctx context.Context, run *domain.AgentRun, checkpoint *domain.ContextCompaction,
 	lineage []domain.Message, effective domain.EffectiveRunConfig, config domain.CompactionPolicyConfig,
-	plan agent.CompactionPlan, requestGeneration int) (*domain.ContextCompaction, error) {
+	plan agent.CompactionPlan, systemPrompt string, tools []domain.ToolDefinition,
+	requestGeneration int) (*domain.ContextCompaction, error) {
 	if s.Repo == nil || s.Calls == nil || s.Providers == nil {
 		return nil, errors.New("compaction service dependencies are required")
 	}
@@ -253,7 +254,7 @@ func (s *Service) compactWithPlan(ctx context.Context, run *domain.AgentRun, che
 		_ = s.fail(ctx, checkpoint, run.ID, config, wrapped)
 		return nil, wrapped
 	}
-	request := agent.SummaryRequest(plan, config, effective.CompactionRuntime)
+	request := agent.SummaryRequest(plan, config, effective.CompactionRuntime, systemPrompt, tools)
 	completion, callID, err := s.streamSummary(ctx, run, checkpoint.ID, provider, request,
 		effective.CompactionRuntime, requestGeneration)
 	if err != nil {

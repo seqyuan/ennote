@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +27,25 @@ func TestBuildCompactionPlanKeepsCompleteRecentTurns(t *testing.T) {
 	assert.Equal(t, "a-2", plan.SourceThroughMessageID)
 	assert.Len(t, plan.TailMessages, 4)
 	assert.NotEmpty(t, plan.SourceDigest)
+}
+
+func TestSummaryRequestReusesMainPrefixAndEmbedsContract(t *testing.T) {
+	config := domain.DefaultCompactionPolicy()
+	plan := CompactionPlan{SerializedSource: "serialized-source"}
+	runtime := domain.ModelRuntimeSnapshot{APIModel: "m", MaxOutputTokens: 4096}
+	tools := []domain.ToolDefinition{{Name: "read", Parameters: json.RawMessage(`{}`)}}
+
+	request := SummaryRequest(plan, config, runtime, "MAIN SYSTEM PROMPT", tools)
+
+	require.Len(t, request.Messages, 2)
+	assert.Equal(t, domain.RoleSystem, request.Messages[0].Role)
+	assert.Equal(t, "MAIN SYSTEM PROMPT", request.Messages[0].Content[0].Text)
+	assert.Equal(t, tools, request.Tools)
+
+	user := request.Messages[1]
+	assert.Equal(t, domain.RoleUser, user.Role)
+	assert.Contains(t, user.Content[0].Text, "serialized-source")
+	assert.Contains(t, user.Content[0].Text, "## Goal")
 }
 
 func TestRepeatedCompactionIncludesFormerTail(t *testing.T) {

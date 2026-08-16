@@ -100,7 +100,7 @@ func (c *RunCompactor) CompactRunContext(ctx context.Context,
 		return c.failOrOpen(request, unchanged, plan.TokensBefore, plan.MainUsable, wrapped)
 	}
 	completion, callID, callAttempt, err := c.streamRunSummary(ctx, request, record.ID, provider,
-		agent.RunSummaryRequest(plan, c.Config, c.Effective.CompactionRuntime))
+		agent.RunSummaryRequest(plan, c.Config, c.Effective.CompactionRuntime, request.SystemPrompt, request.Tools))
 	if err != nil {
 		code := domain.ErrorCodeOf(err)
 		if errors.Is(err, context.Canceled) {

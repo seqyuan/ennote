@@ -190,14 +190,19 @@ func SerializeRunCompactionSource(previousSummary string, messages []domain.Chat
 }
 
 func RunSummaryRequest(plan RunCompactionPlan, config domain.CompactionPolicyConfig,
-	runtime domain.ModelRuntimeSnapshot) domain.CompletionRequest {
+	runtime domain.ModelRuntimeSnapshot, systemPrompt string, tools []domain.ToolDefinition) domain.CompletionRequest {
 	temperature := 0.0
+	messages := make([]domain.ChatMessage, 0, 2)
+	// Same cacheable-prefix reuse as the between-turn summarizer.
+	if systemPrompt != "" {
+		messages = append(messages, domain.ChatMessage{Role: domain.RoleSystem,
+			Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: systemPrompt}}})
+	}
+	content := plan.SerializedSource + "\n\n" + runCompactionSystemPrompt(config.PromptVersion)
+	messages = append(messages, domain.ChatMessage{Role: domain.RoleUser,
+		Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: content}}})
 	return domain.CompletionRequest{Model: runtime.APIModel, MaxTokens: config.SummaryMaxOutputTokens,
-		Temperature: &temperature, Messages: []domain.ChatMessage{
-			{Role: domain.RoleSystem, Content: []domain.ContentBlock{{Kind: domain.ContentText,
-				Text: runCompactionSystemPrompt(config.PromptVersion)}}},
-			{Role: domain.RoleUser, Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: plan.SerializedSource}}},
-		}}
+		Temperature: &temperature, Messages: messages, Tools: tools}
 }
 
 func RunCheckpointMessages(state MidRunCompactionState, tail []domain.ChatMessage) []domain.ChatMessage {

@@ -325,14 +325,22 @@ func SerializeCompactionSource(previousSummary string, messages []domain.Message
 }
 
 func SummaryRequest(plan CompactionPlan, config domain.CompactionPolicyConfig,
-	runtime domain.ModelRuntimeSnapshot) domain.CompletionRequest {
+	runtime domain.ModelRuntimeSnapshot, systemPrompt string, tools []domain.ToolDefinition) domain.CompletionRequest {
 	temperature := 0.0
+	messages := make([]domain.ChatMessage, 0, 2)
+	// Reuse the main conversation's cacheable prefix: the same system prompt and
+	// tool schemas lead, so a same-model summarizer hits the provider's KV cache
+	// on the prefix. The compaction contract rides the user message instead of a
+	// dedicated system prompt.
+	if systemPrompt != "" {
+		messages = append(messages, domain.ChatMessage{Role: domain.RoleSystem,
+			Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: systemPrompt}}})
+	}
+	content := plan.SerializedSource + "\n\n" + compactionSystemPrompt(config.PromptVersion)
+	messages = append(messages, domain.ChatMessage{Role: domain.RoleUser,
+		Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: content}}})
 	return domain.CompletionRequest{Model: runtime.APIModel, MaxTokens: config.SummaryMaxOutputTokens,
-		Temperature: &temperature, Messages: []domain.ChatMessage{
-			{Role: domain.RoleSystem, Content: []domain.ContentBlock{{Kind: domain.ContentText,
-				Text: compactionSystemPrompt(config.PromptVersion)}}},
-			{Role: domain.RoleUser, Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: plan.SerializedSource}}},
-		}}
+		Temperature: &temperature, Messages: messages, Tools: tools}
 }
 
 func ValidateCompactionSummary(summary string, maxOutputTokens int) error {
