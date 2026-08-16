@@ -2,6 +2,7 @@
 
 import { Bot, ImagePlus, ListPlus, Minimize2, Paperclip, Plus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
+import { useT } from "@/components/LocaleProvider";
 import { RoleTargetPicker } from "@/components/RoleTargetPicker";
 import type { ModelProfile, RoleSummary } from "@/components/settings/types";
 import { artifactPreviewURL } from "@/lib/artifacts";
@@ -105,6 +106,7 @@ export function Composer({
   const dragCounter = useRef(0);
   const [configOpen, setConfigOpen] = useState(false);
   const configRef = useRef<HTMLDivElement>(null);
+  const t = useT();
 
   useEffect(() => {
     if (!configOpen) return;
@@ -176,15 +178,15 @@ export function Composer({
 
   return (
     <div className="composer-shell" onDragEnter={handleDragEnter} onDragLeave={handleDragLeave} onDragOver={handleDragOver} onDrop={handleDrop}>
-      {isDragOver && <div className="composer-drop-zone"><Paperclip size={18} />Drop images or text files</div>}
+      {isDragOver && <div className="composer-drop-zone"><Paperclip size={18} />{t("composer.dropFiles")}</div>}
 
       {(pendingImage || textAttachments.length > 0) && (
-        <div className="composer-attachments" aria-label="Attached files">
+        <div className="composer-attachments" aria-label={t("composer.attachedFiles")}>
           {pendingImage && selectedSession && (
             <div className="composer-image-preview">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={artifactPreviewURL(selectedSession, pendingImage.id)} alt={pendingImage.name} />
-              <button type="button" onClick={clearPendingImage} aria-label="Remove image">
+              <button type="button" onClick={clearPendingImage} aria-label={t("composer.removeImage")}>
                 <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
                   <line x1="1" y1="1" x2="7" y2="7" /><line x1="7" y1="1" x2="1" y2="7" />
                 </svg>
@@ -201,7 +203,7 @@ export function Composer({
                   <span className="composer-attachment-name">{attachment.name}</span>
                   <span className="composer-attachment-meta">{ext.toUpperCase()} · {formatAttachmentSize(attachment.size)} · text</span>
                 </span>
-                <button type="button" onClick={() => removeTextAttachment(attachment.id)} aria-label={`Remove ${attachment.name}`}>
+                <button type="button" onClick={() => removeTextAttachment(attachment.id)} aria-label={`${t("composer.remove")} ${attachment.name}`}>
                   <svg width="7" height="7" viewBox="0 0 7 7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
                     <line x1="1" y1="1" x2="6" y2="6" /><line x1="6" y1="1" x2="1" y2="6" />
                   </svg>
@@ -215,14 +217,14 @@ export function Composer({
       <form className="composer" onSubmit={onSubmit} ref={form}>
         <div className="composer-editor" ref={configRef}>
           {configOpen && (
-            <div className="composer-config-panel" role="dialog" aria-label="Run configuration">
+            <div className="composer-config-panel" role="dialog" aria-label={t("composer.runConfiguration")}>
               <div className="composer-config-row">
-                <span className="composer-config-label">Target</span>
+                <span className="composer-config-label">{t("composer.target")}</span>
                 <RoleTargetPicker roles={roles} selectedRoleId={selectedRoleId} onSelect={setSelectedRoleId}
                   disabled={!selectedSession || activeRun || compacting} />
               </div>
               <div className="composer-config-row">
-                <span className="composer-config-label">Permission</span>
+                <span className="composer-config-label">{t("composer.permission")}</span>
                 <div className="permission-segment" role="group" aria-label="Permission mode">
                   {(["discuss", "ask", "auto"] as PermissionMode[]).map((mode) => (
                     <button
@@ -238,15 +240,15 @@ export function Composer({
                 </div>
               </div>
               <div className="composer-config-row">
-                <span className="composer-config-label">Attach</span>
+                <span className="composer-config-label">{t("composer.attach")}</span>
                 <div className="composer-config-tools">
-                  <button type="button" className="icon-command" disabled={!canAttach} onClick={() => fileInput.current?.click()} aria-label="Attach files" title="Attach image or text files">
+                  <button type="button" className="icon-command" disabled={!canAttach} onClick={() => fileInput.current?.click()} aria-label={t("composer.attachFiles")} title={t("composer.attachFiles")}>
                     <Paperclip size={15} aria-hidden="true" />
                   </button>
-                  <button type="button" className="icon-command" disabled={!canAttach} onClick={() => imageInput.current?.click()} aria-label="Attach image" title="Attach image">
+                  <button type="button" className="icon-command" disabled={!canAttach} onClick={() => imageInput.current?.click()} aria-label={t("composer.attachImage")} title={t("composer.attachImage")}>
                     <ImagePlus size={15} aria-hidden="true" />
                   </button>
-                  <button type="button" className="icon-command" onClick={compactSession} disabled={!selectedSession || !activeLeafMessageId || activeRun} aria-label="Compact context" title="Compact context">
+                  <button type="button" className="icon-command" onClick={compactSession} disabled={!selectedSession || !activeLeafMessageId || activeRun} aria-label={t("composer.compactContext")} title={t("composer.compactContext")}>
                     <Minimize2 size={15} aria-hidden="true" />
                   </button>
                 </div>
@@ -271,9 +273,9 @@ export function Composer({
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={onKeyDown}
             rows={1}
-            placeholder={compacting ? "Context compaction in progress" : activeRun ? "Steer the agent… (Enter)" : !selectedSession ? "Select a project and session" : "Type a message…"}
+            placeholder={compacting ? t("composer.placeholderCompacting") : activeRun ? t("composer.placeholderSteer") : !selectedSession ? t("composer.placeholderNoSession") : t("composer.placeholderDefault")}
             disabled={!selectedSession || compacting}
-            aria-label={activeRun ? "Steer the agent" : "Message the agent"}
+            aria-label={activeRun ? t("composer.steerAria") : t("composer.messageAria")}
           />
           <input
             ref={imageInput}
@@ -306,8 +308,8 @@ export function Composer({
                 type="button"
                 className="composer-plus"
                 aria-expanded={configOpen}
-                aria-label="Configure run"
-                title="Configure run"
+                aria-label={t("composer.configureRun")}
+                title={t("composer.configureRun")}
                 disabled={!selectedSession || compacting}
                 onClick={() => setConfigOpen((value) => !value)}
               >
@@ -318,13 +320,13 @@ export function Composer({
                 <>
                   <span
                     className="composer-tag"
-                    title="Permission mode"
-                    aria-label={`Permission mode: ${permissionMode === "discuss" ? "Discuss" : permissionMode === "ask" ? "Ask" : "Auto"}`}
+                    title={t("composer.permissionMode")}
+                    aria-label={`${t("composer.permissionMode")}: ${permissionMode === "discuss" ? "Discuss" : permissionMode === "ask" ? "Ask" : "Auto"}`}
                   >
                     {permissionMode === "discuss" ? "Discuss" : permissionMode === "ask" ? "Ask" : "Auto"}
                   </span>
                   {selectedRoleId && (
-                    <span className="composer-tag composer-tag-role" title="Role target">
+                    <span className="composer-tag composer-tag-role" title={t("composer.roleTarget")}>
                       <Bot size={11} aria-hidden="true" />
                       <span>{roles.find((role) => role.id === selectedRoleId)?.name ?? "Role"}</span>
                     </span>
@@ -341,36 +343,36 @@ export function Composer({
                 disabled={!selectedSession || activeRun || Boolean(selectedRoleId)}
               />
               <label className="composer-chip">
-                <span className="sr-only">Model</span>
+                <span className="sr-only">{t("composer.model")}</span>
                 <select
                   className="composer-chip-select"
                   value={selectedModelId ?? ""}
                   disabled={!selectedSession || activeRun || models.length === 0 || Boolean(selectedRoleId)}
                   onChange={(event) => setSelectedModelId(event.target.value)}
-                  title="Model for the next run"
+                  title={t("composer.modelForRun")}
                 >
-                  {models.length === 0 && <option value="">No model configured</option>}
+                  {models.length === 0 && <option value="">{t("composer.noModel")}</option>}
                   {models.map((model) => <option key={model.id} value={model.id}>{model.displayName || model.modelName}</option>)}
                 </select>
               </label>
               {activeRun && (
-                <button type="button" className="composer-followup" aria-label="Queue follow-up"
+                <button type="button" className="composer-followup" aria-label={t("composer.queueFollowUp")}
                   disabled={!input.trim() || compacting || reconnecting} onClick={followUp}>
                   <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <line x1="5" y1="1" x2="5" y2="6" /><polyline points="2.5 3.5 5 1 7.5 3.5" />
                     <line x1="2" y1="9" x2="8" y2="9" />
                   </svg>
-                  <span>Follow-up</span>
+                  <span>{t("composer.followUp")}</span>
                 </button>
               )}
               {activeRun ? (
-                <button type="button" className="composer-primary" aria-label="Stop run" title="Stop run" onClick={cancel}>
+                <button type="button" className="composer-primary" aria-label={t("composer.stopRun")} title={t("composer.stopRun")} onClick={cancel}>
                   <svg width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true">
                     <rect x="1.5" y="1.5" width="7" height="7" rx="1.5" fill="currentColor" />
                   </svg>
                 </button>
               ) : (
-                <button type="submit" className="composer-primary" aria-label="Send"
+                <button type="submit" className="composer-primary" aria-label={t("composer.send")}
                   disabled={!selectedSession || (!permissionReady && !selectedRoleId) || (!input.trim() && !hasPendingImage && textAttachments.length === 0)}>
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M8.3125 0.980183C8.66767 1.0531 8.97902 1.20418 9.2627 1.43233C9.48724 1.61297 9.73029 1.85793 9.97949 2.10714L14.707 6.83468L13.293 8.24874L9 3.95577V15.0417H7V3.95577L2.70703 8.24874L1.29297 6.83468L6.02051 2.10714C6.26971 1.85793 6.51277 1.61297 6.7373 1.43233C6.97662 1.23986 7.28445 1.04402 7.6875 0.980183C7.8973 0.947006 8.1031 0.95516 8.3125 0.980183Z" fill="currentColor" />
@@ -382,27 +384,20 @@ export function Composer({
         </div>
       </form>
       <div className="composer-status-line">
-        {activeRun && <span className="composer-config-hint">{permissionMode} is frozen for this run</span>}
-        {!permissionReady && selectedSession && !selectedRoleId && <span className="composer-config-hint is-danger">Policy unavailable</span>}
-        {expanding && <span className="composer-status" aria-live="polite">Expanding prompt…</span>}
+        {activeRun && <span className="composer-config-hint">{permissionMode} {t("composer.frozenForRun")}</span>}
+        {!permissionReady && selectedSession && !selectedRoleId && <span className="composer-config-hint is-danger">{t("composer.policyUnavailable")}</span>}
+        {expanding && <span className="composer-status" aria-live="polite">{t("composer.expanding")}</span>}
         {expandDiag && <span className="composer-status diag-warning" aria-live="polite">{expandDiag}</span>}
         {pendingFollowUps.length > 0 && (
           <div className="composer-followup-queue" aria-live="polite" role="status">
             <ListPlus size={13} aria-hidden="true" />
-            <span>Queued: {pendingFollowUps.map(item => item.text).join(" · ")}</span>
+            <span>{t("composer.queued")}: {pendingFollowUps.map(item => item.text).join(" · ")}</span>
           </div>
         )}
       </div>
     </div>
   );
 }
-
-const THINKING_LEVEL_DESC: Record<ThinkingEffort, string> = {
-  default: "默认",
-  low: "低强度推理",
-  medium: "中等推理",
-  high: "高强度推理",
-};
 
 function ThinkingPicker({ models, selectedModelId, thinkingEffort, setThinkingEffort, disabled }: {
   models: ModelProfile[];
@@ -413,6 +408,7 @@ function ThinkingPicker({ models, selectedModelId, thinkingEffort, setThinkingEf
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const t = useT();
   const selected = models.find((model) => model.id === selectedModelId) ?? null;
   const supports = Boolean(selected?.supportsThinking);
   const efforts = selected?.supportedThinkingEfforts?.length
@@ -438,8 +434,8 @@ function ThinkingPicker({ models, selectedModelId, thinkingEffort, setThinkingEf
 
   return (
     <div className="composer-chip" ref={ref}>
-      <button type="button" className="composer-chip-button" aria-label="Thinking effort" aria-expanded={open}
-        title={supports ? "切换推理强度" : "当前模型不支持思考模式"}
+      <button type="button" className="composer-chip-button" aria-label={t("composer.thinkingEffort")} aria-expanded={open}
+        title={supports ? t("composer.thinkingSupported") : t("composer.thinkingUnsupported")}
         disabled={!canUse}
         onClick={() => setOpen((value) => !value)}>
         <span className="composer-thinking-label">{active}</span>
@@ -448,7 +444,7 @@ function ThinkingPicker({ models, selectedModelId, thinkingEffort, setThinkingEf
         </svg>
       </button>
       {open && (
-        <div className="composer-thinking-menu" role="listbox" aria-label="Thinking effort">
+        <div className="composer-thinking-menu" role="listbox" aria-label={t("composer.thinkingEffort")}>
           {efforts.map((lvl) => {
             const isActive = lvl === active;
             return (
@@ -458,7 +454,7 @@ function ThinkingPicker({ models, selectedModelId, thinkingEffort, setThinkingEf
                   ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
                   : <span className="composer-thinking-check" aria-hidden="true" />}
                 <span className="composer-thinking-item">{lvl}</span>
-                <span className="composer-thinking-desc">{THINKING_LEVEL_DESC[lvl]}</span>
+                <span className="composer-thinking-desc">{t(`composer.thinking.${lvl}`)}</span>
               </button>
             );
           })}
