@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useT } from "@/components/LocaleProvider";
 import { SecretTextInput } from "@/components/settings/SecretTextInput";
+import { FetchModelsButton } from "@/components/settings/models/FetchModelsButton";
 import { ModelListEditor } from "@/components/settings/models/ModelListEditor";
 import { apiFetch } from "@/lib/worker-api.client";
 import { apiKeyFailure } from "@/lib/api-key";
@@ -26,6 +27,10 @@ function toDrafts(models: readonly ModelProfile[]): ModelDraft[] {
   }));
 }
 
+function draftId(draft: ModelDraft): string {
+  return (typeof draft.id === "string" ? draft.id : "").trim();
+}
+
 /** Apply a model-sync plan through the wire. */
 async function applySync(plan: ReturnType<typeof planModelSync>): Promise<void> {
   for (const id of plan.toDelete) {
@@ -42,9 +47,10 @@ async function applySync(plan: ReturnType<typeof planModelSync>): Promise<void> 
 /**
  * The editor card for one existing provider: a single write-only API key field
  * (blank keeps the stored key), a collapsed 自定义设置 fold with the curated
- * per-family extras (base URL, and the display name / API protocol of a
- * hand-declared route), and the model list editor. Apply writes provider
- * fields through PUT and reconciles the model list through the model-profiles
+ * per-family extras (base URL, and the display name of a hand-declared route),
+ * and the model list editor with a "Fetch available models" interrogation that
+ * adopts the provider's catalog into the draft. Apply writes provider fields
+ * through PUT and reconciles the model list through the model-profiles
  * endpoints.
  */
 export function ProviderEditor({ provider, models, onClose, refresh, setError, onSaved }: {
@@ -134,6 +140,18 @@ export function ProviderEditor({ provider, models, onClose, refresh, setError, o
               aria-label={t("settings.models.baseUrl")}
               onChange={(e) => { setBaseURL(e.target.value); }} />
           </label>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 12, fontWeight: 500, color: "var(--stg-text-primary)" }}>{t("settings.models.models")}</span>
+            <FetchModelsButton probe={{ baseUrl: baseURL.trim(), apiKey: keyValue }}
+              existingIds={drafts.map(draftId)}
+              onAdopt={(selected) => {
+                const byId = new Map(drafts.map(d => [draftId(d), d]));
+                for (const s of selected) byId.set(draftId(s), byId.get(draftId(s)) ?? s);
+                setDrafts([...byId.values()]);
+              }}
+              onError={setFailure}
+              disabled={busy} />
+          </div>
           <ModelListEditor models={drafts} onChange={setDrafts} disabled={busy} />
         </div>
       </details>

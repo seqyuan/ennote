@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useT } from "@/components/LocaleProvider";
 import { SecretTextInput } from "@/components/settings/SecretTextInput";
+import { FetchModelsButton } from "@/components/settings/models/FetchModelsButton";
 import { apiFetch } from "@/lib/worker-api.client";
 import { apiKeyFailure } from "@/lib/api-key";
 import { validateModels, type ModelDraft } from "@/lib/model-draft";
@@ -138,6 +139,18 @@ export function CustomProviderCard({ taken, onClose, refresh, setError, onSaved 
         {keyFailure === undefined ? null
           : <span style={{ fontSize: 11, color: "var(--stg-danger)" }}>{t(`settings.models.${keyFailure}`)}</span>}
       </label>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 12, fontWeight: 500, color: "var(--stg-text-primary)" }}>{t("settings.models.models")}</span>
+        <FetchModelsButton probe={{ baseUrl: baseURL.trim(), apiKey: keyValue }}
+          existingIds={models.map(m => String(m.id ?? "").trim())}
+          onAdopt={(selected) => {
+            const byId = new Map(models.map(m => [String(m.id ?? "").trim(), m]));
+            for (const s of selected) byId.set(String(s.id ?? "").trim(), byId.get(String(s.id ?? "").trim()) ?? s);
+            setModels([...byId.values()]);
+          }}
+          onError={setFailure}
+          disabled={busy} />
+      </div>
       <ModelListEditor models={models} onChange={setModels} disabled={busy} />
       {failure !== undefined ? <span style={{ fontSize: 12, color: "var(--stg-danger)" }}>{failure}</span> : null}
       {hint === undefined ? null : <span style={{ fontSize: 11, color: "var(--stg-text-tertiary)" }}>{hint}</span>}
