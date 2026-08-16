@@ -414,7 +414,7 @@ func (r *RunRepo) resolvedFromFrozenRuntime(effective domain.EffectiveRunConfig)
 	}
 	provider := domain.ProviderProfile{
 		ID: runtime.ProviderProfileID, Name: runtime.ProviderProfileID,
-		ProviderType: domain.ProviderOpenAICompatible, BaseURL: runtime.BaseURL,
+		ProviderType: domain.ProviderOpenAICompatible, API: runtime.Protocol(), BaseURL: runtime.BaseURL,
 		CredentialRef: credentialRef, APIKey: apiKey, Proxy: runtime.Proxy, Status: "frozen",
 	}
 	return &ResolvedRunConfig{Effective: effective, Provider: provider, Model: model}, nil

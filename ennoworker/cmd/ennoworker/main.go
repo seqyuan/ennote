@@ -1541,7 +1541,7 @@ func (e *agentExecutor) resolveRuntimeProvider(runtime domain.ModelRuntimeSnapsh
 		return nil, domain.NewCodedError(domain.ErrorProviderCredentialUnavailable,
 			fmt.Errorf("provider %s has no API key configured", runtime.ProviderProfileID))
 	}
-	provider, err := llm.NewOpenAIProvider(llm.OpenAIConfig{
+	provider, err := llm.NewProviderForAPI(runtime.Protocol(), llm.ProviderConfig{
 		BaseURL: runtime.BaseURL, APIKey: llm.NewSecret(runtime.APIKey),
 		Model: runtime.APIModel, MaxTokens: runtime.MaxOutputTokens,
 	})

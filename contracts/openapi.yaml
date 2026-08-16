@@ -698,7 +698,7 @@ paths:
               additionalProperties: false
               properties:
                 name: { type: string, minLength: 1 }
-                providerType: { type: string, enum: [openai-compatible] }
+                providerType: { type: string, enum: [openai-compatible, anthropic] }
                 baseUrl: { type: string, format: uri }
                 apiKey: { type: string }
                 proxy: { type: string }
@@ -3171,7 +3171,8 @@ components:
       properties:
         id: { type: string }
         name: { type: string }
-        providerType: { type: string, enum: [openai-compatible] }
+        providerType: { type: string, enum: [openai-compatible, anthropic] }
+        api: { type: string }
         baseUrl: { type: string, format: uri }
         credentialConfigured: { type: boolean }
         proxy: { type: string }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,16 +32,18 @@ type Manager struct {
 	Projects     *projectstore.Store
 	Now          func() time.Time
 
-	mu      sync.Mutex
-	handles map[string]*handle
-	index   map[string]string
-	owners  map[string]string
+	mu        sync.Mutex
+	handles   map[string]*handle
+	index     map[string]string
+	owners    map[string]string
+	listCache map[string][]domain.Session
 }
 
 func NewManager(projectsRoot string, projects *projectstore.Store) *Manager {
 	return &Manager{
 		ProjectsRoot: projectsRoot, Projects: projects,
 		handles: map[string]*handle{}, index: map[string]string{}, owners: map[string]string{},
+		listCache: map[string][]domain.Session{},
 	}
 }
 
@@ -174,6 +177,7 @@ func (m *Manager) Create(ctx context.Context, input domain.CreateSessionInput) (
 	m.mu.Lock()
 	m.index[sessionID] = input.ProjectID
 	m.mu.Unlock()
+	m.InvalidateProject(input.ProjectID)
 	return &domain.Session{
 		ID: sessionID, ProjectID: input.ProjectID, Title: title, Status: "active",
 		Mode: domain.SessionModeHosted, ActiveBranchID: &branchID,
@@ -224,6 +228,10 @@ func (m *Manager) OpenSession(ctx context.Context, sessionID string) (*sql.DB, e
 		db.Close()
 		return nil, err
 	}
+	if err := scanTail(ctx, db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	var storedSessionID, storedProjectID string
 	if err := db.QueryRowContext(ctx, `SELECT session_id,project_id FROM session_store_metadata WHERE singleton=1`).Scan(&storedSessionID, &storedProjectID); err != nil {
 		db.Close()
@@ -249,6 +257,14 @@ func (m *Manager) FindByID(ctx context.Context, sessionID string) (*domain.Sessi
 }
 
 func (m *Manager) ListByProject(ctx context.Context, projectID string, status string) ([]domain.Session, error) {
+	cacheKey := projectID + "\x00" + status
+	m.mu.Lock()
+	if cached, ok := m.listCache[cacheKey]; ok {
+		m.mu.Unlock()
+		return append([]domain.Session(nil), cached...), nil
+	}
+	m.mu.Unlock()
+
 	sessionsDir := filepath.Join(m.ProjectsRoot, projectID, "sessions")
 	entries, err := os.ReadDir(sessionsDir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -279,7 +295,34 @@ func (m *Manager) ListByProject(ctx context.Context, projectID string, status st
 		}
 		return sessions[i].ID < sessions[j].ID
 	})
+	m.mu.Lock()
+	m.listCache[cacheKey] = append([]domain.Session(nil), sessions...)
+	m.mu.Unlock()
 	return sessions, nil
+}
+
+// InvalidateProject drops every cached session list for a project, forcing the
+// next ListByProject to re-read the filesystem. Writers call this after a
+// successful mutation.
+func (m *Manager) InvalidateProject(projectID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	prefix := projectID + "\x00"
+	for key := range m.listCache {
+		if strings.HasPrefix(key, prefix) {
+			delete(m.listCache, key)
+		}
+	}
+}
+
+// InvalidateSession drops the cached lists for the project that owns a session.
+func (m *Manager) InvalidateSession(sessionID string) {
+	m.mu.Lock()
+	projectID := m.index[sessionID]
+	m.mu.Unlock()
+	if projectID != "" {
+		m.InvalidateProject(projectID)
+	}
 }
 
 func (m *Manager) RegisterOwner(kind, resourceID, sessionID string) {

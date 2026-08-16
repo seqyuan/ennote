@@ -53,7 +53,7 @@ func (r *RunRepo) ResolveAndFreezeConfig(ctx context.Context, run *domain.AgentR
 func runtimeSnapshot(model domain.ModelProfile, provider domain.ProviderProfile) domain.ModelRuntimeSnapshot {
 	return domain.ModelRuntimeSnapshot{
 		ProviderProfileID: provider.ID, ModelProfileID: model.ID, APIModel: model.ModelName,
-		BaseURL: provider.BaseURL, CredentialRef: firstNonEmpty(provider.CredentialRef, provider.ID),
+		API: provider.API, BaseURL: provider.BaseURL, CredentialRef: firstNonEmpty(provider.CredentialRef, provider.ID),
 		APIKey: provider.APIKey, Proxy: provider.Proxy,
 		ContextTokens: model.ContextWindow, MaxOutputTokens: model.MaxOutputTokens,
 		SupportsVision: model.SupportsVision, SupportsToolUse: model.SupportsToolUse,

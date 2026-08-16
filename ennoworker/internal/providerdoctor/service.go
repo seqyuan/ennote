@@ -117,7 +117,11 @@ func (s *Service) Diagnose(ctx context.Context, providerID, modelProfileID strin
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	providerClient, err := llm.NewOpenAIProvider(llm.OpenAIConfig{
+	api := provider.API
+	if api == "" {
+		api = domain.APIOpenAICompletions
+	}
+	providerClient, err := llm.NewProviderForAPI(api, llm.ProviderConfig{
 		BaseURL: provider.BaseURL, APIKey: llm.NewSecret(provider.APIKey), Model: model.ModelName,
 		MaxTokens: min(max(model.MaxOutputTokens, 1), 8), HTTPClient: s.HTTPClient,
 	})

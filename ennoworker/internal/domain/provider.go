@@ -27,7 +27,28 @@ type ReasoningConfig struct {
 
 const (
 	ProviderOpenAICompatible ProviderType = "openai-compatible"
+	ProviderAnthropic        ProviderType = "anthropic"
 )
+
+// Wire protocol identifiers stored in ProviderConfig.API and frozen into the
+// run's ModelRuntimeSnapshot.API.
+const (
+	APIOpenAICompletions = "openai-completions"
+	APIAnthropicMessages = "anthropic-messages"
+)
+
+// SupportedAPIs lists the wire protocols a hand-declared provider may name.
+func SupportedAPIs() []string {
+	return []string{APIOpenAICompletions, APIAnthropicMessages}
+}
+
+// UnsupportedAPIs lists protocols Ennote deliberately refuses: they require
+// provider-native authentication (SigV4, application-default credentials, or
+// OAuth) that a hand-declared route cannot express, so offering them would
+// hand back a provider that cannot authenticate.
+func UnsupportedAPIs() []string {
+	return []string{"bedrock", "vertex", "azure", "codex"}
+}
 
 type ProviderFailureCategory string
 
@@ -76,6 +97,7 @@ type ProviderProfile struct {
 	ID                   string       `json:"id"`
 	Name                 string       `json:"name"`
 	ProviderType         ProviderType `json:"providerType"`
+	API                  string       `json:"api,omitempty"`
 	BaseURL              string       `json:"baseUrl"`
 	CredentialRef        string       `json:"-"`
 	APIKey               string       `json:"apiKey,omitempty"`

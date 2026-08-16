@@ -2100,7 +2100,8 @@ export interface components {
             id: string;
             name: string;
             /** @enum {string} */
-            providerType: "openai-compatible";
+            providerType: "openai-compatible" | "anthropic";
+            api?: string;
             /** Format: uri */
             baseUrl: string;
             credentialConfigured: boolean;
@@ -4405,7 +4406,7 @@ export interface operations {
                 "application/json": {
                     name: string;
                     /** @enum {string} */
-                    providerType: "openai-compatible";
+                    providerType: "openai-compatible" | "anthropic";
                     /** Format: uri */
                     baseUrl: string;
                     apiKey?: string;

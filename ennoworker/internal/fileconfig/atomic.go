@@ -40,38 +40,40 @@ func writeJSONAtomic(path string, value any, mode os.FileMode) error {
 }
 
 func writeAtomic(path string, contents []byte, mode os.FileMode) error {
-	directory := filepath.Dir(path)
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return err
-	}
-	temporary, err := os.CreateTemp(directory, "."+filepath.Base(path)+"-*")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if err := temporary.Chmod(mode); err != nil {
-		temporary.Close()
-		return err
-	}
-	if _, err := temporary.Write(contents); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Sync(); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return err
-	}
-	dir, err := os.Open(directory)
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
+	return withFileLock(path, func() error {
+		directory := filepath.Dir(path)
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			return err
+		}
+		temporary, err := os.CreateTemp(directory, "."+filepath.Base(path)+"-*")
+		if err != nil {
+			return err
+		}
+		temporaryPath := temporary.Name()
+		defer os.Remove(temporaryPath)
+		if err := temporary.Chmod(mode); err != nil {
+			temporary.Close()
+			return err
+		}
+		if _, err := temporary.Write(contents); err != nil {
+			temporary.Close()
+			return err
+		}
+		if err := temporary.Sync(); err != nil {
+			temporary.Close()
+			return err
+		}
+		if err := temporary.Close(); err != nil {
+			return err
+		}
+		if err := os.Rename(temporaryPath, path); err != nil {
+			return err
+		}
+		dir, err := os.Open(directory)
+		if err != nil {
+			return err
+		}
+		defer dir.Close()
+		return dir.Sync()
+	})
 }

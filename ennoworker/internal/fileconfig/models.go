@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/modelcatalog"
 )
 
 const ModelsSchemaVersion = 1
@@ -33,18 +34,23 @@ type ProviderConfig struct {
 	Models     []ModelConfig       `json:"models"`
 }
 
+// ModelConfig is the on-disk (config/models.json) shape of one model. Every
+// field except ID/Name is a pointer: nil means "not declared" (the built-in
+// catalog supplies a default via overlayModel), while a non-nil pointer means
+// "explicitly declared" — including an explicit false or 0 that must win over
+// the catalog default.
 type ModelConfig struct {
-	ID                            string                  `json:"id"`
-	Name                          string                  `json:"name,omitempty"`
-	ContextWindow                 int                     `json:"contextWindow"`
-	MaxTokens                     int                     `json:"maxTokens"`
-	InputCostUSDMicrosPerMillion  int64                   `json:"inputCostUsdMicrosPerMillion"`
-	OutputCostUSDMicrosPerMillion int64                   `json:"outputCostUsdMicrosPerMillion"`
-	Vision                        bool                    `json:"vision"`
-	ToolUse                       bool                    `json:"toolUse"`
-	Thinking                      bool                    `json:"thinking"`
-	ThinkingDialect               domain.ThinkingDialect  `json:"thinkingDialect"`
-	ThinkingEfforts               []domain.ThinkingEffort `json:"thinkingEfforts"`
+	ID                            string                   `json:"id"`
+	Name                          string                   `json:"name,omitempty"`
+	ContextWindow                 *int                     `json:"contextWindow,omitempty"`
+	MaxTokens                     *int                     `json:"maxTokens,omitempty"`
+	InputCostUSDMicrosPerMillion  *int64                   `json:"inputCostUsdMicrosPerMillion,omitempty"`
+	OutputCostUSDMicrosPerMillion *int64                   `json:"outputCostUsdMicrosPerMillion,omitempty"`
+	Vision                        *bool                    `json:"vision,omitempty"`
+	ToolUse                       *bool                    `json:"toolUse,omitempty"`
+	Thinking                      *bool                    `json:"thinking,omitempty"`
+	ThinkingDialect               *domain.ThinkingDialect  `json:"thinkingDialect,omitempty"`
+	ThinkingEfforts               *[]domain.ThinkingEffort `json:"thinkingEfforts,omitempty"`
 }
 
 type CreateProviderInput struct {
@@ -77,6 +83,7 @@ type ModelStore struct {
 	Credentials *CredentialStore
 	Settings    *SettingsStore
 	mu          sync.RWMutex
+	snap        fileSnapshot[ModelsDocument]
 	Now         func() time.Time
 }
 
@@ -100,7 +107,8 @@ func (s *ModelStore) CreateProvider(_ context.Context, input CreateProviderInput
 	if input.Name == "" {
 		return nil, fmt.Errorf("provider name is required")
 	}
-	if input.ProviderType != domain.ProviderOpenAICompatible {
+	api := apiForType(input.ProviderType)
+	if api == "" {
 		return nil, fmt.Errorf("unsupported provider type: %s", input.ProviderType)
 	}
 	if err := validateBaseURL(input.BaseURL); err != nil {
@@ -123,7 +131,7 @@ func (s *ModelStore) CreateProvider(_ context.Context, input CreateProviderInput
 		}
 	}
 	document.Providers[input.Key] = ProviderConfig{
-		Name: input.Name, Type: input.ProviderType, API: "openai-completions",
+		Name: input.Name, Type: input.ProviderType, API: api,
 		BaseURL: strings.TrimSpace(input.BaseURL), Credential: credentialID,
 		Proxy: strings.TrimSpace(input.Proxy), Models: []ModelConfig{},
 	}
@@ -132,7 +140,7 @@ func (s *ModelStore) CreateProvider(_ context.Context, input CreateProviderInput
 	}
 	now := s.now()
 	return &domain.ProviderProfile{
-		ID: input.Key, Name: input.Name, ProviderType: input.ProviderType,
+		ID: input.Key, Name: input.Name, ProviderType: input.ProviderType, API: api,
 		BaseURL: strings.TrimSpace(input.BaseURL), CredentialConfigured: strings.TrimSpace(input.APIKey) != "",
 		Proxy: strings.TrimSpace(input.Proxy), Status: "active", CreatedAt: now, UpdatedAt: now,
 	}, nil
@@ -141,7 +149,7 @@ func (s *ModelStore) CreateProvider(_ context.Context, input CreateProviderInput
 func (s *ModelStore) ListProviders(_ context.Context) ([]domain.ProviderProfile, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	document, modifiedAt, err := s.load()
+	document, modifiedAt, err := s.loadForRead()
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +172,7 @@ func (s *ModelStore) ListProviders(_ context.Context) ([]domain.ProviderProfile,
 func (s *ModelStore) FindProvider(_ context.Context, id string) (*domain.ProviderProfile, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	document, modifiedAt, err := s.load()
+	document, modifiedAt, err := s.loadForRead()
 	if err != nil {
 		return nil, err
 	}
@@ -215,8 +223,9 @@ func (s *ModelStore) CreateModel(_ context.Context, input CreateModelInput) (*do
 	if input.DisplayName == "" {
 		input.DisplayName = input.ModelName
 	}
-	model, err := modelConfig(input)
-	if err != nil {
+	model := modelConfig(input)
+	resolved := overlayModel(input.ProviderID, model)
+	if err := validateModel(resolved); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
@@ -246,13 +255,13 @@ func (s *ModelStore) CreateModel(_ context.Context, input CreateModelInput) (*do
 			return nil, err
 		}
 	}
-	return modelProfile(input.ProviderID, model, input.IsDefault, maxTime(modifiedAt, s.now())), nil
+	return modelProfile(input.ProviderID, resolved, input.IsDefault, maxTime(modifiedAt, s.now())), nil
 }
 
 func (s *ModelStore) ListModels(_ context.Context) ([]domain.ModelProfile, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	document, modifiedAt, err := s.load()
+	document, modifiedAt, err := s.loadForRead()
 	if err != nil {
 		return nil, err
 	}
@@ -263,8 +272,9 @@ func (s *ModelStore) ListModels(_ context.Context) ([]domain.ModelProfile, error
 	profiles := make([]domain.ModelProfile, 0)
 	for providerID, provider := range document.Providers {
 		for _, model := range provider.Models {
-			ref := providerID + "/" + model.ID
-			profiles = append(profiles, *modelProfile(providerID, model, ref == settings.DefaultModel, modifiedAt))
+			resolved := overlayModel(providerID, model)
+			ref := providerID + "/" + resolved.ID
+			profiles = append(profiles, *modelProfile(providerID, resolved, ref == settings.DefaultModel, modifiedAt))
 		}
 	}
 	sort.Slice(profiles, func(i, j int) bool {
@@ -370,7 +380,19 @@ func (s *ModelStore) DeleteModel(ctx context.Context, ref string) error {
 	return nil
 }
 
+// load reads the current on-disk document and, on success, caches it as the
+// store's latest valid snapshot. A parse/validation failure leaves the
+// snapshot untouched. Callers that mutate the document must treat a non-nil
+// error as fail-closed and not write.
 func (s *ModelStore) load() (ModelsDocument, time.Time, error) {
+	document, modified, err := s.loadDisk()
+	if err == nil {
+		s.snap.set(document, modified)
+	}
+	return document, modified, err
+}
+
+func (s *ModelStore) loadDisk() (ModelsDocument, time.Time, error) {
 	document := ModelsDocument{SchemaVersion: ModelsSchemaVersion, Providers: map[string]ProviderConfig{}}
 	found, err := readStrictJSON(s.Models, &document)
 	if err != nil {
@@ -397,6 +419,47 @@ func (s *ModelStore) load() (ModelsDocument, time.Time, error) {
 	return document, info.ModTime().UTC(), nil
 }
 
+// loadForRead is the read-path entry: it prefers the current on-disk document
+// and degrades to the latest valid snapshot when the file is currently
+// unparsable. It returns an error only when there is no snapshot to fall back
+// to, so a running Worker keeps serving its last valid configuration instead
+// of failing reads after an external edit breaks the file.
+func (s *ModelStore) loadForRead() (ModelsDocument, time.Time, error) {
+	document, modified, err := s.load()
+	if err == nil {
+		return document, modified, nil
+	}
+	if snap, snapModified, ok := s.snap.get(); ok {
+		return snap, snapModified, nil
+	}
+	return document, modified, err
+}
+
+// StartWatch begins watching the models catalog. File changes re-load the
+// snapshot on a debounce. A watch that cannot be established is a no-op
+// (reads re-read on every access, so hot reload still works). It returns a
+// stop function.
+func (s *ModelStore) StartWatch() (stop func()) {
+	return watchFile(s.Models, 100*time.Millisecond, func() {
+		s.mu.Lock()
+		_, _, _ = s.load()
+		s.mu.Unlock()
+	})
+}
+
+// apiForType maps a provider type to its wire protocol. Unknown types return
+// an empty string, which callers treat as "unsupported type".
+func apiForType(t domain.ProviderType) string {
+	switch t {
+	case domain.ProviderOpenAICompatible:
+		return domain.APIOpenAICompletions
+	case domain.ProviderAnthropic:
+		return domain.APIAnthropicMessages
+	default:
+		return ""
+	}
+}
+
 func validateProvider(key string, provider ProviderConfig) error {
 	if !providerKeyPattern.MatchString(key) {
 		return fmt.Errorf("provider key %q must match %s", key, providerKeyPattern)
@@ -404,11 +467,12 @@ func validateProvider(key string, provider ProviderConfig) error {
 	if strings.TrimSpace(provider.Name) == "" {
 		return fmt.Errorf("provider %q name is required", key)
 	}
-	if provider.Type != domain.ProviderOpenAICompatible {
+	expectedAPI := apiForType(provider.Type)
+	if expectedAPI == "" {
 		return fmt.Errorf("provider %q has unsupported type %q", key, provider.Type)
 	}
-	if provider.API != "openai-completions" {
-		return fmt.Errorf("provider %q has unsupported api %q", key, provider.API)
+	if provider.API != expectedAPI {
+		return fmt.Errorf("provider %q has api %q incompatible with type %q", key, provider.API, provider.Type)
 	}
 	if err := validateBaseURL(provider.BaseURL); err != nil {
 		return fmt.Errorf("provider %q: %w", key, err)
@@ -422,48 +486,146 @@ func validateProvider(key string, provider ProviderConfig) error {
 			return fmt.Errorf("provider %q has duplicate model %q", key, model.ID)
 		}
 		seen[model.ID] = true
-		if err := validateModel(model); err != nil {
+		if err := validateModel(overlayModel(key, model)); err != nil {
 			return fmt.Errorf("provider %q model %q: %w", key, model.ID, err)
 		}
 	}
 	return nil
 }
 
-func modelConfig(input CreateModelInput) (ModelConfig, error) {
-	model := ModelConfig{
-		ID: input.ModelName, Name: input.DisplayName, ContextWindow: input.ContextWindow,
-		MaxTokens:                     input.MaxOutputTokens,
-		InputCostUSDMicrosPerMillion:  input.InputCostUSDMicrosPerMillion,
-		OutputCostUSDMicrosPerMillion: input.OutputCostUSDMicrosPerMillion,
-		Vision:                        input.SupportsVision, ToolUse: input.SupportsToolUse,
-		Thinking: input.SupportsThinking, ThinkingDialect: input.ThinkingDialect,
-		ThinkingEfforts: append([]domain.ThinkingEffort(nil), input.SupportedThinkingEfforts...),
+// modelConfig builds the on-disk ModelConfig shape from a CreateModel input.
+// A zero-valued input field is treated as "not declared" (nil on disk) so the
+// built-in catalog can supply it; a non-zero field is an explicit declaration.
+// This means a caller cannot explicitly declare a false bool or a zero cost
+// through this API — use a hand-written models.json for exact field-level
+// overrides. A catalog miss on a required field is reported by validateModel.
+func modelConfig(input CreateModelInput) ModelConfig {
+	model := ModelConfig{ID: input.ModelName, Name: input.DisplayName}
+	if input.ContextWindow > 0 {
+		model.ContextWindow = &input.ContextWindow
 	}
-	if model.ThinkingDialect == "" {
-		model.ThinkingDialect = domain.ThinkingDialectNone
+	if input.MaxOutputTokens > 0 {
+		model.MaxTokens = &input.MaxOutputTokens
 	}
-	if len(model.ThinkingEfforts) == 0 {
-		model.ThinkingEfforts = []domain.ThinkingEffort{domain.ThinkingDefault}
+	if input.InputCostUSDMicrosPerMillion != 0 {
+		model.InputCostUSDMicrosPerMillion = &input.InputCostUSDMicrosPerMillion
 	}
-	if err := validateModel(model); err != nil {
-		return ModelConfig{}, err
+	if input.OutputCostUSDMicrosPerMillion != 0 {
+		model.OutputCostUSDMicrosPerMillion = &input.OutputCostUSDMicrosPerMillion
 	}
-	return model, nil
+	if input.SupportsVision {
+		model.Vision = &input.SupportsVision
+	}
+	if input.SupportsToolUse {
+		model.ToolUse = &input.SupportsToolUse
+	}
+	if input.SupportsThinking {
+		model.Thinking = &input.SupportsThinking
+	}
+	if input.ThinkingDialect != "" {
+		model.ThinkingDialect = &input.ThinkingDialect
+	}
+	if len(input.SupportedThinkingEfforts) > 0 {
+		efforts := append([]domain.ThinkingEffort(nil), input.SupportedThinkingEfforts...)
+		model.ThinkingEfforts = &efforts
+	}
+	return model
 }
 
+func derefInt(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+func derefInt64(p *int64) int64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+func derefBool(p *bool) bool {
+	if p == nil {
+		return false
+	}
+	return *p
+}
+
+// overlayModel fills a model's nil fields from the built-in catalog. A model
+// the catalog does not describe is returned unchanged (its nil fields stay nil
+// and validateModel reports them as missing); a model the catalog does
+// describe has every nil field filled with the catalog default while every
+// explicitly declared field (including an explicit false or 0) is preserved.
+func overlayModel(providerKey string, model ModelConfig) ModelConfig {
+	defaults, ok := modelcatalog.Lookup(providerKey, model.ID)
+	if !ok {
+		return model
+	}
+	if model.ContextWindow == nil {
+		model.ContextWindow = &defaults.ContextWindow
+	}
+	if model.MaxTokens == nil {
+		model.MaxTokens = &defaults.MaxTokens
+	}
+	if model.InputCostUSDMicrosPerMillion == nil {
+		model.InputCostUSDMicrosPerMillion = &defaults.InputCostUSDMicrosPerMillion
+	}
+	if model.OutputCostUSDMicrosPerMillion == nil {
+		model.OutputCostUSDMicrosPerMillion = &defaults.OutputCostUSDMicrosPerMillion
+	}
+	if model.Vision == nil {
+		model.Vision = &defaults.Vision
+	}
+	if model.ToolUse == nil {
+		model.ToolUse = &defaults.ToolUse
+	}
+	if model.Thinking == nil {
+		model.Thinking = &defaults.Thinking
+	}
+	if model.ThinkingDialect == nil {
+		model.ThinkingDialect = &defaults.ThinkingDialect
+	}
+	if model.ThinkingEfforts == nil {
+		efforts := append([]domain.ThinkingEffort(nil), defaults.ThinkingEfforts...)
+		model.ThinkingEfforts = &efforts
+	}
+	return model
+}
+
+// validateModel checks a catalog-overlaid (fully populated) ModelConfig.
+// Callers run overlayModel first so nil contextWindow/maxTokens already hold a
+// catalog value; a remaining nil means the model is not in the catalog and the
+// field was not declared.
 func validateModel(model ModelConfig) error {
 	if strings.TrimSpace(model.ID) == "" || strings.ContainsAny(model.ID, " \t\r\n") || len(model.ID) > 200 {
 		return fmt.Errorf("model id must be non-empty, contain no whitespace, and be at most 200 bytes")
 	}
-	if model.ContextWindow <= 0 || model.MaxTokens <= 0 || model.MaxTokens > model.ContextWindow {
+	if model.ContextWindow == nil || model.MaxTokens == nil {
+		return fmt.Errorf("contextWindow and maxTokens are required (no catalog entry for this model)")
+	}
+	if *model.ContextWindow <= 0 || *model.MaxTokens <= 0 || *model.MaxTokens > *model.ContextWindow {
 		return fmt.Errorf("contextWindow and maxTokens must be positive and maxTokens cannot exceed contextWindow")
 	}
 	const maxPrice = int64(1_000_000_000)
-	if model.InputCostUSDMicrosPerMillion < 0 || model.OutputCostUSDMicrosPerMillion < 0 ||
-		model.InputCostUSDMicrosPerMillion > maxPrice || model.OutputCostUSDMicrosPerMillion > maxPrice {
+	inputCost, outputCost := derefInt64(model.InputCostUSDMicrosPerMillion), derefInt64(model.OutputCostUSDMicrosPerMillion)
+	if inputCost < 0 || outputCost < 0 || inputCost > maxPrice || outputCost > maxPrice {
 		return fmt.Errorf("model token prices must be between 0 and %d USD micros per million", maxPrice)
 	}
-	if err := validateThinking(model.Thinking, model.ThinkingDialect, model.ThinkingEfforts); err != nil {
+	thinking := derefBool(model.Thinking)
+	dialect := domain.ThinkingDialectNone
+	if model.ThinkingDialect != nil {
+		dialect = *model.ThinkingDialect
+	}
+	efforts := []domain.ThinkingEffort{}
+	if model.ThinkingEfforts != nil {
+		efforts = *model.ThinkingEfforts
+	}
+	if len(efforts) == 0 {
+		efforts = []domain.ThinkingEffort{domain.ThinkingDefault}
+	}
+	if err := validateThinking(thinking, dialect, efforts); err != nil {
 		return err
 	}
 	return nil
@@ -521,25 +683,36 @@ func SplitModelRef(ref string) (string, string, error) {
 
 func providerProfile(id string, provider ProviderConfig, apiKey string, modifiedAt time.Time) domain.ProviderProfile {
 	return domain.ProviderProfile{
-		ID: id, Name: provider.Name, ProviderType: provider.Type, BaseURL: provider.BaseURL,
+		ID: id, Name: provider.Name, ProviderType: provider.Type, API: provider.API, BaseURL: provider.BaseURL,
 		CredentialRef: provider.Credential, APIKey: apiKey, CredentialConfigured: apiKey != "", Proxy: provider.Proxy, Status: "active",
 		CreatedAt: modifiedAt, UpdatedAt: modifiedAt,
 	}
 }
 
+// modelProfile builds a domain.ModelProfile from a catalog-overlaid (fully
+// populated) ModelConfig. The overlaid shape guarantees the pointer fields are
+// non-nil; deref helpers keep the body defensive anyway.
 func modelProfile(providerID string, model ModelConfig, isDefault bool, modifiedAt time.Time) *domain.ModelProfile {
 	name := strings.TrimSpace(model.Name)
 	if name == "" {
 		name = model.ID
 	}
+	dialect := domain.ThinkingDialectNone
+	if model.ThinkingDialect != nil {
+		dialect = *model.ThinkingDialect
+	}
+	var efforts []domain.ThinkingEffort
+	if model.ThinkingEfforts != nil {
+		efforts = append([]domain.ThinkingEffort(nil), *model.ThinkingEfforts...)
+	}
 	return &domain.ModelProfile{
 		ID: providerID + "/" + model.ID, ProviderID: providerID, ModelName: model.ID,
-		DisplayName: name, ContextWindow: model.ContextWindow, MaxOutputTokens: model.MaxTokens,
-		InputCostUSDMicrosPerMillion:  model.InputCostUSDMicrosPerMillion,
-		OutputCostUSDMicrosPerMillion: model.OutputCostUSDMicrosPerMillion,
-		SupportsVision:                model.Vision, SupportsToolUse: model.ToolUse,
-		SupportsThinking: model.Thinking, ThinkingDialect: model.ThinkingDialect,
-		SupportedThinkingEfforts: append([]domain.ThinkingEffort(nil), model.ThinkingEfforts...),
+		DisplayName: name, ContextWindow: derefInt(model.ContextWindow), MaxOutputTokens: derefInt(model.MaxTokens),
+		InputCostUSDMicrosPerMillion:  derefInt64(model.InputCostUSDMicrosPerMillion),
+		OutputCostUSDMicrosPerMillion: derefInt64(model.OutputCostUSDMicrosPerMillion),
+		SupportsVision:                derefBool(model.Vision), SupportsToolUse: derefBool(model.ToolUse),
+		SupportsThinking: derefBool(model.Thinking), ThinkingDialect: dialect,
+		SupportedThinkingEfforts: efforts,
 		IsDefault:                isDefault, Status: "active", CreatedAt: modifiedAt, UpdatedAt: modifiedAt,
 	}
 }

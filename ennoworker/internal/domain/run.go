@@ -90,6 +90,7 @@ type ModelRuntimeSnapshot struct {
 	ProviderProfileID        string           `json:"providerProfileId"`
 	ModelProfileID           string           `json:"modelProfileId"`
 	APIModel                 string           `json:"apiModel"`
+	API                      string           `json:"api,omitempty"`
 	BaseURL                  string           `json:"baseUrl"`
 	CredentialRef            string           `json:"credentialRef,omitempty"`
 	APIKey                   string           `json:"-"`
@@ -101,6 +102,15 @@ type ModelRuntimeSnapshot struct {
 	SupportsThinking         bool             `json:"supportsThinking"`
 	ThinkingDialect          ThinkingDialect  `json:"thinkingDialect"`
 	SupportedThinkingEfforts []ThinkingEffort `json:"supportedThinkingEfforts"`
+}
+
+// Protocol returns the frozen wire protocol, defaulting to
+// openai-completions for legacy snapshots that predate the API field.
+func (m ModelRuntimeSnapshot) Protocol() string {
+	if m.API == "" {
+		return APIOpenAICompletions
+	}
+	return m.API
 }
 
 type FrozenRoutingConfig struct {

@@ -70,6 +70,15 @@ func run() error {
 	sessionManager := sessionstore.NewManager(layout.Projects, projectFiles)
 	defer sessionManager.Close()
 	modelFiles := fileconfig.NewModelStore(layout.Models, layout.ProviderAuth, layout.Settings)
+	// Hot reload: external edits to the models catalog and settings re-load the
+	// in-memory snapshot on a debounce. A watch that cannot be established is a
+	// no-op (reads already re-read on every access).
+	stopModelWatch := modelFiles.StartWatch()
+	stopSettingsWatch := modelFiles.Settings.StartWatch()
+	defer func() {
+		stopModelWatch()
+		stopSettingsWatch()
+	}()
 	providers := &store.ProviderRepo{Files: modelFiles}
 	models := &store.ModelRepo{Files: modelFiles}
 	policyFiles := &fileconfig.PolicyStore{Path: layout.Policies}
@@ -192,7 +201,7 @@ func run() error {
 		if err != nil || providerProfile == nil {
 			return "", fmt.Errorf("resolve Graph Builder provider: %w", err)
 		}
-		provider, err := llm.NewOpenAIProvider(llm.OpenAIConfig{
+		provider, err := llm.NewProviderForAPI(providerProfile.API, llm.ProviderConfig{
 			BaseURL: providerProfile.BaseURL, APIKey: llm.NewSecret(providerProfile.APIKey),
 			Model: model.ModelName, MaxTokens: model.MaxOutputTokens,
 		})

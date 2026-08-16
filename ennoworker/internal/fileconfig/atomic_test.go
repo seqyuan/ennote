@@ -29,10 +29,15 @@ func TestWriteAtomicPersistsContentAndMode(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 
-	// No leftover temp files.
+	// No leftover temp files (the advisory lock file is expected).
 	entries, err := os.ReadDir(filepath.Dir(path))
 	require.NoError(t, err)
-	assert.Len(t, entries, 1, "atomic write must not leave temp files behind")
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	assert.ElementsMatch(t, []string{"config.json", "config.json.lock"}, names,
+		"atomic write must leave only the file and its lock behind")
 }
 
 // TestWriteAtomicOverwritesAtomically verifies an existing file is replaced
