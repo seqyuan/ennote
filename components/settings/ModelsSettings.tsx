@@ -330,6 +330,10 @@ function DiscoverModelsDialog({ provider, existingModels, onClose, refresh, setE
   const [fetching, setFetching] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [importing, setImporting] = useState(false);
+  // Probe the endpoint the form currently shows: prefilled from the saved
+  // provider, editable so an edited-but-unsaved endpoint/key can be asked.
+  const [baseUrl, setBaseUrl] = useState(provider.baseUrl ?? "");
+  const [apiKey, setApiKey] = useState("");
 
   const existingNames = new Set(existingModels.map(model => model.modelName));
 
@@ -339,7 +343,10 @@ function DiscoverModelsDialog({ provider, existingModels, onClose, refresh, setE
     try {
       const result = await apiFetch<DiscoveredModel[]>("/v1/provider-profiles/discover-models", {
         method: "POST",
-        body: JSON.stringify({ providerId: provider.id }),
+        body: JSON.stringify({
+          baseUrl: baseUrl.trim() || undefined,
+          apiKey: apiKey.trim() || undefined,
+        }),
       });
       setCatalog(result ?? []);
       setSelected(new Set((result ?? []).map(model => model.modelName)));
@@ -386,7 +393,16 @@ function DiscoverModelsDialog({ provider, existingModels, onClose, refresh, setE
         <button type="button" className="follow-up-close" aria-label="Close" title="Close" onClick={onClose}>✕</button>
       </div>
       <div className="project-create-form">
-        <div className="project-create-actions">
+        <div className="project-create-actions" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "var(--stg-text-secondary)" }}>
+            Base URL
+            <input type="text" value={baseUrl} style={{ height: 30, padding: "0 8px", border: "1px solid var(--stg-border-l2)", borderRadius: 6, background: "var(--stg-input-fill)", color: "var(--stg-text-primary)", font: "13px/20px var(--font-sans)" }}
+              aria-label="Base URL" onChange={(e) => { setBaseUrl(e.target.value); }} />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "var(--stg-text-secondary)" }}>
+            API key
+            <SecretTextInput value={apiKey} onChange={setApiKey} placeholder={provider.credentialConfigured ? "Stored key used when blank" : "Optional key"} />
+          </label>
           <button type="button" className="secondary-btn" onClick={fetchCatalog} disabled={fetching}>
             {fetching ? "Fetching…" : "Fetch catalog"}
           </button>
