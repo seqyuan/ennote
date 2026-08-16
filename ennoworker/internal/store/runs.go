@@ -268,12 +268,16 @@ func (r *RunRepo) submitTurn(ctx context.Context, input domain.SubmitTurnInput, 
 	}
 	if inviteParticipant {
 		inviteMessageID := uuid.NewString()
+		inviteSeq, err := nextMessageSeq(ctx, tx, input.SessionID)
+		if err != nil {
+			return nil, err
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO messages
 			(id,session_id,parent_message_id,role,status,speaker_kind,speaker_snapshot_json,
-			 addressee_kind,visibility,originated_at,created_at)
+			 addressee_kind,visibility,originated_at,created_at,seq)
 			 VALUES(?,?,?,'system','complete','system','{"kind":"system","displayName":"System"}',
-			 'room','room_control',?,?)`, inviteMessageID, input.SessionID, nullableStr(baseMessageID),
-			timestamp.Format(time.RFC3339Nano), timestamp.Format(time.RFC3339Nano)); err != nil {
+			 'room','room_control',?,?,?)`, inviteMessageID, input.SessionID, nullableStr(baseMessageID),
+			timestamp.Format(time.RFC3339Nano), timestamp.Format(time.RFC3339Nano), inviteSeq); err != nil {
 			return nil, fmt.Errorf("insert participant invite: %w", err)
 		}
 		control := domain.ContentBlock{Kind: domain.ContentRoomControl, RoomControl: &domain.RoomControl{
@@ -285,14 +289,18 @@ func (r *RunRepo) submitTurn(ctx context.Context, input domain.SubmitTurnInput, 
 		}
 		userParentMessageID = inviteMessageID
 	}
+	messageSeq, err := nextMessageSeq(ctx, tx, input.SessionID)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO messages (id, session_id, parent_message_id, role, status,
 		 speaker_kind, speaker_snapshot_json, addressee_kind, addressee_object_id, addressee_version_id,
-		 visibility, originated_at, created_at)
+		 visibility, originated_at, created_at, seq)
 		 VALUES (?, ?, ?, 'user', 'complete', 'user', '{"kind":"user","displayName":"You"}',
-		 ?, ?, ?, 'public', ?, ?)`,
+		 ?, ?, ?, 'public', ?, ?, ?)`,
 		messageID, input.SessionID, nullableStr(userParentMessageID), targetKind, nullableStr(targetObjectID), nullableStr(targetVersionID),
-		timestamp.Format(time.RFC3339Nano), timestamp.Format(time.RFC3339Nano),
+		timestamp.Format(time.RFC3339Nano), timestamp.Format(time.RFC3339Nano), messageSeq,
 	); err != nil {
 		return nil, fmt.Errorf("insert user message: %w", err)
 	}
@@ -560,6 +568,10 @@ func (r *RunRepo) FinalizeSuccess(ctx context.Context, runID string, output doma
 	if commitFormat == domain.CommitFormatSpeakerV2 {
 		message := output.Messages[finalAssistantIndex]
 		messageID := uuid.NewString()
+		seq, err := nextMessageSeq(ctx, tx, sessionID)
+		if err != nil {
+			return err
+		}
 		speakerKind := targetKind
 		if speakerKind != string(domain.SpeakerRole) {
 			speakerKind = string(domain.SpeakerHost)
@@ -567,11 +579,11 @@ func (r *RunRepo) FinalizeSuccess(ctx context.Context, runID string, output doma
 		if _, err := tx.ExecContext(ctx, `INSERT INTO messages
 			(id,session_id,parent_message_id,role,status,run_id,speaker_kind,speaker_object_id,
 			 speaker_version_id,participant_instance_id,speaker_snapshot_json,addressee_kind,
-			 visibility,originated_at,created_at)
-			VALUES(?,?,?,'assistant','complete',?,?,?,?,?,?,'room','public',?,?)`,
+			 visibility,originated_at,created_at,seq)
+			VALUES(?,?,?,'assistant','complete',?,?,?,?,?,?,'room','public',?,?,?)`,
 			messageID, sessionID, parentMessageID, runID, speakerKind, nullableNullString(targetObjectID),
 			nullableNullString(targetVersionID), nullableNullString(participantInstanceID), speakerSnapshot,
-			timestamp.Format(time.RFC3339Nano), timestamp.Format(time.RFC3339Nano)); err != nil {
+			timestamp.Format(time.RFC3339Nano), timestamp.Format(time.RFC3339Nano), seq); err != nil {
 			return fmt.Errorf("insert speaker-ledger message: %w", err)
 		}
 		if err := insertMessageParts(ctx, tx, messageID, message.Content); err != nil {
@@ -592,12 +604,16 @@ func (r *RunRepo) FinalizeSuccess(ctx context.Context, runID string, output doma
 			if index == finalAssistantIndex {
 				visibility = domain.VisibilityPublic
 			}
+			seq, err := nextMessageSeq(ctx, tx, sessionID)
+			if err != nil {
+				return err
+			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO messages
 				(id, session_id, parent_message_id, role, status, run_id, speaker_kind,
-				 speaker_snapshot_json, visibility, originated_at, created_at)
-				VALUES (?, ?, ?, ?, 'complete', ?, 'host', '{"kind":"host","displayName":"Host"}', ?, ?, ?)`,
+				 speaker_snapshot_json, visibility, originated_at, created_at, seq)
+				VALUES (?, ?, ?, ?, 'complete', ?, 'host', '{"kind":"host","displayName":"Host"}', ?, ?, ?, ?)`,
 				messageID, sessionID, parentMessageID, message.Role, runID, visibility,
-				timestamp.Format(time.RFC3339Nano), timestamp.Format(time.RFC3339Nano)); err != nil {
+				timestamp.Format(time.RFC3339Nano), timestamp.Format(time.RFC3339Nano), seq); err != nil {
 				return fmt.Errorf("insert projected message: %w", err)
 			}
 			if err := insertMessageParts(ctx, tx, messageID, message.Content); err != nil {

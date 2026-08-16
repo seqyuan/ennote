@@ -1092,6 +1092,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sessions/{sessionID}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+            };
+            cookie?: never;
+        };
+        get: operations["streamSessionEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sessions/{sessionID}/artifacts/{artifactID}": {
         parameters: {
             query?: never;
@@ -2383,6 +2401,11 @@ export interface components {
             parts: components["schemas"]["MessageContentBlock"][];
             /** Format: date-time */
             createdAt: string;
+            /**
+             * Format: int64
+             * @description Session-monotonic message sequence; 0 for legacy rows pending backfill
+             */
+            seq?: number;
         };
         MessageContentBlock: components["schemas"]["TextContentBlock"] | components["schemas"]["ThinkingContentBlock"] | components["schemas"]["ToolCallContentBlock"] | components["schemas"]["ToolResultContentBlock"] | components["schemas"]["ImageContentBlock"] | components["schemas"]["ImageDescriptionContentBlock"] | components["schemas"]["RoomControlContentBlock"];
         RoomControlContentBlock: {
@@ -3234,6 +3257,14 @@ export interface components {
         ActiveRunState: {
             run: components["schemas"]["AgentRun"];
             pendingApproval?: components["schemas"]["ToolApprovalRequest"];
+        };
+        /** @description Authoritative transient-state projection pushed on the session change feed */
+        SessionRunSnapshot: {
+            activeRun?: components["schemas"]["AgentRun"];
+            pendingApproval?: components["schemas"]["ToolApprovalRequest"];
+            queuedInputs?: components["schemas"]["QueuedInput"][];
+            checkpoints?: components["schemas"]["ContextCompaction"][];
+            delegationActive?: boolean;
         };
         TurnSubmission: {
             turnId: string;
@@ -5488,6 +5519,33 @@ export interface operations {
                 };
             };
             400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    streamSessionEvents: {
+        parameters: {
+            query?: {
+                after?: number;
+            };
+            header?: {
+                "Last-Event-ID"?: string;
+            };
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session change feed (durable event whitelist + transient snapshots) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
             404: components["responses"]["Error"];
         };
     };

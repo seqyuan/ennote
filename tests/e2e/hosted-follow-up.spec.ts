@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { subscribedFrame } from "./session-feed";
 
 const project = { id: "followup-project", name: "Follow-up workspace", description: "", status: "active",
   createdAt: "2026-08-08T00:00:00Z", updatedAt: "2026-08-08T00:00:00Z" };
@@ -27,6 +28,7 @@ test("queues a follow-up while a run is active and clears it once consumed", asy
   const firstStreamHeld = new Promise<void>(resolve => { releaseFirstStream = () => resolve(); });
   let firstStreamReleased = false;
   let sentConsumed = false;
+  let runFinished = false;
 
   await page.route("**/api/worker/v1/**", async route => {
     const url = new URL(route.request().url());
@@ -36,6 +38,8 @@ test("queues a follow-up while a run is active and clears it once consumed", asy
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
     if (path === `/v1/sessions/${session.id}`) return fulfill(route, session);
     if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, { run });
+    if (path === `/v1/sessions/${session.id}/events`) return route.fulfill({ status: 200, contentType: "text/event-stream",
+      body: subscribedFrame({ activeRun: runFinished ? null : run, pendingApproval: null, queuedInputs: [], checkpoints: [], delegationActive: false }) });
     if (path === `/v1/sessions/${session.id}/messages`) return fulfill(route, { messages: [], hasMore: false, activeLeafMessageId: "m1" });
     if (path === `/v1/sessions/${session.id}/compactions` || path === `/v1/sessions/${session.id}/branches`) return fulfill(route, []);
     if (path === "/v1/roles") return fulfill(route, { items: [], nextCursor: "" });
@@ -58,6 +62,7 @@ test("queues a follow-up while a run is active and clears it once consumed", asy
         return route.fulfill({ status: 200, contentType: "text/event-stream",
           body: `data: {"type":"follow_up_consumed","payload":{"seq":1}}\n\n` });
       }
+      runFinished = true;
       return route.fulfill({ status: 200, contentType: "text/event-stream",
         body: `data: {"type":"run_succeeded","payload":{}}\n\n` });
     }

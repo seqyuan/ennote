@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { subscribedFrame } from "./session-feed";
 
 const project = { id: "surface-project", name: "Spatial atlas", description: "", status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" };
 const session = { id: "surface-session", projectId: project.id, title: "Review marker matrix", status: "active", activeLeafMessageId: "m7", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:07Z" };
@@ -100,6 +101,8 @@ test("a nonterminal stream EOF reconnects the same run and refreshes canonical h
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
     if (path === `/v1/sessions/${session.id}`) return fulfill(route, session);
     if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, completed ? null : { run });
+    if (path === `/v1/sessions/${session.id}/events`) return route.fulfill({ status: 200, contentType: "text/event-stream",
+      body: subscribedFrame({ activeRun: completed ? null : run, pendingApproval: null, queuedInputs: [], checkpoints: [], delegationActive: false }) });
     if (path === `/v1/sessions/${session.id}/messages`) return fulfill(route, {
       messages: completed ? [
         message("m1", undefined, "user", [{ type: "text", text: "Resume after disconnect" }]),

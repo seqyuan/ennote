@@ -172,6 +172,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/sessions/{sessionID}/archive", s.archiveSession)
 	mux.HandleFunc("POST /v1/sessions/{sessionID}/restore", s.restoreSession)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/messages", s.listSessionMessages)
+	mux.HandleFunc("GET /v1/sessions/{sessionID}/events", s.streamSessionEvents)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/artifacts/{artifactID}", s.getArtifact)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/artifacts/{artifactID}/preview", s.previewArtifact)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/artifacts/{artifactID}/download", s.downloadArtifact)

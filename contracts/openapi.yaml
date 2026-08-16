@@ -1564,6 +1564,25 @@ paths:
                       data: { $ref: "#/components/schemas/SessionMessagePage" }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/events:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    get:
+      operationId: streamSessionEvents
+      parameters:
+        - name: after
+          in: query
+          schema: { type: integer, format: int64, minimum: 0 }
+        - name: Last-Event-ID
+          in: header
+          schema: { type: string }
+      responses:
+        "200":
+          description: Session change feed (durable event whitelist + transient snapshots)
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/sessions/{sessionID}/artifacts/{artifactID}:
     parameters:
       - $ref: "#/components/parameters/SessionID"
@@ -3502,6 +3521,7 @@ components:
           type: array
           items: { $ref: "#/components/schemas/MessageContentBlock" }
         createdAt: { type: string, format: date-time }
+        seq: { type: integer, format: int64, description: "Session-monotonic message sequence; 0 for legacy rows pending backfill" }
     MessageContentBlock:
       oneOf:
         - $ref: "#/components/schemas/TextContentBlock"
@@ -4625,6 +4645,19 @@ components:
       properties:
         run: { $ref: "#/components/schemas/AgentRun" }
         pendingApproval: { $ref: "#/components/schemas/ToolApprovalRequest" }
+    SessionRunSnapshot:
+      type: object
+      description: Authoritative transient-state projection pushed on the session change feed
+      properties:
+        activeRun: { $ref: "#/components/schemas/AgentRun" }
+        pendingApproval: { $ref: "#/components/schemas/ToolApprovalRequest" }
+        queuedInputs:
+          type: array
+          items: { $ref: "#/components/schemas/QueuedInput" }
+        checkpoints:
+          type: array
+          items: { $ref: "#/components/schemas/ContextCompaction" }
+        delegationActive: { type: boolean }
     TurnSubmission:
       type: object
       required: [turnId, userMessageId, run, existing]

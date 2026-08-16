@@ -107,6 +107,10 @@ type Message struct {
 	OriginatedAt          *time.Time        `json:"originatedAt,omitempty"`
 	Parts                 []ContentBlock    `json:"parts"`
 	CreatedAt             time.Time         `json:"createdAt"`
+	// Seq is the session-monotonic message sequence, assigned at insert time
+	// (MAX(seq)+1 within the session) and used for gap detection / consecutive
+	// assertions on the client. Legacy rows backfilled once read Seq = 0.
+	Seq int64 `json:"seq"`
 }
 
 type SessionBranch struct {

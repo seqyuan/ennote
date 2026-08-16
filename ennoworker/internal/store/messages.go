@@ -16,6 +16,20 @@ type MessageRepo struct{ DB *sql.DB }
 
 var ErrMessageCursorInvalid = errors.New("message cursor is not on the active session lineage")
 
+// nextMessageSeq returns the next session-monotonic message seq (MAX(seq)+1).
+// Callers within a multi-message transaction must call it once per inserted
+// message so each message receives a unique, increasing seq. The session DB is
+// per-session, but the filter keeps parity with the existing defensive style.
+func nextMessageSeq(ctx context.Context, tx *sql.Tx, sessionID string) (int64, error) {
+	var seq int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE session_id = ?`, sessionID,
+	).Scan(&seq); err != nil {
+		return 0, fmt.Errorf("allocate message seq: %w", err)
+	}
+	return seq, nil
+}
+
 func (r *MessageRepo) CreateUserMessage(ctx context.Context, sessionID, parentID, text string) (*domain.Message, error) {
 	timestamp := time.Now().UTC()
 	messageID := uuid.NewString()
@@ -44,12 +58,16 @@ func (r *MessageRepo) CreateUserMessage(ctx context.Context, sessionID, parentID
 		}
 	}
 
+	seq, err := nextMessageSeq(ctx, tx, sessionID)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO messages (id, session_id, parent_message_id, role, status,
-		 speaker_kind, speaker_snapshot_json, addressee_kind, visibility, originated_at, created_at)
+		 speaker_kind, speaker_snapshot_json, addressee_kind, visibility, originated_at, created_at, seq)
 		 VALUES (?, ?, ?, 'user', 'complete', 'user', '{"kind":"user","displayName":"You"}',
-		 'host', 'public', ?, ?)`,
-		messageID, sessionID, nullableStr(parentID), timestamp.Format(time.RFC3339Nano), timestamp.Format(time.RFC3339Nano),
+		 'host', 'public', ?, ?, ?)`,
+		messageID, sessionID, nullableStr(parentID), timestamp.Format(time.RFC3339Nano), timestamp.Format(time.RFC3339Nano), seq,
 	); err != nil {
 		return nil, fmt.Errorf("create message: %w", err)
 	}
@@ -78,6 +96,7 @@ func (r *MessageRepo) CreateUserMessage(ctx context.Context, sessionID, parentID
 		Visibility:      domain.VisibilityPublic,
 		OriginatedAt:    &timestamp,
 		CreatedAt:       timestamp,
+		Seq:             seq,
 	}, nil
 }
 
@@ -119,17 +138,17 @@ func (r *MessageRepo) loadLineage(ctx context.Context, sessionID, leafID string)
 	const query = `WITH RECURSIVE chain(id, session_id, parent_message_id, role, status, run_id,
 		speaker_kind, speaker_object_id, speaker_version_id, participant_instance_id, speaker_snapshot_json,
 		addressee_kind, addressee_object_id, addressee_version_id, reply_to_message_id, visibility,
-		originated_at, created_at, depth) AS (
+		originated_at, created_at, seq, depth) AS (
 		SELECT id, session_id, parent_message_id, role, status, run_id,
 			speaker_kind, speaker_object_id, speaker_version_id, participant_instance_id, speaker_snapshot_json,
 			addressee_kind, addressee_object_id, addressee_version_id, reply_to_message_id, visibility,
-			originated_at, created_at, 0
+			originated_at, created_at, seq, 0
 		FROM messages WHERE id = ? AND session_id = ?
 		UNION ALL
 		SELECT m.id, m.session_id, m.parent_message_id, m.role, m.status, m.run_id,
 			m.speaker_kind, m.speaker_object_id, m.speaker_version_id, m.participant_instance_id, m.speaker_snapshot_json,
 			m.addressee_kind, m.addressee_object_id, m.addressee_version_id, m.reply_to_message_id, m.visibility,
-			m.originated_at, m.created_at, c.depth + 1
+			m.originated_at, m.created_at, m.seq, c.depth + 1
 		FROM messages m JOIN chain c
 		  ON m.id = c.parent_message_id AND m.session_id = c.session_id
 		WHERE c.depth < 500
@@ -137,7 +156,7 @@ func (r *MessageRepo) loadLineage(ctx context.Context, sessionID, leafID string)
 	SELECT id, session_id, parent_message_id, role, status, run_id,
 		speaker_kind, speaker_object_id, speaker_version_id, participant_instance_id, speaker_snapshot_json,
 		addressee_kind, addressee_object_id, addressee_version_id, reply_to_message_id, visibility,
-		originated_at, created_at
+		originated_at, created_at, seq
 	FROM chain ORDER BY depth DESC`
 
 	rows, err := r.DB.QueryContext(ctx, query, leafID, sessionID)
@@ -154,7 +173,7 @@ func (r *MessageRepo) loadLineage(ctx context.Context, sessionID, leafID string)
 			&message.ID, &message.SessionID, &message.ParentMessageID, &message.Role, &message.Status, &runID,
 			&message.SpeakerKind, &speakerObjectID, &speakerVersionID, &participantInstanceID, &speakerSnapshot,
 			&addresseeKind, &addresseeObjectID, &addresseeVersionID, &replyToMessageID, &message.Visibility,
-			&originatedAt, &createdAt,
+			&originatedAt, &createdAt, &message.Seq,
 		); err != nil {
 			return nil, fmt.Errorf("scan lineage message: %w", err)
 		}
@@ -251,24 +270,24 @@ func (r *MessageRepo) Page(ctx context.Context, sessionID, leafID, beforeMessage
 	const pageQuery = `WITH RECURSIVE page_chain(id,session_id,parent_message_id,role,status,run_id,
 		speaker_kind,speaker_object_id,speaker_version_id,participant_instance_id,speaker_snapshot_json,
 		addressee_kind,addressee_object_id,addressee_version_id,reply_to_message_id,visibility,
-		originated_at,created_at,depth,path) AS (
+		originated_at,created_at,seq,depth,path) AS (
 		SELECT id,session_id,parent_message_id,role,status,run_id,
 			speaker_kind,speaker_object_id,speaker_version_id,participant_instance_id,speaker_snapshot_json,
 			addressee_kind,addressee_object_id,addressee_version_id,reply_to_message_id,visibility,
-			originated_at,created_at,0,'|' || id || '|'
+			originated_at,created_at,seq,0,'|' || id || '|'
 		FROM messages WHERE id=? AND session_id=?
 		UNION ALL
 		SELECT m.id,m.session_id,m.parent_message_id,m.role,m.status,m.run_id,
 			m.speaker_kind,m.speaker_object_id,m.speaker_version_id,m.participant_instance_id,m.speaker_snapshot_json,
 			m.addressee_kind,m.addressee_object_id,m.addressee_version_id,m.reply_to_message_id,m.visibility,
-			m.originated_at,m.created_at,c.depth+1,c.path || m.id || '|'
+			m.originated_at,m.created_at,m.seq,c.depth+1,c.path || m.id || '|'
 		FROM messages m JOIN page_chain c ON m.id=c.parent_message_id AND m.session_id=c.session_id
 		WHERE c.depth < ? AND instr(c.path,'|' || m.id || '|')=0
 	)
 	SELECT c.id,c.session_id,c.parent_message_id,c.role,c.status,c.run_id,
 		c.speaker_kind,c.speaker_object_id,c.speaker_version_id,c.participant_instance_id,c.speaker_snapshot_json,
 		c.addressee_kind,c.addressee_object_id,c.addressee_version_id,c.reply_to_message_id,c.visibility,
-		c.originated_at,c.created_at,p.ordinal,p.block_kind,p.payload_json
+		c.originated_at,c.created_at,c.seq,p.ordinal,p.block_kind,p.payload_json
 	FROM page_chain c LEFT JOIN message_parts p ON p.message_id=c.id
 	LEFT JOIN agent_runs ar ON ar.id=c.run_id
 	WHERE ar.commit_format_version IS NULL OR ar.commit_format_version=1 OR c.visibility IN ('public','room_control')
@@ -286,10 +305,11 @@ func (r *MessageRepo) Page(ctx context.Context, sessionID, leafID, beforeMessage
 		var addresseeKind, addresseeObjectID, addresseeVersionID, replyToMessageID, originatedAt sql.NullString
 		var ordinal sql.NullInt64
 		var kind, payload sql.NullString
+		var seq int64
 		if err := rows.Scan(&id, &rowSessionID, &parentID, &role, &status, &runID,
 			&speakerKind, &speakerObjectID, &speakerVersionID, &participantInstanceID, &speakerSnapshot,
 			&addresseeKind, &addresseeObjectID, &addresseeVersionID, &replyToMessageID, &visibility,
-			&originatedAt, &createdAt, &ordinal, &kind, &payload); err != nil {
+			&originatedAt, &createdAt, &seq, &ordinal, &kind, &payload); err != nil {
 			return page, fmt.Errorf("scan message page: %w", err)
 		}
 		if len(newestFirst) == 0 || newestFirst[len(newestFirst)-1].ID != id {
@@ -299,7 +319,7 @@ func (r *MessageRepo) Page(ctx context.Context, sessionID, leafID, beforeMessage
 			}
 			message := domain.Message{ID: id, SessionID: rowSessionID, Role: role, Status: status,
 				SpeakerKind: domain.SpeakerKind(speakerKind), SpeakerSnapshot: json.RawMessage(speakerSnapshot),
-				Visibility: domain.MessageVisibility(visibility), Parts: []domain.ContentBlock{}, CreatedAt: created}
+				Visibility: domain.MessageVisibility(visibility), Parts: []domain.ContentBlock{}, CreatedAt: created, Seq: seq}
 			if parentID.Valid {
 				message.ParentMessageID = &parentID.String
 			}

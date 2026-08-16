@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { subscribedFrame } from "./session-feed";
 
 const project = { id: "delegation-project", name: "Delegation workspace", description: "", status: "active",
   createdAt: "2026-08-04T00:00:00Z", updatedAt: "2026-08-04T00:00:00Z" };
@@ -118,6 +119,13 @@ test("discovers a later child tool approval while the parent waits", async ({ pa
       return fulfill(route, { run: parentRun,
         ...(activeRunRequests > 1 && !approved ? { pendingApproval: childApproval } : {}) });
     }
+    if (path === `/v1/sessions/${session.id}/events`) {
+      activeRunRequests += 1;
+      return route.fulfill({ status: 200, contentType: "text/event-stream",
+        body: subscribedFrame({ activeRun: parentRun,
+          pendingApproval: activeRunRequests > 1 && !approved ? childApproval : null,
+          queuedInputs: [], checkpoints: [], delegationActive: false }) });
+    }
     if (path === `/v1/runs/${parentRun.id}/events`) return route.fulfill({ status: 200, contentType: "text/event-stream", body: "" });
     if (path === `/v1/approval-requests/${childApproval.id}/decision`) {
       approved = true;
@@ -152,6 +160,11 @@ test.describe("mobile admission approval", () => {
       if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, approved ? null : {
         run: { ...parentRun, status: "waiting_delegation_admission" }, pendingApproval: approval,
       });
+      if (path === `/v1/sessions/${session.id}/events`) return route.fulfill({ status: 200, contentType: "text/event-stream",
+        body: subscribedFrame(approved
+          ? { activeRun: null, pendingApproval: null, queuedInputs: [], checkpoints: [], delegationActive: false }
+          : { activeRun: { ...parentRun, status: "waiting_delegation_admission" }, pendingApproval: approval,
+            queuedInputs: [], checkpoints: [], delegationActive: false }) });
       if (path === `/v1/runs/${parentRun.id}/events`) return route.fulfill({ status: 200, contentType: "text/event-stream", body: "" });
       if (path === `/v1/approval-requests/${approval.id}/decision`) {
         expect(route.request().postDataJSON()).toMatchObject({ decision: "approved" });

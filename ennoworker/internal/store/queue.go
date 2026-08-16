@@ -188,6 +188,45 @@ func (r *QueueRepo) CancelPending(ctx context.Context, runID string) (int64, err
 	return result.RowsAffected()
 }
 
+// ListQueuedBySession returns the session's still-queued inputs (steer and
+// follow_up), used by the session snapshot. Only the active run can hold queued
+// inputs (they are cancelled on run terminal), so the session-level list is
+// effectively the active run's pending queue.
+func (r *QueueRepo) ListQueuedBySession(ctx context.Context, sessionID string) ([]domain.QueuedInput, error) {
+	rows, err := r.DB.QueryContext(ctx,
+		`SELECT id, run_id, session_id, client_request_id, seq, kind, content_json, status, created_at
+		 FROM run_input_queue WHERE session_id = ? AND status = 'queued' ORDER BY seq`, sessionID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query queued inputs: %w", err)
+	}
+	defer rows.Close()
+	var items []domain.QueuedInput
+	for rows.Next() {
+		var item domain.QueuedInput
+		var contentJSON, createdAt string
+		if err := rows.Scan(
+			&item.ID, &item.RunID, &item.SessionID, &item.ClientRequestID,
+			&item.Seq, &item.Kind, &contentJSON, &item.Status, &createdAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan queued input: %w", err)
+		}
+		var content struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal([]byte(contentJSON), &content); err != nil {
+			return nil, fmt.Errorf("decode queued input: %w", err)
+		}
+		item.Text = content.Text
+		item.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse queued input timestamp: %w", err)
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func findQueuedInputTx(ctx context.Context, tx *sql.Tx, runID, clientRequestID string) (*domain.QueuedInput, error) {
 	var item domain.QueuedInput
 	var contentJSON, createdAt string

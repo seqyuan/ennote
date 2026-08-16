@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { subscribedFrame } from "./session-feed";
 
 const project = { id: "approval-project", name: "Approval project", description: "", status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" };
 const session = { id: "approval-session", projectId: project.id, title: "Approval session", status: "active", activeLeafMessageId: "message", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" };
@@ -28,6 +29,11 @@ async function mockApprovalApp(page: Page, onDecision: (decision: string) => voi
       const snapshot = active;
       if (delayReplayRefresh && activeRequests > 1) await new Promise(resolve => setTimeout(resolve, 250));
       return fulfill(route, snapshot);
+    }
+    if (path === `/v1/sessions/${session.id}/events`) {
+      const value = active as { run?: unknown; pendingApproval?: unknown };
+      return route.fulfill({ status: 200, contentType: "text/event-stream",
+        body: subscribedFrame({ activeRun: value.run ?? null, pendingApproval: value.pendingApproval ?? null, queuedInputs: [], checkpoints: [], delegationActive: false }) });
     }
     if (path === `/v1/sessions/${session.id}/messages`) return fulfill(route, { messages: [], hasMore: false, activeLeafMessageId: "message" });
     if (path === `/v1/sessions/${session.id}/compactions`) return fulfill(route, []);

@@ -92,10 +92,14 @@ func (r *AgentFlowRunRepo) CreateFlowRun(ctx context.Context, input CreateFlowRu
 	// the session busy constraint applies while the flow is running. The
 	// message is private: the public transcript stays clean; the flow timeline
 	// is event-driven, not transcript-driven.
+	messageSeq, err := nextMessageSeq(ctx, tx, input.SessionID)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO messages
-		(id,session_id,parent_message_id,role,status,speaker_kind,speaker_snapshot_json,visibility,created_at)
-		VALUES(?,?,NULL,'user','complete','system','{"kind":"system","displayName":"System"}','private',?)`,
-		messageID, input.SessionID, timestamp); err != nil {
+		(id,session_id,parent_message_id,role,status,speaker_kind,speaker_snapshot_json,visibility,created_at,seq)
+		VALUES(?,?,NULL,'user','complete','system','{"kind":"system","displayName":"System"}','private',?,?)`,
+		messageID, input.SessionID, timestamp, messageSeq); err != nil {
 		return nil, fmt.Errorf("create flow anchor message: %w", err)
 	}
 	if err := insertMessageParts(ctx, tx, messageID, []domain.ContentBlock{{

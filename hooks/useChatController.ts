@@ -51,6 +51,7 @@ export function useChatController(deps: ChatControllerDeps) {
     sessionId: selectedSession, lineageId: activeBranchId, appendMessage: messagesData.appendTransient,
     upsertMessage: messagesData.upsertTransient, refreshLatest: messagesData.refreshLatest,
     refreshSession: refreshSelectedSession,
+    activeRun: messagesData.activeRun, pendingApproval: messagesData.pendingApproval,
   });
   const recoveryData = useRunRecovery(selectedSession, activeBranchId, agent.activeRunID);
   const branchesData = useSessionBranches({ sessionId: selectedSession, activeBranchId, onSessionUpdated: updateSession });

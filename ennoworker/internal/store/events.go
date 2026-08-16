@@ -57,6 +57,46 @@ func (r *EventRepo) After(ctx context.Context, runID string, afterEventID int64,
 	return events, rows.Err()
 }
 
+// sessionEventWhitelist is the durable event types forwarded on the session
+// change feed. Everything else stays on the run-level stream. message_committed
+// is additionally filtered by publish_mode below (private_to_parent child runs
+// never appear on the session's public timeline).
+const sessionEventWhitelist = `('message_committed','run_succeeded','run_failed','run_cancelled','run_interrupted',
+ 'context_compaction_completed','run_context_compaction_completed',
+ 'approval_requested','approval_resolved','input_queued','input_injected')`
+
+// SessionEventsAfter returns session-scoped durable events after a cursor, in
+// event_id order. run_events has no session_id column, so the session filter is
+// a join to agent_runs; event_id is the session database's global monotonic
+// sequence, so the ORDER BY is a total order across all runs in the session.
+func (r *EventRepo) SessionEventsAfter(ctx context.Context, sessionID string, afterEventID int64, limit int) ([]domain.RunEvent, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
+	}
+	query := `SELECT e.event_id, e.run_id, e.seq, e.event_type, e.payload_json, e.created_at
+		FROM run_events e
+		JOIN agent_runs ar ON ar.id = e.run_id
+		WHERE ar.session_id = ? AND e.event_id > ?
+		  AND e.event_type IN ` + sessionEventWhitelist + `
+		  AND NOT (e.event_type = 'message_committed' AND ar.publish_mode = 'private_to_parent')
+		ORDER BY e.event_id LIMIT ?`
+	rows, err := r.DB.QueryContext(ctx, query, sessionID, afterEventID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query session events: %w", err)
+	}
+	defer rows.Close()
+
+	var events []domain.RunEvent
+	for rows.Next() {
+		event, err := scanRunEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	return events, rows.Err()
+}
+
 func appendEventsTx(ctx context.Context, tx *sql.Tx, runID string, pending ...domain.PendingEvent) ([]domain.RunEvent, error) {
 	var nextSeq int64
 	if err := tx.QueryRowContext(ctx,

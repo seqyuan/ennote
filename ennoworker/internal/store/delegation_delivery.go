@@ -115,10 +115,14 @@ func (r *DelegationRepo) TickSession(ctx context.Context, sessionID string) (*do
 	if leafMessageID.String == "" {
 		leafMessageID.Valid = false
 	}
+	messageSeq, err := nextMessageSeq(ctx, tx, sessionID)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO messages
-		(id,session_id,parent_message_id,role,status,speaker_kind,speaker_snapshot_json,visibility,created_at)
-		VALUES(?,?,?,'user','complete','system','{"kind":"system","displayName":"System"}','public',?)`,
-		messageID, sessionID, nullableBackfillString(leafMessageID), now); err != nil {
+		(id,session_id,parent_message_id,role,status,speaker_kind,speaker_snapshot_json,visibility,created_at,seq)
+		VALUES(?,?,?,'user','complete','system','{"kind":"system","displayName":"System"}','public',?,?)`,
+		messageID, sessionID, nullableBackfillString(leafMessageID), now, messageSeq); err != nil {
 		return nil, fmt.Errorf("create continuation input message: %w", err)
 	}
 	if err := insertMessageParts(ctx, tx, messageID, []domain.ContentBlock{{

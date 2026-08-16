@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { ActiveRunState, AgentRun, ApprovalDecision, ToolApprovalRequest } from "@/lib/approval";
+import type { AgentRun, ApprovalDecision, ToolApprovalRequest } from "@/lib/approval";
 import type { RunUsage } from "@/hooks/chat-controller-types";
 import type { TurnMessage } from "@/lib/chat-messages";
 import { runFailureMessage, errorMessage } from "@/lib/provider-errors";
@@ -16,6 +16,10 @@ interface UseAgentSessionInput {
   upsertMessage: (message: TurnMessage) => void;
   refreshLatest: () => Promise<void>;
   refreshSession: () => Promise<unknown>;
+  // Phase C: the authoritative run/approval projection from the session store
+  // snapshot (fed by the session change feed), replacing /active-run polling.
+  activeRun: AgentRun | null;
+  pendingApproval: ToolApprovalRequest | null;
 }
 
 function genId(): string {
@@ -23,11 +27,9 @@ function genId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMessage, refreshLatest, refreshSession }: UseAgentSessionInput) {
-  const [activeRun, setActiveRun] = useState<AgentRun | null>(null);
-  const [pendingApproval, setPendingApproval] = useState<ToolApprovalRequest | null>(null);
+export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMessage, refreshLatest, refreshSession,
+  activeRun, pendingApproval }: UseAgentSessionInput) {
   const [resolvingApproval, setResolvingApproval] = useState<ApprovalDecision | null>(null);
-  const [delegationActive, setDelegationActive] = useState(false);
   const [status, setStatus] = useState("");
   const [usage, setUsage] = useState<RunUsage | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,68 +40,44 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
   const decisionGeneration = useRef(0);
   const currentSession = useRef(sessionId);
   const streamConnected = useRef(false);
+  const streamedRunId = useRef<string | null>(null);
+  const [streamNonce, setStreamNonce] = useState(0);
 
   useEffect(() => { currentSession.current = sessionId; }, [sessionId]);
 
-  const refreshPendingApproval = useCallback(async (expectedRunID: string, version: number) => {
-    const selected = currentSession.current;
-    const expectedDecisionVersion = decisionGeneration.current;
-    if (!selected) return;
-    try {
-      const active = await apiFetch<ActiveRunState | null>(`/v1/sessions/${encodeURIComponent(selected)}/active-run`);
-      if (generation.current !== version || decisionGeneration.current !== expectedDecisionVersion ||
-        active?.run.id !== expectedRunID) return;
-      setActiveRun(active.run);
-      setPendingApproval(active.pendingApproval ?? null);
-      if (active.run.status === "waiting_children") setDelegationActive(true);
-      if (active.pendingApproval) setStatus("Waiting for approval");
-      else if (active.run.status === "waiting_children") setStatus("Delegated roles are working…");
-      else if (active.run.status === "waiting_delegation_admission") setStatus("Waiting for delegation approval");
-    } catch (err) {
-      if (generation.current === version) setError((err as Error).message);
-    }
-  }, []);
-
-  const watchRun = useCallback(async (run: AgentRun, restoredApproval?: ToolApprovalRequest | null) => {
+  // streamRun opens the run-level SSE for a given run and manages the local
+  // live-rendering state (status/usage/followUps). The authoritative run and
+  // approval projection lives in the session store snapshot now.
+  const streamRun = useCallback(async (run: AgentRun, signal: AbortSignal, version: number) => {
     const selected = currentSession.current;
     if (!selected || run.sessionId !== selected) return;
-    const version = ++generation.current;
-    streamController.current?.abort();
-    const controller = new AbortController();
-    streamController.current = controller;
-    setActiveRun(run);
-    setPendingApproval(restoredApproval ?? null);
-    setDelegationActive(run.status === "waiting_children");
-    setStatus(restoredApproval ? "Waiting for approval" : run.runKind === "context_compaction" ? "Compaction queued…" :
+    streamedRunId.current = run.id;
+    streamConnected.current = true;
+    setStatus(pendingApproval ? "Waiting for approval" : run.runKind === "context_compaction" ? "Compaction queued…" :
       run.status === "waiting_children" ? "Delegated roles are working…" :
       run.status === "waiting_delegation_admission" ? "Waiting for delegation approval" : "Running…");
     setUsage(null);
     let terminal = false;
-    streamConnected.current = true;
     try {
       if (run.runKind === "context_compaction") {
-        terminal = await streamCompactionEvents(run.id, setStatus, controller.signal);
+        terminal = await streamCompactionEvents(run.id, setStatus, signal);
       } else {
-        terminal = await streamAgentEvents(run.id, upsertMessage, setStatus, setUsage, controller.signal, {
-          requested: () => void refreshPendingApproval(run.id, version),
-          resolved: () => { if (generation.current === version) setPendingApproval(null); },
-          delegated: () => { if (generation.current === version) setDelegationActive(true); },
+        terminal = await streamAgentEvents(run.id, upsertMessage, setStatus, setUsage, signal, {
+          requested: () => {}, // approval projection is snapshot-authoritative
+          resolved: () => {},
+          delegated: () => {}, // delegationActive is carried by the snapshot
           followUpConsumed: () => { if (generation.current === version) setPendingFollowUps(current => current.slice(1)); },
         });
       }
     } catch (err) {
       terminal = err instanceof TerminalRunError;
-      if (!controller.signal.aborted && generation.current === version) setError((err as Error).message);
+      if (!signal.aborted && generation.current === version) setError((err as Error).message);
     } finally {
       if (generation.current === version) streamConnected.current = false;
-      if (!terminal && !controller.signal.aborted && generation.current === version) {
+      if (!terminal && !signal.aborted && generation.current === version) {
         setStatus("Run connection interrupted");
       }
-      if (terminal && !controller.signal.aborted && generation.current === version && currentSession.current === selected) {
-        setActiveRun(null);
-        setPendingApproval(null);
-        setResolvingApproval(null);
-        setDelegationActive(false);
+      if (terminal && !signal.aborted && generation.current === version && currentSession.current === selected) {
         setPendingFollowUps([]);
         streamController.current = null;
         await refreshSession().catch(() => null);
@@ -109,73 +87,74 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
         }, 1600);
       }
     }
-  }, [refreshLatest, refreshPendingApproval, refreshSession, upsertMessage]);
+  }, [refreshLatest, refreshSession, upsertMessage, pendingApproval]);
 
-  useEffect(() => {
+  // watchRun starts streaming a freshly submitted/retried run immediately, so
+  // the UI gets fast feedback before the snapshot catches up (≈250ms).
+  const watchRun = useCallback((run: AgentRun) => {
+    const selected = currentSession.current;
+    if (!selected || run.sessionId !== selected) return;
     const version = ++generation.current;
     streamController.current?.abort();
+    const controller = new AbortController();
+    streamController.current = controller;
+    void streamRun(run, controller.signal, version);
+  }, [streamRun]);
+
+  // Batched local-state reset, extracted so effects don't call setState inline
+  // (react-hooks/set-state-in-effect).
+  const resetLiveState = useCallback(() => {
+    setResolvingApproval(null);
+    setStatus("");
+    setUsage(null);
+    setError(null);
+    setPendingFollowUps([]);
+  }, []);
+
+  // Reset on session/branch switch (declared before the streaming effect so it
+  // aborts the previous session's run stream first).
+  useEffect(() => {
+    generation.current += 1;
+    streamController.current?.abort();
     decisionController.current?.abort();
-    queueMicrotask(() => {
-      if (generation.current !== version) return;
-      setActiveRun(null);
-      setPendingApproval(null);
-      setResolvingApproval(null);
-      setDelegationActive(false);
-      setStatus("");
-      setError(null);
-    });
-    if (!sessionId) return;
-    const controller = new AbortController();
-    apiFetch<ActiveRunState | null>(`/v1/sessions/${encodeURIComponent(sessionId)}/active-run`, { signal: controller.signal })
-      .then(active => {
-        if (!active || controller.signal.aborted || generation.current !== version || currentSession.current !== sessionId) return;
-        void watchRun(active.run, active.pendingApproval ?? null);
-      })
-      .catch(err => {
-        if (!controller.signal.aborted && generation.current === version) setError((err as Error).message);
-      });
-    return () => controller.abort();
-  }, [lineageId, sessionId, watchRun]);
+    streamedRunId.current = null;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate reset on session/branch switch
+    resetLiveState();
+  }, [lineageId, sessionId, resetLiveState]);
 
+  // Snapshot-driven streaming: open the run stream when the store snapshot has
+  // an active run we are not yet streaming, and tear down when it clears.
   useEffect(() => {
-    if (!activeRun || pendingApproval || !sessionId || activeRun.runKind === "context_compaction" ||
-      (!delegationActive && activeRun.status !== "waiting_children")) return;
-    const runID = activeRun.id;
-    const version = generation.current;
-    const poll = () => void refreshPendingApproval(runID, version);
-    const timer = window.setInterval(poll, 1500);
-    return () => window.clearInterval(timer);
-  }, [activeRun, delegationActive, pendingApproval, refreshPendingApproval, sessionId]);
+    if (activeRun) {
+      if (activeRun.id !== streamedRunId.current) watchRun(activeRun);
+    } else if (streamedRunId.current) {
+      streamController.current?.abort();
+      streamedRunId.current = null;
+      resetLiveState();
+    }
+  }, [activeRun, watchRun, resetLiveState]);
 
+  // Reconnect after a run-stream interruption while the run is still active.
+  // Depends on the run id (not the whole object) so store snapshot refreshes of
+  // the same run do not reset the reconnect timer.
+  const activeRunId = activeRun?.id ?? null;
   useEffect(() => {
-    if (status !== "Run connection interrupted" || !activeRun || pendingApproval || !sessionId) return;
-    const selected = sessionId;
-    const runID = activeRun.id;
-    const version = generation.current;
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => {
-      apiFetch<ActiveRunState | null>(`/v1/sessions/${encodeURIComponent(selected)}/active-run`, { signal: controller.signal })
-        .then(active => {
-          if (controller.signal.aborted || generation.current !== version || currentSession.current !== selected) return;
-          if (!active || active.run.id !== runID) {
-            setActiveRun(null);
-            setStatus("");
-            return Promise.all([refreshSession().catch(() => null), refreshLatest()]);
-          }
-          if (active.pendingApproval) {
-            setActiveRun(active.run);
-            setPendingApproval(active.pendingApproval);
-            setStatus("Waiting for approval");
-            return;
-          }
-          void watchRun(active.run);
-        })
-        .catch(err => {
-          if (!controller.signal.aborted && generation.current === version) setError((err as Error).message);
-        });
-    }, 1000);
-    return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [activeRun, pendingApproval, refreshLatest, refreshSession, sessionId, status, watchRun]);
+    if (status !== "Run connection interrupted" || !activeRunId) return;
+    const timer = window.setTimeout(() => setStreamNonce(current => current + 1), 1000);
+    return () => window.clearTimeout(timer);
+  }, [status, activeRunId]);
+
+  // Re-stream the current active run on a reconnect nonce bump. Reads the run
+  // from a ref so store snapshot refreshes (same id, new object) do not re-fire.
+  const activeRunRef = useRef(activeRun);
+  useEffect(() => { activeRunRef.current = activeRun; }, [activeRun]);
+  useEffect(() => {
+    if (streamNonce === 0) return;
+    const run = activeRunRef.current;
+    if (!run) return;
+    streamedRunId.current = null;
+    watchRun(run);
+  }, [streamNonce, watchRun]);
 
   const cancel = useCallback(async () => {
     if (!activeRun) return;
@@ -184,10 +163,6 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
       streamController.current?.abort();
       generation.current += 1;
       setStatus("cancelled");
-      setActiveRun(null);
-      setPendingApproval(null);
-      setResolvingApproval(null);
-      setDelegationActive(false);
       await refreshSession().catch(() => null);
       await refreshLatest();
     } catch (err) {
@@ -245,10 +220,10 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
         }), signal: controller.signal,
       });
       if (controller.signal.aborted || decisionGeneration.current !== version) return;
-      setPendingApproval(null);
       setStatus(decision === "approved" ? "Approval granted. Resuming…" : "Approval rejected. Resuming…");
       if (!streamConnected.current && activeRun) {
-        void watchRun({ ...activeRun, status: "queued" });
+        streamedRunId.current = null;
+        watchRun({ ...activeRun, status: "queued" });
       }
     } catch (err) {
       if (!controller.signal.aborted && decisionGeneration.current === version) setError((err as Error).message);
