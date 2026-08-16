@@ -6,6 +6,7 @@ import { SecretTextInput } from "@/components/settings/SecretTextInput";
 import { CredentialDot } from "@/components/settings/models/CredentialDot";
 import { CustomProviderCard } from "@/components/settings/models/CustomProviderCard";
 import { DeleteProviderModal } from "@/components/settings/models/DeleteProviderModal";
+import { ProviderEditor } from "@/components/settings/models/ProviderEditor";
 import type { DiscoveredModel, ModelProfile, ProviderDiagnostic, ProviderProfile } from "@/components/settings/types";
 import { apiFetch } from "@/lib/worker-api.client";
 
@@ -90,6 +91,7 @@ function ProviderCard({ provider, models, collapsed, onToggleCollapsed, refresh,
   const [busy, setBusy] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteFailure, setDeleteFailure] = useState<string | undefined>(undefined);
+  const [editing, setEditing] = useState(false);
   const requestVersion = useRef(0);
   const controller = useRef<AbortController | null>(null);
 
@@ -145,6 +147,9 @@ function ProviderCard({ provider, models, collapsed, onToggleCollapsed, refresh,
       <span>{provider.baseUrl} · {models.length} {models.length === 1 ? "model" : "models"} · {provider.credentialConfigured ? "Credential saved" : "No credential"}</span>
     </div>
     <div className="provider-controls">
+      <button type="button" className="secondary-btn" disabled={busy} onClick={() => setEditing(open => !open)}>
+        {editing ? "Cancel edit" : "Edit"}
+      </button>
       <button type="button" className="secondary-btn" disabled={busy} onClick={testProvider}>
         {checking ? "Retest" : "Test"}
       </button>
@@ -165,6 +170,9 @@ function ProviderCard({ provider, models, collapsed, onToggleCollapsed, refresh,
         </div>
         {diagnostic.failure && <span className="diagnostic-failure">{diagnostic.failure.message}</span>}
       </div>
+    )}
+    {editing && (
+      <ProviderEditor provider={provider} models={models} onClose={() => setEditing(false)} refresh={refresh} setError={setError} />
     )}
     {!collapsed && (
       <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 8 }}>
