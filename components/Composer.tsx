@@ -81,6 +81,8 @@ interface ComposerProps {
   cancel: () => void;
   pendingFollowUps: { id: string; text: string }[];
   compactSession: () => void;
+  /** No session selected: the inert composer requests a project (hero picker). */
+  onRequestProject?: () => void;
   // Prompt templates + @addressing panel.
   promptTemplates: { name: string; description: string; argumentHint: string; source: string; editable: boolean }[];
   panelRoles: { id: string; handle: string; name: string; description?: string }[];
@@ -103,6 +105,7 @@ export function Composer({
   pendingFollowUps,
   promptTemplates, showPromptPanel, onPromptSelect, onPromptPanelClose, expanding, expandDiag,
   panelRoles, panelFlows, onRoleSelect, onFlowSelect, contextUsage, stats,
+  onRequestProject,
 }: ComposerProps) {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const form = useRef<HTMLFormElement>(null);
@@ -147,6 +150,7 @@ export function Composer({
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (!selectedSession) return;
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
     form.current?.requestSubmit();
@@ -221,7 +225,11 @@ export function Composer({
       )}
 
       <form className="composer" onSubmit={onSubmit} ref={form}>
-        <div className="composer-editor" ref={configRef}>
+        <div
+          className={`composer-editor${!selectedSession ? " composer-no-session" : ""}`}
+          ref={configRef}
+          onClick={() => { if (!selectedSession) onRequestProject?.(); }}
+        >
           {configOpen && (
             <div className="composer-config-panel" role="dialog" aria-label={t("composer.runConfiguration")}>
               <div className="composer-config-row">
@@ -279,8 +287,9 @@ export function Composer({
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={onKeyDown}
             rows={1}
+            readOnly={!selectedSession}
+            disabled={compacting}
             placeholder={compacting ? t("composer.placeholderCompacting") : activeRun ? t("composer.placeholderSteer") : !selectedSession ? t("composer.placeholderNoSession") : t("composer.placeholderDefault")}
-            disabled={!selectedSession || compacting}
             aria-label={activeRun ? t("composer.steerAria") : t("composer.messageAria")}
           />
           <input

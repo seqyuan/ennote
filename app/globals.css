@@ -686,6 +686,59 @@ button:disabled { cursor: default; }
   justify-content: center;
   overflow: hidden;
 }
+
+/* Shared project dropdown menu (sidebar selector + hero chip). */
+.project-menu {
+  position: absolute;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.10);
+  overflow: hidden;
+  max-height: 280px;
+  overflow-y: auto;
+  z-index: 100;
+}
+.sidebar-project-menu {
+  top: calc(100% + 4px);
+  left: 10px;
+  right: 10px;
+}
+.hero-project-menu {
+  top: calc(100% + 4px);
+  left: 0;
+  width: 248px;
+}
+
+/* Workspace chip at the top-left of the chat hero (dsh conversation hero). */
+.hero-project-chip-wrap {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  z-index: 10;
+}
+.hero-project-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 5px 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text);
+  transition: background 0.12s, border-color 0.12s;
+}
+.hero-project-chip:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-dim);
+}
+.hero-project-chip > span {
+  flex: 1;
+  min-width: 0;
+}
 .empty-hero-glow {
   position: absolute;
   top: 50%;

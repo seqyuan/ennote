@@ -56,6 +56,9 @@ html.dark .composer-shell {
 }
 .composer textarea::placeholder { color: var(--cmp-text-tertiary); }
 
+/* No session selected: the inert composer is a project-request affordance. */
+.composer-no-session textarea { cursor: pointer; }
+
 /* Toolbar row, now inside the card (dsh layout). */
 .composer-toolbar-row {
   width: 100%;

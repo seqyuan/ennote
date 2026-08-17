@@ -77,8 +77,8 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
   const sidebarResize = useResizable({ initialWidth: 280, minWidth: 264, maxWidth: 420, storageKey: "--ennote-sidebar-width" });
   const rightPanelResize = useResizable({ initialWidth: 420, minWidth: 280, maxWidth: 1000, storageKey: "--ennote-right-panel-width", direction: "left" });
 
-  // Project selector dropdown is owned here so the empty hero can open it
-  // (it renders inside SessionSidebar).
+  // Project selector dropdown is owned here for the sidebar; the middle
+  // channel (hero chip + composer) keeps its own instance inside ChatWindow.
   const projectSelector = useProjectSelector();
 
   // Right panel layout state (file tabs live in useFileTabs)
@@ -211,13 +211,6 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
     apiFetch<Session>(`/v1/sessions/${encodeURIComponent(sessionId)}`).then(sessionNavigation.replaceSession).catch(() => {});
     if (isMobile) closeMobileNavigation();
   }, [changeView, closeMobileNavigation, closeSettings, isMobile, selectSession, sessionNavigation]);
-
-  // Empty-hero "Select project" opens the sidebar project dropdown (expanding
-  // the rail first so the selector is mounted).
-  const openProjectSelector = useCallback(() => {
-    setSidebarOpen(true);
-    window.requestAnimationFrame(() => projectSelector.openDropdown());
-  }, [projectSelector]);
 
   const archiveSession = useCallback(async (session: Session) => {
     const succeeded = await sessionNavigation.archive(session);
@@ -403,10 +396,12 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
                 actions={chat.actions}
                 error={combinedError}
                 clearError={clearCombinedError}
+                projects={projects}
                 selectedProject={selectedProject}
-                projectCount={projects.length}
                 hasModel={settings.models.length > 0}
-                onSelectProject={openProjectSelector}
+                pinnedProjectIds={pinnedProjectIds}
+                togglePinProject={togglePinProject}
+                onSwitchProject={switchProject}
                 onNewProject={openCreateProject}
                 onNewSession={() => void createSession()}
                 onOpenSettings={openSettings}

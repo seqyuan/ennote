@@ -171,8 +171,8 @@ export function SessionSidebar({
         <div style={{ flex: "1 1 auto", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
           <div style={{ textAlign: "center", color: "var(--text-dim)", fontSize: 12 }}>
             <div>{t("sidebar.chooseProject")}</div>
-            <button onClick={createProject} style={{ marginTop: 12, padding: "6px 14px", border: "1px solid var(--accent)", borderRadius: 6, background: "transparent", color: "var(--accent)", cursor: "pointer", fontSize: 12 }}>
-              <Plus size={12} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
+            <button onClick={createProject} style={{ marginTop: 8, padding: "3px 8px", border: "none", borderRadius: 5, background: "transparent", color: "var(--text-dim)", cursor: "pointer", fontSize: 12 }}>
+              <Plus size={11} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
               {t("sidebar.newProject")}
             </button>
           </div>

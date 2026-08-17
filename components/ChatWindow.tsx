@@ -1,7 +1,7 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Composer } from "@/components/Composer";
 import { EmptyHero } from "@/components/EmptyHero";
 import { BackgroundDelegationStrip } from "@/components/BackgroundDelegationStrip";
@@ -10,6 +10,8 @@ import { ConversationTimeline } from "@/components/ConversationTimeline";
 import { StreamingStatusBar } from "@/components/StreamingStatusBar";
 import type { BranchView, ChatActions, ComposerView, HistoryView, RunView } from "@/hooks/useChatController";
 import type { components } from "@/lib/worker-api.gen";
+import { useProjectSelector } from "@/hooks/useProjectSelector";
+import type { SidebarProject } from "./ProjectMenu";
 
 type RunRecovery = components["schemas"]["RunRecovery"];
 
@@ -22,10 +24,12 @@ interface ChatWindowProps {
   error: string | null;
   clearError: () => void;
   // Empty-state guidance (no session selected).
+  projects: SidebarProject[];
   selectedProject: string | null;
-  projectCount: number;
   hasModel: boolean;
-  onSelectProject: () => void;
+  pinnedProjectIds: string[];
+  togglePinProject: (projectId: string) => void;
+  onSwitchProject: (projectId: string) => void;
   onNewProject: () => void;
   onNewSession: () => void;
   onOpenSettings: () => void;
@@ -33,15 +37,31 @@ interface ChatWindowProps {
 
 export function ChatWindow({
   history, run, branches, composer, actions, error, clearError,
-  selectedProject, projectCount, hasModel, onSelectProject, onNewProject, onNewSession, onOpenSettings,
+  projects, selectedProject, hasModel, pinnedProjectIds, togglePinProject,
+  onSwitchProject, onNewProject, onNewSession, onOpenSettings,
 }: ChatWindowProps) {
   const messagesRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const preserveScroll = useRef(false);
   const previousMessageCount = useRef(0);
+  // Hero project chip + composer share one dropdown control; both live in the
+  // middle channel so the sidebar keeps its own independent selector.
+  const heroProject = useProjectSelector();
   const waiting = run.activeRunStatus === "waiting_for_approval" ||
     run.activeRunStatus === "waiting_delegation_admission" || Boolean(run.pendingApproval);
   const reconnecting = run.status === "Run connection interrupted" && !waiting;
+
+  // Requesting a project from the empty state: with no projects yet the chip
+  // and the inert composer go straight to the create dialog (dsh add-only);
+  // otherwise they toggle the shared menu anchored under the hero chip.
+  const requestProject = useCallback(() => {
+    if (projects.length === 0) {
+      onNewProject();
+      return;
+    }
+    if (heroProject.open) heroProject.close();
+    else heroProject.openDropdown();
+  }, [heroProject, onNewProject, projects.length]);
 
   useEffect(() => {
     const container = messagesRef.current;
@@ -94,13 +114,17 @@ export function ChatWindow({
           <strong>New conversation</strong><span>Start with a question, file, or analysis task.</span>
         </div>}
         {!history.sessionId && <EmptyHero
+          projects={projects}
           selectedProject={selectedProject}
-          projectCount={projectCount}
           hasModel={hasModel}
-          onSelectProject={onSelectProject}
+          pinnedProjectIds={pinnedProjectIds}
+          togglePinProject={togglePinProject}
+          onRequestProject={requestProject}
+          onSwitchProject={onSwitchProject}
           onNewProject={onNewProject}
           onNewSession={onNewSession}
           onOpenSettings={onOpenSettings}
+          projectSelector={heroProject}
         />}
         <ConversationTimeline sessionId={history.sessionId ?? ""} nodes={history.messages} pendingApproval={run.pendingApproval} resolvingApproval={run.resolvingApproval}
           decideApproval={run.decideApproval} activeLeafMessageId={history.activeLeafMessageId}
@@ -134,6 +158,7 @@ export function ChatWindow({
     )}
     <Composer selectedSession={history.sessionId} activeLeafMessageId={history.activeLeafMessageId} input={composer.input} setInput={composer.setInput}
       activeRun={Boolean(run.activeRun)} compacting={run.compacting} hasPendingImage={Boolean(composer.pendingImage)} reconnecting={reconnecting}
+      onRequestProject={requestProject}
       permissionMode={composer.displayedPermissionMode} permissionReady={composer.permissionReady} setPermissionMode={composer.setPermissionMode}
       models={composer.models} selectedModelId={composer.selectedModelId} setSelectedModelId={composer.setSelectedModelId}
       thinkingEffort={composer.thinkingEffort} setThinkingEffort={composer.setThinkingEffort}
