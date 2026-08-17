@@ -20,6 +20,10 @@ import (
 
 const SchemaVersion = 1
 
+// ErrNotFound reports that a project manifest does not exist (unknown or
+// already-deleted project id).
+var ErrNotFound = errors.New("project not found")
+
 type GraphBinding struct {
 	GraphID  string `json:"graphId"`
 	Revision string `json:"revision"`
@@ -252,40 +256,89 @@ func (s *Store) UpdateMCPBindings(_ context.Context, projectID string, mutate fu
 		return nil, err
 	}
 	manifest.Project.UpdatedAt = s.now()
+	if err := s.persistManifest(projectID, *manifest); err != nil {
+		return nil, err
+	}
+	return manifest, nil
+}
+
+// Rename updates a project's display name in place. The workspace host path
+// is untouched: renaming never moves the user's directory.
+func (s *Store) Rename(_ context.Context, projectID, name string) (*domain.Project, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, fmt.Errorf("project name is required")
+	}
+	manifest, err := s.read(projectID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) || isInvalidProjectID(err) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	manifest.Project.Name = name
+	manifest.Project.UpdatedAt = s.now()
+	if err := s.persistManifest(projectID, manifest); err != nil {
+		return nil, err
+	}
+	project := manifest.Project
+	return &project, nil
+}
+
+// Delete soft-deletes a project: it marks the manifest status "deleted" so
+// List() stops returning it, without touching the workspace host directory or
+// the session data already stored under the project. The manifest stays on
+// disk, so the deletion is recoverable.
+func (s *Store) Delete(_ context.Context, projectID string) (*domain.Project, error) {
+	manifest, err := s.read(projectID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) || isInvalidProjectID(err) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	manifest.Project.Status = "deleted"
+	manifest.Project.UpdatedAt = s.now()
+	if err := s.persistManifest(projectID, manifest); err != nil {
+		return nil, err
+	}
+	project := manifest.Project
+	return &project, nil
+}
+
+// persistManifest atomically rewrites a project's project.json manifest.
+func (s *Store) persistManifest(projectID string, manifest Manifest) error {
 	path := filepath.Join(s.Root, projectID, "project.json")
 	contents, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
-		return nil, err
+		return err
 	}
 	contents = append(contents, '\n')
 	temporary, err := os.CreateTemp(filepath.Dir(path), ".project.json-*")
 	if err != nil {
-		return nil, err
+		return err
 	}
 	temporaryPath := temporary.Name()
 	defer os.Remove(temporaryPath)
 	if err := temporary.Chmod(0o600); err != nil {
 		temporary.Close()
-		return nil, err
+		return err
 	}
 	if _, err := temporary.Write(contents); err != nil {
 		temporary.Close()
-		return nil, err
+		return err
 	}
 	if err := temporary.Sync(); err != nil {
 		temporary.Close()
-		return nil, err
+		return err
 	}
 	if err := temporary.Close(); err != nil {
-		return nil, err
+		return err
 	}
 	if err := os.Rename(temporaryPath, path); err != nil {
-		return nil, err
+		return err
 	}
-	if err := syncDirectory(filepath.Dir(path)); err != nil {
-		return nil, err
-	}
-	return manifest, nil
+	return syncDirectory(filepath.Dir(path))
 }
 
 func canonicalHostPath(path string) (string, error) {

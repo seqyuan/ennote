@@ -26,6 +26,10 @@ interface SessionSidebarProps {
   announcement: string;
   pinnedProjectIds: string[];
   togglePinProject: (projectId: string) => void;
+  renameProject: (projectId: string, name: string) => Promise<void>;
+  deleteProject: (projectId: string) => Promise<void>;
+  renameSession: (session: Session, title: string) => Promise<void>;
+  createSessionIn: (projectId: string) => Promise<void>;
   collapsed: Set<string>;
   toggleCollapsed: (projectId: string) => void;
   archived: Record<string, Session[]>;
@@ -52,6 +56,7 @@ interface SessionSidebarProps {
 export function SessionSidebar({
   projects, groups, selectedProject, selectedSession, settingsOpen,
   query, setQuery, mutatingId, announcement, pinnedProjectIds, togglePinProject,
+  renameProject, deleteProject, renameSession, createSessionIn,
   collapsed, toggleCollapsed, archived, openArchived,
   createProject, createSession, switchProject, switchSession,
   archiveSession, restoreSession, openSettings, closeNavigation, runningSessionIds,
@@ -155,6 +160,10 @@ export function SessionSidebar({
                   switchSession={switchSession}
                   archiveSession={archiveSession}
                   restoreSession={restoreSession}
+                  renameSession={renameSession}
+                  renameProject={renameProject}
+                  deleteProject={deleteProject}
+                  createSessionIn={createSessionIn}
                   mutatingId={mutatingId}
                   archived={archived[group.projectId] ?? []}
                   onOpenArchived={() => openArchived(group.projectId)}

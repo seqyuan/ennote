@@ -38,7 +38,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
     projects, selectedProject, switchProject: workspaceSwitchProject,
     createProjectOpen, openCreateProject, confirmCreateProject, cancelCreateProject, createProjectBusy,
     settingsOpen, openSettings: workspaceOpenSettings, closeSettings,
-    workspaceFor, togglePinProject, pinnedProjectIds,
+    workspaceFor, togglePinProject, pinnedProjectIds, renameProject, deleteProject,
   } = useWorkspace();
 
   // Session selection stays in the chat shell; the composer reset that used to
@@ -187,10 +187,9 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
     if (isMobile) closeMobileNavigation();
   }, [changeView, closeMobileNavigation, isMobile, selectSession, sessionNavigation, workspaceSwitchProject]);
 
-  const createSession = useCallback(async () => {
-    if (!selectedProject) return;
+  const createSessionIn = useCallback(async (projectId: string) => {
     try {
-      const session = await apiFetch<Session>(`/v1/projects/${encodeURIComponent(selectedProject)}/sessions`, {
+      const session = await apiFetch<Session>(`/v1/projects/${encodeURIComponent(projectId)}/sessions`, {
         method: "POST", body: JSON.stringify({ title: `Chat ${new Date().toLocaleTimeString()}` }),
       });
       chat.run.setError(null);
@@ -198,11 +197,32 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
       selectSession(session.id);
       changeView("chat");
       await sessionNavigation.refresh();
-      sidebarGroups.refresh(selectedProject);
+      sidebarGroups.refresh(projectId);
     } catch (reason) {
       chat.run.setError((reason as Error).message);
     }
-  }, [changeView, selectSession, selectedProject, sessionNavigation, sidebarGroups, chat.run]);
+  }, [changeView, selectSession, sessionNavigation, sidebarGroups, chat.run]);
+
+  const createSession = useCallback(async () => {
+    if (selectedProject) await createSessionIn(selectedProject);
+  }, [createSessionIn, selectedProject]);
+
+  const renameSession = useCallback(async (session: Session, title: string) => {
+    const updated = await apiFetch<Session>(`/v1/sessions/${encodeURIComponent(session.id)}`, {
+      method: "PATCH", body: JSON.stringify({ title }),
+    });
+    sessionNavigation.replaceSession(updated);
+    sidebarGroups.refresh(session.projectId);
+  }, [sessionNavigation, sidebarGroups]);
+
+  const handleRenameProject = useCallback(async (projectId: string, name: string) => {
+    await renameProject(projectId, name);
+    sidebarGroups.refresh(projectId);
+  }, [renameProject, sidebarGroups]);
+
+  const handleDeleteProject = useCallback(async (projectId: string) => {
+    await deleteProject(projectId);
+  }, [deleteProject]);
 
   const switchSession = useCallback((sessionId: string) => {
     closeSettings();
@@ -288,12 +308,16 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
       announcement={sessionNavigation.announcement}
       pinnedProjectIds={pinnedProjectIds}
       togglePinProject={togglePinProject}
+      renameProject={handleRenameProject}
+      deleteProject={handleDeleteProject}
       collapsed={sidebarGroups.collapsed}
       toggleCollapsed={sidebarGroups.toggleCollapsed}
       archived={sidebarGroups.archived}
       openArchived={sidebarGroups.openArchived}
       createProject={openCreateProject}
       createSession={createSession}
+      createSessionIn={createSessionIn}
+      renameSession={renameSession}
       switchProject={switchProject}
       switchSession={switchSession}
       archiveSession={session => void archiveSession(session)}

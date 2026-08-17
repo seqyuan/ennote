@@ -1101,6 +1101,50 @@ paths:
                           workspace: { $ref: "#/components/schemas/ProjectWorkspace" }
         "400":
           $ref: "#/components/responses/Error"
+  /v1/projects/{projectID}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    patch:
+      operationId: updateProject
+      summary: Rename a project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              additionalProperties: false
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+      responses:
+        "200":
+          description: Project renamed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Project" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteProject
+      summary: Soft-delete a project
+      responses:
+        "200":
+          description: Project soft-deleted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Project" }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/projects/{projectID}/workspace:
     parameters:
       - $ref: "#/components/parameters/ProjectID"

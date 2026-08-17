@@ -531,11 +531,42 @@ func TestProjectAndSessionCRUD(t *testing.T) {
 	require.Len(t, sessions, 1)
 	assert.Equal(t, session.ID, sessions[0].ID)
 
+	// Rename after the list has been read once (fills the list cache).
 	renamed := request(t, handler, http.MethodPatch, "/v1/sessions/"+session.ID, map[string]any{"title": "Renamed analysis"}, true)
 	require.Equal(t, http.StatusOK, renamed.Code, renamed.Body.String())
 	var renamedSession domain.Session
 	decodeData(t, renamed, &renamedSession)
 	assert.Equal(t, "Renamed analysis", renamedSession.Title)
+
+	// The follow-up list must reflect the rename (list cache invalidated).
+	relisted := request(t, handler, http.MethodGet, "/v1/projects/"+result.Project.ID+"/sessions", nil, true)
+	var relistedSessions []domain.Session
+	decodeData(t, relisted, &relistedSessions)
+	require.Len(t, relistedSessions, 1)
+	assert.Equal(t, "Renamed analysis", relistedSessions[0].Title)
+
+	projectRenamed := request(t, handler, http.MethodPatch, "/v1/projects/"+result.Project.ID, map[string]any{"name": "Lung atlas"}, true)
+	require.Equal(t, http.StatusOK, projectRenamed.Code, projectRenamed.Body.String())
+	var renamedProject domain.Project
+	decodeData(t, projectRenamed, &renamedProject)
+	assert.Equal(t, "Lung atlas", renamedProject.Name)
+	assert.Equal(t, result.Project.ID, renamedProject.ID)
+
+	deleted := request(t, handler, http.MethodDelete, "/v1/projects/"+result.Project.ID, nil, true)
+	require.Equal(t, http.StatusOK, deleted.Code, deleted.Body.String())
+	var deletedProject domain.Project
+	decodeData(t, deleted, &deletedProject)
+	assert.Equal(t, "deleted", deletedProject.Status)
+
+	listedProjects := request(t, handler, http.MethodGet, "/v1/projects", nil, true)
+	var projectsAfterDelete []domain.Project
+	decodeData(t, listedProjects, &projectsAfterDelete)
+	for _, project := range projectsAfterDelete {
+		assert.NotEqual(t, result.Project.ID, project.ID)
+	}
+
+	missing := request(t, handler, http.MethodPatch, "/v1/projects/00000000-0000-0000-0000-000000000000", map[string]any{"name": "x"}, true)
+	require.Equal(t, http.StatusNotFound, missing.Code)
 }
 
 func TestProjectWorkspaceFilesAPI(t *testing.T) {

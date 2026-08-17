@@ -165,6 +165,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/host/directories", s.createHostDirectory)
 	mux.HandleFunc("GET /v1/projects", s.listProjects)
 	mux.HandleFunc("POST /v1/projects", s.createProject)
+	mux.HandleFunc("PATCH /v1/projects/{projectID}", s.updateProject)
+	mux.HandleFunc("DELETE /v1/projects/{projectID}", s.deleteProject)
 	mux.HandleFunc("GET /v1/projects/{projectID}/workspace", s.getProjectWorkspace)
 	mux.HandleFunc("GET /v1/projects/{projectID}/files", s.listProjectFiles)
 	mux.HandleFunc("GET /v1/projects/{projectID}/files/content", s.readProjectFile)
@@ -608,6 +610,60 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeData(w, http.StatusCreated, map[string]any{"project": project, "workspace": workspace})
+}
+
+func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Name string `json:"name"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if strings.TrimSpace(input.Name) == "" {
+		writeError(w, r, http.StatusBadRequest, "invalid_project", "name is required", false)
+		return
+	}
+	project, err := s.Projects.Rename(r.Context(), r.PathValue("projectID"), input.Name)
+	if err != nil {
+		if errors.Is(err, store.ErrProjectNotFound) {
+			writeError(w, r, http.StatusNotFound, "project_not_found", err.Error(), false)
+			return
+		}
+		writeInternal(w, r, err)
+		return
+	}
+	s.syncProjectProjection(r.Context(), project)
+	writeData(w, http.StatusOK, project)
+}
+
+func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
+	project, err := s.Projects.Delete(r.Context(), r.PathValue("projectID"))
+	if err != nil {
+		if errors.Is(err, store.ErrProjectNotFound) {
+			writeError(w, r, http.StatusNotFound, "project_not_found", err.Error(), false)
+			return
+		}
+		writeInternal(w, r, err)
+		return
+	}
+	s.syncProjectProjection(r.Context(), project)
+	writeData(w, http.StatusOK, project)
+}
+
+// syncProjectProjection refreshes the project_summaries projection row so
+// search/usage stays consistent after a rename or soft-delete.
+func (s *Server) syncProjectProjection(ctx context.Context, project *domain.Project) {
+	if s.Projection == nil {
+		return
+	}
+	workspace, err := s.Projects.FindWorkspaceByProjectID(ctx, project.ID)
+	if err != nil {
+		slog.Warn("project workspace lookup failed", "project_id", project.ID, "error", err)
+		return
+	}
+	if err := s.Projection.UpsertProject(ctx, project, workspace); err != nil {
+		slog.Warn("project projection failed", "project_id", project.ID, "error", err)
+	}
 }
 
 func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
@@ -1282,6 +1338,8 @@ func (s *Server) queueInput(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) writeStoreError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, store.ErrProjectNotFound):
+		writeError(w, r, http.StatusNotFound, "project_not_found", err.Error(), false)
 	case errors.Is(err, store.ErrSessionNotFound):
 		writeError(w, r, http.StatusNotFound, "session_not_found", err.Error(), false)
 	case errors.Is(err, store.ErrSessionStateConflict):

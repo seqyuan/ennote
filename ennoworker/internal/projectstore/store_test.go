@@ -118,3 +118,51 @@ func TestProjectStoreRejectsCorruptManifest(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "decode project manifest")
 }
+
+func TestProjectStoreRenameKeepsWorkspacePath(t *testing.T) {
+	store := &projectstore.Store{Root: filepath.Join(t.TempDir(), "projects"), Now: fixedNow}
+	workspace := t.TempDir()
+	project, _, err := store.CreateWithWorkspace(context.Background(), domain.CreateProjectInput{Name: "Before", HostPath: workspace})
+	require.NoError(t, err)
+
+	renamed, err := store.Rename(context.Background(), project.ID, "  After  ")
+	require.NoError(t, err)
+	assert.Equal(t, "After", renamed.Name)
+	assert.Equal(t, project.ID, renamed.ID)
+
+	foundWorkspace, err := store.FindWorkspaceByProjectID(context.Background(), project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, workspace, foundWorkspace.HostPath)
+
+	found, err := store.FindByID(context.Background(), project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "After", found.Name)
+}
+
+func TestProjectStoreDeleteIsSoftDelete(t *testing.T) {
+	store := &projectstore.Store{Root: filepath.Join(t.TempDir(), "projects"), Now: fixedNow}
+	project, _, err := store.CreateWithWorkspace(context.Background(), domain.CreateProjectInput{Name: "Doomed", HostPath: t.TempDir()})
+	require.NoError(t, err)
+
+	deleted, err := store.Delete(context.Background(), project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "deleted", deleted.Status)
+
+	// List no longer returns the project, but the manifest remains readable.
+	projects, err := store.List(context.Background())
+	require.NoError(t, err)
+	assert.Len(t, projects, 0)
+	found, err := store.FindByID(context.Background(), project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "deleted", found.Status)
+}
+
+func TestProjectStoreRenameAndDeleteUnknownProject(t *testing.T) {
+	store := &projectstore.Store{Root: filepath.Join(t.TempDir(), "projects"), Now: fixedNow}
+	missing := "00000000-0000-0000-0000-000000000000"
+
+	_, err := store.Rename(context.Background(), missing, "nope")
+	assert.ErrorIs(t, err, projectstore.ErrNotFound)
+	_, err = store.Delete(context.Background(), missing)
+	assert.ErrorIs(t, err, projectstore.ErrNotFound)
+}

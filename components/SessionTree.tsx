@@ -1,8 +1,11 @@
 "use client";
 
+import { Archive, MoreHorizontal, Pencil, RotateCcw } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { Session } from "@/components/settings/types";
 import type { SessionLifecycleView } from "@/hooks/useProjectSessions";
-import { SessionActionMenu } from "./SessionActionMenu";
+import { useT } from "@/components/LocaleProvider";
+import { SidebarRenameDialog } from "./SidebarRenameDialog";
 
 /** Build a simple session tree from sourceSessionId parent references */
 export interface SessionTreeNode {
@@ -44,6 +47,22 @@ function wouldCreateCycle(sessionId: string, parentId: string, nodes: Map<string
   return false;
 }
 
+/** Compact relative time, dsh-style ("now"/"5min" in en, "刚刚"/"5分钟" in zh). */
+export function formatRelativeTime(updatedAt: string, t: (key: string) => string): string {
+  const MIN = 60_000;
+  const HOUR = 3_600_000;
+  const DAY = 86_400_000;
+  const MONTH = 30 * DAY;
+  const YEAR = 365 * DAY;
+  const diff = Math.max(0, Date.now() - new Date(updatedAt).getTime());
+  if (diff < MIN) return t("time.now");
+  if (diff < HOUR) return `${Math.floor(diff / MIN)}${t("time.minutes")}`;
+  if (diff < DAY) return `${Math.floor(diff / HOUR)}${t("time.hours")}`;
+  if (diff < MONTH) return `${Math.floor(diff / DAY)}${t("time.days")}`;
+  if (diff < YEAR) return `${Math.floor(diff / MONTH)}${t("time.months")}`;
+  return `${Math.floor(diff / YEAR)}${t("time.years")}`;
+}
+
 export function renderSessionTree(
   nodes: SessionTreeNode[],
   selectedSession: string | null,
@@ -51,6 +70,7 @@ export function renderSessionTree(
   view: SessionLifecycleView,
   archiveSession: (s: Session) => void,
   restoreSession: (s: Session) => void,
+  renameSession: (s: Session, title: string) => Promise<void>,
   mutatingId: string | null,
   depth: number,
   runningSessionIds?: Set<string>,
@@ -59,53 +79,114 @@ export function renderSessionTree(
     const s = node.session;
     const isSelected = s.id === selectedSession;
     const isRunning = runningSessionIds?.has(s.id);
-    const SESSION_TRUNCATE_LENGTH = 80;
-
     return [
-      <li className="session-row" key={s.id} style={{ paddingLeft: depth * 14 }}>
-        <button
-          type="button"
-          className={`sidebar-item ${isSelected ? "active" : ""}`}
-          aria-current={isSelected ? "page" : undefined}
-          onClick={() => view === "active" && switchSession(s.id)}
-          disabled={view === "archived"}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            minWidth: 0,
-            paddingRight: 4,
-          }}
-          title={s.title}
-        >
-          {isRunning && (
-            <span
-              style={{
-                display: "inline-block",
-                width: 7,
-                height: 7,
-                borderRadius: "50%",
-                background: "#22c55e",
-                flexShrink: 0,
-                animation: depth === 0 ? "pulse 2s infinite" : undefined,
-              }}
-            />
-          )}
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {s.title.length > SESSION_TRUNCATE_LENGTH
-              ? s.title.slice(0, SESSION_TRUNCATE_LENGTH) + "..."
-              : s.title}
-          </span>
-        </button>
-        <SessionActionMenu
-          session={s}
-          view={view}
-          archiveSession={archiveSession}
-          restoreSession={restoreSession}
-          mutatingId={mutatingId}
-        />
-      </li>,
-      ...renderSessionTree(node.children, selectedSession, switchSession, view, archiveSession, restoreSession, mutatingId, depth + 1, runningSessionIds),
+      <SessionRow
+        key={s.id}
+        session={s}
+        view={view}
+        isSelected={isSelected}
+        isRunning={isRunning}
+        depth={depth}
+        mutatingId={mutatingId}
+        switchSession={switchSession}
+        archiveSession={archiveSession}
+        restoreSession={restoreSession}
+        renameSession={renameSession}
+      />,
+      ...renderSessionTree(node.children, selectedSession, switchSession, view, archiveSession, restoreSession, renameSession, mutatingId, depth + 1, runningSessionIds),
     ];
   });
+}
+
+function SessionRow({
+  session, view, isSelected, isRunning, depth, mutatingId,
+  switchSession, archiveSession, restoreSession, renameSession,
+}: {
+  session: Session;
+  view: SessionLifecycleView;
+  isSelected: boolean;
+  isRunning: boolean | undefined;
+  depth: number;
+  mutatingId: string | null;
+  switchSession: (id: string) => void;
+  archiveSession: (s: Session) => void;
+  restoreSession: (s: Session) => void;
+  renameSession: (s: Session, title: string) => Promise<void>;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const t = useT();
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [menuOpen]);
+
+  return (
+    <>
+      <li className={`sb-session-row${isSelected ? " sb-selected" : ""}${menuOpen ? " sb-menu-open" : ""}`} style={{ marginLeft: depth * 22 }}>
+        <div
+          className="sb-session-body"
+          role="button"
+          tabIndex={0}
+          aria-current={isSelected ? "page" : undefined}
+          aria-label={session.title}
+          onClick={() => view === "active" && switchSession(session.id)}
+          onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && view === "active") { e.preventDefault(); switchSession(session.id); } }}
+        >
+          <span className="sb-row-slot sb-session-status">
+            {isRunning && <span className="sb-running-dot" aria-hidden="true" />}
+          </span>
+          <span className="sb-session-title">{session.title}</span>
+          <span className="sb-session-time" aria-hidden="true">{formatRelativeTime(session.updatedAt, t)}</span>
+        </div>
+        <span className="sb-row-actions" ref={menuRef}>
+          <button
+            type="button"
+            className="sb-row-icon-btn"
+            aria-label={`Actions for ${session.title}`}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
+          >
+            <MoreHorizontal size={15} aria-hidden="true" />
+          </button>
+          {menuOpen && (
+            <div className="sb-row-menu" role="menu">
+              <button type="button" role="menuitem" disabled={mutatingId === session.id || view === "archived"} onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setRenameOpen(true); }}>
+                <Pencil size={13} aria-hidden="true" /> {t("sidebar.renameSession")}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={mutatingId === session.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuOpen(false);
+                  if (view === "active") archiveSession(session);
+                  else restoreSession(session);
+                }}
+              >
+                {view === "active" ? <Archive size={13} aria-hidden="true" /> : <RotateCcw size={13} aria-hidden="true" />}
+                {view === "active" ? t("sidebar.archive") : t("sidebar.restore")}
+              </button>
+            </div>
+          )}
+        </span>
+      </li>
+      {renameOpen && (
+        <SidebarRenameDialog
+          title={t("sidebar.renameSession")}
+          initialName={session.title}
+          onCancel={() => setRenameOpen(false)}
+          onConfirm={async (name) => { await renameSession(session, name); setRenameOpen(false); }}
+        />
+      )}
+    </>
+  );
 }

@@ -23,6 +23,8 @@ interface WorkspaceValue {
   closeSettings: () => void;
   pinnedProjectIds: string[];
   togglePinProject: (projectId: string) => void;
+  renameProject: (projectId: string, name: string) => Promise<void>;
+  deleteProject: (projectId: string) => Promise<void>;
   workspaceFor: (projectId: string) => ProjectWorkspace | undefined;
 }
 
@@ -112,6 +114,25 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const renameProject = useCallback(async (projectId: string, name: string) => {
+    const updated = await apiFetch<Project>(`/v1/projects/${encodeURIComponent(projectId)}`, {
+      method: "PATCH", body: JSON.stringify({ name }),
+    });
+    setProjects((current) => current.map((project) => project.id === projectId ? updated : project));
+  }, []);
+
+  const deleteProject = useCallback(async (projectId: string) => {
+    await apiFetch<Project>(`/v1/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
+    setProjects((current) => current.filter((project) => project.id !== projectId));
+    setWorkspaceMap((previous) => {
+      const next = new Map(previous);
+      next.delete(projectId);
+      return next;
+    });
+    setPinnedProjectIds((current) => current.filter((id) => id !== projectId));
+    setSelectedProject((current) => current === projectId ? null : current);
+  }, []);
+
   const workspaceFor = useCallback((projectId: string) => workspaceMap.get(projectId), [workspaceMap]);
 
   const value: WorkspaceValue = {
@@ -119,7 +140,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     createProjectOpen: creatingProject, openCreateProject, confirmCreateProject, cancelCreateProject,
     createProjectBusy: creatingProjectBusy,
     settingsOpen, openSettings, closeSettings,
-    pinnedProjectIds, togglePinProject, workspaceFor,
+    pinnedProjectIds, togglePinProject, renameProject, deleteProject, workspaceFor,
   };
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

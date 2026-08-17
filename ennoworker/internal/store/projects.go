@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,9 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
 )
+
+// ErrProjectNotFound reports an unknown or already-deleted project id.
+var ErrProjectNotFound = errors.New("project not found")
 
 // ProjectRepo persists Project manifests in the file-native project store
 // (V2). The legacy global projects/project_workspaces SQL tables were removed.
@@ -60,4 +64,28 @@ func (r *ProjectRepo) FindByID(ctx context.Context, id string) (*domain.Project,
 		return nil, ErrFileBackedStoreRequired
 	}
 	return r.Files.FindByID(ctx, id)
+}
+
+// Rename updates a project's display name without touching its workspace path.
+func (r *ProjectRepo) Rename(ctx context.Context, id, name string) (*domain.Project, error) {
+	if r == nil || r.Files == nil {
+		return nil, ErrFileBackedStoreRequired
+	}
+	project, err := r.Files.Rename(ctx, id, name)
+	if errors.Is(err, projectstore.ErrNotFound) {
+		return nil, ErrProjectNotFound
+	}
+	return project, err
+}
+
+// Delete soft-deletes a project (status "deleted"); List stops returning it.
+func (r *ProjectRepo) Delete(ctx context.Context, id string) (*domain.Project, error) {
+	if r == nil || r.Files == nil {
+		return nil, ErrFileBackedStoreRequired
+	}
+	project, err := r.Files.Delete(ctx, id)
+	if errors.Is(err, projectstore.ErrNotFound) {
+		return nil, ErrProjectNotFound
+	}
+	return project, err
 }
