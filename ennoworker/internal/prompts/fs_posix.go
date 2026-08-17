@@ -112,7 +112,7 @@ func fstatOwner(fd int) (owned bool, nlink uint64, err error) {
 	if err := unix.Fstat(fd, &stat); err != nil {
 		return false, 0, err
 	}
-	return stat.Uid == uint32(unix.Geteuid()), stat.Nlink, nil
+	return stat.Uid == uint32(unix.Geteuid()), uint64(stat.Nlink), nil
 }
 
 // readBounded reads from fd until EOF or maxBytes+1 bytes. Returns the data

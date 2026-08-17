@@ -2,5 +2,9 @@
 
 package hooks
 
-func isLinux() bool                { return false }
-func linuxProcessGroup() *struct{} { return nil }
+import (
+	"syscall"
+)
+
+func isLinux() bool { return false }
+func linuxProcessGroup() *syscall.SysProcAttr { return nil }
