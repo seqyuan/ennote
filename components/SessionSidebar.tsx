@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, FolderPlus, Plus, Search, Settings2, Workflow, X } from "lucide-react";
+import { Bot, FolderPlus, Search, Settings2, Workflow, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Session } from "@/components/settings/types";
 import type { SidebarProjectGroup } from "@/hooks/useSidebarProjectGroups";
@@ -168,12 +168,10 @@ export function SessionSidebar({
 
       {!selectedProject && (
         <div style={{ flex: "1 1 auto", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
+          {/* Guidance only: workspace creation lives in the add button above
+              the session list — no duplicate New-Project affordance here. */}
           <div style={{ textAlign: "center", color: "var(--text-dim)", fontSize: 12 }}>
             <div>{t("sidebar.chooseProject")}</div>
-            <button onClick={createProject} style={{ marginTop: 8, padding: "3px 8px", border: "none", borderRadius: 5, background: "transparent", color: "var(--text-dim)", cursor: "pointer", fontSize: 12 }}>
-              <Plus size={11} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
-              {t("sidebar.newProject")}
-            </button>
           </div>
         </div>
       )}

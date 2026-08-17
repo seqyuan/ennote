@@ -77,9 +77,22 @@ test("creating a project uses a dialog instead of native prompts", async ({ page
   await page.setViewportSize({ width: 1280, height: 800 });
   let created: Record<string, unknown> | null = null;
   let projectCalls = 0;
+  const homeListing = {
+    path: "/home/seqyuan",
+    home: "/home/seqyuan",
+    crumbs: [{ name: "seqyuan", path: "/home/seqyuan", hidden: false }],
+    entries: [
+      { name: "seqyuan", path: "/home/seqyuan", hidden: false },
+      { name: "projects", path: "/home/seqyuan/projects", hidden: false },
+    ],
+    truncated: false,
+  };
   await page.route("**/api/worker/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (path === "/v1/host/directories") {
+      return fulfill(route, homeListing);
+    }
     if (path === "/v1/projects") {
       if (route.request().method() === "POST") {
         created = JSON.parse(route.request().postData() ?? "{}");
@@ -89,25 +102,23 @@ test("creating a project uses a dialog instead of native prompts", async ({ page
         }, 201);
       }
       projectCalls += 1;
-      return fulfill(route, projectCalls === 1 ? [] : [{ ...project, id: "new-project", name: "RNA screen" }]);
+      return fulfill(route, projectCalls === 1 ? [] : [{ ...project, id: "new-project", name: created?.name ?? "seqyuan" }]);
     }
     return route.abort();
   });
 
   await page.goto("/");
   await expect(page.getByText("Choose a project to start.")).toBeVisible();
-  await page.getByRole("button", { name: "New Project" }).click();
-
-  await expect(page.getByRole("dialog", { name: "New project" })).toBeVisible();
-  await page.getByPlaceholder("RNA screen").fill("RNA screen");
-  await page.getByPlaceholder("~/projects/rna-screen").fill("~/projects/rna-screen");
-  await page.getByRole("button", { name: "Create project" }).click();
+  // Workspace creation lives in the add button above the session list; the
+  // directory picker dialog replaces the old native prompt flow.
+  await page.getByRole("button", { name: "Add workspace" }).click();
+  await expect(page.getByRole("dialog", { name: "Select Workspace Directory" })).toBeVisible();
+  // Confirm the default (home) directory without typing a path.
+  await page.getByRole("button", { name: "Open", exact: true }).click();
 
   await expect.poll(() => created).not.toBeNull();
-  expect(created).toMatchObject({ name: "RNA screen", hostPath: "~/projects/rna-screen" });
-  // Dialog closes and the new project is auto-selected in the selector. The
-  // sidebar also renders the project with an accessible name of "RNA screen Pin
-  // project", so match the selector button exactly to avoid a strict-mode race.
-  await expect(page.getByRole("dialog", { name: "New project" })).not.toBeVisible();
-  await expect(page.getByRole("button", { name: "RNA screen", exact: true })).toBeVisible();
+  expect(created).toMatchObject({ name: "seqyuan", hostPath: "/home/seqyuan" });
+  // Dialog closes and the new project is auto-selected in the selector.
+  await expect(page.getByRole("dialog", { name: "Select Workspace Directory" })).not.toBeVisible();
+  await expect(page.getByRole("button", { name: "seqyuan", exact: true })).toBeVisible();
 });
