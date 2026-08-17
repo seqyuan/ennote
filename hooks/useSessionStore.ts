@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
-import { mergeTimeline, type ConversationNode, type TurnMessage } from "@/lib/chat-messages";
+import { applyTransient, projectBase, type ConversationNode, type TimelineBase, type TurnMessage } from "@/lib/chat-messages";
+import { useTurnMetrics } from "@/hooks/useTurnMetrics";
 import { sessionRegistry, type SessionStoreSnapshot } from "@/lib/session-store";
 import type { components } from "@/lib/worker-api.gen";
 
@@ -38,6 +39,9 @@ const noopLoadOlder = async (): Promise<boolean> => false;
 const noopRefresh = async (): Promise<void> => {};
 const noopAppend = (): void => {};
 const noopUpsert = (): void => {};
+
+/** Stable empty base for the not-loaded state (branch switch / first render). */
+const EMPTY_BASE: TimelineBase = { nodes: [], openTurn: null, calls: new Map(), syntheticTurn: 0 };
 
 export interface UseSessionStoreResult {
   messages: ConversationNode[];
@@ -83,10 +87,18 @@ export function useSessionStore(sessionId: string | null, branchId?: string): Us
   }, [store, branchId]);
 
   const loaded = Boolean(sessionId) && snapshot.loaded && snapshot.dataBranchId === branchId;
+  const turnMetrics = useTurnMetrics(sessionId, snapshot.activeRun?.id ?? null);
 
+  // Split projection: the base (canonical + checkpoints) is stable during
+  // streaming, so it is memoized separately; only `applyTransient` re-runs per
+  // chunk and it preserves base node references.
+  const base = useMemo(
+    () => (loaded ? projectBase(snapshot.canonical, snapshot.checkpoints, turnMetrics) : EMPTY_BASE),
+    [loaded, snapshot.canonical, snapshot.checkpoints, turnMetrics],
+  );
   const messages = useMemo(
-    () => (loaded ? mergeTimeline(snapshot.canonical, snapshot.checkpoints, snapshot.transient) : []),
-    [loaded, snapshot.canonical, snapshot.checkpoints, snapshot.transient],
+    () => applyTransient(base, snapshot.transient, turnMetrics),
+    [base, snapshot.transient, turnMetrics],
   );
 
   // Mirrors the pre-store loading semantics: report loading while the window
