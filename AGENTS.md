@@ -48,3 +48,31 @@ constraints, not a replacement for the local roadmap or detailed design plans.
   workspace. Do not force-add or push them.
 - Keep roadmap priorities in the local roadmap and architecture invariants here.
   Do not treat temporary agent memory as a source of truth.
+
+## Commit and Release Conventions
+
+- Use Conventional Commits with a scoped subject: `feat(chat):`, `fix(worker):`,
+  `refactor(settings):`, `perf(chat):`, `test(e2e):`, `docs:`, `chore:`. One
+  logical change per commit.
+- Scope `git add` to the exact files of that change and commit them separately.
+  Never use `git add -A` / `git commit -a` to sweep unrelated workspace state
+  (including pre-existing work-in-progress) into a commit.
+- Keep coupled files in the same commit so each commit is self-consistent:
+  a `contracts/openapi.yaml` change ships with its regenerated
+  `lib/worker-api.gen.ts` and the Go/TS code that consumes it. If a commit does
+  not typecheck/build on its own, it is not ready to commit.
+- The message-timeline projection (`lib/chat-messages.ts`) and its consumers
+  (`hooks/useChatController.ts`, `hooks/useSessionStore.ts`) are streaming hot
+  paths. Perf/refactor changes there must ship with the unit tests that pin
+  reference-preservation semantics (`tests/unit/chat-messages.test.ts`).
+- Never commit generated/build artifacts: `worker/`, `out/`,
+  `ennoworker/ennogate`, `ennoworker/ennoworker` are gitignored and produced at
+  release time.
+- Releases: bump `version` in `package.json` (and `package-lock.json` via
+  `npm install --package-lock-only`), commit as
+  `chore: bump version to X.Y.Z (<short summary>)`, and create an annotated tag
+  `vX.Y.Z` with a one-line summary. Verify with
+  `npm run lint && npm run typecheck && npm test && npm run test:go && npm run build`
+  before tagging; run `npm run test:e2e` when the change touches rendering or
+  session behavior. `npm run release:prepare` builds the distributable worker
+  binaries.
