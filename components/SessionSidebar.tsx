@@ -132,7 +132,6 @@ export function SessionSidebar({
         pinnedProjectIds={pinnedProjectIds}
         togglePinProject={togglePinProject}
         onSelect={switchProject}
-        onCreate={createProject}
         control={projectSelector}
       />
 

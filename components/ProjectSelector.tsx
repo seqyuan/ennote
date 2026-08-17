@@ -12,10 +12,9 @@ export function ProjectSelector(props: {
   pinnedProjectIds: string[];
   togglePinProject: (projectId: string) => void;
   onSelect: (projectId: string) => void;
-  onCreate: () => void;
   control: ReturnType<typeof useProjectSelector>;
 }) {
-  const { projects, selectedProject, pinnedProjectIds, togglePinProject, onSelect, onCreate, control } = props;
+  const { projects, selectedProject, pinnedProjectIds, togglePinProject, onSelect, control } = props;
   const { open: projectDropdownOpen, toggle, close, rootRef: controlRootRef } = control;
   const t = useT();
 
@@ -57,10 +56,6 @@ export function ProjectSelector(props: {
           onSelect={(projectId) => {
             onSelect(projectId);
             close();
-          }}
-          onCreate={() => {
-            close();
-            onCreate();
           }}
           className="sidebar-project-menu"
         />

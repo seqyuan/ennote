@@ -20,11 +20,10 @@ export function HeroProjectChip(props: {
   /** Open the project menu (or the create dialog when no project exists). */
   onRequestProject: () => void;
   onSwitchProject: (projectId: string) => void;
-  onNewProject: () => void;
   /** Dropdown control owned by ChatWindow (shared with the composer). */
   projectSelector: ReturnType<typeof useProjectSelector>;
 }) {
-  const { projects, selectedProject, pinnedProjectIds, togglePinProject, onRequestProject, onSwitchProject, onNewProject, projectSelector } = props;
+  const { projects, selectedProject, pinnedProjectIds, togglePinProject, onRequestProject, onSwitchProject, projectSelector } = props;
   const { open, close, rootRef } = projectSelector;
   const t = useT();
   const selectedName = selectedProject ? projects.find((p) => p.id === selectedProject)?.name ?? null : null;
@@ -66,10 +65,6 @@ export function HeroProjectChip(props: {
           onSelect={(projectId) => {
             close();
             onSwitchProject(projectId);
-          }}
-          onCreate={() => {
-            close();
-            onNewProject();
           }}
           className="hero-project-menu"
         />

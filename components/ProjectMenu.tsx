@@ -1,15 +1,19 @@
 "use client";
 
-import { Plus, Star } from "lucide-react";
+import { Star } from "lucide-react";
 import { useT } from "@/components/LocaleProvider";
 
 export interface SidebarProject { id: string; name: string }
 
 /**
- * Shared project dropdown menu (list + pin + add entry), used by the sidebar
+ * Shared project dropdown menu (list + pin), used by the sidebar
  * ProjectSelector and the chat hero's project chip. The caller owns the
  * anchored wrapper, the open state, and the outside-click lifecycle; this
- * component only renders the menu panel.
+ * component only renders the menu panel. There is deliberately NO add-entry
+ * here — workspace creation lives in the sidebar's own add button and the
+ * hero chip's no-project create flow. `project-menu` is the base class that
+ * supplies the popover chrome (absolute positioning, surface, border,
+ * shadow, max-height); the caller's positioning class sets the anchor.
  */
 export function ProjectMenu(props: {
   projects: SidebarProject[];
@@ -17,15 +21,14 @@ export function ProjectMenu(props: {
   pinnedProjectIds: string[];
   togglePinProject: (projectId: string) => void;
   onSelect: (projectId: string) => void;
-  onCreate: () => void;
   /** Positioning class (e.g. `sidebar-project-menu` / `hero-project-menu`). */
   className?: string;
 }) {
-  const { projects, selectedProject, pinnedProjectIds, togglePinProject, onSelect, onCreate, className } = props;
+  const { projects, selectedProject, pinnedProjectIds, togglePinProject, onSelect, className } = props;
   const t = useT();
 
   return (
-    <div role="menu" aria-label="Projects" className={className}>
+    <div role="menu" aria-label="Projects" className={`project-menu ${className ?? ""}`}>
       {projects.length === 0 && (
         <div style={{ padding: "10px 12px", color: "var(--text-dim)", fontSize: 11 }}>{t("sidebar.noProjects")}</div>
       )}
@@ -61,20 +64,6 @@ export function ProjectMenu(props: {
           </button>
         </div>
       ))}
-      <button
-        type="button"
-        onClick={onCreate}
-        style={{
-          display: "flex", alignItems: "center", gap: 7,
-          width: "100%", padding: "8px 10px",
-          background: "none", border: "none",
-          borderTop: projects.length > 0 ? "1px solid var(--border)" : "none",
-          color: "var(--accent)", cursor: "pointer", textAlign: "left" as const, fontSize: 11,
-        }}
-      >
-        <Plus size={12} />
-        {t("sidebar.addProject")}
-      </button>
     </div>
   );
 }

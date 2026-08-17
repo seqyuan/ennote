@@ -162,7 +162,6 @@ export function ChatWindow({
           togglePinProject={togglePinProject}
           onRequestProject={requestProject}
           onSwitchProject={onSwitchProject}
-          onNewProject={onNewProject}
           projectSelector={heroProject}
         />
       </div>
