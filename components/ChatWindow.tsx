@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import { useCallback, useEffect, useRef } from "react";
 import { Composer } from "@/components/Composer";
 import { EmptyHero } from "@/components/EmptyHero";
+import { HeroProjectChip } from "@/components/HeroProjectChip";
 import { BackgroundDelegationStrip } from "@/components/BackgroundDelegationStrip";
 import { CompactionPromptBar } from "@/components/CompactionPromptBar";
 import { ConversationTimeline } from "@/components/ConversationTimeline";
@@ -114,17 +115,10 @@ export function ChatWindow({
           <strong>New conversation</strong><span>Start with a question, file, or analysis task.</span>
         </div>}
         {!history.sessionId && <EmptyHero
-          projects={projects}
           selectedProject={selectedProject}
           hasModel={hasModel}
-          pinnedProjectIds={pinnedProjectIds}
-          togglePinProject={togglePinProject}
-          onRequestProject={requestProject}
-          onSwitchProject={onSwitchProject}
-          onNewProject={onNewProject}
           onNewSession={onNewSession}
           onOpenSettings={onOpenSettings}
-          projectSelector={heroProject}
         />}
         <ConversationTimeline sessionId={history.sessionId ?? ""} nodes={history.messages} pendingApproval={run.pendingApproval} resolvingApproval={run.resolvingApproval}
           decideApproval={run.decideApproval} activeLeafMessageId={history.activeLeafMessageId}
@@ -155,6 +149,23 @@ export function ChatWindow({
         onConfirm={composer.compaction.confirm}
         onCancel={composer.compaction.cancel}
       />
+    )}
+    {/* The workspace chip rides directly above the composer card, left-
+        aligned with it (dsh hero workspace row) — never the floating
+        top-left of the chat area. Rendered only while no session exists. */}
+    {!history.sessionId && (
+      <div className="hero-workspace-row">
+        <HeroProjectChip
+          projects={projects}
+          selectedProject={selectedProject}
+          pinnedProjectIds={pinnedProjectIds}
+          togglePinProject={togglePinProject}
+          onRequestProject={requestProject}
+          onSwitchProject={onSwitchProject}
+          onNewProject={onNewProject}
+          projectSelector={heroProject}
+        />
+      </div>
     )}
     <Composer selectedSession={history.sessionId} activeLeafMessageId={history.activeLeafMessageId} input={composer.input} setInput={composer.setInput}
       activeRun={Boolean(run.activeRun)} compacting={run.compacting} hasPendingImage={Boolean(composer.pendingImage)} reconnecting={reconnecting}

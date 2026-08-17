@@ -2,88 +2,27 @@
 
 import { Bot } from "lucide-react";
 import { useT } from "@/components/LocaleProvider";
-import type { useProjectSelector } from "@/hooks/useProjectSelector";
-import { ProjectMenu, type SidebarProject } from "./ProjectMenu";
 
 /**
  * Hero guidance shown in the chat area when no session is selected. Mirrors
- * the DeepSeek Harness conversation hero: a compact workspace chip sits at the
- * top-left of the dialog (folder + name/placeholder + chevron) and carries the
- * only project affordance — picking opens the shared project menu with the add
- * entry pinned at the bottom; with no projects at all the chip opens the
- * create flow directly. The hero no longer stacks prominent add-project
- * buttons: once a session starts the chip disappears (the composer docks).
+ * the DeepSeek Harness conversation hero: the workspace chip is NOT part of
+ * this centered stack — it rides directly above the composer card (see
+ * HeroProjectChip, rendered by ChatWindow next to the composer) so the chip
+ * sits at the input box's top-left, matching dsh. This component only owns
+ * the centered brand mark, headline, and CTAs over the soft glow.
  */
 export function EmptyHero(props: {
-  projects: SidebarProject[];
   selectedProject: string | null;
   hasModel: boolean;
-  pinnedProjectIds: string[];
-  togglePinProject: (projectId: string) => void;
-  /** Open the project menu (or the create dialog when no project exists). */
-  onRequestProject: () => void;
-  onSwitchProject: (projectId: string) => void;
-  onNewProject: () => void;
   onNewSession: () => void;
   onOpenSettings: () => void;
-  /** Dropdown control owned by ChatWindow (shared with the composer). */
-  projectSelector: ReturnType<typeof useProjectSelector>;
 }) {
-  const { projects, selectedProject, hasModel, pinnedProjectIds, togglePinProject, onRequestProject, onSwitchProject, onNewProject, onNewSession, onOpenSettings, projectSelector } = props;
-  const { open, close, rootRef } = projectSelector;
+  const { selectedProject, hasModel, onNewSession, onOpenSettings } = props;
   const t = useT();
-  const selectedName = selectedProject ? projects.find((p) => p.id === selectedProject)?.name ?? null : null;
 
   return (
     <div className="empty-hero" data-testid="empty-hero">
       <div className="empty-hero-glow" aria-hidden="true" />
-
-      {/* Workspace chip, top-left of the dialog (hero only). */}
-      <div ref={rootRef} className="hero-project-chip-wrap">
-        <button
-          type="button"
-          className="hero-project-chip"
-          onClick={onRequestProject}
-          title={selectedName ?? t("empty.project.choose")}
-          aria-label={selectedName ? `${selectedName} · ${t("sidebar.selectProject")}` : t("sidebar.selectProjectEllipsis")}
-          aria-haspopup="menu"
-          aria-expanded={open}
-        >
-          {selectedName ? (
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: "var(--accent)" }}>
-              <path d="M1.5 5A1.5 1.5 0 0 1 3 3.5h3l1.2 1.5H13A1.5 1.5 0 0 1 14.5 6.5L13.6 11A1.5 1.5 0 0 1 12.1 12.5H3A1.5 1.5 0 0 1 1.5 11V5ZM1.5 8V11A1.5 1.5 0 0 0 3 12.5h10A1.5 1.5 0 0 0 14.5 11V8" />
-            </svg>
-          ) : (
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: "var(--accent)" }}>
-              <path d="M1.5 5A1.5 1.5 0 0 1 3 3.5h3l1.2 1.5H13A1.5 1.5 0 0 1 14.5 6.5L13.6 11A1.5 1.5 0 0 1 12.1 12.5H3A1.5 1.5 0 0 1 1.5 11V5Z" />
-            </svg>
-          )}
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {selectedName ?? t("empty.project.choose")}
-          </span>
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--text-dim)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
-            <polyline points="2 3.5 5 6.5 8 3.5" />
-          </svg>
-        </button>
-
-        {open && (
-          <ProjectMenu
-            projects={projects}
-            selectedProject={selectedProject}
-            pinnedProjectIds={pinnedProjectIds}
-            togglePinProject={togglePinProject}
-            onSelect={(projectId) => {
-              close();
-              onSwitchProject(projectId);
-            }}
-            onCreate={() => {
-              close();
-              onNewProject();
-            }}
-            className="hero-project-menu"
-          />
-        )}
-      </div>
 
       {!selectedProject ? (
         <div className="empty-hero-stack">

@@ -325,7 +325,7 @@ button:disabled { cursor: default; }
 }
 .sidebar-item:hover { background: var(--bg-hover); color: var(--text); }
 .sidebar-item.active { background: var(--bg-selected); color: var(--text); font-weight: 600; }
-.sidebar-settings { margin-top: auto; border-top: 1px solid var(--border); }
+.sidebar-settings { margin-top: auto; }
 .sidebar-button { display: flex; align-items: center; width: 100%; gap: 8px; }
 .sidebar-list, .session-list { margin: 0; padding: 0; list-style: none; }
 .navigation-close { display: none; margin-left: auto; }
@@ -705,16 +705,29 @@ button:disabled { cursor: default; }
   right: 10px;
 }
 .hero-project-menu {
-  top: calc(100% + 4px);
+  bottom: calc(100% + 4px);
   left: 0;
   width: 248px;
 }
 
-/* Workspace chip at the top-left of the chat hero (dsh conversation hero). */
+/* The chip row above the composer card; mirrors dsh's heroWorkspaceRow
+   (left-aligned with the card, no separator line). */
+.hero-workspace-row {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  width: min(100%, 920px);
+  margin: 0 auto;
+  padding: 2px 28px 0;
+  box-sizing: border-box;
+  background: var(--bg);
+}
+
+/* Workspace chip seat: in-flow, directly above the composer card (dsh hero
+   workspace row). The row itself (.hero-workspace-row) shares the composer's
+   width/padding so the chip's left edge aligns with the input card's. */
 .hero-project-chip-wrap {
-  position: absolute;
-  top: 14px;
-  left: 16px;
+  position: relative;
   z-index: 10;
 }
 .hero-project-chip {
@@ -875,7 +888,7 @@ button:disabled { cursor: default; }
 /* Attachment strip */
 
 /* Composer */
-.composer-shell { position: relative; flex-shrink: 0; border-top: 1px solid var(--border); background: var(--bg); }
+.composer-shell { position: relative; flex-shrink: 0; background: var(--bg); }
 .composer-plus {
   position: relative; flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
   width: 26px; height: 26px; margin: 0 0 7px 5px; padding: 0; border-radius: 50%;
