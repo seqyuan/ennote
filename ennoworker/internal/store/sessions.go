@@ -115,9 +115,12 @@ func (r *SessionRepo) transitionStatus(ctx context.Context, sessionID, expected,
 	}
 	session, err := transitionSessionStatus(ctx, db, sessionID, expected, target)
 	if err == nil {
-		err = queueSessionProjection(ctx, db, session)
-		if err == nil && r.Files != nil {
+		if r.Files != nil {
+			// Best-effort projection: cache invalidation must not ride on it.
+			_ = queueSessionProjection(ctx, db, session)
 			r.Files.InvalidateSession(sessionID)
+		} else {
+			err = queueSessionProjection(ctx, db, session)
 		}
 	}
 	return session, err
@@ -194,9 +197,12 @@ func (r *SessionRepo) UpdateTitle(ctx context.Context, sessionID, title string) 
 	}
 	session, err := updateSessionTitle(ctx, db, sessionID, title)
 	if err == nil {
-		err = queueSessionProjection(ctx, db, session)
-		if err == nil && r.Files != nil {
+		if r.Files != nil {
+			// Best-effort projection: cache invalidation must not ride on it.
+			_ = queueSessionProjection(ctx, db, session)
 			r.Files.InvalidateSession(sessionID)
+		} else {
+			err = queueSessionProjection(ctx, db, session)
 		}
 	}
 	return session, err

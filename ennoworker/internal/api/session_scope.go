@@ -66,7 +66,10 @@ func ownerFromPath(path string) *requestOwner {
 func (s *Server) withSessionDB(db *sql.DB, sessionID string) *Server {
 	clone := *s
 	clone.DB = db
-	clone.Sessions = &store.SessionRepo{DB: db}
+	// Keep both the scoped DB and the manager: session-level writes (rename,
+	// archive/restore) must still invalidate the manager's per-project list
+	// cache, which lives on SessionStores, not on the scoped database.
+	clone.Sessions = &store.SessionRepo{DB: db, Files: s.SessionStores}
 	if s.Branches != nil {
 		value := *s.Branches
 		value.DB = db
