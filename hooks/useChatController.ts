@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import type { Session } from "@/components/settings/types";
 import { apiFetch } from "@/lib/worker-api.client";
 import { useAgentSession } from "@/hooks/useAgentSession";
@@ -8,6 +8,7 @@ import { useSessionMessages } from "@/hooks/useSessionMessages";
 import { useRunRecovery } from "@/hooks/useRunRecovery";
 import { useSessionBranches } from "@/hooks/useSessionBranches";
 import { useChatComposer } from "@/hooks/useChatComposer";
+import { useSessionStats } from "@/hooks/useSessionStats";
 import type { usePromptTemplates } from "@/hooks/usePromptTemplates";
 import type { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
 
@@ -54,6 +55,7 @@ export function useChatController(deps: ChatControllerDeps) {
     activeRun: messagesData.activeRun, pendingApproval: messagesData.pendingApproval,
   });
   const recoveryData = useRunRecovery(selectedSession, activeBranchId, agent.activeRunID);
+  const sessionStats = useSessionStats(selectedSession, agent.activeRunID);
   const branchesData = useSessionBranches({ sessionId: selectedSession, activeBranchId, onSessionUpdated: updateSession });
 
   // Composer domain: state + actions in its own hook, driven by a runtime
@@ -77,12 +79,26 @@ export function useChatController(deps: ChatControllerDeps) {
     },
   });
 
-  const createBranch = async (messageId: string) => {
-    if (!agent.activeRunID) await branchesData.createBranch(messageId);
-  };
+  const activeRunID = agent.activeRunID;
+  const { decideApproval: decideApprovalOnRun } = agent;
+  const { createBranch: createBranchOnBranch } = branchesData;
+
+  const createBranch = useCallback(async (messageId: string) => {
+    if (!activeRunID) await createBranchOnBranch(messageId);
+  }, [activeRunID, createBranchOnBranch]);
   const activateBranch = async (branchId: string) => {
-    if (!agent.activeRunID) await branchesData.activateBranch(branchId);
+    if (!activeRunID) await branchesData.activateBranch(branchId);
   };
+  // Stable callbacks for the memoized render tree: ConversationTurn and
+  // AssistantMessage skip re-render only when these keep their identity.
+  const decideApproval = useCallback(
+    (decision: Parameters<typeof decideApprovalOnRun>[0]) => void decideApprovalOnRun(decision),
+    [decideApprovalOnRun],
+  );
+  const createBranchForTree = useCallback(
+    (messageId: string) => void createBranch(messageId),
+    [createBranch],
+  );
   const retryRun = useCallback(async () => {
     const run = await recoveryData.retry();
     if (run) void agent.watchRun(run);
@@ -96,11 +112,64 @@ export function useChatController(deps: ChatControllerDeps) {
 
   const error = agent.error ?? recoveryData.error ?? branchesData.error;
 
+  // Resolve the run-frozen modelProfileId into a display name from the catalog
+  // (falling back to the raw apiModel), so assistant speaker labels can show
+  // which model produced a reply without each message row knowing the catalog.
+  const modelNameById = useMemo(
+    () => new Map(settings.models.map((model) => [model.id, model.displayName || model.modelName])),
+    [settings.models],
+  );
+
+  // Attribution for transient (streaming) assistant steps, which carry no
+  // speaker. Inherit the active run's speaker snapshot + resolved model so the
+  // speaker label and model name render in real time, not only after the reply
+  // is committed as a canonical message.
+  const activeRunAttribution = useMemo(() => {
+    const run = agent.activeRun;
+    if (!run) return null;
+    const effective = (run.effectiveConfig ?? {}) as Record<string, unknown>;
+    const requested = (run.requestedConfig ?? {}) as Record<string, unknown>;
+    const modelProfileId = (typeof effective.modelProfileId === "string" && effective.modelProfileId)
+      ? effective.modelProfileId
+      : (typeof requested.modelProfileId === "string" ? requested.modelProfileId : undefined);
+    const apiModel = (typeof effective.apiModel === "string" && effective.apiModel)
+      ? effective.apiModel
+      : (typeof requested.apiModel === "string" ? requested.apiModel : undefined);
+    const modelName = (modelProfileId ? modelNameById.get(modelProfileId) : undefined) ?? apiModel;
+    return { speaker: run.speakerSnapshot, modelProfileId, apiModel, modelName };
+  }, [agent.activeRun, modelNameById]);
+
+  const messages = useMemo(
+    () => messagesData.messages.map((node) => {
+      if (node.kind !== "turn") return node;
+      // Only enrich un-enriched assistant steps; skip already-resolved ones so
+      // streaming updates (transient appends) don't re-clone the whole tree.
+      let changed = false;
+      const steps = node.steps.map((step) => {
+        if (step.kind !== "assistant") return step;
+        if (!step.speaker) {
+          if (!activeRunAttribution) return step;
+          changed = true;
+          const { speaker, modelProfileId, apiModel, modelName } = activeRunAttribution;
+          return { ...step, speaker: { ...speaker, modelProfileId, apiModel, modelName } };
+        }
+        if (step.speaker.modelName) return step;
+        const resolved = step.speaker.modelProfileId ? modelNameById.get(step.speaker.modelProfileId) : undefined;
+        const modelName = resolved ?? step.speaker.apiModel;
+        if (!modelName) return step;
+        changed = true;
+        return { ...step, speaker: { ...step.speaker, modelName } };
+      });
+      return changed ? { ...node, steps } : node;
+    }),
+    [messagesData.messages, modelNameById, activeRunAttribution],
+  );
+
   const history = {
     sessionId: selectedSession,
     activeBranchId,
     activeLeafMessageId,
-    messages: messagesData.messages,
+    messages,
     loading: messagesData.loading,
     loadingOlder: messagesData.loadingOlder,
     error: messagesData.historyError,
@@ -113,10 +182,12 @@ export function useChatController(deps: ChatControllerDeps) {
     activeRunStatus: agent.activeRun?.status,
     status: agent.status,
     usage: agent.usage,
+    contextUsage: agent.contextUsage,
+    stats: sessionStats,
     compacting: agent.compacting,
     pendingApproval: agent.pendingApproval,
     resolvingApproval: agent.resolvingApproval,
-    decideApproval: (decision: Parameters<typeof agent.decideApproval>[0]) => void agent.decideApproval(decision),
+    decideApproval,
     cancel: () => void agent.cancel(),
     pendingFollowUps: agent.pendingFollowUps,
     recovery: recoveryData.recovery,
@@ -133,7 +204,7 @@ export function useChatController(deps: ChatControllerDeps) {
     loading: branchesData.loading,
     changing: branchesData.changing,
     error: branchesData.error,
-    createBranch: (messageId: string) => void createBranch(messageId),
+    createBranch: createBranchForTree,
     activateBranch: (branchId: string) => void activateBranch(branchId),
   };
 

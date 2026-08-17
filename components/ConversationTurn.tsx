@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { CornerDownRight, Wrench } from "lucide-react";
 import { ApprovalPanel } from "@/components/ApprovalPanel";
 import { AssistantMessage } from "@/components/AssistantMessage";
@@ -23,10 +24,11 @@ interface ConversationTurnProps {
   createBranch?: (messageId: string) => void;
 }
 
-export function ConversationTurn({ sessionId, turn, active = false, pendingApproval, resolvingApproval, decideApproval, runStatus,
+export const ConversationTurn = memo(function ConversationTurn({ sessionId, turn, active = false, pendingApproval, resolvingApproval, decideApproval, runStatus,
   activeLeafMessageId, branchDisabled, createBranch }: ConversationTurnProps) {
   const approvalBatchID = pendingApproval ? turn.steps.find(step => step.kind === "tool_batch" &&
     pendingApproval.items.some(item => step.activities.some(activity => activity.toolCallId === item.toolCallId)))?.id : undefined;
+  const lastAssistantIndex = turn.steps.map(step => step.kind).lastIndexOf("assistant");
   return <article className={`conversation-turn ${active ? "is-active" : ""}`} data-turn-id={turn.id}>
     {turn.user && <div className="user-row" data-message-id={turn.user.sourceMessageId ?? turn.user.id}>
       <div className="user-message"><MessageView text={turn.user.text} /></div>
@@ -35,8 +37,9 @@ export function ConversationTurn({ sessionId, turn, active = false, pendingAppro
         branchDisabled={branchDisabled} onBranch={createBranch} />
     </div>}
     <div className="agent-flow">
-      {turn.steps.map(step => {
+      {turn.steps.map((step, index) => {
         if (step.kind === "assistant") return <AssistantMessage step={step} key={step.id}
+          metrics={index === lastAssistantIndex ? turn.metrics : undefined}
           activeLeafMessageId={activeLeafMessageId} branchDisabled={branchDisabled} createBranch={createBranch} />;
         if (step.kind === "steer") return <div className="steer-message" key={step.id}>
           <CornerDownRight size={14} aria-hidden="true" /><span>{step.text}</span>
@@ -51,9 +54,9 @@ export function ConversationTurn({ sessionId, turn, active = false, pendingAppro
       {runStatus && <RunStatus {...runStatus} />}
     </div>
   </article>;
-}
+});
 
-function ToolBatch({ sessionId, batch, approval, resolving, decide }: {
+const ToolBatch = memo(function ToolBatch({ sessionId, batch, approval, resolving, decide }: {
   sessionId: string;
   batch: ToolBatchStep;
   approval?: ToolApprovalRequest | null;
@@ -68,7 +71,7 @@ function ToolBatch({ sessionId, batch, approval, resolving, decide }: {
       <ToolCallView sessionId={sessionId} activity={activity} key={activity.toolCallId} />)}</div>
     {approval && decide && <ApprovalPanel approval={approval} resolving={resolving ?? null} decide={decide} />}
   </section>;
-}
+});
 
 export function PendingApprovalBatch({ approval, resolving, decide }: {
   approval: ToolApprovalRequest;
