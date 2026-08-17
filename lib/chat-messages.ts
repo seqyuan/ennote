@@ -4,6 +4,7 @@ import { classifyDisplayRisk, type DisplayRiskClass, type ToolActivityState } fr
 
 export type CanonicalMessage = components["schemas"]["Message"];
 export type CanonicalMessagePage = components["schemas"]["SessionMessagePage"];
+export type TurnMetric = components["schemas"]["TurnMetric"];
 type CanonicalPart = CanonicalMessage["parts"][number];
 type GeneratedCheckpoint = components["schemas"]["ContextCompaction"];
 
@@ -49,6 +50,11 @@ export interface SpeakerLabel {
   displayName?: string;
   icon?: string;
   color?: string;
+  /** Denormalized from the run's frozen effective config (see MessageRepo.Page). */
+  modelProfileId?: string;
+  apiModel?: string;
+  /** Resolved display name (set by useChatController from the model catalog). */
+  modelName?: string;
 }
 
 export interface AssistantStep {
@@ -94,6 +100,8 @@ export interface ConversationTurn {
   user?: UserStep;
   steps: ConversationStep[];
   messageIds: string[];
+  runId?: string;
+  metrics?: TurnMetric;
 }
 
 export interface CheckpointNode {
@@ -127,11 +135,28 @@ export function reconcileLatestMessages(current: CanonicalMessage[], latest: Can
   return [...current.slice(0, overlap), ...latest];
 }
 
-export function mergeTimeline(
+/**
+ * The stable prefix of the timeline projection: canonical messages + completed
+ * checkpoints. It is deliberately NOT flushed at the end — the open tail turn
+ * (plus its tool registry) is returned so `applyTransient` can continue it
+ * without re-projecting the whole history.
+ */
+export interface TimelineBase {
+  /** Flushed turns + checkpoint nodes (reference-stable across applies). */
+  nodes: ConversationNode[];
+  /** Unflushed tail turn left open by the canonical projection. */
+  openTurn: ConversationTurn | null;
+  /** Tool-call registry for `openTurn` (resume/retry merge target). */
+  calls: Map<string, ToolActivity>;
+  /** Orphan-turn id counter, carried so transient ids never collide. */
+  syntheticTurn: number;
+}
+
+export function projectBase(
   messages: CanonicalMessage[],
   checkpoints: ContextCheckpoint[],
-  transient: TurnMessage[],
-): ConversationNode[] {
+  turnMetrics?: Map<string, TurnMetric>,
+): TimelineBase {
   const nodes: ConversationNode[] = [];
   let turn: ConversationTurn | null = null;
   let syntheticTurn = 0;
@@ -139,6 +164,7 @@ export function mergeTimeline(
 
   const flushTurn = () => {
     if (!turn) return;
+    if (turn.runId) turn.metrics = turnMetrics?.get(turn.runId);
     if (turn.user || turn.steps.length > 0) nodes.push(turn);
     turn = null;
     calls.clear();
@@ -159,9 +185,7 @@ export function mergeTimeline(
     }
     projectCanonicalIntoTurn(item.value);
   }
-  for (const item of transient) projectTransientIntoTurn(item);
-  flushTurn();
-  return nodes;
+  return { nodes, openTurn: turn, calls, syntheticTurn };
 
   function projectCanonicalIntoTurn(message: CanonicalMessage) {
     if (message.role === "user") {
@@ -177,64 +201,9 @@ export function mergeTimeline(
     }
     const active = ensureTurn();
     active.messageIds.push(message.id);
+    if (message.runId) active.runId = active.runId ?? message.runId;
     if (message.role === "assistant") projectAssistantParts(active, message);
     else if (message.role === "tool") projectToolParts(active, message);
-  }
-
-  function projectTransientIntoTurn(message: TurnMessage) {
-    if (message.role === "user" && message.kind !== "steer") {
-      flushTurn();
-      turn = {
-        kind: "turn",
-        id: `turn-${message.id}`,
-        user: { id: message.id, text: message.text, sourceMessageId: message.sourceMessageId, createdAt: message.createdAt },
-        steps: [],
-        messageIds: [message.sourceMessageId ?? message.id],
-      };
-      return;
-    }
-    const active = ensureTurn();
-    active.messageIds.push(message.sourceMessageId ?? message.id);
-    if (message.role === "user" && message.kind === "steer") {
-      active.steps.push({ kind: "steer", id: message.id, text: message.text.replace(/^↪\s*/, ""), createdAt: message.createdAt });
-      return;
-    }
-    if (message.role === "assistant") {
-      const blocks: AssistantBlock[] = [];
-      if (message.thinking) blocks.push({ kind: "thinking", text: message.thinking });
-      if (message.text) blocks.push({ kind: "text", text: message.text });
-      if (blocks.length > 0) active.steps.push({ kind: "assistant", id: message.id, sourceMessageId: message.sourceMessageId,
-        blocks, createdAt: message.createdAt });
-      return;
-    }
-    if (message.role === "tool") {
-      const callID = message.toolCallId ?? message.id;
-      const existing = calls.get(callID);
-      if (existing) {
-        if (message.arguments) existing.arguments = message.arguments;
-        if (message.runId) existing.runId = message.runId;
-        existing.result = message.toolState === "running" ? existing.result : {
-          content: message.text, isError: Boolean(message.isError), artifacts: [],
-        };
-        existing.state = message.toolState ?? resultState(message.text, Boolean(message.isError));
-        existing.sourceMessageIds.push(message.sourceMessageId ?? message.id);
-        return;
-      }
-      addToolBatch(active, [{
-        id: message.id,
-        toolCallId: callID,
-        toolName: message.toolName ?? "tool",
-        arguments: message.arguments,
-        argumentsFragment: message.argumentsFragment,
-        result: message.toolState === "running" ? undefined : {
-          content: message.text, isError: Boolean(message.isError), artifacts: [],
-        },
-        state: message.toolState ?? resultState(message.text, Boolean(message.isError)),
-        riskClass: classifyDisplayRisk(message.toolName ?? "tool"),
-        sourceMessageIds: [message.sourceMessageId ?? message.id],
-        runId: message.runId,
-      }]);
-    }
   }
 
   function projectAssistantParts(active: ConversationTurn, message: CanonicalMessage) {
@@ -243,13 +212,14 @@ export function mergeTimeline(
     const flushAssistant = () => {
       if (assistantBlocks.length === 0) return;
       active.steps.push({ kind: "assistant", id: `${message.id}-assistant-${active.steps.length}`,
-        sourceMessageId: message.id, blocks: assistantBlocks, speaker: message.speakerSnapshot,
+        sourceMessageId: message.id, blocks: assistantBlocks,
+        speaker: { ...message.speakerSnapshot, modelProfileId: message.modelProfileId, apiModel: message.apiModel },
         createdAt: message.createdAt });
       assistantBlocks = [];
     };
     const flushBatch = () => {
       if (batch.length === 0) return;
-      addToolBatch(active, batch);
+      addToolBatch(active, batch, calls);
       batch = [];
     };
     for (const part of message.parts) {
@@ -304,15 +274,164 @@ export function mergeTimeline(
         orphaned.push(activity);
       }
     }
-    if (orphaned.length > 0) addToolBatch(active, orphaned);
+    if (orphaned.length > 0) addToolBatch(active, orphaned, calls);
+  }
+}
+
+/**
+ * Merge streaming deltas into the base's tail without mutating `base`. Only the
+ * tail (openTurn + new transient turns) is constructed; every other node keeps
+ * its reference so memoized consumers skip re-render.
+ */
+export function applyTransient(
+  base: TimelineBase,
+  transient: TurnMessage[],
+  turnMetrics?: Map<string, TurnMetric>,
+): ConversationNode[] {
+  if (transient.length === 0) {
+    const tail = finalize(base.openTurn, turnMetrics);
+    return tail ? [...base.nodes, tail] : base.nodes;
   }
 
-  function addToolBatch(active: ConversationTurn, activities: ToolActivity[]) {
-    const previous = active.steps[active.steps.length - 1];
-    if (previous?.kind === "tool_batch") previous.activities.push(...activities);
-    else active.steps.push({ kind: "tool_batch", id: `batch-${activities[0].id}`, activities });
-    for (const activity of activities) calls.set(activity.toolCallId, activity);
+  const nodes = [...base.nodes];
+  const calls = new Map(base.calls);
+  let syntheticTurn = base.syntheticTurn;
+  let turn: ConversationTurn | null = base.openTurn;
+  let turnIsBase = turn !== null;
+
+  const ensureMutable = (): ConversationTurn => {
+    if (turn === null) {
+      syntheticTurn += 1;
+      turn = { kind: "turn", id: `turn-orphan-${syntheticTurn}`, steps: [], messageIds: [] };
+      turnIsBase = false;
+      return turn;
+    }
+    if (turnIsBase) {
+      // clone-on-write: the first mutation of base.openTurn copies it (deep
+      // enough to detach tool activities) and rebinds the registry.
+      turn = cloneTurn(turn);
+      calls.clear();
+      for (const step of turn.steps) {
+        if (step.kind === "tool_batch") for (const activity of step.activities) calls.set(activity.toolCallId, activity);
+      }
+      turnIsBase = false;
+    }
+    return turn;
+  };
+  const flushTurn = () => {
+    if (!turn) return;
+    const outgoing = turnIsBase ? { ...turn } : turn;
+    if (outgoing.runId) outgoing.metrics = turnMetrics?.get(outgoing.runId);
+    if (outgoing.user || outgoing.steps.length > 0) nodes.push(outgoing);
+    turn = null;
+    turnIsBase = false;
+    calls.clear();
+  };
+
+  for (const message of transient) projectTransientIntoTurn(message);
+  flushTurn();
+  return nodes;
+
+  function projectTransientIntoTurn(message: TurnMessage) {
+    if (message.role === "user" && message.kind !== "steer") {
+      flushTurn();
+      turn = {
+        kind: "turn",
+        id: `turn-${message.id}`,
+        user: { id: message.id, text: message.text, sourceMessageId: message.sourceMessageId, createdAt: message.createdAt },
+        steps: [],
+        messageIds: [message.sourceMessageId ?? message.id],
+      };
+      turnIsBase = false;
+      return;
+    }
+    const active = ensureMutable();
+    active.messageIds.push(message.sourceMessageId ?? message.id);
+    if (message.runId) active.runId = active.runId ?? message.runId;
+    if (message.role === "user" && message.kind === "steer") {
+      active.steps.push({ kind: "steer", id: message.id, text: message.text.replace(/^↪\s*/, ""), createdAt: message.createdAt });
+      return;
+    }
+    if (message.role === "assistant") {
+      const blocks: AssistantBlock[] = [];
+      if (message.thinking) blocks.push({ kind: "thinking", text: message.thinking });
+      if (message.text) blocks.push({ kind: "text", text: message.text });
+      if (blocks.length > 0) active.steps.push({ kind: "assistant", id: message.id, sourceMessageId: message.sourceMessageId,
+        blocks, createdAt: message.createdAt });
+      return;
+    }
+    if (message.role === "tool") {
+      const callID = message.toolCallId ?? message.id;
+      const existing = calls.get(callID);
+      if (existing) {
+        if (message.arguments) existing.arguments = message.arguments;
+        if (message.runId) existing.runId = message.runId;
+        existing.result = message.toolState === "running" ? existing.result : {
+          content: message.text, isError: Boolean(message.isError), artifacts: [],
+        };
+        existing.state = message.toolState ?? resultState(message.text, Boolean(message.isError));
+        existing.sourceMessageIds.push(message.sourceMessageId ?? message.id);
+        return;
+      }
+      addToolBatch(active, [{
+        id: message.id,
+        toolCallId: callID,
+        toolName: message.toolName ?? "tool",
+        arguments: message.arguments,
+        argumentsFragment: message.argumentsFragment,
+        result: message.toolState === "running" ? undefined : {
+          content: message.text, isError: Boolean(message.isError), artifacts: [],
+        },
+        state: message.toolState ?? resultState(message.text, Boolean(message.isError)),
+        riskClass: classifyDisplayRisk(message.toolName ?? "tool"),
+        sourceMessageIds: [message.sourceMessageId ?? message.id],
+        runId: message.runId,
+      }], calls);
+    }
   }
+}
+
+/**
+ * Backward-compatible projection: the composition of the split. Existing
+ * callers and unit tests keep working unchanged.
+ */
+export function mergeTimeline(
+  messages: CanonicalMessage[],
+  checkpoints: ContextCheckpoint[],
+  transient: TurnMessage[],
+  turnMetrics?: Map<string, TurnMetric>,
+): ConversationNode[] {
+  return applyTransient(projectBase(messages, checkpoints, turnMetrics), transient, turnMetrics);
+}
+
+function addToolBatch(active: ConversationTurn, activities: ToolActivity[], calls: Map<string, ToolActivity>) {
+  const previous = active.steps[active.steps.length - 1];
+  if (previous?.kind === "tool_batch") previous.activities.push(...activities);
+  else active.steps.push({ kind: "tool_batch", id: `batch-${activities[0].id}`, activities });
+  for (const activity of activities) calls.set(activity.toolCallId, activity);
+}
+
+function finalize(turn: ConversationTurn | null, turnMetrics?: Map<string, TurnMetric>): ConversationTurn | null {
+  if (!turn) return null;
+  const outgoing = { ...turn };
+  if (outgoing.runId) outgoing.metrics = turnMetrics?.get(outgoing.runId);
+  if (!outgoing.user && outgoing.steps.length === 0) return null;
+  return outgoing;
+}
+
+/** Deep enough to detach mutable tool activities; assistant/steer steps are append-only. */
+function cloneTurn(turn: ConversationTurn): ConversationTurn {
+  return {
+    ...turn,
+    messageIds: [...turn.messageIds],
+    steps: turn.steps.map((step) => step.kind === "tool_batch"
+      ? { ...step, activities: step.activities.map((activity) => ({
+          ...activity,
+          sourceMessageIds: [...activity.sourceMessageIds],
+          result: activity.result ? { ...activity.result } : undefined,
+        })) }
+      : step),
+  };
 }
 
 function projectionItems(messages: CanonicalMessage[], checkpoints: ContextCheckpoint[]): ProjectionItem[] {

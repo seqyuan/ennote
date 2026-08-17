@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyTransient,
   mergeTimeline,
   prependCanonicalMessages,
+  projectBase,
   reconcileLatestMessages,
   type CanonicalMessage,
   type ContextCheckpoint,
@@ -141,6 +143,91 @@ describe("structured conversation projection", () => {
     );
     expect(timeline.map(item => item.id)).toEqual(["turn-m1", "compaction-checkpoint", "turn-m3"]);
     expect(timeline[1]).toMatchObject({ kind: "checkpoint", summary: "state summary", reclaimedTokens: 100 });
+  });
+});
+
+describe("split projection (projectBase + applyTransient)", () => {
+  const completedTurn = (): CanonicalMessage[] => [
+    message("m1", "user", "Inspect"),
+    message("m2", "assistant", "", [
+      { type: "text", text: "Inspecting…" },
+      { type: "tool_call", toolCall: { id: "c1", name: "read", arguments: { path: "/a" } } },
+    ]),
+    message("m3", "tool", "", [
+      { type: "tool_result", toolResult: { toolCallId: "c1", toolName: "read", content: "ok", isError: false } },
+    ]),
+    message("m4", "assistant", "Done"),
+  ];
+  const streamingTail = (): TurnMessage[] => [
+    { id: "u2", role: "user", text: "Next" },
+    { id: "a2", role: "assistant", text: "streaming" },
+    { id: "t2", role: "tool", kind: "tool", toolCallId: "c2", toolName: "grep", text: "hit", isError: false },
+  ];
+
+  it("is equivalent to mergeTimeline across canonical/transient/checkpoint mixes", () => {
+    const checkpoint: ContextCheckpoint = {
+      id: "cp", status: "completed", reason: "manual", summary: "s", reclaimedTokens: 1,
+      firstKeptMessageId: "m1", sourceThroughMessageId: "m1", baseLeafMessageId: "m4", createdAt: "2026-07-28T00:00:05Z",
+    };
+    const cases = [
+      { messages: completedTurn(), checkpoints: [] as ContextCheckpoint[], transient: [] as TurnMessage[] },
+      { messages: completedTurn(), checkpoints: [] as ContextCheckpoint[], transient: streamingTail() },
+      { messages: completedTurn(), checkpoints: [checkpoint], transient: streamingTail() },
+      { messages: [] as CanonicalMessage[], checkpoints: [] as ContextCheckpoint[], transient: streamingTail() },
+    ];
+    for (const c of cases) {
+      expect(applyTransient(projectBase(c.messages, c.checkpoints), c.transient))
+        .toEqual(mergeTimeline(c.messages, c.checkpoints, c.transient));
+    }
+  });
+
+  const twoTurns = (): CanonicalMessage[] => [
+    message("m1", "user", "First"),
+    message("m2", "assistant", "First reply"),
+    message("m3", "user", "Second"),
+    message("m4", "assistant", "Second reply"),
+  ];
+
+  it("preserves base node references and returns base.nodes when there is no open turn", () => {
+    const base = projectBase(twoTurns(), []);
+    expect(base.nodes).toHaveLength(1);
+    const out = applyTransient(base, streamingTail());
+    expect(out.length).toBeGreaterThan(base.nodes.length);
+    for (let i = 0; i < base.nodes.length; i += 1) expect(out[i]).toBe(base.nodes[i]);
+
+    // No open turn (empty canonical): the empty-transient fast path returns base.nodes.
+    const emptyBase = projectBase([], []);
+    expect(applyTransient(emptyBase, [])).toBe(emptyBase.nodes);
+  });
+
+  it("finalizes the open turn on empty transient without mutating base", () => {
+    const base = projectBase(twoTurns(), []);
+    const openTurnRef = base.openTurn;
+    const out = applyTransient(base, []);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toBe(base.nodes[0]);
+    expect(out[1]).not.toBe(openTurnRef); // finalized clone, not the base object
+    expect(openTurnRef?.metrics).toBeUndefined(); // base.openTurn untouched
+  });
+
+  it("does not mutate base when a streaming tool delta merges into a canonical tool call", () => {
+    const base = projectBase([
+      message("m1", "user", "go"),
+      message("m2", "assistant", "", [
+        { type: "tool_call", toolCall: { id: "c1", name: "read", arguments: {} } },
+      ]),
+    ], []);
+    const baseBatch = base.openTurn?.steps.find(step => step.kind === "tool_batch");
+    expect(baseBatch?.kind).toBe("tool_batch");
+    if (baseBatch?.kind !== "tool_batch") return;
+    expect(baseBatch.activities[0].result).toBeUndefined();
+
+    applyTransient(base, [
+      { id: "t1", role: "tool", kind: "tool", toolCallId: "c1", toolName: "read", text: "result", isError: false },
+    ]);
+
+    // base.openTurn's activity is untouched (clone-on-write isolated the merge).
+    expect(baseBatch.activities[0].result).toBeUndefined();
   });
 });
 
