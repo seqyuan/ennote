@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
-import { applyTransient, projectBase, type ConversationNode, type TimelineBase, type TurnMessage } from "@/lib/chat-messages";
+import { applyTransient, projectBase, type ConversationNode, type ModelResolver, type TimelineBase, type TurnMessage } from "@/lib/chat-messages";
 import { useTurnMetrics } from "@/hooks/useTurnMetrics";
 import { sessionRegistry, type SessionStoreSnapshot } from "@/lib/session-store";
 import type { components } from "@/lib/worker-api.gen";
@@ -71,7 +71,12 @@ export interface UseSessionStoreResult {
  * - Switching away and back is a cache hit when the same branch is already
  *   loaded; no re-fetch (phase A residency guarantee).
  */
-export function useSessionStore(sessionId: string | null, branchId?: string): UseSessionStoreResult {
+export function useSessionStore(
+  sessionId: string | null,
+  branchId?: string,
+  options?: { resolveModel?: ModelResolver },
+): UseSessionStoreResult {
+  const resolveModel = options?.resolveModel;
   const store = sessionId ? sessionRegistry.getStore(sessionId) : null;
 
   const snapshot = useSyncExternalStore(
@@ -93,12 +98,12 @@ export function useSessionStore(sessionId: string | null, branchId?: string): Us
   // streaming, so it is memoized separately; only `applyTransient` re-runs per
   // chunk and it preserves base node references.
   const base = useMemo(
-    () => (loaded ? projectBase(snapshot.canonical, snapshot.checkpoints, turnMetrics) : EMPTY_BASE),
-    [loaded, snapshot.canonical, snapshot.checkpoints, turnMetrics],
+    () => (loaded ? projectBase(snapshot.canonical, snapshot.checkpoints, turnMetrics, resolveModel) : EMPTY_BASE),
+    [loaded, snapshot.canonical, snapshot.checkpoints, turnMetrics, resolveModel],
   );
   const messages = useMemo(
-    () => applyTransient(base, snapshot.transient, turnMetrics),
-    [base, snapshot.transient, turnMetrics],
+    () => applyTransient(base, snapshot.transient, turnMetrics, resolveModel, snapshot.activeRun),
+    [base, snapshot.transient, turnMetrics, resolveModel, snapshot.activeRun],
   );
 
   // Mirrors the pre-store loading semantics: report loading while the window

@@ -772,6 +772,15 @@ func (l *Loop) streamWithRetry(ctx context.Context, input RunInput, iteration in
 	if len(effectiveConfig) == 0 {
 		effectiveConfig = input.EffectiveConfig
 	}
+	// Context occupancy: report the prepared request once per turn (not per
+	// retry attempt) so the client's context meter tracks the real surface.
+	if callOptions.Purpose == domain.ModelCallAgentTurn {
+		usage := splitContextUsage(request.Messages, request.Tools)
+		usage.ContextWindow = l.effectiveRuntime(runtime.Snapshot).ContextTokens
+		if err := l.recordContextUsage(ctx, input.RunID, usage); err != nil {
+			return domain.Completion{}, err
+		}
+	}
 	for attempt := 1; ; attempt++ {
 		callID := uuid.NewString()
 		started := domain.ModelCallStart{
@@ -807,7 +816,7 @@ func (l *Loop) streamWithRetry(ctx context.Context, input RunInput, iteration in
 				Attempt: attempt, RequestGeneration: callOptions.RequestGeneration, Purpose: callOptions.Purpose,
 				SourceArtifactID: callOptions.SourceArtifactID, CompactionID: callOptions.CompactionID,
 				ActualModel: completion.ActualModel, StopReason: completion.StopReason,
-				Usage: completion.Usage,
+				Usage: completion.Usage, FirstTokenAt: baseSink.firstTokenAt,
 			}
 			if err := l.recordModelCompleted(ctx, finished); err != nil {
 				return domain.Completion{}, err
@@ -1039,7 +1048,8 @@ func (s *attemptSink) Usage(value domain.Usage) error {
 }
 
 func usageEmpty(value domain.Usage) bool {
-	return value.InputTokens == 0 && value.OutputTokens == 0 && value.CachedTokens == 0 && value.ReasoningTokens == 0
+	return value.UncachedInputTokens == 0 && value.CacheReadTokens == 0 && value.CacheWriteTokens == 0 &&
+		value.OutputTokens == 0 && value.ReasoningTokens == 0
 }
 
 func (s *attemptSink) commit(callback func() error) error {
@@ -1061,9 +1071,20 @@ type eventSink struct {
 	callID            string
 	purpose           domain.ModelCallPurpose
 	sourceArtifactID  string
+	firstTokenAt      time.Time
+}
+
+// markFirstToken stamps the first-token time once, at the first streamed delta
+// (text, thinking, or a tool-call fragment). It feeds the StatsLine TTFT and
+// decode-throughput figures.
+func (s *eventSink) markFirstToken() {
+	if s.firstTokenAt.IsZero() {
+		s.firstTokenAt = time.Now().UTC()
+	}
 }
 
 func (s *eventSink) TextDelta(value string) error {
+	s.markFirstToken()
 	eventType := "text_delta"
 	if s.purpose == domain.ModelCallImageDescription {
 		eventType = "vision_description_delta"
@@ -1075,12 +1096,14 @@ func (s *eventSink) TextDelta(value string) error {
 	})
 }
 func (s *eventSink) ThinkingDelta(value string) error {
+	s.markFirstToken()
 	s.publishLive("thinking_delta", map[string]any{"text": value})
 	return s.loop.appendEvent(s.ctx, s.runID, "thinking_delta", map[string]any{
 		"iteration": s.iteration, "attempt": s.attempt, "requestGeneration": s.requestGeneration, "text": value,
 	})
 }
 func (s *eventSink) ToolCallDelta(value llm.ToolCallDelta) error {
+	s.markFirstToken()
 	s.publishLive("tool_call_delta", map[string]any{
 		"index": value.Index, "id": value.ID,
 		"name": value.Name, "argumentsFragment": value.ArgumentsFragment,

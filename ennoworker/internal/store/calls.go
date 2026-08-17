@@ -71,10 +71,11 @@ func (r *CallRepo) ModelCompleted(ctx context.Context, call domain.ModelCallFini
 	})
 	return r.transact(ctx, call.RunID, domain.PendingEvent{EventType: eventType, Payload: payload}, func(tx *sql.Tx, now string) error {
 		result, err := tx.ExecContext(ctx, `UPDATE model_calls SET status = 'completed', actual_model = ?,
-			stop_reason = ?, input_tokens = ?, output_tokens = ?, cache_read_tokens = ?,
-			reasoning_tokens = ?, finished_at = ? WHERE id = ? AND run_id = ? AND status = 'started'`,
-			call.ActualModel, call.StopReason, call.Usage.InputTokens, call.Usage.OutputTokens,
-			call.Usage.CachedTokens, call.Usage.ReasoningTokens, now, call.ID, call.RunID)
+			stop_reason = ?, uncached_input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_write_tokens = ?,
+			reasoning_tokens = ?, finished_at = ?, first_token_at = ? WHERE id = ? AND run_id = ? AND status = 'started'`,
+			call.ActualModel, call.StopReason, call.Usage.UncachedInputTokens, call.Usage.OutputTokens,
+			call.Usage.CacheReadTokens, call.Usage.CacheWriteTokens, call.Usage.ReasoningTokens,
+			now, nullableTime(call.FirstTokenAt), call.ID, call.RunID)
 		if err != nil {
 			return err
 		}
@@ -271,9 +272,9 @@ func (r *CallRepo) transact(ctx context.Context, runID string, event domain.Pend
 }
 
 func updateModelUsage(ctx context.Context, tx *sql.Tx, callID string, usage domain.Usage) error {
-	result, err := tx.ExecContext(ctx, `UPDATE model_calls SET input_tokens = ?, output_tokens = ?,
-		cache_read_tokens = ?, reasoning_tokens = ? WHERE id = ? AND status = 'started'`,
-		usage.InputTokens, usage.OutputTokens, usage.CachedTokens, usage.ReasoningTokens, callID)
+	result, err := tx.ExecContext(ctx, `UPDATE model_calls SET uncached_input_tokens = ?, output_tokens = ?,
+		cache_read_tokens = ?, cache_write_tokens = ?, reasoning_tokens = ? WHERE id = ? AND status = 'started'`,
+		usage.UncachedInputTokens, usage.OutputTokens, usage.CacheReadTokens, usage.CacheWriteTokens, usage.ReasoningTokens, callID)
 	if err != nil {
 		return err
 	}
@@ -290,6 +291,13 @@ func upsertUsage(ctx context.Context, tx *sql.Tx, runID, callID string, usage do
 		ON CONFLICT(id) DO UPDATE SET details_json = excluded.details_json`,
 		"usage-"+callID, runID, callID, string(details), now)
 	return err
+}
+
+func nullableTime(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value.UTC().Format(time.RFC3339Nano)
 }
 
 func validJSONOrEmpty(value json.RawMessage) string {

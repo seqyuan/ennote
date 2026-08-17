@@ -88,7 +88,7 @@ func TestManualServiceCommitsCallUsageAndCheckpoint(t *testing.T) {
 	summary := serviceSummary()
 	provider := llm.NewFakeProvider(llm.FakeStep{Completion: domain.Completion{
 		Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: summary}}, StopReason: "stop",
-		ActualModel: "test-model", Usage: domain.Usage{InputTokens: 300, OutputTokens: 80},
+		ActualModel: "test-model", Usage: domain.Usage{UncachedInputTokens: 300, OutputTokens: 80},
 	}})
 	service := &Service{Repo: compactions, Calls: &store.CallRepo{DB: db}, Messages: messages,
 		Providers: func(domain.ModelRuntimeSnapshot) (llm.Provider, error) { return provider, nil }}
@@ -101,7 +101,7 @@ func TestManualServiceCommitsCallUsageAndCheckpoint(t *testing.T) {
 	require.NotNil(t, checkpoint.ModelCallID)
 	var callStatus, purpose string
 	var inputTokens int
-	require.NoError(t, db.QueryRow(`SELECT status,purpose,input_tokens FROM model_calls WHERE id=?`,
+	require.NoError(t, db.QueryRow(`SELECT status,purpose,uncached_input_tokens FROM model_calls WHERE id=?`,
 		*checkpoint.ModelCallID).Scan(&callStatus, &purpose, &inputTokens))
 	assert.Equal(t, "completed", callStatus)
 	assert.Equal(t, string(domain.ModelCallContextCompaction), purpose)
@@ -162,7 +162,7 @@ func TestRunCompactorCommitsSummaryAndReusesDigest(t *testing.T) {
 	provider := llm.NewFakeProvider(llm.FakeStep{Completion: domain.Completion{
 		Content:    []domain.ContentBlock{{Kind: domain.ContentText, Text: serviceSummary()}},
 		StopReason: domain.StopReasonStop, ActualModel: "summary",
-		Usage: domain.Usage{InputTokens: 500, OutputTokens: 100},
+		Usage: domain.Usage{UncachedInputTokens: 500, OutputTokens: 100},
 	}})
 	service := &Service{RunRepo: &store.RunCompactionRepo{DB: db}, Calls: &store.CallRepo{DB: db},
 		Providers: func(domain.ModelRuntimeSnapshot) (llm.Provider, error) { return provider, nil }}

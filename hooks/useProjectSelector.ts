@@ -11,6 +11,7 @@ import type { RefObject } from "react";
 export function useProjectSelector(): {
   open: boolean;
   toggle: () => void;
+  openDropdown: () => void;
   close: () => void;
   rootRef: RefObject<HTMLDivElement | null>;
 } {
@@ -27,7 +28,8 @@ export function useProjectSelector(): {
   }, [open]);
 
   const toggle = useCallback(() => setOpen((o) => !o), []);
+  const openDropdown = useCallback(() => setOpen(true), []);
   const close = useCallback(() => setOpen(false), []);
 
-  return { open, toggle, close, rootRef };
+  return { open, toggle, openDropdown, close, rootRef };
 }

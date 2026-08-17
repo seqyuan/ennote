@@ -5,6 +5,7 @@ import { classifyDisplayRisk, type DisplayRiskClass, type ToolActivityState } fr
 export type CanonicalMessage = components["schemas"]["Message"];
 export type CanonicalMessagePage = components["schemas"]["SessionMessagePage"];
 export type TurnMetric = components["schemas"]["TurnMetric"];
+export type AgentRun = components["schemas"]["AgentRun"];
 type CanonicalPart = CanonicalMessage["parts"][number];
 type GeneratedCheckpoint = components["schemas"]["ContextCompaction"];
 
@@ -104,6 +105,9 @@ export interface ConversationTurn {
   metrics?: TurnMetric;
 }
 
+/** Resolves a run-frozen modelProfileId / apiModel into a display name. */
+export type ModelResolver = (modelProfileId?: string, apiModel?: string) => string | undefined;
+
 export interface CheckpointNode {
   kind: "checkpoint";
   id: string;
@@ -156,6 +160,7 @@ export function projectBase(
   messages: CanonicalMessage[],
   checkpoints: ContextCheckpoint[],
   turnMetrics?: Map<string, TurnMetric>,
+  resolveModel?: ModelResolver,
 ): TimelineBase {
   const nodes: ConversationNode[] = [];
   let turn: ConversationTurn | null = null;
@@ -211,10 +216,13 @@ export function projectBase(
     let batch: ToolActivity[] = [];
     const flushAssistant = () => {
       if (assistantBlocks.length === 0) return;
+      const speaker: SpeakerLabel = { ...message.speakerSnapshot, modelProfileId: message.modelProfileId, apiModel: message.apiModel };
+      if (resolveModel) {
+        const modelName = resolveModel(message.modelProfileId, message.apiModel);
+        if (modelName) speaker.modelName = modelName;
+      }
       active.steps.push({ kind: "assistant", id: `${message.id}-assistant-${active.steps.length}`,
-        sourceMessageId: message.id, blocks: assistantBlocks,
-        speaker: { ...message.speakerSnapshot, modelProfileId: message.modelProfileId, apiModel: message.apiModel },
-        createdAt: message.createdAt });
+        sourceMessageId: message.id, blocks: assistantBlocks, speaker, createdAt: message.createdAt });
       assistantBlocks = [];
     };
     const flushBatch = () => {
@@ -287,6 +295,8 @@ export function applyTransient(
   base: TimelineBase,
   transient: TurnMessage[],
   turnMetrics?: Map<string, TurnMetric>,
+  resolveModel?: ModelResolver,
+  activeRun?: AgentRun | null,
 ): ConversationNode[] {
   if (transient.length === 0) {
     const tail = finalize(base.openTurn, turnMetrics);
@@ -357,7 +367,7 @@ export function applyTransient(
       if (message.thinking) blocks.push({ kind: "thinking", text: message.thinking });
       if (message.text) blocks.push({ kind: "text", text: message.text });
       if (blocks.length > 0) active.steps.push({ kind: "assistant", id: message.id, sourceMessageId: message.sourceMessageId,
-        blocks, createdAt: message.createdAt });
+        blocks, speaker: attributionFor(activeRun, resolveModel), createdAt: message.createdAt });
       return;
     }
     if (message.role === "tool") {
@@ -402,6 +412,21 @@ export function mergeTimeline(
   turnMetrics?: Map<string, TurnMetric>,
 ): ConversationNode[] {
   return applyTransient(projectBase(messages, checkpoints, turnMetrics), transient, turnMetrics);
+}
+
+/** Attribute a streaming (speaker-less) assistant step from the active run. */
+function attributionFor(activeRun: AgentRun | null | undefined, resolveModel?: ModelResolver): SpeakerLabel | undefined {
+  if (!activeRun) return undefined;
+  const effective = (activeRun.effectiveConfig ?? {}) as Record<string, unknown>;
+  const requested = (activeRun.requestedConfig ?? {}) as Record<string, unknown>;
+  const modelProfileId = (typeof effective.modelProfileId === "string" && effective.modelProfileId)
+    ? effective.modelProfileId
+    : (typeof requested.modelProfileId === "string" ? requested.modelProfileId : undefined);
+  const apiModel = (typeof effective.apiModel === "string" && effective.apiModel)
+    ? effective.apiModel
+    : (typeof requested.apiModel === "string" ? requested.apiModel : undefined);
+  const modelName = resolveModel ? resolveModel(modelProfileId, apiModel) : undefined;
+  return { ...activeRun.speakerSnapshot, modelProfileId, apiModel, modelName };
 }
 
 function addToolBatch(active: ConversationTurn, activities: ToolActivity[], calls: Map<string, ToolActivity>) {

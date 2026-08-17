@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	stores "github.com/seqyuan/ennote/ennoworker/internal/store"
@@ -86,6 +87,46 @@ func TestMessagePageRejectsOffBranchAndOtherSessionCursors(t *testing.T) {
 	emptySession := sqlCreateSession(t, db, "00000000-0000-4000-8000-000000000004")
 	_, err = messages.Page(ctx, emptySession.ID, "", "fabricated", 10)
 	assert.ErrorIs(t, err, stores.ErrMessageCursorInvalid)
+}
+
+func TestMessagePageEnrichesModelFromRun(t *testing.T) {
+	db, manager, session := newSessionDB(t)
+	ctx := context.Background()
+	messages := &stores.MessageRepo{DB: db}
+	now := time.Now().UTC()
+
+	root, err := messages.CreateUserMessage(ctx, session.ID, "", "hello")
+	require.NoError(t, err)
+
+	const runID = "run-with-model"
+	_, err = db.ExecContext(ctx, `INSERT INTO agent_runs
+		(id,turn_id,session_id,run_kind,base_message_id,attempt,status,requested_config_json,
+		 effective_config_json,speaker_snapshot_json,root_run_id,parent_run_id,execution_depth,publish_mode,
+		 commit_format_version,context_snapshot_json,created_at)
+		VALUES(?,NULL,?,'context_compaction',?,1,'succeeded','{}','{"modelProfileId":"mp-1","apiModel":"claude-sonnet-4"}',
+		 '{"kind":"host","displayName":"Host"}',?,NULL,0,'public_final',1,'{}',?)`,
+		runID, session.ID, root.ID, runID, now.Format(time.RFC3339Nano))
+	require.NoError(t, err)
+
+	const assistantID = "assistant-with-model"
+	_, err = db.ExecContext(ctx, `INSERT INTO messages
+		(id,session_id,parent_message_id,role,status,run_id,speaker_kind,speaker_snapshot_json,
+		 visibility,created_at,seq)
+		VALUES(?,?,?,'assistant','complete',?,'host','{"kind":"host","displayName":"Host"}',
+		 'public',?,2)`,
+		assistantID, session.ID, root.ID, runID, now.Format(time.RFC3339Nano))
+	require.NoError(t, err)
+
+	sessions := &stores.SessionRepo{Files: manager}
+	require.NoError(t, sessions.ActivateLeaf(ctx, session.ID, assistantID))
+
+	page, err := messages.Page(ctx, session.ID, assistantID, "", 50)
+	require.NoError(t, err)
+	require.Len(t, page.Messages, 2)
+	last := page.Messages[len(page.Messages)-1]
+	assert.Equal(t, assistantID, last.ID)
+	assert.Equal(t, "mp-1", last.ModelProfileID)
+	assert.Equal(t, "claude-sonnet-4", last.APIModel)
 }
 
 func messageIDs(messages []domain.Message) []string {

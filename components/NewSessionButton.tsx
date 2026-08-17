@@ -5,10 +5,9 @@ import { useT } from "@/components/LocaleProvider";
 
 export function NewSessionButton(props: {
   disabled: boolean;
-  collapsed: boolean;
   onClick: () => void;
 }) {
-  const { disabled, collapsed, onClick } = props;
+  const { disabled, onClick } = props;
   const t = useT();
   return (
     <button
@@ -20,7 +19,7 @@ export function NewSessionButton(props: {
       title={disabled ? t("sidebar.selectProjectFirst") : t("sidebar.newChatAria")}
     >
       <Plus size={14} aria-hidden="true" />
-      {!collapsed && <span>{t("sidebar.newChat")}</span>}
+      <span>{t("sidebar.newChat")}</span>
     </button>
   );
 }

@@ -110,7 +110,7 @@ func TestLoopCompletesTextToolTextFlow(t *testing.T) {
 			TextDeltas: []string{"Done"},
 			Completion: domain.Completion{
 				Content: []domain.ContentBlock{textBlock("Done")}, StopReason: "stop", ActualModel: "fake-model",
-				Usage: domain.Usage{InputTokens: 10, OutputTokens: 2},
+				Usage: domain.Usage{UncachedInputTokens: 10, OutputTokens: 2},
 			},
 		},
 	)

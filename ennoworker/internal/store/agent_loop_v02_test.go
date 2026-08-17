@@ -220,13 +220,13 @@ func TestCallRecorderCommitsProjectionAndEventAtomically(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, recorder.ModelStarted(ctx, start))
-	usage := domain.Usage{InputTokens: 10, OutputTokens: 2, CachedTokens: 3}
+	usage := domain.Usage{UncachedInputTokens: 10, OutputTokens: 2, CacheReadTokens: 3}
 	require.NoError(t, recorder.ModelUsage(ctx, domain.ModelCallFinish{ID: callID, RunID: submission.Run.ID, Iteration: 1, Attempt: 1, Usage: usage}))
 	require.NoError(t, recorder.ModelCompleted(ctx, domain.ModelCallFinish{ID: callID, RunID: submission.Run.ID,
 		Iteration: 1, Attempt: 1, ActualModel: "api-model", StopReason: domain.StopReasonStop, Usage: usage}))
 	var status, actualModel string
 	var inputTokens int64
-	require.NoError(t, runRepo.DB.QueryRow(`SELECT status, actual_model, input_tokens FROM model_calls WHERE id = ?`, callID).
+	require.NoError(t, runRepo.DB.QueryRow(`SELECT status, actual_model, uncached_input_tokens FROM model_calls WHERE id = ?`, callID).
 		Scan(&status, &actualModel, &inputTokens))
 	assert.Equal(t, "completed", status)
 	assert.Equal(t, "api-model", actualModel)
@@ -253,9 +253,9 @@ func TestCallRecorderRollsBackEveryProjectionWhenItsEventFails(t *testing.T) {
 		_, err = runRepo.DB.Exec(`CREATE TRIGGER fail_usage_event BEFORE INSERT ON run_events
 			WHEN NEW.event_type = 'usage_updated' BEGIN SELECT RAISE(ABORT, 'injected'); END`)
 		require.NoError(t, err)
-		require.Error(t, recorder.ModelUsage(ctx, domain.ModelCallFinish{ID: callID, RunID: submission.Run.ID, Usage: domain.Usage{InputTokens: 9}}))
+		require.Error(t, recorder.ModelUsage(ctx, domain.ModelCallFinish{ID: callID, RunID: submission.Run.ID, Usage: domain.Usage{UncachedInputTokens: 9}}))
 		var inputTokens, usageCount int
-		require.NoError(t, runRepo.DB.QueryRow(`SELECT input_tokens FROM model_calls WHERE id = ?`, callID).Scan(&inputTokens))
+		require.NoError(t, runRepo.DB.QueryRow(`SELECT uncached_input_tokens FROM model_calls WHERE id = ?`, callID).Scan(&inputTokens))
 		require.NoError(t, runRepo.DB.QueryRow(`SELECT COUNT(*) FROM usage_records WHERE ref_id = ?`, callID).Scan(&usageCount))
 		assert.Zero(t, inputTokens)
 		assert.Zero(t, usageCount)

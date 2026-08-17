@@ -51,7 +51,7 @@ func TestLoopDoesNotRetryAfterTextOrUsageWasCommitted(t *testing.T) {
 	}{
 		{name: "text", step: llm.FakeStep{TextDeltas: []string{"partial"}, Err: providerError}},
 		{name: "thinking", step: llm.FakeStep{ThinkingDeltas: []string{"partial reasoning"}, Err: providerError}},
-		{name: "usage", step: llm.FakeStep{Completion: domain.Completion{Usage: domain.Usage{InputTokens: 1}}, Err: providerError}},
+		{name: "usage", step: llm.FakeStep{Completion: domain.Completion{Usage: domain.Usage{UncachedInputTokens: 1}}, Err: providerError}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

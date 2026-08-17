@@ -311,7 +311,7 @@ func TestRuntimeBudgetAdmissionCapsCallsUsageAndCost(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 4000, allowed, "output must be clamped to the remaining child output ceiling")
 	require.NoError(t, delegations.CompleteModelCall(ctx, childID, model.ID,
-		domain.Usage{InputTokens: 1000, OutputTokens: 500}))
+		domain.Usage{UncachedInputTokens: 1000, OutputTokens: 500}))
 	require.NoError(t, delegations.AdmitToolCalls(ctx, childID, 8))
 	assert.ErrorIs(t, delegations.AdmitToolCalls(ctx, childID, 1), store.ErrDelegationBudgetExceeded)
 

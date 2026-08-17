@@ -287,7 +287,7 @@ func (r *MessageRepo) Page(ctx context.Context, sessionID, leafID, beforeMessage
 	SELECT c.id,c.session_id,c.parent_message_id,c.role,c.status,c.run_id,
 		c.speaker_kind,c.speaker_object_id,c.speaker_version_id,c.participant_instance_id,c.speaker_snapshot_json,
 		c.addressee_kind,c.addressee_object_id,c.addressee_version_id,c.reply_to_message_id,c.visibility,
-		c.originated_at,c.created_at,c.seq,p.ordinal,p.block_kind,p.payload_json
+		c.originated_at,c.created_at,c.seq,p.ordinal,p.block_kind,p.payload_json,ar.effective_config_json
 	FROM page_chain c LEFT JOIN message_parts p ON p.message_id=c.id
 	LEFT JOIN agent_runs ar ON ar.id=c.run_id
 	WHERE ar.commit_format_version IS NULL OR ar.commit_format_version=1 OR c.visibility IN ('public','room_control')
@@ -305,11 +305,12 @@ func (r *MessageRepo) Page(ctx context.Context, sessionID, leafID, beforeMessage
 		var addresseeKind, addresseeObjectID, addresseeVersionID, replyToMessageID, originatedAt sql.NullString
 		var ordinal sql.NullInt64
 		var kind, payload sql.NullString
+		var effectiveConfig sql.NullString
 		var seq int64
 		if err := rows.Scan(&id, &rowSessionID, &parentID, &role, &status, &runID,
 			&speakerKind, &speakerObjectID, &speakerVersionID, &participantInstanceID, &speakerSnapshot,
 			&addresseeKind, &addresseeObjectID, &addresseeVersionID, &replyToMessageID, &visibility,
-			&originatedAt, &createdAt, &seq, &ordinal, &kind, &payload); err != nil {
+			&originatedAt, &createdAt, &seq, &ordinal, &kind, &payload, &effectiveConfig); err != nil {
 			return page, fmt.Errorf("scan message page: %w", err)
 		}
 		if len(newestFirst) == 0 || newestFirst[len(newestFirst)-1].ID != id {
@@ -320,6 +321,16 @@ func (r *MessageRepo) Page(ctx context.Context, sessionID, leafID, beforeMessage
 			message := domain.Message{ID: id, SessionID: rowSessionID, Role: role, Status: status,
 				SpeakerKind: domain.SpeakerKind(speakerKind), SpeakerSnapshot: json.RawMessage(speakerSnapshot),
 				Visibility: domain.MessageVisibility(visibility), Parts: []domain.ContentBlock{}, CreatedAt: created, Seq: seq}
+			if effectiveConfig.Valid && effectiveConfig.String != "" {
+				var frozen struct {
+					ModelProfileID string `json:"modelProfileId"`
+					APIModel       string `json:"apiModel"`
+				}
+				if err := json.Unmarshal([]byte(effectiveConfig.String), &frozen); err == nil {
+					message.ModelProfileID = frozen.ModelProfileID
+					message.APIModel = frozen.APIModel
+				}
+			}
 			if parentID.Valid {
 				message.ParentMessageID = &parentID.String
 			}

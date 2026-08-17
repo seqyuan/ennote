@@ -4,7 +4,11 @@ import { Bot, ImagePlus, ListPlus, Minimize2, Paperclip, Plus } from "lucide-rea
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
 import { useT } from "@/components/LocaleProvider";
 import { RoleTargetPicker } from "@/components/RoleTargetPicker";
+import { ModelSelect } from "@/components/ModelSelect";
+import { ContextMeter } from "@/components/ContextMeter";
+import { StatsLine } from "@/components/StatsLine";
 import type { ModelProfile, RoleSummary } from "@/components/settings/types";
+import type { SessionContextUsage, SessionStats } from "@/hooks/chat-controller-types";
 import { artifactPreviewURL } from "@/lib/artifacts";
 import type { PermissionMode, ThinkingEffort } from "@/lib/permission-mode";
 import { PromptCommandMenu } from "./PromptCommandMenu";
@@ -88,6 +92,8 @@ interface ComposerProps {
   onPromptPanelClose: () => void;
   expanding: boolean;
   expandDiag: string | null;
+  contextUsage: SessionContextUsage | null;
+  stats: SessionStats | null;
 }
 
 export function Composer({
@@ -96,7 +102,7 @@ export function Composer({
   roles, selectedRoleId, setSelectedRoleId, textAttachments, removeTextAttachment, pendingImage, clearPendingImage, attachFiles, uploadImage, submit, steer, followUp, cancel, compactSession,
   pendingFollowUps,
   promptTemplates, showPromptPanel, onPromptSelect, onPromptPanelClose, expanding, expandDiag,
-  panelRoles, panelFlows, onRoleSelect, onFlowSelect,
+  panelRoles, panelFlows, onRoleSelect, onFlowSelect, contextUsage, stats,
 }: ComposerProps) {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const form = useRef<HTMLFormElement>(null);
@@ -335,26 +341,15 @@ export function Composer({
               )}
             </div>
             <div className="composer-trailing">
-              <ThinkingPicker
+              <ModelSelect
                 models={models}
                 selectedModelId={selectedModelId}
+                setSelectedModelId={setSelectedModelId}
                 thinkingEffort={thinkingEffort}
                 setThinkingEffort={setThinkingEffort}
-                disabled={!selectedSession || activeRun || Boolean(selectedRoleId)}
+                disabled={!selectedSession || activeRun || models.length === 0 || Boolean(selectedRoleId)}
               />
-              <label className="composer-chip">
-                <span className="sr-only">{t("composer.model")}</span>
-                <select
-                  className="composer-chip-select"
-                  value={selectedModelId ?? ""}
-                  disabled={!selectedSession || activeRun || models.length === 0 || Boolean(selectedRoleId)}
-                  onChange={(event) => setSelectedModelId(event.target.value)}
-                  title={t("composer.modelForRun")}
-                >
-                  {models.length === 0 && <option value="">{t("composer.noModel")}</option>}
-                  {models.map((model) => <option key={model.id} value={model.id}>{model.displayName || model.modelName}</option>)}
-                </select>
-              </label>
+              <ContextMeter contextUsage={contextUsage} />
               {activeRun && (
                 <button type="button" className="composer-followup" aria-label={t("composer.queueFollowUp")}
                   disabled={!input.trim() || compacting || reconnecting} onClick={followUp}>
@@ -383,6 +378,7 @@ export function Composer({
           </div>
         </div>
       </form>
+      <StatsLine stats={stats} />
       <div className="composer-status-line">
         {activeRun && <span className="composer-config-hint">{permissionMode} {t("composer.frozenForRun")}</span>}
         {!permissionReady && selectedSession && !selectedRoleId && <span className="composer-config-hint is-danger">{t("composer.policyUnavailable")}</span>}
@@ -395,71 +391,6 @@ export function Composer({
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-function ThinkingPicker({ models, selectedModelId, thinkingEffort, setThinkingEffort, disabled }: {
-  models: ModelProfile[];
-  selectedModelId: string | null;
-  thinkingEffort: ThinkingEffort;
-  setThinkingEffort: (effort: ThinkingEffort) => void;
-  disabled: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const t = useT();
-  const selected = models.find((model) => model.id === selectedModelId) ?? null;
-  const supports = Boolean(selected?.supportsThinking);
-  const efforts = selected?.supportedThinkingEfforts?.length
-    ? selected.supportedThinkingEfforts
-    : (["default"] as ThinkingEffort[]);
-  const active = efforts.includes(thinkingEffort) ? thinkingEffort : "default";
-  const canUse = !disabled && supports && Boolean(selected);
-
-  // 切换模型后若新模型不支持当前档位，回退到 default。
-  useEffect(() => {
-    if (selected && !efforts.includes(thinkingEffort)) setThinkingEffort("default");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedModelId]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointer = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
-    };
-    window.addEventListener("mousedown", onPointer);
-    return () => window.removeEventListener("mousedown", onPointer);
-  }, [open]);
-
-  return (
-    <div className="composer-chip" ref={ref}>
-      <button type="button" className="composer-chip-button" aria-label={t("composer.thinkingEffort")} aria-expanded={open}
-        title={supports ? t("composer.thinkingSupported") : t("composer.thinkingUnsupported")}
-        disabled={!canUse}
-        onClick={() => setOpen((value) => !value)}>
-        <span className="composer-thinking-label">{active}</span>
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M3 4.5L6 7.5L9 4.5" />
-        </svg>
-      </button>
-      {open && (
-        <div className="composer-thinking-menu" role="listbox" aria-label={t("composer.thinkingEffort")}>
-          {efforts.map((lvl) => {
-            const isActive = lvl === active;
-            return (
-              <button key={lvl} type="button" role="option" aria-selected={isActive}
-                onClick={() => { setThinkingEffort(lvl); setOpen(false); }}>
-                {isActive
-                  ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
-                  : <span className="composer-thinking-check" aria-hidden="true" />}
-                <span className="composer-thinking-item">{lvl}</span>
-                <span className="composer-thinking-desc">{t(`composer.thinking.${lvl}`)}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }

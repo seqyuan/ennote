@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AgentRun, ApprovalDecision, ToolApprovalRequest } from "@/lib/approval";
-import type { RunUsage } from "@/hooks/chat-controller-types";
+import type { RunUsage, SessionContextUsage } from "@/hooks/chat-controller-types";
 import type { TurnMessage } from "@/lib/chat-messages";
 import { runFailureMessage, errorMessage } from "@/lib/provider-errors";
 import { registerChildProgress } from "@/hooks/useChildProgress";
@@ -32,6 +32,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
   const [resolvingApproval, setResolvingApproval] = useState<ApprovalDecision | null>(null);
   const [status, setStatus] = useState("");
   const [usage, setUsage] = useState<RunUsage | null>(null);
+  const [contextUsage, setContextUsage] = useState<SessionContextUsage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingFollowUps, setPendingFollowUps] = useState<{ id: string; text: string }[]>([]);
   const streamController = useRef<AbortController | null>(null);
@@ -62,7 +63,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
       if (run.runKind === "context_compaction") {
         terminal = await streamCompactionEvents(run.id, setStatus, signal);
       } else {
-        terminal = await streamAgentEvents(run.id, upsertMessage, setStatus, setUsage, signal, {
+        terminal = await streamAgentEvents(run.id, upsertMessage, setStatus, setUsage, setContextUsage, signal, {
           requested: () => {}, // approval projection is snapshot-authoritative
           resolved: () => {},
           delegated: () => {}, // delegationActive is carried by the snapshot
@@ -107,6 +108,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
     setResolvingApproval(null);
     setStatus("");
     setUsage(null);
+    setContextUsage(null);
     setError(null);
     setPendingFollowUps([]);
   }, []);
@@ -121,6 +123,18 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
     // eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate reset on session/branch switch
     resetLiveState();
   }, [lineageId, sessionId, resetLiveState]);
+
+  // Hydrate the context meter when idle (no active run): read the latest
+  // Worker-reported projection for the selected session. During a run the live
+  // context_usage events own this state, so the fetch only runs between runs.
+  useEffect(() => {
+    if (!sessionId || activeRun?.id) return;
+    let cancelled = false;
+    apiFetch<SessionContextUsage | null>(`/v1/sessions/${encodeURIComponent(sessionId)}/context-usage`)
+      .then((value) => { if (!cancelled) setContextUsage(value); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [sessionId, activeRun?.id]);
 
   // Snapshot-driven streaming: open the run stream when the store snapshot has
   // an active run we are not yet streaming, and tear down when it clears.
@@ -235,6 +249,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
   return {
     activeRun,
     activeRunID: activeRun?.id ?? null,
+    contextUsage,
     compacting: activeRun?.runKind === "context_compaction",
     pendingApproval,
     resolvingApproval,
@@ -294,6 +309,7 @@ async function streamAgentEvents(
   upsertMessage: (message: TurnMessage) => void,
   setStatus: (status: string) => void,
   setUsage: (usage: RunUsage) => void,
+  setContextUsage: (usage: SessionContextUsage) => void,
   signal: AbortSignal,
   approval: { requested: () => void; resolved: () => void; delegated: () => void; followUpConsumed: () => void },
 ): Promise<boolean> {
@@ -314,8 +330,30 @@ async function streamAgentEvents(
   // rendering deltas to avoid duplicate text. Durable delta types are ignored.
   let currentEventName: string | null = null;
   let liveFrame = false;
-  // Accumulated per-call usage across the run (usage_updated fires per model call).
-  const usageTotal: RunUsage = { inputTokens: 0, outputTokens: 0, cachedTokens: 0, reasoningTokens: 0 };
+  // Accumulated per-step usage across the run. usage_updated fires per model
+  // call, so a step that retries (or Anthropic, which reports usage twice per
+  // attempt via message_start + message_delta) would otherwise double count.
+  // Last-wins per iteration keeps the newest full snapshot for each step.
+  const usageByIteration = new Map<number, RunUsage>();
+
+  function recordUsage(iteration: number, usage: Partial<RunUsage>): void {
+    usageByIteration.set(iteration, {
+      uncachedInputTokens: Number(usage.uncachedInputTokens ?? 0),
+      cacheReadTokens: Number(usage.cacheReadTokens ?? 0),
+      cacheWriteTokens: Number(usage.cacheWriteTokens ?? 0),
+      outputTokens: Number(usage.outputTokens ?? 0),
+      reasoningTokens: Number(usage.reasoningTokens ?? 0),
+    });
+    const total: RunUsage = { uncachedInputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, reasoningTokens: 0 };
+    for (const value of usageByIteration.values()) {
+      total.uncachedInputTokens += value.uncachedInputTokens;
+      total.cacheReadTokens += value.cacheReadTokens;
+      total.cacheWriteTokens += value.cacheWriteTokens;
+      total.outputTokens += value.outputTokens;
+      total.reasoningTokens += value.reasoningTokens;
+    }
+    setUsage(total);
+  }
 
   function assistant(iteration: number) {
     const value = assistants.get(iteration) ?? { text: "", thinking: "" };
@@ -370,13 +408,12 @@ async function streamAgentEvents(
         switch (event.type) {
           case "usage_updated": {
             const usage = payload.usage as Partial<RunUsage> | undefined;
-            if (usage) {
-              usageTotal.inputTokens += Number(usage.inputTokens ?? 0);
-              usageTotal.outputTokens += Number(usage.outputTokens ?? 0);
-              usageTotal.cachedTokens += Number(usage.cachedTokens ?? 0);
-              usageTotal.reasoningTokens += Number(usage.reasoningTokens ?? 0);
-              setUsage({ ...usageTotal });
-            }
+            if (usage) recordUsage(iteration, usage);
+            break;
+          }
+          case "context_usage": {
+            const usage = payload as SessionContextUsage | undefined;
+            if (usage && typeof usage.contextWindow === "number") setContextUsage(usage);
             break;
           }
           case "text_delta": case "thinking_delta": {

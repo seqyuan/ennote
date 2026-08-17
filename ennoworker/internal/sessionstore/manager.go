@@ -256,6 +256,45 @@ func (m *Manager) FindByID(ctx context.Context, sessionID string) (*domain.Sessi
 	return findSession(ctx, db, sessionID)
 }
 
+// ContextUsage returns the latest context-occupancy projection reported for a
+// Session (the newest durable context_usage run event), or nil before the
+// first report. It reads the projection from the Session's own database, so it
+// is the same authority the live run stream replays.
+func (m *Manager) ContextUsage(ctx context.Context, sessionID string) (*domain.SessionContextUsage, error) {
+	db, err := m.OpenSession(ctx, sessionID)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return readContextUsage(ctx, db, sessionID)
+}
+
+// readContextUsage returns the newest durable context_usage run event for a
+// Session, or nil before the first report.
+func readContextUsage(ctx context.Context, db *sql.DB, sessionID string) (*domain.SessionContextUsage, error) {
+	var payloadJSON string
+	err := db.QueryRowContext(ctx, `
+		SELECT re.payload_json
+		FROM run_events re
+		JOIN agent_runs ar ON ar.id = re.run_id
+		WHERE ar.session_id = ? AND re.event_type = 'context_usage'
+		ORDER BY re.created_at DESC, re.event_id DESC
+		LIMIT 1`, sessionID).Scan(&payloadJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var usage domain.SessionContextUsage
+	if err := json.Unmarshal([]byte(payloadJSON), &usage); err != nil {
+		return nil, fmt.Errorf("decode session context usage: %w", err)
+	}
+	return &usage, nil
+}
+
 func (m *Manager) ListByProject(ctx context.Context, projectID string, status string) ([]domain.Session, error) {
 	cacheKey := projectID + "\x00" + status
 	m.mu.Lock()

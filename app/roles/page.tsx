@@ -1,22 +1,11 @@
-"use client";
+import { AppShell } from "@/components/AppShell";
 
-import { useState } from "react";
-import { WorkspacePageShell } from "@/components/WorkspacePageShell";
-import { RolesSettings } from "@/components/settings/RolesSettings";
-import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
-
+/**
+ * `/roles` — direct-entry / legacy URL for the Roles view. Renders the
+ * same AppShell; the sidebar switches views in-place, so this route is
+ * only reached by bookmarks, deep links, and tests. The current view is
+ * synced to `/?view=roles` via history.replaceState.
+ */
 export default function RolesPage() {
-  const settings = useSettingsProfiles();
-  const [error, setError] = useState<string | null>(null);
-  return (
-    <WorkspacePageShell
-      title="Roles"
-      description="Global reusable execution presets for Chat and Graph Tasks."
-      error={error}
-      onDismissError={() => setError(null)}
-      testId="roles-page"
-    >
-      <RolesSettings models={settings.models} providers={settings.providers} setError={setError} />
-    </WorkspacePageShell>
-  );
+  return <AppShell initialView="roles" />;
 }

@@ -291,10 +291,10 @@ func (r *CompactionRepo) Complete(ctx context.Context, completion CompactionComp
 	defer tx.Rollback()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	callResult, err := tx.ExecContext(ctx, `UPDATE model_calls SET status='completed',actual_model=?,stop_reason=?,
-		input_tokens=?,output_tokens=?,cache_read_tokens=?,reasoning_tokens=?,finished_at=?
+		uncached_input_tokens=?,output_tokens=?,cache_read_tokens=?,cache_write_tokens=?,reasoning_tokens=?,finished_at=?
 		WHERE id=? AND run_id=? AND status='started'`, completion.ActualModel, completion.StopReason,
-		completion.Usage.InputTokens, completion.Usage.OutputTokens, completion.Usage.CachedTokens,
-		completion.Usage.ReasoningTokens, now, completion.CallID, completion.RunID)
+		completion.Usage.UncachedInputTokens, completion.Usage.OutputTokens, completion.Usage.CacheReadTokens,
+		completion.Usage.CacheWriteTokens, completion.Usage.ReasoningTokens, now, completion.CallID, completion.RunID)
 	if err != nil {
 		return err
 	}

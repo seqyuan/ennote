@@ -2507,6 +2507,8 @@ export interface components {
             role: "system" | "user" | "assistant" | "tool";
             status: string;
             runId?: string;
+            modelProfileId?: string;
+            apiModel?: string;
             /** @enum {string} */
             speakerKind: "user" | "host" | "role" | "workflow" | "room" | "system";
             speakerObjectId?: string;

@@ -3724,6 +3724,8 @@ components:
         role: { type: string, enum: [system, user, assistant, tool] }
         status: { type: string }
         runId: { type: string }
+        modelProfileId: { type: string }
+        apiModel: { type: string }
         speakerKind: { type: string, enum: [user, host, role, workflow, room, system] }
         speakerObjectId: { type: string }
         speakerVersionId: { type: string }

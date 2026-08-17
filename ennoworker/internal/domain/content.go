@@ -98,11 +98,21 @@ type ToolDefinition struct {
 	RiskClass RiskClass `json:"-"`
 }
 
+// Usage is the provider-billing token accounting, normalized to three disjoint
+// prompt-side buckets (uncached + cacheRead + cacheWrite = total input). This
+// mirrors deepseek-harness's token-meter buckets so cache-hit share and total
+// input are correct for every provider.
 type Usage struct {
-	InputTokens     int64 `json:"inputTokens"`
-	OutputTokens    int64 `json:"outputTokens"`
-	CachedTokens    int64 `json:"cachedTokens"`
-	ReasoningTokens int64 `json:"reasoningTokens"`
+	UncachedInputTokens int64 `json:"uncachedInputTokens"`
+	CacheReadTokens     int64 `json:"cacheReadTokens"`
+	CacheWriteTokens    int64 `json:"cacheWriteTokens"`
+	OutputTokens        int64 `json:"outputTokens"`
+	ReasoningTokens     int64 `json:"reasoningTokens"`
+}
+
+// InputTokens returns the total billed prompt-side input (the three buckets).
+func (u Usage) InputTokens() int64 {
+	return u.UncachedInputTokens + u.CacheReadTokens + u.CacheWriteTokens
 }
 
 type CompletionRequest struct {

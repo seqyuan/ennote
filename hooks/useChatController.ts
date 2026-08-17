@@ -34,6 +34,17 @@ export function useChatController(deps: ChatControllerDeps) {
     selectedSession, sessionRecord, selectedProject, promptCatalog, settings, replaceSession,
   } = deps;
 
+  // Model-catalog resolver, hoisted so the session data hooks can apply it
+  // inside the projection (no second enrichment pass re-cloning nodes).
+  const modelNameById = useMemo(
+    () => new Map(settings.models.map((model) => [model.id, model.displayName || model.modelName])),
+    [settings.models],
+  );
+  const resolveModel = useCallback(
+    (modelProfileId?: string, apiModel?: string) => (modelProfileId ? modelNameById.get(modelProfileId) : undefined) ?? apiModel,
+    [modelNameById],
+  );
+
   // Session lineage derivations come from the session record (owned by the
   // caller's project-sessions store).
   const activeBranchId = sessionRecord?.activeBranchId;
@@ -47,7 +58,7 @@ export function useChatController(deps: ChatControllerDeps) {
   }, [replaceSession, selectedSession]);
 
   // Session data hooks (owned here; AppShell only receives the composed views).
-  const messagesData = useSessionMessages(selectedSession, activeBranchId);
+  const messagesData = useSessionMessages(selectedSession, activeBranchId, { resolveModel });
   const agent = useAgentSession({
     sessionId: selectedSession, lineageId: activeBranchId, appendMessage: messagesData.appendTransient,
     upsertMessage: messagesData.upsertTransient, refreshLatest: messagesData.refreshLatest,
@@ -112,64 +123,11 @@ export function useChatController(deps: ChatControllerDeps) {
 
   const error = agent.error ?? recoveryData.error ?? branchesData.error;
 
-  // Resolve the run-frozen modelProfileId into a display name from the catalog
-  // (falling back to the raw apiModel), so assistant speaker labels can show
-  // which model produced a reply without each message row knowing the catalog.
-  const modelNameById = useMemo(
-    () => new Map(settings.models.map((model) => [model.id, model.displayName || model.modelName])),
-    [settings.models],
-  );
-
-  // Attribution for transient (streaming) assistant steps, which carry no
-  // speaker. Inherit the active run's speaker snapshot + resolved model so the
-  // speaker label and model name render in real time, not only after the reply
-  // is committed as a canonical message.
-  const activeRunAttribution = useMemo(() => {
-    const run = agent.activeRun;
-    if (!run) return null;
-    const effective = (run.effectiveConfig ?? {}) as Record<string, unknown>;
-    const requested = (run.requestedConfig ?? {}) as Record<string, unknown>;
-    const modelProfileId = (typeof effective.modelProfileId === "string" && effective.modelProfileId)
-      ? effective.modelProfileId
-      : (typeof requested.modelProfileId === "string" ? requested.modelProfileId : undefined);
-    const apiModel = (typeof effective.apiModel === "string" && effective.apiModel)
-      ? effective.apiModel
-      : (typeof requested.apiModel === "string" ? requested.apiModel : undefined);
-    const modelName = (modelProfileId ? modelNameById.get(modelProfileId) : undefined) ?? apiModel;
-    return { speaker: run.speakerSnapshot, modelProfileId, apiModel, modelName };
-  }, [agent.activeRun, modelNameById]);
-
-  const messages = useMemo(
-    () => messagesData.messages.map((node) => {
-      if (node.kind !== "turn") return node;
-      // Only enrich un-enriched assistant steps; skip already-resolved ones so
-      // streaming updates (transient appends) don't re-clone the whole tree.
-      let changed = false;
-      const steps = node.steps.map((step) => {
-        if (step.kind !== "assistant") return step;
-        if (!step.speaker) {
-          if (!activeRunAttribution) return step;
-          changed = true;
-          const { speaker, modelProfileId, apiModel, modelName } = activeRunAttribution;
-          return { ...step, speaker: { ...speaker, modelProfileId, apiModel, modelName } };
-        }
-        if (step.speaker.modelName) return step;
-        const resolved = step.speaker.modelProfileId ? modelNameById.get(step.speaker.modelProfileId) : undefined;
-        const modelName = resolved ?? step.speaker.apiModel;
-        if (!modelName) return step;
-        changed = true;
-        return { ...step, speaker: { ...step.speaker, modelName } };
-      });
-      return changed ? { ...node, steps } : node;
-    }),
-    [messagesData.messages, modelNameById, activeRunAttribution],
-  );
-
   const history = {
     sessionId: selectedSession,
     activeBranchId,
     activeLeafMessageId,
-    messages,
+    messages: messagesData.messages,
     loading: messagesData.loading,
     loadingOlder: messagesData.loadingOlder,
     error: messagesData.historyError,

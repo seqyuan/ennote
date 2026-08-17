@@ -139,7 +139,7 @@ func TestLoopBudgetAdmissionStopsBeforeProvider(t *testing.T) {
 }
 
 func TestLoopBudgetAdmissionClampsProviderOutputAndRecordsUsage(t *testing.T) {
-	usage := domain.Usage{InputTokens: 5, OutputTokens: 3}
+	usage := domain.Usage{UncachedInputTokens: 5, OutputTokens: 3}
 	provider := llm.NewFakeProvider(llm.FakeStep{Completion: domain.Completion{
 		StopReason: domain.StopReasonStop, Usage: usage,
 	}})

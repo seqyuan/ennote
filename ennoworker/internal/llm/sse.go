@@ -181,13 +181,13 @@ type openAIFunctionCallDelta struct {
 }
 
 type openAIUsage struct {
-	PromptTokens         int64 `json:"prompt_tokens"`
-	CompletionTokens     int64 `json:"completion_tokens"`
-	CachedTokens         int64 `json:"cached_tokens"`
-	ReasoningTokens      int64 `json:"reasoning_tokens"`
-	PromptCacheHitTokens int64 `json:"prompt_cache_hit_tokens"`
+	PromptTokens          int64 `json:"prompt_tokens"`
+	CompletionTokens      int64 `json:"completion_tokens"`
+	CachedTokens          int64 `json:"cached_tokens"`
+	ReasoningTokens       int64 `json:"reasoning_tokens"`
+	PromptCacheHitTokens  int64 `json:"prompt_cache_hit_tokens"`
 	PromptCacheMissTokens int64 `json:"prompt_cache_miss_tokens"`
-	PromptTokensDetails struct {
+	PromptTokensDetails   struct {
 		CachedTokens int64 `json:"cached_tokens"`
 	} `json:"prompt_tokens_details"`
 	CompletionTokensDetails struct {
@@ -210,8 +210,18 @@ func (u openAIUsage) domainUsage() domain.Usage {
 	if reasoning == 0 {
 		reasoning = u.CompletionTokensDetails.ReasoningTokens
 	}
+	// DeepSeek reports prompt_cache_miss_tokens explicitly; OpenAI-compat
+	// providers report only the total, so the uncached bucket is the remainder
+	// after cache hits. There is no prompt cache-write on this wire protocol.
+	uncached := u.PromptCacheMissTokens
+	if uncached == 0 {
+		uncached = u.PromptTokens - cached
+	}
+	if uncached < 0 {
+		uncached = 0
+	}
 	return domain.Usage{
-		InputTokens: u.PromptTokens, OutputTokens: u.CompletionTokens,
-		CachedTokens: cached, ReasoningTokens: reasoning,
+		UncachedInputTokens: uncached, CacheReadTokens: cached, CacheWriteTokens: 0,
+		OutputTokens: u.CompletionTokens, ReasoningTokens: reasoning,
 	}
 }

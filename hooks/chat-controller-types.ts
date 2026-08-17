@@ -7,6 +7,8 @@ import type { components } from "@/lib/worker-api.gen";
 
 type SessionBranch = components["schemas"]["SessionBranch"];
 type RunRecovery = components["schemas"]["RunRecovery"];
+export type SessionContextUsage = components["schemas"]["SessionContextUsage"];
+export type SessionStats = components["schemas"]["SessionStats"];
 
 export type HistoryView = {
   sessionId: string | null;
@@ -21,9 +23,10 @@ export type HistoryView = {
 };
 
 export type RunUsage = {
-  inputTokens: number;
+  uncachedInputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   outputTokens: number;
-  cachedTokens: number;
   reasoningTokens: number;
 };
 
@@ -32,6 +35,8 @@ export type RunView = {
   activeRunStatus?: string;
   status: string;
   usage: RunUsage | null;
+  contextUsage: SessionContextUsage | null;
+  stats: SessionStats | null;
   compacting: boolean;
   pendingApproval: ToolApprovalRequest | null;
   resolvingApproval: ApprovalDecision | null;

@@ -165,7 +165,7 @@ func rebuildAttention(ctx context.Context, tx *sql.Tx, sessionDB *sql.DB, projec
 
 func rebuildUsage(ctx context.Context, tx *sql.Tx, sessionDB *sql.DB, projectID, sessionID string) error {
 	rows, err := sessionDB.QueryContext(ctx, `SELECT substr(mc.started_at,1,10),COALESCE(mc.provider_profile_id,''),
-		COALESCE(mc.model_profile_id,mc.actual_model,''),SUM(mc.input_tokens),SUM(mc.output_tokens),
+		COALESCE(mc.model_profile_id,mc.actual_model,''),SUM(mc.uncached_input_tokens + mc.cache_read_tokens + mc.cache_write_tokens),SUM(mc.output_tokens),
 		SUM(mc.cache_read_tokens),SUM(mc.reasoning_tokens),MAX(mc.started_at)
 		FROM model_calls mc GROUP BY 1,2,3`)
 	if err != nil {

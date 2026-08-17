@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { SessionSidebar } from "./SessionSidebar";
+import { SidebarExpandFab } from "./SidebarExpandFab";
 import { ChatWindow } from "./ChatWindow";
 import { TopBar } from "./TopBar";
 import { RightPanel } from "./RightPanel";
@@ -22,13 +23,16 @@ import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
 import { usePromptTemplates } from "@/hooks/usePromptTemplates";
 import { useChatController } from "@/hooks/useChatController";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useProjectSelector } from "@/hooks/useProjectSelector";
+import { SettingsView } from "./SettingsView";
+import type { WorkspaceView } from "./workspace-view";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { Session } from "@/components/settings/types";
 import type { components } from "@/lib/worker-api.gen";
 
 type ProjectWorkspace = components["schemas"]["ProjectWorkspace"];
 
-export function AppShell() {
+export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView }) {
   const isMobile = useMediaQuery("(max-width: 640px)");
   const {
     projects, selectedProject, switchProject: workspaceSwitchProject,
@@ -41,6 +45,30 @@ export function AppShell() {
   // live in selectSession is now declarative inside useChatController.
   const [selectedSession, setSelectedSessionState] = useState<string | null>(null);
 
+  // Main-area view (chat / roles / graphs). Switching only swaps the
+  // center+right region; the sidebar stays mounted. The URL is kept in
+  // sync (?view=roles) via history.replaceState so deep links, refresh,
+  // and browser back/forward preserve the view.
+  const [view, setView] = useState<WorkspaceView>(initialView ?? "chat");
+  const changeView = useCallback((next: WorkspaceView) => {
+    setView(next);
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", next === "chat" ? "/" : `/?view=${next}`);
+    }
+  }, []);
+  useEffect(() => {
+    const applyFromUrl = () => {
+      if (typeof window === "undefined") return;
+      const candidate = new URLSearchParams(window.location.search).get("view");
+      if (candidate === "roles" || candidate === "graphs" || candidate === "chat") {
+        setView(candidate);
+      }
+    };
+    applyFromUrl();
+    window.addEventListener("popstate", applyFromUrl);
+    return () => window.removeEventListener("popstate", applyFromUrl);
+  }, []);
+
   const selectSession = useCallback((sessionId: string | null) => {
     setSelectedSessionState(sessionId);
   }, []);
@@ -49,6 +77,10 @@ export function AppShell() {
   const sidebarResize = useResizable({ initialWidth: 280, minWidth: 264, maxWidth: 420, storageKey: "--ennote-sidebar-width" });
   const rightPanelResize = useResizable({ initialWidth: 420, minWidth: 280, maxWidth: 1000, storageKey: "--ennote-right-panel-width", direction: "left" });
 
+  // Project selector dropdown is owned here so the empty hero can open it
+  // (it renders inside SessionSidebar).
+  const projectSelector = useProjectSelector();
+
   // Right panel layout state (file tabs live in useFileTabs)
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
@@ -56,10 +88,15 @@ export function AppShell() {
 
   // Top bar
   const navigationTriggerRef = useRef<HTMLButtonElement>(null);
+  // Settings view's mobile menu button (focus target when the chat TopBar is
+  // not rendered because a Roles/Graphs view is active).
+  const settingsMenuTriggerRef = useRef<HTMLButtonElement>(null);
 
   const closeMobileNavigation = useCallback(() => {
     setSidebarOpen(false);
-    window.requestAnimationFrame(() => navigationTriggerRef.current?.focus());
+    window.requestAnimationFrame(() => {
+      (navigationTriggerRef.current ?? settingsMenuTriggerRef.current)?.focus();
+    });
   }, []);
 
   useEffect(() => {
@@ -130,13 +167,25 @@ export function AppShell() {
     void refreshSettings();
   }, [refreshSettings, workspaceOpenSettings]);
 
+  // Feature: first-run guidance — when no provider profile exists, open the
+  // Models settings tab once so the user can configure a provider instead of
+  // staring at an inert composer. Mirrors DeepSeek Harness' provider onboarding.
+  const autoOpenedSettings = useRef(false);
+  useEffect(() => {
+    if (autoOpenedSettings.current || settings.loading || settings.error) return;
+    if (settings.providers.length > 0) return;
+    autoOpenedSettings.current = true;
+    openSettings();
+  }, [settings.loading, settings.error, settings.providers.length, openSettings]);
+
   const switchProject = useCallback((projectId: string) => {
     workspaceSwitchProject(projectId);
+    changeView("chat");
     selectSession(null);
     sessionNavigation.setView("active");
     sessionNavigation.setQuery("");
     if (isMobile) closeMobileNavigation();
-  }, [closeMobileNavigation, isMobile, selectSession, sessionNavigation, workspaceSwitchProject]);
+  }, [changeView, closeMobileNavigation, isMobile, selectSession, sessionNavigation, workspaceSwitchProject]);
 
   const createSession = useCallback(async () => {
     if (!selectedProject) return;
@@ -147,19 +196,28 @@ export function AppShell() {
       chat.run.setError(null);
       sessionNavigation.replaceSession(session);
       selectSession(session.id);
+      changeView("chat");
       await sessionNavigation.refresh();
       sidebarGroups.refresh(selectedProject);
     } catch (reason) {
       chat.run.setError((reason as Error).message);
     }
-  }, [selectSession, selectedProject, sessionNavigation, sidebarGroups, chat.run]);
+  }, [changeView, selectSession, selectedProject, sessionNavigation, sidebarGroups, chat.run]);
 
   const switchSession = useCallback((sessionId: string) => {
     closeSettings();
+    changeView("chat");
     selectSession(sessionId);
     apiFetch<Session>(`/v1/sessions/${encodeURIComponent(sessionId)}`).then(sessionNavigation.replaceSession).catch(() => {});
     if (isMobile) closeMobileNavigation();
-  }, [closeMobileNavigation, closeSettings, isMobile, selectSession, sessionNavigation]);
+  }, [changeView, closeMobileNavigation, closeSettings, isMobile, selectSession, sessionNavigation]);
+
+  // Empty-hero "Select project" opens the sidebar project dropdown (expanding
+  // the rail first so the selector is mounted).
+  const openProjectSelector = useCallback(() => {
+    setSidebarOpen(true);
+    window.requestAnimationFrame(() => projectSelector.openDropdown());
+  }, [projectSelector]);
 
   const archiveSession = useCallback(async (session: Session) => {
     const succeeded = await sessionNavigation.archive(session);
@@ -241,7 +299,6 @@ export function AppShell() {
       toggleCollapsed={sidebarGroups.toggleCollapsed}
       archived={sidebarGroups.archived}
       openArchived={sidebarGroups.openArchived}
-      refreshGroups={sidebarGroups.refreshAll}
       createProject={openCreateProject}
       createSession={createSession}
       switchProject={switchProject}
@@ -251,8 +308,10 @@ export function AppShell() {
       openSettings={openSettings}
       closeNavigation={closeMobileNavigation}
       runningSessionIds={runningSessionIds}
-      railMode={!sidebarOpen && !isMobile}
       onToggleSidebar={() => setSidebarOpen((v) => !v)}
+      projectSelector={projectSelector}
+      view={view}
+      setView={changeView}
     />
   );
 
@@ -262,7 +321,12 @@ export function AppShell() {
   return (
     <ChildProgressProvider>
     <>
-      <div className="app-shell" data-testid="ennote-shell">
+      <div className={`app-shell${!sidebarOpen && !isMobile ? " sidebar-collapsed" : ""}`} data-testid="ennote-shell">
+        {/* Floating top-left expand button: the desktop sidebar fully collapses
+            to 0 width (no rail), so a fixed button in the corner reopens it.
+            Mobile keeps the topbar hamburger / settings-view menu button. */}
+        {!sidebarOpen && !isMobile && <SidebarExpandFab onClick={() => setSidebarOpen(true)} />}
+
         {/* Mobile overlay backdrop */}
         <div
           className="sidebar-overlay-backdrop"
@@ -299,49 +363,69 @@ export function AppShell() {
           />
         )}
 
-        {/* Center: chat */}
+        {/* Center: chat (or Roles/Graphs settings view) */}
         <div className="workspace-content" inert={isMobile && sidebarOpen} style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
-          {/* Top bar */}
-          <TopBar
-            sidebarOpen={sidebarOpen}
-            onToggleSidebar={() => setSidebarOpen((v) => !v)}
-            navigationTriggerRef={navigationTriggerRef}
-            session={selectedSessionRecord}
-            title={titleEdit}
-            projectName={topBarProjectName}
-            projectPath={currentCwd}
-            branch={{
-              branches: chat.branches.branches,
-              activeBranchId: chat.branches.activeBranchId,
-              loading: chat.branches.loading,
-              changing: chat.branches.changing,
-              disabled: Boolean(chat.run.activeRun),
-              onActivate: chat.branches.activateBranch,
-            }}
-            rightPanelOpen={rightPanelOpen}
-            onToggleRightPanel={() => setRightPanelOpen((v) => !v)}
-            attention={{
-              projectId: selectedProject ?? currentProjectId ?? undefined,
-              onNavigate: (item) => {
-                if (item.sessionId && item.sessionId !== selectedSession) switchSession(item.sessionId);
-              },
-            }}
-          />
+          {view === "chat" ? (
+            <>
+              {/* Top bar */}
+              <TopBar
+                sidebarOpen={sidebarOpen}
+                onToggleSidebar={() => setSidebarOpen((v) => !v)}
+                navigationTriggerRef={navigationTriggerRef}
+                session={selectedSessionRecord}
+                title={titleEdit}
+                projectName={topBarProjectName}
+                projectPath={currentCwd}
+                branch={{
+                  branches: chat.branches.branches,
+                  activeBranchId: chat.branches.activeBranchId,
+                  loading: chat.branches.loading,
+                  changing: chat.branches.changing,
+                  disabled: Boolean(chat.run.activeRun),
+                  onActivate: chat.branches.activateBranch,
+                }}
+                rightPanelOpen={rightPanelOpen}
+                onToggleRightPanel={() => setRightPanelOpen((v) => !v)}
+                attention={{
+                  projectId: selectedProject ?? currentProjectId ?? undefined,
+                  onNavigate: (item) => {
+                    if (item.sessionId && item.sessionId !== selectedSession) switchSession(item.sessionId);
+                  },
+                }}
+              />
 
-          {/* Chat area */}
-          <ChatWindow
-            history={chat.history}
-            run={chat.run}
-            branches={chat.branches}
-            composer={chat.composer}
-            actions={chat.actions}
-            error={combinedError}
-            clearError={clearCombinedError}
-          />
+              {/* Chat area */}
+              <ChatWindow
+                history={chat.history}
+                run={chat.run}
+                branches={chat.branches}
+                composer={chat.composer}
+                actions={chat.actions}
+                error={combinedError}
+                clearError={clearCombinedError}
+                selectedProject={selectedProject}
+                projectCount={projects.length}
+                hasModel={settings.models.length > 0}
+                onSelectProject={openProjectSelector}
+                onNewProject={openCreateProject}
+                onNewSession={() => void createSession()}
+                onOpenSettings={openSettings}
+              />
+            </>
+          ) : (
+            <SettingsView
+              view={view}
+              models={settings.models}
+              providers={settings.providers}
+              onBackToChat={() => changeView("chat")}
+              onOpenMobileNav={() => setSidebarOpen(true)}
+              menuTriggerRef={settingsMenuTriggerRef}
+            />
+          )}
         </div>
 
-        {/* Right panel resize handle */}
-        {rightPanelOpen && (
+        {/* Right panel resize handle (chat view only) */}
+        {view === "chat" && rightPanelOpen && (
           <ResizeHandle
             side="left"
             ariaLabel="Resize right panel"
@@ -354,25 +438,27 @@ export function AppShell() {
           />
         )}
 
-        {/* Right panel */}
-        <RightPanel
-          open={rightPanelOpen}
-          onClose={() => setRightPanelOpen(false)}
-          resize={rightPanelResize}
-          tabs={rightTabs}
-          activeTabId={activeRightTabId}
-          onSelectTab={setActiveRightTabId}
-          onCloseTab={closeTab}
-          projectId={currentProjectId ?? null}
-          displayPath={currentCwd}
-          onOpenFile={handleOpenFile}
-          onPreviewFile={handlePreviewFile}
-          selectedSession={selectedSession}
-          sessionTitle={selectedSessionRecord?.title || selectedSession || ""}
-          activeRun={chat.run.activeRun}
-          status={chat.run.status}
-          permissionMode={chat.composer.displayedPermissionMode}
-        />
+        {/* Right panel (chat view only) */}
+        {view === "chat" && (
+          <RightPanel
+            open={rightPanelOpen}
+            onClose={() => setRightPanelOpen(false)}
+            resize={rightPanelResize}
+            tabs={rightTabs}
+            activeTabId={activeRightTabId}
+            onSelectTab={setActiveRightTabId}
+            onCloseTab={closeTab}
+            projectId={currentProjectId ?? null}
+            displayPath={currentCwd}
+            onOpenFile={handleOpenFile}
+            onPreviewFile={handlePreviewFile}
+            selectedSession={selectedSession}
+            sessionTitle={selectedSessionRecord?.title || selectedSession || ""}
+            activeRun={chat.run.activeRun}
+            status={chat.run.status}
+            permissionMode={chat.composer.displayedPermissionMode}
+          />
+        )}
 
       </div>
 
@@ -404,8 +490,7 @@ export function AppShell() {
       {createProjectOpen && (
         <ProjectCreateDialog
           busy={createProjectBusy}
-          error={chat.run.error}
-          onCreate={(name, hostPath) => void confirmCreateProject(name, hostPath)}
+          onCreate={confirmCreateProject}
           onClose={cancelCreateProject}
         />
       )}

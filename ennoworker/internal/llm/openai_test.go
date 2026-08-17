@@ -95,8 +95,9 @@ func TestOpenAIStreamTextThinkingToolsAndUsage(t *testing.T) {
 	assert.Equal(t, "call-1", completion.ToolCalls[0].ID)
 	assert.Equal(t, "read", completion.ToolCalls[0].Name)
 	assert.JSONEq(t, `{"path":"a.txt"}`, string(completion.ToolCalls[0].Arguments))
-	assert.Equal(t, int64(11), completion.Usage.InputTokens)
-	assert.Equal(t, int64(3), completion.Usage.CachedTokens)
+	assert.Equal(t, int64(11), completion.Usage.InputTokens())
+	assert.Equal(t, int64(8), completion.Usage.UncachedInputTokens)
+	assert.Equal(t, int64(3), completion.Usage.CacheReadTokens)
 	assert.Equal(t, int64(2), completion.Usage.ReasoningTokens)
 	assert.Equal(t, true, requestBody["stream"])
 	assert.Equal(t, "effective-api-model", requestBody["model"])
@@ -120,9 +121,10 @@ func TestOpenAIStreamParsesDeepSeekNativeCacheHits(t *testing.T) {
 	}, &recordingSink{})
 	require.NoError(t, err)
 
-	assert.Equal(t, int64(100), completion.Usage.InputTokens)
+	assert.Equal(t, int64(100), completion.Usage.InputTokens())
+	assert.Equal(t, int64(60), completion.Usage.UncachedInputTokens)
 	assert.Equal(t, int64(20), completion.Usage.OutputTokens)
-	assert.Equal(t, int64(40), completion.Usage.CachedTokens)
+	assert.Equal(t, int64(40), completion.Usage.CacheReadTokens)
 }
 
 func TestOpenAIReasoningEffortWireMappingAndDefaultOmission(t *testing.T) {

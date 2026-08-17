@@ -1,20 +1,11 @@
-"use client";
+import { AppShell } from "@/components/AppShell";
 
-import { useState } from "react";
-import { WorkspacePageShell } from "@/components/WorkspacePageShell";
-import { AgentFlowSettings } from "@/components/settings/AgentFlowSettings";
-
+/**
+ * `/graphs` — direct-entry / legacy URL for the Graphs view. Renders the
+ * same AppShell; the sidebar switches views in-place, so this route is
+ * only reached by bookmarks, deep links, and tests. The current view is
+ * synced to `/?view=graphs` via history.replaceState.
+ */
 export default function GraphsPage() {
-  const [error, setError] = useState<string | null>(null);
-  return (
-    <WorkspacePageShell
-      title="Graphs"
-      description="Global Task graphs. Every published Graph can run in any Session."
-      error={error}
-      onDismissError={() => setError(null)}
-      testId="graphs-page"
-    >
-      <AgentFlowSettings setError={setError} />
-    </WorkspacePageShell>
-  );
+  return <AppShell initialView="graphs" />;
 }

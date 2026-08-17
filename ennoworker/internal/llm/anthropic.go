@@ -463,8 +463,9 @@ type anthropicUsage struct {
 
 func (u anthropicUsage) domainUsage() domain.Usage {
 	return domain.Usage{
-		InputTokens:  u.InputTokens,
-		OutputTokens: u.OutputTokens,
-		CachedTokens: u.CacheReadInputTokens + u.CacheCreationInputTokens,
+		UncachedInputTokens: u.InputTokens,
+		CacheReadTokens:     u.CacheReadInputTokens,
+		CacheWriteTokens:    u.CacheCreationInputTokens,
+		OutputTokens:        u.OutputTokens,
 	}
 }

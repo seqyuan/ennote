@@ -1,28 +1,91 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
+	"os"
+	"sort"
 	"strconv"
 
+	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 )
 
-// listAttention returns pending-first attention items for a project.
+// listAttention returns pending-first attention items for a project. In the V2
+// file-native layout each Session owns its own SQLite attention_items table, so
+// the project-scoped bell fans out over every Session in the project and merges
+// the rows. A sessionId query parameter narrows the fan-out to one Session.
 func (s *Server) listAttention(w http.ResponseWriter, r *http.Request) {
-	if s.Attention == nil {
-		writeError(w, r, http.StatusServiceUnavailable, "attention_unavailable",
-			"attention is unavailable", true)
-		return
-	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	items, err := s.Attention.ListAttention(r.Context(), r.URL.Query().Get("projectId"),
+	items, err := s.listAttentionItems(r.Context(), r.URL.Query().Get("projectId"),
 		r.URL.Query().Get("sessionId"), r.URL.Query().Get("status"), limit)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, store.ErrSessionNotFound) {
+			writeError(w, r, http.StatusNotFound, "session_resource_not_found", "Session resource not found", false)
+			return
+		}
 		writeInternal(w, r, err)
 		return
 	}
 	writeData(w, http.StatusOK, map[string]any{"items": items, "hasMore": false})
+}
+
+// listAttentionItems aggregates attention rows across a project's Sessions or,
+// when sessionID is non-empty, reads just that Session's rows.
+func (s *Server) listAttentionItems(ctx context.Context, projectID, sessionID, status string, limit int) ([]domain.AttentionItem, error) {
+	if s.SessionStores == nil || s.Attention == nil {
+		return nil, fmt.Errorf("attention is unavailable")
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	// Without a project scope there is nothing to aggregate; return an empty
+	// page rather than failing the global bell on first paint.
+	if projectID == "" {
+		return []domain.AttentionItem{}, nil
+	}
+
+	if sessionID != "" {
+		db, err := s.SessionStores.OpenSession(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		return (&store.AttentionRepo{DB: db}).ListAttention(ctx, projectID, sessionID, status, limit)
+	}
+
+	sessions, err := s.SessionStores.ListByProject(ctx, projectID, "")
+	if err != nil {
+		return nil, err
+	}
+	items := make([]domain.AttentionItem, 0, len(sessions))
+	for _, session := range sessions {
+		db, err := s.SessionStores.OpenSession(ctx, session.ID)
+		if err != nil {
+			// A Session that fails to open (for example, removed on disk) must
+			// not break the cross-session bell; keep it best-effort.
+			continue
+		}
+		sessionItems, err := (&store.AttentionRepo{DB: db}).ListAttention(ctx, projectID, session.ID, status, limit)
+		if err != nil {
+			continue
+		}
+		items = append(items, sessionItems...)
+	}
+	// Merge order: action-required first, then newest first (mirrors the
+	// per-Session ORDER BY so the combined page stays stable).
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].RequiresAction != items[j].RequiresAction {
+			return items[i].RequiresAction
+		}
+		return items[i].CreatedAt.After(items[j].CreatedAt)
+	})
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil
 }
 
 // listSessionAttention returns attention items for one session.

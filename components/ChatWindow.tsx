@@ -3,6 +3,7 @@
 import { X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Composer } from "@/components/Composer";
+import { EmptyHero } from "@/components/EmptyHero";
 import { BackgroundDelegationStrip } from "@/components/BackgroundDelegationStrip";
 import { CompactionPromptBar } from "@/components/CompactionPromptBar";
 import { ConversationTimeline } from "@/components/ConversationTimeline";
@@ -20,10 +21,19 @@ interface ChatWindowProps {
   actions: ChatActions;
   error: string | null;
   clearError: () => void;
+  // Empty-state guidance (no session selected).
+  selectedProject: string | null;
+  projectCount: number;
+  hasModel: boolean;
+  onSelectProject: () => void;
+  onNewProject: () => void;
+  onNewSession: () => void;
+  onOpenSettings: () => void;
 }
 
 export function ChatWindow({
   history, run, branches, composer, actions, error, clearError,
+  selectedProject, projectCount, hasModel, onSelectProject, onNewProject, onNewSession, onOpenSettings,
 }: ChatWindowProps) {
   const messagesRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -83,7 +93,15 @@ export function ChatWindow({
         {!history.loading && history.sessionId && history.messages.length === 0 && !history.error && !run.pendingApproval && <div className="history-empty">
           <strong>New conversation</strong><span>Start with a question, file, or analysis task.</span>
         </div>}
-        {!history.sessionId && <div className="history-empty"><strong>No session selected</strong><span>Choose a project and session to continue.</span></div>}
+        {!history.sessionId && <EmptyHero
+          selectedProject={selectedProject}
+          projectCount={projectCount}
+          hasModel={hasModel}
+          onSelectProject={onSelectProject}
+          onNewProject={onNewProject}
+          onNewSession={onNewSession}
+          onOpenSettings={onOpenSettings}
+        />}
         <ConversationTimeline sessionId={history.sessionId ?? ""} nodes={history.messages} pendingApproval={run.pendingApproval} resolvingApproval={run.resolvingApproval}
           decideApproval={run.decideApproval} activeLeafMessageId={history.activeLeafMessageId}
           branchDisabled={Boolean(run.activeRun) || branches.changing} createBranch={branches.createBranch}
@@ -97,8 +115,8 @@ export function ChatWindow({
           waiting={waiting}
           reconnecting={reconnecting}
           compacting={run.compacting}
-          cacheTokens={run.usage?.cachedTokens ?? 0}
-          inputTokens={run.usage?.inputTokens ?? 0}
+          cacheReadTokens={run.usage?.cacheReadTokens ?? 0}
+          inputTokens={(run.usage?.uncachedInputTokens ?? 0) + (run.usage?.cacheReadTokens ?? 0) + (run.usage?.cacheWriteTokens ?? 0)}
           outputTokens={run.usage?.outputTokens ?? 0}
         />
         <div ref={bottomRef} />
@@ -127,7 +145,8 @@ export function ChatWindow({
       promptTemplates={composer.promptPanel.templates} showPromptPanel={composer.promptPanel.show} onPromptSelect={composer.promptPanel.onSelect}
       panelRoles={composer.promptPanel.roles} panelFlows={composer.promptPanel.flows} onRoleSelect={composer.promptPanel.onRoleSelect} onFlowSelect={composer.promptPanel.onFlowSelect}
       onPromptPanelClose={composer.promptPanel.onClose}
-      expanding={composer.promptPanel.expanding} expandDiag={composer.promptPanel.expandDiag} />
+      expanding={composer.promptPanel.expanding} expandDiag={composer.promptPanel.expandDiag}
+      contextUsage={run.contextUsage} stats={run.stats} />
   </main>;
 }
 

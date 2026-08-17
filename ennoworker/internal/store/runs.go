@@ -882,7 +882,7 @@ func (r *RunRepo) buildRunTelemetryTx(ctx context.Context, tx *sql.Tx, runID, ti
 	// Model call + usage aggregation.
 	if err := tx.QueryRowContext(ctx, `SELECT
 		COUNT(*),
-		COALESCE(SUM(input_tokens), 0),
+		COALESCE(SUM(uncached_input_tokens + cache_read_tokens + cache_write_tokens), 0),
 		COALESCE(SUM(output_tokens), 0),
 		COALESCE(SUM(cache_read_tokens), 0)
 		FROM model_calls WHERE run_id = ?`, runID).Scan(
@@ -913,7 +913,7 @@ func (r *RunRepo) buildRunTelemetryTx(ctx context.Context, tx *sql.Tx, runID, ti
 	}
 
 	// Max context utilization: parse the frozen effective config's context
-	// window and use peak input_tokens / window. Best-effort; 0 when unknown.
+	// window and use peak billed input / window. Best-effort; 0 when unknown.
 	var windowText string
 	if err := tx.QueryRowContext(ctx, `SELECT effective_config_json FROM agent_runs WHERE id = ?`, runID).Scan(&windowText); err == nil && windowText != "" {
 		var effective domain.EffectiveRunConfig
@@ -921,7 +921,7 @@ func (r *RunRepo) buildRunTelemetryTx(ctx context.Context, tx *sql.Tx, runID, ti
 			window := effective.ContextTokens
 			if window > 0 {
 				var peak int
-				_ = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(input_tokens), 0) FROM model_calls WHERE run_id = ?`, runID).Scan(&peak)
+				_ = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(uncached_input_tokens + cache_read_tokens + cache_write_tokens), 0) FROM model_calls WHERE run_id = ?`, runID).Scan(&peak)
 				telemetry.MaxContextUtilization = float64(peak) / float64(window)
 			}
 		}

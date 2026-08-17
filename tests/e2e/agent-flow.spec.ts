@@ -115,7 +115,10 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
 
     await expect(page.getByRole("tab", { name: "RNA-seq" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Add Graph" })).toBeVisible();
-    await expect(page.getByText("Select project", { exact: false })).toHaveCount(0);
+    // The sidebar now stays mounted next to the settings view, so scope the
+    // no-empty-hero check to the editor region (the sidebar's project
+    // selector legitimately shows its empty state when no project is set).
+    await expect(page.locator(".settings-view").getByText("Select project", { exact: false })).toHaveCount(0);
     const task = page.locator('[data-task-id="align_1"]');
     await expect(task.locator(".graph-task-form")).toHaveCount(0);
     await task.locator(".graph-task-summary").click();
@@ -125,9 +128,11 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
 
     if (viewport.width < 500) {
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+      // Mobile: the settings view's menu button opens the app-shell sidebar
+      // drawer (same shell as chat, labeled "Navigation").
       await page.getByRole("button", { name: "Open navigation" }).click();
-      await expect(page.getByLabel("Workspace navigation")).toBeVisible();
-      await page.locator(".workspace-nav-close").click();
+      await expect(page.getByRole("dialog", { name: "Navigation" })).toBeVisible();
+      await page.locator(".sidebar-close-nav").click();
       await page.getByRole("tab", { name: "graph", exact: true }).click();
     }
     await expect(page.getByText("Level 1", { exact: true })).toBeVisible();

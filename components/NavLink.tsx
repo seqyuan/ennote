@@ -1,15 +1,26 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-
-export function NavLink({ href, label, icon }: { href: string; label: string; icon: React.ReactNode }) {
-  const pathname = usePathname();
-  const active = pathname === href;
+/**
+ * Sidebar nav item for view switching (Roles / Graphs). Rendered as a
+ * button instead of a Link so activating it only swaps the main-area
+ * view inside AppShell — the sidebar stays mounted and the URL is
+ * updated via history.replaceState (no page navigation).
+ */
+export function NavLink({ active, label, icon, onClick }: {
+  active: boolean;
+  label: string;
+  icon: React.ReactNode;
+  onClick: () => void;
+}) {
   return (
-    <Link href={href} className={`sidebar-nav-item ${active ? "active" : ""}`} aria-current={active ? "page" : undefined}>
+    <button
+      type="button"
+      className={`sidebar-nav-item ${active ? "active" : ""}`}
+      aria-current={active ? "page" : undefined}
+      onClick={onClick}
+    >
       <span className="nav-icon">{icon}</span>
       <span>{label}</span>
-    </Link>
+    </button>
   );
 }

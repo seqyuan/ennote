@@ -20,7 +20,7 @@ export function ProjectSelector(props: {
   const t = useT();
 
   return (
-    <div ref={controlRootRef} style={{ position: "relative", marginTop: 8, padding: "0 10px", display: "flex", alignItems: "stretch", gap: 4 }}>
+    <div ref={controlRootRef} className="sidebar-project-selector" style={{ position: "relative", padding: "0 10px", display: "flex", alignItems: "stretch", gap: 4 }}>
       <button
         type="button"
         onClick={toggle}

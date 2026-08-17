@@ -1,6 +1,9 @@
 package domain
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 type ModelCallPurpose string
 
@@ -39,6 +42,7 @@ type ModelCallFinish struct {
 	ActualModel       string
 	StopReason        StopReason
 	Usage             Usage
+	FirstTokenAt      time.Time
 	ErrorCode         string
 	Error             string
 	HTTPStatus        int

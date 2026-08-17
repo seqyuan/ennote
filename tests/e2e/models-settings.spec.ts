@@ -71,7 +71,8 @@ test("Models tab: add custom provider, edit + fetch models, delete", async ({ pa
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  // First-run guidance auto-opens the Models settings tab when no provider
+  // exists (mirrors dsh onboarding), so the dialog is already open.
   await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Models" })).toHaveAttribute("aria-selected", "true");
 
@@ -83,7 +84,9 @@ test("Models tab: add custom provider, edit + fetch models, delete", async ({ pa
   await page.getByRole("button", { name: "Add model" }).click();
   await page.getByLabel("Model ID 1").fill("gpt-4o");
   await page.getByRole("button", { name: "Create provider" }).click();
-  await expect(page.getByText("openai-main", { exact: true })).toBeVisible();
+  // The provider row renders (name + Custom tag), so assert its actions.
+  await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Delete openai-main" })).toBeVisible();
   expect(createdProviders[0]).toEqual({
     key: "openai-main",
     name: "openai-main",
@@ -93,12 +96,15 @@ test("Models tab: add custom provider, edit + fetch models, delete", async ({ pa
   });
   expect(createdModels).toHaveLength(1);
 
-  // Edit: fetch the catalog into the draft, then apply.
+  // Edit: open the custom-settings fold, fetch the catalog into the draft, apply.
   await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByText("Customized settings").click();
   await page.getByRole("button", { name: "Fetch available models" }).click();
   await expect(page.getByRole("dialog", { name: "Choose models to add" })).toBeVisible();
   await page.getByRole("button", { name: "Add selected" }).click();
   await page.getByRole("button", { name: "Apply" }).click();
+  // Apply is async; the editor closes only after it succeeds and refreshes.
+  await expect(page.getByRole("button", { name: "Apply" })).toHaveCount(0);
   // gpt-4o-mini was adopted as a new model; gpt-4o unchanged.
   expect(createdModels.some(m => m.modelName === "gpt-4o-mini")).toBe(true);
 

@@ -148,61 +148,199 @@ html.dark .composer-shell {
 .composer-followup:hover:not(:disabled) { background: var(--cmp-hover); color: var(--cmp-text-primary); }
 .composer-followup:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* Chip controls: model select + thinking picker (dsh .select language). */
-.composer-chip {
+/* Model + effort seat: pixel port of dsh ui-model-selection (ModelSelect.module.css). */
+.model-select {
   position: relative;
-  display: inline-flex;
-  align-items: center;
+  min-width: 0;
 }
-.composer-chip-select {
-  max-width: 220px;
-  height: 28px;
-  padding: 0 20px 0 8px;
-  border: none;
-  border-radius: 8px;
-  outline: none;
-  appearance: none;
-  background-color: transparent;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%2381858C' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 4px center;
-  background-size: 12px 12px;
-  color: var(--cmp-text-secondary);
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 20px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.composer-chip-select:hover:not(:disabled) { background-color: var(--cmp-hover); }
-.composer-chip-select:disabled { opacity: 0.5; cursor: default; }
 
-.composer-chip-button {
-  display: inline-flex;
+/* Trigger pill (dsh 313:14108 ToggleButton): 13/20 medium label, 4px gap,
+   14px caption chevron, 28px chip, 24px pill radius. */
+.model-select-trigger {
+  display: flex;
   align-items: center;
   gap: 4px;
+  min-width: 0;
+  max-width: 220px;
   height: 28px;
-  padding: 0 8px;
+  padding: 0 4px 0 8px;
   border: none;
-  border-radius: 8px;
+  border-radius: 24px;
+  outline: none;
   background: transparent;
   color: var(--cmp-text-secondary);
   font-size: 13px;
+  line-height: 20px;
   font-weight: 500;
   cursor: pointer;
 }
-.composer-chip-button:hover:not(:disabled) { background: var(--cmp-hover); color: var(--cmp-text-primary); }
-.composer-chip-button:disabled { opacity: 0.5; cursor: default; }
-.composer-chip-button[aria-expanded="true"] { background: var(--cmp-hover); color: var(--cmp-text-primary); }
-
-/* Thinking menu uses the card's surface tokens. */
-.composer-thinking-menu {
-  background: var(--cmp-fill);
-  border-color: var(--cmp-border);
+.model-select-trigger:hover:not(:disabled) {
+  background: var(--cmp-hover);
 }
-.composer-thinking-menu button { color: var(--cmp-text-secondary); }
-.composer-thinking-menu button:hover { background: var(--cmp-hover); color: var(--cmp-text-primary); }
-.composer-thinking-menu button[aria-selected="true"] { color: var(--cmp-text-primary); background: var(--cmp-hover); }
+.model-select-trigger:focus-visible {
+  box-shadow: 0 0 0 2px var(--cmp-brand);
+}
+.model-select-trigger:disabled {
+  color: var(--cmp-text-tertiary);
+  cursor: default;
+}
+.model-select-trigger-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Effort beside the model name, caption tone. */
+.model-select-trigger-effort {
+  flex: 0 0 auto;
+  color: var(--cmp-text-tertiary);
+}
+.model-select-chevron {
+  flex: 0 0 auto;
+  color: var(--cmp-text-tertiary);
+  transition: transform 120ms ease;
+}
+.model-select-chevron.open {
+  transform: rotate(180deg);
+}
+
+/* Dropdown card (dsh .menu): 240px, 12px radius, lv3 shadow, opens upward. */
+.model-select-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  width: min(240px, calc(100vw - 32px));
+  max-height: min(360px, calc(100vh - 96px));
+  overflow: hidden;
+  padding: 4px;
+  border: 1px solid var(--cmp-border);
+  border-radius: 12px;
+  background: var(--cmp-fill);
+  box-shadow: var(--cmp-shadow);
+  color: var(--cmp-text-primary);
+}
+.model-select-empty {
+  padding: 10px;
+  color: var(--cmp-text-tertiary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+/* Root cells (dsh 496:26454 .Menu_cell): 40px row, 10px side padding, 8px gap,
+   10px radius, 14/22 label, value in the tertiary tone, right chevron. */
+.model-select-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 40px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--cmp-text-primary);
+  font-size: 14px;
+  line-height: 22px;
+  cursor: pointer;
+  text-align: left;
+}
+.model-select-cell:hover {
+  background: var(--cmp-hover);
+}
+.model-select-cell-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-select-cell-value {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cmp-text-tertiary);
+}
+.model-select-cell-chevron {
+  flex: 0 0 auto;
+  color: var(--cmp-text-tertiary);
+}
+
+/* Drilled panes: sticky group title + option rows with trailing check. */
+.model-select-groups {
+  min-height: 0;
+  overflow-y: auto;
+}
+.model-select-group + .model-select-group {
+  margin-top: 4px;
+}
+.model-select-group-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 5px 8px 3px;
+  background: var(--cmp-fill);
+  color: var(--cmp-text-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+}
+.model-select-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 38px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 10px;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.model-select-option:hover:not(:disabled),
+.model-select-option:focus-visible {
+  background: var(--cmp-hover);
+}
+.model-select-option:disabled {
+  color: var(--cmp-text-tertiary);
+  cursor: default;
+}
+.model-select-option-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.model-select-option-name {
+  overflow: hidden;
+  color: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-select-option-desc {
+  overflow: hidden;
+  color: var(--cmp-text-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-select-check {
+  display: grid;
+  place-items: center;
+  flex: 0 0 18px;
+  color: var(--cmp-text-primary);
+}
 
 /* Status line below the card. */
 .composer-status-line {
@@ -213,4 +351,140 @@ html.dark .composer-shell {
   width: min(100%, 920px);
   margin: 0 auto;
   padding: 6px 28px 0;
+}
+
+/* ---- Context meter (dsh ContextMeter, beside the send button) ---- */
+.context-meter {
+  position: relative;
+  display: inline-flex;
+}
+.context-meter-trigger {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--cmp-text-secondary);
+  cursor: pointer;
+}
+.context-meter-trigger:hover {
+  background: var(--cmp-hover);
+}
+.context-meter-track {
+  fill: none;
+  stroke: var(--cmp-border);
+  stroke-width: 2;
+}
+.context-meter-fill {
+  fill: none;
+  stroke: var(--cmp-text-tertiary);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.context-meter-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 100;
+  box-sizing: border-box;
+  width: 264px;
+  padding: 12px;
+  border: 1px solid var(--cmp-border);
+  border-radius: 12px;
+  background: var(--cmp-fill);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--cmp-text-secondary);
+  cursor: default;
+}
+.context-meter-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.context-meter-figures {
+  margin-left: auto;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--cmp-text-primary);
+}
+.context-meter-percent {
+  font-weight: 500;
+  color: var(--cmp-text-primary);
+}
+.context-meter-headline {
+  color: var(--cmp-text-tertiary);
+}
+.context-meter-headline:empty {
+  display: none;
+}
+.context-meter-bar {
+  display: flex;
+  gap: 1px;
+  margin: 10px 0 12px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--cmp-hover);
+  overflow: hidden;
+}
+.context-meter-segment {
+  flex: none;
+  min-width: 2px;
+  height: 100%;
+  border-radius: 1px;
+  background: var(--meter-tint, var(--cmp-text-tertiary));
+}
+.context-meter-swatch {
+  display: inline-block;
+  margin-right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--meter-tint);
+  vertical-align: baseline;
+}
+.cm-color-system { --meter-tint: rgb(148, 163, 184); }
+.cm-color-tools { --meter-tint: rgb(167, 139, 250); }
+.cm-color-messages { --meter-tint: var(--cmp-brand, rgb(65, 118, 230)); }
+.context-meter-rows {
+  margin: 6px 0 0;
+}
+.context-meter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+}
+.context-meter-row dt {
+  color: var(--cmp-text-secondary);
+}
+.context-meter-row dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--cmp-text-primary);
+}
+
+/* ---- StatsLine (dsh StatsLine row under the composer) ---- */
+.stats-line {
+  display: block;
+  text-align: center;
+  width: min(100%, 920px);
+  margin: 0 auto;
+  box-sizing: border-box;
+  padding: 4px 28px 0;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--cmp-text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stats-line-sep {
+  color: var(--cmp-text-tertiary);
+  margin: 0 10px;
 }

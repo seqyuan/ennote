@@ -16,7 +16,6 @@
   --sb-brand: rgb(65, 118, 230);             /* deepseek-500 */
   --sb-radius: 12px;
   --sb-radius-row: 8px;
-  --sb-rail: 56px;
   --sb-pad-x: 12px;
 
   background: var(--sb-fill);
@@ -44,20 +43,6 @@ html.dark .workspace-nav-container {
   padding: 6px var(--sb-pad-x);
   color: var(--sb-text-primary);
   font-size: 14px;
-}
-
-/* Desktop: collapse = 56px rail (override globals' width:0) + free the
-   nested 180px min-width that would break the rail. */
-@media (min-width: 641px) {
-  .sidebar-container.sidebar-closed {
-    width: var(--sb-rail) !important;
-    min-width: var(--sb-rail) !important;
-    border-right: 1px solid var(--sb-border-l1) !important;
-  }
-  .sidebar-container.sidebar-closed > * {
-    width: var(--sb-rail);
-    min-width: var(--sb-rail);
-  }
 }
 
 /* ---- Logo row (dsh SidebarRoot .logoRow) ---- */
@@ -164,6 +149,11 @@ html.dark .workspace-nav-container {
   border-radius: var(--sb-radius-row);
   color: var(--sb-text-secondary);
   font-size: 13px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
   text-decoration: none;
 }
 .sidebar-nav-item:hover { background: var(--sb-hover); color: var(--sb-text-primary); }
@@ -175,24 +165,133 @@ html.dark .workspace-nav-container {
 .sidebar-nav-item .nav-icon { color: var(--sb-text-secondary); }
 .sidebar-nav-item.active .nav-icon { color: var(--sb-brand); }
 
-/* ---- Sessions header row ---- */
-.sidebar-sessions-head {
-  flex-shrink: 0;
+/* ---- Workspace header (DSH WorkspaceBrowser sectionHeader) ---- */
+.sidebar-workspace-head {
+  flex: none;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  padding: 8px 10px 4px;
-}
-.sidebar-sessions-head .sessions-label {
-  flex: none;
+  justify-content: flex-end;
+  gap: 4px;
+  height: 36px;
+  margin: 2px -4px 4px 0;
+  padding-left: 4px;
+  box-sizing: border-box;
+  border-radius: 12px;
   color: var(--sb-text-tertiary);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
-.sidebar-sessions-head .sidebar-icon-btn { flex: none; }
+.workspace-label {
+  flex: none;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 14px;
+  line-height: 20px;
+  opacity: 1;
+  visibility: visible;
+  transition: max-width 180ms ease, margin-right 180ms ease, opacity 120ms ease, transform 180ms ease, visibility 0s linear;
+}
+.workspace-search-slot {
+  flex: 1;
+  min-width: 0;
+  max-width: 28px;
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  transition: max-width 180ms ease;
+}
+.workspace-search {
+  flex: none;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 28px;
+  padding: 0;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--sb-text-secondary);
+  overflow: hidden;
+  transition: width 180ms ease, padding 180ms ease, border-color 180ms ease, border-radius 180ms ease;
+}
+.workspace-action-button,
+.workspace-search-clear {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.workspace-action-button:hover,
+.workspace-search-clear:hover { background: var(--sb-hover); }
+.workspace-search input {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--sb-text-primary);
+  font-size: 13px;
+  line-height: 18px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+.workspace-search input::placeholder { color: var(--sb-text-tertiary); }
+.workspace-search-clear { width: 24px; height: 24px; color: var(--sb-text-secondary); }
+.workspace-head-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  max-width: 28px;
+  opacity: 1;
+  overflow: hidden;
+  visibility: visible;
+  transition: max-width 180ms ease, opacity 120ms ease, transform 180ms ease, visibility 0s linear;
+}
+.sidebar-workspace-head.search-expanded .workspace-label {
+  max-width: 0;
+  margin-right: -4px;
+  opacity: 0;
+  transform: translateX(-4px);
+  visibility: hidden;
+  transition-delay: 0s, 0s, 0s, 0s, 180ms;
+}
+.sidebar-workspace-head.search-expanded .workspace-search-slot { max-width: 100%; }
+.sidebar-workspace-head.search-expanded .workspace-search {
+  width: calc(100% + 4px);
+  height: 30px;
+  margin-inline: -2px;
+  padding: 0 4px 0 0;
+  border: 1px solid var(--sb-border-l2);
+  border-radius: 10px;
+  color: var(--sb-text-tertiary);
+}
+.sidebar-workspace-head.search-expanded .workspace-search-button { width: 28px; height: 30px; }
+.sidebar-workspace-head.search-expanded .workspace-search-button:hover { background: transparent; }
+.sidebar-workspace-head.search-expanded .workspace-search input {
+  margin-left: -2px;
+  opacity: 1;
+  pointer-events: auto;
+}
+.sidebar-workspace-head.search-expanded .workspace-head-actions {
+  max-width: 0;
+  opacity: 0;
+  transform: translateX(4px);
+  visibility: hidden;
+  pointer-events: none;
+  transition-delay: 0s, 0s, 0s, 180ms;
+}
+.sidebar-project-selector { margin-top: 0; margin-bottom: 4px; }
 
 /* ---- Rows (session/project), scoped overrides of globals' .sidebar-item ---- */
 .sidebar .sidebar-item {
@@ -218,106 +317,6 @@ html.dark .workspace-nav-container {
 .sidebar .sidebar-project-group [role="button"] {
   border-radius: var(--sb-radius-row);
 }
-
-/* ---- Rail (collapsed desktop) ---- */
-.sidebar.sidebar-rail {
-  padding: 18px 10px 6px;
-  align-items: center;
-}
-.sidebar.sidebar-rail .sidebar-logo-row {
-  height: 36px;
-  padding: 0;
-  margin-bottom: 12px;
-  justify-content: center;
-}
-.sidebar.sidebar-rail .sidebar-brand strong { display: none; }
-.sidebar.sidebar-rail .sidebar-collapse-toggle { width: 36px; height: 36px; color: var(--sb-text-primary); }
-.sidebar.sidebar-rail .sidebar-new-session {
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  margin: 0 0 12px;
-  gap: 0;
-  border-color: transparent;
-  background: transparent;
-}
-.sidebar.sidebar-rail .sidebar-new-session:hover { background: var(--sb-hover); }
-.sidebar.sidebar-rail .sidebar-nav-item {
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  justify-content: center;
-}
-.sidebar.sidebar-rail .sidebar-nav-item span,
-.sidebar.sidebar-rail .sidebar-new-session span { display: none; }
-.sidebar.sidebar-rail .sidebar-sessions-head .sessions-label { display: none; }
-
-/* ---- Inline persistent search in the Sessions header (dsh section header) ---- */
-.sessions-search {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  padding: 0 7px;
-  border: 1px solid var(--sb-border-l2);
-  border-radius: 6px;
-  background: var(--sb-button-fill);
-  color: var(--sb-text-tertiary);
-}
-.sessions-search:focus-within { border-color: var(--sb-brand); }
-.sessions-search input {
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--sb-text-primary);
-  font-size: 12px;
-}
-.sessions-search input::placeholder { color: var(--sb-text-tertiary); }
-.sessions-search button {
-  display: grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--sb-text-tertiary);
-  cursor: pointer;
-}
-.sessions-search button:hover { color: var(--sb-text-secondary); }
-
-.sidebar-rail-icon {
-  width: 36px;
-  height: 36px;
-  margin-bottom: 12px;
-  display: grid;
-  place-items: center;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--sb-text-primary);
-  cursor: pointer;
-}
-.sidebar-rail-icon:hover { background: var(--sb-hover); }
-
-/* Rail settings button: icon-only, centered. */
-.sidebar-rail .sidebar-settings {
-  margin-top: auto;
-  border-top: 1px solid var(--sb-border-l1);
-  padding-top: 6px;
-}
-.sidebar-rail .sidebar-settings .sidebar-item {
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  margin: 0 auto;
-}
-.sidebar-rail .sidebar-settings .sidebar-item span { display: none; }
 
 /* Desktop: the sidebar owns the collapse toggle now; keep the topbar hamburger
    only for the mobile off-canvas drawer. */

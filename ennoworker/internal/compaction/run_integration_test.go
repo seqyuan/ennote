@@ -75,7 +75,7 @@ func TestLoopRunCompactorFinalizesCompleteCanonicalTranscript(t *testing.T) {
 		llm.FakeStep{Completion: integrationToolCompletion("c2")},
 		llm.FakeStep{Completion: domain.Completion{Content: []domain.ContentBlock{{
 			Kind: domain.ContentText, Text: serviceSummary()}}, StopReason: domain.StopReasonStop,
-			ActualModel: "summary", Usage: domain.Usage{InputTokens: 600, OutputTokens: 100}}},
+			ActualModel: "summary", Usage: domain.Usage{UncachedInputTokens: 600, OutputTokens: 100}}},
 		llm.FakeStep{Completion: domain.Completion{Content: []domain.ContentBlock{{
 			Kind: domain.ContentText, Text: "analysis complete"}}, StopReason: domain.StopReasonStop,
 			ActualModel: "main"}},

@@ -56,7 +56,7 @@ func TestRebuildRestoresSessionOwnerAndUsageProjections(t *testing.T) {
 		VALUES(?,?,'context_compaction',?,'completed',?)`, runID, session.ID, messageID, now)
 	require.NoError(t, err)
 	_, err = db.Exec(`INSERT INTO model_calls(id,run_id,seq,provider_profile_id,model_profile_id,actual_model,
-		input_tokens,output_tokens,cache_read_tokens,reasoning_tokens,started_at)
+		uncached_input_tokens,output_tokens,cache_read_tokens,reasoning_tokens,started_at)
 		VALUES(?,?,1,'deepseek','deepseek/deepseek-chat','deepseek-chat',100,20,5,2,?)`, callID, runID, now)
 	require.NoError(t, err)
 
@@ -67,7 +67,8 @@ func TestRebuildRestoresSessionOwnerAndUsageProjections(t *testing.T) {
 	assert.Equal(t, session.ID, ownerSession)
 	var input, output int64
 	require.NoError(t, stores.Usage.QueryRow(`SELECT input_tokens,output_tokens FROM usage_aggregates WHERE session_id=?`, session.ID).Scan(&input, &output))
-	assert.Equal(t, int64(100), input)
+	// Billed input = uncached (100) + cacheRead (5) + cacheWrite (0).
+	assert.Equal(t, int64(105), input)
 	assert.Equal(t, int64(20), output)
 }
 

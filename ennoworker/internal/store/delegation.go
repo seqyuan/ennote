@@ -1474,8 +1474,9 @@ func (r *DelegationRepo) CompleteModelCall(ctx context.Context, runID, modelProf
 			return err
 		}
 	}
-	tokens := usage.InputTokens + usage.OutputTokens
-	cost := tokenCostMicros(usage.InputTokens, inputRate) + tokenCostMicros(usage.OutputTokens, outputRate)
+	totalInput := usage.InputTokens()
+	tokens := totalInput + usage.OutputTokens
+	cost := tokenCostMicros(totalInput, inputRate) + tokenCostMicros(usage.OutputTokens, outputRate)
 	result, err := r.DB.ExecContext(ctx, `UPDATE run_budgets SET consumed_tokens=consumed_tokens+?,
 		consumed_output_tokens=consumed_output_tokens+?,consumed_cost_usd_micros=consumed_cost_usd_micros+?
 		WHERE run_id=? AND consumed_tokens+?<=max_total_tokens

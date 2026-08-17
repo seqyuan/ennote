@@ -222,12 +222,41 @@ describe("split projection (projectBase + applyTransient)", () => {
     if (baseBatch?.kind !== "tool_batch") return;
     expect(baseBatch.activities[0].result).toBeUndefined();
 
-    applyTransient(base, [
+    const out = applyTransient(base, [
       { id: "t1", role: "tool", kind: "tool", toolCallId: "c1", toolName: "read", text: "result", isError: false },
     ]);
 
     // base.openTurn's activity is untouched (clone-on-write isolated the merge).
     expect(baseBatch.activities[0].result).toBeUndefined();
+    // ...and the output turn carries the merged result.
+    const outTurn = out[0];
+    expect(outTurn.kind).toBe("turn");
+    if (outTurn.kind !== "turn") return;
+    const outBatch = outTurn.steps.find(step => step.kind === "tool_batch");
+    if (outBatch?.kind !== "tool_batch") return;
+    expect(outBatch.activities[0].result?.content).toBe("result");
+    expect(outBatch.activities[0].state).toBe("completed");
+  });
+
+  it("resolves model display names onto canonical assistant steps via resolveModel", () => {
+    const base = projectBase([
+      message("m1", "user", "go"),
+      { ...message("m2", "assistant", "reply"), modelProfileId: "mp-1", apiModel: "claude-sonnet-4" },
+    ], [], undefined, (modelProfileId, apiModel) => modelProfileId === "mp-1" ? "Claude Sonnet 4" : apiModel);
+    const step = base.openTurn?.steps.find(candidate => candidate.kind === "assistant");
+    expect(step?.kind).toBe("assistant");
+    if (step?.kind !== "assistant") return;
+    expect(step.speaker?.modelName).toBe("Claude Sonnet 4");
+    expect(step.speaker?.modelProfileId).toBe("mp-1");
+    // fallback to apiModel when the catalog misses the profile
+    const missing = projectBase([
+      { ...message("m3", "user", "go"), modelProfileId: "gone" },
+      { ...message("m4", "assistant", "reply"), modelProfileId: "gone", apiModel: "raw-model" },
+    ], [], undefined, (modelProfileId, apiModel) => (modelProfileId === "mp-1" ? "Claude Sonnet 4" : apiModel));
+    const step2 = missing.openTurn?.steps.find(candidate => candidate.kind === "assistant");
+    expect(step2?.kind).toBe("assistant");
+    if (step2?.kind !== "assistant") return;
+    expect(step2.speaker?.modelName).toBe("raw-model");
   });
 });
 

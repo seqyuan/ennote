@@ -42,7 +42,7 @@ func TestRunCompactionLifecycleAndDigestReuse(t *testing.T) {
 	require.NoError(t, calls.ModelCompleted(ctx, domain.ModelCallFinish{ID: callID, RunID: submission.Run.ID,
 		Iteration: 3, Attempt: 1, RequestGeneration: 1, Purpose: domain.ModelCallContextCompaction,
 		ActualModel: "model", StopReason: domain.StopReasonStop,
-		Usage: domain.Usage{InputTokens: 100, OutputTokens: 30}}))
+		Usage: domain.Usage{UncachedInputTokens: 100, OutputTokens: 30}}))
 	summary := "## Goal\nContinue."
 	require.NoError(t, repo.Complete(ctx, RunCompactionCompletion{ID: planned.ID,
 		RunID: submission.Run.ID, ModelCallID: callID, Summary: summary, SummaryDigest: "summary-digest",

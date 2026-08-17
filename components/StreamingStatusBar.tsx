@@ -9,15 +9,15 @@ interface StreamingStatusBarProps {
   waiting: boolean;
   reconnecting: boolean;
   compacting: boolean;
-  /** Cumulative provider cache-hit tokens for the active run. */
-  cacheTokens?: number;
-  /** Cumulative provider input tokens for the active run. */
+  /** Cumulative cache-hit tokens for the active run. */
+  cacheReadTokens?: number;
+  /** Cumulative billed input tokens for the active run (uncached + cacheRead + cacheWrite). */
   inputTokens?: number;
   /** Cumulative provider output tokens for the active run. */
   outputTokens?: number;
 }
 
-export function StreamingStatusBar({ status, activeRun, waiting, reconnecting, compacting, cacheTokens = 0, inputTokens = 0, outputTokens = 0 }: StreamingStatusBarProps) {
+export function StreamingStatusBar({ status, activeRun, waiting, reconnecting, compacting, cacheReadTokens = 0, inputTokens = 0, outputTokens = 0 }: StreamingStatusBarProps) {
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [clock, setClock] = useState(0);
 
@@ -46,7 +46,7 @@ export function StreamingStatusBar({ status, activeRun, waiting, reconnecting, c
 
   return (
     <div className="streaming-status" role="status" aria-live="polite">
-      <span>{label}{startedAt ? `  ${formatElapsed(elapsed)}` : ""}{cacheTokens > 0 ? `  · cache ${formatTokenCount(cacheTokens)}` : ""}{(inputTokens > 0 || outputTokens > 0) ? `  · ↑${formatTokenCount(inputTokens)} ↓${formatTokenCount(outputTokens)}` : ""}</span>
+      <span>{label}{startedAt ? `  ${formatElapsed(elapsed)}` : ""}{cacheReadTokens > 0 ? `  · cache ${formatTokenCount(cacheReadTokens)}` : ""}{(inputTokens > 0 || outputTokens > 0) ? `  · ↑${formatTokenCount(inputTokens)} ↓${formatTokenCount(outputTokens)}` : ""}</span>
     </div>
   );
 }

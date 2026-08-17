@@ -3,6 +3,7 @@ import "./globals.css";
 import "./sidebar.css";
 import "./composer.css";
 import "./settings.css";
+import "./project-picker.css";
 import { LocaleProvider } from "@/components/LocaleProvider";
 import { WorkerGenerationGuard } from "@/components/WorkerGenerationGuard";
 import { WorkspaceProvider } from "@/components/WorkspaceProvider";
