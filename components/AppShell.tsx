@@ -27,7 +27,7 @@ import { useProjectSelector } from "@/hooks/useProjectSelector";
 import { SettingsView } from "./SettingsView";
 import type { WorkspaceView } from "./workspace-view";
 import { apiFetch } from "@/lib/worker-api.client";
-import type { Session } from "@/components/settings/types";
+import type { SettingsTab, Session } from "@/components/settings/types";
 import type { components } from "@/lib/worker-api.gen";
 
 type ProjectWorkspace = components["schemas"]["ProjectWorkspace"];
@@ -37,7 +37,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
   const {
     projects, selectedProject, switchProject: workspaceSwitchProject,
     createProjectOpen, openCreateProject, confirmCreateProject, cancelCreateProject, createProjectBusy,
-    settingsOpen, openSettings: workspaceOpenSettings, closeSettings,
+    settingsOpen, settingsTab, openSettings: workspaceOpenSettings, closeSettings,
     workspaceFor, togglePinProject, pinnedProjectIds, renameProject, deleteProject,
   } = useWorkspace();
 
@@ -162,21 +162,22 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
   );
 
   const refreshSettings = settings.refresh;
-  const openSettings = useCallback(() => {
-    workspaceOpenSettings();
+  const openSettings = useCallback((tab?: SettingsTab) => {
+    workspaceOpenSettings(tab);
     void refreshSettings();
   }, [refreshSettings, workspaceOpenSettings]);
 
-  // Feature: first-run guidance — when no provider profile exists, open the
-  // Models settings tab once so the user can configure a provider instead of
-  // staring at an inert composer. Mirrors DeepSeek Harness' provider onboarding.
+  // Feature: first-run guidance — when no provider is usable yet, open the
+  // Models settings section once so the user can configure a provider instead
+  // of staring at an inert composer. Mirrors dsh's onboarding step, which
+  // opens the Models section explicitly; the plain trigger lands on General.
   const autoOpenedSettings = useRef(false);
   useEffect(() => {
     if (autoOpenedSettings.current || settings.loading || settings.error) return;
-    if (settings.providers.length > 0) return;
+    if (settings.providers.some(provider => provider.credentialConfigured)) return;
     autoOpenedSettings.current = true;
-    openSettings();
-  }, [settings.loading, settings.error, settings.providers.length, openSettings]);
+    openSettings("models");
+  }, [settings.loading, settings.error, settings.providers, openSettings]);
 
   const switchProject = useCallback((projectId: string) => {
     workspaceSwitchProject(projectId);
@@ -494,6 +495,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
       <SettingsDialog
         open={settingsOpen}
         onClose={closeSettings}
+        initialTab={settingsTab}
         providers={settings.providers}
         models={settings.models}
         policies={settings.policies}

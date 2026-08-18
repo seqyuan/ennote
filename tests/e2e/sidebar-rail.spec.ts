@@ -1,7 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 const project = { id: "rail-project", name: "Rail", description: "", status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" };
-const provider = { id: "rail-provider", name: "test", providerType: "openai-compatible", baseUrl: "https://example.test", apiKey: "test", status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" };
+const provider = { id: "rail-provider", name: "test", providerType: "openai-compatible", baseUrl: "https://example.test", credentialConfigured: true, status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" };
 
 async function fulfill(route: Route, data: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ data }) });

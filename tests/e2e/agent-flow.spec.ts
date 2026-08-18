@@ -3,7 +3,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 test.describe.configure({ mode: "serial" });
 
 const now = "2026-08-08T00:00:00Z";
-const provider = { id: "provider-1", name: "anthropic", providerType: "openai-compatible", baseUrl: "https://example.test/v1", apiKey: "test", status: "active", createdAt: now, updatedAt: now };
+const provider = { id: "provider-1", name: "anthropic", providerType: "openai-compatible", baseUrl: "https://example.test/v1", credentialConfigured: true, status: "active", createdAt: now, updatedAt: now };
 const model = { id: "model-1", providerId: provider.id, modelName: "claude-sonnet-4", displayName: "Claude Sonnet", contextWindow: 200000, maxOutputTokens: 8000, inputCostUsdMicrosPerMillion: 0, outputCostUsdMicrosPerMillion: 0, supportsVision: true, supportsToolUse: true, supportsThinking: true, thinkingDialect: "openai_reasoning_effort", supportedThinkingEfforts: ["default", "low", "medium", "high"], isDefault: true, status: "active", createdAt: now, updatedAt: now };
 
 function fulfill(route: Route, data: unknown, status = 200) {

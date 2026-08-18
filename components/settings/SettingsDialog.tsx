@@ -18,15 +18,6 @@ interface TabItem {
   icon: React.ReactNode;
 }
 
-function SettingsIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.72l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z" />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
-  );
-}
-
 function tabIcon(id: SettingsTab) {
   if (id === "general") {
     return (
@@ -86,10 +77,14 @@ function tabIcon(id: SettingsTab) {
   );
 }
 
-export function SettingsDialog({ open, onClose, providers, models, policies, session, refresh, error, setError,
+export function SettingsDialog({ open, onClose, initialTab, providers, models, policies, session, refresh, error, setError,
   onSessionUpdated, projectId }: {
   open: boolean;
   onClose: () => void;
+  /** Section to land on when the dialog opens; defaults to the first tab
+   *  (dsh: the trigger reopens on the first nav row; onboarding targets a
+   *  specific section explicitly). */
+  initialTab?: SettingsTab;
   providers: ProviderProfile[];
   models: ModelProfile[];
   policies: PolicyProfile[];
@@ -100,13 +95,54 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
   onSessionUpdated: (session: Session) => void;
   projectId: string | null;
 }) {
-  const [activeTab, setActiveTab] = useState<SettingsTab>("models");
+  if (!open) return null;
+  return (
+    <div
+      className="settings-dialog-backdrop"
+      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
+    >
+      {/* Keyed by the opening section: the body remounts on every open, so
+          the active tab resets exactly like dsh (close clears the section;
+          the trigger reopens on the first nav row, onboarding re-targets). */}
+      <SettingsBody
+        key={initialTab ?? "general"}
+        initialTab={initialTab}
+        onClose={onClose}
+        providers={providers}
+        models={models}
+        policies={policies}
+        session={session}
+        refresh={refresh}
+        error={error}
+        setError={setError}
+        onSessionUpdated={onSessionUpdated}
+        projectId={projectId}
+      />
+    </div>
+  );
+}
+
+function SettingsBody({ onClose, initialTab, providers, models, policies, session, refresh, error, setError,
+  onSessionUpdated, projectId }: {
+  onClose: () => void;
+  initialTab?: SettingsTab;
+  providers: ProviderProfile[];
+  models: ModelProfile[];
+  policies: PolicyProfile[];
+  session?: Session;
+  refresh: () => Promise<void>;
+  error: string | null;
+  setError: (value: string | null) => void;
+  onSessionUpdated: (session: Session) => void;
+  projectId: string | null;
+}) {
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab ?? "general");
   const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    if (!open) return;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const focusDialog = window.requestAnimationFrame(() => dialogRef.current?.querySelector<HTMLElement>(".settings-dialog-tab")?.focus());
+    const focusDialog = window.requestAnimationFrame(() => closeRef.current?.focus());
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -134,9 +170,7 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
       window.removeEventListener("keydown", onKeyDown);
       previousFocus?.focus();
     };
-  }, [onClose, open]);
-
-  if (!open) return null;
+  }, [onClose]);
 
   const tabs: TabItem[] = [
     { id: "general", label: "General", description: "Appearance and theme", icon: tabIcon("general") },
@@ -148,66 +182,19 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
     { id: "skills", label: "Skills", description: "Skill catalog, marketplace, and updates", icon: tabIcon("skills") },
   ];
 
-  const activeItem = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
-
   return (
     <div
-      className="settings-dialog-backdrop"
-      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
+      ref={dialogRef}
+      className="settings-dialog-shell"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settings-dialog-title"
     >
-      <div
-        ref={dialogRef}
-        className="settings-dialog-shell"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="settings-dialog-title"
-      >
-        {/* Header */}
-        <div className="settings-dialog-header">
-          <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
-            <span style={{ color: "var(--text-muted)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <SettingsIcon />
-            </span>
-            <div style={{ minWidth: 0 }}>
-              <div id="settings-dialog-title" style={{ fontSize: 15, fontWeight: 700, color: "var(--text)", lineHeight: 1.25 }}>Settings</div>
-              <div style={{ fontSize: 11, color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {activeItem.label} · {activeItem.description}
-              </div>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            title="Close settings"
-            aria-label="Close settings"
-            style={{
-              width: 30, height: 30,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              border: "none", borderRadius: 6,
-              background: "transparent", color: "var(--text-muted)", cursor: "pointer",
-              fontSize: 20, lineHeight: 1,
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}
-          >
-            <X size={17} aria-hidden="true" />
-          </button>
-        </div>
-
-        {/* Error bar */}
-        {error && (
-          <div className="error-bar" role="alert">
-            <span>{error}</span>
-            <button type="button" onClick={() => setError(null)} aria-label="Dismiss error">
-              <X size={15} aria-hidden="true" />
-            </button>
-          </div>
-        )}
-
         {/* Body */}
         <div className="settings-dialog-body">
-          {/* Tabs */}
+          {/* Tabs (dsh nav rail: section title on top, cells below) */}
           <div className="settings-dialog-tabs" role="tablist" aria-label="Settings sections">
+            <div id="settings-dialog-title" className="settings-dialog-navtitle">Settings</div>
             {tabs.map((tab, index) => {
               const active = activeTab === tab.id;
               return (
@@ -242,13 +229,28 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
             })}
           </div>
 
-          {/* Panel content */}
-          <div
-            className="settings-dialog-panel"
-            role="tabpanel"
-            id={`settings-panel-${activeTab}`}
-            aria-labelledby={`settings-tab-${activeTab}`}
-          >
+          {/* Panel content (dsh: header row with close, options below) */}
+          <div className="settings-dialog-content">
+            <div className="settings-dialog-header">
+              <div className="settings-dialog-actions" />
+              <button ref={closeRef} type="button" className="settings-dialog-close" title="Close settings" aria-label="Close settings" onClick={onClose}>
+                <X size={14} aria-hidden="true" />
+              </button>
+            </div>
+            {error && (
+              <div className="error-bar" role="alert">
+                <span>{error}</span>
+                <button type="button" onClick={() => setError(null)} aria-label="Dismiss error">
+                  <X size={15} aria-hidden="true" />
+                </button>
+              </div>
+            )}
+            <div
+              className="settings-dialog-panel"
+              role="tabpanel"
+              id={`settings-panel-${activeTab}`}
+              aria-labelledby={`settings-tab-${activeTab}`}
+            >
             {activeTab === "general" && (
               <div style={{ height: "100%", overflowY: "auto" }}>
                 <GeneralSettings />
@@ -288,9 +290,9 @@ export function SettingsDialog({ open, onClose, providers, models, policies, ses
                 <SkillsSettings projectId={projectId} setError={setError} />
               </div>
             )}
+            </div>
           </div>
         </div>
       </div>
-    </div>
   );
 }

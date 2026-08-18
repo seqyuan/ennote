@@ -4,8 +4,8 @@ import { useState } from "react";
 import { useT } from "@/components/LocaleProvider";
 import { SecretTextInput } from "@/components/settings/SecretTextInput";
 import { FetchModelsButton } from "@/components/settings/models/FetchModelsButton";
-import { apiFetch } from "@/lib/worker-api.client";
 import { apiKeyFailure } from "@/lib/api-key";
+import { createProviderWithModels } from "@/lib/provider-create";
 import { validateModels, type ModelDraft } from "@/lib/model-draft";
 import { ModelListEditor } from "@/components/settings/models/ModelListEditor";
 
@@ -70,25 +70,14 @@ export function CustomProviderCard({ taken, onClose, refresh, setError, onSaved 
     setBusy(true);
     setFailure(undefined);
     try {
-      await apiFetch("/v1/provider-profiles", { method: "POST", body: JSON.stringify({
+      await createProviderWithModels({
         key: route,
         name: displayName.trim() || route,
         providerType: protocol,
         baseUrl: baseURL.trim(),
         apiKey: keyValue || undefined,
-      }) });
-      for (const model of models) {
-        await apiFetch("/v1/model-profiles", { method: "POST", body: JSON.stringify({
-          providerId: route,
-          modelName: model.id,
-          ...(typeof model.name === "string" && model.name.length > 0 ? { displayName: model.name } : {}),
-          // A hand-declared route has no catalog fallback, so a blank capacity
-          // falls back to common defaults rather than failing the write.
-          contextWindow: typeof model.contextWindow === "number" ? model.contextWindow : 131072,
-          maxOutputTokens: typeof model.maxTokens === "number" ? model.maxTokens : 16384,
-          supportsToolUse: true,
-        }) });
-      }
+        models,
+      });
       setError(null);
       onSaved?.(displayName.trim() || route);
       await refresh();

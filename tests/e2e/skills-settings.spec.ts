@@ -1,4 +1,6 @@
 import { expect, test, type Route } from "@playwright/test";
+// A configured provider suppresses the first-run Models settings auto-open.
+const settingsProvider = { id: "settings-provider", name: "Provider", providerType: "openai-compatible", baseUrl: "https://example.test", credentialConfigured: true, status: "active", createdAt: "2026-07-30T00:00:00Z", updatedAt: "2026-07-30T00:00:00Z" };
 
 
 const installed = [
@@ -33,7 +35,8 @@ test("skills tab lists installed and catalog skills with install annotations", a
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
     if (path === "/v1/projects") return fulfill(route, []);
-    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
+    if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
+    if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
     if (path === "/v1/roles") return fulfill(route, { items: [], nextCursor: "" });
     if (path === "/v1/skills") return fulfill(route, { skills: [...installed, ...local], diagnostics: [], projectResourcesLoaded: false });
     return route.abort();
@@ -60,7 +63,8 @@ test("marketplace search installs a skill", async ({ page }) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
     if (path === "/v1/projects") return fulfill(route, []);
-    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
+    if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
+    if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
     if (path === "/v1/roles") return fulfill(route, { items: [], nextCursor: "" });
     if (path === "/v1/skills") return fulfill(route, { skills: [], diagnostics: [], projectResourcesLoaded: false });
     if (path === "/v1/skills/search") return fulfill(route, { results: [{ package: "acme/skills@plotly", installs: "12.5K installs", url: "https://skills.sh/acme/skills/plotly" }] });
@@ -94,7 +98,8 @@ test("toggle, check update, and remove a skill", async ({ page }) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
     if (path === "/v1/projects") return fulfill(route, []);
-    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
+    if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
+    if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
     if (path === "/v1/roles") return fulfill(route, { items: [], nextCursor: "" });
     if (path === "/v1/skills") return fulfill(route, { skills: [installed[1]], diagnostics: [], projectResourcesLoaded: false });
     if (path.startsWith("/v1/skills/disabled/")) {
@@ -148,7 +153,8 @@ test("skill roots: preset add, toggle, and remove via the settings surface", asy
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
     if (path === "/v1/projects") return fulfill(route, []);
-    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
+    if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
+    if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
     if (path === "/v1/roles") return fulfill(route, { items: [], nextCursor: "" });
     if (path === "/v1/skills") return fulfill(route, { skills: [], diagnostics: [], projectResourcesLoaded: false });
     if (path === "/v1/skills/roots") {

@@ -1,6 +1,7 @@
 {
   "providers": {
     "deepseek": {
+      "name": "DeepSeek",
       "api": "openai-completions",
       "baseUrl": "https://api.deepseek.com",
       "models": {
@@ -40,6 +41,7 @@
       }
     },
     "openai": {
+      "name": "OpenAI",
       "api": "openai-completions",
       "baseUrl": "https://api.openai.com/v1",
       "models": {
@@ -90,6 +92,7 @@
       }
     },
     "anthropic": {
+      "name": "Anthropic",
       "api": "anthropic-messages",
       "baseUrl": "https://api.anthropic.com",
       "models": {

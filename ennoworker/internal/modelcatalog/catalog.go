@@ -40,6 +40,7 @@ type ModelDefaults struct {
 }
 
 type providerEntry struct {
+	Name    string                   `json:"name"`
 	API     string                   `json:"api"`
 	BaseURL string                   `json:"baseUrl"`
 	Models  map[string]ModelDefaults `json:"models"`
@@ -89,6 +90,9 @@ func validate(doc document) error {
 	for key, provider := range doc.Providers {
 		if !providerKeyPattern.MatchString(key) {
 			return fmt.Errorf("provider key %q invalid", key)
+		}
+		if strings.TrimSpace(provider.Name) == "" {
+			return fmt.Errorf("provider %q name is required", key)
 		}
 		if strings.TrimSpace(provider.API) == "" {
 			return fmt.Errorf("provider %q api is required", key)
@@ -182,6 +186,17 @@ func HasProvider(providerKey string) bool {
 	return ok
 }
 
+// ProviderKeys returns the directory provider keys, sorted. This is the
+// dormant-provider list the Models tab offers for adoption.
+func ProviderKeys() []string {
+	keys := make([]string, 0, len(catalog.Providers))
+	for key := range catalog.Providers {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // ProviderModelIDs returns the catalog's model ids for a provider, sorted. An
 // unknown provider yields nil. This is the "inherited" model list a provider
 // with no explicitly declared models serves.
@@ -196,6 +211,15 @@ func ProviderModelIDs(providerKey string) []string {
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+// ProviderDefaultName returns the directory display name for a provider.
+func ProviderDefaultName(providerKey string) (string, bool) {
+	provider, ok := catalog.Providers[providerKey]
+	if !ok {
+		return "", false
+	}
+	return provider.Name, true
 }
 
 // ProviderDefaultAPI returns the default wire protocol for a provider.

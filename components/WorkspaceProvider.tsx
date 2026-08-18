@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, createContext, useContext, type ReactNode } from "react";
 import type { components } from "@/lib/worker-api.gen";
 import { apiFetch } from "@/lib/worker-api.client";
+import type { SettingsTab } from "@/components/settings/types";
 
 type Project = components["schemas"]["Project"];
 type ProjectWorkspace = components["schemas"]["ProjectWorkspace"];
@@ -19,7 +20,10 @@ interface WorkspaceValue {
   cancelCreateProject: () => void;
   createProjectBusy: boolean;
   settingsOpen: boolean;
-  openSettings: () => void;
+  /** Section the opener asked for (dsh onboarding targets a section);
+   *  undefined means the dialog opens on its first tab. */
+  settingsTab: SettingsTab | undefined;
+  openSettings: (tab?: SettingsTab) => void;
   closeSettings: () => void;
   pinnedProjectIds: string[];
   togglePinProject: (projectId: string) => void;
@@ -48,6 +52,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>(undefined);
   const [creatingProject, setCreatingProject] = useState(false);
   const [creatingProjectBusy, setCreatingProjectBusy] = useState(false);
   const [workspaceMap, setWorkspaceMap] = useState<Map<string, ProjectWorkspace>>(new Map());
@@ -70,8 +75,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setSelectedProject(projectId);
   }, []);
 
-  const openSettings = useCallback(() => setSettingsOpen(true), []);
-  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+  const openSettings = useCallback((tab?: SettingsTab) => {
+    setSettingsTab(tab);
+    setSettingsOpen(true);
+  }, []);
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(false);
+    setSettingsTab(undefined);
+  }, []);
 
   const openCreateProject = useCallback(() => {
     setCreatingProjectBusy(false);
@@ -139,7 +150,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     projects, selectedProject, switchProject,
     createProjectOpen: creatingProject, openCreateProject, confirmCreateProject, cancelCreateProject,
     createProjectBusy: creatingProjectBusy,
-    settingsOpen, openSettings, closeSettings,
+    settingsOpen, settingsTab, openSettings, closeSettings,
     pinnedProjectIds, togglePinProject, renameProject, deleteProject, workspaceFor,
   };
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

@@ -25,6 +25,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphbuilder"
+	"github.com/seqyuan/ennote/ennoworker/internal/modelcatalog"
 	"github.com/seqyuan/ennote/ennoworker/internal/prompts"
 	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
@@ -337,17 +338,63 @@ func (s *Server) drainSessionProjection(ctx context.Context, sessionID string) {
 	}
 }
 
+// directoryProviderType maps a catalog wire protocol to the profile provider
+// type the Models tab's editor offers.
+func directoryProviderType(api string) domain.ProviderType {
+	switch api {
+	case "anthropic-messages":
+		return domain.ProviderAnthropic
+	default:
+		return domain.ProviderOpenAICompatible
+	}
+}
+
+// listProviderProfiles returns the configured provider profiles joined with
+// the built-in provider directory: every catalog provider that has no profile
+// yet renders as an unconfigured directory row (dsh's dormant provider), so
+// the Models tab can offer it for adoption without the user declaring it from
+// scratch. A stored profile always overrides its directory entry.
 func (s *Server) listProviderProfiles(w http.ResponseWriter, r *http.Request) {
 	profiles, err := s.Providers.List(r.Context())
 	if err != nil {
 		writeInternal(w, r, err)
 		return
 	}
+	configured := make(map[string]bool, len(profiles))
 	for index := range profiles {
+		configured[profiles[index].ID] = true
 		profiles[index].CredentialConfigured = profiles[index].CredentialConfigured || profiles[index].APIKey != ""
 		profiles[index].APIKey = ""
 	}
+	for _, key := range modelcatalog.ProviderKeys() {
+		if configured[key] {
+			continue
+		}
+		profiles = append(profiles, directoryProfile(key))
+	}
 	writeData(w, http.StatusOK, profiles)
+}
+
+// directoryProfile synthesizes the provider row the Models tab shows for a
+// catalog provider that has no stored profile yet: the catalog's display
+// name, protocol, and default endpoint, with no credential and no custom
+// model list (which is what makes the catalog's models serve as defaults).
+func directoryProfile(key string) domain.ProviderProfile {
+	name, _ := modelcatalog.ProviderDefaultName(key)
+	api, _ := modelcatalog.ProviderDefaultAPI(key)
+	baseURL, _ := modelcatalog.ProviderDefaultBaseURL(key)
+	return domain.ProviderProfile{
+		ID:                   key,
+		Name:                 name,
+		ProviderType:         directoryProviderType(api),
+		API:                  api,
+		BaseURL:              baseURL,
+		CredentialConfigured: false,
+		Status:               "active",
+		Custom:               false,
+		Directory:            true,
+		ModelsCustomized:     false,
+	}
 }
 
 func (s *Server) createProviderProfile(w http.ResponseWriter, r *http.Request) {
@@ -361,6 +408,14 @@ func (s *Server) createProviderProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	if !decodeJSON(w, r, &input) {
 		return
+	}
+	// A blank base URL on a catalog provider adopts the directory default
+	// (dsh: the namespace default), so the UI can create from the directory
+	// without re-typing the endpoint.
+	if strings.TrimSpace(input.BaseURL) == "" && modelcatalog.HasProvider(strings.TrimSpace(input.Key)) {
+		if defaultURL, ok := modelcatalog.ProviderDefaultBaseURL(strings.TrimSpace(input.Key)); ok {
+			input.BaseURL = defaultURL
+		}
 	}
 	profile, err := s.Providers.Create(r.Context(), store.CreateProviderInput{
 		Key: input.Key, Name: input.Name, ProviderType: input.ProviderType, BaseURL: input.BaseURL,

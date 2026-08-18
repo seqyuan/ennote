@@ -3380,6 +3380,10 @@ components:
         status: { type: string }
         custom: { type: boolean }
         modelsCustomized: { type: boolean }
+        # True only for dormant built-in directory rows (no stored profile
+        # yet); stored profiles never set it. Drives the Models tab's adopt
+        # and first-run setup-card postures, mirroring dsh's provider rows.
+        directory: { type: boolean }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     DiscoveredModel:

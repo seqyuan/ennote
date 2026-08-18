@@ -1,4 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+// A configured provider suppresses the first-run Models settings auto-open.
+const settingsProvider = { id: "settings-provider", name: "Provider", providerType: "openai-compatible", baseUrl: "https://example.test", credentialConfigured: true, status: "active", createdAt: "2026-07-30T00:00:00Z", updatedAt: "2026-07-30T00:00:00Z" };
 
 const now = "2026-08-05T00:00:00Z";
 const project = { id: "mcp-project", name: "RNA screen", description: "", status: "active", createdAt: now, updatedAt: now };
@@ -30,7 +32,8 @@ async function mockMCP(page: Page) {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
     if (path === "/v1/projects") return fulfill(route, [project]);
-    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
+    if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
+    if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, []);
     if (path === "/v1/mcp/server-profiles") return fulfill(route, [profile]);
     if (path === `/v1/projects/${project.id}/mcp/candidates`) return fulfill(route, [candidate]);
@@ -123,7 +126,8 @@ test("MCP settings shows Bound + Update available for a stale project-file candi
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
     if (path === "/v1/projects") return fulfill(route, [project]);
-    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
+    if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
+    if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, []);
     if (path === "/v1/mcp/server-profiles") return fulfill(route, [profile]);
     if (path === `/v1/projects/${project.id}/mcp/candidates`) return fulfill(route, [staleCandidate]);
@@ -178,7 +182,8 @@ test("update-available candidate exposes a read-only profile diff", async ({ pag
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
     if (path === "/v1/projects") return fulfill(route, [project]);
-    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
+    if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
+    if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, []);
     if (path === "/v1/mcp/server-profiles") return fulfill(route, [profile]);
     if (path === `/v1/mcp/server-profiles/${profile.id}/versions`) return fulfill(route, [version]);
@@ -205,7 +210,8 @@ test("unbound managed MCP profiles can be archived", async ({ page }) => {
   await page.route("**/api/worker/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
     if (path === "/v1/projects") return fulfill(route, [project]);
-    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
+    if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
+    if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, []);
     if (path === "/v1/mcp/server-profiles") return fulfill(route, archived ? [] : [profile]);
     if (path === `/v1/mcp/server-profiles/${profile.id}/versions`) return fulfill(route, [version]);

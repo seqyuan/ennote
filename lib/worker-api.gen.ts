@@ -2199,6 +2199,7 @@ export interface components {
             status: string;
             custom?: boolean;
             modelsCustomized?: boolean;
+            directory?: boolean;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */

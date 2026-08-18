@@ -1,7 +1,5 @@
 import { expect, test, type Route } from "@playwright/test";
 
-const now = "2026-08-08T00:00:00Z";
-
 function fulfill(route: Route, data: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ data }) });
 }
@@ -85,7 +83,7 @@ test("Models tab: add custom provider, edit + fetch models, delete", async ({ pa
   await page.getByLabel("Model ID 1").fill("gpt-4o");
   await page.getByRole("button", { name: "Create provider" }).click();
   // The provider row renders (name + Custom tag), so assert its actions.
-  await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit openai-main" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Delete openai-main" })).toBeVisible();
   expect(createdProviders[0]).toEqual({
     key: "openai-main",
@@ -97,7 +95,7 @@ test("Models tab: add custom provider, edit + fetch models, delete", async ({ pa
   expect(createdModels).toHaveLength(1);
 
   // Edit: open the custom-settings fold, fetch the catalog into the draft, apply.
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit openai-main" }).click();
   await page.getByText("Customized settings").click();
   await page.getByRole("button", { name: "Fetch available models" }).click();
   await expect(page.getByRole("dialog", { name: "Choose models to add" })).toBeVisible();
@@ -108,9 +106,9 @@ test("Models tab: add custom provider, edit + fetch models, delete", async ({ pa
   // gpt-4o-mini was adopted as a new model; gpt-4o unchanged.
   expect(createdModels.some(m => m.modelName === "gpt-4o-mini")).toBe(true);
 
-  // Delete the provider through the confirmation modal.
+  // Delete the provider through the confirmation modal; the row disappears.
   await page.getByLabel("Delete openai-main").click();
   await expect(page.getByRole("dialog", { name: "Delete openai-main?" })).toBeVisible();
   await page.getByRole("dialog", { name: "Delete openai-main?" }).getByRole("button", { name: "Delete openai-main" }).click();
-  await expect(page.getByText("No providers yet")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit openai-main" })).toHaveCount(0);
 });

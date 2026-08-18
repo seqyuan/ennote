@@ -7,6 +7,7 @@ import { FetchModelsButton } from "@/components/settings/models/FetchModelsButto
 import { ModelListEditor } from "@/components/settings/models/ModelListEditor";
 import { apiFetch } from "@/lib/worker-api.client";
 import { apiKeyFailure } from "@/lib/api-key";
+import { createProviderWithModels } from "@/lib/provider-create";
 import { validateModels, type ModelDraft } from "@/lib/model-draft";
 import { planModelSync, type BeforeModel } from "@/lib/model-sync";
 import type { ModelProfile, ProviderProfile } from "@/components/settings/types";
@@ -45,17 +46,21 @@ async function applySync(plan: ReturnType<typeof planModelSync>): Promise<void> 
 }
 
 /**
- * The editor card for one existing provider: a single write-only API key field
- * (blank keeps the stored key), a collapsed 自定义设置 fold with the curated
- * per-family extras (base URL, and the display name of a hand-declared route),
- * and the model list editor with a "Fetch available models" interrogation that
- * adopts the provider's catalog into the draft. Apply writes provider fields
- * through PUT and reconciles the model list through the model-profiles
- * endpoints.
+ * The editor card for one provider. In update mode it edits an existing
+ * profile: a single write-only API key field (blank keeps the stored key), a
+ * collapsed 自定义设置 fold with the curated per-family extras (base URL, and
+ * the display name of a hand-declared route), and the model list editor with
+ * a "Fetch available models" interrogation that adopts the provider's catalog
+ * into the draft. In create mode (directory setup/adopt) the card writes the
+ * profile through POST and leaves a blank model list to the built-in catalog.
  */
-export function ProviderEditor({ provider, models, onClose, refresh, setError, onSaved }: {
+export function ProviderEditor({ provider, models, creating, hideTitle, onClose, refresh, setError, onSaved }: {
   provider: ProviderProfile;
   models: readonly ModelProfile[];
+  /** Create the profile instead of updating it (directory setup/adopt card). */
+  creating?: boolean;
+  /** Hide the title row (the adopt card renders its own provider select). */
+  hideTitle?: boolean;
   onClose: (changed: boolean) => void;
   refresh: () => Promise<void>;
   setError: (value: string | null) => void;
@@ -65,7 +70,7 @@ export function ProviderEditor({ provider, models, onClose, refresh, setError, o
   const [keyDraft, setKeyDraft] = useState("");
   const [baseURL, setBaseURL] = useState(provider.baseUrl ?? "");
   const [displayName, setDisplayName] = useState(provider.name ?? "");
-  const [drafts, setDrafts] = useState<readonly ModelDraft[]>(() => toDrafts(models));
+  const [drafts, setDrafts] = useState<readonly ModelDraft[]>(() => creating ? [] : toDrafts(models));
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | undefined>(undefined);
 
@@ -84,19 +89,30 @@ export function ProviderEditor({ provider, models, onClose, refresh, setError, o
     setBusy(true);
     setFailure(undefined);
     try {
-      await apiFetch(`/v1/provider-profiles/${encodeURIComponent(provider.id)}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          name: displayName.trim() || undefined,
-          baseUrl: baseURL.trim() || undefined,
-          // Blank keeps the stored key; a typed key replaces it.
+      if (creating) {
+        await createProviderWithModels({
+          key: provider.id,
+          name: displayName.trim() || provider.name,
+          providerType: provider.providerType,
+          baseUrl: baseURL.trim() || provider.baseUrl,
           apiKey: keyValue || undefined,
-        }),
-      });
-      const plan = planModelSync(provider.id, before, drafts);
-      await applySync(plan);
+          models: drafts,
+        });
+      } else {
+        await apiFetch(`/v1/provider-profiles/${encodeURIComponent(provider.id)}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            name: displayName.trim() || undefined,
+            baseUrl: baseURL.trim() || undefined,
+            // Blank keeps the stored key; a typed key replaces it.
+            apiKey: keyValue || undefined,
+          }),
+        });
+        const plan = planModelSync(provider.id, before, drafts);
+        await applySync(plan);
+      }
       setError(null);
-      onSaved?.(displayName.trim() || provider.id);
+      onSaved?.(displayName.trim() || provider.name);
       await refresh();
       onClose(true);
     } catch (reason) {
@@ -110,10 +126,12 @@ export function ProviderEditor({ provider, models, onClose, refresh, setError, o
 
   return (
     <div className="settings-row provider-settings-row" style={{ flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <strong style={{ fontSize: 14, fontWeight: 500 }}>{provider.name}</strong>
-        {provider.name !== provider.id && <span style={{ fontSize: 11, color: "var(--stg-text-tertiary)" }}>{provider.id}</span>}
-      </div>
+      {!hideTitle && (
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <strong style={{ fontSize: 14, fontWeight: 500 }}>{provider.name}</strong>
+          {provider.name !== provider.id && <span style={{ fontSize: 11, color: "var(--stg-text-tertiary)" }}>{provider.id}</span>}
+        </div>
+      )}
       <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--stg-text-secondary)" }}>
         {t("settings.models.keyInput")}
         <SecretTextInput value={keyDraft} onChange={setKeyDraft}
@@ -142,6 +160,9 @@ export function ProviderEditor({ provider, models, onClose, refresh, setError, o
           </label>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 12, fontWeight: 500, color: "var(--stg-text-primary)" }}>{t("settings.models.models")}</span>
+            {creating && drafts.length === 0 && (
+              <span style={{ fontSize: 11, color: "var(--stg-text-tertiary)" }}>{t("settings.models.modelsInherited")}</span>
+            )}
             <FetchModelsButton probe={{ baseUrl: baseURL.trim(), apiKey: keyValue }}
               existingIds={drafts.map(draftId)}
               onAdopt={(selected) => {
@@ -161,7 +182,9 @@ export function ProviderEditor({ provider, models, onClose, refresh, setError, o
         <button type="button" disabled={submitDisabled}
           style={{ minHeight: 36, padding: "0 14px", border: "none", borderRadius: 18, background: "var(--stg-brand)", color: "#fff", fontWeight: 500, cursor: "pointer", opacity: submitDisabled ? 0.5 : 1 }}
           onClick={() => { void apply(); }}>
-          {busy ? t("settings.models.applying") : t("settings.models.apply")}
+          {busy
+            ? (creating ? t("settings.models.creating") : t("settings.models.applying"))
+            : (creating ? t("settings.models.create") : t("settings.models.apply"))}
         </button>
       </div>
     </div>

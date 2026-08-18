@@ -1,4 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+// A configured provider suppresses the first-run Models settings auto-open.
+const settingsProvider = { id: "settings-provider", name: "Provider", providerType: "openai-compatible", baseUrl: "https://example.test", credentialConfigured: true, status: "active", createdAt: "2026-07-30T00:00:00Z", updatedAt: "2026-07-30T00:00:00Z" };
 
 const project = { id: "phase2-project", name: "Cell atlas", description: "", status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" };
 const activeSessions = [
@@ -20,7 +22,8 @@ async function mockPhase2(page: Page) {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
     if (path === "/v1/projects") return fulfill(route, [project]);
-    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles") return fulfill(route, []);
+    if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
+    if (path === "/v1/model-profiles") return fulfill(route, []);
     if (path === "/v1/policy-profiles") return fulfill(route, policies);
     if (path === `/v1/projects/${project.id}/sessions`) {
       const status = url.searchParams.get("status") ?? "active";
@@ -83,15 +86,19 @@ test("Settings tabs use arrow navigation, retain Chat, and restore focus", async
   const settingsButton = page.getByRole("button", { name: "Settings", exact: true });
   await settingsButton.click();
   await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+  // The trigger opens on the first nav row (General); onboarding targets a
+  // section explicitly, so select Models for the focus and arrow checks.
+  const models = page.getByRole("tab", { name: "Models" });
+  await models.click();
+  await expect(models).toHaveAttribute("aria-selected", "true");
   const closeSettings = page.getByRole("button", { name: "Close settings" });
   await closeSettings.focus();
+  // Shift+Tab wraps to the previous focusable in DOM order: the last nav
+  // cell (the rail precedes the content column, dsh layout).
   await closeSettings.press("Shift+Tab");
-  await expect(page.getByRole("button", { name: "Add provider" })).toBeFocused();
-  await page.getByRole("button", { name: "Add provider" }).press("Tab");
+  await expect(page.getByRole("tab", { name: "Skills" })).toBeFocused();
+  await page.getByRole("tab", { name: "Skills" }).press("Tab");
   await expect(closeSettings).toBeFocused();
-  const models = page.getByRole("tab", { name: "Models" });
-  await models.focus();
-  await expect(models).toHaveAttribute("aria-selected", "true");
   await models.press("ArrowRight");
   await expect(page.getByRole("tab", { name: "Policies" })).toHaveAttribute("aria-selected", "true");
   await page.getByRole("tab", { name: "Policies" }).press("End");

@@ -107,6 +107,9 @@ type ProviderProfile struct {
 	// Custom is true when the built-in catalog does not describe this provider
 	// key (a hand-declared route), which is what drives the Models tab's Custom tag.
 	Custom bool `json:"custom"`
+	// Directory is true only for a dormant built-in directory row that has no
+	// stored profile yet; stored profiles never set it.
+	Directory bool `json:"directory,omitempty"`
 	// ModelsCustomized is true when the provider declares its own model list;
 	// false means an empty list, which serves the built-in catalog for known keys.
 	ModelsCustomized bool      `json:"modelsCustomized"`

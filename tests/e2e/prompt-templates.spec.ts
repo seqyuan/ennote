@@ -1,4 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+// A configured provider suppresses the first-run Models settings auto-open.
+const settingsProvider = { id: "settings-provider", name: "Provider", providerType: "openai-compatible", baseUrl: "https://example.test", credentialConfigured: true, status: "active", createdAt: "2026-07-30T00:00:00Z", updatedAt: "2026-07-30T00:00:00Z" };
 
 // ——— fixtures ———
 
@@ -31,7 +33,8 @@ async function mockBackend(page: Page) {
     // Static resources.
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/policy-profiles") return fulfill(route, policies);
-    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles") return fulfill(route, []);
+    if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
+    if (path === "/v1/model-profiles") return fulfill(route, []);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
     if (path === `/v1/sessions/${session.id}`) return fulfill(route, session);
     if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, null);

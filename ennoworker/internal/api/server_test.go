@@ -470,6 +470,59 @@ func TestProfileManagementAndSessionDefaultModel(t *testing.T) {
 	assert.Nil(t, session.DefaultModelProfileID)
 }
 
+func TestProviderDirectoryRowsJoinProfiles(t *testing.T) {
+	_, handler := setupServer(t, nil)
+
+	// No profiles: the list is exactly the built-in directory, each row
+	// dormant (no credential, not custom, no stored profile).
+	listed := request(t, handler, http.MethodGet, "/v1/provider-profiles", nil, true)
+	require.Equal(t, http.StatusOK, listed.Code)
+	var directory []domain.ProviderProfile
+	decodeData(t, listed, &directory)
+	require.Len(t, directory, 3)
+	byKey := map[string]domain.ProviderProfile{}
+	for _, row := range directory {
+		byKey[row.ID] = row
+	}
+	for _, key := range []string{"deepseek", "openai", "anthropic"} {
+		row, ok := byKey[key]
+		require.True(t, ok, "directory row %q missing", key)
+		assert.True(t, row.Directory)
+		assert.False(t, row.Custom)
+		assert.False(t, row.CredentialConfigured)
+		assert.NotEmpty(t, row.BaseURL, "directory row %q needs a default endpoint", key)
+		assert.NotEmpty(t, row.Name, "directory row %q needs a display name", key)
+	}
+
+	// Creating a profile for a directory key with a blank base URL adopts the
+	// directory default endpoint (dsh: the namespace default).
+	created := request(t, handler, http.MethodPost, "/v1/provider-profiles", map[string]any{
+		"key": "deepseek", "name": "DeepSeek", "providerType": "openai-compatible",
+		"apiKey": "sk-deepseek-1",
+	}, true)
+	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
+	var provider domain.ProviderProfile
+	decodeData(t, created, &provider)
+	assert.Equal(t, "https://api.deepseek.com", provider.BaseURL)
+	assert.False(t, provider.Custom, "a catalog key is never a custom route")
+	assert.False(t, provider.Directory, "a stored profile overrides its directory row")
+
+	// The stored profile replaces its directory row; the others stay dormant.
+	listed = request(t, handler, http.MethodGet, "/v1/provider-profiles", nil, true)
+	require.Equal(t, http.StatusOK, listed.Code)
+	var joined []domain.ProviderProfile
+	decodeData(t, listed, &joined)
+	require.Len(t, joined, 3)
+	byKey = map[string]domain.ProviderProfile{}
+	for _, row := range joined {
+		byKey[row.ID] = row
+	}
+	assert.False(t, byKey["deepseek"].Directory)
+	assert.True(t, byKey["deepseek"].CredentialConfigured)
+	assert.True(t, byKey["openai"].Directory)
+	assert.True(t, byKey["anthropic"].Directory)
+}
+
 func TestPolicyProfileAPIUsesStrictVersionedConfiguration(t *testing.T) {
 	_, handler := setupServer(t, nil)
 	created := request(t, handler, http.MethodPost, "/v1/policy-profiles", map[string]any{

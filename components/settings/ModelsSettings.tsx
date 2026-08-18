@@ -1,6 +1,5 @@
 "use client";
 
-import { Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useT } from "@/components/LocaleProvider";
 import { CredentialDot } from "@/components/settings/models/CredentialDot";
@@ -10,11 +9,13 @@ import { ProviderEditor } from "@/components/settings/models/ProviderEditor";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { ModelProfile, ProviderProfile } from "@/components/settings/types";
 
-/** Models settings: one row per configured provider (name, custom tag, API-key
- *  dot, Edit/Delete) and, when editing, the provider editor card (single key
- *  field + custom-settings fold + model list). Matches the dsh Models section:
- *  model management and endpoint interrogation live inside the editor, not on
- *  the collapsed row. */
+/** One provider row joined from the profile list and the built-in directory:
+ *  directory rows carry `directory` (dormant — no stored profile yet) and are
+ *  what the add flow adopts; stored profiles always override their directory
+ *  entry. Mirrors dsh's Models section: rows expose only confirmed API-key
+ *  state through accessible dots, model management and endpoint interrogation
+ *  live inside the editor, and the two ways to gain a provider (adopt one the
+ *  directory ships, or declare one it does not) are equal siblings. */
 export function ModelsSettings({ providers, models, refresh, setError }: {
   providers: ProviderProfile[];
   models: ModelProfile[];
@@ -22,91 +23,214 @@ export function ModelsSettings({ providers, models, refresh, setError }: {
   setError: (value: string | null) => void;
 }) {
   const t = useT();
-  const [customOpen, setCustomOpen] = useState(false);
-  const [savedName, setSavedName] = useState<string | null>(null);
-
-  return <section className="settings-tab-section" aria-labelledby="settings-models-heading">
-    <header><h2 id="settings-models-heading">{t("settings.models.title")}</h2>
-      <p>{t("settings.models.intro")}</p></header>
-    {savedName && (
-      <p role="status" aria-live="polite" style={{ margin: 0, fontSize: 12, lineHeight: "18px", color: "var(--stg-text-tertiary)" }}>
-        {t("settings.models.savedProvider").replace("{provider}", savedName)}
-      </p>
-    )}
-    {!customOpen ? (
-      <button type="button" className="secondary-btn" style={{ marginBottom: 12 }} onClick={() => setCustomOpen(true)}>
-        {t("settings.models.customAdd")}
-      </button>
-    ) : (
-      <CustomProviderCard taken={providers.map(provider => provider.id)}
-        onClose={() => setCustomOpen(false)} refresh={refresh} setError={setError} onSaved={setSavedName} />
-    )}
-    <div className="settings-list">
-      {providers.map(provider => (
-        <ProviderCard key={provider.id} provider={provider}
-          models={models.filter(model => model.providerId === provider.id)}
-          refresh={refresh} setError={setError} onSaved={setSavedName} />
-      ))}
-      {providers.length === 0 && (
-        <div className="settings-empty">No providers yet — add one above to start wiring models.</div>
-      )}
-    </div>
-  </section>;
-}
-
-function ProviderCard({ provider, models, refresh, setError, onSaved }: {
-  provider: ProviderProfile;
-  models: ModelProfile[];
-  refresh: () => Promise<void>;
-  setError: (value: string | null) => void;
-  onSaved: (name: string) => void;
-}) {
-  const t = useT();
-  const [busy, setBusy] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [declaring, setDeclaring] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<ProviderProfile | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [deleteFailure, setDeleteFailure] = useState<string | undefined>(undefined);
-  const [editing, setEditing] = useState(false);
+  const [savedName, setSavedName] = useState<string | null>(null);
+  // Setup cards the user closed stay closed for the session; the provider
+  // falls back to an ordinary row and reopens through Edit.
+  const [dismissedSetup, setDismissedSetup] = useState<ReadonlySet<string>>(() => new Set());
 
-  const deleteProvider = async () => {
-    setBusy(true);
+  // One fact decides both first-run postures: whether the user already has a
+  // provider to talk to (dsh `anyUsable`).
+  const anyUsable = providers.some(provider => provider.credentialConfigured);
+  const dormant = providers.filter(provider => provider.directory);
+  const addProvider = adding
+    ? providers.find(provider => provider.directory && provider.id === editing) ?? null
+    : null;
+
+  const announceSaved = (name: string): void => { setSavedName(name); };
+
+  const closeDelete = (): void => {
+    if (deleting) return;
+    setDeleteTarget(null);
+    setDeleteFailure(undefined);
+  };
+
+  const confirmDelete = async (): Promise<void> => {
+    if (deleteTarget === null || deleting) return;
+    setDeleting(true);
     setDeleteFailure(undefined);
     try {
-      await apiFetch(`/v1/provider-profiles/${encodeURIComponent(provider.id)}`, { method: "DELETE" });
+      await apiFetch(`/v1/provider-profiles/${encodeURIComponent(deleteTarget.id)}`, { method: "DELETE" });
       setError(null);
-      setDeleteOpen(false);
+      setDeleteTarget(null);
       await refresh();
     } catch (reason) {
       setDeleteFailure((reason as Error).message);
     } finally {
-      setBusy(false);
+      setDeleting(false);
     }
   };
 
-  return <div className="settings-row provider-settings-row">
-    <div className="provider-head">
-      <div className="settings-primary" style={{ minWidth: 0 }}>
-        <strong style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          {provider.name}
-          {provider.custom ? <span style={{ fontSize: 10, fontWeight: 500, color: "var(--stg-text-tertiary)", border: "1px solid var(--stg-border-l2)", borderRadius: 4, padding: "0 5px", lineHeight: "16px" }}>{t("settings.models.customTag")}</span> : null}
-          <CredentialDot configured={provider.credentialConfigured} missing={!provider.credentialConfigured} />
-        </strong>
-      </div>
-      <div className="provider-controls">
-        <button type="button" className="secondary-btn" disabled={busy} onClick={() => setEditing(open => !open)}>
-          {t("settings.models.edit")}
-        </button>
-        <button type="button" className="secondary-btn" title={t("settings.models.removeProvider").replace("{provider}", provider.name)} aria-label={t("settings.models.removeProvider").replace("{provider}", provider.name)}
-          disabled={busy} onClick={() => setDeleteOpen(true)}>
-          <Trash2 size={13} aria-hidden="true" />
-        </button>
-      </div>
-    </div>
-    {editing && (
-      <ProviderEditor provider={provider} models={models}
-        onClose={(changed) => { setEditing(false); if (changed) onSaved(provider.name); }}
-        refresh={refresh} setError={setError} />
+  return <section className="settings-tab-section" aria-labelledby="settings-models-heading">
+    <header><h2 id="settings-models-heading">{t("settings.models.title")}</h2>
+      <p>{t("settings.models.intro")}</p></header>
+    {savedName !== null && (
+      <p className="settings-models-saved" role="status" aria-live="polite">
+        {t("settings.models.savedProvider").replace("{provider}", savedName)}
+      </p>
     )}
-    <DeleteProviderModal open={deleteOpen} providerName={provider.name} busy={busy} failure={deleteFailure}
-      onCancel={() => { if (!busy) { setDeleteOpen(false); setDeleteFailure(undefined); } }} onConfirm={deleteProvider} />
-  </div>;
+    <ul className="settings-models-rows">
+      {providers.map(provider => {
+        if (!anyUsable && provider.directory && !dismissedSetup.has(provider.id)) {
+          // First-run posture: the provider exists in the directory but has
+          // no key — the setup card IS its presence on the page, until the
+          // user closes it.
+          return (
+            <li key={provider.id} className="settings-models-setupcard">
+              <ProviderEditor
+                provider={provider}
+                models={[]}
+                creating
+                refresh={refresh}
+                setError={setError}
+                onSaved={announceSaved}
+                onClose={() => {
+                  setDismissedSetup(previous => new Set([...previous, provider.id]));
+                }}
+              />
+            </li>
+          );
+        }
+        const open = !adding && editing === provider.id;
+        return (
+          <li key={provider.id} className="settings-models-rowcard">
+            <div className="settings-models-rowhead">
+              <span className="settings-models-rowidentity">
+                <span className="settings-models-rowname">{provider.name}</span>
+                {provider.custom
+                  ? <span className="settings-models-rowtag">{t("settings.models.customTag")}</span>
+                  : null}
+                <CredentialDot configured={provider.credentialConfigured} missing={!provider.credentialConfigured} />
+              </span>
+              <span className="settings-models-rowactions">
+                <button
+                  type="button"
+                  className="settings-models-btn"
+                  aria-label={t("settings.models.editProvider").replace("{provider}", provider.name)}
+                  onClick={() => {
+                    setSavedName(null);
+                    setDeclaring(false);
+                    setAdding(false);
+                    setEditing(open ? null : provider.id);
+                  }}
+                >
+                  {t("settings.models.edit")}
+                </button>
+                {provider.directory ? null : (
+                  <button
+                    type="button"
+                    className="settings-models-btn settings-models-danger"
+                    aria-label={t("settings.models.removeProvider").replace("{provider}", provider.name)}
+                    onClick={() => {
+                      setSavedName(null);
+                      setDeleteFailure(undefined);
+                      setDeleteTarget(provider);
+                    }}
+                  >
+                    {t("settings.models.remove")}
+                  </button>
+                )}
+              </span>
+            </div>
+            {open && (
+              // A dismissed directory row reopens through Edit in create
+              // mode: no stored profile exists yet, so the card must POST.
+              <ProviderEditor
+                provider={provider}
+                models={models.filter(model => model.providerId === provider.id)}
+                creating={provider.directory}
+                refresh={refresh}
+                setError={setError}
+                onSaved={announceSaved}
+                onClose={() => { setEditing(null); }}
+              />
+            )}
+          </li>
+        );
+      })}
+    </ul>
+    <div className="settings-models-addblock">
+      {addProvider !== null && (
+        <div className="settings-models-addcard">
+          <div className="settings-models-field">
+            <span className="settings-models-fieldlabel">{t("settings.models.provider")}</span>
+            <select
+              className="settings-models-input settings-models-select"
+              value={addProvider.id}
+              aria-label={t("settings.models.provider")}
+              onChange={(event) => { setEditing(event.target.value); }}
+            >
+              {dormant.map(row => (
+                <option key={row.id} value={row.id}>{row.name}</option>
+              ))}
+            </select>
+          </div>
+          <ProviderEditor
+            key={addProvider.id}
+            provider={addProvider}
+            models={[]}
+            creating
+            hideTitle
+            refresh={refresh}
+            setError={setError}
+            onSaved={announceSaved}
+            onClose={() => { setAdding(false); setEditing(null); }}
+          />
+        </div>
+      )}
+      {declaring && (
+        <div className="settings-models-addcard">
+          <CustomProviderCard
+            taken={providers.map(provider => provider.id)}
+            refresh={refresh}
+            setError={setError}
+            onSaved={announceSaved}
+            onClose={(changed) => { setDeclaring(false); if (changed) void refresh(); }}
+          />
+        </div>
+      )}
+      {addProvider === null && !declaring && (
+        <div className="settings-models-addactions">
+          <button
+            type="button"
+            className="settings-models-addbutton"
+            disabled={dormant.length === 0}
+            onClick={() => {
+              setSavedName(null);
+              setDeclaring(false);
+              setAdding(true);
+              setEditing(dormant[0]?.id ?? null);
+            }}
+          >
+            {t("settings.models.add")}
+          </button>
+          <button
+            type="button"
+            className="settings-models-addbutton"
+            onClick={() => {
+              setSavedName(null);
+              setAdding(false);
+              setEditing(null);
+              setDeclaring(true);
+            }}
+          >
+            {t("settings.models.customAdd")}
+          </button>
+        </div>
+      )}
+    </div>
+    <DeleteProviderModal
+      open={deleteTarget !== null}
+      providerName={deleteTarget?.name ?? ""}
+      busy={deleting}
+      failure={deleteFailure}
+      onCancel={closeDelete}
+      onConfirm={() => { void confirmDelete(); }}
+    />
+  </section>;
 }

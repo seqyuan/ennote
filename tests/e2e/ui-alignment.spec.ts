@@ -3,6 +3,9 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 const project = { id: "ui-project", name: "UI project", description: "", status: "active", createdAt: "2026-07-30T00:00:00Z", updatedAt: "2026-07-30T00:00:00Z" };
 const workspace = { id: "workspace", projectId: project.id, kind: "local", hostPath: "/tmp/ui-project", virtualPath: "/workspace", status: "active", pathFingerprint: "fingerprint", createdAt: "2026-07-30T00:00:00Z" };
 const policies = ["discuss", "ask", "auto"].map((mode) => ({ id: `builtin-tool-${mode}-v1`, name: mode, kind: "tool", version: 1, config: { mode }, status: "active", createdAt: "2026-07-30T00:00:00Z", updatedAt: "2026-07-30T00:00:00Z" }));
+// A configured provider suppresses the first-run Models settings auto-open,
+// so these tests control the dialog themselves.
+const provider = { id: "ui-provider", name: "UI provider", providerType: "openai-compatible", baseUrl: "https://example.test", credentialConfigured: true, status: "active", createdAt: "2026-07-30T00:00:00Z", updatedAt: "2026-07-30T00:00:00Z" };
 const files = [
   { name: "src", path: "/workspace/src", isDir: true, size: 0, modifiedAt: "2026-07-30T00:00:00Z" },
   { name: "README.md", path: "/workspace/README.md", isDir: false, size: 28, modifiedAt: "2026-07-30T00:00:00Z" },
@@ -17,7 +20,8 @@ async function mockUI(page: Page) {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
     if (path === "/v1/projects") return fulfill(route, [project]);
-    if (path === "/v1/provider-profiles" || path === "/v1/model-profiles") return fulfill(route, []);
+    if (path === "/v1/provider-profiles") return fulfill(route, [provider]);
+    if (path === "/v1/model-profiles") return fulfill(route, []);
     if (path === "/v1/policy-profiles") return fulfill(route, policies);
     if (path === `/v1/projects/${project.id}/workspace`) return fulfill(route, workspace);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, []);
