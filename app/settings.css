@@ -126,6 +126,13 @@ html.dark .settings-dialog-backdrop {
   margin-left: auto;
 }
 
+/* Mobile-only current-section title in the header top bar (≤640px).
+   Hidden on desktop where the nav rail carries the "Settings" title.
+   Specificity beats the legacy .settings-dialog-header span rule. */
+.settings-dialog-header .settings-dialog-current {
+  display: none;
+}
+
 .settings-dialog-close {
   display: inline-flex;
   align-items: center;
@@ -512,4 +519,114 @@ html.dark .settings-dialog-backdrop {
   background: none;
   padding: 0;
   min-height: 0;
+}
+
+/* ---- Mobile (<=640px): full-screen sheet + top bar + horizontal tab strip.
+   The desktop rules above stay untouched; these re-declarations win the
+   cascade for the same selectors because this file loads after globals.css.
+   (The equivalent mobile rules that used to live in globals.css were
+   defeated by that load order — mobile kept the desktop rail.) ---- */
+@media (max-width: 640px) {
+  /* Sheet: edge-to-edge, no rounded card, no side margins. */
+  .settings-dialog-backdrop {
+    padding: 0;
+    align-items: stretch;
+    justify-content: stretch;
+  }
+  .settings-dialog-shell {
+    width: 100%;
+    height: 100dvh;
+    max-width: none;
+    min-height: 0;
+    border: none;
+    border-radius: 0;
+  }
+
+  /* Body column: top bar + panel first, then the tab strip pinned to the
+     bottom of the sheet (bottom tab bar pattern, thumb-friendly). */
+  .settings-dialog-body {
+    flex-direction: column;
+  }
+
+  /* Top bar: current-section title left, close right. */
+  .settings-dialog-content {
+    order: 1;
+    flex: 1;
+    min-height: 0;
+  }
+  .settings-dialog-header {
+    height: auto;
+    min-height: 52px;
+    align-items: center;
+    padding: max(8px, env(safe-area-inset-top)) 12px 6px 16px;
+    border-bottom: 1px solid var(--stg-border-l2);
+  }
+  .settings-dialog-actions {
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+  .settings-dialog-header .settings-dialog-current {
+    display: block;
+    font-size: 16px;
+    line-height: 24px;
+    font-weight: 500;
+    color: var(--stg-text-primary);
+    text-transform: none;
+  }
+  .settings-dialog-close {
+    width: 40px;
+    height: 40px;
+  }
+
+  /* Tab strip: horizontal scrollable pills docked at the sheet bottom. */
+  .settings-dialog-tabs {
+    order: 2;
+    flex: 0 0 auto;
+    width: auto;
+    flex-direction: row;
+    gap: 6px;
+    padding: 8px max(10px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: none;
+    border-bottom: none;
+    border-top: 1px solid var(--stg-border-l2);
+    background: var(--stg-fill);
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .settings-dialog-tabs::-webkit-scrollbar { display: none; }
+  .settings-dialog-navtitle { display: none; }
+  .settings-dialog-tab {
+    flex: 0 0 auto;
+    width: auto;
+    height: 40px;
+    margin: 0;
+    padding: 0 14px;
+    border-radius: 20px;
+  }
+  /* Active pill reads as selected on touch: brand-tinted fill + brand text. */
+  .settings-dialog-tab.active {
+    background: color-mix(in srgb, var(--stg-brand) 12%, transparent);
+    color: var(--stg-brand);
+  }
+  .settings-dialog-tab.active .settings-tab-icon { color: var(--stg-brand); }
+
+  /* Panel: comfortable padding; the docked strip covers the safe area. */
+  .settings-dialog-panel { flex: 1; }
+  .settings-dialog-shell .settings-tab-section {
+    padding: 18px 16px 24px;
+  }
+
+  /* Context tab: the five-column per-model policy grid collapses to rows. */
+  .settings-dialog-shell .model-policy-row {
+    grid-template-columns: 1fr;
+  }
+
+  /* Roles/Graphs pages: keep the back affordance touch-friendly. */
+  .settings-view-back {
+    min-height: 44px;
+    min-width: 44px;
+    justify-content: center;
+  }
 }

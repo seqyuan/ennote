@@ -1406,13 +1406,9 @@ html.dark .composer-followup-queue { color: #a5b4fc; }
   .settings-tabs button[aria-selected="true"] { border-bottom-color: var(--accent); background: transparent; }
   .settings-panels { flex: 1; }
   .settings-tab-section { padding: 18px 14px 30px; }
-  /* New annovibe-style settings dialog mobile */
-  .settings-dialog-backdrop { padding: 0; align-items: stretch; justify-content: stretch; }
-  .settings-dialog-shell { width: 100%; height: 100dvh; min-height: 0; border: none; border-radius: 0; }
-  .settings-dialog-body { flex-direction: column; }
-  .settings-dialog-tabs { width: 100%; display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden; border-right: none; border-bottom: 1px solid var(--border); padding: 7px; }
-  .settings-dialog-tab { width: 132px; flex: 0 0 132px; margin: 0; padding: 8px; }
-  .settings-dialog-panel { flex: 1; }
+  /* New annovibe-style settings dialog mobile rules moved to
+     app/settings.css (the later-loaded stylesheet wins the cascade there;
+     from globals.css they were silently defeated by settings.css). */
   .roles-settings { grid-template-columns: 1fr; grid-template-rows: minmax(180px, 36%) minmax(0, 1fr); }
   .roles-master { border-right: 0; border-bottom: 1px solid var(--border); }
   .roles-master > header { min-height: 48px; }

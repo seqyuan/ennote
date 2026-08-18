@@ -19,6 +19,15 @@ async function mockApp(page: Page) {
 test("General tab persists appearance and default permission preferences", async ({ page }) => {
   await mockApp(page);
   await page.goto("/");
+  // First-run guidance auto-opens the dialog when no provider is configured
+  // yet (a tick after load); wait for it, dismiss it, then exercise the
+  // sidebar trigger like a real user.
+  const autoDialog = page.locator(".settings-dialog-shell");
+  await autoDialog.waitFor({ state: "visible", timeout: 5000 }).catch(() => {});
+  if (await autoDialog.isVisible()) {
+    await page.getByRole("button", { name: "Close settings" }).click();
+    await autoDialog.waitFor({ state: "hidden" });
+  }
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("tab", { name: "General" }).click();
 

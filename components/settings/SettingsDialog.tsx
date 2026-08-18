@@ -188,7 +188,7 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
       className="settings-dialog-shell"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="settings-dialog-title"
+      aria-labelledby="settings-dialog-title settings-dialog-current"
     >
         {/* Body */}
         <div className="settings-dialog-body">
@@ -232,7 +232,14 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
           {/* Panel content (dsh: header row with close, options below) */}
           <div className="settings-dialog-content">
             <div className="settings-dialog-header">
-              <div className="settings-dialog-actions" />
+              <div className="settings-dialog-actions">
+                {/* Mobile-only current-section title; the desktop nav rail
+                    keeps its own "Settings" title (dsh). Shown in the top
+                    bar on ≤640px, hidden on desktop. */}
+                <span id="settings-dialog-current" className="settings-dialog-current">
+                  {tabs.find((tab) => tab.id === activeTab)?.label}
+                </span>
+              </div>
               <button ref={closeRef} type="button" className="settings-dialog-close" title="Close settings" aria-label="Close settings" onClick={onClose}>
                 <X size={14} aria-hidden="true" />
               </button>
