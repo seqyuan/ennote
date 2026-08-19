@@ -165,11 +165,12 @@ try {
   if (workerReady.response.status !== 200 || workerReady.json?.data?.status !== "ready" || workerReady.json?.data?.degraded !== true) {
     throw new Error(`proxied Worker readiness failed: ${workerReady.text}`);
   }
-  const database = await stat(resolve(home, "data", "ennote.db"));
+  // Storage layout v2: ennote.db was replaced by catalog.db + usage.db.
+  const database = await stat(resolve(home, "data", "catalog.db"));
   if (database.size === 0) throw new Error("startup did not create a migrated database");
 
   const launcherState = JSON.parse(await readFile(resolve(home, "ennote-state.json"), "utf8"));
-  const workerState = JSON.parse(await readFile(resolve(home, "data", "worker-state.json"), "utf8"));
+  const workerState = JSON.parse(await readFile(resolve(home, "runtime", "worker-state.json"), "utf8"));
   if (!pidAlive(launcherState.pid) || !pidAlive(workerState.pid)) throw new Error("managed processes are not alive");
   const logText = await readFile(resolve(home, "logs", "ennote.log"), "utf8");
   if (logText.includes(workerState.bootstrapToken)) throw new Error("bootstrap token leaked into logs");
@@ -178,7 +179,7 @@ try {
   await waitForDead(launcherState.pid);
   if (!pidAlive(workerState.pid)) throw new Error("ennoworker did not survive an ennogate crash");
   const recoveredGate = parseLastJSON(cli(["start", "--port", String(port), "--json"]).stdout);
-  const recoveredWorker = JSON.parse(await readFile(resolve(home, "data", "worker-state.json"), "utf8"));
+  const recoveredWorker = JSON.parse(await readFile(resolve(home, "runtime", "worker-state.json"), "utf8"));
   if (recoveredWorker.pid !== workerState.pid || recoveredWorker.instanceId !== workerState.instanceId) {
     throw new Error("ennogate did not reconnect to the authenticated surviving ennoworker");
   }
@@ -205,7 +206,7 @@ try {
   await writeFile(resolve(home, "ennote-state.json"), JSON.stringify({ version: 1, pid: 99_999_999, url }), { mode: 0o600 });
   const restarted = parseLastJSON(cli(["start", "--port", String(port), "--json"]).stdout);
   if (!restarted.pid || restarted.pid === recoveredGate.pid) throw new Error("stale state was not replaced on restart");
-  const secondWorkerState = JSON.parse(await readFile(resolve(home, "data", "worker-state.json"), "utf8"));
+  const secondWorkerState = JSON.parse(await readFile(resolve(home, "runtime", "worker-state.json"), "utf8"));
   parseLastJSON(cli(["stop", "--json"]).stdout);
   await waitForDead(restarted.pid);
   await waitForDead(secondWorkerState.pid);
