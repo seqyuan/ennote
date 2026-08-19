@@ -56,13 +56,17 @@ async function selectProject(page: Page) {
 test("searches active Sessions and supports archive and restore lifecycle actions", async ({ page }) => {
   await mockPhase2(page);
   await selectProject(page);
-  const search = page.getByRole("searchbox", { name: "Search sessions" });
+  // The search field is a collapsed affordance: expand it first.
+  await page.getByRole("button", { name: "Search sessions", exact: true }).click();
+  const search = page.getByRole("textbox", { name: "Search sessions" });
   await search.fill("marker");
   await expect(page.getByRole("button", { name: "Marker review", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "QC notes", exact: true })).toHaveCount(0);
   await search.clear();
   await expect(page.getByRole("button", { name: "QC notes", exact: true })).toBeVisible();
 
+  // Row actions are hover-revealed.
+  await page.getByRole("button", { name: "Marker review", exact: true }).hover();
   await page.getByRole("button", { name: "Actions for Marker review" }).click();
   await page.getByRole("menuitem", { name: "Archive session" }).click();
   await expect(page.getByRole("button", { name: "Marker review", exact: true })).toHaveCount(0);
@@ -70,6 +74,7 @@ test("searches active Sessions and supports archive and restore lifecycle action
   await expect(page.getByRole("button", { name: "Marker review", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Prior integration", exact: true })).toBeVisible();
 
+  await page.getByRole("button", { name: "Marker review", exact: true }).hover();
   await page.getByRole("button", { name: "Actions for Marker review" }).click();
   await page.getByRole("menuitem", { name: "Restore session" }).click();
   await expect(page.getByText("Restored Marker review", { exact: true })).toBeAttached();

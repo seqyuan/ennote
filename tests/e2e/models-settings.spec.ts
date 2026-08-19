@@ -69,9 +69,12 @@ test("Models tab: add custom provider, edit + fetch models, delete", async ({ pa
   });
 
   await page.goto("/");
-  // First-run guidance auto-opens the Models settings tab when no provider
-  // exists (mirrors dsh onboarding), so the dialog is already open.
+  // The e2e storage state disables first-run guidance (it would intercept
+  // clicks across the suite), so open the dialog through the trigger and
+  // land on the Models tab explicitly.
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+  await page.getByRole("tab", { name: "Models" }).click();
   await expect(page.getByRole("tab", { name: "Models" })).toHaveAttribute("aria-selected", "true");
 
   // Add a custom provider with one model.

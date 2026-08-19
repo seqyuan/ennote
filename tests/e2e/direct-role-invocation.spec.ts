@@ -72,7 +72,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     await page.getByRole("button", { name: "Configure run", exact: true }).click();
     await page.getByTitle("Invocation target").click();
     await page.getByRole("option", { name: new RegExp(role.handle) }).click();
-    await expect(page.getByTitle("Model for the next run")).toBeDisabled();
+    await expect(page.getByTitle("Default Model")).toBeDisabled();
     await expect(page.getByRole("button", { name: "Ask", exact: true })).toBeDisabled();
     await page.getByRole("textbox", { name: "Message the agent" }).fill("Check the new policy.");
     await page.getByRole("button", { name: "Send", exact: true }).click();

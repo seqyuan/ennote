@@ -115,7 +115,7 @@ test("a historical message creates and activates a new branch", async ({ page })
   });
 
   await openSession(page);
-  await page.getByRole("button", { name: "Branch from this message" }).click();
+  await page.getByRole("button", { name: "Branch into a new conversation" }).click();
   await expect(page.getByRole("button", { name: "Choose conversation branch" })).toContainText("Branch 2");
   await expect(page.getByText("later answer", { exact: true })).toHaveCount(0);
 });
@@ -176,7 +176,7 @@ test.describe("mobile branch controls", () => {
     });
     await openSession(page);
     await expect(page.getByRole("button", { name: "Choose conversation branch" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Branch from this message" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Branch into a new conversation" })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     await page.screenshot({ path: "/tmp/ennote-branch-mobile.png", fullPage: true });
   });

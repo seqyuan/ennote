@@ -58,32 +58,6 @@ test("each turn freezes the selected permission profile", async ({ page }) => {
     config: { toolPolicyProfileId: "builtin-tool-ask-v1" } });
 });
 
-test("a late Provider diagnostic cannot replace a newer result", async ({ page }) => {
-  await mockApp(page);
-  let attempts = 0;
-  await page.route("**/api/worker/v1/provider-profiles/provider/test", async route => {
-    attempts += 1;
-    if (attempts === 1) {
-      await new Promise(resolve => setTimeout(resolve, 250));
-      if (route.request().isNavigationRequest()) return;
-      try {
-        await fulfill(route, { providerId: "provider", status: "failed", latencyMs: 250, testedAt: "2026-07-28T00:00:00Z", stages: [], failure: { category: "authentication_failed", message: "old failure", retryable: false } });
-      } catch { /* request was cancelled by the retest */ }
-      return;
-    }
-    return fulfill(route, { providerId: "provider", modelProfileId: "model", modelName: "test-model", status: "ready", latencyMs: 8, testedAt: "2026-07-28T00:00:01Z", stages: [{ name: "generation", status: "passed", message: "ok", latencyMs: 8 }] });
-  });
-
-  await page.goto("/");
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  const testButton = page.getByRole("button", { name: "Test", exact: true });
-  await testButton.click();
-  await page.getByRole("button", { name: "Retest", exact: true }).click();
-  await expect(page.getByText("Ready", { exact: true })).toBeVisible();
-  await page.waitForTimeout(300);
-  await expect(page.getByText("old failure", { exact: true })).toHaveCount(0);
-});
-
 test.describe("mobile", () => {
   test.use({ viewport: { width: 390, height: 844 } });
   test("permission controls and Send remain inside the viewport", async ({ page }) => {

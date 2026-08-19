@@ -74,7 +74,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     await expect(page.getByLabel("Role prompt")).toHaveValue("Review evidence independently.");
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
     if (viewport.width < 500) {
-      await page.getByRole("button", { name: "Roles", exact: true }).click();
+      await page.getByTestId("roles-page").getByRole("button", { name: "Roles", exact: true }).click();
       await expect(page.getByRole("option", { name: /Security Reviewer/ })).toBeVisible();
     }
   });
