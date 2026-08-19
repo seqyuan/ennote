@@ -1,0 +1,134 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  ENNOTE_NPM_PACKAGE: "@seqyuan/ennote"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: npm-publish
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Read Package Version
+        id: pkg
+        run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Verify Tag Matches Version
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [ "$tag_version" != "${{ steps.pkg.outputs.version }}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match package version ${{ steps.pkg.outputs.version }}" >&2
+            exit 1
+          fi
+
+      - name: Verify Tag Commit Is On main
+        run: |
+          git fetch origin main --force
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/main"; then
+            echo "tag ${GITHUB_REF_NAME} points to a commit outside origin/main" >&2
+            exit 1
+          fi
+
+      - name: Check npm token
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "missing repository secret NPM_TOKEN" >&2
+            exit 1
+          fi
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build Frontend
+        run: npm run build:web
+
+      - name: Cross-Compile Go Binaries
+        run: |
+          cd ennoworker
+          for target in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+            go build -ldflags="-s -w" -trimpath -o "../worker/ennogate-${target}-raw" ./cmd/ennogate
+            go build -ldflags="-s -w" -trimpath -o "../worker/ennoworker-${target}-raw" ./cmd/ennoworker
+          done
+          # Rename amd64 → x64 to match Node os.arch()
+          cd ../worker
+          for f in *-amd64-raw; do mv "$f" "${f//-amd64-raw/-x64-raw}"; done
+
+      - name: Install UPX
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq upx-ucl
+
+      - name: Compress Binaries
+        run: |
+          cd worker
+          echo "=== sizes before UPX ==="
+          ls -lh *-raw
+          for f in *-raw; do
+            upx --best -q "$f"
+          done
+          echo "=== sizes after UPX ==="
+          ls -lh *-raw
+          # Strip -raw suffix
+          for f in *-raw; do mv "$f" "${f%-raw}"; done
+          ls -lh
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: |
+            worker/ennogate-*
+            worker/ennoworker-*
+          fail_on_unmatched_files: true
+
+      - name: Verify Tarball
+        run: npm run pack:check
+
+      - name: Smoke Test Installed Package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          ENNOTE_SMOKE_WORKER_DIR: ${{ github.workspace }}/worker
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
+          npm run smoke:installed
+
+      - name: Publish To npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
+          if npm view "$ENNOTE_NPM_PACKAGE@${{ steps.pkg.outputs.version }}" version >/dev/null 2>&1; then
+            echo "Package already published, setting access to public..."
+            npm access set status=public "$ENNOTE_NPM_PACKAGE"
+          else
+            npm publish --access public
+          fi
