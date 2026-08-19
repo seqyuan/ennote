@@ -57,7 +57,13 @@ async function seedAuth(baseURL: string): Promise<boolean> {
         name, value, domain: hostname, path: "/",
         expires: -1, httpOnly: true, secure: false, sameSite: "Lax" as const,
       }],
-      origins: [],
+      // Seed the onboarding-dismissed flag: first-run guidance would
+      // otherwise auto-open the Settings dialog (no providers in tests)
+      // and its backdrop intercepts clicks for every spec.
+      origins: [{
+        origin: new URL(baseURL).origin,
+        localStorage: [{ name: "ennote-onboarding-done", value: "1" }],
+      }],
     };
     mkdirSync(".auth", { recursive: true });
     writeFileSync(STORAGE_PATH, JSON.stringify(storage));

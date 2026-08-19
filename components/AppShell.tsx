@@ -16,6 +16,7 @@ import { useProjectSessions } from "@/hooks/useProjectSessions";
 import { useSidebarProjectGroups } from "@/hooks/useSidebarProjectGroups";
 import { ChildProgressProvider } from "@/hooks/useChildProgress";
 import { useWorkspace } from "./WorkspaceProvider";
+import { useOnboardingSettings } from "@/hooks/useOnboardingSettings";
 import { useRunningSessionIds } from "@/hooks/useRunningSessionIds";
 import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
 import { usePromptTemplates } from "@/hooks/usePromptTemplates";
@@ -33,7 +34,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
   const {
     projects, selectedProject, switchProject: workspaceSwitchProject,
     createProjectOpen, openCreateProject, confirmCreateProject, cancelCreateProject, createProjectBusy,
-    settingsOpen, settingsTab, openSettings: workspaceOpenSettings, closeSettings,
+    settingsOpen, settingsTab, openSettings: workspaceOpenSettings, closeSettings: workspaceCloseSettings,
     workspaceFor, togglePinProject, pinnedProjectIds, renameProject, deleteProject,
   } = useWorkspace();
 
@@ -163,17 +164,16 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
     void refreshSettings();
   }, [refreshSettings, workspaceOpenSettings]);
 
-  // Feature: first-run guidance — when no provider is usable yet, open the
-  // Models settings section once so the user can configure a provider instead
-  // of staring at an inert composer. Mirrors dsh's onboarding step, which
-  // opens the Models section explicitly; the plain trigger lands on General.
-  const autoOpenedSettings = useRef(false);
-  useEffect(() => {
-    if (autoOpenedSettings.current || settings.loading || settings.error) return;
-    if (settings.providers.some(provider => provider.credentialConfigured)) return;
-    autoOpenedSettings.current = true;
-    openSettings("models");
-  }, [settings.loading, settings.error, settings.providers, openSettings]);
+  // First-run guidance: with no usable provider yet, open the Models
+  // section once. Closing the dialog persists the dismissal, so a refresh
+  // never re-opens it (see useOnboardingSettings).
+  const { closeSettings } = useOnboardingSettings({
+    loading: settings.loading,
+    error: settings.error,
+    providers: settings.providers,
+    openSettings,
+    closeSettings: workspaceCloseSettings,
+  });
 
   const switchProject = useCallback((projectId: string) => {
     workspaceSwitchProject(projectId);

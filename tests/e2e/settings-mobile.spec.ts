@@ -31,8 +31,10 @@ test.describe("mobile settings dialog", () => {
 
   test("renders as a full-screen sheet with a horizontal pill tab strip", async ({ page }) => {
     await mockApp(page);
-    // No usable provider → first-run guidance opens the Models section.
     await page.goto("/");
+    // Sidebar trigger: on mobile the navigation is a drawer.
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     const shell = page.locator(".settings-dialog-shell");
     await expect(shell).toBeVisible();
 
@@ -43,8 +45,10 @@ test.describe("mobile settings dialog", () => {
     expect(box!.height).toBe(viewport.height);
 
     // Top bar: current-section title + close button above the tab strip.
+    // The plain trigger lands on General (first-run guidance lands on
+    // Models, which the e2e storage state disables).
     const title = page.locator(".settings-dialog-current");
-    await expect(title).toHaveText("Models");
+    await expect(title).toHaveText("General");
     const titleBox = await title.boundingBox();
     const closeBox = await page.getByRole("button", { name: "Close settings" }).boundingBox();
     const stripBox = await page.locator(".settings-dialog-tabs").boundingBox();
