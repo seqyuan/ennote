@@ -8,11 +8,9 @@ import { TopBar } from "./TopBar";
 import { RightPanel } from "./RightPanel";
 import { FilePreviewWindow } from "./FilePreviewWindow";
 import { ResizeHandle } from "./ResizeHandle";
-import type { Tab } from "./TabBar";
 import { ProjectCreateDialog } from "./ProjectCreateDialog";
 import { SettingsDialog } from "./settings/SettingsDialog";
 import { useResizable } from "@/hooks/useResizable";
-import { useFileTabs } from "@/hooks/useFileTabs";
 import { useSessionTitle } from "@/hooks/useSessionTitle";
 import { useProjectSessions } from "@/hooks/useProjectSessions";
 import { useSidebarProjectGroups } from "@/hooks/useSidebarProjectGroups";
@@ -23,14 +21,12 @@ import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
 import { usePromptTemplates } from "@/hooks/usePromptTemplates";
 import { useChatController } from "@/hooks/useChatController";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useProjectFiles } from "@/hooks/useProjectFiles";
 import { useProjectSelector } from "@/hooks/useProjectSelector";
 import { SettingsView } from "./SettingsView";
 import type { WorkspaceView } from "./workspace-view";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { SettingsTab, Session } from "@/components/settings/types";
-import type { components } from "@/lib/worker-api.gen";
-
-type ProjectWorkspace = components["schemas"]["ProjectWorkspace"];
 
 export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView }) {
   const isMobile = useMediaQuery("(max-width: 640px)");
@@ -250,35 +246,21 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
 
   // File operations use project-scoped /workspace paths. Host paths are display-only.
   const currentProjectId = selectedSessionRecord?.projectId ?? selectedProject;
-  const currentWorkspace = currentProjectId ? workspaceFor(currentProjectId) ?? null : null;
-  const currentCwd = currentWorkspace?.hostPath ?? null;
-
-  // Workspace loading is owned by the WorkspaceProvider; surface load errors here.
-  const setRunError = chat.run.setError;
-  useEffect(() => {
-    const projectId = currentProjectId;
-    if (!projectId || workspaceFor(projectId)) return;
-    const controller = new AbortController();
-    void apiFetch<ProjectWorkspace>(`/v1/projects/${encodeURIComponent(projectId)}/workspace`, { signal: controller.signal })
-      .catch((reason) => {
-        if (!controller.signal.aborted) setRunError((reason as Error).message);
-      });
-    return () => controller.abort();
-    // workspaceFor is stable via context; re-run on project switch.
-  }, [currentProjectId, setRunError, workspaceFor]);
-
-  const fileTabsState = useFileTabs(currentProjectId);
-  const { fileTabs, activeTabId: activeRightTabId, setActiveTabId: setActiveRightTabId, openFile, closeTab } = fileTabsState;
-
-  const handleOpenFile = useCallback((filePath: string, fileName: string) => {
-    openFile(filePath, fileName);
-    setRightPanelOpen(true);
-  }, [openFile, setRightPanelOpen]);
-
-  const handlePreviewFile = useCallback((filePath: string, fileName: string) => {
-    if (!currentProjectId) return;
-    setPreviewFile({ projectId: currentProjectId, path: filePath, name: fileName });
-  }, [currentProjectId]);
+  const {
+    currentCwd,
+    rightTabs,
+    activeRightTabId,
+    setActiveRightTabId,
+    handleOpenFile,
+    handlePreviewFile,
+    closeTab,
+  } = useProjectFiles({
+    projectId: currentProjectId,
+    workspaceFor,
+    setRunError: chat.run.setError,
+    onOpenPanel: () => setRightPanelOpen(true),
+    onPreviewFile: setPreviewFile,
+  });
 
   // Title editing
   const titleEdit = useSessionTitle({ session: selectedSessionRecord, replaceSession: sessionNavigation.replaceSession });
@@ -286,14 +268,6 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
   const topBarProjectName = currentCwd
     ? currentCwd.replace(/\/+$/, "").split(/[\\/]/).filter(Boolean).pop() || currentCwd
     : "";
-
-  // Right tabs
-  const rightTabs: Tab[] = [
-    { id: "files", label: "Files", closable: false, icon: "files" },
-    { id: "graph", label: "Graphs", closable: false, icon: "graph" },
-    { id: "tools", label: "Status", closable: false, icon: "tools" },
-    ...fileTabs,
-  ];
 
   // Sidebar content
   const sidebar = (
