@@ -30,7 +30,7 @@ export function EmptyHero(props: {
           <h1 className="empty-hero-title">{t("empty.project.title")}</h1>
           <p className="empty-hero-body">{t("empty.project.body")}</p>
           {!hasModel && (
-            <button type="button" className="empty-hero-settings" onClick={onOpenSettings}>
+            <button type="button" className="empty-hero-settings" onClick={() => onOpenSettings()}>
               {t("empty.noModel")}
             </button>
           )}
@@ -48,7 +48,7 @@ export function EmptyHero(props: {
           </div>
           <p className="empty-hero-hint">{t("empty.session.hint")}</p>
           {!hasModel && (
-            <button type="button" className="empty-hero-settings" onClick={onOpenSettings}>
+            <button type="button" className="empty-hero-settings" onClick={() => onOpenSettings()}>
               {t("empty.noModel")}
             </button>
           )}

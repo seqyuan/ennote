@@ -191,7 +191,7 @@ export function SessionSidebar({
       <div className="sidebar-section sidebar-settings" style={{ flexShrink: 0 }}>
         <button
           className={`sidebar-item sidebar-button ${settingsOpen ? "active" : ""}`}
-          onClick={openSettings}
+          onClick={() => openSettings()}
           aria-haspopup="dialog"
           aria-expanded={settingsOpen}
         >
