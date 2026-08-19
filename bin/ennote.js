@@ -16,7 +16,7 @@ const DEFAULT_PORT = "45131";
 const DEFAULT_HOSTNAME = "127.0.0.1";
 const START_TIMEOUT_MS = 45_000;
 const STOP_TIMEOUT_MS = 15_000;
-const GITHUB_RELEASES_BASE = "https://github.com/seqyuan/ennote-bin/releases/download";
+const GITHUB_RELEASES_BASE = "https://github.com/seqyuan/ennote/releases/download";
 
 function platformSuffix(platform = os.platform(), arch = os.arch()) {
   if (!new Set(["linux", "darwin"]).has(platform)) {
