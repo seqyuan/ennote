@@ -75,29 +75,12 @@ jobs:
         run: |
           cd ennoworker
           for target in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
-            go build -ldflags="-s -w" -trimpath -o "../worker/ennogate-${target}-raw" ./cmd/ennogate
-            go build -ldflags="-s -w" -trimpath -o "../worker/ennoworker-${target}-raw" ./cmd/ennoworker
+            go build -ldflags="-s -w" -trimpath -o "../worker/ennogate-${target}" ./cmd/ennogate
+            go build -ldflags="-s -w" -trimpath -o "../worker/ennoworker-${target}" ./cmd/ennoworker
           done
           # Rename amd64 → x64 to match Node os.arch()
           cd ../worker
-          for f in *-amd64-raw; do mv "$f" "${f//-amd64-raw/-x64-raw}"; done
-
-      - name: Install UPX
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq upx-ucl
-
-      - name: Compress Binaries
-        run: |
-          cd worker
-          echo "=== sizes before UPX ==="
-          ls -lh *-raw
-          for f in *-raw; do
-            upx --best -q "$f"
-          done
-          echo "=== sizes after UPX ==="
-          ls -lh *-raw
-          # Strip -raw suffix
-          for f in *-raw; do mv "$f" "${f%-raw}"; done
+          for f in *-amd64; do mv "$f" "${f//-amd64/-x64}"; done
           ls -lh
 
       - name: Create GitHub Release
