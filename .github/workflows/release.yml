@@ -125,8 +125,7 @@ jobs:
         run: |
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
           if npm view "$ENNOTE_NPM_PACKAGE@${{ steps.pkg.outputs.version }}" version >/dev/null 2>&1; then
-            echo "Package already published, setting access to public..."
-            npm access set status=public "$ENNOTE_NPM_PACKAGE"
+            echo "Package $ENNOTE_NPM_PACKAGE@${{ steps.pkg.outputs.version }} already published, nothing to do."
           else
             npm publish --access public
           fi
