@@ -10,10 +10,8 @@ type GlobalRoleDetail = components["schemas"]["GlobalRoleDetail"];
 type FileRevision = { version: number; publishedAt: string };
 
 /**
- * Role catalog + selection for the composer. Loads the published global Role
- * catalog (with a /v1/roles fallback for SQL-backed test adapters) and owns the
- * selected Role id. Selection does not survive a project switch (declarative,
- * §4.1.3).
+ * Role catalog + selection for the composer. Loads published global Roles.
+ * Selection does not survive a project switch (declarative, §4.1.3).
  */
 export function useRoleSelection(selectedProject: string | null): {
   roles: RoleSummary[];
@@ -29,7 +27,6 @@ export function useRoleSelection(selectedProject: string | null): {
     setSelectedRoleId(null);
   }, [selectedProject]);
 
-  // Role catalog: global roles with a /v1/roles fallback.
   useEffect(() => {
     if (!selectedProject) return;
     let cancelled = false;
@@ -60,18 +57,8 @@ export function useRoleSelection(selectedProject: string | null): {
         setRoles(published);
         setSelectedRoleId((current) => published.some((role) => role.id === current) ? current : null);
       })
-      .catch(async () => {
-        // SQL-backed API test adapters expose the managed Role catalog.
-        try {
-          const params = new URLSearchParams({ projectId: selectedProject, status: "active", limit: "100" });
-          const page = await apiFetch<{ items: RoleSummary[] }>(`/v1/roles?${params}`);
-          if (cancelled) return;
-          const published = page.items.filter((role) => Boolean(role.currentVersionId));
-          setRoles(published);
-          setSelectedRoleId((current) => published.some((role) => role.id === current) ? current : null);
-        } catch {
-          if (!cancelled) setRoles([]);
-        }
+      .catch(() => {
+        if (!cancelled) setRoles([]);
       });
     return () => { cancelled = true; };
   }, [selectedProject]);

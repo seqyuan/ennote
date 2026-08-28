@@ -15,7 +15,6 @@ test("Models tab: add custom provider, edit + fetch models, delete", async ({ pa
     const path = url.pathname.replace("/api/worker", "");
     if (path === "/v1/projects") return fulfill(route, []);
     if (path === "/v1/policy-profiles") return fulfill(route, []);
-    if (path === "/v1/roles") return fulfill(route, { items: [], nextCursor: "" });
     if (path === "/v1/provider-profiles" && route.request().method() === "GET") {
       return fulfill(route, provider ? [provider] : []);
     }

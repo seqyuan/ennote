@@ -6,13 +6,7 @@ export type DiscoveredModel = components["schemas"]["DiscoveredModel"];
 export type ModelProfile = components["schemas"]["ModelProfile"];
 export type PolicyProfile = components["schemas"]["PolicyProfile"];
 export type Session = components["schemas"]["Session"];
-export type RoleDefinition = components["schemas"]["RoleDefinition"];
-export type RoleIdentity = components["schemas"]["RoleIdentity"];
 export type RoleSummary = components["schemas"]["RoleSummary"];
-export type RoleVersion = components["schemas"]["RoleVersion"];
-export type RoleValidationResult = components["schemas"]["RoleValidationResult"];
-export type RoleCandidate = components["schemas"]["RoleCandidate"];
-export type MaterializedRoleCandidate = components["schemas"]["MaterializedRoleCandidate"];
 export type MCPServerProfile = components["schemas"]["MCPServerProfile"];
 export type MCPServerProfileVersion = components["schemas"]["MCPServerProfileVersion"];
 

@@ -53,7 +53,6 @@ test("two sessions keep independent resident stores when switching between them"
     if (path === `/v1/runs/${runA.id}/events` || path === `/v1/runs/${runB.id}/events`) {
       return route.fulfill({ status: 200, contentType: "text/event-stream", body: "" });
     }
-    if (path === "/v1/roles") return fulfill(route, { items: [], nextCursor: "" });
     return route.abort();
   });
 
@@ -118,7 +117,6 @@ test("an off-screen session converges to a later snapshot and refreshed history 
     if (path === `/v1/runs/${runA.id}/events` || path === `/v1/runs/${runB.id}/events`) {
       return route.fulfill({ status: 200, contentType: "text/event-stream", body: "" });
     }
-    if (path === "/v1/roles") return fulfill(route, { items: [], nextCursor: "" });
     return route.abort();
   });
 

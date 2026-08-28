@@ -11,7 +11,6 @@ async function mockApp(page: Page) {
     if (path === "/v1/policy-profiles") return fulfill(route, []);
     if (path === "/v1/provider-profiles") return fulfill(route, []);
     if (path === "/v1/model-profiles") return fulfill(route, []);
-    if (path === "/v1/roles") return fulfill(route, { items: [], nextCursor: "" });
     return route.abort();
   });
 }

@@ -31,7 +31,16 @@ async function mockBackend(page: Page) {
     if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, null);
     if (path === `/v1/sessions/${session.id}/messages`) return fulfill(route, { messages: [], hasMore: false, activeLeafMessageId: null });
     if (path === `/v1/projects/${project.id}/prompt-templates`) return fulfill(route, { templates: [], diagnostics: [] });
-    if (path === "/v1/roles" && method === "GET") return fulfill(route, { items: [role], nextCursor: "" });
+    if (path === "/v1/global-roles" && method === "GET") {
+      return fulfill(route, [{ id: role.id, name: role.name, path: "/home/roles/security-reviewer/role.md", digest: `sha256:${"a".repeat(64)}` }]);
+    }
+    if (path === `/v1/global-roles/${role.id}` && method === "GET") {
+      return fulfill(route, {
+        id: role.id, name: role.name, path: "/home/roles/security-reviewer/role.md", digest: `sha256:${"a".repeat(64)}`,
+        document: { handle: role.handle, name: role.name, description: role.description, positioning: role.positioning, icon: role.icon, color: role.color },
+      });
+    }
+    if (path === `/v1/global-roles/${role.id}/versions`) return fulfill(route, [{ version: 1, publishedAt: now }]);
     if (path === "/v1/graphs" && method === "GET") return fulfill(route, graphs);
     return route.abort();
   });

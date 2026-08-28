@@ -42,7 +42,6 @@ test("queues a follow-up while a run is active and clears it once consumed", asy
       body: subscribedFrame({ activeRun: runFinished ? null : run, pendingApproval: null, queuedInputs: [], checkpoints: [], delegationActive: false }) });
     if (path === `/v1/sessions/${session.id}/messages`) return fulfill(route, { messages: [], hasMore: false, activeLeafMessageId: "m1" });
     if (path === `/v1/sessions/${session.id}/compactions` || path === `/v1/sessions/${session.id}/branches`) return fulfill(route, []);
-    if (path === "/v1/roles") return fulfill(route, { items: [], nextCursor: "" });
     if (path === `/v1/runs/${run.id}/inputs` && route.request().method() === "POST") {
       const body = route.request().postDataJSON() as Record<string, unknown>;
       queuedBodies.push(body);

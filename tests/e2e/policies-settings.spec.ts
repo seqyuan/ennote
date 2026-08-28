@@ -28,7 +28,6 @@ test("active policy profiles can be deactivated", async ({ page }) => {
       active = false;
       return route.fulfill({ status: 204 });
     }
-    if (path === "/v1/roles") return fulfill(route, { items: [], nextCursor: "" });
     return route.abort();
   });
 

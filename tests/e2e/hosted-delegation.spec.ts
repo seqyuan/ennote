@@ -56,7 +56,6 @@ function commonRoute(path: string, route: Route) {
   if (path === `/v1/sessions/${session.id}`) return fulfill(route, session);
   if (path === `/v1/sessions/${session.id}/compactions` || path === `/v1/sessions/${session.id}/branches`) return fulfill(route, []);
   if (path === `/v1/sessions/${session.id}/recovery`) return fulfill(route, null);
-  if (path.startsWith("/v1/roles")) return fulfill(route, { items: [], nextCursor: "" });
   return null;
 }
 

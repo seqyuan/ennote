@@ -37,7 +37,6 @@ test("skills tab lists installed and catalog skills with install annotations", a
     if (path === "/v1/projects") return fulfill(route, []);
     if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
     if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
-    if (path === "/v1/roles") return fulfill(route, { items: [], nextCursor: "" });
     if (path === "/v1/skills") return fulfill(route, { skills: [...installed, ...local], diagnostics: [], projectResourcesLoaded: false });
     return route.abort();
   });
@@ -65,7 +64,6 @@ test("marketplace search installs a skill", async ({ page }) => {
     if (path === "/v1/projects") return fulfill(route, []);
     if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
     if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
-    if (path === "/v1/roles") return fulfill(route, { items: [], nextCursor: "" });
     if (path === "/v1/skills") return fulfill(route, { skills: [], diagnostics: [], projectResourcesLoaded: false });
     if (path === "/v1/skills/search") return fulfill(route, { results: [{ package: "acme/skills@plotly", installs: "12.5K installs", url: "https://skills.sh/acme/skills/plotly" }] });
     if (path === "/v1/skills/install") {
@@ -100,7 +98,6 @@ test("toggle, check update, and remove a skill", async ({ page }) => {
     if (path === "/v1/projects") return fulfill(route, []);
     if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
     if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
-    if (path === "/v1/roles") return fulfill(route, { items: [], nextCursor: "" });
     if (path === "/v1/skills") return fulfill(route, { skills: [installed[1]], diagnostics: [], projectResourcesLoaded: false });
     if (path.startsWith("/v1/skills/disabled/")) {
       patched.push(path);
@@ -155,7 +152,6 @@ test("skill roots: preset add, toggle, and remove via the settings surface", asy
     if (path === "/v1/projects") return fulfill(route, []);
     if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
     if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
-    if (path === "/v1/roles") return fulfill(route, { items: [], nextCursor: "" });
     if (path === "/v1/skills") return fulfill(route, { skills: [], diagnostics: [], projectResourcesLoaded: false });
     if (path === "/v1/skills/roots") {
       if (route.request().method() === "POST") {

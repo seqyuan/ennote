@@ -40,7 +40,6 @@ function commonRoute(path: string, route: Route) {
   if (path.startsWith("/v1/sessions/") && path.endsWith("/compactions")) return fulfill(route, []);
   if (path.startsWith("/v1/sessions/") && path.endsWith("/branches")) return fulfill(route, []);
   if (path.startsWith("/v1/sessions/") && path.endsWith("/recovery")) return fulfill(route, null);
-  if (path.startsWith("/v1/roles")) return fulfill(route, { items: [], nextCursor: "" });
   return null;
 }
 
