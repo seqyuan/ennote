@@ -1,9 +1,10 @@
 "use client";
 
-import { Archive, MoreHorizontal, Pencil, Plus, Star, Trash2, Triangle } from "lucide-react";
+import { MoreHorizontal, Pencil, Plus, Star, Trash2, Triangle } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useT } from "@/components/LocaleProvider";
 import type { Session } from "@/components/settings/types";
+import { isBlankSession } from "@/lib/session-blank";
 import type { SidebarProjectGroup } from "@/hooks/useSidebarProjectGroups";
 import { SidebarRenameDialog } from "./SidebarRenameDialog";
 import { buildSessionTree, renderSessionTree } from "./SessionTree";
@@ -58,8 +59,11 @@ export function ProjectGroup({
   }, [menuOpen]);
 
   const matching = query
-    ? group.sessions.filter((s) => s.title.toLowerCase().includes(query))
-    : group.sessions;
+    ? group.sessions.filter((s) => !isBlankSession(s) && s.title.toLowerCase().includes(query))
+    : [
+      ...group.sessions.filter((s) => isBlankSession(s) && s.id === selectedSession),
+      ...group.sessions.filter((s) => !isBlankSession(s)),
+    ];
 
   const onRowKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -93,7 +97,7 @@ export function ProjectGroup({
         <span className="sb-row-actions" ref={menuRef}>
           <button
             type="button"
-            className="sb-pin-star"
+            className={isPinned ? "sb-pin-star" : "sb-pin-star is-unpinned"}
             title={isPinned ? t("sidebar.unpin") : t("sidebar.pin")}
             aria-label={isPinned ? t("sidebar.unpin") : t("sidebar.pin")}
             onClick={(event) => { event.stopPropagation(); onTogglePin(); }}
@@ -151,7 +155,6 @@ export function ProjectGroup({
             setArchivedOpen(next);
             if (next) onOpenArchived();
           }}>
-            <Archive size={12} aria-hidden="true" />
             {archivedOpen ? t("sidebar.hideArchived") : t("sidebar.showArchived")}
           </button>
           {archivedOpen && archived.length > 0 && (

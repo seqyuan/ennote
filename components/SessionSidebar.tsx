@@ -1,7 +1,7 @@
 "use client";
 
 import { Bot, FolderPlus, Search, Settings2, Workflow, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Session } from "@/components/settings/types";
 import type { SidebarProjectGroup } from "@/hooks/useSidebarProjectGroups";
 import { useProjectSelector } from "@/hooks/useProjectSelector";
@@ -12,6 +12,9 @@ import { NavLink } from "./NavLink";
 import { ProjectGroup } from "./ProjectGroup";
 import type { WorkspaceView } from "./workspace-view";
 import { ProjectSelector } from "./ProjectSelector";
+
+const SCROLLBAR_LINGER_MS = 2000;
+
 interface SidebarProject { id: string; name: string }
 
 interface SessionSidebarProps {
@@ -64,11 +67,46 @@ export function SessionSidebar({
 }: SessionSidebarProps) {
   const t = useT();
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const columnRef = useRef<HTMLElement>(null);
+  const lingerTimer = useRef<number | undefined>(undefined);
   const [searchExpanded, setSearchExpanded] = useState(false);
+  const [pointerInside, setPointerInside] = useState(false);
 
   useEffect(() => {
     if (searchExpanded) searchInputRef.current?.focus({ preventScroll: true });
   }, [searchExpanded]);
+
+  const cancelLinger = useCallback(() => {
+    if (lingerTimer.current === undefined) return;
+    window.clearTimeout(lingerTimer.current);
+    lingerTimer.current = undefined;
+  }, []);
+  const armLinger = useCallback(() => {
+    if (lingerTimer.current !== undefined) return;
+    lingerTimer.current = window.setTimeout(() => {
+      lingerTimer.current = undefined;
+      setPointerInside(false);
+    }, SCROLLBAR_LINGER_MS);
+  }, []);
+
+  useEffect(() => {
+    if (!pointerInside) return;
+    const onMove = (event: PointerEvent) => {
+      const rect = columnRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const inside = event.clientX >= rect.left && event.clientX < rect.right
+        && event.clientY >= rect.top && event.clientY < rect.bottom;
+      if (inside) cancelLinger();
+      else armLinger();
+    };
+    document.addEventListener("pointermove", onMove);
+    return () => {
+      document.removeEventListener("pointermove", onMove);
+      cancelLinger();
+    };
+  }, [pointerInside, cancelLinger, armLinger]);
+
+  useEffect(() => () => cancelLinger(), [cancelLinger]);
 
   const closeSearch = () => {
     setQuery("");
@@ -76,19 +114,27 @@ export function SessionSidebar({
   };
 
   return (
-    <aside className="sidebar" aria-label={t("sidebar.aria")}>
+    <aside
+      ref={columnRef}
+      className={`sidebar${pointerInside ? "" : " quiet-bars"}`}
+      aria-label={t("sidebar.aria")}
+      onPointerEnter={() => { cancelLinger(); setPointerInside(true); }}
+      onPointerLeave={() => { armLinger(); }}
+    >
       <SidebarLogoRow
         onToggleSidebar={onToggleSidebar}
         onCloseNavigation={closeNavigation}
+        onNewSession={createSession}
+        newSessionDisabled={!selectedProject}
       />
 
       <NewSessionButton disabled={!selectedProject} onClick={createSession} />
 
       {/* Roles / Graphs below New Session (dsh nav-item style). These switch
           the main-area view inside the shell — the sidebar never navigates away. */}
-      <nav style={{ flexShrink: 0, padding: "0 0 8px", display: "flex", flexDirection: "column", gap: 2 }} aria-label="Workspace">
-        <NavLink active={view === "roles"} label={t("sidebar.roles")} icon={<Bot size={15} />} onClick={() => setView("roles")} />
-        <NavLink active={view === "graphs"} label={t("sidebar.graphs")} icon={<Workflow size={15} />} onClick={() => setView("graphs")} />
+      <nav className="sidebar-nav" aria-label="Workspace">
+        <NavLink active={view === "roles"} label={t("sidebar.roles")} icon={<Bot size={16} />} onClick={() => setView("roles")} />
+        <NavLink active={view === "graphs"} label={t("sidebar.graphs")} icon={<Workflow size={16} />} onClick={() => setView("graphs")} />
       </nav>
 
       {/* Workspace actions sit directly below the primary nav. */}
@@ -141,61 +187,62 @@ export function SessionSidebar({
       />
 
       {selectedProject && (
-        <section className="sidebar-section sidebar-sessions" aria-label={t("sidebar.sessions")} style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" }}>
-          <div style={{ flex: "1 1 auto", overflowY: "auto", minHeight: 0, padding: "0 6px 8px" }}>
-            {groups.length === 0 ? (
-              <div className="sidebar-empty">{t("sidebar.loadingSessions")}</div>
-            ) : (
-              groups.map((group) => (
-                <ProjectGroup
-                  key={group.projectId}
-                  group={group}
-                  isCurrent={group.projectId === selectedProject}
-                  isPinned={pinnedProjectIds.includes(group.projectId)}
-                  isCollapsed={collapsed.has(group.projectId)}
-                  onToggleCollapsed={() => toggleCollapsed(group.projectId)}
-                  onTogglePin={() => togglePinProject(group.projectId)}
-                  query={query.trim()}
-                  selectedSession={selectedSession}
-                  switchSession={switchSession}
-                  archiveSession={archiveSession}
-                  restoreSession={restoreSession}
-                  renameSession={renameSession}
-                  renameProject={renameProject}
-                  deleteProject={deleteProject}
-                  createSessionIn={createSessionIn}
-                  mutatingId={mutatingId}
-                  archived={archived[group.projectId] ?? []}
-                  onOpenArchived={() => openArchived(group.projectId)}
-                  runningSessionIds={runningSessionIds}
-                />
-              ))
-            )}
+        <section className="sidebar-sessions" aria-label={t("sidebar.sessions")}>
+          <div className="sidebar-tree-body">
+            <div className="sidebar-session-list">
+              {groups.length === 0 ? (
+                <div className="sidebar-empty">{t("sidebar.loadingSessions")}</div>
+              ) : (
+                groups.map((group) => (
+                  <ProjectGroup
+                    key={group.projectId}
+                    group={group}
+                    isCurrent={group.projectId === selectedProject}
+                    isPinned={pinnedProjectIds.includes(group.projectId)}
+                    isCollapsed={collapsed.has(group.projectId)}
+                    onToggleCollapsed={() => toggleCollapsed(group.projectId)}
+                    onTogglePin={() => togglePinProject(group.projectId)}
+                    query={query.trim()}
+                    selectedSession={selectedSession}
+                    switchSession={switchSession}
+                    archiveSession={archiveSession}
+                    restoreSession={restoreSession}
+                    renameSession={renameSession}
+                    renameProject={renameProject}
+                    deleteProject={deleteProject}
+                    createSessionIn={createSessionIn}
+                    mutatingId={mutatingId}
+                    archived={archived[group.projectId] ?? []}
+                    onOpenArchived={() => openArchived(group.projectId)}
+                    runningSessionIds={runningSessionIds}
+                  />
+                ))
+              )}
+            </div>
+            <div className="sidebar-list-fade" aria-hidden="true" />
           </div>
         </section>
       )}
 
       {!selectedProject && (
-        <div style={{ flex: "1 1 auto", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
+        <div className="sidebar-empty-project">
           {/* Guidance only: workspace creation lives in the add button above
               the session list — no duplicate New-Project affordance here. */}
-          <div style={{ textAlign: "center", color: "var(--text-dim)", fontSize: 12 }}>
-            <div>{t("sidebar.chooseProject")}</div>
-          </div>
+          <div>{t("sidebar.chooseProject")}</div>
         </div>
       )}
 
       <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
 
-      {/* Settings at bottom (icon in rail) */}
-      <div className="sidebar-section sidebar-settings" style={{ flexShrink: 0 }}>
+      <div className="sidebar-settings">
         <button
-          className={`sidebar-item sidebar-button ${settingsOpen ? "active" : ""}`}
+          type="button"
+          className={`sidebar-settings-trigger${settingsOpen ? " active" : ""}`}
           onClick={() => openSettings()}
           aria-haspopup="dialog"
           aria-expanded={settingsOpen}
         >
-          <Settings2 size={15} aria-hidden="true" />
+          <Settings2 size={16} aria-hidden="true" />
           <span>{t("sidebar.settings")}</span>
         </button>
       </div>

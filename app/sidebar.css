@@ -17,6 +17,11 @@
   --sb-radius: 12px;
   --sb-radius-row: 8px;
   --sb-pad-x: 12px;
+  --sb-caption: rgb(173, 178, 184);          /* dsh chevron caption */
+  --sb-scrollbar-thumb: rgb(229, 229, 229);  /* dsw scrollbar-bg-l2 */
+  --sb-scrollbar-thumb-hover: rgb(84, 85, 87);
+  --sb-scrollbar-width: 8px;
+  --sb-scrollbar-offset: 2px;
 
   background: var(--sb-fill);
   border-right: 1px solid var(--sb-border-l1);
@@ -36,13 +41,26 @@ html.dark .workspace-nav-container {
   --sb-button-fill: rgb(44, 44, 46);
   --sb-button-hover: rgb(53, 54, 56);
   --sb-brand: rgb(103, 158, 254);            /* deepseek-400 */
+  --sb-caption: rgb(173, 178, 184);
+  --sb-scrollbar-thumb: rgb(84, 85, 87);
+  --sb-scrollbar-thumb-hover: rgb(151, 157, 166);
 }
 
 /* ---- Sidebar shell ---- */
 .sidebar {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
   padding: 6px var(--sb-pad-x);
   color: var(--sb-text-primary);
   font-size: 14px;
+}
+.sidebar.quiet-bars {
+  --sb-scrollbar-thumb: transparent;
+  --sb-scrollbar-thumb-hover: transparent;
 }
 
 /* ---- Logo row (dsh SidebarRoot .logoRow) ---- */
@@ -61,23 +79,48 @@ html.dark .workspace-nav-container {
 .sidebar-brand {
   flex: 1;
   min-width: 0;
-  display: flex;
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.sidebar-brand:hover,
+.sidebar-brand:disabled { background: transparent; }
+.sidebar-brand:disabled { cursor: default; }
+.sidebar-brand-identity {
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  overflow: hidden;
-  color: var(--sb-text-primary);
+  height: 24px;
+  min-width: 0;
 }
-.sidebar-brand strong { font-size: 13px; font-weight: 600; }
+.sidebar-brand-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 24px;
+  letter-spacing: 0.04em;
+}
 .brand-mark {
-  display: grid;
-  place-items: center;
-  width: 23px;
-  height: 23px;
-  border: 1px solid var(--sb-text-tertiary);
-  border-radius: 6px;
-  background: var(--sb-button-fill);
-  color: var(--sb-brand);
-  font: 800 12px var(--font-mono);
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: 700 16px/24px inherit;
 }
 
 /* Desktop toggle (panel-left icon), right edge of the logo row. */
@@ -140,15 +183,26 @@ html.dark .workspace-nav-container {
 .sidebar-new-session:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ---- Nav item (Roles / Graphs, below New Session) ---- */
+.sidebar-nav {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 0 8px;
+}
 .sidebar-nav-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
-  padding: 7px 10px;
+  height: 32px;
+  padding: 0 8px;
+  box-sizing: border-box;
   border-radius: var(--sb-radius-row);
-  color: var(--sb-text-secondary);
-  font-size: 13px;
+  color: var(--sb-text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
   border: 0;
   background: transparent;
   text-align: left;
@@ -158,9 +212,9 @@ html.dark .workspace-nav-container {
 }
 .sidebar-nav-item:hover { background: var(--sb-hover); color: var(--sb-text-primary); }
 .sidebar-nav-item.active {
-  background: var(--sb-active);
+  background: var(--sb-hover);
   color: var(--sb-text-primary);
-  font-weight: 600;
+  font-weight: 500;
 }
 .sidebar-nav-item .nav-icon { color: var(--sb-text-secondary); }
 .sidebar-nav-item.active .nav-icon { color: var(--sb-brand); }
@@ -293,6 +347,96 @@ html.dark .workspace-nav-container {
 }
 .sidebar-project-selector { margin-top: 0; margin-bottom: 4px; }
 
+/* ---- Session list (dsh WorkspaceBrowser .treeBody / .list / .fade) ---- */
+.sidebar .sidebar-sessions {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-left: -4px;
+  margin-right: calc(-1 * var(--sb-pad-x));
+  padding: 0 0 0 4px;
+  overflow: hidden;
+}
+.sidebar-tree-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.sidebar-session-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin-right: var(--sb-scrollbar-offset);
+  padding-right: calc(var(--sb-pad-x) - var(--sb-scrollbar-width) - var(--sb-scrollbar-offset));
+  padding-bottom: 16px;
+  scrollbar-gutter: stable;
+}
+.sidebar-session-list::-webkit-scrollbar { width: var(--sb-scrollbar-width); }
+.sidebar-session-list::-webkit-scrollbar-track { background: transparent; }
+.sidebar-session-list::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: var(--sb-scrollbar-thumb);
+}
+.sidebar-session-list::-webkit-scrollbar-thumb:hover {
+  background: var(--sb-scrollbar-thumb-hover);
+}
+@supports not selector(::-webkit-scrollbar) {
+  .sidebar-session-list {
+    scrollbar-width: thin;
+    scrollbar-color: var(--sb-scrollbar-thumb) transparent;
+  }
+}
+.sidebar-list-fade {
+  position: absolute;
+  left: 0;
+  right: var(--sb-pad-x);
+  bottom: 0;
+  height: 24px;
+  background: linear-gradient(to bottom, transparent, var(--sb-fill));
+  pointer-events: none;
+}
+.sidebar-empty-project {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  text-align: center;
+  color: var(--sb-text-tertiary);
+  font-size: 12px;
+}
+
+/* ---- Settings foot (dsh SettingsRoot .trigger) ---- */
+.sidebar .sidebar-settings {
+  flex: none;
+  padding: 0;
+  margin-top: auto;
+}
+.sidebar-settings-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% + 4px);
+  height: 42px;
+  margin: 4px -2px;
+  padding: 0 10px 0 8px;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--sb-text-primary);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  cursor: pointer;
+  overflow: hidden;
+}
+.sidebar-settings-trigger:hover,
+.sidebar-settings-trigger.active { background: var(--sb-hover); }
+
 /* ---- Rows (session/project), scoped overrides of globals' .sidebar-item ---- */
 .sidebar .sidebar-item {
   padding: 6px 10px;
@@ -303,17 +447,35 @@ html.dark .workspace-nav-container {
 .sidebar .sidebar-item:hover { background: var(--sb-hover); color: var(--sb-text-primary); }
 .sidebar .sidebar-item.active { background: var(--sb-active); color: var(--sb-text-primary); font-weight: 600; }
 .sidebar .session-action-trigger,
-.sidebar .sidebar-icon-btn,
-.sidebar .sidebar-archived-toggle {
+.sidebar .sidebar-icon-btn {
   color: var(--sb-text-tertiary);
 }
 .sidebar .session-action-trigger:hover,
-.sidebar .sidebar-icon-btn:hover,
-.sidebar .sidebar-archived-toggle:hover {
+.sidebar .sidebar-icon-btn:hover {
   background: var(--sb-hover);
   color: var(--sb-text-secondary);
 }
-.sidebar-project-group > div:nth-child(2) { margin: 0 4px; }
+.sidebar .sidebar-archived-toggle {
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  padding: 0 12px 0 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--sb-text-tertiary);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+.sidebar .sidebar-archived-toggle:hover {
+  background: transparent;
+  color: var(--sb-text-secondary);
+}
+.sidebar .sidebar-project-group { margin-bottom: 0; }
+.sidebar .sidebar-project-group + .sidebar-project-group { margin-top: 4px; }
 .sidebar .sidebar-project-group [role="button"] {
   border-radius: var(--sb-radius-row);
 }
@@ -406,7 +568,10 @@ html.dark .workspace-nav-container {
   color: var(--sb-text-tertiary);
 }
 
-.sb-project-row .sb-chevron { display: none; }
+.sb-project-row .sb-chevron {
+  display: none;
+  color: var(--sb-caption);
+}
 .sb-project-row:hover .sb-chevron { display: inline-flex; }
 .sb-project-row:hover .sb-folder { display: none; }
 
@@ -427,6 +592,13 @@ html.dark .workspace-nav-container {
   height: 32px;
   gap: 0;
   box-sizing: border-box;
+  animation: sb-row-in 150ms ease;
+}
+@keyframes sb-row-in {
+  from { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sb-session-row { animation: none; }
 }
 
 .sb-session-row .sb-session-title {

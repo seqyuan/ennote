@@ -2,6 +2,7 @@
 
 import { Archive, MoreHorizontal, Pencil, RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { isBlankSession } from "@/lib/session-blank";
 import type { Session } from "@/components/settings/types";
 import type { SessionLifecycleView } from "@/hooks/useProjectSessions";
 import { useT } from "@/components/LocaleProvider";
@@ -135,14 +136,14 @@ function SessionRow({
           role="button"
           tabIndex={0}
           aria-current={isSelected ? "page" : undefined}
-          aria-label={session.title}
+          aria-label={isBlankSession(session) ? t("sidebar.newSession") : session.title}
           onClick={() => view === "active" && switchSession(session.id)}
           onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && view === "active") { e.preventDefault(); switchSession(session.id); } }}
         >
           <span className="sb-row-slot sb-session-status">
             {isRunning && <span className="sb-running-dot" aria-hidden="true" />}
           </span>
-          <span className="sb-session-title">{session.title}</span>
+          <span className="sb-session-title">{isBlankSession(session) ? t("sidebar.newSession") : session.title}</span>
           <span className="sb-session-time" aria-hidden="true">{formatRelativeTime(session.updatedAt, t)}</span>
         </div>
         <span className="sb-row-actions" ref={menuRef}>

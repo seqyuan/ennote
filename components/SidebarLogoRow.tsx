@@ -6,15 +6,26 @@ import { useT } from "@/components/LocaleProvider";
 export function SidebarLogoRow(props: {
   onToggleSidebar: () => void;
   onCloseNavigation: () => void;
+  onNewSession: () => void;
+  newSessionDisabled: boolean;
 }) {
-  const { onToggleSidebar, onCloseNavigation } = props;
+  const { onToggleSidebar, onCloseNavigation, onNewSession, newSessionDisabled } = props;
   const t = useT();
   return (
     <div className="sidebar-logo-row">
-      <div className="sidebar-brand">
-        <span className="brand-mark">E</span>
-        <strong>Ennote</strong>
-      </div>
+      <button
+        type="button"
+        className="sidebar-brand"
+        disabled={newSessionDisabled}
+        onClick={onNewSession}
+        aria-label={t("sidebar.newChatAria")}
+        title={newSessionDisabled ? t("sidebar.selectProjectFirst") : t("sidebar.newChatAria")}
+      >
+        <span className="sidebar-brand-identity" aria-hidden="true">
+          <span className="brand-mark">E</span>
+          <span className="sidebar-brand-name">Ennote</span>
+        </span>
+      </button>
 
       {/* Desktop collapse (dsh panel-left toggle). Mobile drawer has its
           own close X; this button is hidden below 641px via CSS. */}
