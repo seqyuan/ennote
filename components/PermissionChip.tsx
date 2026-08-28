@@ -53,18 +53,16 @@ export function PermissionChip({
   const id = useId();
   const locked = disabled || !permissionReady;
 
+  const menuOpen = open && !locked;
+
   useEffect(() => {
-    if (!open) return;
+    if (!menuOpen) return;
     const close = (event: MouseEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     };
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
-  }, [open]);
-
-  useEffect(() => {
-    if (locked) setOpen(false);
-  }, [locked]);
+  }, [menuOpen]);
 
   return (
     <div ref={rootRef} className="permission-chip">
@@ -73,18 +71,18 @@ export function PermissionChip({
         className="permission-chip-trigger"
         aria-label={`${t("composer.permissionMode")}: ${modeLabel(permissionMode)}`}
         aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={open ? `${id}-menu` : undefined}
+        aria-expanded={menuOpen}
+        aria-controls={menuOpen ? `${id}-menu` : undefined}
         disabled={locked}
         onClick={() => setOpen((value) => !value)}
       >
         <span className="permission-chip-icon" aria-hidden><PermissionGlyph mode={permissionMode} /></span>
         <span className="permission-chip-label">{modeLabel(permissionMode)}</span>
-        <svg className={open ? "permission-chip-chevron open" : "permission-chip-chevron"} width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <svg className={menuOpen ? "permission-chip-chevron open" : "permission-chip-chevron"} width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M3.5 5.25L7 8.75L10.5 5.25" />
         </svg>
       </button>
-      {open && (
+      {menuOpen && (
         <div id={`${id}-menu`} className="permission-chip-menu" role="menu" aria-label={t("composer.permissionMode")}>
           {MODES.map((mode) => {
             const selected = mode === permissionMode;
