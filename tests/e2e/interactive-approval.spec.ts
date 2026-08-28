@@ -66,9 +66,7 @@ test("pending approval survives reload and resolves the whole batch", async ({ p
   await openApproval(page);
   await expect(page.getByText("write", { exact: true })).toBeVisible();
   await expect(page.getByText("bash", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Configure run", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Ask", exact: true })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Ask", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: /Permission mode: Ask/ })).toBeDisabled();
 
   await page.reload();
   await page.getByTitle("Select project").first().click();

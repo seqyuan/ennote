@@ -34,7 +34,16 @@ async function mockDirectRole(page: Page, onInvocation: (body: Record<string, un
     if (path === "/v1/provider-profiles") return fulfill(route, []);
     if (path === "/v1/model-profiles") return fulfill(route, [model]);
     if (path === "/v1/policy-profiles") return fulfill(route, policies);
-    if (path === "/v1/roles") return fulfill(route, { items: [role], nextCursor: "" });
+    if (path === "/v1/global-roles") {
+      return fulfill(route, [{ id: role.id, name: role.name, path: "/home/roles/security-reviewer/role.md", digest: `sha256:${"a".repeat(64)}` }]);
+    }
+    if (path === `/v1/global-roles/${role.id}`) {
+      return fulfill(route, {
+        id: role.id, name: role.name, path: "/home/roles/security-reviewer/role.md", digest: `sha256:${"a".repeat(64)}`,
+        document: { handle: role.handle, name: role.name, description: role.description, positioning: role.positioning, icon: role.icon, color: role.color },
+      });
+    }
+    if (path === `/v1/global-roles/${role.id}/versions`) return fulfill(route, [{ version: 1, publishedAt: now }]);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
     if (path === `/v1/sessions/${session.id}`) return fulfill(route, session);
     if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, null);
@@ -73,7 +82,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     await page.getByTitle("Invocation target").click();
     await page.getByRole("option", { name: new RegExp(role.handle) }).click();
     await expect(page.getByTitle("Default Model")).toBeDisabled();
-    await expect(page.getByRole("button", { name: "Ask", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: /Permission mode/ })).toBeDisabled();
     await page.getByRole("textbox", { name: "Message the agent" }).fill("Check the new policy.");
     await page.getByRole("button", { name: "Send", exact: true }).click();
     await expect.poll(() => invocation).toBeTruthy();

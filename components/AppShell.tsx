@@ -26,13 +26,15 @@ import { useProjectFiles } from "@/hooks/useProjectFiles";
 import { useProjectSelector } from "@/hooks/useProjectSelector";
 import { SettingsView } from "./SettingsView";
 import type { WorkspaceView } from "./workspace-view";
+import { useWorkspaceSessionConnect } from "@/hooks/useWorkspaceSessionConnect";
+import { reuseOrCreateBlankSession, SELECTED_SESSION_KEY, writeStoredId } from "@/lib/ensure-blank-session";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { SettingsTab, Session } from "@/components/settings/types";
 
 export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView }) {
   const isMobile = useMediaQuery("(max-width: 640px)");
   const {
-    projects, selectedProject, switchProject: workspaceSwitchProject,
+    projects, projectsReady, selectedProject, switchProject: workspaceSwitchProject,
     createProjectOpen, openCreateProject, confirmCreateProject, cancelCreateProject, createProjectBusy,
     settingsOpen, settingsTab, openSettings: workspaceOpenSettings, closeSettings: workspaceCloseSettings,
     workspaceFor, togglePinProject, pinnedProjectIds, renameProject, deleteProject,
@@ -68,6 +70,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
 
   const selectSession = useCallback((sessionId: string | null) => {
     setSelectedSessionState(sessionId);
+    writeStoredId(SELECTED_SESSION_KEY, sessionId);
   }, []);
 
   // Resizable panels
@@ -131,26 +134,14 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [closeMobileNavigation, isMobile, sidebarOpen]);
 
-  // Session data (navigation/workspace domain stays here; the chat session
-  // hooks live inside useChatController and surface as composed views).
   const sessionNavigation = useProjectSessions(selectedProject);
   const sidebarGroups = useSidebarProjectGroups(projects, pinnedProjectIds, selectedProject);
   const settings = useSettingsProfiles();
   const replaceSession = sessionNavigation.replaceSession;
   const selectedSessionRecord = sessionNavigation.activeSessions.find(s => s.id === selectedSession);
-
   const promptCatalog = usePromptTemplates(selectedProject);
-
-  // Chat domain: composer state, session data hooks and all chat actions live
-  // in the controller; AppShell reads only the composed views plus the run id
-  // for sidebar run indicators.
   const chat = useChatController({
-    selectedSession,
-    sessionRecord: selectedSessionRecord,
-    selectedProject,
-    promptCatalog,
-    settings,
-    replaceSession,
+    selectedSession, sessionRecord: selectedSessionRecord, selectedProject, promptCatalog, settings, replaceSession,
   });
 
   const runningSessionIds = useRunningSessionIds(
@@ -186,9 +177,8 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
 
   const createSessionIn = useCallback(async (projectId: string) => {
     try {
-      const session = await apiFetch<Session>(`/v1/projects/${encodeURIComponent(projectId)}/sessions`, {
-        method: "POST", body: JSON.stringify({ title: `Chat ${new Date().toLocaleTimeString()}` }),
-      });
+      workspaceSwitchProject(projectId);
+      const session = await reuseOrCreateBlankSession(projectId, sessionNavigation.activeSessions);
       chat.run.setError(null);
       sessionNavigation.replaceSession(session);
       selectSession(session.id);
@@ -198,11 +188,17 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
     } catch (reason) {
       chat.run.setError((reason as Error).message);
     }
-  }, [changeView, selectSession, sessionNavigation, sidebarGroups, chat.run]);
+  }, [changeView, selectSession, sessionNavigation, sidebarGroups, chat.run, workspaceSwitchProject]);
 
   const createSession = useCallback(async () => {
     if (selectedProject) await createSessionIn(selectedProject);
   }, [createSessionIn, selectedProject]);
+
+  useWorkspaceSessionConnect({
+    projectsReady, selectedProject, selectedSession,
+    sessions: sessionNavigation.activeSessions, sessionsLoading: sessionNavigation.loading,
+    selectSession, connectBlank: createSessionIn,
+  });
 
   const renameSession = useCallback(async (session: Session, title: string) => {
     const updated = await apiFetch<Session>(`/v1/sessions/${encodeURIComponent(session.id)}`, {
@@ -334,8 +330,8 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
           aria-label={isMobile && sidebarOpen ? "Navigation" : undefined}
           id="workspace-navigation"
           style={{
-            width: isMobile ? undefined : sidebarOpen ? sidebarResize.width : 56,
-            minWidth: isMobile ? undefined : sidebarOpen ? sidebarResize.width : 56,
+            width: isMobile ? undefined : sidebarOpen ? sidebarResize.width : 0,
+            minWidth: isMobile ? undefined : sidebarOpen ? sidebarResize.width : 0,
             transition: sidebarOpen || sidebarResize.isResizing ? "none" : undefined,
           }}
         >
@@ -400,9 +396,8 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
                 hasModel={settings.models.length > 0}
                 pinnedProjectIds={pinnedProjectIds}
                 togglePinProject={togglePinProject}
-                onSwitchProject={switchProject}
+                onSwitchProject={(projectId) => void createSessionIn(projectId)}
                 onNewProject={openCreateProject}
-                onNewSession={() => void createSession()}
                 onOpenSettings={openSettings}
               />
             </>

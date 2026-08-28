@@ -21,7 +21,6 @@ async function mockApp(page: Page, onTurn?: (body: Record<string, unknown>) => v
     if (path === "/v1/policy-profiles") return fulfill(route, policies);
     if (path === "/v1/provider-profiles") return fulfill(route, [provider]);
     if (path === "/v1/model-profiles") return fulfill(route, []);
-    if (path === "/v1/roles") return fulfill(route, { items: [], nextCursor: "" });
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
     if (path === `/v1/sessions/${session.id}`) return fulfill(route, session);
     if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, null);
@@ -46,12 +45,10 @@ test("each turn freezes the selected permission profile", async ({ page }) => {
   await page.getByText(project.name, { exact: true }).click();
   await page.getByText(session.title, { exact: true }).click();
 
-  await page.getByRole("button", { name: "Configure run", exact: true }).click();
-  const discuss = page.getByRole("button", { name: "Discuss", exact: true });
-  const ask = page.getByRole("button", { name: "Ask", exact: true });
-  await expect(discuss).toHaveAttribute("aria-pressed", "true");
-  await ask.click();
-  await page.getByPlaceholder("Type a message…").fill("run this turn");
+  await page.getByRole("button", { name: /Permission mode/ }).click();
+  await expect(page.getByRole("menuitemradio", { name: "Discuss", exact: true })).toHaveAttribute("aria-checked", "true");
+  await page.getByRole("menuitemradio", { name: "Ask", exact: true }).click();
+  await page.getByRole("textbox", { name: "Message the agent" }).fill("run this turn");
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect.poll(() => turnBody).toBeTruthy();
   expect(turnBody).toMatchObject({ text: "run this turn", target: { kind: "host" },
@@ -68,8 +65,7 @@ test.describe("mobile", () => {
     await page.getByText(project.name, { exact: true }).click();
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByText(session.title, { exact: true }).click();
-    await page.getByRole("button", { name: "Configure run", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Discuss", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Permission mode/ })).toBeVisible();
     await expect(page.getByRole("button", { name: "Send", exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   });

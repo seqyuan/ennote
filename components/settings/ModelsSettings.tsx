@@ -9,6 +9,14 @@ import { ProviderEditor } from "@/components/settings/models/ProviderEditor";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { ModelProfile, ProviderProfile } from "@/components/settings/types";
 
+function IconPlus({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** One provider row joined from the profile list and the built-in directory:
  *  directory rows carry `directory` (dormant — no stored profile yet) and are
  *  what the add flow adopts; stored profiles always override their directory
@@ -207,6 +215,7 @@ export function ModelsSettings({ providers, models, refresh, setError }: {
               setEditing(dormant[0]?.id ?? null);
             }}
           >
+            <IconPlus />
             {t("settings.models.add")}
           </button>
           <button
@@ -219,6 +228,7 @@ export function ModelsSettings({ providers, models, refresh, setError }: {
               setDeclaring(true);
             }}
           >
+            <IconPlus />
             {t("settings.models.customAdd")}
           </button>
         </div>

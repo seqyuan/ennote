@@ -1,48 +1,71 @@
 "use client";
 
-import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useT } from "@/components/LocaleProvider";
+import { FetchModelsButton } from "@/components/settings/models/FetchModelsButton";
 import { formatCapacity, parseCapacity } from "@/lib/capacity";
 import type { ModelDraft } from "@/lib/model-draft";
 
 /** The two token counts edited as K/M-suffixed text behind a row's disclosure. */
 type CapacityField = "contextWindow" | "maxTokens";
 
-/** A row's text field, or the empty string when unset or not a string. */
 function textOf(model: ModelDraft, key: string): string {
   const value = model[key];
   return typeof value === "string" ? value : "";
 }
 
-/** A row's numeric field, or `undefined` when unset or not a number. */
 function numberOf(model: ModelDraft, key: string): number | undefined {
   const value = model[key];
   return typeof value === "number" ? value : undefined;
 }
 
+function IconChevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden
+      style={{ transform: open ? "rotate(90deg)" : undefined, transition: "transform 120ms ease" }}
+    >
+      <path d="M6 3.5L10.5 8L6 12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconTrash() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M2.5 4h11M6.5 4V2.5h3V4M4 4l.7 9a1 1 0 001 .9h4.6a1 1 0 001-.9L12 4M6.5 6.8v4.4M9.5 6.8v4.4"
+        stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconPlus() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /**
- * The model list of one provider profile: one row per model (id + display
- * name) with the context window and output cap behind a per-row disclosure,
- * plus the add/delete/reset actions. An empty list means "serve the built-in
- * catalog" once Phase 2 lands; for now the parent decides what an empty list
- * means.
+ * The model list of one provider profile: one bordered entry per model (id +
+ * display name) with capacities behind a per-row disclosure, plus add/delete
+ * and the "Fetch available models" interrogation. Matches dsh ModelListEditor.
  */
-export function ModelListEditor({ models, onChange, overridden, onReset, disabled }: {
+export function ModelListEditor({ models, onChange, overridden, onReset, disabled, probe, probeBlocked, onFetchError }: {
   models: readonly ModelDraft[];
   onChange: (models: ModelDraft[]) => void;
-  /** Whether the user layer currently owns the whole array (shows Reset). */
   overridden?: boolean;
-  /** Remove the user-owned array and return to inheritance. */
   onReset?: () => void;
   disabled?: boolean;
+  probe?: { baseUrl?: string; apiKey?: string };
+  probeBlocked?: string;
+  onFetchError?: (message: string) => void;
 }) {
   const t = useT();
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(() => new Set());
-  // Capacities are edited as text, so a field's keystrokes are held here
-  // rather than re-derived from the parsed count on every change (which would
-  // rewrite `1000` to `1K` mid-word). One entry per field: a single buffer
-  // would be displaced by editing any other field.
   const [editing, setEditing] = useState<ReadonlyMap<string, string>>(() => new Map());
 
   const bufferKey = (index: number, field: CapacityField): string => `${String(index)}:${field}`;
@@ -50,8 +73,6 @@ export function ModelListEditor({ models, onChange, overridden, onReset, disable
   const patch = (index: number, next: Record<string, string | number | undefined>): void => {
     onChange(models.map((model, at) => {
       if (at !== index) return model;
-      // Rebuilt rather than spread over: an emptied optional field must leave
-      // the profile, not be stored as a value its schema would reject.
       const cleared = new Set(
         Object.entries(next).filter(([, value]) => value === undefined || value === "").map(([key]) => key),
       );
@@ -104,110 +125,109 @@ export function ModelListEditor({ models, onChange, overridden, onReset, disable
     setEditing(current => reindexOnRemove(current, index));
   };
 
-  const inputStyle: React.CSSProperties = {
-    height: 30, padding: "0 8px", border: "1px solid var(--stg-border-l2)",
-    borderRadius: 6, background: "var(--stg-input-fill)", color: "var(--stg-text-primary)",
-    font: "13px/20px var(--font-sans)", minWidth: 0,
-  };
-  const iconButtonStyle: React.CSSProperties = {
-    display: "grid", placeItems: "center", width: 28, height: 28, padding: 0, flexShrink: 0,
-    border: "1px solid var(--stg-border-l2)", borderRadius: 6, background: "transparent",
-    color: "var(--stg-text-secondary)", cursor: "pointer",
-  };
+  const draftId = (draft: ModelDraft): string => (typeof draft.id === "string" ? draft.id : "").trim();
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ fontSize: 12, fontWeight: 500, color: "var(--stg-text-primary)" }}>{t("settings.models.models")}</span>
-        {overridden !== undefined && (
-          <span style={{ fontSize: 11, color: "var(--stg-text-tertiary)" }}>
-            {overridden ? t("settings.models.modelsCustomized") : t("settings.models.modelsInherited")}
-          </span>
-        )}
+    <section className="settings-models-catalog" aria-label={t("settings.models.models")}>
+      <div className="settings-models-list-head">
+        <div className="settings-models-catalog-heading">
+          <span className="settings-models-catalog-title">{t("settings.models.models")}</span>
+          {overridden !== undefined && (
+            <span className="settings-models-catalog-meta">
+              {overridden ? t("settings.models.modelsCustomized") : t("settings.models.modelsInherited")}
+            </span>
+          )}
+        </div>
         {overridden === true && onReset !== undefined && (
-          <button
-            type="button"
-            className="secondary-btn"
-            style={{ minHeight: 26, height: 26, padding: "0 10px", borderRadius: 13, fontSize: 11, marginLeft: "auto" }}
-            disabled={disabled}
-            onClick={onReset}
-          >
+          <button type="button" className="settings-models-link" disabled={disabled} onClick={onReset}>
             {t("settings.models.resetModels")}
           </button>
         )}
+        {probe !== undefined && (
+          <FetchModelsButton
+            probe={probe}
+            existingIds={models.map(draftId)}
+            onAdopt={(selected) => {
+              const byId = new Map(models.map(d => [draftId(d), d]));
+              for (const s of selected) byId.set(draftId(s), byId.get(draftId(s)) ?? s);
+              onChange([...byId.values()]);
+            }}
+            onError={onFetchError}
+            disabled={disabled}
+            blockedReason={probeBlocked}
+          />
+        )}
       </div>
       {models.length === 0 && (
-        <p style={{ margin: 0, fontSize: 12, lineHeight: "18px", color: "var(--stg-text-tertiary)" }}>
-          {t("settings.models.modelsEmpty")}
-        </p>
+        <p className="settings-models-catalog-empty">{t("settings.models.modelsEmpty")}</p>
       )}
       {models.map((model, index) => (
-        <div key={index} style={{ display: "flex", flexDirection: "column", gap: 4, padding: "6px 0" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <div key={index} className="settings-models-entry">
+          <div className="settings-models-entry-row">
             <input
+              className="settings-models-input"
               type="text"
               value={textOf(model, "id")}
               placeholder={t("settings.models.modelId")}
               aria-label={`${t("settings.models.modelId")} ${index + 1}`}
               disabled={disabled}
-              style={{ ...inputStyle, flex: 1 }}
               onChange={(event) => { patch(index, { id: event.target.value }); }}
             />
             <input
+              className="settings-models-input"
               type="text"
               value={textOf(model, "name")}
               placeholder={t("settings.models.modelName")}
               aria-label={`${t("settings.models.modelName")} ${index + 1}`}
               disabled={disabled}
-              style={{ ...inputStyle, flex: 1 }}
               onChange={(event) => { patch(index, { name: event.target.value === "" ? undefined : event.target.value }); }}
             />
             <button
               type="button"
+              className="settings-models-icon"
               aria-label={`${t("settings.models.modelAdvanced")} ${index + 1}`}
               aria-expanded={expanded.has(index)}
               title={t("settings.models.modelAdvanced")}
-              style={iconButtonStyle}
               onClick={() => { toggleExpanded(index); }}
             >
-              {expanded.has(index) ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
+              <IconChevron open={expanded.has(index)} />
             </button>
             <button
               type="button"
+              className="settings-models-icon settings-models-icon-danger"
               aria-label={`${t("settings.models.removeModel")} ${index + 1}`}
               title={t("settings.models.removeModel")}
               disabled={disabled}
-              style={{ ...iconButtonStyle, color: "var(--stg-danger)" }}
               onClick={() => { remove(index); }}
             >
-              <Trash2 size={13} aria-hidden="true" />
+              <IconTrash />
             </button>
           </div>
           {expanded.has(index) && (
-            <div style={{ display: "flex", gap: 8, paddingLeft: 2 }}>
-              <label style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1, fontSize: 11, color: "var(--stg-text-secondary)" }}>
-                {t("settings.models.contextWindow")}
+            <div className="settings-models-entry-advanced">
+              <label className="settings-models-entry-field">
+                <span className="settings-models-entry-field-label">{t("settings.models.contextWindow")}</span>
                 <input
+                  className="settings-models-input"
                   type="text"
                   inputMode="numeric"
                   value={capacityText(model, index, "contextWindow")}
                   placeholder="256K"
                   aria-label={`${t("settings.models.contextWindow")} ${index + 1}`}
                   disabled={disabled}
-                  style={inputStyle}
                   onChange={(event) => { editCapacity(index, "contextWindow", event.target.value); }}
                 />
               </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1, fontSize: 11, color: "var(--stg-text-secondary)" }}>
-                {t("settings.models.maxTokens")}
+              <label className="settings-models-entry-field">
+                <span className="settings-models-entry-field-label">{t("settings.models.maxTokens")}</span>
                 <input
+                  className="settings-models-input"
                   type="text"
                   inputMode="numeric"
                   value={capacityText(model, index, "maxTokens")}
                   placeholder="32K"
                   aria-label={`${t("settings.models.maxTokens")} ${index + 1}`}
                   disabled={disabled}
-                  style={inputStyle}
                   onChange={(event) => { editCapacity(index, "maxTokens", event.target.value); }}
                 />
               </label>
@@ -217,14 +237,13 @@ export function ModelListEditor({ models, onChange, overridden, onReset, disable
       ))}
       <button
         type="button"
-        className="secondary-btn"
-        style={{ alignSelf: "flex-start", minHeight: 28, height: 28, padding: "0 12px", borderRadius: 14, fontSize: 12, display: "inline-flex", alignItems: "center", gap: 5 }}
+        className="settings-models-add-model"
         disabled={disabled}
         onClick={() => { onChange([...models, { id: "" }]); }}
       >
-        <Plus size={13} aria-hidden="true" />
+        <IconPlus />
         {t("settings.models.addModel")}
       </button>
-    </div>
+    </section>
   );
 }

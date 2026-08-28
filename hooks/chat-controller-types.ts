@@ -1,5 +1,5 @@
 import type { PendingImage, TextAttachment } from "@/components/Composer";
-import type { ModelProfile, RoleSummary } from "@/components/settings/types";
+import type { ModelProfile, ProviderProfile, RoleSummary } from "@/components/settings/types";
 import type { ApprovalDecision, ToolApprovalRequest } from "@/lib/approval";
 import type { ConversationNode } from "@/lib/chat-messages";
 import type { PermissionMode, ThinkingEffort } from "@/lib/permission-mode";
@@ -73,6 +73,7 @@ export type ComposerView = {
   removeTextAttachment: (id: string) => void;
   attachFiles: (files: File[]) => void;
   models: ModelProfile[];
+  providers: ProviderProfile[];
   selectedModelId: string | null;
   setSelectedModelId: (modelId: string) => void;
   thinkingEffort: ThinkingEffort;

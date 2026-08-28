@@ -93,7 +93,7 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
     window.addEventListener(DEFAULT_PERMISSION_EVENT, onDefaultChange);
     return () => window.removeEventListener(DEFAULT_PERMISSION_EVENT, onDefaultChange);
   }, []);
-  const [thinkingEffort, setThinkingEffort] = useState<ThinkingEffort>("default");
+  const [effortOverrides, setEffortOverrides] = useState<Record<string, ThinkingEffort>>({});
   const [compactionPrompt, setCompactionPrompt] = useState<{ open: boolean; instructions: string; busy: boolean }>({
     open: false, instructions: "", busy: false,
   });
@@ -119,9 +119,13 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
   // The reset intentionally mirrors what selectSession used to do synchronously;
   // moving it here is the point of the design (§4.1.2), so the cascading-state
   // rule is bypassed for this deliberate effect.
+  const previousSession = useRef(selectedSession);
   useLayoutEffect(() => {
-    // Deliberate declarative reset (§4.1.2): mirrors the synchronous clearing
-    // selectSession used to do; cascading-state rule bypassed intentionally.
+    const previous = previousSession.current;
+    previousSession.current = selectedSession;
+    // Keep the draft when a project lands on its first blank session (dsh
+    // connectWorkspace). Switching between real sessions still clears.
+    if (previous === null && selectedSession) return;
     setInputVersioned("");
     clearAttachments();
   }, [selectedSession, setInputVersioned, clearAttachments]);
@@ -134,6 +138,17 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
       ?? settings.models[0]?.id
       ?? null
     : null;
+
+  // Effort is per-session like dsh's durable ModelSelection.reasoningEffort.
+  // The Worker session record has no effort field; the next turn still sends
+  // it on the run config. `"default"` is the catalog defaultEffort.
+  const thinkingEffort: ThinkingEffort = selectedSession
+    ? (effortOverrides[selectedSession] ?? "default")
+    : "default";
+  const setThinkingEffort = useCallback((effort: ThinkingEffort) => {
+    if (!selectedSession) return;
+    setEffortOverrides((current) => ({ ...current, [selectedSession]: effort }));
+  }, [selectedSession]);
 
   const selectedPermissionPolicyID = useCallback(
     () => { return permissionPolicyID(settings.policies, permissionMode); },
@@ -302,8 +317,21 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
 
   const selectModel = useCallback((modelId: string) => {
     if (!selectedSession) return;
+    // Optimistic seat, then PATCH so a refresh keeps the choice — dsh
+    // session.selectModel is the durable equivalent.
     setModelOverrides((current) => ({ ...current, [selectedSession]: modelId }));
-  }, [selectedSession]);
+    void apiFetch<Session>(`/v1/sessions/${encodeURIComponent(selectedSession)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ defaultModelProfileId: modelId }),
+    }).then(() => {
+      if (selectedSessionRef.current !== selectedSession) return;
+      void agent.refreshSelectedSession();
+    }).catch((reason) => {
+      if (selectedSessionRef.current === selectedSession) {
+        agent.setError(errorMessage(reason, "Failed to select model"));
+      }
+    });
+  }, [agent, selectedSession]);
 
   const startCompaction = useCallback(async () => {
     if (!selectedSession || agent.activeRunID) return;
@@ -357,6 +385,7 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
     removeTextAttachment,
     attachFiles: (files) => void attachFiles(files),
     models: settings.models.filter((model) => model.status === "active"),
+    providers: settings.providers,
     selectedModelId,
     setSelectedModelId: selectModel,
     thinkingEffort,

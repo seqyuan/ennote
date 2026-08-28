@@ -4,10 +4,11 @@ import { Bot, ImagePlus, ListPlus, Minimize2, Paperclip, Plus } from "lucide-rea
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
 import { useT } from "@/components/LocaleProvider";
 import { RoleTargetPicker } from "@/components/RoleTargetPicker";
+import { PermissionChip } from "@/components/PermissionChip";
 import { ModelSelect } from "@/components/ModelSelect";
 import { ContextMeter } from "@/components/ContextMeter";
 import { StatsLine } from "@/components/StatsLine";
-import type { ModelProfile, RoleSummary } from "@/components/settings/types";
+import type { ModelProfile, ProviderProfile, RoleSummary } from "@/components/settings/types";
 import type { SessionContextUsage, SessionStats } from "@/hooks/chat-controller-types";
 import { artifactPreviewURL } from "@/lib/artifacts";
 import type { PermissionMode, ThinkingEffort } from "@/lib/permission-mode";
@@ -62,6 +63,7 @@ interface ComposerProps {
   permissionReady: boolean;
   setPermissionMode: (mode: PermissionMode) => void;
   models: ModelProfile[];
+  providers: ProviderProfile[];
   selectedModelId: string | null;
   setSelectedModelId: (modelId: string) => void;
   thinkingEffort: ThinkingEffort;
@@ -81,6 +83,10 @@ interface ComposerProps {
   cancel: () => void;
   pendingFollowUps: { id: string; text: string }[];
   compactSession: () => void;
+  /** No workspace: the dashed card opens the project picker (dsh inert). */
+  inert?: boolean;
+  /** Centered empty-conversation layout (dsh hero / blank session). */
+  hero?: boolean;
   /** No session selected: the inert composer requests a project (hero picker). */
   onRequestProject?: () => void;
   // Prompt templates + @addressing panel.
@@ -100,12 +106,12 @@ interface ComposerProps {
 
 export function Composer({
   selectedSession, activeLeafMessageId, input, setInput, activeRun, compacting, hasPendingImage, reconnecting,
-  permissionMode, permissionReady, setPermissionMode, models, selectedModelId, setSelectedModelId, thinkingEffort, setThinkingEffort,
+  permissionMode, permissionReady, setPermissionMode, models, providers, selectedModelId, setSelectedModelId, thinkingEffort, setThinkingEffort,
   roles, selectedRoleId, setSelectedRoleId, textAttachments, removeTextAttachment, pendingImage, clearPendingImage, attachFiles, uploadImage, submit, steer, followUp, cancel, compactSession,
   pendingFollowUps,
   promptTemplates, showPromptPanel, onPromptSelect, onPromptPanelClose, expanding, expandDiag,
   panelRoles, panelFlows, onRoleSelect, onFlowSelect, contextUsage, stats,
-  onRequestProject,
+  onRequestProject, inert = false, hero = false,
 }: ComposerProps) {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const form = useRef<HTMLFormElement>(null);
@@ -132,12 +138,13 @@ export function Composer({
   }, [configOpen]);
 
   const configDot = Boolean(selectedRoleId) || permissionMode !== "discuss";
+  const selectedRole = roles.find((role) => role.id === selectedRoleId) ?? null;
 
   useEffect(() => {
     const element = textarea.current;
     if (!element) return;
     element.style.height = "0px";
-    element.style.height = `${Math.min(element.scrollHeight, 176)}px`;
+    element.style.height = `${Math.min(element.scrollHeight, 336)}px`;
   }, [input]);
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -226,9 +233,9 @@ export function Composer({
 
       <form className="composer" onSubmit={onSubmit} ref={form}>
         <div
-          className={`composer-editor${!selectedSession ? " composer-no-session" : ""}`}
+          className={`composer-editor${inert ? " composer-no-session" : ""}`}
           ref={configRef}
-          onClick={() => { if (!selectedSession) onRequestProject?.(); }}
+          onClick={() => { if (inert) onRequestProject?.(); }}
         >
           {configOpen && (
             <div className="composer-config-panel" role="dialog" aria-label={t("composer.runConfiguration")}>
@@ -236,22 +243,6 @@ export function Composer({
                 <span className="composer-config-label">{t("composer.target")}</span>
                 <RoleTargetPicker roles={roles} selectedRoleId={selectedRoleId} onSelect={setSelectedRoleId}
                   disabled={!selectedSession || activeRun || compacting} />
-              </div>
-              <div className="composer-config-row">
-                <span className="composer-config-label">{t("composer.permission")}</span>
-                <div className="permission-segment" role="group" aria-label="Permission mode">
-                  {(["discuss", "ask", "auto"] as PermissionMode[]).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      aria-pressed={permissionMode === mode}
-                      disabled={!selectedSession || activeRun || !permissionReady || Boolean(selectedRoleId)}
-                      onClick={() => setPermissionMode(mode)}
-                    >
-                      {mode === "discuss" ? "Discuss" : mode === "ask" ? "Ask" : "Auto"}
-                    </button>
-                  ))}
-                </div>
               </div>
               <div className="composer-config-row">
                 <span className="composer-config-label">{t("composer.attach")}</span>
@@ -287,9 +278,9 @@ export function Composer({
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={onKeyDown}
             rows={1}
-            readOnly={!selectedSession}
+            readOnly={inert}
             disabled={compacting}
-            placeholder={compacting ? t("composer.placeholderCompacting") : activeRun ? t("composer.placeholderSteer") : !selectedSession ? t("composer.placeholderNoSession") : t("composer.placeholderDefault")}
+            placeholder={compacting ? t("composer.placeholderCompacting") : activeRun ? t("composer.placeholderSteer") : inert ? t("composer.placeholderNoSession") : hero ? t("composer.placeholderHero") : t("composer.placeholderDefault")}
             aria-label={activeRun ? t("composer.steerAria") : t("composer.messageAria")}
           />
           <input
@@ -328,30 +319,30 @@ export function Composer({
                 disabled={!selectedSession || compacting}
                 onClick={() => setConfigOpen((value) => !value)}
               >
-                <Plus size={15} aria-hidden="true" />
+                <Plus size={14} aria-hidden="true" />
                 {configDot && <span className="composer-plus-dot" aria-hidden="true" />}
               </button>
               {selectedSession && (
-                <>
-                  <span
-                    className="composer-tag"
-                    title={t("composer.permissionMode")}
-                    aria-label={`${t("composer.permissionMode")}: ${permissionMode === "discuss" ? "Discuss" : permissionMode === "ask" ? "Ask" : "Auto"}`}
-                  >
-                    {permissionMode === "discuss" ? "Discuss" : permissionMode === "ask" ? "Ask" : "Auto"}
-                  </span>
-                  {selectedRoleId && (
-                    <span className="composer-tag composer-tag-role" title={t("composer.roleTarget")}>
-                      <Bot size={11} aria-hidden="true" />
-                      <span>{roles.find((role) => role.id === selectedRoleId)?.name ?? "Role"}</span>
+                <div className="composer-modes">
+                  <PermissionChip
+                    permissionMode={permissionMode}
+                    permissionReady={permissionReady}
+                    setPermissionMode={setPermissionMode}
+                    disabled={!selectedSession || activeRun || compacting || Boolean(selectedRoleId)}
+                  />
+                  {selectedRole && (
+                    <span className="composer-tag" title={t("composer.roleTarget")}>
+                      <Bot size={14} aria-hidden="true" />
+                      <span>{selectedRole.handle ? `@${selectedRole.handle}` : selectedRole.name}</span>
                     </span>
                   )}
-                </>
+                </div>
               )}
             </div>
             <div className="composer-trailing">
               <ModelSelect
                 models={models}
+                providers={providers}
                 selectedModelId={selectedModelId}
                 setSelectedModelId={setSelectedModelId}
                 thinkingEffort={thinkingEffort}
@@ -377,7 +368,7 @@ export function Composer({
                 </button>
               ) : (
                 <button type="submit" className="composer-primary" aria-label={t("composer.send")}
-                  disabled={!selectedSession || (!permissionReady && !selectedRoleId) || (!input.trim() && !hasPendingImage && textAttachments.length === 0)}>
+                  disabled={inert || !selectedSession || (!permissionReady && !selectedRoleId) || (!input.trim() && !hasPendingImage && textAttachments.length === 0)}>
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M8.3125 0.980183C8.66767 1.0531 8.97902 1.20418 9.2627 1.43233C9.48724 1.61297 9.73029 1.85793 9.97949 2.10714L14.707 6.83468L13.293 8.24874L9 3.95577V15.0417H7V3.95577L2.70703 8.24874L1.29297 6.83468L6.02051 2.10714C6.26971 1.85793 6.51277 1.61297 6.7373 1.43233C6.97662 1.23986 7.28445 1.04402 7.6875 0.980183C7.8973 0.947006 8.1031 0.95516 8.3125 0.980183Z" fill="currentColor" />
                   </svg>

@@ -3,7 +3,7 @@
 import { Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
 
-/** annovibe-style secret input: plaintext editable with a reveal toggle. */
+/** Secret input matching dsh's 32px field, with a reveal toggle. */
 export function SecretTextInput({ value, onChange, placeholder }: {
   value: string;
   onChange: (value: string) => void;
@@ -11,7 +11,7 @@ export function SecretTextInput({ value, onChange, placeholder }: {
 }) {
   const [visible, setVisible] = useState(false);
   return (
-    <span style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+    <span className="settings-models-secret">
       <input
         type={visible ? "text" : "password"}
         value={value}
@@ -19,23 +19,13 @@ export function SecretTextInput({ value, onChange, placeholder }: {
         autoComplete="off"
         spellCheck={false}
         onChange={(event) => onChange(event.target.value)}
-        style={{
-          flex: 1, minWidth: 0, height: 30, padding: "0 8px",
-          border: "1px solid var(--border)", borderRadius: 6,
-          background: "var(--bg)", color: "var(--text)",
-          font: "12px var(--font-mono)",
-        }}
       />
       <button
         type="button"
+        className="settings-models-secret-toggle"
         title={visible ? "Hide key" : "Show key"}
         aria-label={visible ? "Hide key" : "Show key"}
-        onClick={() => setVisible((value) => !value)}
-        style={{
-          display: "grid", placeItems: "center", width: 28, height: 30, padding: 0,
-          border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)",
-          color: "var(--text-muted)", cursor: "pointer", flexShrink: 0,
-        }}
+        onClick={() => setVisible((current) => !current)}
       >
         {visible ? <EyeOff size={13} aria-hidden="true" /> : <Eye size={13} aria-hidden="true" />}
       </button>

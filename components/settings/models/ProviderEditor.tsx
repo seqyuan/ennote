@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useT } from "@/components/LocaleProvider";
 import { SecretTextInput } from "@/components/settings/SecretTextInput";
-import { FetchModelsButton } from "@/components/settings/models/FetchModelsButton";
 import { ModelListEditor } from "@/components/settings/models/ModelListEditor";
 import { apiFetch } from "@/lib/worker-api.client";
 import { apiKeyFailure } from "@/lib/api-key";
@@ -12,13 +11,6 @@ import { validateModels, type ModelDraft } from "@/lib/model-draft";
 import { planModelSync, type BeforeModel } from "@/lib/model-sync";
 import type { ModelProfile, ProviderProfile } from "@/components/settings/types";
 
-const inputStyle: React.CSSProperties = {
-  height: 32, padding: "0 10px", border: "1px solid var(--stg-border-l2)",
-  borderRadius: 8, background: "var(--stg-input-fill)", color: "var(--stg-text-primary)",
-  font: "14px/22px var(--font-sans)", minWidth: 0,
-};
-
-/** Existing models converted to editable drafts (structurally open). */
 function toDrafts(models: readonly ModelProfile[]): ModelDraft[] {
   return models.map(model => ({
     id: model.modelName,
@@ -28,11 +20,6 @@ function toDrafts(models: readonly ModelProfile[]): ModelDraft[] {
   }));
 }
 
-function draftId(draft: ModelDraft): string {
-  return (typeof draft.id === "string" ? draft.id : "").trim();
-}
-
-/** Apply a model-sync plan through the wire. */
 async function applySync(plan: ReturnType<typeof planModelSync>): Promise<void> {
   for (const id of plan.toDelete) {
     await apiFetch(`/v1/model-profiles/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -46,20 +33,15 @@ async function applySync(plan: ReturnType<typeof planModelSync>): Promise<void> 
 }
 
 /**
- * The editor card for one provider. In update mode it edits an existing
- * profile: a single write-only API key field (blank keeps the stored key), a
- * collapsed 自定义设置 fold with the curated per-family extras (base URL, and
- * the display name of a hand-declared route), and the model list editor with
- * a "Fetch available models" interrogation that adopts the provider's catalog
- * into the draft. In create mode (directory setup/adopt) the card writes the
- * profile through POST and leaves a blank model list to the built-in catalog.
+ * The editor card for one provider. Pixel-aligned with dsh ProviderEditor:
+ * API key field, a 自定义设置 fold (base URL, optional display name, model
+ * catalog), and a Cancel/Apply footer. Reasoning effort is deliberately
+ * absent — it is a per-model capability offered by the composer picker.
  */
 export function ProviderEditor({ provider, models, creating, hideTitle, onClose, refresh, setError, onSaved }: {
   provider: ProviderProfile;
   models: readonly ModelProfile[];
-  /** Create the profile instead of updating it (directory setup/adopt card). */
   creating?: boolean;
-  /** Hide the title row (the adopt card renders its own provider select). */
   hideTitle?: boolean;
   onClose: (changed: boolean) => void;
   refresh: () => Promise<void>;
@@ -104,7 +86,6 @@ export function ProviderEditor({ provider, models, creating, hideTitle, onClose,
           body: JSON.stringify({
             name: displayName.trim() || undefined,
             baseUrl: baseURL.trim() || undefined,
-            // Blank keeps the stored key; a typed key replaces it.
             apiKey: keyValue || undefined,
           }),
         });
@@ -123,65 +104,70 @@ export function ProviderEditor({ provider, models, creating, hideTitle, onClose,
   }
 
   const submitDisabled = busy || keyFailure !== undefined || modelFailure !== undefined;
+  const keyPlaceholder = provider.credentialConfigured
+    ? t("settings.models.keyStored")
+    : t("settings.models.keyPlaceholder");
 
   return (
-    <div className="settings-row provider-settings-row" style={{ flexDirection: "column", gap: 12 }}>
+    <div className="settings-row provider-settings-row settings-models-editor">
       {!hideTitle && (
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-          <strong style={{ fontSize: 14, fontWeight: 500 }}>{provider.name}</strong>
-          {provider.name !== provider.id && <span style={{ fontSize: 11, color: "var(--stg-text-tertiary)" }}>{provider.id}</span>}
+        <div className="settings-models-editor-header">
+          <span className="settings-models-editor-title">{provider.name}</span>
+          {provider.name !== provider.id && (
+            <span className="settings-models-editor-route">{provider.id}</span>
+          )}
         </div>
       )}
-      <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--stg-text-secondary)" }}>
-        {t("settings.models.keyInput")}
-        <SecretTextInput value={keyDraft} onChange={setKeyDraft}
-          placeholder={provider.credentialConfigured ? t("settings.models.keyStored") : t("settings.models.keyPlaceholder")} />
+      <div className="settings-models-field">
+        <span className="settings-models-fieldlabel">{t("settings.models.keyInput")}</span>
+        <SecretTextInput value={keyDraft} onChange={setKeyDraft} placeholder={keyPlaceholder} />
         {keyFailure === undefined ? null
-          : <span style={{ fontSize: 11, color: "var(--stg-danger)" }}>{t(`settings.models.${keyFailure}`)}</span>}
-      </label>
-      <details style={{ fontSize: 12 }}>
-        <summary style={{ cursor: "pointer", color: "var(--stg-text-secondary)", fontWeight: 500, fontSize: 12 }}>
-          {t("settings.models.customized")}
-        </summary>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingTop: 10 }}>
+          : <p className="settings-models-error">{t(`settings.models.${keyFailure}`)}</p>}
+      </div>
+      <details className="settings-models-customized">
+        <summary className="settings-models-customized-summary">{t("settings.models.customized")}</summary>
+        <div className="settings-models-customized-body">
           {provider.custom && (
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--stg-text-secondary)" }}>
-              {t("settings.models.customDisplayName")}
-              <input type="text" value={displayName} disabled={busy} style={inputStyle}
+            <div className="settings-models-field">
+              <span className="settings-models-fieldlabel">{t("settings.models.customDisplayName")}</span>
+              <input
+                className="settings-models-input"
+                type="text"
+                value={displayName}
+                disabled={busy}
                 aria-label={t("settings.models.customDisplayName")}
-                onChange={(e) => { setDisplayName(e.target.value); }} />
-            </label>
+                onChange={(e) => { setDisplayName(e.target.value); }}
+              />
+            </div>
           )}
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--stg-text-secondary)" }}>
-            {t("settings.models.baseUrl")}
-            <input type="text" value={baseURL} disabled={busy} style={inputStyle}
+          <div className="settings-models-field">
+            <span className="settings-models-fieldlabel">{t("settings.models.baseUrl")}</span>
+            <input
+              className="settings-models-input"
+              type="text"
+              value={baseURL}
+              disabled={busy}
+              placeholder={provider.baseUrl || t("settings.models.baseUrlDefault")}
               aria-label={t("settings.models.baseUrl")}
-              onChange={(e) => { setBaseURL(e.target.value); }} />
-          </label>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 12, fontWeight: 500, color: "var(--stg-text-primary)" }}>{t("settings.models.models")}</span>
-            {creating && drafts.length === 0 && (
-              <span style={{ fontSize: 11, color: "var(--stg-text-tertiary)" }}>{t("settings.models.modelsInherited")}</span>
-            )}
-            <FetchModelsButton probe={{ baseUrl: baseURL.trim(), apiKey: keyValue }}
-              existingIds={drafts.map(draftId)}
-              onAdopt={(selected) => {
-                const byId = new Map(drafts.map(d => [draftId(d), d]));
-                for (const s of selected) byId.set(draftId(s), byId.get(draftId(s)) ?? s);
-                setDrafts([...byId.values()]);
-              }}
-              onError={setFailure}
-              disabled={busy} />
+              onChange={(e) => { setBaseURL(e.target.value); }}
+            />
           </div>
-          <ModelListEditor models={drafts} onChange={setDrafts} disabled={busy} />
+          <ModelListEditor
+            models={drafts}
+            onChange={setDrafts}
+            disabled={busy}
+            probe={{ baseUrl: baseURL.trim(), apiKey: keyValue }}
+            probeBlocked={keyFailure !== undefined ? t(`settings.models.${keyFailure}`) : undefined}
+            onFetchError={setFailure}
+          />
         </div>
       </details>
-      {failure !== undefined ? <span style={{ fontSize: 12, color: "var(--stg-danger)" }}>{failure}</span> : null}
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <button type="button" className="secondary-btn" disabled={busy} onClick={() => onClose(false)}>{t("settings.models.cancel")}</button>
-        <button type="button" disabled={submitDisabled}
-          style={{ minHeight: 36, padding: "0 14px", border: "none", borderRadius: 18, background: "var(--stg-brand)", color: "#fff", fontWeight: 500, cursor: "pointer", opacity: submitDisabled ? 0.5 : 1 }}
-          onClick={() => { void apply(); }}>
+      {failure !== undefined ? <p className="settings-models-error">{failure}</p> : null}
+      <div className="settings-models-editor-actions">
+        <button type="button" className="secondary-btn" disabled={busy} onClick={() => onClose(false)}>
+          {t("settings.models.cancel")}
+        </button>
+        <button type="button" className="settings-models-primary" disabled={submitDisabled} onClick={() => { void apply(); }}>
           {busy
             ? (creating ? t("settings.models.creating") : t("settings.models.applying"))
             : (creating ? t("settings.models.create") : t("settings.models.apply"))}

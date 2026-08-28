@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useT } from "@/components/LocaleProvider";
 import { SecretTextInput } from "@/components/settings/SecretTextInput";
-import { FetchModelsButton } from "@/components/settings/models/FetchModelsButton";
 import { apiKeyFailure } from "@/lib/api-key";
 import { createProviderWithModels } from "@/lib/provider-create";
 import { validateModels, type ModelDraft } from "@/lib/model-draft";
@@ -16,12 +15,6 @@ const ROUTE_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 /** The provider types a hand-declared route may name (mapped to a wire API by
  *  the backend). */
 const PROTOCOLS = ["openai-compatible", "anthropic"] as const;
-
-const inputStyle: React.CSSProperties = {
-  height: 32, padding: "0 10px", border: "1px solid var(--stg-border-l2)",
-  borderRadius: 8, background: "var(--stg-input-fill)", color: "var(--stg-text-primary)",
-  font: "14px/22px var(--font-sans)", minWidth: 0,
-};
 
 /**
  * The card that declares a provider the built-in catalog does not ship — an
@@ -56,8 +49,6 @@ export function CustomProviderCard({ taken, onClose, refresh, setError, onSaved 
     && baseURL.trim().length > 0 && models.length > 0 && modelFailure === undefined
     && keyFailure === undefined;
 
-  // The gate line names the field the user is still looking at, and stays
-  // silent once the card is satisfied.
   let hint: string | undefined;
   if (failure === undefined && !ready && !routeInvalid && !routeTaken && keyFailure === undefined) {
     if (route.length === 0) hint = t("settings.models.customRouteHint");
@@ -90,64 +81,82 @@ export function CustomProviderCard({ taken, onClose, refresh, setError, onSaved 
   }
 
   return (
-    <div className="settings-row provider-settings-row" style={{ flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <strong style={{ fontSize: 14, fontWeight: 500 }}>{t("settings.models.customTitle")}</strong>
+    <div className="settings-row provider-settings-row settings-models-editor">
+      <div className="settings-models-editor-header">
+        <span className="settings-models-editor-title">{t("settings.models.customTitle")}</span>
       </div>
-      <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--stg-text-secondary)" }}>
-        {t("settings.models.customRoute")}
-        <input type="text" value={route} placeholder="acme-gateway" disabled={busy} style={inputStyle}
+      <div className="settings-models-field">
+        <span className="settings-models-fieldlabel">{t("settings.models.customRoute")}</span>
+        <input
+          className="settings-models-input"
+          type="text"
+          value={route}
+          placeholder="acme-gateway"
+          disabled={busy}
           aria-label={t("settings.models.customRoute")}
-          onChange={(e) => { setRoute(e.target.value); }} />
+          onChange={(e) => { setRoute(e.target.value); }}
+        />
         {routeInvalid || routeTaken
-          ? <span style={{ fontSize: 11, color: "var(--stg-danger)" }}>{t(routeInvalid ? "settings.models.customRouteInvalid" : "settings.models.customRouteTaken")}</span>
-          : <span style={{ fontSize: 11, color: "var(--stg-text-tertiary)" }}>{t("settings.models.customRouteHint")}</span>}
-      </label>
-      <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--stg-text-secondary)" }}>
-        {t("settings.models.customDisplayName")}
-        <input type="text" value={displayName} placeholder={route.length === 0 ? t("settings.models.customDisplayName") : route} disabled={busy} style={inputStyle}
+          ? <p className="settings-models-error">{t(routeInvalid ? "settings.models.customRouteInvalid" : "settings.models.customRouteTaken")}</p>
+          : <p className="settings-models-hint">{t("settings.models.customRouteHint")}</p>}
+      </div>
+      <div className="settings-models-field">
+        <span className="settings-models-fieldlabel">{t("settings.models.customDisplayName")}</span>
+        <input
+          className="settings-models-input"
+          type="text"
+          value={displayName}
+          placeholder={route.length === 0 ? t("settings.models.customDisplayName") : route}
+          disabled={busy}
           aria-label={t("settings.models.customDisplayName")}
-          onChange={(e) => { setDisplayName(e.target.value); }} />
-      </label>
-      <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--stg-text-secondary)" }}>
-        {t("settings.models.baseUrl")}
-        <input type="text" value={baseURL} placeholder="https://gateway.example/v1" disabled={busy} style={inputStyle}
+          onChange={(e) => { setDisplayName(e.target.value); }}
+        />
+      </div>
+      <div className="settings-models-field">
+        <span className="settings-models-fieldlabel">{t("settings.models.baseUrl")}</span>
+        <input
+          className="settings-models-input"
+          type="text"
+          value={baseURL}
+          placeholder="https://gateway.example/v1"
+          disabled={busy}
           aria-label={t("settings.models.baseUrl")}
-          onChange={(e) => { setBaseURL(e.target.value); }} />
-      </label>
-      <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--stg-text-secondary)" }}>
-        {t("settings.models.customApi")}
-        <select value={protocol} disabled={busy} style={inputStyle} aria-label={t("settings.models.customApi")}
-          onChange={(e) => { setProtocol(e.target.value); }}>
+          onChange={(e) => { setBaseURL(e.target.value); }}
+        />
+      </div>
+      <div className="settings-models-field">
+        <span className="settings-models-fieldlabel">{t("settings.models.customApi")}</span>
+        <select
+          className="settings-models-input settings-models-select"
+          value={protocol}
+          disabled={busy}
+          aria-label={t("settings.models.customApi")}
+          onChange={(e) => { setProtocol(e.target.value); }}
+        >
           {PROTOCOLS.map((choice) => <option key={choice} value={choice}>{choice}</option>)}
         </select>
-      </label>
-      <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--stg-text-secondary)" }}>
-        {t("settings.models.keyInput")}
+      </div>
+      <div className="settings-models-field">
+        <span className="settings-models-fieldlabel">{t("settings.models.keyInput")}</span>
         <SecretTextInput value={apiKey} onChange={setApiKey} placeholder={t("settings.models.keyPlaceholder")} />
         {keyFailure === undefined ? null
-          : <span style={{ fontSize: 11, color: "var(--stg-danger)" }}>{t(`settings.models.${keyFailure}`)}</span>}
-      </label>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ fontSize: 12, fontWeight: 500, color: "var(--stg-text-primary)" }}>{t("settings.models.models")}</span>
-        <FetchModelsButton probe={{ baseUrl: baseURL.trim(), apiKey: keyValue }}
-          existingIds={models.map(m => String(m.id ?? "").trim())}
-          onAdopt={(selected) => {
-            const byId = new Map(models.map(m => [String(m.id ?? "").trim(), m]));
-            for (const s of selected) byId.set(String(s.id ?? "").trim(), byId.get(String(s.id ?? "").trim()) ?? s);
-            setModels([...byId.values()]);
-          }}
-          onError={setFailure}
-          disabled={busy} />
+          : <p className="settings-models-error">{t(`settings.models.${keyFailure}`)}</p>}
       </div>
-      <ModelListEditor models={models} onChange={setModels} disabled={busy} />
-      {failure !== undefined ? <span style={{ fontSize: 12, color: "var(--stg-danger)" }}>{failure}</span> : null}
-      {hint === undefined ? null : <span style={{ fontSize: 11, color: "var(--stg-text-tertiary)" }}>{hint}</span>}
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <button type="button" className="secondary-btn" disabled={busy} onClick={() => onClose(false)}>{t("settings.models.cancel")}</button>
-        <button type="button" className="settings-form button" disabled={busy || !ready}
-          style={{ minHeight: 36, padding: "0 14px", border: "none", borderRadius: 18, background: "var(--stg-brand)", color: "#fff", fontWeight: 500, cursor: "pointer" }}
-          onClick={() => { void create(); }}>
+      <ModelListEditor
+        models={models}
+        onChange={setModels}
+        disabled={busy}
+        probe={{ baseUrl: baseURL.trim(), apiKey: keyValue }}
+        probeBlocked={keyFailure !== undefined ? t(`settings.models.${keyFailure}`) : undefined}
+        onFetchError={setFailure}
+      />
+      {failure !== undefined ? <p className="settings-models-error">{failure}</p> : null}
+      {hint === undefined ? null : <p className="settings-models-hint">{hint}</p>}
+      <div className="settings-models-editor-actions">
+        <button type="button" className="secondary-btn" disabled={busy} onClick={() => onClose(false)}>
+          {t("settings.models.cancel")}
+        </button>
+        <button type="button" className="settings-models-primary" disabled={busy || !ready} onClick={() => { void create(); }}>
           {busy ? t("settings.models.creating") : t("settings.models.create")}
         </button>
       </div>

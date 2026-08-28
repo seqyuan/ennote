@@ -3,7 +3,7 @@
 import { X } from "lucide-react";
 import { useCallback, useEffect, useRef } from "react";
 import { Composer } from "@/components/Composer";
-import { EmptyHero } from "@/components/EmptyHero";
+import { EmptyHero, HeroGlow } from "@/components/EmptyHero";
 import { HeroProjectChip } from "@/components/HeroProjectChip";
 import { BackgroundDelegationStrip } from "@/components/BackgroundDelegationStrip";
 import { CompactionPromptBar } from "@/components/CompactionPromptBar";
@@ -32,14 +32,13 @@ interface ChatWindowProps {
   togglePinProject: (projectId: string) => void;
   onSwitchProject: (projectId: string) => void;
   onNewProject: () => void;
-  onNewSession: () => void;
   onOpenSettings: () => void;
 }
 
 export function ChatWindow({
   history, run, branches, composer, actions, error, clearError,
   projects, selectedProject, hasModel, pinnedProjectIds, togglePinProject,
-  onSwitchProject, onNewProject, onNewSession, onOpenSettings,
+  onSwitchProject, onNewProject, onOpenSettings,
 }: ChatWindowProps) {
   const messagesRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -92,7 +91,15 @@ export function ChatWindow({
     } else preserveScroll.current = false;
   }
 
-  return <main className="chat-area">
+  const isBlank = Boolean(history.sessionId)
+    && !history.activeLeafMessageId
+    && history.messages.length === 0
+    && !run.activeRun
+    && !run.pendingApproval;
+  const isHero = !history.sessionId || isBlank;
+  const inert = !selectedProject;
+
+  return <main className="chat-area" data-phase={isHero ? "hero" : "active"}>
     {error && <div className="error-bar" role="alert"><span>{error}</span>
       <button onClick={clearError} aria-label="Dismiss error"><X size={15} aria-hidden="true" /></button></div>}
     {run.recovery && <div className={`recovery-bar ${run.recovery.retryable ? "is-retryable" : "is-blocked"}`} data-testid="run-recovery">
@@ -102,24 +109,18 @@ export function ChatWindow({
         {run.retrying ? "Retrying…" : "Retry"}
       </button>}
     </div>}
-    <div className="messages" ref={messagesRef} data-testid="chat-messages">
+    {!isHero && <div className="messages" ref={messagesRef} data-testid="chat-messages">
       <div className="conversation-viewport">
-        {history.sessionId && history.hasMore && <div className="history-control">
+        {history.hasMore && <div className="history-control">
           <button type="button" onClick={loadOlder} disabled={history.loadingOlder}>
             {history.loadingOlder ? "Loading earlier messages…" : "Load earlier messages"}
           </button>
         </div>}
         {history.loading && <div className="history-state">Loading conversation…</div>}
         {history.error && <div className="history-state history-state-error">Conversation history unavailable: {history.error}</div>}
-        {!history.loading && history.sessionId && history.messages.length === 0 && !history.error && !run.pendingApproval && <div className="history-empty">
+        {!history.loading && history.messages.length === 0 && !history.error && !run.pendingApproval && <div className="history-empty">
           <strong>New conversation</strong><span>Start with a question, file, or analysis task.</span>
         </div>}
-        {!history.sessionId && <EmptyHero
-          selectedProject={selectedProject}
-          hasModel={hasModel}
-          onNewSession={onNewSession}
-          onOpenSettings={onOpenSettings}
-        />}
         <ConversationTimeline sessionId={history.sessionId ?? ""} nodes={history.messages} pendingApproval={run.pendingApproval} resolvingApproval={run.resolvingApproval}
           decideApproval={run.decideApproval} activeLeafMessageId={history.activeLeafMessageId}
           branchDisabled={Boolean(run.activeRun) || branches.changing} createBranch={branches.createBranch}
@@ -139,9 +140,9 @@ export function ChatWindow({
         />
         <div ref={bottomRef} />
       </div>
-    </div>
-    <BackgroundDelegationStrip sessionId={history.sessionId ?? undefined} />
-    {composer.compaction.open && (
+    </div>}
+    {!isHero && <BackgroundDelegationStrip sessionId={history.sessionId ?? undefined} />}
+    {!isHero && composer.compaction.open && (
       <CompactionPromptBar
         value={composer.compaction.instructions}
         onChange={composer.compaction.setInstructions}
@@ -150,38 +151,47 @@ export function ChatWindow({
         onCancel={composer.compaction.cancel}
       />
     )}
-    {/* The workspace chip rides directly above the composer card, left-
-        aligned with it (dsh hero workspace row) — never the floating
-        top-left of the chat area. Rendered only while no session exists. */}
-    {!history.sessionId && (
-      <div className="hero-workspace-row">
-        <HeroProjectChip
-          projects={projects}
-          selectedProject={selectedProject}
-          pinnedProjectIds={pinnedProjectIds}
-          togglePinProject={togglePinProject}
+    <div className="composer-seat">
+      <div className={isHero ? "composer-stack composer-hero" : "composer-stack"}>
+        {isHero && <HeroGlow />}
+        {isHero && (
+          <EmptyHero
+            hasModel={hasModel}
+            onOpenSettings={onOpenSettings}
+          />
+        )}
+        {isHero && (
+          <div className="hero-workspace-row">
+            <HeroProjectChip
+              projects={projects}
+              selectedProject={selectedProject}
+              pinnedProjectIds={pinnedProjectIds}
+              togglePinProject={togglePinProject}
+              onRequestProject={requestProject}
+              onSwitchProject={onSwitchProject}
+              projectSelector={heroProject}
+            />
+          </div>
+        )}
+        <Composer selectedSession={history.sessionId} activeLeafMessageId={history.activeLeafMessageId} input={composer.input} setInput={composer.setInput}
+          activeRun={Boolean(run.activeRun)} compacting={run.compacting} hasPendingImage={Boolean(composer.pendingImage)} reconnecting={reconnecting}
+          inert={inert} hero={isHero}
           onRequestProject={requestProject}
-          onSwitchProject={onSwitchProject}
-          projectSelector={heroProject}
-        />
+          permissionMode={composer.displayedPermissionMode} permissionReady={composer.permissionReady} setPermissionMode={composer.setPermissionMode}
+          models={composer.models} providers={composer.providers} selectedModelId={composer.selectedModelId} setSelectedModelId={composer.setSelectedModelId}
+          thinkingEffort={composer.thinkingEffort} setThinkingEffort={composer.setThinkingEffort}
+          roles={composer.roles} selectedRoleId={composer.selectedRoleId} setSelectedRoleId={composer.setSelectedRoleId}
+          textAttachments={composer.textAttachments} removeTextAttachment={composer.removeTextAttachment}
+          pendingImage={composer.pendingImage} clearPendingImage={composer.clearPendingImage}
+          attachFiles={composer.attachFiles} uploadImage={composer.uploadImage} submit={actions.submit} steer={actions.steer} followUp={actions.followUp} cancel={run.cancel} compactSession={composer.compactSession}
+          pendingFollowUps={run.pendingFollowUps}
+          promptTemplates={composer.promptPanel.templates} showPromptPanel={composer.promptPanel.show} onPromptSelect={composer.promptPanel.onSelect}
+          panelRoles={composer.promptPanel.roles} panelFlows={composer.promptPanel.flows} onRoleSelect={composer.promptPanel.onRoleSelect} onFlowSelect={composer.promptPanel.onFlowSelect}
+          onPromptPanelClose={composer.promptPanel.onClose}
+          expanding={composer.promptPanel.expanding} expandDiag={composer.promptPanel.expandDiag}
+          contextUsage={run.contextUsage} stats={run.stats} />
       </div>
-    )}
-    <Composer selectedSession={history.sessionId} activeLeafMessageId={history.activeLeafMessageId} input={composer.input} setInput={composer.setInput}
-      activeRun={Boolean(run.activeRun)} compacting={run.compacting} hasPendingImage={Boolean(composer.pendingImage)} reconnecting={reconnecting}
-      onRequestProject={requestProject}
-      permissionMode={composer.displayedPermissionMode} permissionReady={composer.permissionReady} setPermissionMode={composer.setPermissionMode}
-      models={composer.models} selectedModelId={composer.selectedModelId} setSelectedModelId={composer.setSelectedModelId}
-      thinkingEffort={composer.thinkingEffort} setThinkingEffort={composer.setThinkingEffort}
-      roles={composer.roles} selectedRoleId={composer.selectedRoleId} setSelectedRoleId={composer.setSelectedRoleId}
-      textAttachments={composer.textAttachments} removeTextAttachment={composer.removeTextAttachment}
-      pendingImage={composer.pendingImage} clearPendingImage={composer.clearPendingImage}
-      attachFiles={composer.attachFiles} uploadImage={composer.uploadImage} submit={actions.submit} steer={actions.steer} followUp={actions.followUp} cancel={run.cancel} compactSession={composer.compactSession}
-      pendingFollowUps={run.pendingFollowUps}
-      promptTemplates={composer.promptPanel.templates} showPromptPanel={composer.promptPanel.show} onPromptSelect={composer.promptPanel.onSelect}
-      panelRoles={composer.promptPanel.roles} panelFlows={composer.promptPanel.flows} onRoleSelect={composer.promptPanel.onRoleSelect} onFlowSelect={composer.promptPanel.onFlowSelect}
-      onPromptPanelClose={composer.promptPanel.onClose}
-      expanding={composer.promptPanel.expanding} expandDiag={composer.promptPanel.expandDiag}
-      contextUsage={run.contextUsage} stats={run.stats} />
+    </div>
   </main>;
 }
 

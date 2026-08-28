@@ -17,23 +17,26 @@ function toDraft(candidate: DiscoveredModel): ModelDraft {
 }
 
 /**
- * The "Fetch available models" action and its picker, shared by the provider
- * editor and the custom-provider card. It asks the endpoint the form currently
- * shows (base URL + typed key, unsaved) and, on adopt, hands the selected
- * drafts back to the caller instead of writing anything itself.
+ * The "Fetch available models" action and its picker, shared by the model-list
+ * editor. It asks the endpoint the form currently shows (base URL + typed key,
+ * unsaved) and, on adopt, hands the selected drafts back to the caller.
  */
-export function FetchModelsButton({ probe, existingIds, onAdopt, onError, disabled }: {
+export function FetchModelsButton({ probe, existingIds, onAdopt, onError, disabled, blockedReason }: {
   probe: { baseUrl?: string; apiKey?: string };
   existingIds: readonly string[];
   onAdopt: (selected: ModelDraft[]) => void;
   onError?: (message: string) => void;
   disabled?: boolean;
+  blockedReason?: string;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [candidates, setCandidates] = useState<DiscoveredModel[] | null>(null);
   const [fetching, setFetching] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
+
+  const askable = Boolean(probe.baseUrl && probe.baseUrl.length > 0);
+  const title = blockedReason ?? (askable ? undefined : t("settings.models.fetchNeedsBaseUrl"));
 
   const fetchModels = async () => {
     setFetching(true);
@@ -43,10 +46,12 @@ export function FetchModelsButton({ probe, existingIds, onAdopt, onError, disabl
         method: "POST",
         body: JSON.stringify({ baseUrl: probe.baseUrl || undefined, apiKey: probe.apiKey || undefined }),
       }) ?? [];
+      if (found.length === 0) {
+        onError?.(t("settings.models.fetchEmpty"));
+        return;
+      }
       const known = new Set(existingIds);
       setCandidates(found);
-      // Candidates already configured start unchecked, so adopting a selection
-      // never silently rewrites a row the user already tuned.
       setPicked(new Set(found.filter(candidate => !known.has(candidate.modelName)).map(candidate => candidate.modelName)));
       setOpen(true);
     } catch (reason) {
@@ -56,41 +61,69 @@ export function FetchModelsButton({ probe, existingIds, onAdopt, onError, disabl
     }
   };
 
-  const adopt = () => {
-    if (!candidates) return;
-    onAdopt(candidates.filter(candidate => picked.has(candidate.modelName)).map(toDraft));
+  const close = () => {
     setOpen(false);
     setCandidates(null);
   };
 
+  const adopt = () => {
+    if (!candidates) return;
+    onAdopt(candidates.filter(candidate => picked.has(candidate.modelName)).map(toDraft));
+    close();
+  };
+
+  const allPicked = candidates !== null && candidates.length > 0
+    && candidates.every(candidate => picked.has(candidate.modelName));
+
+  const toggleAll = () => {
+    if (!candidates) return;
+    setPicked(allPicked ? new Set() : new Set(candidates.map(candidate => candidate.modelName)));
+  };
+
   return (
     <>
-      <button type="button" className="secondary-btn" style={{ minHeight: 26, height: 26, padding: "0 10px", borderRadius: 13, fontSize: 11, marginLeft: "auto" }}
-        disabled={disabled || fetching} onClick={() => { void fetchModels(); }}>
+      <button
+        type="button"
+        className="settings-models-link"
+        disabled={disabled || fetching || !askable || blockedReason !== undefined}
+        title={title}
+        onClick={() => { void fetchModels(); }}
+      >
         {fetching ? t("settings.models.fetching") : t("settings.models.fetchModels")}
       </button>
       {open && candidates && (
         <div className="settings-overlay" style={{ display: "grid", placeItems: "center" }} role="dialog" aria-modal="true" aria-label={t("settings.models.fetchTitle")}>
-          <div className="project-create-dialog" style={{ maxWidth: 420 }}>
+          <div className="project-create-dialog settings-models-fetch">
             <div className="project-create-header">
               <span>{t("settings.models.fetchTitle")}</span>
-              <button type="button" className="follow-up-close" aria-label={t("settings.models.close")} title={t("settings.models.close")} onClick={() => { setOpen(false); setCandidates(null); }}>✕</button>
+              <button type="button" className="follow-up-close" aria-label={t("settings.models.close")} title={t("settings.models.close")} onClick={close}>✕</button>
             </div>
             <div className="project-create-form">
-              <p style={{ margin: 0, fontSize: 12, lineHeight: "18px", color: "var(--stg-text-secondary)" }}>{t("settings.models.fetchDescription")}</p>
-              <div style={{ maxHeight: 240, overflowY: "auto", border: "1px solid var(--stg-border-l2)", borderRadius: 6 }}>
-                {candidates.map(candidate => (
-                  <label key={candidate.modelName} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderBottom: "1px solid var(--stg-border-l2)", fontSize: 12, cursor: "pointer" }}>
-                    <input type="checkbox" checked={picked.has(candidate.modelName)} onChange={() => {
-                      setPicked(current => { const next = new Set(current); if (!next.delete(candidate.modelName)) next.add(candidate.modelName); return next; });
-                    }} />
-                    <code style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{candidate.modelName}</code>
-                  </label>
-                ))}
+              <p className="settings-models-hint">{t("settings.models.fetchDescription")}</p>
+              <div className="settings-models-fetch-actions">
+                <button type="button" className="settings-models-link" onClick={toggleAll}>
+                  {t(allPicked ? "settings.models.fetchDeselectAll" : "settings.models.fetchSelectAll")}
+                </button>
               </div>
+              <ul className="settings-models-candidates">
+                {candidates.map(candidate => (
+                  <li key={candidate.modelName} className="settings-models-candidate">
+                    <label className="settings-models-candidate-label">
+                      <input type="checkbox" checked={picked.has(candidate.modelName)} onChange={() => {
+                        setPicked(current => {
+                          const next = new Set(current);
+                          if (!next.delete(candidate.modelName)) next.add(candidate.modelName);
+                          return next;
+                        });
+                      }} />
+                      <span className="settings-models-candidate-id">{candidate.modelName}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
               <div className="project-create-actions" style={{ justifyContent: "flex-end" }}>
-                <button type="button" className="secondary-btn" onClick={() => { setOpen(false); setCandidates(null); }}>{t("settings.models.cancel")}</button>
-                <button type="button" className="project-create-submit" onClick={adopt}>{t("settings.models.fetchAdopt")}</button>
+                <button type="button" className="secondary-btn" onClick={close}>{t("settings.models.cancel")}</button>
+                <button type="button" className="secondary-btn" onClick={adopt}>{t("settings.models.fetchAdopt")}</button>
               </div>
             </div>
           </div>

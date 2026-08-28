@@ -9,11 +9,19 @@
  * caption tone and a chevron. It opens a two-level menu above the trigger:
  * the root is the Model / Effort row pair, each drilling into its own list —
  * the provider-grouped model list and the effort levels. The selected model's
- * `supportsThinking` gates the effort row, matching dsh's reasoning metadata.
+ * `supportsThinking` gates the effort row (dsh `model.reasoning`). Choosing a
+ * model omits an explicit effort so the Worker default (`"default"`) applies,
+ * matching dsh's select RPC that leaves `reasoningEffort` unset.
  */
 import { useEffect, useId, useMemo, useRef, useState, type FocusEvent } from "react";
 import { useT } from "@/components/LocaleProvider";
-import type { ModelProfile } from "@/components/settings/types";
+import type { ModelProfile, ProviderProfile } from "@/components/settings/types";
+import {
+  effortDisplayName,
+  groupModelsByProvider,
+  modelHasReasoning,
+  reasoningEfforts,
+} from "@/lib/model-selection";
 import type { ThinkingEffort } from "@/lib/permission-mode";
 
 type Pane = "root" | "model" | "effort";
@@ -21,11 +29,6 @@ type Pane = "root" | "model" | "effort";
 /** Simple {var} interpolation; ennote's translate has none. */
 function fill(template: string, vars: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (_, name: string) => vars[name] ?? `{${name}}`);
-}
-
-/** dsh-style effort name: capitalize the level id ("default" → "Default"). */
-function effortName(level: string): string {
-  return level.charAt(0).toUpperCase() + level.slice(1);
 }
 
 function ChevronRightIcon() {
@@ -44,8 +47,9 @@ function CheckIcon({ size = 16 }: { size?: number }) {
   );
 }
 
-export function ModelSelect({ models, selectedModelId, setSelectedModelId, thinkingEffort, setThinkingEffort, disabled }: {
+export function ModelSelect({ models, providers = [], selectedModelId, setSelectedModelId, thinkingEffort, setThinkingEffort, disabled }: {
   models: ModelProfile[];
+  providers?: readonly Pick<ProviderProfile, "id" | "name">[];
   selectedModelId: string | null;
   setSelectedModelId: (modelId: string) => void;
   thinkingEffort: ThinkingEffort;
@@ -65,35 +69,22 @@ export function ModelSelect({ models, selectedModelId, setSelectedModelId, think
     [models, selectedModelId],
   );
 
-  // Provider-grouped model list, mirroring dsh's ModelDirectory groups.
-  const groups = useMemo(() => {
-    const byProvider = new Map<string, ModelProfile[]>();
-    for (const model of models) {
-      const list = byProvider.get(model.providerId) ?? [];
-      list.push(model);
-      byProvider.set(model.providerId, list);
-    }
-    return [...byProvider.entries()];
-  }, [models]);
+  const groups = useMemo(
+    () => groupModelsByProvider(models, providers),
+    [models, providers],
+  );
 
-  const reasoning = selected?.supportsThinking ? selected : null;
-  const efforts = useMemo<readonly ThinkingEffort[]>(() => {
-    if (!reasoning) return [];
-    const declared = reasoning.supportedThinkingEfforts;
-    return declared && declared.length > 0 ? declared : ["default"];
-  }, [reasoning]);
-
+  const reasoning = modelHasReasoning(selected);
+  const efforts = useMemo(() => reasoningEfforts(selected), [selected]);
   const active: ThinkingEffort = efforts.length > 0 && efforts.includes(thinkingEffort) ? thinkingEffort : "default";
-  const effortLabel = reasoning === null ? undefined : effortName(active);
+  const effortLabel = reasoning ? effortDisplayName(active) : undefined;
 
-  // Switching models resets an unsupported effort back to the default,
-  // including a non-thinking model (whose offered list degrades to [default]).
+  // A model that does not advertise the current effort falls back to the
+  // Worker default — dsh's omitted `reasoningEffort` on a model switch.
   useEffect(() => {
     if (!selected) return;
-    const list = selected.supportsThinking && selected.supportedThinkingEfforts?.length
-      ? selected.supportedThinkingEfforts
-      : (["default"] as ThinkingEffort[]);
-    if (!list.includes(thinkingEffort)) setThinkingEffort("default");
+    const list = reasoningEfforts(selected);
+    if (list.length > 0 && !list.includes(thinkingEffort)) setThinkingEffort("default");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedModelId]);
 
@@ -136,7 +127,6 @@ export function ModelSelect({ models, selectedModelId, setSelectedModelId, think
     const onKey = (event: globalThis.KeyboardEvent): void => {
       if (event.key === "Escape") {
         event.preventDefault();
-        // Escape backs out of a drilled pane first, then closes.
         if (pane !== "root") setPane("root");
         else close(true);
         return;
@@ -151,8 +141,6 @@ export function ModelSelect({ models, selectedModelId, setSelectedModelId, think
   }, [open, pane]);
 
   const onBlur = (event: FocusEvent<HTMLDivElement>): void => {
-    // A pane switch removes the focused item (relatedTarget null) — that must
-    // not close the menu; the outside mousedown listener owns click-away.
     if (!(event.relatedTarget instanceof Node)) return;
     if (rootRef.current?.contains(event.relatedTarget)) return;
     close();
@@ -160,7 +148,9 @@ export function ModelSelect({ models, selectedModelId, setSelectedModelId, think
 
   const choose = (model: ModelProfile): void => {
     if (selectedModelId === model.id) { close(true); return; }
+    // dsh select({ provider, model }) omits reasoningEffort → Host default.
     setSelectedModelId(model.id);
+    setThinkingEffort("default");
     close(true);
   };
 
@@ -205,7 +195,7 @@ export function ModelSelect({ models, selectedModelId, setSelectedModelId, think
                 <span className="model-select-cell-value">{modelLabel}</span>
                 <ChevronRightIcon />
               </button>
-              {reasoning !== null && (
+              {reasoning && (
                 <button data-menu-index={itemIndex++} type="button" role="menuitem" className="model-select-cell" onClick={() => { setPane("effort"); }}>
                   <span className="model-select-cell-label">{t("composer.modelSelect.effort")}</span>
                   <span className="model-select-cell-value">{effortLabel}</span>
@@ -217,10 +207,10 @@ export function ModelSelect({ models, selectedModelId, setSelectedModelId, think
 
           {pane === "model" && (
             <div className="model-select-groups">
-              {groups.map(([providerId, providerModels]) => (
-                <section role="group" aria-labelledby={`${id}-${providerId}`} className="model-select-group" key={providerId}>
-                  <div className="model-select-group-title" id={`${id}-${providerId}`}>{providerId}</div>
-                  {providerModels.map((model) => {
+              {groups.map((group) => (
+                <section role="group" aria-labelledby={`${id}-${group.id}`} className="model-select-group" key={group.id}>
+                  <div className="model-select-group-title" id={`${id}-${group.id}`}>{group.name}</div>
+                  {group.models.map((model) => {
                     const isSelected = selectedModelId === model.id;
                     return (
                       <button
@@ -263,8 +253,7 @@ export function ModelSelect({ models, selectedModelId, setSelectedModelId, think
                     onClick={() => { chooseEffort(level); }}
                   >
                     <span className="model-select-option-copy">
-                      <span className="model-select-option-name">{effortName(level)}</span>
-                      <span className="model-select-option-desc">{t(`composer.thinking.${level}`)}</span>
+                      <span className="model-select-option-name">{effortDisplayName(level)}</span>
                     </span>
                     <span className="model-select-check">
                       {isActive && <CheckIcon />}

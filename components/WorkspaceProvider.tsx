@@ -4,6 +4,9 @@ import { useCallback, useEffect, useState, createContext, useContext, type React
 import type { components } from "@/lib/worker-api.gen";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { SettingsTab } from "@/components/settings/types";
+import {
+  recentProjectId, readStoredId, SELECTED_PROJECT_KEY, writeStoredId,
+} from "@/lib/ensure-blank-session";
 
 type Project = components["schemas"]["Project"];
 type ProjectWorkspace = components["schemas"]["ProjectWorkspace"];
@@ -12,6 +15,8 @@ const PINNED_KEY = "ennote-pinned-projects";
 
 interface WorkspaceValue {
   projects: Project[];
+  /** True after the first /v1/projects fetch settles (success or failure). */
+  projectsReady: boolean;
   selectedProject: string | null;
   switchProject: (projectId: string) => void;
   createProjectOpen: boolean;
@@ -50,6 +55,7 @@ export function useWorkspace(): WorkspaceValue {
  */
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsReady, setProjectsReady] = useState(false);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>(undefined);
@@ -67,12 +73,26 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    apiFetch<Project[]>("/v1/projects").then(setProjects).catch(() => {});
+    apiFetch<Project[]>("/v1/projects").then((list) => {
+      setProjects(list);
+      setSelectedProject((current) => {
+        const next = current && list.some((project) => project.id === current)
+          ? current
+          : (() => {
+            const stored = readStoredId(SELECTED_PROJECT_KEY);
+            if (stored && list.some((project) => project.id === stored)) return stored;
+            return recentProjectId(list) ?? null;
+          })();
+        writeStoredId(SELECTED_PROJECT_KEY, next);
+        return next;
+      });
+    }).catch(() => {}).finally(() => setProjectsReady(true));
   }, []);
 
   const switchProject = useCallback((projectId: string) => {
     setSettingsOpen(false);
     setSelectedProject(projectId);
+    writeStoredId(SELECTED_PROJECT_KEY, projectId);
   }, []);
 
   const openSettings = useCallback((tab?: SettingsTab) => {
@@ -141,13 +161,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       return next;
     });
     setPinnedProjectIds((current) => current.filter((id) => id !== projectId));
-    setSelectedProject((current) => current === projectId ? null : current);
+    setSelectedProject((current) => {
+      if (current !== projectId) return current;
+      writeStoredId(SELECTED_PROJECT_KEY, null);
+      return null;
+    });
   }, []);
 
   const workspaceFor = useCallback((projectId: string) => workspaceMap.get(projectId), [workspaceMap]);
 
   const value: WorkspaceValue = {
-    projects, selectedProject, switchProject,
+    projects, projectsReady, selectedProject, switchProject,
     createProjectOpen: creatingProject, openCreateProject, confirmCreateProject, cancelCreateProject,
     createProjectBusy: creatingProjectBusy,
     settingsOpen, settingsTab, openSettings, closeSettings,
