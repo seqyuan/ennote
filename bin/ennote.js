@@ -160,12 +160,18 @@ function createLogger(logFile, quiet) {
   };
 }
 
+function requireHTTPS(url) {
+  if (!String(url).startsWith("https://")) {
+    throw new Error(`refusing non-HTTPS download: ${url}`);
+  }
+}
+
 function downloadFile(url, destPath) {
   return new Promise((resolve, reject) => {
+    try { requireHTTPS(url); } catch (error) { return reject(error); }
     const file = fs.createWriteStream(destPath, { mode: 0o500 });
-    const transport = url.startsWith("https") ? https : http;
-    const request = transport.get(url, (response) => {
-      if (response.statusCode === 302 || response.statusCode === 301) {
+    const request = https.get(url, (response) => {
+      if (response.statusCode === 302 || response.statusCode === 301 || response.statusCode === 307 || response.statusCode === 308) {
         file.close();
         fs.unlinkSync(destPath);
         return downloadFile(response.headers.location, destPath).then(resolve, reject);
@@ -196,6 +202,50 @@ function downloadFile(url, destPath) {
   });
 }
 
+function parseSHA256SUMS(text, filename) {
+  const needle = filename.replace(/\\/g, "/");
+  for (const line of String(text).split(/\r?\n/)) {
+    const match = line.match(/^([a-fA-F0-9]{64})\s+\*?(\S+)\s*$/);
+    if (!match) continue;
+    const listed = match[2].replace(/^\.\//, "").split("/").pop();
+    if (listed === needle) return match[1].toLowerCase();
+  }
+  throw new Error(`SHA256SUMS has no entry for ${filename}`);
+}
+
+function fileSHA256(filePath) {
+  return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+}
+
+function verifyFileSHA256(filePath, expected) {
+  const actual = fileSHA256(filePath);
+  if (actual !== expected.toLowerCase()) {
+    throw new Error(`checksum mismatch for ${path.basename(filePath)}`);
+  }
+}
+
+function downloadText(url) {
+  return new Promise((resolve, reject) => {
+    try { requireHTTPS(url); } catch (error) { return reject(error); }
+    const request = https.get(url, (response) => {
+      if (response.statusCode === 302 || response.statusCode === 301 || response.statusCode === 307 || response.statusCode === 308) {
+        return downloadText(response.headers.location).then(resolve, reject);
+      }
+      if (response.statusCode !== 200) {
+        return reject(new Error(`HTTP ${response.statusCode} for ${url}`));
+      }
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    });
+    request.once("error", reject);
+    request.setTimeout(60_000, () => {
+      request.destroy();
+      reject(new Error(`Download timed out: ${url}`));
+    });
+  });
+}
+
 async function ensureBinaries(home, pkg, log, platform = os.platform(), arch = os.arch()) {
   const suffix = platformSuffix(platform, arch);
   const version = pkg.version;
@@ -208,9 +258,19 @@ async function ensureBinaries(home, pkg, log, platform = os.platform(), arch = o
   if (!fs.existsSync(workerPath)) needed.push({ name: "ennoworker", path: workerPath });
   if (needed.length === 0) return;
   log(`Downloading ${needed.length} binary(s) for ${suffix}...`);
+  const sumsUrl = `${GITHUB_RELEASES_BASE}/v${version}/SHA256SUMS`;
+  const sumsText = await downloadText(sumsUrl);
   for (const { name, path: dest } of needed) {
-    const url = `${GITHUB_RELEASES_BASE}/v${version}/${name}-${suffix}`;
+    const filename = `${name}-${suffix}`;
+    const expected = parseSHA256SUMS(sumsText, filename);
+    const url = `${GITHUB_RELEASES_BASE}/v${version}/${filename}`;
     await downloadFile(url, dest);
+    try {
+      verifyFileSHA256(dest, expected);
+    } catch (error) {
+      try { fs.unlinkSync(dest); } catch {}
+      throw error;
+    }
   }
   log("Binaries ready.");
 }
@@ -410,6 +470,9 @@ module.exports = {
   validateRuntime,
   healthCheck,
   isPidAlive,
+  parseSHA256SUMS,
+  fileSHA256,
+  verifyFileSHA256,
   ensureBinaries,
   startService,
   stopService,

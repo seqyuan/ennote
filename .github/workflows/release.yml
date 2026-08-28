@@ -82,6 +82,7 @@ jobs:
           cd ../worker
           for f in *-amd64; do mv "$f" "${f//-amd64/-x64}"; done
           ls -lh
+          shasum -a 256 ennogate-* ennoworker-* | tee SHA256SUMS
 
       - name: Verify Linux Binaries Are Statically Linked
         # Without CGO_ENABLED=0 the linux-x64 build links glibc dynamically
@@ -106,6 +107,7 @@ jobs:
           files: |
             worker/ennogate-*
             worker/ennoworker-*
+            worker/SHA256SUMS
           fail_on_unmatched_files: true
 
       - name: Verify Tarball

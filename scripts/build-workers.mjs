@@ -1,4 +1,6 @@
-import { chmod, mkdir } from "node:fs/promises";
+import { chmod, mkdir, readdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,3 +39,8 @@ for (const target of targets) {
     console.log(`built worker/${command}-${target.platform}-${target.nodeArch}`);
   }
 }
+
+const names = (await readdir(workerDir)).filter((name) => /^(ennogate|ennoworker)-/.test(name)).sort();
+const lines = names.map((name) => `${createHash("sha256").update(readFileSync(resolve(workerDir, name))).digest("hex")}  ${name}`);
+await writeFile(resolve(workerDir, "SHA256SUMS"), `${lines.join("\n")}\n`);
+console.log("wrote worker/SHA256SUMS");

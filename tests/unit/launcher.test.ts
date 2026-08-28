@@ -16,6 +16,9 @@ const launcher = require(resolve(root, "bin/ennote.js")) as {
   statePaths(home: string): { state: string; log: string; auth: string };
   serviceURL(hostname: string, port: string): string;
   validateRuntime(paths: { gate: string; worker: string; staticDir: string }): void;
+  parseSHA256SUMS(text: string, filename: string): string;
+  fileSHA256(filePath: string): string;
+  verifyFileSHA256(filePath: string, expected: string): void;
 };
 
 describe("ennote launcher", () => {
@@ -43,6 +46,21 @@ describe("ennote launcher", () => {
       log: "/home/ennote/logs/ennote.log",
       auth: "/home/ennote/config/auth.json",
     });
+  });
+
+  it("parses SHA256SUMS and rejects a mismatched digest", () => {
+    const sums = [
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ennogate-linux-x64",
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  ennoworker-darwin-arm64",
+    ].join("\n");
+    expect(launcher.parseSHA256SUMS(sums, "ennogate-linux-x64")).toBe("a".repeat(64));
+    expect(launcher.parseSHA256SUMS(sums, "ennoworker-darwin-arm64")).toBe("b".repeat(64));
+    expect(() => launcher.parseSHA256SUMS(sums, "missing")).toThrow("no entry");
+    const tmp = resolve(root, "tests/unit/checksum-fixture.bin");
+    require("node:fs").writeFileSync(tmp, "payload");
+    expect(() => launcher.verifyFileSHA256(tmp, "a".repeat(64))).toThrow("checksum mismatch");
+    launcher.verifyFileSHA256(tmp, launcher.fileSHA256(tmp));
+    require("node:fs").unlinkSync(tmp);
   });
 
   it("fails clearly when packaged runtime files are absent", () => {
