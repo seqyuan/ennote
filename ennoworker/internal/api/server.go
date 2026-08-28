@@ -113,6 +113,8 @@ type Server struct {
 	// GraphRunResume restarts the orchestrator for a resumed Graph Run on the
 	// Worker lifetime context.
 	GraphRunResume func(ctx context.Context, db *sql.DB, sessionID, runID string) error
+	// HostHome confines GET/POST /v1/host/directories. Empty uses os.UserHomeDir.
+	HostHome string
 }
 
 func (s *Server) Handler() http.Handler {

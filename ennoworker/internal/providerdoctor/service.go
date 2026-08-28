@@ -13,6 +13,7 @@ import (
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/llm"
+	"github.com/seqyuan/ennote/ennoworker/internal/ssrf"
 )
 
 var (
@@ -65,6 +66,7 @@ func (s *Service) Diagnose(ctx context.Context, providerID, modelProfileID strin
 	}
 	parsedURL, parseErr := url.Parse(provider.BaseURL)
 	if provider.ProviderType != domain.ProviderOpenAICompatible || parseErr != nil ||
+		ssrf.ValidateProviderURL(provider.BaseURL) != nil ||
 		(parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" {
 		failure := domain.ProviderFailure{Category: domain.ProviderFailureConfigurationInvalid, Message: "The provider URL or type is not supported by this worker."}
 		diagnostic.Failure = &failure
@@ -117,13 +119,24 @@ func (s *Service) Diagnose(ctx context.Context, providerID, modelProfileID strin
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	httpClient := s.HTTPClient
+	if httpClient == nil {
+		pinned, clientErr := ssrf.ClientForURL(probeCtx, provider.BaseURL, timeout)
+		if clientErr != nil {
+			failure := domain.ProviderFailure{Category: domain.ProviderFailureConfigurationInvalid, Message: "The provider URL is not reachable from this worker."}
+			diagnostic.Failure = &failure
+			diagnostic.Stages = append(diagnostic.Stages, failedStage("generation", failure.Message, 0))
+			return finish(), nil
+		}
+		httpClient = pinned
+	}
 	api := provider.API
 	if api == "" {
 		api = domain.APIOpenAICompletions
 	}
 	providerClient, err := llm.NewProviderForAPI(api, llm.ProviderConfig{
 		BaseURL: provider.BaseURL, APIKey: llm.NewSecret(provider.APIKey), Model: model.ModelName,
-		MaxTokens: min(max(model.MaxOutputTokens, 1), 8), HTTPClient: s.HTTPClient,
+		MaxTokens: min(max(model.MaxOutputTokens, 1), 8), HTTPClient: httpClient,
 	})
 	if err != nil {
 		failure := domain.ProviderFailure{Category: domain.ProviderFailureConfigurationInvalid, Message: "The provider runtime configuration is invalid."}
@@ -179,9 +192,8 @@ type DiscoverInput struct {
 // returned to callers.
 func (s *Service) DiscoverModels(ctx context.Context, input DiscoverInput) ([]DiscoveredModel, error) {
 	base := strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
-	parsed, err := url.Parse(base)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return nil, fmt.Errorf("provider base URL must be an absolute HTTP URL")
+	if err := ssrf.ValidateProviderURL(base); err != nil {
+		return nil, err
 	}
 	timeout := s.Timeout
 	if timeout <= 0 {
@@ -199,7 +211,11 @@ func (s *Service) DiscoverModels(ctx context.Context, input DiscoverInput) ([]Di
 	req.Header.Set("Accept", "application/json")
 	client := s.HTTPClient
 	if client == nil {
-		client = http.DefaultClient
+		pinned, clientErr := ssrf.ClientForURL(fetchCtx, base, timeout)
+		if clientErr != nil {
+			return nil, clientErr
+		}
+		client = pinned
 	}
 	resp, err := client.Do(req)
 	if err != nil {

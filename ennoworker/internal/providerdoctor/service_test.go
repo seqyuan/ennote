@@ -145,3 +145,20 @@ func TestDiscoverModelsRejectsBadBaseURLAndEmptyCatalog(t *testing.T) {
 	_, err = service.DiscoverModels(context.Background(), DiscoverInput{BaseURL: server.URL})
 	assert.ErrorContains(t, err, "empty model catalog")
 }
+
+func TestDiscoverModelsRejectsPrivateAndMetadataURLs(t *testing.T) {
+	service := testService("https://example.test")
+	_, err := service.DiscoverModels(context.Background(), DiscoverInput{BaseURL: "http://169.254.169.254/"})
+	assert.Error(t, err)
+	_, err = service.DiscoverModels(context.Background(), DiscoverInput{BaseURL: "https://192.168.1.10/v1"})
+	assert.Error(t, err)
+}
+
+func TestDoctorRejectsPrivateProviderURL(t *testing.T) {
+	service := testService("http://169.254.169.254/")
+	diagnostic, err := service.Diagnose(context.Background(), "provider", "")
+	require.NoError(t, err)
+	assert.Equal(t, "failed", diagnostic.Status)
+	require.NotNil(t, diagnostic.Failure)
+	assert.Equal(t, domain.ProviderFailureConfigurationInvalid, diagnostic.Failure.Category)
+}

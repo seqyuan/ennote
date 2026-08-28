@@ -12,8 +12,8 @@ import (
 )
 
 func TestHostDirectoryBrowserListsAndCreatesDirectories(t *testing.T) {
-	_, handler := setupServer(t, nil)
-	root := t.TempDir()
+	server, handler := setupServer(t, nil)
+	root := server.HostHome
 	require.NoError(t, os.Mkdir(filepath.Join(root, "beta"), 0o755))
 	require.NoError(t, os.Mkdir(filepath.Join(root, "Alpha"), 0o755))
 	require.NoError(t, os.Mkdir(filepath.Join(root, ".hidden"), 0o755))
@@ -47,4 +47,29 @@ func TestHostDirectoryBrowserRejectsRelativePathsAndRequiresAuth(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, relative.Code)
 	unauthorized := request(t, handler, http.MethodGet, "/v1/host/directories", nil, false)
 	assert.Equal(t, http.StatusUnauthorized, unauthorized.Code)
+}
+
+func TestHostDirectoryBrowserRejectsPathsOutsideHome(t *testing.T) {
+	_, handler := setupServer(t, nil)
+	outside := request(t, handler, http.MethodGet, "/v1/host/directories?path="+url.QueryEscape(t.TempDir()), nil, true)
+	assert.Equal(t, http.StatusForbidden, outside.Code)
+	createOutside := request(t, handler, http.MethodPost, "/v1/host/directories", map[string]any{"path": t.TempDir(), "name": "x"}, true)
+	assert.Equal(t, http.StatusForbidden, createOutside.Code)
+}
+
+func TestHostDirectoryBrowserIgnoresSymlinksThatEscapeHome(t *testing.T) {
+	server, handler := setupServer(t, nil)
+	escape := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(escape, "secret"), 0o755))
+	link := filepath.Join(server.HostHome, "escape")
+	require.NoError(t, os.Symlink(escape, link))
+	listed := request(t, handler, http.MethodGet, "/v1/host/directories?path="+url.QueryEscape(server.HostHome), nil, true)
+	require.Equal(t, http.StatusOK, listed.Code, listed.Body.String())
+	var listing hostDirectoryListing
+	decodeData(t, listed, &listing)
+	for _, entry := range listing.Entries {
+		assert.NotEqual(t, "escape", entry.Name)
+	}
+	direct := request(t, handler, http.MethodGet, "/v1/host/directories?path="+url.QueryEscape(link), nil, true)
+	assert.Equal(t, http.StatusForbidden, direct.Code)
 }

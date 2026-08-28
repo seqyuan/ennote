@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -316,14 +317,18 @@ func validateLoopbackWorkerURL(raw string) error {
 }
 
 type Gate struct {
-	HomeDir    string
-	Port       string
-	WorkerURL  string
-	Token      string
-	StaticDir  string
-	mu         sync.Mutex
-	proxy      *httputil.ReverseProxy
-	proxyReady bool
+	HomeDir          string
+	Port             string
+	WorkerURL        string
+	Token            string
+	StaticDir        string
+	LoginMaxFailures int
+	LoginLockout     time.Duration
+	Now              func() time.Time
+	mu               sync.Mutex
+	proxy            *httputil.ReverseProxy
+	proxyReady       bool
+	logins           loginLimiter
 }
 
 type contextKey struct{ name string }
@@ -427,6 +432,13 @@ func (g *Gate) authPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
 		return
 	}
+	if r.URL.Path == "/setup" && !isLoopbackRequest(r) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(w, setupDeniedHTML)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = io.WriteString(w, devHTML)
@@ -464,6 +476,12 @@ func (g *Gate) proxyWorker(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gate) login(w http.ResponseWriter, r *http.Request) {
+	ip := clientIP(r)
+	if retryAfter, blocked := g.logins.blocked(ip, g.now()); blocked {
+		w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())+1))
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "too many login attempts"})
+		return
+	}
 	var input struct{ Password string }
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid request"})
@@ -478,9 +496,11 @@ func (g *Gate) login(w http.ResponseWriter, r *http.Request) {
 	var stored struct{ Hash string }
 	json.Unmarshal(data, &stored)
 	if bcrypt.CompareHashAndPassword([]byte(stored.Hash), []byte(input.Password)) != nil {
+		g.logins.fail(ip, g.now(), g.lockout(), g.maxFailures())
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "wrong password"})
 		return
 	}
+	g.logins.success(ip)
 	token, err := generateToken()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to create login session"})
@@ -525,14 +545,18 @@ func (g *Gate) setupPassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "POST required"})
 		return
 	}
+	if !isLoopbackRequest(r) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "password setup must be completed from localhost"})
+		return
+	}
 	authFile := filepath.Join(g.HomeDir, "config", "auth.json")
 	if _, err := os.Stat(authFile); err == nil {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "password already set"})
 		return
 	}
 	var input struct{ Password string }
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || len(input.Password) < 4 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "password must be at least 4 characters"})
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || len(input.Password) < minPasswordLength {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "password must be at least 8 characters"})
 		return
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
@@ -594,6 +618,93 @@ func (g *Gate) csrfMiddleware(next http.Handler) http.Handler {
 }
 
 // ---- helpers ----
+
+const (
+	minPasswordLength    = 8
+	defaultLoginFailures = 5
+	defaultLoginLockout  = 15 * time.Minute
+)
+
+type loginRecord struct {
+	count       int
+	windowStart time.Time
+	lockedUntil time.Time
+}
+
+type loginLimiter struct {
+	mu     sync.Mutex
+	failed map[string]loginRecord
+}
+
+func (g *Gate) now() time.Time {
+	if g.Now != nil {
+		return g.Now()
+	}
+	return time.Now()
+}
+
+func (g *Gate) maxFailures() int {
+	if g.LoginMaxFailures > 0 {
+		return g.LoginMaxFailures
+	}
+	return defaultLoginFailures
+}
+
+func (g *Gate) lockout() time.Duration {
+	if g.LoginLockout > 0 {
+		return g.LoginLockout
+	}
+	return defaultLoginLockout
+}
+
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+func isLoopbackRequest(r *http.Request) bool {
+	ip := net.ParseIP(clientIP(r))
+	return ip != nil && ip.IsLoopback()
+}
+
+func (l *loginLimiter) blocked(ip string, now time.Time) (time.Duration, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	rec := l.failed[ip]
+	if now.Before(rec.lockedUntil) {
+		return rec.lockedUntil.Sub(now), true
+	}
+	return 0, false
+}
+
+func (l *loginLimiter) fail(ip string, now time.Time, lockout time.Duration, maxFailures int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.failed == nil {
+		l.failed = map[string]loginRecord{}
+	}
+	rec := l.failed[ip]
+	if now.After(rec.lockedUntil) && (rec.windowStart.IsZero() || now.Sub(rec.windowStart) > lockout) {
+		rec = loginRecord{windowStart: now}
+	}
+	if rec.windowStart.IsZero() {
+		rec.windowStart = now
+	}
+	rec.count++
+	if rec.count >= maxFailures {
+		rec.lockedUntil = now.Add(lockout)
+	}
+	l.failed[ip] = rec
+}
+
+func (l *loginLimiter) success(ip string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.failed, ip)
+}
 
 func generateToken() (string, error) {
 	value := make([]byte, 32)
@@ -669,7 +780,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .error{color:#f85149;margin-top:8px;font-size:13px;display:none}
 </style></head><body>
 <div class="welcome"><h1>Ennote</h1><p>AI-native bioinformatics agent workspace</p>
-<div id="setup"><input id="pw" type="password" placeholder="Set a password (min 4 chars) to start"><button onclick="setup()">Set Password</button></div>
+<div id="setup"><input id="pw" type="password" placeholder="Set a password (min 8 chars) to start"><button onclick="setup()">Set Password</button></div>
 <div id="login" style="display:none"><input id="loginpw" type="password" placeholder="Password"><button onclick="login()">Login</button></div>
 <div id="error" class="error"></div></div>
 <script>
@@ -680,7 +791,7 @@ fetch("/api/auth/status").then(r=>r.json()).then(d=>{
 });
 function setup(){
   const pw=document.getElementById("pw").value;
-  if(pw.length<4){showError("Minimum 4 characters");return}
+  if(pw.length<8){showError("Minimum 8 characters");return}
   fetch("/api/auth/setup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:pw})}).then(r=>r.json()).then(d=>{
     if(d.status==="password set"){document.getElementById("setup").style.display="none";document.getElementById("login").style.display="block"}
     else showError(d.error||"Failed")
@@ -695,3 +806,12 @@ function login(){
 }
 function showError(msg){const e=document.getElementById("error");e.textContent=msg;e.style.display="block"}
 </script></body></html>`
+
+const setupDeniedHTML = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Ennote</title>
+<style>:root{--bg:#0d1117;--text:#e6edf3;--text-dim:#8b949e;}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+.welcome{text-align:center;max-width:480px;padding:40px}
+p{color:var(--text-dim);line-height:1.6}
+</style></head><body>
+<div class="welcome"><h1>Ennote</h1><p>Initial password setup must be completed from this machine (localhost). After that, LAN clients can log in.</p></div>
+</body></html>`

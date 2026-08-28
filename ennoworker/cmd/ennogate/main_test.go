@@ -80,6 +80,21 @@ func TestProcessAliveRecognizesCurrentAndMissingProcess(t *testing.T) {
 	assert.False(t, processAlive(-1))
 }
 
+func gateRequest(method, target, body, origin, remote string) *http.Request {
+	var bodyReader *strings.Reader
+	req := httptest.NewRequest(method, target, nil)
+	if body != "" {
+		bodyReader = strings.NewReader(body)
+		req = httptest.NewRequest(method, target, bodyReader)
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.RemoteAddr = remote
+	if origin != "" {
+		req.Header.Set("Origin", origin)
+	}
+	return req
+}
+
 func TestGateRequiresSetupAndLoginBeforeStaticOrWorkerAccess(t *testing.T) {
 	home := t.TempDir()
 	staticDir := t.TempDir()
@@ -99,30 +114,36 @@ func TestGateRequiresSetupAndLoginBeforeStaticOrWorkerAccess(t *testing.T) {
 	handler := gate.handler()
 
 	root := httptest.NewRecorder()
-	handler.ServeHTTP(root, httptest.NewRequest(http.MethodGet, "/", nil))
+	handler.ServeHTTP(root, gateRequest(http.MethodGet, "/", "", "", "127.0.0.1:9"))
 	assert.Equal(t, http.StatusSeeOther, root.Code)
 	assert.Equal(t, "/setup", root.Header().Get("Location"))
 
 	setupPage := httptest.NewRecorder()
-	handler.ServeHTTP(setupPage, httptest.NewRequest(http.MethodGet, "/setup", nil))
+	handler.ServeHTTP(setupPage, gateRequest(http.MethodGet, "/setup", "", "", "127.0.0.1:9"))
 	assert.Equal(t, http.StatusOK, setupPage.Code)
 	assert.Contains(t, setupPage.Body.String(), "Set Password")
 
 	blockedProxy := httptest.NewRecorder()
-	handler.ServeHTTP(blockedProxy, httptest.NewRequest(http.MethodGet, "/api/worker/v1/health/ready", nil))
+	handler.ServeHTTP(blockedProxy, gateRequest(http.MethodGet, "/api/worker/v1/health/ready", "", "", "127.0.0.1:9"))
 	assert.Equal(t, http.StatusPreconditionRequired, blockedProxy.Code)
 	assert.Zero(t, upstreamCalls.Load())
 
-	foreignSetup := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"password":"test-password"}`))
-	foreignSetup.Header.Set("Content-Type", "application/json")
-	foreignSetup.Header.Set("Origin", "https://attacker.example")
+	foreignSetup := gateRequest(http.MethodPost, "/api/auth/setup", `{"password":"test-password"}`, "https://attacker.example", "127.0.0.1:9")
 	foreignResponse := httptest.NewRecorder()
 	handler.ServeHTTP(foreignResponse, foreignSetup)
 	assert.Equal(t, http.StatusForbidden, foreignResponse.Code)
 
-	setupRequest := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"password":"test-password"}`))
-	setupRequest.Header.Set("Content-Type", "application/json")
-	setupRequest.Header.Set("Origin", "http://example.com")
+	lanSetup := gateRequest(http.MethodPost, "/api/auth/setup", `{"password":"test-password"}`, "http://example.com", "192.0.2.10:9")
+	lanResponse := httptest.NewRecorder()
+	handler.ServeHTTP(lanResponse, lanSetup)
+	assert.Equal(t, http.StatusForbidden, lanResponse.Code)
+
+	shortSetup := gateRequest(http.MethodPost, "/api/auth/setup", `{"password":"abcd"}`, "http://example.com", "127.0.0.1:9")
+	shortResponse := httptest.NewRecorder()
+	handler.ServeHTTP(shortResponse, shortSetup)
+	assert.Equal(t, http.StatusBadRequest, shortResponse.Code)
+
+	setupRequest := gateRequest(http.MethodPost, "/api/auth/setup", `{"password":"test-password"}`, "http://example.com", "127.0.0.1:9")
 	setupResponse := httptest.NewRecorder()
 	handler.ServeHTTP(setupResponse, setupRequest)
 	require.Equal(t, http.StatusOK, setupResponse.Code, setupResponse.Body.String())
@@ -131,12 +152,10 @@ func TestGateRequiresSetupAndLoginBeforeStaticOrWorkerAccess(t *testing.T) {
 	assert.Equal(t, os.FileMode(0o600), authInfo.Mode().Perm())
 
 	loginRedirect := httptest.NewRecorder()
-	handler.ServeHTTP(loginRedirect, httptest.NewRequest(http.MethodGet, "/", nil))
+	handler.ServeHTTP(loginRedirect, gateRequest(http.MethodGet, "/", "", "", "127.0.0.1:9"))
 	assert.Equal(t, "/login", loginRedirect.Header().Get("Location"))
 
-	loginRequest := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"password":"test-password"}`))
-	loginRequest.Header.Set("Content-Type", "application/json")
-	loginRequest.Header.Set("Origin", "http://example.com")
+	loginRequest := gateRequest(http.MethodPost, "/api/auth/login", `{"password":"test-password"}`, "http://example.com", "127.0.0.1:9")
 	loginResponse := httptest.NewRecorder()
 	handler.ServeHTTP(loginResponse, loginRequest)
 	require.Equal(t, http.StatusOK, loginResponse.Code, loginResponse.Body.String())
@@ -147,38 +166,77 @@ func TestGateRequiresSetupAndLoginBeforeStaticOrWorkerAccess(t *testing.T) {
 	assert.True(t, sessionCookie.HttpOnly)
 	assert.Equal(t, http.SameSiteLaxMode, sessionCookie.SameSite)
 
-	staticRequest := httptest.NewRequest(http.MethodGet, "/", nil)
+	staticRequest := gateRequest(http.MethodGet, "/", "", "", "127.0.0.1:9")
 	staticRequest.AddCookie(sessionCookie)
 	staticResponse := httptest.NewRecorder()
 	handler.ServeHTTP(staticResponse, staticRequest)
 	require.Equal(t, http.StatusOK, staticResponse.Code)
 	assert.Equal(t, "STATIC_APP", staticResponse.Body.String())
 
-	graphsRequest := httptest.NewRequest(http.MethodGet, "/graphs", nil)
+	graphsRequest := gateRequest(http.MethodGet, "/graphs", "", "", "127.0.0.1:9")
 	graphsRequest.AddCookie(sessionCookie)
 	graphsResponse := httptest.NewRecorder()
 	handler.ServeHTTP(graphsResponse, graphsRequest)
 	require.Equal(t, http.StatusOK, graphsResponse.Code)
 	assert.Equal(t, "GRAPHS_APP", graphsResponse.Body.String())
 
-	proxyRequest := httptest.NewRequest(http.MethodGet, "/api/worker/v1/health/ready", nil)
+	proxyRequest := gateRequest(http.MethodGet, "/api/worker/v1/health/ready", "", "", "127.0.0.1:9")
 	proxyRequest.AddCookie(sessionCookie)
 	proxyResponse := httptest.NewRecorder()
 	handler.ServeHTTP(proxyResponse, proxyRequest)
 	require.Equal(t, http.StatusOK, proxyResponse.Code, proxyResponse.Body.String())
 	assert.Equal(t, int32(1), upstreamCalls.Load())
 
-	logoutRequest := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	logoutRequest := gateRequest(http.MethodPost, "/api/auth/logout", "", "http://example.com", "127.0.0.1:9")
 	logoutRequest.AddCookie(sessionCookie)
-	logoutRequest.Header.Set("Origin", "http://example.com")
 	logoutResponse := httptest.NewRecorder()
 	handler.ServeHTTP(logoutResponse, logoutRequest)
 	require.Equal(t, http.StatusOK, logoutResponse.Code)
 
-	afterLogout := httptest.NewRequest(http.MethodGet, "/", nil)
+	afterLogout := gateRequest(http.MethodGet, "/", "", "", "127.0.0.1:9")
 	afterLogout.AddCookie(sessionCookie)
 	afterLogoutResponse := httptest.NewRecorder()
 	handler.ServeHTTP(afterLogoutResponse, afterLogout)
 	assert.Equal(t, http.StatusSeeOther, afterLogoutResponse.Code)
 	assert.Equal(t, "/login", afterLogoutResponse.Header().Get("Location"))
+}
+
+func TestGateRejectsSetupPageFromNonLoopback(t *testing.T) {
+	home := t.TempDir()
+	staticDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(home, "config"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("STATIC"), 0o600))
+	gate := &Gate{HomeDir: home, StaticDir: staticDir, WorkerURL: "http://127.0.0.1:9", Token: "token"}
+	handler := gate.handler()
+
+	lanPage := httptest.NewRecorder()
+	handler.ServeHTTP(lanPage, gateRequest(http.MethodGet, "/setup", "", "", "192.0.2.10:9"))
+	assert.Equal(t, http.StatusForbidden, lanPage.Code)
+	assert.Contains(t, lanPage.Body.String(), "localhost")
+}
+
+func TestGateLocksLoginAfterRepeatedFailures(t *testing.T) {
+	home := t.TempDir()
+	staticDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(home, "config"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("STATIC"), 0o600))
+	gate := &Gate{HomeDir: home, StaticDir: staticDir, WorkerURL: "http://127.0.0.1:9", Token: "token", LoginMaxFailures: 3, LoginLockout: time.Hour}
+	handler := gate.handler()
+
+	setup := gateRequest(http.MethodPost, "/api/auth/setup", `{"password":"test-password"}`, "http://example.com", "127.0.0.1:9")
+	setupResponse := httptest.NewRecorder()
+	handler.ServeHTTP(setupResponse, setup)
+	require.Equal(t, http.StatusOK, setupResponse.Code, setupResponse.Body.String())
+
+	for i := 0; i < 3; i++ {
+		wrong := gateRequest(http.MethodPost, "/api/auth/login", `{"password":"nope-nope"}`, "http://example.com", "192.0.2.20:9")
+		resp := httptest.NewRecorder()
+		handler.ServeHTTP(resp, wrong)
+		assert.Equal(t, http.StatusUnauthorized, resp.Code)
+	}
+	locked := gateRequest(http.MethodPost, "/api/auth/login", `{"password":"test-password"}`, "http://example.com", "192.0.2.20:9")
+	lockedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(lockedResponse, locked)
+	assert.Equal(t, http.StatusTooManyRequests, lockedResponse.Code)
+	assert.NotEmpty(t, lockedResponse.Header().Get("Retry-After"))
 }

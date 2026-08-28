@@ -472,3 +472,15 @@ func TestUpdateModelRejectsUnknownModel(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
+
+func TestCreateProviderRejectsPrivateAndMetadataURLs(t *testing.T) {
+	store := newModelStore(t)
+	_, err := store.CreateProvider(context.Background(), fileconfig.CreateProviderInput{
+		Name: "Metadata", ProviderType: domain.ProviderOpenAICompatible, BaseURL: "http://169.254.169.254/",
+	})
+	require.Error(t, err)
+	_, err = store.CreateProvider(context.Background(), fileconfig.CreateProviderInput{
+		Name: "LAN", ProviderType: domain.ProviderOpenAICompatible, BaseURL: "http://192.168.1.10:11434/v1",
+	})
+	require.Error(t, err)
+}

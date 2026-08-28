@@ -121,7 +121,9 @@ func setupServer(t *testing.T, control RunController) (*Server, http.Handler) {
 			Logger:        nil,
 			Bundled:       mcpclient.NewBundledRegistry(),
 		},
+		HostHome: filepath.Join(home, "user-home"),
 	}
+	require.NoError(t, os.MkdirAll(server.HostHome, 0o700))
 	return server, server.Handler()
 }
 

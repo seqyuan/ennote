@@ -3,7 +3,6 @@ package fileconfig
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"os"
 	"regexp"
 	"sort"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/modelcatalog"
+	"github.com/seqyuan/ennote/ennoworker/internal/ssrf"
 )
 
 const ModelsSchemaVersion = 1
@@ -857,11 +857,7 @@ func modelProfile(providerID string, model ModelConfig, isDefault bool, modified
 }
 
 func validateBaseURL(raw string) error {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return fmt.Errorf("provider base URL must be an absolute HTTP URL")
-	}
-	return nil
+	return ssrf.ValidateProviderURL(raw)
 }
 
 func providerKey(name string) string {
