@@ -32,7 +32,9 @@ export function useRoleSelection(selectedProject: string | null): {
     let cancelled = false;
     void apiFetch<GlobalRoleSummary[]>("/v1/global-roles")
       .then(async (catalog) => {
-        const resolved = await Promise.all(catalog.filter((entry) => !entry.error).map(async (entry): Promise<RoleSummary | null> => {
+        // A malformed/empty payload must never take down the composer via
+        // .filter on null; treat it as an empty catalog.
+        const resolved = await Promise.all((catalog ?? []).filter((entry) => !entry.error).map(async (entry): Promise<RoleSummary | null> => {
           try {
             const [detail, revisions] = await Promise.all([
               apiFetch<GlobalRoleDetail>(`/v1/global-roles/${encodeURIComponent(entry.id)}`),
