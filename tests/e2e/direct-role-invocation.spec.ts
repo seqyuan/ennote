@@ -12,7 +12,7 @@ const policies = ["discuss", "ask", "auto"].map((mode) => ({ id: `builtin-tool-$
   version: 1, config: { mode }, status: "active", createdAt: now, updatedAt: now }));
 const role = { id: "security-role", handle: "security-reviewer", name: "Security Reviewer", description: "Independent review",
   positioning: "Inspect trust boundaries.", icon: "shield-check", color: "#b91c1c", scope: "project", projectId: project.id,
-  status: "active", currentVersionId: "security-v1", currentVersion: 1, updatedAt: now };
+  status: "active", currentVersionId: "v000001", currentVersion: 1, updatedAt: now };
 const messages = [
   { id: "question", sessionId: session.id, role: "user", status: "complete", speakerKind: "user",
     speakerSnapshot: { kind: "user", displayName: "You" }, addresseeKind: "role", addresseeObjectId: role.id,

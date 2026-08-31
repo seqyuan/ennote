@@ -71,9 +71,15 @@ test("submit turn against the live worker streams the assistant reply", async ({
 
     await page.goto("/");
     await page.getByTestId("ennote-shell").waitFor();
+    // A freshly created session has no leaf yet (blank), so the sidebar only
+    // surfaces it once it is the active session. Seed the stored selection so
+    // startup restores it instead of connecting a new blank chat; the blank
+    // row shows the localized "New session" label, so it is not addressable
+    // by title.
+    await page.evaluate((sessionId) => localStorage.setItem("ennote-selected-session", sessionId), session.id);
+    await page.goto("/");
+    await page.getByTestId("ennote-shell").waitFor();
     await selectProject(page, created.project.name);
-    if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
-    await page.getByRole("button", { name: session.title, exact: true }).click();
 
     await page.getByRole("textbox", { name: "Message the agent" }).fill("ping");
     await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled();

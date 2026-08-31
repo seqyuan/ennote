@@ -5,11 +5,11 @@ const settingsProvider = { id: "settings-provider", name: "Provider", providerTy
 
 const project = { id: "phase2-project", name: "Cell atlas", description: "", status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" };
 const activeSessions = [
-  { id: "marker-session", projectId: project.id, title: "Marker review", status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:03Z" },
-  { id: "qc-session", projectId: project.id, title: "QC notes", status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:02Z" },
+  { id: "marker-session", projectId: project.id, title: "Marker review", status: "active", activeLeafMessageId: "m3", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:03Z" },
+  { id: "qc-session", projectId: project.id, title: "QC notes", status: "active", activeLeafMessageId: "m2", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:02Z" },
 ];
 const archivedSessions = [
-  { id: "old-session", projectId: project.id, title: "Prior integration", status: "archived", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:01Z" },
+  { id: "old-session", projectId: project.id, title: "Prior integration", status: "archived", activeLeafMessageId: "m1", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:01Z" },
 ];
 const policies = ["discuss", "ask", "auto"].map(mode => ({ id: `builtin-tool-${mode}-v1`, name: mode, kind: "tool", version: 1, config: { mode }, status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" }));
 
@@ -130,11 +130,18 @@ test.describe("mobile drawer", () => {
     await expect(page.locator(".sidebar")).toHaveCount(1);
     await expect(page.locator(".workspace-content")).toHaveAttribute("inert", "");
     const closeNavigation = page.getByRole("button", { name: "Close navigation" });
-    await closeNavigation.focus();
-    await closeNavigation.press("Shift+Tab");
+    await expect(closeNavigation).toBeVisible();
+    // The brand row (New chat shortcut) precedes the close X in DOM order
+    // after the dsh chrome alignment, so it is the dialog's first focusable;
+    // Settings remains the last nav cell. Shift+Tab wraps first→last and
+    // Tab wraps last→first inside the single modal DOM.
+    const firstCell = page.locator(".sidebar-brand");
+    await expect(firstCell).toBeVisible();
+    await firstCell.focus();
+    await firstCell.press("Shift+Tab");
     await expect(page.getByRole("button", { name: "Settings", exact: true })).toBeFocused();
     await page.getByRole("button", { name: "Settings", exact: true }).press("Tab");
-    await expect(closeNavigation).toBeFocused();
+    await expect(firstCell).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog", { name: "Navigation" })).not.toBeVisible();
     await expect(trigger).toBeFocused();

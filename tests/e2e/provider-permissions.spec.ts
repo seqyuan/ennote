@@ -63,8 +63,11 @@ test.describe("mobile", () => {
     await page.goto("/");
     await page.getByRole("button", { name: "Open navigation" }).click();
     await selectProject(page, project.name);
+    // Selecting a project closes the mobile drawer; reopen it to reach the
+    // session row (the topbar title stays behind the drawer and would
+    // intercept the click).
     await page.getByRole("button", { name: "Open navigation" }).click();
-    await page.getByText(session.title, { exact: true }).click();
+    await page.locator(".sb-session-row .sb-session-body").click();
     await expect(page.getByRole("button", { name: /Permission mode/ })).toBeVisible();
     await expect(page.getByRole("button", { name: "Send", exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
