@@ -175,9 +175,11 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
     if (isMobile) closeMobileNavigation();
   }, [changeView, closeMobileNavigation, isMobile, selectSession, sessionNavigation, workspaceSwitchProject]);
 
-  const createSessionIn = useCallback(async (projectId: string) => {
+  // Startup auto-connect (useWorkspaceSessionConnect): the project is already
+  // selected by WorkspaceProvider, so reuse/create the blank without switching
+  // — switching closes an open Settings dialog (setSettingsOpen(false)).
+  const connectBlankSession = useCallback(async (projectId: string) => {
     try {
-      workspaceSwitchProject(projectId);
       const session = await reuseOrCreateBlankSession(projectId, sessionNavigation.activeSessions);
       chat.run.setError(null);
       sessionNavigation.replaceSession(session);
@@ -188,7 +190,13 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
     } catch (reason) {
       chat.run.setError((reason as Error).message);
     }
-  }, [changeView, selectSession, sessionNavigation, sidebarGroups, chat.run, workspaceSwitchProject]);
+  }, [changeView, selectSession, sessionNavigation, sidebarGroups, chat.run]);
+
+  // Sidebar "New session": also switch to the target project first.
+  const createSessionIn = useCallback(async (projectId: string) => {
+    workspaceSwitchProject(projectId);
+    await connectBlankSession(projectId);
+  }, [connectBlankSession, workspaceSwitchProject]);
 
   const createSession = useCallback(async () => {
     if (selectedProject) await createSessionIn(selectedProject);
@@ -197,7 +205,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
   useWorkspaceSessionConnect({
     projectsReady, selectedProject, selectedSession,
     sessions: sessionNavigation.activeSessions, sessionsLoading: sessionNavigation.loading,
-    selectSession, connectBlank: createSessionIn,
+    selectSession, connectBlank: connectBlankSession,
   });
 
   const renameSession = useCallback(async (session: Session, title: string) => {
