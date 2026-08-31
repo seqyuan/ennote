@@ -28,7 +28,9 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
     const controllers = nestedControllers.current;
     void listProjectFiles(projectId, "/workspace", controller.signal)
       .then((items) => {
-        setEntries(items);
+        // A malformed/empty payload must never take down the file tree via
+        // .filter on null; treat it as an empty listing.
+        setEntries(items ?? []);
         setError(null);
       })
       .catch((reason) => {
