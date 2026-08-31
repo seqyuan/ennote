@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
 
 const project = { id: "ui-project", name: "UI review", description: "", status: "active",
   createdAt: "2026-08-06T00:00:00Z", updatedAt: "2026-08-06T00:00:00Z" };
@@ -15,9 +16,7 @@ async function fulfill(route: Route, data: unknown, status = 200) {
 
 async function openConversation(page: Page) {
   await page.goto("/");
-  if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.getByTitle("Select project").first().click();
-  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
+  await selectProject(page, project.name);
   if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("button", { name: session.title, exact: true }).click();
 }
@@ -28,6 +27,7 @@ test("manual compaction uses an inline prompt bar and submits the focus instruct
   await page.route("**/api/worker/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/policy-profiles") return fulfill(route, []);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
@@ -90,6 +90,7 @@ test("creating a project uses a dialog instead of native prompts", async ({ page
   await page.route("**/api/worker/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/host/directories") {
       return fulfill(route, homeListing);
     }

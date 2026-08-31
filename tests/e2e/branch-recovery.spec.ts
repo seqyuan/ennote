@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
 
 const project = { id: "branch-project", name: "Branch project", description: "", status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" };
 const policies = ["discuss", "ask", "auto"].map(mode => ({ id: `builtin-tool-${mode}-v1`, name: mode, kind: "tool", version: 1, config: { mode }, status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" }));
@@ -20,9 +21,7 @@ async function fulfill(route: Route, data: unknown, status = 200) {
 
 async function openSession(page: Page) {
   await page.goto("/");
-  if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.getByTitle("Select project").first().click();
-  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
+  await selectProject(page, project.name);
   if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("button", { name: "Lineage review", exact: true }).click();
 }
@@ -32,6 +31,7 @@ test("branch switching rejects a late response from the previously active lineag
   await page.route("**/api/worker/v1/**", async route => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/policy-profiles") return fulfill(route, policies);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session()]);
@@ -90,6 +90,7 @@ test("a historical message creates and activates a new branch", async ({ page })
   await page.route("**/api/worker/v1/**", async route => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/policy-profiles") return fulfill(route, policies);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [currentSession]);
@@ -129,6 +130,7 @@ test("a safe failed run can be retried from the recovery bar", async ({ page }) 
   await page.route("**/api/worker/v1/**", async route => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/policy-profiles") return fulfill(route, policies);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session(main.id, "failed-user")]);
@@ -164,6 +166,7 @@ test.describe("mobile branch controls", () => {
   test("header and history controls remain within the viewport", async ({ page }) => {
     await page.route("**/api/worker/v1/**", async route => {
       const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+      if (await tryFulfillBlankSessionCreate(route)) return;
       if (path === "/v1/projects") return fulfill(route, [project]);
       if (path === "/v1/policy-profiles") return fulfill(route, policies);
       if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session()]);

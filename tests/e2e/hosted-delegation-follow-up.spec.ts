@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
 
 const project = { id: "delegation-project", name: "Delegation workspace", description: "", status: "active",
   createdAt: "2026-08-04T00:00:00Z", updatedAt: "2026-08-04T00:00:00Z" };
@@ -39,8 +40,7 @@ async function selectSession(page: Page) {
   await page.goto("/");
   await waitNavigationClosed();
   await openNavigation();
-  await page.getByTitle("Select project").first().click();
-  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
+  await selectProject(page, project.name);
   await waitNavigationClosed();
   await openNavigation();
   await page.getByRole("button", { name: session.title, exact: true }).click();
@@ -83,6 +83,7 @@ test("replies to a needs_input delegated task via the private dialog", async ({ 
   let continuationSubmitted = false;
   await page.route("**/api/worker/v1/**", async route => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     const common = commonRoute(path, route);
     if (common) return common;
     if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, null);

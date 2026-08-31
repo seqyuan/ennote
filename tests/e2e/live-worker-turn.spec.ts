@@ -3,6 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, type APIRequestContext } from "@playwright/test";
+import { selectProject } from "./harness";
 
 test.describe.configure({ mode: "serial" });
 
@@ -70,9 +71,7 @@ test("submit turn against the live worker streams the assistant reply", async ({
 
     await page.goto("/");
     await page.getByTestId("ennote-shell").waitFor();
-    if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
-    await page.getByTitle("Select project").first().click();
-    await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: created.project.name }).click();
+    await selectProject(page, created.project.name);
     if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("button", { name: session.title, exact: true }).click();
 

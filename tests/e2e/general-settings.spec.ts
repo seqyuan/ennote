@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { tryFulfillBlankSessionCreate } from "./harness";
 
 async function fulfill(route: Route, data: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ data }) });
@@ -7,6 +8,7 @@ async function fulfill(route: Route, data: unknown, status = 200) {
 async function mockApp(page: Page) {
   await page.route("**/api/worker/v1/**", async route => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, []);
     if (path === "/v1/policy-profiles") return fulfill(route, []);
     if (path === "/v1/provider-profiles") return fulfill(route, []);

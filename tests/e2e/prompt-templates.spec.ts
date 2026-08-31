@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
 // A configured provider suppresses the first-run Models settings auto-open.
 const settingsProvider = { id: "settings-provider", name: "Provider", providerType: "openai-compatible", baseUrl: "https://example.test", credentialConfigured: true, status: "active", createdAt: "2026-07-30T00:00:00Z", updatedAt: "2026-07-30T00:00:00Z" };
 
@@ -28,6 +29,7 @@ async function mockBackend(page: Page) {
   await page.route("**/api/worker/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     const method = route.request().method();
 
     // Static resources.
@@ -87,9 +89,7 @@ async function mockBackend(page: Page) {
 async function openSession(page: Page) {
   await mockBackend(page);
   await page.goto("/");
-  if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.getByTitle("Select project").first().click();
-  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
+  await selectProject(page, project.name);
   await page.getByRole("button", { name: session.title, exact: true }).click();
 }
 

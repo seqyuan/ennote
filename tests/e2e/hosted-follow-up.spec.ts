@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
 import { subscribedFrame } from "./session-feed";
 
 const project = { id: "followup-project", name: "Follow-up workspace", description: "", status: "active",
@@ -15,8 +16,7 @@ async function fulfill(route: Route, data: unknown, status = 200) {
 
 async function selectSession(page: Page) {
   await page.goto("/");
-  await page.getByTitle("Select project").first().click();
-  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
+  await selectProject(page, project.name);
   await page.getByRole("button", { name: session.title, exact: true }).click();
 }
 
@@ -33,6 +33,7 @@ test("queues a follow-up while a run is active and clears it once consumed", asy
   await page.route("**/api/worker/v1/**", async route => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/provider-profiles" || path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);

@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { tryFulfillBlankSessionCreate } from "./harness";
 
 const now = "2026-08-08T00:00:00Z";
 const provider = { id: "provider", name: "anthropic", providerType: "openai-compatible", baseUrl: "https://example.test", apiKey: "test", status: "active", createdAt: now, updatedAt: now };
@@ -24,6 +25,7 @@ async function mockRoles(page: Page, onPatch?: (body: Record<string, unknown>) =
   let document = documentFixture();
   await page.route("**/api/worker/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     const method = route.request().method();
     if (path === "/v1/projects") return fulfill(route, []);
     if (path === "/v1/provider-profiles") return fulfill(route, [provider]);

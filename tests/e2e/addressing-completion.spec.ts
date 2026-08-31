@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
 
 const now = "2026-08-06T00:00:00Z";
 const project = { id: "addr-proj", name: "Addressing", description: "", status: "active", createdAt: now, updatedAt: now };
@@ -22,6 +23,7 @@ async function mockBackend(page: Page) {
   await page.route("**/api/worker/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     const method = route.request().method();
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/policy-profiles") return fulfill(route, policies);
@@ -49,8 +51,7 @@ async function mockBackend(page: Page) {
 async function openSession(page: Page) {
   await mockBackend(page);
   await page.goto("/");
-  await page.getByTitle("Select project").first().click();
-  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
+  await selectProject(page, project.name);
   await page.getByRole("button", { name: session.title, exact: true }).click();
 }
 
@@ -67,9 +68,7 @@ test("typing @role completes a role target and clears the token", async ({ page 
   // The token is consumed and the role target is selected instead.
   await expect(textarea).toHaveValue("");
   await expect(panel).not.toBeVisible();
-  // The config panel trigger now shows the selected role handle.
-  await page.getByRole("button", { name: "Configure run", exact: true }).click();
-  await expect(page.getByText("@security-reviewer", { exact: true })).toBeVisible();
+  await expect(page.locator(".composer-tag")).toHaveText(/@security-reviewer/);
 });
 
 test("typing @graph completes a graph invocation with version", async ({ page }) => {

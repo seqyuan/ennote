@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { tryFulfillBlankSessionCreate } from "./harness";
 
 /**
  * Mobile settings dialog (≤640px) renders as a full-screen sheet: top bar
@@ -17,6 +18,7 @@ async function fulfill(route: Route, data: unknown, status = 200) {
 async function mockApp(page: Page) {
   await page.route("**/api/worker/v1/**", async route => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, []);
     if (path === "/v1/policy-profiles") return fulfill(route, []);
     if (path === "/v1/provider-profiles") return fulfill(route, []);

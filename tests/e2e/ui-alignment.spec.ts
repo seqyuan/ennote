@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
 
 const project = { id: "ui-project", name: "UI project", description: "", status: "active", createdAt: "2026-07-30T00:00:00Z", updatedAt: "2026-07-30T00:00:00Z" };
 const workspace = { id: "workspace", projectId: project.id, kind: "local", hostPath: "/tmp/ui-project", virtualPath: "/workspace", status: "active", pathFingerprint: "fingerprint", createdAt: "2026-07-30T00:00:00Z" };
@@ -19,6 +20,7 @@ async function mockUI(page: Page) {
   await page.route("**/api/worker/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/provider-profiles") return fulfill(route, [provider]);
     if (path === "/v1/model-profiles") return fulfill(route, []);
@@ -43,15 +45,10 @@ async function mockUI(page: Page) {
   });
 }
 
-async function selectProject(page: Page) {
-  await page.getByTitle("Select project").first().click();
-  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
-}
-
 test("file panel renders Markdown, code, and a floating preview", async ({ page }) => {
   await mockUI(page);
   await page.goto("/");
-  await selectProject(page);
+  await selectProject(page, project.name);
   await expect(page.locator(".conversation-header")).toHaveCount(0);
   await page.getByTitle("Show panel").click();
   await page.getByTitle("/workspace/README.md").click();

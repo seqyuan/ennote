@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
 import { subscribedFrame } from "./session-feed";
 
 const now = "2026-07-28T00:00:00Z";
@@ -24,6 +25,7 @@ async function mock(page: Page) {
   await page.route("**/api/worker/v1/**", async route => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     let data: unknown;
     if (path === "/v1/projects") data = [project];
     else if (path === "/v1/provider-profiles") data = [provider];
@@ -52,8 +54,7 @@ async function fulfill(route: Route, data: unknown) {
 test("host assistant replies attribute the resolved model name next to the speaker", async ({ page }) => {
   await mock(page);
   await page.goto("/");
-  await page.getByTitle("Select project").first().click();
-  await page.getByText(project.name, { exact: true }).click();
+  await selectProject(page, project.name);
   await page.getByText(session.title, { exact: true }).click();
 
   await expect(page.getByText("the reply", { exact: true })).toBeVisible();
@@ -74,6 +75,7 @@ test("streaming host replies attribute the model name in real time", async ({ pa
   await page.route("**/api/worker/v1/**", async route => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/provider-profiles") return fulfill(route, [provider]);
     if (path === "/v1/model-profiles") return fulfill(route, [model]);
@@ -93,8 +95,7 @@ test("streaming host replies attribute the model name in real time", async ({ pa
   });
 
   await page.goto("/");
-  await page.getByTitle("Select project").first().click();
-  await page.getByText(project.name, { exact: true }).click();
+  await selectProject(page, project.name);
   await page.getByText(session.title, { exact: true }).click();
 
   await expect(page.getByText("streaming reply", { exact: true })).toBeVisible();

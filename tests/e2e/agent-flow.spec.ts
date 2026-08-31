@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { tryFulfillBlankSessionCreate } from "./harness";
 
 test.describe.configure({ mode: "serial" });
 
@@ -63,6 +64,7 @@ async function mockGraphAuthoring(page: Page) {
   let builderThread: Record<string, unknown> = { graphId: "rna-seq", modelProfileId: model.id, messages: [] };
   await page.route("**/api/worker/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     const method = route.request().method();
     if (path === "/v1/projects") return fulfill(route, []);
     if (path === "/v1/provider-profiles") return fulfill(route, [provider]);

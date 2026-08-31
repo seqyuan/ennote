@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { selectProject as pickProject, tryFulfillBlankSessionCreate } from "./harness";
 
 const project = { id: "attention-project", name: "Attention workspace", description: "", status: "active",
   createdAt: "2026-08-04T00:00:00Z", updatedAt: "2026-08-04T00:00:00Z" };
@@ -26,8 +27,7 @@ async function selectProject(page: Page) {
     await page.getByRole("button", { name: "Open navigation" }).click();
     await expect(navigation).toHaveClass(/sidebar-open/);
   }
-  await page.getByTitle("Select project").first().click();
-  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
+  await pickProject(page, project.name);
 }
 
 function commonRoute(path: string, route: Route) {
@@ -58,6 +58,7 @@ test("global attention bell shows pending items and navigates to the source sess
   let dismissedCompletion = false;
   await page.route("**/api/worker/v1/**", async route => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     const common = commonRoute(path, route);
     if (common) return common;
     if (path === `/v1/sessions/${currentSession.id}/active-run`) return fulfill(route, null);

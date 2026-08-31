@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
 
 const project = { id: "project-permission", name: "Permission project", description: "", status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" };
 const session = { id: "session-permission", projectId: project.id, title: "Permission session", status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" };
@@ -17,6 +18,7 @@ async function mockApp(page: Page, onTurn?: (body: Record<string, unknown>) => v
   await page.route("**/api/worker/v1/**", async route => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/policy-profiles") return fulfill(route, policies);
     if (path === "/v1/provider-profiles") return fulfill(route, [provider]);
@@ -41,8 +43,7 @@ test("each turn freezes the selected permission profile", async ({ page }) => {
   let turnBody: Record<string, unknown> | undefined;
   await mockApp(page, body => { turnBody = body; });
   await page.goto("/");
-  await page.getByTitle("Select project").first().click();
-  await page.getByText(project.name, { exact: true }).click();
+  await selectProject(page, project.name);
   await page.getByText(session.title, { exact: true }).click();
 
   await page.getByRole("button", { name: /Permission mode/ }).click();
@@ -61,8 +62,7 @@ test.describe("mobile", () => {
     await mockApp(page);
     await page.goto("/");
     await page.getByRole("button", { name: "Open navigation" }).click();
-    await page.getByTitle("Select project").first().click();
-    await page.getByText(project.name, { exact: true }).click();
+    await selectProject(page, project.name);
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByText(session.title, { exact: true }).click();
     await expect(page.getByRole("button", { name: /Permission mode/ })).toBeVisible();

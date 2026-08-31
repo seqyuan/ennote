@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
 import { subscribedFrame } from "./session-feed";
 
 const project = { id: "surface-project", name: "Spatial atlas", description: "", status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" };
@@ -32,6 +33,7 @@ async function mockSurface(page: Page) {
   await page.route("**/api/worker/v1/**", async route => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/policy-profiles") return fulfill(route, policies);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
@@ -50,9 +52,7 @@ async function mockSurface(page: Page) {
 async function openSurface(page: Page) {
   await mockSurface(page);
   await page.goto("/");
-  if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.getByTitle("Select project").first().click();
-  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
+  await selectProject(page, project.name);
   if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("button", { name: session.title, exact: true }).click();
   await expect(page.locator("[data-turn-id]")).toHaveCount(2);
@@ -82,8 +82,7 @@ test("theme control applies and persists light and dark preferences", async ({ p
   expect(await page.evaluate(() => localStorage.getItem("ennote-theme"))).toBe("dark");
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await page.getByTitle("Select project").first().click();
-  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
+  await selectProject(page, project.name);
   await page.getByRole("button", { name: session.title, exact: true }).click();
   await page.screenshot({ path: "/tmp/ennote-conversation-surface-dark.png", fullPage: true });
 });
@@ -96,6 +95,7 @@ test("a nonterminal stream EOF reconnects the same run and refreshes canonical h
   await page.route("**/api/worker/v1/**", async route => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/policy-profiles") return fulfill(route, policies);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
@@ -121,8 +121,7 @@ test("a nonterminal stream EOF reconnects the same run and refreshes canonical h
     return route.abort();
   });
   await page.goto("/");
-  await page.getByTitle("Select project").first().click();
-  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
+  await selectProject(page, project.name);
   await page.getByRole("button", { name: session.title, exact: true }).click();
   await expect.poll(() => streams, { timeout: 5000 }).toBe(2);
   await expect(page.getByText("Recovered response", { exact: true })).toBeVisible();

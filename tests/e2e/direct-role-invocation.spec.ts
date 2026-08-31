@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
 
 const now = "2026-08-03T00:00:00Z";
 const project = { id: "role-project", name: "Role project", description: "", status: "active", createdAt: now, updatedAt: now };
@@ -30,6 +31,7 @@ function fulfill(route: Route, data: unknown, status = 200) {
 async function mockDirectRole(page: Page, onInvocation: (body: Record<string, unknown>) => void) {
   await page.route("**/api/worker/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/provider-profiles") return fulfill(route, []);
     if (path === "/v1/model-profiles") return fulfill(route, [model]);
@@ -71,8 +73,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     await mockDirectRole(page, (body) => { invocation = body; });
     await page.goto("/");
     if (viewport.width <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
-    await page.getByTitle("Select project").first().click();
-    await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
+    await selectProject(page, project.name);
     if (viewport.width <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("button", { name: session.title, exact: true }).click();
 

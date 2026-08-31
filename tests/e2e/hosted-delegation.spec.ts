@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
 import { subscribedFrame } from "./session-feed";
 
 const project = { id: "delegation-project", name: "Delegation workspace", description: "", status: "active",
@@ -40,8 +41,7 @@ async function selectSession(page: Page) {
   await page.goto("/");
   await waitNavigationClosed();
   await openNavigation();
-  await page.getByTitle("Select project").first().click();
-  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
+  await selectProject(page, project.name);
   await waitNavigationClosed();
   await openNavigation();
   await page.getByRole("button", { name: session.title, exact: true }).click();
@@ -72,6 +72,7 @@ test("nested delegation activity polls child state and renders terminal result",
   ];
   await page.route("**/api/worker/v1/**", async route => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     const common = commonRoute(path, route);
     if (common) return common;
     if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, null);
@@ -110,6 +111,7 @@ test("discovers a later child tool approval while the parent waits", async ({ pa
       argumentsPreview: "{\"path\":\"notes.txt\"}" }] };
   await page.route("**/api/worker/v1/**", async route => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     const common = commonRoute(path, route);
     if (common) return common;
     if (path === `/v1/sessions/${session.id}/messages`) return fulfill(route, { messages: [], hasMore: false });
@@ -153,6 +155,7 @@ test.describe("mobile admission approval", () => {
             maxCostUsdMicros: 100000, maxWallTimeMs: 120000 } }] }] };
     await page.route("**/api/worker/v1/**", async route => {
       const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+      if (await tryFulfillBlankSessionCreate(route)) return;
       const common = commonRoute(path, route);
       if (common) return common;
       if (path === `/v1/sessions/${session.id}/messages`) return fulfill(route, { messages: [], hasMore: false });
@@ -212,6 +215,7 @@ test("retries an eligible child and renders generation history", async ({ page }
   ];
   await page.route("**/api/worker/v1/**", async route => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     const common = commonRoute(path, route);
     if (common) return common;
     if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, null);
@@ -269,6 +273,7 @@ test("shows background delegation completion without blocking the composer", asy
   ];
   await page.route("**/api/worker/v1/**", async route => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     const common = commonRoute(path, route);
     if (common) return common;
     if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, null);
@@ -301,6 +306,7 @@ test("cancels an active delegation group when the action is valid", async ({ pag
   ];
   await page.route("**/api/worker/v1/**", async route => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     const common = commonRoute(path, route);
     if (common) return common;
     if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, null);

@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
 // A configured provider suppresses the first-run Models settings auto-open.
 const settingsProvider = { id: "settings-provider", name: "Provider", providerType: "openai-compatible", baseUrl: "https://example.test", credentialConfigured: true, status: "active", createdAt: "2026-07-30T00:00:00Z", updatedAt: "2026-07-30T00:00:00Z" };
 
@@ -21,6 +22,7 @@ async function mockPhase2(page: Page) {
   await page.route("**/api/worker/v1/**", async route => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
     if (path === "/v1/model-profiles") return fulfill(route, []);
@@ -46,16 +48,14 @@ async function mockPhase2(page: Page) {
   });
 }
 
-async function selectProject(page: Page) {
+async function openWorkspace(page: Page) {
   await page.goto("/");
-  if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.getByTitle("Select project").first().click();
-  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
+  await selectProject(page, project.name);
 }
 
 test("searches active Sessions and supports archive and restore lifecycle actions", async ({ page }) => {
   await mockPhase2(page);
-  await selectProject(page);
+  await openWorkspace(page);
   // The search field is a collapsed affordance: expand it first.
   await page.getByRole("button", { name: "Search sessions", exact: true }).click();
   const search = page.getByRole("textbox", { name: "Search sessions" });
@@ -84,7 +84,7 @@ test("searches active Sessions and supports archive and restore lifecycle action
 
 test("Settings tabs use arrow navigation, retain Chat, and restore focus", async ({ page }) => {
   await mockPhase2(page);
-  await selectProject(page);
+  await openWorkspace(page);
   await page.getByRole("button", { name: "Marker review", exact: true }).click();
   await page.evaluate(() => { (window as typeof window & { retainedChat?: Element | null }).retainedChat = document.querySelector(".chat-area"); });
 
@@ -140,8 +140,7 @@ test.describe("mobile drawer", () => {
     await expect(trigger).toBeFocused();
 
     await trigger.click();
-    await page.getByTitle("Select project").first().click();
-    await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
+    await selectProject(page, project.name);
     await expect(trigger).toBeFocused();
     await trigger.click();
     await page.getByRole("button", { name: "Marker review", exact: true }).click();

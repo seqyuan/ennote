@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
 // A configured provider suppresses the first-run Models settings auto-open.
 const settingsProvider = { id: "settings-provider", name: "Provider", providerType: "openai-compatible", baseUrl: "https://example.test", credentialConfigured: true, status: "active", createdAt: "2026-07-30T00:00:00Z", updatedAt: "2026-07-30T00:00:00Z" };
 
@@ -31,6 +32,7 @@ async function mockMCP(page: Page) {
   await page.route("**/api/worker/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
     if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
@@ -75,12 +77,11 @@ async function selectProjectAndOpenMCPSettings(page: Page) {
   await page.goto("/");
   const mobile = (page.viewportSize()?.width ?? 1280) <= 640;
   if (mobile) await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.getByTitle("Select project").first().click();
-  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
+  await selectProject(page, project.name);
   // Selecting a project closes the mobile drawer; reopen it to reach Settings.
   if (mobile) await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("tab", { name: /MCP/ }).click();
+  await page.getByRole("tab", { name: "MCP", exact: true }).click();
 }
 
 for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
@@ -125,6 +126,7 @@ test("MCP settings shows Bound + Update available for a stale project-file candi
   await page.route("**/api/worker/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
     if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
@@ -181,6 +183,7 @@ test("update-available candidate exposes a read-only profile diff", async ({ pag
   await page.route("**/api/worker/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
     if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
@@ -209,6 +212,7 @@ test("unbound managed MCP profiles can be archived", async ({ page }) => {
   const managedCandidate = { ...candidate, sourceKind: "managed", sourceLocator: "", alreadyBound: false };
   await page.route("**/api/worker/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
     if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);

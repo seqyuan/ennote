@@ -1,4 +1,5 @@
 import { expect, test, type Route } from "@playwright/test";
+import { tryFulfillBlankSessionCreate } from "./harness";
 // A configured provider suppresses the first-run Models settings auto-open.
 const settingsProvider = { id: "settings-provider", name: "Provider", providerType: "openai-compatible", baseUrl: "https://example.test", credentialConfigured: true, status: "active", createdAt: "2026-07-30T00:00:00Z", updatedAt: "2026-07-30T00:00:00Z" };
 
@@ -34,6 +35,7 @@ test("skills tab lists installed and catalog skills with install annotations", a
   await page.route("**/api/worker/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, []);
     if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
     if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
@@ -61,6 +63,7 @@ test("marketplace search installs a skill", async ({ page }) => {
   await page.route("**/api/worker/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, []);
     if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
     if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
@@ -95,6 +98,7 @@ test("toggle, check update, and remove a skill", async ({ page }) => {
   await page.route("**/api/worker/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, []);
     if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
     if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
@@ -149,6 +153,7 @@ test("skill roots: preset add, toggle, and remove via the settings surface", asy
   await page.route("**/api/worker/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, []);
     if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
     if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);

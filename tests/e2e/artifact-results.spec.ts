@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
 
 const project = { id: "artifact-project", name: "Artifact study", description: "", status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" };
 const session = { id: "artifact-session", projectId: project.id, title: "Scientific outputs", status: "active", activeLeafMessageId: "m4", activeBranchId: "main", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:04Z" };
@@ -33,6 +34,7 @@ async function mockArtifacts(page: Page) {
   await page.route("**/api/worker/v1/**", async route => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/policy-profiles") return fulfill(route, policies);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
@@ -69,9 +71,7 @@ async function mockArtifacts(page: Page) {
 async function openArtifacts(page: Page) {
   await mockArtifacts(page);
   await page.goto("/");
-  if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.getByTitle("Select project").first().click();
-  await page.getByLabel("Projects", { exact: true }).getByRole("button", { name: project.name }).click();
+  await selectProject(page, project.name);
   if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("button", { name: session.title, exact: true }).click();
   await expect(page.locator("[data-artifact-id]" )).toHaveCount(6);

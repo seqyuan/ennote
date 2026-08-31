@@ -1,4 +1,5 @@
 import { expect, test, type Route } from "@playwright/test";
+import { tryFulfillBlankSessionCreate } from "./harness";
 
 const now = "2026-08-07T00:00:00Z";
 const policy = {
@@ -20,6 +21,7 @@ test("active policy profiles can be deactivated", async ({ page }) => {
   let active = true;
   await page.route("**/api/worker/v1/**", async route => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects" || path === "/v1/provider-profiles" || path === "/v1/model-profiles") {
       return fulfill(route, []);
     }

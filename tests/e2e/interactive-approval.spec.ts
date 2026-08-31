@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
 import { subscribedFrame } from "./session-feed";
 
 const project = { id: "approval-project", name: "Approval project", description: "", status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" };
@@ -20,6 +21,7 @@ async function mockApprovalApp(page: Page, onDecision: (decision: string) => voi
   await page.route("**/api/worker/v1/**", async route => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillBlankSessionCreate(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/policy-profiles") return fulfill(route, policies);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
@@ -51,9 +53,7 @@ async function mockApprovalApp(page: Page, onDecision: (decision: string) => voi
 
 async function openApproval(page: Page) {
   await page.goto("/");
-  if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.getByTitle("Select project").first().click();
-  await page.getByText(project.name, { exact: true }).click();
+  await selectProject(page, project.name);
   if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByText(session.title, { exact: true }).click();
   await expect(page.getByRole("region", { name: "Tool approval required" })).toBeVisible();
@@ -69,8 +69,7 @@ test("pending approval survives reload and resolves the whole batch", async ({ p
   await expect(page.getByRole("button", { name: /Permission mode: Ask/ })).toBeDisabled();
 
   await page.reload();
-  await page.getByTitle("Select project").first().click();
-  await page.getByText(project.name, { exact: true }).click();
+  await selectProject(page, project.name);
   await page.getByText(session.title, { exact: true }).click();
   await expect(page.getByRole("button", { name: "Approve batch" })).toBeVisible();
   await page.getByRole("button", { name: "Approve batch" }).click();
