@@ -4,10 +4,11 @@ import { Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
 
 /** Secret input matching dsh's 32px field, with a reveal toggle. */
-export function SecretTextInput({ value, onChange, placeholder }: {
+export function SecretTextInput({ value, onChange, placeholder, ariaLabel }: {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  ariaLabel?: string;
 }) {
   const [visible, setVisible] = useState(false);
   return (
@@ -16,6 +17,7 @@ export function SecretTextInput({ value, onChange, placeholder }: {
         type={visible ? "text" : "password"}
         value={value}
         placeholder={placeholder}
+        aria-label={ariaLabel}
         autoComplete="off"
         spellCheck={false}
         onChange={(event) => onChange(event.target.value)}

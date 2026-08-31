@@ -120,7 +120,7 @@ export function ProviderEditor({ provider, models, creating, hideTitle, onClose,
       )}
       <div className="settings-models-field">
         <span className="settings-models-fieldlabel">{t("settings.models.keyInput")}</span>
-        <SecretTextInput value={keyDraft} onChange={setKeyDraft} placeholder={keyPlaceholder} />
+        <SecretTextInput value={keyDraft} onChange={setKeyDraft} placeholder={keyPlaceholder} ariaLabel={t("settings.models.keyInput")} />
         {keyFailure === undefined ? null
           : <p className="settings-models-error">{t(`settings.models.${keyFailure}`)}</p>}
       </div>

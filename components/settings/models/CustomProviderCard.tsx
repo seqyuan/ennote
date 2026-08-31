@@ -138,7 +138,7 @@ export function CustomProviderCard({ taken, onClose, refresh, setError, onSaved 
       </div>
       <div className="settings-models-field">
         <span className="settings-models-fieldlabel">{t("settings.models.keyInput")}</span>
-        <SecretTextInput value={apiKey} onChange={setApiKey} placeholder={t("settings.models.keyPlaceholder")} />
+        <SecretTextInput value={apiKey} onChange={setApiKey} placeholder={t("settings.models.keyPlaceholder")} ariaLabel={t("settings.models.keyInput")} />
         {keyFailure === undefined ? null
           : <p className="settings-models-error">{t(`settings.models.${keyFailure}`)}</p>}
       </div>
