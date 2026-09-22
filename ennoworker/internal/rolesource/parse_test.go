@@ -121,26 +121,65 @@ func TestParseRejectsInvalidRoleMarkdown(t *testing.T) {
 	}
 }
 
-func TestParseNormalizesRoleAuthority(t *testing.T) {
-	readOnly, err := rolesource.Parse([]byte(validRoleMarkdown))
-	require.NoError(t, err)
-	assert.Equal(t, rolesource.AuthorityReadOnly, readOnly.Authority)
-	assert.Equal(t, domain.RoleAuthorityReadOnly, readOnly.Authority.Domain())
+func TestParseValidatesRoleAuthority(t *testing.T) {
+	cases := []struct {
+		name      string
+		authority string
+		want      rolesource.Authority
+		domain    domain.RoleAuthority
+	}{
+		{name: "read only", authority: "read_only", want: rolesource.AuthorityReadOnly, domain: domain.RoleAuthorityReadOnly},
+		{name: "write workspace", authority: "write_workspace", want: rolesource.AuthorityWriteWorkspace, domain: domain.RoleAuthorityMutation},
+		{name: "legacy mutation alias", authority: "mutation", want: rolesource.AuthorityMutation, domain: domain.RoleAuthorityMutation},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			document, err := rolesource.Parse([]byte(strings.Replace(validRoleMarkdown, "authority: read_only", "authority: "+test.authority, 1)))
+			require.NoError(t, err)
+			// Authority is preserved verbatim so an existing revision keeps its digest.
+			assert.Equal(t, test.want, document.Authority)
+			assert.Equal(t, test.domain, document.Authority.Domain())
+		})
+	}
 
-	writeWorkspace, err := rolesource.Parse([]byte(strings.Replace(validRoleMarkdown, "authority: read_only", "authority: write_workspace", 1)))
-	require.NoError(t, err)
-	assert.Equal(t, rolesource.AuthorityWriteWorkspace, writeWorkspace.Authority)
-	assert.Equal(t, domain.RoleAuthorityMutation, writeWorkspace.Authority.Domain())
-
-	// The internal vocabulary must never be accepted in a portable Role file.
-	_, err = rolesource.Parse([]byte(strings.Replace(validRoleMarkdown, "authority: read_only", "authority: mutation", 1)))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "authority")
-
-	// An omitted authority fails closed to read_only.
+	// An omitted authority is tolerated for legacy files and fails closed.
 	omitted, err := rolesource.Parse([]byte(strings.Replace(validRoleMarkdown, "authority: read_only\n", "", 1)))
 	require.NoError(t, err)
-	assert.Equal(t, rolesource.AuthorityReadOnly, omitted.Authority)
+	assert.Equal(t, rolesource.Authority(""), omitted.Authority)
+	assert.Equal(t, domain.RoleAuthorityReadOnly, omitted.Authority.Domain())
+
+	// Unknown values are rejected.
+	_, err = rolesource.Parse([]byte(strings.Replace(validRoleMarkdown, "authority: read_only", "authority: admin", 1)))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "authority")
+}
+
+// TestRoleAuthorityIsDigestStable pins the compatibility invariant behind the
+// Authority type: parsing and re-encoding a Role must not rewrite the authority
+// field, because ReadRoleRevision re-verifies the published digest.
+func TestRoleAuthorityIsDigestStable(t *testing.T) {
+	sources := []string{
+		validRoleMarkdown,
+		strings.Replace(validRoleMarkdown, "authority: read_only", "authority: write_workspace", 1),
+		strings.Replace(validRoleMarkdown, "authority: read_only", "authority: mutation", 1),
+		strings.Replace(validRoleMarkdown, "authority: read_only\n", "", 1),
+	}
+	for _, source := range sources {
+		document, err := rolesource.Parse([]byte(source))
+		require.NoError(t, err)
+		before, err := rolesource.SourceDigest(document)
+		require.NoError(t, err)
+		// Simulate the publish/read cycle: encode the draft, then re-parse the
+		// revision bytes and recompute the digest.
+		encoded, err := rolesource.Encode(document)
+		require.NoError(t, err)
+		reparsed, err := rolesource.Parse(encoded)
+		require.NoError(t, err)
+		after, err := rolesource.SourceDigest(reparsed)
+		require.NoError(t, err)
+		assert.Equal(t, document.Authority, reparsed.Authority)
+		assert.Equal(t, before, after)
+	}
 }
 
 func TestParseRejectsOversizedRoleFile(t *testing.T) {

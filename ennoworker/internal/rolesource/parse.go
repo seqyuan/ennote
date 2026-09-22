@@ -28,22 +28,32 @@ type ModelBinding struct {
 // Authority is the Role source-level write authority. It is deliberately not
 // domain.RoleAuthority: portable Role files and the Worker API spell the
 // mutation authority "write_workspace", while the frozen RoleDefinition uses
-// "mutation". normalizeAndValidate canonicalizes this value and Domain maps it
+// "mutation".
+//
+// Authority is validated but never rewritten: Role revisions are immutable and
+// digest-verified, so normalizing an existing field would change the digest of
+// revisions written before this type existed. Domain maps every accepted value
 // onto the internal vocabulary.
 type Authority string
 
 const (
 	AuthorityReadOnly       Authority = "read_only"
 	AuthorityWriteWorkspace Authority = "write_workspace"
+	// AuthorityMutation is the internal spelling, accepted for Roles authored
+	// against the frozen RoleDefinition contract before "write_workspace" was
+	// documented. It carries exactly the same authority.
+	AuthorityMutation Authority = "mutation"
 )
 
-// Domain maps the source authority onto the internal Role authority. Only the
-// values accepted by normalizeAndValidate reach this method.
+// Domain maps the source authority onto the internal Role authority. An
+// omitted authority fails closed to read_only.
 func (a Authority) Domain() domain.RoleAuthority {
-	if a == AuthorityWriteWorkspace {
+	switch a {
+	case AuthorityWriteWorkspace, AuthorityMutation:
 		return domain.RoleAuthorityMutation
+	default:
+		return domain.RoleAuthorityReadOnly
 	}
-	return domain.RoleAuthorityReadOnly
 }
 
 type SkillBinding struct {
@@ -204,12 +214,11 @@ func normalizeAndValidate(document *Document) error {
 	if document.Color == "" {
 		document.Color = "neutral"
 	}
-	// Authority is required by the portable Role contract; an omitted value
-	// fails closed to read_only so a legacy file can never grant mutation.
+	// Authority is validated but never rewritten so SourceDigest stays stable
+	// across the introduction of the Authority type. An omitted value is
+	// accepted for legacy files and fails closed to read_only in Domain.
 	switch document.Authority {
-	case "":
-		document.Authority = AuthorityReadOnly
-	case AuthorityReadOnly, AuthorityWriteWorkspace:
+	case "", AuthorityReadOnly, AuthorityWriteWorkspace, AuthorityMutation:
 	default:
 		return fmt.Errorf("unsupported Role authority %q", document.Authority)
 	}
