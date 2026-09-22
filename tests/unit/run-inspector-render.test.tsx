@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { RunInspectorBody } from "@/components/RunInspectorPanel";
+import { RunInspectorBody, type TranscriptSection } from "@/components/RunInspectorPanel";
 import type { RunMCPFrozen } from "@/hooks/useRunMCP";
 import type { RunPromptComposition } from "@/hooks/useRunPromptComposition";
 
@@ -51,6 +51,66 @@ function mcpSurface(): RunMCPFrozen {
     ],
   };
 }
+
+function transcriptSection(): TranscriptSection {
+  return {
+    messages: [
+      { id: "m1", runId: "run-1", ordinal: 0, role: "assistant", visibility: "private", createdAt: "2026-09-23T00:00:00Z",
+        content: [
+          { type: "thinking", text: "weighing options" },
+          { type: "tool_call", toolCall: { id: "c1", name: "read", arguments: { path: "a.csv" } } },
+        ] },
+      { id: "m2", runId: "run-1", ordinal: 1, role: "tool", visibility: "private", createdAt: "2026-09-23T00:00:01Z",
+        content: [{ type: "tool_result", toolResult: { toolCallId: "c1", toolName: "read", content: "a,b", isError: true } }] },
+    ],
+    hasMore: true,
+    loadingOlder: false,
+    loadOlder: () => {},
+  };
+}
+
+describe("RunInspectorBody transcript", () => {
+  it("labels the transcript as the run's own private record", () => {
+    const html = renderToStaticMarkup(<RunInspectorBody
+      runId="run-1" composition={composition()} transcript={transcriptSection()} loading={false} error={null} t={t} />);
+
+    expect(html).toContain("inspector.transcript");
+    expect(html).toContain("inspector.transcriptNote");
+    expect(html).toContain("data-transcript-private");
+  });
+
+  it("renders each row with its ordinal, role and tool summary", () => {
+    const html = renderToStaticMarkup(<RunInspectorBody
+      runId="run-1" composition={composition()} transcript={transcriptSection()} loading={false} error={null} t={t} />);
+
+    expect(html).toContain("data-transcript-ordinal=\"0\"");
+    expect(html).toContain("data-transcript-ordinal=\"1\"");
+    expect(html).toContain("read");
+    expect(html).toContain("inspector.transcriptThinking");
+  });
+
+  it("offers older pages instead of silently truncating a long run", () => {
+    const html = renderToStaticMarkup(<RunInspectorBody
+      runId="run-1" composition={composition()} transcript={transcriptSection()} loading={false} error={null} t={t} />);
+    expect(html).toContain("inspector.transcriptOlder");
+
+    const complete = renderToStaticMarkup(<RunInspectorBody runId="run-1" composition={composition()} loading={false}
+      error={null} t={t} transcript={{ ...transcriptSection(), hasMore: false }} />);
+    expect(complete).not.toContain("inspector.transcriptOlder");
+  });
+
+  it("says so when a run generated no transcript rows", () => {
+    const html = renderToStaticMarkup(<RunInspectorBody runId="run-1" composition={composition()} loading={false}
+      error={null} t={t} transcript={{ messages: [], hasMore: false, loadingOlder: false, loadOlder: () => {} }} />);
+    expect(html).toContain("inspector.transcriptEmpty");
+  });
+
+  it("omits the transcript block entirely when it was not requested", () => {
+    const html = renderToStaticMarkup(
+      <RunInspectorBody runId="run-1" composition={composition()} loading={false} error={null} t={t} />);
+    expect(html).not.toContain("inspector.transcriptNote");
+  });
+});
 
 describe("RunInspectorBody MCP surface", () => {
   it("names each frozen server with its tools and revision", () => {

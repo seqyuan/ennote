@@ -7,6 +7,7 @@ import { GraphActivityPanel } from "./GraphActivityPanel";
 import { RunInspectorPanel } from "./RunInspectorPanel";
 import { TabBar, type Tab } from "./TabBar";
 import { useRunMCP } from "@/hooks/useRunMCP";
+import { useRunTranscript } from "@/hooks/useRunTranscript";
 import { useRunPromptComposition } from "@/hooks/useRunPromptComposition";
 import type { useResizable } from "@/hooks/useResizable";
 import type { PermissionMode } from "@/lib/permission-mode";
@@ -41,6 +42,7 @@ export function RightPanel(props: {
   const inspectedRunId = activeTabId === "tools" ? inspectorRunId : null;
   const prompt = useRunPromptComposition(inspectedRunId);
   const mcp = useRunMCP(inspectedRunId);
+  const transcript = useRunTranscript(inspectedRunId);
 
   return (
     <div
@@ -84,6 +86,7 @@ export function RightPanel(props: {
               runId={inspectorRunId}
               composition={prompt.composition}
               mcp={mcp.frozen}
+              transcript={transcript}
               loading={prompt.loading}
               error={prompt.error}
             />

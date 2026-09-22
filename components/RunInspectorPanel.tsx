@@ -14,7 +14,9 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight, FileClock } from "lucide-react";
 import { useT } from "@/components/LocaleProvider";
 import { formatBytes, shortDigest } from "@/lib/run-inspection";
+import { transcriptEntries, transcriptSummary } from "@/lib/run-transcript";
 import type { RunMCPFrozen } from "@/hooks/useRunMCP";
+import type { RunMessagePage } from "@/hooks/useRunTranscript";
 import type { RunPromptComposition } from "@/hooks/useRunPromptComposition";
 import type { components } from "@/lib/worker-api.gen";
 
@@ -42,11 +44,20 @@ const DIGEST: React.CSSProperties = {
 };
 
 /** Presentational body: pure props, so its states are directly testable. */
-export function RunInspectorBody({ runId, composition, mcp, loading, error, t }: {
+export type TranscriptSection = {
+  messages: RunMessagePage["messages"];
+  hasMore: boolean;
+  loadingOlder: boolean;
+  loadOlder: () => void;
+};
+
+export function RunInspectorBody({ runId, composition, mcp, transcript, loading, error, t }: {
   runId: string | null;
   composition: RunPromptComposition | null;
   /** Absent on the composition-only call sites; the MCP block then renders nothing. */
   mcp?: RunMCPFrozen | null;
+  /** Absent where the transcript was not requested. */
+  transcript?: TranscriptSection | null;
   loading: boolean;
   error: string | null;
   t: (key: string) => string;
@@ -106,6 +117,25 @@ export function RunInspectorBody({ runId, composition, mcp, loading, error, t }:
           {(mcp.servers ?? []).map((server) => <MCPServerRow key={server.id} server={server} t={t} />)}
         </div>}
     </div>}
+
+    {transcript ? <div>
+      <div style={HEADING}>{t("inspector.transcript")}</div>
+      <div style={{ ...MUTED, marginBottom: 6 }}>{t("inspector.transcriptNote")}</div>
+      {transcript.messages.length === 0
+        ? <div style={MUTED}>{t("inspector.transcriptEmpty")}</div>
+        : <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {transcript.messages.map((message) => <TranscriptRow key={message.id} message={message} t={t} />)}
+        </div>}
+      {transcript.hasMore && <button
+        type="button"
+        disabled={transcript.loadingOlder}
+        onClick={transcript.loadOlder}
+        style={{
+          marginTop: 6, padding: "3px 8px", borderRadius: 5, border: "1px solid var(--border)",
+          background: "none", color: "var(--text-dim)", fontSize: 10.5, cursor: "pointer",
+        }}
+      >{t("inspector.transcriptOlder")}</button>}
+    </div> : null}
 
     {recorded && <div>
       <button
@@ -194,6 +224,68 @@ function MCPServerRow({ server, t }: { server: RunMCPServerSnapshot; t: (key: st
   </div>;
 }
 
+const ROLE_LABEL: Record<string, string> = {
+  system: "System", user: "User", assistant: "Assistant", tool: "Tool",
+};
+
+function TranscriptRow({ message, t }: { message: RunMessagePage["messages"][number]; t: (key: string) => string }) {
+  const entries = transcriptEntries(message.content);
+  const summary = transcriptSummary(message.content);
+  return <details
+    data-transcript-ordinal={message.ordinal}
+    style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "4px 8px" }}
+  >
+    <summary style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, cursor: "pointer" }}>
+      <span style={{ ...MUTED, flexShrink: 0, width: 22, textAlign: "right" }}>{message.ordinal}</span>
+      <span style={{ flexShrink: 0, fontWeight: 600, color: "var(--text)" }}>
+        {ROLE_LABEL[message.role] ?? message.role}
+      </span>
+      {message.visibility === "private" && <span
+        data-transcript-private
+        style={{
+          flexShrink: 0, fontSize: 9.5, padding: "1px 5px", borderRadius: 4,
+          border: "1px solid var(--border)", color: "var(--text-dim)",
+        }}
+      >{t("inspector.transcriptPrivate")}</span>}
+      <span style={{ flex: 1, minWidth: 0, color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {summary}
+      </span>
+    </summary>
+    <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 4 }}>
+      {entries.map((entry, index) => <TranscriptEntryView entry={entry} key={index} t={t} />)}
+    </div>
+  </details>;
+}
+
+function TranscriptEntryView({ entry, t }: { entry: ReturnType<typeof transcriptEntries>[number]; t: (key: string) => string }) {
+  const pre: React.CSSProperties = {
+    margin: 0, padding: "5px 7px", borderRadius: 5, background: "var(--bg-panel)",
+    fontSize: 10.5, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word",
+    maxHeight: 260, overflowY: "auto",
+  };
+  if (entry.kind === "text") return <div style={pre}>{entry.text}</div>;
+  if (entry.kind === "thinking") return <div>
+    <div style={{ ...MUTED, marginBottom: 2 }}>{t("inspector.transcriptThinking")}</div>
+    <div style={pre}>{entry.text}</div>
+  </div>;
+  if (entry.kind === "image") return <div style={MUTED}>
+    {t("inspector.transcriptImage").replace("{width}", String(entry.width)).replace("{height}", String(entry.height))}
+  </div>;
+  if (entry.kind === "unknown") return <div style={MUTED}>
+    {t("inspector.transcriptUnknown").replace("{type}", entry.type)}
+  </div>;
+  if (entry.kind === "tool_call") return <details>
+    <summary style={{ ...MUTED, cursor: "pointer" }}>{`${t("inspector.transcriptCall")} ${entry.name}`}</summary>
+    {entry.arguments !== undefined && <div style={{ ...pre, marginTop: 3 }}>{entry.arguments}</div>}
+  </details>;
+  return <details>
+    <summary style={{ ...MUTED, cursor: "pointer", color: entry.isError ? "var(--danger, #dc2626)" : "var(--text-dim)" }}>
+      {`${entry.isError ? t("inspector.transcriptError") : t("inspector.transcriptResult")} ${entry.name}`}
+    </summary>
+    <div style={{ ...pre, marginTop: 3 }}>{entry.text}</div>
+  </details>;
+}
+
 function DigestLine({ label, value }: { label: string; value: string }) {
   if (!value) return null;
   return <div style={{ display: "flex", gap: 8, fontSize: 10.5 }}>
@@ -202,14 +294,16 @@ function DigestLine({ label, value }: { label: string; value: string }) {
   </div>;
 }
 
-export function RunInspectorPanel({ runId, composition, mcp, loading, error }: {
+export function RunInspectorPanel({ runId, composition, mcp, transcript, loading, error }: {
   runId: string | null;
   composition: RunPromptComposition | null;
   mcp: RunMCPFrozen | null;
+  transcript: TranscriptSection | null;
   loading: boolean;
   error: string | null;
 }) {
   const t = useT();
   return <RunInspectorBody
-    runId={runId} composition={composition} mcp={mcp} loading={loading} error={error} t={t} />;
+    runId={runId} composition={composition} mcp={mcp} transcript={transcript}
+    loading={loading} error={error} t={t} />;
 }

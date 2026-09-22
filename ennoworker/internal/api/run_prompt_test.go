@@ -27,7 +27,11 @@ type runPromptResponse struct {
 	SectionsDigest  string                 `json:"sectionsDigest"`
 	ComposedDigest  string                 `json:"composedDigest"`
 	Prompt          string                 `json:"prompt"`
-	Recorded        bool                   `json:"recorded"`
+	// The catalog state is part of the frozen record: it explains why a catalog
+	// section is present or absent.
+	SkillCatalogState  string `json:"skillCatalogState"`
+	SkillCatalogDigest string `json:"skillCatalogDigest"`
+	Recorded           bool   `json:"recorded"`
 }
 
 // insertRunRow seeds the minimum rows the router and the handler need: the
@@ -73,6 +77,7 @@ func insertRunWithRecordedComposition(t *testing.T, ctx context.Context, db *sql
 	snapshot, err := json.Marshal(domain.SystemPromptSnapshot{
 		Version: 1, PlatformVersion: "hosted-v1", AgentPrompt: composed, Digest: "base-digest",
 		Sections: sections, SectionsDigest: sectionsDigest, ComposedDigest: composedDigest,
+		SkillCatalogState: domain.SkillCatalogMaterialized, SkillCatalogDigest: "catalog-digest",
 	})
 	require.NoError(t, err)
 	return insertRunRow(t, ctx, db, sessionID, string(snapshot), "base-digest"), composed, sections
@@ -97,6 +102,9 @@ func TestGetRunPromptReturnsTheFrozenComposition(t *testing.T) {
 	assert.Equal(t, sections, got.Sections)
 	assert.NotEmpty(t, got.SectionsDigest)
 	assert.NotEmpty(t, got.ComposedDigest)
+	assert.Equal(t, "materialized", got.SkillCatalogState,
+		"the recorded catalog state travels with the composition so absence is explainable")
+	assert.Equal(t, "catalog-digest", got.SkillCatalogDigest)
 }
 
 // A Run frozen before composition freezing existed must read as not recorded,
@@ -119,6 +127,7 @@ func TestGetRunPromptReportsAnUnrecordedComposition(t *testing.T) {
 	assert.Empty(t, got.Sections)
 	assert.Empty(t, got.Prompt)
 	assert.Empty(t, got.ComposedDigest)
+	assert.Empty(t, got.SkillCatalogState)
 	assert.Equal(t, "base-digest", got.Digest, "the frozen base-prompt digest is still reported")
 	assert.Contains(t, rec.Body.String(), `"sections":[]`, "sections must serialize as an array")
 }
