@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/mcpclient"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -70,4 +71,47 @@ func TestLoadRunMCPReportsAnEmptySurface(t *testing.T) {
 	frozen, err := (&store.MCPRunRepo{DB: db}).LoadRunMCP(context.Background(), "run-without-mcp")
 	require.NoError(t, err)
 	assert.Empty(t, frozen.Servers)
+}
+
+// The handshake facts must survive the freeze/read round trip: a Run's record of
+// what a server negotiated and asked for is only useful if it can be read back.
+func TestLoadRunMCPReturnsTheFrozenHandshake(t *testing.T) {
+	db := store.SetupDB(t)
+	repo := &store.MCPRunRepo{DB: db}
+	ctx := context.Background()
+
+	handshake := mcpclient.ServerHandshake{ProtocolVersion: "2026-07-28",
+		Instructions: "Search before you fetch."}
+	_, err := repo.FreezeServer(ctx, store.RunMCPServerSnapshot{
+		RunID: "run-handshake", BindingID: "binding", BindingRevision: 1,
+		ProfileVersionID: "profile@v000001", ConfigDigest: "config",
+		NegotiatedProtocol: handshake.ProtocolVersion,
+		Instructions:       handshake.Instructions,
+		InstructionsDigest: handshake.InstructionDigest(),
+		Required:           true,
+	})
+	require.NoError(t, err)
+
+	frozen, err := repo.LoadRunMCP(ctx, "run-handshake")
+	require.NoError(t, err)
+	require.Len(t, frozen.Servers, 1)
+	server := frozen.Servers[0].Server
+	assert.Equal(t, "2026-07-28", server.NegotiatedProtocol)
+	assert.Equal(t, "Search before you fetch.", server.Instructions)
+	assert.Equal(t, handshake.InstructionDigest(), server.InstructionsDigest)
+
+	// A server that negotiated nothing records nothing, rather than asserting a
+	// default it never observed.
+	_, err = repo.FreezeServer(ctx, store.RunMCPServerSnapshot{
+		RunID: "run-unavailable", BindingID: "binding", BindingRevision: 1,
+		ProfileVersionID: "profile@v000001", ConfigDigest: "config",
+		Required: false, UnavailableReason: "connection refused",
+	})
+	require.NoError(t, err)
+	empty, err := repo.LoadRunMCP(ctx, "run-unavailable")
+	require.NoError(t, err)
+	require.Len(t, empty.Servers, 1)
+	assert.Empty(t, empty.Servers[0].Server.NegotiatedProtocol)
+	assert.Empty(t, empty.Servers[0].Server.Instructions)
+	assert.Empty(t, empty.Servers[0].Server.InstructionsDigest)
 }

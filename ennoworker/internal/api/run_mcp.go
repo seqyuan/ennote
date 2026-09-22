@@ -55,7 +55,11 @@ func (s *Server) getRunMCP(w http.ResponseWriter, r *http.Request) {
 			"catalogDigest":        entry.Server.CatalogDigest,
 			"required":             entry.Server.Required,
 			"unavailableReason":    entry.Server.UnavailableReason,
-			"tools":                tools,
+			// What the server declared about itself at negotiation: the revision
+			// it agreed to and the guidance it asked callers to follow.
+			"instructions":       entry.Server.Instructions,
+			"instructionsDigest": entry.Server.InstructionsDigest,
+			"tools":              tools,
 		})
 	}
 	writeData(w, http.StatusOK, map[string]any{"runId": frozen.RunID, "servers": servers})

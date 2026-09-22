@@ -25,11 +25,15 @@ type Session struct {
 	Transport  string
 	Endpoint   string
 	Executable string
-	session    *mcp.ClientSession
-	cmd        *exec.Cmd
-	procDone   chan struct{}
-	done       chan struct{}
-	closeOnce  chan struct{}
+	// handshake is what the server declared about itself during initialize.
+	// Captured once, at negotiation, and never refreshed: a Run's record of it
+	// must describe the connection that actually served it.
+	handshake ServerHandshake
+	session   *mcp.ClientSession
+	cmd       *exec.Cmd
+	procDone  chan struct{}
+	done      chan struct{}
+	closeOnce chan struct{}
 }
 
 // ConnectOption carries per-connection credential resolution and environment
@@ -175,6 +179,11 @@ func Connect(ctx context.Context, v *domain.MCPServerProfileVersion, opts Connec
 		return nil, fmt.Errorf("mcp connect timed out after %s", opts.MaxConnectTime)
 	}
 	s.session = session
+	if init := session.InitializeResult(); init != nil {
+		instructions, original := boundInstructions(init.Instructions)
+		s.handshake = ServerHandshake{ProtocolVersion: init.ProtocolVersion,
+			Instructions: instructions, InstructionBytes: original}
+	}
 	// NOTE: on success we deliberately do NOT call cancel(): the SDK binds the
 	// connect context to the transport lifecycle (the SSE GET stream stays
 	// open for the lifetime of that context). The caller's ctx owns the
@@ -238,6 +247,10 @@ func (s *Session) Done() <-chan struct{} { return s.done }
 
 // Session exposes the underlying SDK session.
 func (s *Session) Session() *mcp.ClientSession { return s.session }
+
+// Handshake returns what this connection's initialize result declared: the
+// negotiated protocol revision and the server's bounded instructions.
+func (s *Session) Handshake() ServerHandshake { return s.handshake }
 
 // ListTools fetches the full bounded tool catalog with pagination caps.
 func (s *Session) ListTools(ctx context.Context) ([]*mcp.Tool, error) {

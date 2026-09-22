@@ -215,6 +215,19 @@ function MCPServerRow({ server, t }: { server: RunMCPServerSnapshot; t: (key: st
     {unavailable && <div style={{ marginTop: 3, color: "var(--text-dim)", fontSize: 10.5 }}>
       {`${t("inspector.mcpUnavailable")}: ${server.unavailableReason}`}
     </div>}
+    {server.negotiatedProtocol !== "" && <div style={{ marginTop: 2, ...MUTED, fontSize: 10.5 }}>
+      {`${t("inspector.mcpProtocol")}: ${server.negotiatedProtocol}`}
+    </div>}
+    {server.instructions !== "" && <details style={{ marginTop: 3 }}>
+      <summary style={{ ...MUTED, fontSize: 10.5, cursor: "pointer" }} title={server.instructionsDigest}>
+        {t("inspector.mcpInstructions")}
+      </summary>
+      <div style={{
+        marginTop: 3, padding: "5px 7px", borderRadius: 5, background: "var(--bg-panel)",
+        fontSize: 10.5, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word",
+        maxHeight: 240, overflowY: "auto",
+      }} data-mcp-instructions>{server.instructions}</div>
+    </details>}
     {(server.tools ?? []).length > 0 && <div style={{ marginTop: 3, display: "flex", flexDirection: "column", gap: 1 }}>
       {(server.tools ?? []).map((tool) => <div key={tool.exposedName} style={{ display: "flex", gap: 8, fontSize: 10.5 }}>
         <span style={{ ...DIGEST, flex: 1, minWidth: 0 }} title={tool.exposedName}>{tool.exposedName}</span>

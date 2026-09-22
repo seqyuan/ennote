@@ -135,9 +135,13 @@ func TestFreezeRunSnapshotsSemantics(t *testing.T) {
 		Runs: runsRepo,
 	}
 	mcp.DiscoverFn = func(ctx context.Context, binding *domain.MCPProjectBinding,
-		version *domain.MCPServerProfileVersion) ([]domain.MCPCatalogEntry, error) {
-		return []domain.MCPCatalogEntry{{RemoteName: "search", ExposedName: "bio__search",
-			InputSchema: []byte(`{"type":"object"}`), Digest: "d1"}}, nil
+		version *domain.MCPServerProfileVersion) (MCPDiscovery, error) {
+		return MCPDiscovery{
+			Tools: []domain.MCPCatalogEntry{{RemoteName: "search", ExposedName: "bio__search",
+				InputSchema: []byte(`{"type":"object"}`), Digest: "d1"}},
+			Handshake: mcpclient.ServerHandshake{ProtocolVersion: "2026-07-28",
+				Instructions: "Search before you fetch."},
+		}, nil
 	}
 
 	profile, err := profileRepo.CreateProfile(context.Background(), store.CreateMCPProfileInput{
@@ -186,6 +190,24 @@ func TestFreezeRunSnapshotsSemantics(t *testing.T) {
 	assert.Equal(t, "env:GITHUB_TOKEN", servers[0].Version.EnvCredentials["GITHUB_TOKEN"],
 		"binding credential refs must merge into the frozen connection version")
 
+	// The frozen snapshot records what the handshake declared: the revision the
+	// server actually negotiated and the guidance it asked for. Asserting the
+	// requested/default value here would be asserting a fact nobody observed.
+	assert.Equal(t, "2026-07-28", servers[0].Snapshot.NegotiatedProtocol)
+	assert.Equal(t, "Search before you fetch.", servers[0].Snapshot.Instructions)
+	assert.Equal(t, mcpclient.ServerHandshake{ProtocolVersion: "2026-07-28",
+		Instructions: "Search before you fetch."}.InstructionDigest(), servers[0].Snapshot.InstructionsDigest)
+	assert.NotEqual(t, "2025-06-18", servers[0].Snapshot.NegotiatedProtocol,
+		"the frozen protocol must not be a hardcoded default")
+
+	// The frozen facts survive a read back and reach the Run's MCP read model.
+	frozenRead, err := runsRepo.LoadRunMCP(context.Background(), "run-2")
+	require.NoError(t, err)
+	require.Len(t, frozenRead.Servers, 1)
+	assert.Equal(t, "2026-07-28", frozenRead.Servers[0].Server.NegotiatedProtocol)
+	assert.Equal(t, "Search before you fetch.", frozenRead.Servers[0].Server.Instructions)
+	assert.Equal(t, servers[0].Snapshot.InstructionsDigest, frozenRead.Servers[0].Server.InstructionsDigest)
+
 	// FreezeRun is idempotent per Run: a second call for run-2 reuses the
 	// frozen snapshots and never duplicates run_mcp_servers rows.
 	servers2, err := mcp.FreezeRun(context.Background(), "run-2", projectID)
@@ -209,8 +231,8 @@ func TestFreezeRunSnapshotsSemantics(t *testing.T) {
 	require.NoError(t, err)
 	// Inject a failing discover to simulate an unreachable required server.
 	mcp.DiscoverFn = func(ctx context.Context, binding *domain.MCPProjectBinding,
-		version *domain.MCPServerProfileVersion) ([]domain.MCPCatalogEntry, error) {
-		return nil, fmt.Errorf("connection refused")
+		version *domain.MCPServerProfileVersion) (MCPDiscovery, error) {
+		return MCPDiscovery{}, fmt.Errorf("connection refused")
 	}
 	_, err = mcp.FreezeRun(context.Background(), "run-3", projectID)
 	require.Error(t, err)
@@ -223,8 +245,8 @@ func TestFreezeRunOptionalUnavailableFreezesSnapshot(t *testing.T) {
 		Runs: runsRepo,
 	}
 	mcp.DiscoverFn = func(ctx context.Context, binding *domain.MCPProjectBinding,
-		version *domain.MCPServerProfileVersion) ([]domain.MCPCatalogEntry, error) {
-		return nil, fmt.Errorf("connection refused")
+		version *domain.MCPServerProfileVersion) (MCPDiscovery, error) {
+		return MCPDiscovery{}, fmt.Errorf("connection refused")
 	}
 	profile, err := profileRepo.CreateProfile(context.Background(), store.CreateMCPProfileInput{
 		DisplayName: "Opt", Slug: "opt", SourceKind: domain.MCPSourceManaged,

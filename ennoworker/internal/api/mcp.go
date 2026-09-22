@@ -31,7 +31,16 @@ type MCPServer struct {
 	Bundled *mcpclient.BundledRegistry
 	// DiscoverFn is injectable for tests; nil uses the real mcpDiscover.
 	DiscoverFn func(ctx context.Context, binding *domain.MCPProjectBinding,
-		version *domain.MCPServerProfileVersion) ([]domain.MCPCatalogEntry, error)
+		version *domain.MCPServerProfileVersion) (MCPDiscovery, error)
+}
+
+// MCPDiscovery is one server's discovery outcome: the normalized tools plus what
+// the handshake declared. The handshake is captured during the same connection
+// that lists tools, so freezing a Run never needs a second connection to learn
+// which revision served it or what guidance the server asked for.
+type MCPDiscovery struct {
+	Tools     []domain.MCPCatalogEntry
+	Handshake mcpclient.ServerHandshake
 }
 
 func (s *Server) mcp() *MCPServer { return s.MCP }
@@ -414,7 +423,7 @@ func (m *MCPServer) bindingCredentialDigest(binding *domain.MCPProjectBinding, v
 // discover performs a bounded catalog discovery, honoring the test-injected
 // DiscoverFn when present.
 func (m *MCPServer) discover(ctx context.Context, binding *domain.MCPProjectBinding,
-	version *domain.MCPServerProfileVersion) ([]domain.MCPCatalogEntry, error) {
+	version *domain.MCPServerProfileVersion) (MCPDiscovery, error) {
 	if m.DiscoverFn != nil {
 		return m.DiscoverFn(ctx, binding, version)
 	}
@@ -442,23 +451,24 @@ func (m *MCPServer) mcpConnectOption(binding *domain.MCPProjectBinding) mcpclien
 // normalizes the catalog, and stores it into the binding-scoped cache keyed
 // by binding revision + credential digest.
 func (m *MCPServer) mcpDiscover(ctx context.Context, binding *domain.MCPProjectBinding,
-	version *domain.MCPServerProfileVersion) ([]domain.MCPCatalogEntry, error) {
+	version *domain.MCPServerProfileVersion) (MCPDiscovery, error) {
 	session, err := m.mcpBrowseConnect(ctx, version, binding)
 	if err != nil {
-		return nil, err
+		return MCPDiscovery{}, err
 	}
 	defer session.Close()
+	handshake := session.Handshake()
 	raw, err := session.ListTools(ctx)
 	if err != nil {
-		return nil, err
+		return MCPDiscovery{}, err
 	}
 	profile, err := m.Profiles.GetProfile(ctx, version.ProfileID)
 	if err != nil {
-		return nil, err
+		return MCPDiscovery{}, err
 	}
 	entries, err := mcpclient.NormalizeCatalog(profile.Slug, raw)
 	if err != nil {
-		return nil, err
+		return MCPDiscovery{}, err
 	}
 	err = m.Catalogs.PutCatalog(ctx, store.MCPCatalogCacheRow{
 		BindingID: binding.ID, BindingRevision: binding.Revision,
@@ -466,11 +476,16 @@ func (m *MCPServer) mcpDiscover(ctx context.Context, binding *domain.MCPProjectB
 		AuthGeneration: 0, CredentialDigest: m.bindingCredentialDigest(binding, version),
 		CatalogDigest: store.DigestCatalog(entries),
 		Tools:         entries, FetchedAt: time.Now().UTC(),
+		// The negotiated revision and the server's guidance are observations from
+		// this handshake, cached so a later Run can freeze them without dialing.
+		NegotiatedProtocol: handshake.ProtocolVersion,
+		Instructions:       handshake.Instructions,
+		InstructionBytes:   handshake.InstructionBytes,
 	})
 	if err != nil {
-		return nil, err
+		return MCPDiscovery{}, err
 	}
-	return entries, nil
+	return MCPDiscovery{Tools: entries, Handshake: handshake}, nil
 }
 
 // --- Bundled catalog (static, no execution) ---
@@ -542,59 +557,62 @@ func (m *MCPServer) FreezeRun(ctx context.Context, runID, projectID string) ([]F
 		if err != nil {
 			return nil, fmt.Errorf("mcp binding %s: profile unavailable: %w", binding.ID, err)
 		}
+		// freezeUnavailable records an optional server that could not be reached.
+		// It negotiated nothing, so the recorded protocol stays empty rather than
+		// asserting a default that was never observed.
+		freezeUnavailable := func(reason string) error {
+			snap := store.RunMCPServerSnapshot{
+				RunID: runID, BindingID: binding.ID, BindingRevision: binding.Revision,
+				ProfileVersionID: version.ID, ConfigDigest: version.ConfigDigest,
+				ServerIdentityDigest: version.ConfigDigest,
+				Required:             false, UnavailableReason: reason,
+			}
+			if _, fErr := m.Runs.FreezeServer(ctx, snap); fErr != nil {
+				return fErr
+			}
+			frozen = append(frozen, FrozenRunServer{Snapshot: snap, Version: version})
+			return nil
+		}
+
 		// Required servers are always connectivity-verified: discover refreshes
 		// the catalog AND proves the server is reachable right now.
 		var entries []domain.MCPCatalogEntry
+		var handshake mcpclient.ServerHandshake
 		if binding.Required {
-			entries, err = m.discover(ctx, binding, version)
-			if err != nil {
-				return nil, fmt.Errorf("mcp server %s unavailable: %w", version.Executable+version.Endpoint, err)
+			discovery, discoverErr := m.discover(ctx, binding, version)
+			if discoverErr != nil {
+				return nil, fmt.Errorf("mcp server %s unavailable: %w", version.Executable+version.Endpoint, discoverErr)
 			}
+			entries, handshake = discovery.Tools, discovery.Handshake
 		} else {
 			var cached *store.MCPCatalogCacheRow
 			var cErr error
 			if m.Catalogs != nil {
 				cached, cErr = m.Catalogs.GetCatalog(ctx, binding.ID, binding.Revision, 0,
 					version.ID, "latest", m.bindingCredentialDigest(binding, version))
-				if cErr == nil {
-					entries = cached.Tools
-				}
 			}
-			if cErr != nil {
-				entries, err = m.discover(ctx, binding, version)
-				if err != nil {
-					// Optional: freeze an unavailable snapshot and continue.
-					snap := store.RunMCPServerSnapshot{
-						RunID: runID, BindingID: binding.ID, BindingRevision: binding.Revision,
-						ProfileVersionID: version.ID, ConfigDigest: version.ConfigDigest,
-						NegotiatedProtocol: "2025-06-18", ServerIdentityDigest: version.ConfigDigest,
-						Required: false, UnavailableReason: err.Error(),
-					}
-					if _, fErr := m.Runs.FreezeServer(ctx, snap); fErr == nil {
-						frozen = append(frozen, FrozenRunServer{Snapshot: snap, Version: version})
-					}
-					continue
-				}
-			} else if m.Catalogs == nil {
-				// No cache store configured (tests): discover directly.
-				entries, err = m.discover(ctx, binding, version)
-				if err != nil {
-					if binding.Required {
-						return nil, fmt.Errorf("mcp server %s unavailable: %w", version.Executable+version.Endpoint, err)
-					}
-					snap := store.RunMCPServerSnapshot{
-						RunID: runID, BindingID: binding.ID, BindingRevision: binding.Revision,
-						ProfileVersionID: version.ID, ConfigDigest: version.ConfigDigest,
-						NegotiatedProtocol: "2025-06-18", ServerIdentityDigest: version.ConfigDigest,
-						Required: false, UnavailableReason: err.Error(),
-					}
-					if _, fErr := m.Runs.FreezeServer(ctx, snap); fErr == nil {
-						frozen = append(frozen, FrozenRunServer{Snapshot: snap, Version: version})
-					}
-					continue
+			if cErr == nil && cached != nil {
+				// The cached observation carries what the handshake declared, so
+				// freezing from cache does not downgrade the record.
+				entries = cached.Tools
+				handshake = mcpclient.ServerHandshake{
+					ProtocolVersion:  cached.NegotiatedProtocol,
+					Instructions:     cached.Instructions,
+					InstructionBytes: cached.InstructionBytes,
 				}
 			} else {
-				entries = cached.Tools
+				discovery, discoverErr := m.discover(ctx, binding, version)
+				if discoverErr != nil {
+					if m.Catalogs == nil && binding.Required {
+						return nil, fmt.Errorf("mcp server %s unavailable: %w", version.Executable+version.Endpoint, discoverErr)
+					}
+					// Optional: freeze an unavailable snapshot and continue.
+					if fErr := freezeUnavailable(discoverErr.Error()); fErr != nil {
+						return nil, fErr
+					}
+					continue
+				}
+				entries, handshake = discovery.Tools, discovery.Handshake
 			}
 		}
 		// Selected-only: freeze exactly the tools the user selected. A binding
@@ -626,8 +644,13 @@ func (m *MCPServer) FreezeRun(ctx context.Context, runID, projectID string) ([]F
 		snap := store.RunMCPServerSnapshot{
 			RunID: runID, BindingID: binding.ID, BindingRevision: binding.Revision,
 			ProfileVersionID: version.ID, ConfigDigest: version.ConfigDigest,
-			NegotiatedProtocol: "2025-06-18", ServerIdentityDigest: version.ConfigDigest,
-			CatalogDigest: store.DigestCatalog(entries), Required: binding.Required,
+			// Observed, not assumed: the revision this server actually negotiated
+			// and the guidance it asked callers to follow.
+			NegotiatedProtocol:   handshake.ProtocolVersion,
+			ServerIdentityDigest: version.ConfigDigest,
+			CatalogDigest:        store.DigestCatalog(entries), Required: binding.Required,
+			Instructions:       handshake.Instructions,
+			InstructionsDigest: handshake.InstructionDigest(),
 		}
 		serverID, err := m.Runs.FreezeServerWithTools(ctx, snap, tools)
 		if err != nil {

@@ -17,6 +17,10 @@ import (
 // snapshots. The cache key includes binding revision and auth generation so a
 // server that returns a different toolset per identity cannot leak a catalog
 // across Projects or credential generations.
+//
+// CacheDir selects the file form, which is the only form in use: production
+// wires CacheDir, and no migration declares mcp_catalog_cache, so the SQL branch
+// is unreachable. Do not extend it without also giving it a schema.
 type MCPCatalogRepo struct {
 	DB       *sql.DB
 	CacheDir string
@@ -40,7 +44,15 @@ type MCPCatalogCacheRow struct {
 	CatalogDigest        string
 	Tools                []domain.MCPCatalogEntry
 	AnnotationsJSON      string
-	FetchedAt            time.Time
+	// NegotiatedProtocol and Instructions are what the handshake declared, which
+	// is not what was requested: ProtocolVersion above is the cache key
+	// ("latest"), while this is the revision the server actually agreed to.
+	NegotiatedProtocol string
+	Instructions       string
+	// InstructionBytes is the untruncated length, kept so a cached observation
+	// stays as complete as the live one it came from.
+	InstructionBytes int
+	FetchedAt        time.Time
 }
 
 // PutCatalog stores or replaces the binding-scoped catalog cache row.
@@ -121,7 +133,12 @@ type RunMCPServerSnapshot struct {
 	Required             bool
 	UnavailableReason    string
 	ConnectionGeneration int
-	CreatedAt            time.Time
+	// Instructions is the server's bounded usage guidance and InstructionsDigest
+	// the digest of exactly those bytes. Both are empty when the server declared
+	// none, and when it never negotiated a connection at all.
+	Instructions       string
+	InstructionsDigest string
+	CreatedAt          time.Time
 }
 
 // RunMCPToolSnapshot is a frozen per-Run tool record.
@@ -155,21 +172,23 @@ func (r *MCPRunRepo) freezeServerTx(ctx context.Context, tx *sql.Tx, s RunMCPSer
 		_, err := tx.ExecContext(ctx, `INSERT INTO run_mcp_servers
 			(id, run_id, binding_id, binding_revision, profile_version_id, config_digest,
 			 negotiated_protocol, server_identity_digest, catalog_digest, required,
-			 unavailable_reason, connection_generation, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 unavailable_reason, connection_generation, instructions, instructions_digest, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			s.ID, s.RunID, s.BindingID, s.BindingRevision, s.ProfileVersionID, s.ConfigDigest,
 			s.NegotiatedProtocol, s.ServerIdentityDigest, s.CatalogDigest, s.Required,
-			emptyAsNull(s.UnavailableReason), s.ConnectionGeneration, roleTime(s.CreatedAt))
+			emptyAsNull(s.UnavailableReason), s.ConnectionGeneration,
+			s.Instructions, s.InstructionsDigest, roleTime(s.CreatedAt))
 		return s.ID, err
 	}
 	_, err := r.DB.ExecContext(ctx, `INSERT INTO run_mcp_servers
 		(id, run_id, binding_id, binding_revision, profile_version_id, config_digest,
 		 negotiated_protocol, server_identity_digest, catalog_digest, required,
-		 unavailable_reason, connection_generation, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 unavailable_reason, connection_generation, instructions, instructions_digest, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		s.ID, s.RunID, s.BindingID, s.BindingRevision, s.ProfileVersionID, s.ConfigDigest,
 		s.NegotiatedProtocol, s.ServerIdentityDigest, s.CatalogDigest, s.Required,
-		emptyAsNull(s.UnavailableReason), s.ConnectionGeneration, roleTime(s.CreatedAt))
+		emptyAsNull(s.UnavailableReason), s.ConnectionGeneration,
+		s.Instructions, s.InstructionsDigest, roleTime(s.CreatedAt))
 	if err != nil {
 		return "", fmt.Errorf("freeze mcp run server: %w", err)
 	}
@@ -275,7 +294,7 @@ func (r *MCPRunRepo) ListFrozenTools(ctx context.Context, runServerID string) ([
 func (r *MCPRunRepo) ListFrozenServers(ctx context.Context, runID string) ([]*RunMCPServerSnapshot, error) {
 	rows, err := r.DB.QueryContext(ctx, `SELECT id, run_id, binding_id, binding_revision, profile_version_id,
 		config_digest, negotiated_protocol, server_identity_digest, catalog_digest, required,
-		unavailable_reason, connection_generation, created_at
+		unavailable_reason, connection_generation, instructions, instructions_digest, created_at
 		FROM run_mcp_servers WHERE run_id = ? ORDER BY created_at`, runID)
 	if err != nil {
 		return nil, err
@@ -288,7 +307,8 @@ func (r *MCPRunRepo) ListFrozenServers(ctx context.Context, runID string) ([]*Ru
 		var createdAt string
 		if err := rows.Scan(&s.ID, &s.RunID, &s.BindingID, &s.BindingRevision, &s.ProfileVersionID,
 			&s.ConfigDigest, &s.NegotiatedProtocol, &s.ServerIdentityDigest, &s.CatalogDigest,
-			&s.Required, &reason, &s.ConnectionGeneration, &createdAt); err != nil {
+			&s.Required, &reason, &s.ConnectionGeneration,
+			&s.Instructions, &s.InstructionsDigest, &createdAt); err != nil {
 			return nil, err
 		}
 		s.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)

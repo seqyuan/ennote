@@ -37,8 +37,9 @@ function mcpSurface(): RunMCPFrozen {
     servers: [
       {
         id: "srv-1", bindingId: "binding-a", bindingRevision: 2, profileVersionId: "profile-a@v000001",
-        configDigest: "config-a", negotiatedProtocol: "2025-06-18", serverIdentityDigest: "identity-a",
+        configDigest: "config-a", negotiatedProtocol: "2026-07-28", serverIdentityDigest: "identity-a",
         catalogDigest: "catalog-a", required: true, unavailableReason: "",
+        instructions: "Search before you fetch.", instructionsDigest: "sha256:instructions-a",
         tools: [
           { remoteName: "search", exposedName: "bio__search", description: "Search", riskClass: "external", sourceKind: "managed", schemaDigest: "d1" },
         ],
@@ -47,6 +48,9 @@ function mcpSurface(): RunMCPFrozen {
         id: "srv-2", bindingId: "binding-b", bindingRevision: 1, profileVersionId: "profile-b@v000001",
         configDigest: "config-b", negotiatedProtocol: "", serverIdentityDigest: "", catalogDigest: "",
         required: false, unavailableReason: "connection refused", tools: [],
+        // A server that never negotiated declares nothing, so it shows no protocol
+        // and no instructions rather than an empty claim.
+        instructions: "", instructionsDigest: "",
       },
     ],
   };
@@ -130,6 +134,26 @@ describe("RunInspectorBody MCP surface", () => {
     expect(html).toContain("data-mcp-server=\"binding-b\"");
     expect(html).toContain("connection refused");
     expect(html).toContain("inspector.mcpUnavailable");
+  });
+
+  it("shows the negotiated protocol and the server's own instructions", () => {
+    const html = renderToStaticMarkup(<RunInspectorBody
+      runId="run-1" composition={composition()} mcp={mcpSurface()} loading={false} error={null} t={t} />);
+
+    expect(html).toContain("inspector.mcpProtocol");
+    expect(html).toContain("2026-07-28");
+    expect(html).toContain("inspector.mcpInstructions");
+    expect(html).toContain("data-mcp-instructions");
+    expect(html).toContain("Search before you fetch.");
+  });
+
+  it("keeps a server that declared nothing quiet", () => {
+    const html = renderToStaticMarkup(<RunInspectorBody
+      runId="run-1" composition={composition()} mcp={mcpSurface()} loading={false} error={null} t={t} />);
+
+    // Only the reachable server claims a protocol; the unavailable one shows none.
+    expect(html.match(/inspector\.mcpProtocol/g) ?? []).toHaveLength(1);
+    expect(html.match(/data-mcp-instructions/g) ?? []).toHaveLength(1);
   });
 
   it("states that no server was frozen rather than rendering an empty block", () => {

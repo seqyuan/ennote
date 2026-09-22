@@ -114,9 +114,13 @@ func TestFileMCPFreezeRunUsesProjectBinding(t *testing.T) {
 	require.NoError(t, err)
 
 	mcp.DiscoverFn = func(_ context.Context, b *domain.MCPProjectBinding,
-		v *domain.MCPServerProfileVersion) ([]domain.MCPCatalogEntry, error) {
-		return []domain.MCPCatalogEntry{{RemoteName: "search", ExposedName: "bio__search",
-			InputSchema: []byte(`{"type":"object"}`), Digest: "d1"}}, nil
+		v *domain.MCPServerProfileVersion) (MCPDiscovery, error) {
+		return MCPDiscovery{
+			Tools: []domain.MCPCatalogEntry{{RemoteName: "search", ExposedName: "bio__search",
+				InputSchema: []byte(`{"type":"object"}`), Digest: "d1"}},
+			Handshake: mcpclient.ServerHandshake{ProtocolVersion: "2026-07-28",
+				Instructions: "Search before you fetch."},
+		}, nil
 	}
 	servers, err := mcp.FreezeRun(ctx, "run-file-mcp", project.ID)
 	require.NoError(t, err)

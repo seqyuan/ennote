@@ -2905,6 +2905,10 @@ export interface components {
             required: boolean;
             /** @description Empty when the server was reachable; otherwise why the frozen snapshot has no tools. */
             unavailableReason: string;
+            /** @description The server's bounded usage guidance from its initialize result, empty when it declared none. Truncated text carries an in-band marker naming how much was dropped. */
+            instructions: string;
+            /** @description Digest of exactly the recorded instruction bytes, so two Runs can be compared without comparing text. */
+            instructionsDigest: string;
             tools: components["schemas"]["RunMCPToolSnapshot"][];
         };
         RunMCPFrozen: {
