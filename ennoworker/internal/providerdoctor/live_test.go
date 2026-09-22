@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
-	"github.com/seqyuan/ennote/ennoworker/internal/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,17 +25,17 @@ func liveDoctorConfig(t *testing.T) (string, string, string) {
 	return baseURL, apiKey, model
 }
 
+// liveDoctor builds a Doctor against a real provider. ProviderProfile.APIKey is
+// the resolved key the Service sends (see service_test.go), so the live key goes
+// there directly.
 func liveDoctor(baseURL, apiKey, model string) *Service {
 	return &Service{
 		Providers: providerStoreStub{profile: &domain.ProviderProfile{
 			ID: "provider", ProviderType: domain.ProviderOpenAICompatible,
-			BaseURL: baseURL, APIKey: os.Getenv("ENNOTE_DOCTOR_KEY"), Status: "active",
+			BaseURL: baseURL, APIKey: apiKey, Status: "active",
 		}},
 		Models: modelStoreStub{model: &domain.ModelProfile{
 			ID: "model", ProviderID: "provider", ModelName: model, MaxOutputTokens: 32,
-		}},
-		Credentials: llm.CredentialResolver{LookupEnv: func(name string) (string, bool) {
-			return apiKey, name == "ENNOTE_DOCTOR_KEY"
 		}},
 		Timeout: 45 * time.Second,
 	}
