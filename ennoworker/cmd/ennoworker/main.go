@@ -931,11 +931,20 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 		defer childMCPSet.Close()
 	}
 
-	// A private child's prompt is platform Role envelope plus the frozen Role
-	// definition. It is frozen into the same record as a public Run so a delegated
-	// Role is auditable the same way, and so a reader can see exactly which Role
-	// version's definition the child executed under.
-	childSegments := agent.RoleSystemPromptSegments(*resolved.Effective.Role, resolved.SystemPrompt.AgentPrompt)
+	// A private child's prompt is the platform Role envelope, the frozen Role
+	// definition, the Role's preload Skill bodies, and the explicit task Skill
+	// bodies frozen on its delegation item. Preloads are inlined data on purpose:
+	// a child has no /skills mount, so a Skill it cannot read is still a Skill it
+	// must be able to follow.
+	taskSkillIDs, taskSkillsErr := e.delegationRepo().TaskSkillsForChildRun(ctx, run.ID)
+	if taskSkillsErr != nil {
+		return domain.RunOutput{}, fmt.Errorf("load child task skills: %w", taskSkillsErr)
+	}
+	childSegments, childSegmentsErr := e.delegatedChildSegments(resolved.Effective.Role,
+		resolved.SystemPrompt.AgentPrompt, taskSkillIDs, fmt.Sprintf("task:%s", run.ID))
+	if childSegmentsErr != nil {
+		return domain.RunOutput{}, childSegmentsErr
+	}
 	systemPrompt, systemPromptSections := systemprompt.Compose(childSegments)
 	if freezeErr := e.runs.FreezeSystemPromptComposition(ctx, run.ID, systemPrompt, systemPromptSections); freezeErr != nil {
 		return domain.RunOutput{}, fmt.Errorf("freeze prompt composition: %w", freezeErr)
@@ -1885,4 +1894,30 @@ func describePromptSections(sections []domain.PromptSection) string {
 		parts = append(parts, fmt.Sprintf("%s/%s=%dB", section.Kind, section.ID, section.Bytes))
 	}
 	return strings.Join(parts, " ")
+}
+
+// delegatedChildSegments returns the ordered composition of a private delegated
+// child's system prompt: the platform Role envelope, the frozen Role definition,
+// the Role's preload Skill bodies, and the explicit task Skill bodies frozen on
+// the delegation item.
+//
+// A child deliberately receives no project instruction files and no Skill
+// catalog. Its context policy is task_only, and it has no /skills mount, so
+// naming a catalog would describe a capability the child does not have. Preload
+// Skills are inlined precisely because they must work without filesystem access.
+func (e *agentExecutor) delegatedChildSegments(role *domain.FrozenRoleExecution, agentPrompt string,
+	taskSkillIDs []string, taskSource string) ([]systemprompt.Segment, error) {
+	if role == nil {
+		return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
+			errors.New("delegated child prompt requires a frozen Role execution"))
+	}
+	taskSegments, err := e.taskPreloadSegments(role, taskSkillIDs, taskSource)
+	if err != nil {
+		return nil, err
+	}
+	segments := make([]systemprompt.Segment, 0, 4+len(taskSegments))
+	segments = append(segments, agent.RoleSystemPromptSegments(*role, agentPrompt)...)
+	segments = append(segments, e.rolePreloadSegments(role)...)
+	segments = append(segments, taskSegments...)
+	return segments, nil
 }
