@@ -193,6 +193,13 @@ func decodeSystemPromptSnapshot(encoded, expectedDigest string) (domain.SystemPr
 // nothing, which is worse than an absent one. An absent record stays valid so a
 // Run frozen before composition freezing existed still resumes.
 func validatePromptSections(snapshot domain.SystemPromptSnapshot) error {
+	// The catalog state is recorded vocabulary, not free text: an unknown value
+	// would render as a state no reader can interpret.
+	switch snapshot.SkillCatalogState {
+	case domain.SkillCatalogUnrecorded, domain.SkillCatalogMaterialized, domain.SkillCatalogDisabled:
+	default:
+		return fmt.Errorf("frozen system prompt snapshot has unknown skill catalog state %q", snapshot.SkillCatalogState)
+	}
 	if len(snapshot.Sections) == 0 {
 		if snapshot.SectionsDigest != "" {
 			return errors.New("frozen system prompt snapshot has a sections digest but no sections")

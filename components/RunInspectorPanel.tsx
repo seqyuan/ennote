@@ -83,6 +83,15 @@ export function RunInspectorBody({ runId, composition, loading, error, t }: {
       <DigestLine label={t("inspector.sectionsDigest")} value={composition.sectionsDigest} />
       <DigestLine label={t("inspector.composedDigest")} value={composition.composedDigest} />
       <DigestLine label={t("inspector.baseDigest")} value={composition.digest} />
+      {composition.skillCatalogState !== "" && <div style={{ display: "flex", gap: 8, fontSize: 10.5 }}>
+        <span style={{ ...MUTED, flexShrink: 0 }}>{t("inspector.skillCatalog")}</span>
+        <span style={{ ...MUTED, color: "var(--text)" }}>
+          {t(`inspector.catalog.${composition.skillCatalogState}`)}
+        </span>
+        {composition.skillCatalogDigest !== "" && <span style={{ ...DIGEST, minWidth: 0 }} title={composition.skillCatalogDigest}>
+          {shortDigest(composition.skillCatalogDigest, 8)}
+        </span>}
+      </div>}
     </div>
 
     {recorded && <div>

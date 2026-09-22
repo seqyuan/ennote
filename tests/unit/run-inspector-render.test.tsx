@@ -23,6 +23,8 @@ function composition(overrides: Partial<RunPromptComposition> = {}): RunPromptCo
     sectionsDigest: "sections-digest",
     composedDigest: "composed-digest",
     prompt: "base\n\n<role_definition>\nReport.\n</role_definition>",
+    skillCatalogState: "materialized",
+    skillCatalogDigest: "catalog-digest",
     recorded: true,
     ...overrides,
   };
@@ -57,6 +59,28 @@ describe("RunInspectorBody", () => {
     expect(html).not.toContain("Report.");
   });
 
+  it("explains why a catalog section is present or absent", () => {
+    const recorded = renderToStaticMarkup(
+      <RunInspectorBody runId="run-1" composition={composition()} loading={false} error={null} t={t} />);
+    expect(recorded).toContain("inspector.skillCatalog");
+    expect(recorded).toContain("inspector.catalog.materialized");
+
+    // A Run that skipped the catalog says so, instead of looking like a Run
+    // whose catalog happened to be empty.
+    const skipped = renderToStaticMarkup(<RunInspectorBody runId="run-1" loading={false} error={null} t={t}
+      composition={composition({ skillCatalogState: "disabled", skillCatalogDigest: "" })} />);
+    expect(skipped).toContain("inspector.catalog.disabled");
+    expect(skipped).not.toContain("inspector.catalog.materialized");
+
+    // An unrecorded Run claims nothing about the catalog.
+    const unrecorded = renderToStaticMarkup(<RunInspectorBody runId="run-old" loading={false} error={null} t={t}
+      composition={composition({
+        sections: [], sectionsDigest: "", composedDigest: "", prompt: "",
+        skillCatalogState: "", skillCatalogDigest: "", recorded: false,
+      })} />);
+    expect(unrecorded).not.toContain("inspector.skillCatalog");
+  });
+
   it("states that the record is frozen rather than re-derived", () => {
     const html = renderToStaticMarkup(
       <RunInspectorBody runId="run-1" composition={composition()} loading={false} error={null} t={t} />);
@@ -66,7 +90,10 @@ describe("RunInspectorBody", () => {
   it("renders an unrecorded Run as not recorded instead of an empty prompt", () => {
     const html = renderToStaticMarkup(<RunInspectorBody
       runId="run-old" loading={false} error={null} t={t}
-      composition={composition({ sections: [], sectionsDigest: "", composedDigest: "", prompt: "", recorded: false })}
+      composition={composition({
+        sections: [], sectionsDigest: "", composedDigest: "", prompt: "",
+        skillCatalogState: "", skillCatalogDigest: "", recorded: false,
+      })}
     />);
 
     expect(html).toContain("inspector.unrecorded");

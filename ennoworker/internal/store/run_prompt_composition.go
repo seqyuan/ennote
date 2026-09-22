@@ -29,6 +29,10 @@ type RunPromptComposition struct {
 	Version         int
 	AgentProfileID  string
 	PlatformVersion string
+	// SkillCatalogState is "materialized" or "disabled"; empty on a Run that
+	// predates composition freezing.
+	SkillCatalogState  domain.SkillCatalogState
+	SkillCatalogDigest string
 	// Digest is the frozen base-prompt digest. It covers the Agent prompt and
 	// its platform identity, independent of the composition record.
 	Digest         string
@@ -68,6 +72,8 @@ func (r *RunRepo) LoadRunPromptComposition(ctx context.Context, runID string) (R
 	composition.Sections = snapshot.Sections
 	composition.SectionsDigest = snapshot.SectionsDigest
 	composition.ComposedDigest = snapshot.ComposedDigest
+	composition.SkillCatalogState = snapshot.SkillCatalogState
+	composition.SkillCatalogDigest = snapshot.SkillCatalogDigest
 	if snapshot.ComposedDigest == "" {
 		return composition, nil
 	}
@@ -83,6 +89,16 @@ func (r *RunRepo) LoadRunPromptComposition(ctx context.Context, runID string) (R
 	return composition, nil
 }
 
+// PromptCompositionInput is what the executor observed while composing a Run's
+// system prompt: the exact bytes, the ordered section identity, and the Skill
+// catalog state that explains why a catalog section is present or absent.
+type PromptCompositionInput struct {
+	Prompt             string
+	Sections           []domain.PromptSection
+	SkillCatalogState  domain.SkillCatalogState
+	SkillCatalogDigest string
+}
+
 // FreezeSystemPromptComposition records the composition of a Run's system
 // prompt: the ordered section identity of every contribution plus the exact
 // composed text, addressed by content digest so identical prompts are stored
@@ -94,17 +110,17 @@ func (r *RunRepo) LoadRunPromptComposition(ctx context.Context, runID string) (R
 // start path is safe; a different composition fails with
 // ErrSystemPromptCompositionFrozen rather than silently changing what the model
 // was given.
-func (r *RunRepo) FreezeSystemPromptComposition(ctx context.Context, runID, composed string, sections []domain.PromptSection) error {
+func (r *RunRepo) FreezeSystemPromptComposition(ctx context.Context, runID string, input PromptCompositionInput) error {
 	if runID == "" {
 		return fmt.Errorf("run id is required")
 	}
-	sectionsDigest, err := systemprompt.SectionsDigest(sections)
+	sectionsDigest, err := systemprompt.SectionsDigest(input.Sections)
 	if err != nil {
 		return err
 	}
 	composedDigest := ""
-	if composed != "" {
-		composedDigest = systemprompt.TextDigest(composed)
+	if input.Prompt != "" {
+		composedDigest = systemprompt.TextDigest(input.Prompt)
 	}
 
 	tx, err := r.DB.BeginTx(ctx, nil)
@@ -141,8 +157,13 @@ func (r *RunRepo) FreezeSystemPromptComposition(ctx context.Context, runID, comp
 	if snapshot.Digest == "" {
 		return fmt.Errorf("%w: prompt composition requires a frozen system prompt snapshot", ErrInvalidRunState)
 	}
-	if snapshot.SectionsDigest != "" {
-		if snapshot.SectionsDigest == sectionsDigest && snapshot.ComposedDigest == composedDigest {
+	if snapshot.SectionsDigest != "" || snapshot.SkillCatalogState != "" {
+		// The catalog state is part of the composition's identity: an identical
+		// prompt produced under a different catalog state is a different
+		// composition and must not be silently accepted.
+		if snapshot.SectionsDigest == sectionsDigest && snapshot.ComposedDigest == composedDigest &&
+			snapshot.SkillCatalogState == input.SkillCatalogState &&
+			snapshot.SkillCatalogDigest == input.SkillCatalogDigest {
 			return tx.Commit()
 		}
 		return ErrSystemPromptCompositionFrozen
@@ -150,13 +171,15 @@ func (r *RunRepo) FreezeSystemPromptComposition(ctx context.Context, runID, comp
 
 	if composedDigest != "" {
 		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO prompt_blobs (digest, bytes, text, created_at)
-			VALUES (?, ?, ?, ?)`, composedDigest, len(composed), composed, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+			VALUES (?, ?, ?, ?)`, composedDigest, len(input.Prompt), input.Prompt, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 			return fmt.Errorf("store composed system prompt: %w", err)
 		}
 	}
-	snapshot.Sections = sections
+	snapshot.Sections = input.Sections
 	snapshot.SectionsDigest = sectionsDigest
 	snapshot.ComposedDigest = composedDigest
+	snapshot.SkillCatalogState = input.SkillCatalogState
+	snapshot.SkillCatalogDigest = input.SkillCatalogDigest
 	encoded, err := json.Marshal(snapshot)
 	if err != nil {
 		return fmt.Errorf("encode frozen system prompt snapshot: %w", err)

@@ -2888,6 +2888,13 @@ export interface components {
             composedDigest: string;
             /** @description Exact composed system prompt text, empty when the Run recorded no composition. */
             prompt: string;
+            /**
+             * @description Why the Skill catalog section is present or absent: materialized, or deliberately skipped because the frozen tool policy denies read.
+             * @enum {string}
+             */
+            skillCatalogState: "" | "materialized" | "disabled";
+            /** @description Digest of the materialized catalog the Run's catalog section was built from, empty when none was built. */
+            skillCatalogDigest: string;
             /** @description False for a Run that predates composition freezing; the client must render that as not recorded rather than as an empty prompt. */
             recorded: boolean;
         };

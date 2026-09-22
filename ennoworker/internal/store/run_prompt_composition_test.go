@@ -37,13 +37,21 @@ func composedDigestOf(text string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+func catalogInput(prompt string, sections []domain.PromptSection) store.PromptCompositionInput {
+	return store.PromptCompositionInput{
+		Prompt: prompt, Sections: sections,
+		SkillCatalogState: domain.SkillCatalogMaterialized, SkillCatalogDigest: "sha256:catalog",
+	}
+}
+
 func TestFreezeSystemPromptCompositionRecordsSectionsAndText(t *testing.T) {
 	fixture := newFileRunFixture(t, "composition")
 	run := claimedRunFrozen(t, fixture, "composition-1")
 	sections := compositionSections()
 	prompt := "base\nproject rules"
 
-	require.NoError(t, fixture.Runs.FreezeSystemPromptComposition(context.Background(), run.ID, prompt, sections))
+	require.NoError(t, fixture.Runs.FreezeSystemPromptComposition(context.Background(), run.ID,
+		catalogInput(prompt, sections)))
 
 	// The exact prompt bytes live once, addressed by content.
 	var bytes int
@@ -77,13 +85,32 @@ func TestFreezeSystemPromptCompositionRecordsSectionsAndText(t *testing.T) {
 	assert.NotEmpty(t, loaded.Digest, "the frozen base-prompt digest is preserved")
 }
 
+// The catalog state is what tells a reader why a Skill catalog section is
+// present or absent, so it is part of the recorded composition too.
+func TestFreezeSystemPromptCompositionRecordsSkillCatalogState(t *testing.T) {
+	fixture := newFileRunFixture(t, "composition-catalog")
+	run := claimedRunFrozen(t, fixture, "composition-catalog-1")
+
+	require.NoError(t, fixture.Runs.FreezeSystemPromptComposition(context.Background(), run.ID,
+		store.PromptCompositionInput{
+			Prompt: "base", Sections: compositionSections(),
+			SkillCatalogState: domain.SkillCatalogDisabled,
+		}))
+
+	loaded, err := fixture.Runs.LoadRunPromptComposition(context.Background(), run.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.SkillCatalogDisabled, loaded.SkillCatalogState)
+	assert.Empty(t, loaded.SkillCatalogDigest)
+}
+
 func TestFreezeSystemPromptCompositionIsIdempotentForTheSameComposition(t *testing.T) {
 	fixture := newFileRunFixture(t, "composition-idempotent")
 	run := claimedRunFrozen(t, fixture, "composition-2")
 	sections := compositionSections()
 
-	require.NoError(t, fixture.Runs.FreezeSystemPromptComposition(context.Background(), run.ID, "base\nproject rules", sections))
-	require.NoError(t, fixture.Runs.FreezeSystemPromptComposition(context.Background(), run.ID, "base\nproject rules", sections))
+	input := catalogInput("base\nproject rules", sections)
+	require.NoError(t, fixture.Runs.FreezeSystemPromptComposition(context.Background(), run.ID, input))
+	require.NoError(t, fixture.Runs.FreezeSystemPromptComposition(context.Background(), run.ID, input))
 
 	var blobs, runs int
 	require.NoError(t, fixture.DB.QueryRow(`SELECT COUNT(*) FROM prompt_blobs`).Scan(&blobs))
@@ -95,13 +122,14 @@ func TestFreezeSystemPromptCompositionIsIdempotentForTheSameComposition(t *testi
 func TestFreezeSystemPromptCompositionRejectsConflictingRewrite(t *testing.T) {
 	fixture := newFileRunFixture(t, "composition-conflict")
 	run := claimedRunFrozen(t, fixture, "composition-3")
-	require.NoError(t, fixture.Runs.FreezeSystemPromptComposition(
-		context.Background(), run.ID, "base\nproject rules", compositionSections()))
+	require.NoError(t, fixture.Runs.FreezeSystemPromptComposition(context.Background(), run.ID,
+		catalogInput("base\nproject rules", compositionSections())))
 
 	conflicting := []domain.PromptSection{{
 		ID: "base", Kind: domain.PromptSectionBase, Source: "agent_profile", Bytes: 9, Digest: systemprompt.TextDigest("different"),
 	}}
-	err := fixture.Runs.FreezeSystemPromptComposition(context.Background(), run.ID, "different", conflicting)
+	err := fixture.Runs.FreezeSystemPromptComposition(context.Background(), run.ID,
+		store.PromptCompositionInput{Prompt: "different", Sections: conflicting})
 	require.ErrorIs(t, err, store.ErrSystemPromptCompositionFrozen)
 
 	// The original composition is untouched.
@@ -109,6 +137,20 @@ func TestFreezeSystemPromptCompositionRejectsConflictingRewrite(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "base\nproject rules", loaded.Prompt)
 	assert.Equal(t, compositionSections(), loaded.Sections)
+	assert.Equal(t, domain.SkillCatalogMaterialized, loaded.SkillCatalogState)
+}
+
+// An identical prompt composed under a different Skill catalog state is a
+// different composition: the state is part of what was frozen.
+func TestFreezeSystemPromptCompositionRejectsConflictingCatalogState(t *testing.T) {
+	fixture := newFileRunFixture(t, "composition-state-conflict")
+	run := claimedRunFrozen(t, fixture, "composition-7")
+	require.NoError(t, fixture.Runs.FreezeSystemPromptComposition(context.Background(), run.ID,
+		catalogInput("base", compositionSections())))
+
+	err := fixture.Runs.FreezeSystemPromptComposition(context.Background(), run.ID,
+		store.PromptCompositionInput{Prompt: "base", Sections: compositionSections(), SkillCatalogState: domain.SkillCatalogDisabled})
+	require.ErrorIs(t, err, store.ErrSystemPromptCompositionFrozen)
 }
 
 func TestFreezeSystemPromptCompositionRequiresARunningRun(t *testing.T) {
@@ -116,14 +158,15 @@ func TestFreezeSystemPromptCompositionRequiresARunningRun(t *testing.T) {
 	run := claimedRunFrozen(t, fixture, "composition-4")
 	require.NoError(t, fixture.Runs.Fail(context.Background(), run.ID, "test_failed", "stub"))
 
-	err := fixture.Runs.FreezeSystemPromptComposition(context.Background(), run.ID, "base", compositionSections())
+	err := fixture.Runs.FreezeSystemPromptComposition(context.Background(), run.ID,
+		catalogInput("base", compositionSections()))
 	require.ErrorIs(t, err, store.ErrInvalidRunState)
 }
 
 func TestFreezeSystemPromptCompositionRejectsUnknownRun(t *testing.T) {
 	fixture := newFileRunFixture(t, "composition-missing")
 	err := fixture.Runs.FreezeSystemPromptComposition(context.Background(),
-		"00000000-0000-4000-8000-000000000000", "base", compositionSections())
+		"00000000-0000-4000-8000-000000000000", catalogInput("base", compositionSections()))
 	require.ErrorIs(t, err, store.ErrRunNotFound)
 }
 
@@ -136,6 +179,7 @@ func TestLoadRunPromptCompositionReportsUnrecordedComposition(t *testing.T) {
 	assert.Empty(t, loaded.Prompt, "a Run whose composition was never recorded reads as unrecorded")
 	assert.Empty(t, loaded.Sections)
 	assert.Empty(t, loaded.ComposedDigest)
+	assert.Empty(t, loaded.SkillCatalogState)
 	assert.NotEmpty(t, loaded.Digest, "the base-prompt digest is still reported")
 }
 
@@ -143,7 +187,8 @@ func TestFreezeSystemPromptCompositionStoresEmptyCompositionWithoutBlob(t *testi
 	fixture := newFileRunFixture(t, "composition-empty")
 	run := claimedRunFrozen(t, fixture, "composition-6")
 
-	require.NoError(t, fixture.Runs.FreezeSystemPromptComposition(context.Background(), run.ID, "", nil))
+	require.NoError(t, fixture.Runs.FreezeSystemPromptComposition(context.Background(), run.ID,
+		store.PromptCompositionInput{}))
 
 	var blobs int
 	require.NoError(t, fixture.DB.QueryRow(`SELECT COUNT(*) FROM prompt_blobs`).Scan(&blobs))

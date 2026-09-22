@@ -416,10 +416,10 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	}
 	systemPrompt := ""
 	var systemPromptSections []domain.PromptSection
-	var skillCatalogState string
+	var skillCatalogState domain.SkillCatalogState
 	var skillCatalogDigest string
 	if resumeState != nil {
-		skillCatalogState = resumeState.SkillCatalogState
+		skillCatalogState = domain.SkillCatalogState(resumeState.SkillCatalogState)
 		if resumeState.SkillCatalogState == "materialized" && resumeState.SkillCatalogDigest != "" {
 			if err := skills.VerifyMaterializedCatalog(snapDir, resumeState.SkillCatalogDigest); err != nil {
 				return domain.RunOutput{}, domain.NewCodedError(domain.ErrorApprovalCheckpointInvalid, fmt.Errorf("catalog verification failed: %w", err))
@@ -479,13 +479,13 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 					if saveErr := e.skillRepo.SaveCatalog(ctx, run.ID, result.Records); saveErr != nil {
 						slog.Warn("save catalog failed", "error", saveErr)
 					}
-					skillCatalogState = "materialized"
+					skillCatalogState = domain.SkillCatalogMaterialized
 					skillCatalogDigest = result.CatalogDigest
 				}
 			}
 			catalogPrompt = skills.BuildCatalogPrompt(catalog, 16*1024)
 		} else {
-			skillCatalogState = "disabled"
+			skillCatalogState = domain.SkillCatalogDisabled
 			slog.Info("read tool not allowed by policy, skipping skill catalog")
 		}
 
@@ -511,7 +511,10 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		// request, exactly like the effective config. A Run whose composition
 		// cannot be recorded must not start: the point of the freeze is that no
 		// model-visible input exists without a verifiable record of it.
-		if freezeErr := e.runs.FreezeSystemPromptComposition(ctx, run.ID, systemPrompt, systemPromptSections); freezeErr != nil {
+		if freezeErr := e.runs.FreezeSystemPromptComposition(ctx, run.ID, store.PromptCompositionInput{
+			Prompt: systemPrompt, Sections: systemPromptSections,
+			SkillCatalogState: skillCatalogState, SkillCatalogDigest: skillCatalogDigest,
+		}); freezeErr != nil {
 			return domain.RunOutput{}, fmt.Errorf("freeze prompt composition: %w", freezeErr)
 		}
 		// Log the composition's identity, never its content: the Worker must stay
@@ -746,7 +749,7 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		VisionPolicy: resolved.Effective.VisionPolicy, ThinkingEffort: resolved.Effective.ThinkingEffort,
 		SystemPrompt: systemPrompt, History: chatHistory, OverflowRecovery: overflowRecovery,
 		Resume: resumeState, Approval: approvalResolution,
-		SkillCatalogState: skillCatalogState, SkillCatalogDigest: skillCatalogDigest,
+		SkillCatalogState: string(skillCatalogState), SkillCatalogDigest: skillCatalogDigest,
 		RequestGeneration: claimGen,
 	})
 
@@ -946,7 +949,11 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 		return domain.RunOutput{}, childSegmentsErr
 	}
 	systemPrompt, systemPromptSections := systemprompt.Compose(childSegments)
-	if freezeErr := e.runs.FreezeSystemPromptComposition(ctx, run.ID, systemPrompt, systemPromptSections); freezeErr != nil {
+	// A child has no /skills mount, so its catalog state is deliberately empty
+	// rather than "disabled": there is no catalog decision to record.
+	if freezeErr := e.runs.FreezeSystemPromptComposition(ctx, run.ID, store.PromptCompositionInput{
+		Prompt: systemPrompt, Sections: systemPromptSections,
+	}); freezeErr != nil {
 		return domain.RunOutput{}, fmt.Errorf("freeze prompt composition: %w", freezeErr)
 	}
 	// task_only context: the frozen assignment is the only history, except for

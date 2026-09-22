@@ -114,6 +114,32 @@ func TestDecodeSystemPromptSnapshotRejectsUnguardedSections(t *testing.T) {
 	assert.Contains(t, err.Error(), "sections without a sections digest")
 }
 
+// The recorded catalog state is a closed vocabulary, not free text: an unknown
+// value would render as a state no reader can interpret.
+func TestDecodeSystemPromptSnapshotRejectsUnknownSkillCatalogState(t *testing.T) {
+	encoded, snapshotDigest := encodeSnapshotForTest(t, nil, "")
+	var snapshot map[string]any
+	require.NoError(t, json.Unmarshal([]byte(encoded), &snapshot))
+	snapshot["skillCatalogState"] = "partially-materialized"
+	patched, err := json.Marshal(snapshot)
+	require.NoError(t, err)
+
+	_, err = decodeSystemPromptSnapshot(string(patched), snapshotDigest)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown skill catalog state")
+
+	// Every recorded state decodes.
+	for _, state := range []domain.SkillCatalogState{
+		domain.SkillCatalogUnrecorded, domain.SkillCatalogMaterialized, domain.SkillCatalogDisabled,
+	} {
+		snapshot["skillCatalogState"] = string(state)
+		patched, err := json.Marshal(snapshot)
+		require.NoError(t, err)
+		_, err = decodeSystemPromptSnapshot(string(patched), snapshotDigest)
+		require.NoError(t, err, "state %q must decode", state)
+	}
+}
+
 // The base-prompt digest formula is untouched by this change, so a snapshot
 // encoded before sections existed still validates against its stored digest.
 func TestSystemPromptSnapshotDigestIgnoresCompositionFields(t *testing.T) {

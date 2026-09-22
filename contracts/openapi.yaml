@@ -4263,7 +4263,7 @@ components:
     RunPromptComposition:
       type: object
       additionalProperties: false
-      required: [runId, version, platformVersion, digest, sections, sectionsDigest, composedDigest, prompt, recorded]
+      required: [runId, version, platformVersion, digest, sections, sectionsDigest, composedDigest, prompt, skillCatalogState, skillCatalogDigest, recorded]
       properties:
         runId: { type: string }
         version: { type: integer, minimum: 1 }
@@ -4280,6 +4280,13 @@ components:
         prompt:
           type: string
           description: Exact composed system prompt text, empty when the Run recorded no composition.
+        skillCatalogState:
+          type: string
+          enum: ["", materialized, disabled]
+          description: "Why the Skill catalog section is present or absent: materialized, or deliberately skipped because the frozen tool policy denies read."
+        skillCatalogDigest:
+          type: string
+          description: Digest of the materialized catalog the Run's catalog section was built from, empty when none was built.
         recorded:
           type: boolean
           description: "False for a Run that predates composition freezing; the client must render that as not recorded rather than as an empty prompt."

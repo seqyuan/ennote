@@ -21,15 +21,17 @@ func (s *Server) getRunPrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeData(w, http.StatusOK, map[string]any{
-		"runId":           composition.RunID,
-		"version":         composition.Version,
-		"agentProfileId":  composition.AgentProfileID,
-		"platformVersion": composition.PlatformVersion,
-		"digest":          composition.Digest,
-		"sections":        nonNilPromptSections(composition.Sections),
-		"sectionsDigest":  composition.SectionsDigest,
-		"composedDigest":  composition.ComposedDigest,
-		"prompt":          composition.Prompt,
+		"runId":              composition.RunID,
+		"version":            composition.Version,
+		"agentProfileId":     composition.AgentProfileID,
+		"platformVersion":    composition.PlatformVersion,
+		"digest":             composition.Digest,
+		"sections":           nonNilPromptSections(composition.Sections),
+		"sectionsDigest":     composition.SectionsDigest,
+		"composedDigest":     composition.ComposedDigest,
+		"prompt":             composition.Prompt,
+		"skillCatalogState":  string(composition.SkillCatalogState),
+		"skillCatalogDigest": composition.SkillCatalogDigest,
 		// A Run that predates composition freezing must read as "not recorded"
 		// rather than as an empty prompt.
 		"recorded": composition.ComposedDigest != "" || composition.SectionsDigest != "",

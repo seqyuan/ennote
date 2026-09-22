@@ -393,7 +393,28 @@ type SystemPromptSnapshot struct {
 	SectionsDigest string          `json:"sectionsDigest,omitempty"`
 	// ComposedDigest addresses the full composed prompt text in prompt_blobs.
 	ComposedDigest string `json:"composedDigest,omitempty"`
+	// SkillCatalogState and SkillCatalogDigest say why a Skill catalog section
+	// is present or absent: the catalog can be materialized, or deliberately
+	// skipped because the frozen tool policy denies read. Without them an empty
+	// catalog and a disabled one are indistinguishable to a reader.
+	SkillCatalogState  SkillCatalogState `json:"skillCatalogState,omitempty"`
+	SkillCatalogDigest string            `json:"skillCatalogDigest,omitempty"`
 }
+
+// SkillCatalogState records why a Run's Skill catalog section is present or
+// absent. It is part of the frozen composition record: the catalog can be
+// materialized, or deliberately skipped because the frozen tool policy denies
+// read, and without the state an empty catalog and a disabled one look the same
+// to a reader.
+type SkillCatalogState string
+
+const (
+	// SkillCatalogUnrecorded is the zero value: the Run predates composition
+	// freezing, so no catalog decision was recorded.
+	SkillCatalogUnrecorded   SkillCatalogState = ""
+	SkillCatalogMaterialized SkillCatalogState = "materialized"
+	SkillCatalogDisabled     SkillCatalogState = "disabled"
+)
 
 type SystemPromptMetadata struct {
 	Version         int    `json:"version"`

@@ -131,6 +131,9 @@ const messages: Record<Locale, Record<string, string>> = {
     "inspector.sectionsDigest": "Sections",
     "inspector.composedDigest": "Composed",
     "inspector.baseDigest": "Base prompt",
+    "inspector.skillCatalog": "Skill catalog",
+    "inspector.catalog.materialized": "materialized",
+    "inspector.catalog.disabled": "skipped, read denied by the frozen tool policy",
 
     "stats.counts": "{turns} turns · {steps} steps",
     "stats.llm": "LLM {duration}",
@@ -389,6 +392,9 @@ const messages: Record<Locale, Record<string, string>> = {
     "inspector.sectionsDigest": "组成",
     "inspector.composedDigest": "全文",
     "inspector.baseDigest": "基础提示词",
+    "inspector.skillCatalog": "Skill 目录",
+    "inspector.catalog.materialized": "已物化",
+    "inspector.catalog.disabled": "已跳过（冻结的工具策略禁止 read）",
 
     "stats.counts": "{turns} 轮 · {steps} 步",
     "stats.llm": "LLM {duration}",
