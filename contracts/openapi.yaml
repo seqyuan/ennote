@@ -2009,6 +2009,24 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "500": { $ref: "#/components/responses/Error" }
+  /v1/runs/{runID}/prompt:
+    parameters:
+      - $ref: "#/components/parameters/RunID"
+    get:
+      operationId: getRunPrompt
+      responses:
+        "200":
+          description: Frozen model-visible prompt composition of one Run
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/RunPromptComposition" }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
   /v1/runs/{runID}/children:
     parameters:
       - $ref: "#/components/parameters/RunID"
@@ -4218,6 +4236,53 @@ components:
         agentProfileId: { type: string }
         platformVersion: { type: string }
         digest: { type: string, minLength: 1 }
+        sectionsDigest:
+          type: string
+          description: Digest of the frozen prompt composition, empty when the Run recorded none.
+        composedDigest:
+          type: string
+          description: Content address of the frozen composed prompt text, empty when the Run recorded none.
+    PromptSection:
+      type: object
+      additionalProperties: false
+      required: [id, kind, source, bytes, digest]
+      properties:
+        id: { type: string }
+        kind:
+          type: string
+          enum: [base, role, context, skills_catalog, skill_preload]
+          description: "Contributing layer: platform-owned base/envelope, or an authored Role, project file, catalog, or Skill body."
+        source:
+          type: string
+          description: Producer under the (source, version, digest, risk) identity convention, e.g. "role:analyst@3".
+        bytes: { type: integer, minimum: 0 }
+        digest: { type: string, minLength: 1 }
+        skillId:
+          type: string
+          description: Set when this section inlined one Skill body.
+    RunPromptComposition:
+      type: object
+      additionalProperties: false
+      required: [runId, version, platformVersion, digest, sections, sectionsDigest, composedDigest, prompt, recorded]
+      properties:
+        runId: { type: string }
+        version: { type: integer, minimum: 1 }
+        agentProfileId: { type: string }
+        platformVersion: { type: string }
+        digest:
+          type: string
+          description: Frozen base-prompt digest, independent of the composition record.
+        sections:
+          type: array
+          items: { $ref: "#/components/schemas/PromptSection" }
+        sectionsDigest: { type: string }
+        composedDigest: { type: string }
+        prompt:
+          type: string
+          description: Exact composed system prompt text, empty when the Run recorded no composition.
+        recorded:
+          type: boolean
+          description: "False for a Run that predates composition freezing; the client must render that as not recorded rather than as an empty prompt."
     AgentRun:
       type: object
       additionalProperties: false

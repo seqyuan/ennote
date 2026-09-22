@@ -400,6 +400,13 @@ type SystemPromptMetadata struct {
 	AgentProfileID  string `json:"agentProfileId,omitempty"`
 	PlatformVersion string `json:"platformVersion"`
 	Digest          string `json:"digest"`
+	// SectionsDigest and ComposedDigest index the frozen prompt composition.
+	// They are empty on a Run that recorded none, so a carrier can tell whether
+	// the composition detail endpoint has anything to return without calling it.
+	// The section list and the prompt text stay on that endpoint: a Run listing
+	// must not carry tens of kilobytes per row.
+	SectionsDigest string `json:"sectionsDigest,omitempty"`
+	ComposedDigest string `json:"composedDigest,omitempty"`
 }
 
 type AgentRun struct {

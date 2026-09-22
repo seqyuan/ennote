@@ -1275,6 +1275,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/runs/{runID}/prompt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runID: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getRunPrompt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/runs/{runID}/children": {
         parameters: {
             query?: never;
@@ -2839,6 +2857,39 @@ export interface components {
             agentProfileId?: string;
             platformVersion: string;
             digest: string;
+            /** @description Digest of the frozen prompt composition, empty when the Run recorded none. */
+            sectionsDigest?: string;
+            /** @description Content address of the frozen composed prompt text, empty when the Run recorded none. */
+            composedDigest?: string;
+        };
+        PromptSection: {
+            id: string;
+            /**
+             * @description Contributing layer: platform-owned base/envelope, or an authored Role, project file, catalog, or Skill body.
+             * @enum {string}
+             */
+            kind: "base" | "role" | "context" | "skills_catalog" | "skill_preload";
+            /** @description Producer under the (source, version, digest, risk) identity convention, e.g. "role:analyst@3". */
+            source: string;
+            bytes: number;
+            digest: string;
+            /** @description Set when this section inlined one Skill body. */
+            skillId?: string;
+        };
+        RunPromptComposition: {
+            runId: string;
+            version: number;
+            agentProfileId?: string;
+            platformVersion: string;
+            /** @description Frozen base-prompt digest, independent of the composition record. */
+            digest: string;
+            sections: components["schemas"]["PromptSection"][];
+            sectionsDigest: string;
+            composedDigest: string;
+            /** @description Exact composed system prompt text, empty when the Run recorded no composition. */
+            prompt: string;
+            /** @description False for a Run that predates composition freezing; the client must render that as not recorded rather than as an empty prompt. */
+            recorded: boolean;
         };
         AgentRun: {
             id: string;
@@ -5985,6 +6036,32 @@ export interface operations {
                 };
             };
             400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            500: components["responses"]["Error"];
+        };
+    };
+    getRunPrompt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runID: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Frozen model-visible prompt composition of one Run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RunPromptComposition"];
+                    };
+                };
+            };
             404: components["responses"]["Error"];
             500: components["responses"]["Error"];
         };

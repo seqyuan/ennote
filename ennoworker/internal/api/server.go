@@ -200,6 +200,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/compactions/{compactionID}", s.getCompaction)
 	mux.HandleFunc("GET /v1/runs/{runID}", s.getRun)
 	mux.HandleFunc("GET /v1/runs/{runID}/messages", s.listRunMessages)
+	mux.HandleFunc("GET /v1/runs/{runID}/prompt", s.getRunPrompt)
 	mux.HandleFunc("GET /v1/runs/{runID}/children", s.listRunChildren)
 	mux.HandleFunc("GET /v1/delegations/{groupID}", s.inspectDelegation)
 	mux.HandleFunc("POST /v1/delegations/{groupID}/retry", s.retryDelegation)

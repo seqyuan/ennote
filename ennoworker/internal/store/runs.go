@@ -1330,6 +1330,7 @@ func scanAgentRun(row rowScanner) (domain.AgentRun, error) {
 		run.SystemPrompt = &domain.SystemPromptMetadata{
 			Version: snapshot.Version, AgentProfileID: snapshot.AgentProfileID,
 			PlatformVersion: snapshot.PlatformVersion, Digest: systemPromptDigest,
+			SectionsDigest: snapshot.SectionsDigest, ComposedDigest: snapshot.ComposedDigest,
 		}
 	}
 	if errorCode.Valid {
