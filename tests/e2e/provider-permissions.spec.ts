@@ -5,7 +5,7 @@ const project = { id: "project-permission", name: "Permission project", descript
 const session = { id: "session-permission", projectId: project.id, title: "Permission session", status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" };
 const provider = { id: "provider", name: "Test provider", providerType: "openai-compatible", baseUrl: "https://provider.test/v1", credentialRef: "env:TEST_KEY", status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" };
 const policies = [
-  { id: "builtin-tool-discuss-v1", name: "Discuss", kind: "tool", version: 1, config: { mode: "discuss" }, status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" },
+  { id: "builtin-tool-discuss-v3", name: "Discuss", kind: "tool", version: 3, config: { mode: "discuss" }, status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" },
   { id: "builtin-tool-ask-v1", name: "Ask", kind: "tool", version: 1, config: { mode: "ask" }, status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" },
   { id: "builtin-tool-auto-v1", name: "Auto", kind: "tool", version: 1, config: { mode: "auto" }, status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" },
 ];

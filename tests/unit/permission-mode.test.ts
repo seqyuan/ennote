@@ -3,14 +3,14 @@ import { describe, expect, it } from "vitest";
 import { permissionModeForPolicyID, permissionPolicyID, withPermissionConfig, withRunConfig } from "../../lib/permission-mode";
 
 describe("per-turn permission mode", () => {
-  it("prefers the stable built-in profile for the selected mode", () => {
+  it("prefers the versioned built-in profile for the selected mode", () => {
     const profiles = [
       { id: "custom", kind: "tool", status: "active", config: { mode: "discuss" } },
-      { id: "builtin-tool-discuss-v1", kind: "tool", status: "active", config: { mode: "discuss" } },
+      { id: "builtin-tool-discuss-v3", kind: "tool", status: "active", config: { mode: "discuss" } },
       { id: "builtin-tool-ask-v1", kind: "tool", status: "active", config: { mode: "ask" } },
       { id: "inactive", kind: "tool", status: "inactive", config: { mode: "auto" } },
     ];
-    expect(permissionPolicyID(profiles, "discuss")).toBe("builtin-tool-discuss-v1");
+    expect(permissionPolicyID(profiles, "discuss")).toBe("builtin-tool-discuss-v3");
     expect(permissionPolicyID(profiles, "ask")).toBe("builtin-tool-ask-v1");
     expect(permissionPolicyID(profiles, "auto")).toBeUndefined();
   });

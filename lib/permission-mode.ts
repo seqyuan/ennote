@@ -11,8 +11,11 @@ export interface PermissionPolicyProfile {
 
 export function permissionPolicyID(profiles: PermissionPolicyProfile[], mode: PermissionMode): string | undefined {
   const active = profiles.filter(profile => profile.kind === "tool" && profile.status === "active" && profile.config.mode === mode);
-  const builtinID = `builtin-tool-${mode}-v1`;
-  return active.find(profile => profile.id === builtinID)?.id ?? active[0]?.id;
+  // Builtin tool-policy versions are not uniform (Discuss ships v3 while Ask
+  // and Auto ship v1), so match any versioned builtin id for the mode instead
+  // of pinning one version number.
+  const builtinID = new RegExp(`^builtin-tool-${mode}-v\\d+$`);
+  return active.find(profile => builtinID.test(profile.id))?.id ?? active[0]?.id;
 }
 
 export function permissionModeForPolicyID(profiles: PermissionPolicyProfile[], policyID: unknown): PermissionMode | undefined {
