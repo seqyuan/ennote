@@ -384,6 +384,15 @@ type SystemPromptSnapshot struct {
 	AgentPrompt     string `json:"agentPrompt"`
 	PlatformVersion string `json:"platformVersion"`
 	Digest          string `json:"digest"`
+	// Sections, SectionsDigest and ComposedDigest are the additive composition
+	// provenance recorded once, after the prompt is composed. They are all empty
+	// on a Run frozen before composition freezing existed, and such a snapshot
+	// still decodes. Sections without SectionsDigest is never valid: an
+	// unverifiable record is worse than no record.
+	Sections       []PromptSection `json:"sections,omitempty"`
+	SectionsDigest string          `json:"sectionsDigest,omitempty"`
+	// ComposedDigest addresses the full composed prompt text in prompt_blobs.
+	ComposedDigest string `json:"composedDigest,omitempty"`
 }
 
 type SystemPromptMetadata struct {

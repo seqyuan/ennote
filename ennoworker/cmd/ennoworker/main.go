@@ -507,6 +507,13 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		segments = append(segments, e.rolePreloadSegments(resolved.Effective.Role)...)
 		segments = append(segments, taskSegments...)
 		systemPrompt, systemPromptSections = systemprompt.Compose(segments)
+		// Freeze what the model is about to be given before the first Provider
+		// request, exactly like the effective config. A Run whose composition
+		// cannot be recorded must not start: the point of the freeze is that no
+		// model-visible input exists without a verifiable record of it.
+		if freezeErr := e.runs.FreezeSystemPromptComposition(ctx, run.ID, systemPrompt, systemPromptSections); freezeErr != nil {
+			return domain.RunOutput{}, fmt.Errorf("freeze prompt composition: %w", freezeErr)
+		}
 		// Log the composition's identity, never its content: the Worker must stay
 		// quiet about prompt text in logs (engine design, observability), while
 		// the section record makes the composition auditable through the API.

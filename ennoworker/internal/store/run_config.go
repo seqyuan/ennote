@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/systemprompt"
 )
 
 const (
@@ -180,7 +181,35 @@ func decodeSystemPromptSnapshot(encoded, expectedDigest string) (domain.SystemPr
 		snapshot.Digest != calculated.Digest || expectedDigest != snapshot.Digest {
 		return snapshot, errors.New("frozen system prompt snapshot digest mismatch")
 	}
+	if err := validatePromptSections(snapshot); err != nil {
+		return snapshot, err
+	}
 	return snapshot, nil
+}
+
+// validatePromptSections checks the composition provenance when present. A
+// snapshot with sections but no sections digest is rejected rather than
+// tolerated: an unverifiable record reads as authoritative while proving
+// nothing, which is worse than an absent one. An absent record stays valid so a
+// Run frozen before composition freezing existed still resumes.
+func validatePromptSections(snapshot domain.SystemPromptSnapshot) error {
+	if len(snapshot.Sections) == 0 {
+		if snapshot.SectionsDigest != "" {
+			return errors.New("frozen system prompt snapshot has a sections digest but no sections")
+		}
+		return nil
+	}
+	if snapshot.SectionsDigest == "" {
+		return errors.New("frozen system prompt snapshot has sections without a sections digest")
+	}
+	calculated, err := systemprompt.SectionsDigest(snapshot.Sections)
+	if err != nil {
+		return err
+	}
+	if calculated != snapshot.SectionsDigest {
+		return errors.New("frozen system prompt snapshot sections digest mismatch")
+	}
+	return nil
 }
 
 func validateThinkingSelection(runtime domain.ModelRuntimeSnapshot, effort domain.ThinkingEffort) error {
