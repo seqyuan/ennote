@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { permissionModeForPolicyID, permissionPolicyID, withPermissionConfig, withRunConfig } from "../../lib/permission-mode";
+import { frozenPermissionMode, permissionModeForPolicyID, permissionPolicyID, withPermissionConfig, withRunConfig } from "../../lib/permission-mode";
 
 describe("per-turn permission mode", () => {
   it("prefers the versioned built-in profile for the selected mode", () => {
@@ -59,5 +59,43 @@ describe("per-turn permission mode", () => {
       text: "hello",
       config: { toolPolicyProfileId: "builtin-tool-auto-v1", modelProfileId: "model-1" },
     });
+  });
+});
+
+describe("frozen run permission mode", () => {
+  const profiles = [
+    { id: "builtin-tool-discuss-v3", kind: "tool", status: "active", config: { mode: "discuss" } },
+    { id: "builtin-tool-ask-v1", kind: "tool", status: "active", config: { mode: "ask" } },
+    { id: "builtin-tool-auto-v1", kind: "tool", status: "active", config: { mode: "auto" } },
+  ];
+
+  // A Role Run ignores the requested host policy: the Role's frozen
+  // permissionCeiling is the authority the Worker actually executes.
+  it("prefers the Role permissionCeiling over the requested policy", () => {
+    const run = {
+      requestedConfig: { toolPolicyProfileId: "builtin-tool-discuss-v3" },
+      effectiveConfig: { role: { permissionCeiling: "auto" }, toolPolicy: { id: "builtin-tool-auto-v1" } },
+    };
+    expect(frozenPermissionMode(run, profiles)).toBe("auto");
+  });
+
+  // A host Run's requested policy can be rewritten at freeze time; the effective
+  // value wins over what the composer sent.
+  it("reads the frozen tool policy for a host run", () => {
+    const run = {
+      requestedConfig: { toolPolicyProfileId: "builtin-tool-ask-v1" },
+      effectiveConfig: { toolPolicy: { id: "builtin-tool-discuss-v3" } },
+    };
+    expect(frozenPermissionMode(run, profiles)).toBe("discuss");
+  });
+
+  it("falls back to the requested policy before the effective snapshot exists", () => {
+    expect(frozenPermissionMode({ requestedConfig: { toolPolicyProfileId: "builtin-tool-ask-v1" } }, profiles)).toBe("ask");
+  });
+
+  it("ignores malformed or unknown payloads", () => {
+    expect(frozenPermissionMode(null, profiles)).toBeUndefined();
+    expect(frozenPermissionMode({ effectiveConfig: "nope", requestedConfig: 7 }, profiles)).toBeUndefined();
+    expect(frozenPermissionMode({ effectiveConfig: { role: { permissionCeiling: "admin" } } }, profiles)).toBeUndefined();
   });
 });

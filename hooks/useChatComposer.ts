@@ -6,7 +6,7 @@ import type { RunAgentFlow, Session } from "@/components/settings/types";
 import type { AgentRun } from "@/lib/approval";
 import type { TurnMessage } from "@/lib/chat-messages";
 import {
-  permissionModeForPolicyID,
+  frozenPermissionMode,
   permissionPolicyID,
   withRunConfig,
   type PermissionMode,
@@ -154,10 +154,14 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
     () => { return permissionPolicyID(settings.policies, permissionMode); },
     [permissionMode, settings.policies],
   );
-  const displayedPermissionMode = useCallback(() => {
-    const requested = agent.activeRunRecord?.requestedConfig as Record<string, unknown> | undefined;
-    return permissionModeForPolicyID(settings.policies, requested?.toolPolicyProfileId) ?? permissionMode;
-  }, [agent.activeRunRecord, permissionMode, settings.policies]);
+  // The frozen Run is authoritative: a Role Run pins the mode through the
+  // Role's permissionCeiling, a host Run through the frozen tool policy. The
+  // local selection only shows before a Run exists (or if the snapshot is
+  // missing).
+  const displayedPermissionMode = useCallback(
+    () => frozenPermissionMode(agent.activeRunRecord, settings.policies) ?? permissionMode,
+    [agent.activeRunRecord, permissionMode, settings.policies],
+  );
 
   // ——— Chat actions ———
 
