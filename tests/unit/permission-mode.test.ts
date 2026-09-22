@@ -15,7 +15,37 @@ describe("per-turn permission mode", () => {
     expect(permissionPolicyID(profiles, "auto")).toBeUndefined();
   });
 
+  // The Worker ships the Discuss builtin at v3 and Ask/Auto at v1, so selection
+  // must not pin a version number.
+  it("matches any versioned built-in id for the mode", () => {
+    const profiles = [
+      { id: "custom-discuss", kind: "tool", status: "active", config: { mode: "discuss" } },
+      { id: "builtin-tool-discuss-v7", kind: "tool", status: "active", config: { mode: "discuss" } },
+    ];
+    expect(permissionPolicyID(profiles, "discuss")).toBe("builtin-tool-discuss-v7");
+  });
+
+  // A custom same-mode policy is still used when no builtin exists, but the
+  // non-permission tool policies must never be selectable.
+  it("never selects a non-permission tool policy", () => {
+    const profiles = [
+      { id: "builtin-tool-allow-existing-v1", kind: "tool", status: "active", config: { mode: "allow_existing_behavior" } },
+      { id: "custom-restricted", kind: "tool", status: "active", config: { mode: "restricted" } },
+    ];
+    expect(permissionPolicyID(profiles, "discuss")).toBeUndefined();
+    expect(permissionPolicyID(profiles, "ask")).toBeUndefined();
+    expect(permissionPolicyID(profiles, "auto")).toBeUndefined();
+  });
+
+  it("falls back to a custom same-mode policy when no builtin exists", () => {
+    const profiles = [
+      { id: "custom-ask", kind: "tool", status: "active", config: { mode: "ask" } },
+    ];
+    expect(permissionPolicyID(profiles, "ask")).toBe("custom-ask");
+  });
+
   it("restores the frozen mode from a built-in profile ID", () => {
+    expect(permissionModeForPolicyID([], "builtin-tool-discuss-v3")).toBe("discuss");
     expect(permissionModeForPolicyID([], "builtin-tool-ask-v1")).toBe("ask");
     expect(permissionModeForPolicyID([], "custom")).toBeUndefined();
   });
