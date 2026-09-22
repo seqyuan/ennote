@@ -32,6 +32,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/skills"
 	"github.com/seqyuan/ennote/ennoworker/internal/spill"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
+	"github.com/seqyuan/ennote/ennoworker/internal/systemprompt"
 	"github.com/seqyuan/ennote/ennoworker/internal/tools"
 	"github.com/seqyuan/ennote/ennoworker/internal/workspace"
 )
@@ -407,11 +408,14 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		snapDir = filepath.Join(e.sessionPath, "snapshots", "skills", "sha256-"+resumeState.SkillCatalogDigest)
 	}
 
-	baseSystemPrompt := agent.BaseSystemPrompt(resolved.SystemPrompt.AgentPrompt)
+	// The base of the prompt is platform-owned: either the frozen Agent prompt,
+	// or the platform Role envelope plus the frozen Role definition.
+	baseSegments := agent.BaseSystemPromptSegments(resolved.SystemPrompt.AgentPrompt)
 	if resolved.Effective.Role != nil {
-		baseSystemPrompt = agent.RoleSystemPrompt(*resolved.Effective.Role, resolved.SystemPrompt.AgentPrompt)
+		baseSegments = agent.RoleSystemPromptSegments(*resolved.Effective.Role, resolved.SystemPrompt.AgentPrompt)
 	}
-	systemPrompt := baseSystemPrompt
+	systemPrompt := ""
+	var systemPromptSections []domain.PromptSection
 	var skillCatalogState string
 	var skillCatalogDigest string
 	if resumeState != nil {
@@ -485,18 +489,30 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 			slog.Info("read tool not allowed by policy, skipping skill catalog")
 		}
 
-		systemPrompt = projCtx.BuildPrompt(baseSystemPrompt, catalogPrompt)
-		if preloaded := e.rolePreloadPrompt(resolved.Effective.Role); preloaded != "" {
-			systemPrompt += preloaded
-		}
+		// One ordered segment list produces both the exact prompt bytes and the
+		// per-section identity record that the Run freezes, so nothing can be in
+		// the prompt without also being in the record.
 		taskSkillIDs, taskSkillsErr := (&store.DelegationRepo{DB: e.db}).TaskSkillsForChildRun(ctx, run.ID)
 		if taskSkillsErr != nil {
 			return domain.RunOutput{}, fmt.Errorf("load task skills: %w", taskSkillsErr)
 		}
-		if taskPreloaded, taskSkillsErr := e.taskPreloadPrompt(resolved.Effective.Role, taskSkillIDs); taskSkillsErr != nil {
+		taskSegments, taskSkillsErr := e.taskPreloadSegments(resolved.Effective.Role, taskSkillIDs,
+			fmt.Sprintf("task:%s", run.ID))
+		if taskSkillsErr != nil {
 			return domain.RunOutput{}, taskSkillsErr
-		} else if taskPreloaded != "" {
-			systemPrompt += taskPreloaded
+		}
+		segments := make([]systemprompt.Segment, 0, len(baseSegments)+6)
+		segments = append(segments, baseSegments...)
+		segments = append(segments, projCtx.Segments(catalogPrompt)...)
+		segments = append(segments, e.rolePreloadSegments(resolved.Effective.Role)...)
+		segments = append(segments, taskSegments...)
+		systemPrompt, systemPromptSections = systemprompt.Compose(segments)
+		// Log the composition's identity, never its content: the Worker must stay
+		// quiet about prompt text in logs (engine design, observability), while
+		// the section record makes the composition auditable through the API.
+		if digest, digestErr := systemprompt.SectionsDigest(systemPromptSections); digestErr == nil {
+			slog.Info("composed system prompt", "runId", run.ID, "bytes", len(systemPrompt),
+				"sectionsDigest", digest, "sections", describePromptSections(systemPromptSections))
 		}
 	}
 
@@ -1454,13 +1470,17 @@ func (e *agentExecutor) livePublisherFor(run *domain.AgentRun) events.LivePublis
 	}
 }
 
-// rolePreloadPrompt returns the frozen preload Skill prompts for a Role as an
-// inline system-prompt fragment. Preload Skills are data injected at execution
-// time and do not require filesystem access, so they remain available even when
-// the read tool is not in the Role allowlist.
-func (e *agentExecutor) rolePreloadPrompt(role *domain.FrozenRoleExecution) string {
+// rolePreloadSegments returns the frozen preload Skills of a Role as inlined
+// prompt segments. Preload Skills are data injected at execution time and do
+// not require filesystem access, so they remain available even when the read
+// tool is not in the Role allowlist.
+//
+// Each segment names the exact frozen Role version that carried the preload
+// binding, so the composition record shows which Role version put which Skill
+// body into the prompt.
+func (e *agentExecutor) rolePreloadSegments(role *domain.FrozenRoleExecution) []systemprompt.Segment {
 	if role == nil {
-		return ""
+		return nil
 	}
 	var preloads []string
 	for _, entry := range role.Skills.Entries {
@@ -1469,13 +1489,14 @@ func (e *agentExecutor) rolePreloadPrompt(role *domain.FrozenRoleExecution) stri
 		}
 	}
 	if len(preloads) == 0 {
-		return ""
+		return nil
 	}
 	loaded := make(map[string]*skills.LoadedSkill)
 	for _, skill := range skills.Discover(e.skillsDir, e.builtinDir) {
 		loaded[skill.Manifest.ID] = skill
 	}
-	var builder strings.Builder
+	source := fmt.Sprintf("role:%s@%d", role.Handle, role.Version)
+	segments := make([]systemprompt.Segment, 0, len(preloads))
 	for _, id := range preloads {
 		skill, ok := loaded[id]
 		if !ok {
@@ -1483,22 +1504,24 @@ func (e *agentExecutor) rolePreloadPrompt(role *domain.FrozenRoleExecution) stri
 			// defensively if the on-disk catalog changed since publication.
 			continue
 		}
-		builder.WriteString("\n\n<preloaded_skill id=\"")
-		builder.WriteString(id)
-		builder.WriteString("\">\n")
-		builder.WriteString(skill.PromptText)
-		builder.WriteString("\n</preloaded_skill>")
+		segments = append(segments, systemprompt.SkillSegment(id, skill.PromptText, source))
 	}
-	return builder.String()
+	return segments
 }
 
-// taskPreloadPrompt renders explicit task Skills as an additive overlay. Role
+// rolePreloadPrompt is the composed text of rolePreloadSegments.
+func (e *agentExecutor) rolePreloadPrompt(role *domain.FrozenRoleExecution) string {
+	prompt, _ := systemprompt.Compose(e.rolePreloadSegments(role))
+	return prompt
+}
+
+// taskPreloadSegments renders explicit task Skills as an additive overlay. Role
 // preload Skills are rendered separately and are de-duplicated here; explicit
 // task Skills must still exist in the current catalog so a removed or invalid
 // frozen binding fails loudly rather than silently weakening the task.
-func (e *agentExecutor) taskPreloadPrompt(role *domain.FrozenRoleExecution, ids []string) (string, error) {
+func (e *agentExecutor) taskPreloadSegments(role *domain.FrozenRoleExecution, ids []string, source string) ([]systemprompt.Segment, error) {
 	if len(ids) == 0 {
-		return "", nil
+		return nil, nil
 	}
 	loaded := make(map[string]*skills.LoadedSkill)
 	for _, skill := range skills.Discover(e.skillsDir, e.builtinDir) {
@@ -1513,12 +1536,12 @@ func (e *agentExecutor) taskPreloadPrompt(role *domain.FrozenRoleExecution, ids 
 		}
 	}
 	seen := make(map[string]struct{}, len(ids))
-	var builder strings.Builder
+	segments := make([]systemprompt.Segment, 0, len(ids))
 	for _, rawID := range ids {
 		id := strings.TrimSpace(rawID)
 		skill, ok := loaded[id]
 		if !ok {
-			return "", fmt.Errorf("task skill %q is unavailable", id)
+			return nil, fmt.Errorf("task skill %q is unavailable", id)
 		}
 		if _, duplicate := seen[id]; duplicate {
 			continue
@@ -1527,13 +1550,19 @@ func (e *agentExecutor) taskPreloadPrompt(role *domain.FrozenRoleExecution, ids 
 		if _, inherited := rolePreloads[id]; inherited {
 			continue
 		}
-		builder.WriteString("\n\n<preloaded_skill id=\"")
-		builder.WriteString(id)
-		builder.WriteString("\">\n")
-		builder.WriteString(skill.PromptText)
-		builder.WriteString("\n</preloaded_skill>")
+		segments = append(segments, systemprompt.SkillSegment(id, skill.PromptText, source))
 	}
-	return builder.String(), nil
+	return segments, nil
+}
+
+// taskPreloadPrompt is the composed text of taskPreloadSegments.
+func (e *agentExecutor) taskPreloadPrompt(role *domain.FrozenRoleExecution, ids []string) (string, error) {
+	segments, err := e.taskPreloadSegments(role, ids, "task")
+	if err != nil {
+		return "", err
+	}
+	prompt, _ := systemprompt.Compose(segments)
+	return prompt, nil
 }
 
 func (e *agentExecutor) resolveRuntimeProvider(runtime domain.ModelRuntimeSnapshot) (llm.Provider, error) {
@@ -1831,4 +1860,14 @@ func tickSessionAutoResume(ctx context.Context, db *sql.DB, coordinator *runs.Co
 		return fmt.Errorf("enqueue continuation run %s: %w", continuation.ID, err)
 	}
 	return nil
+}
+
+// describePromptSections renders the section record as one compact log field:
+// kind, id and byte count per section, in composition order.
+func describePromptSections(sections []domain.PromptSection) string {
+	parts := make([]string, 0, len(sections))
+	for _, section := range sections {
+		parts = append(parts, fmt.Sprintf("%s/%s=%dB", section.Kind, section.ID, section.Bytes))
+	}
+	return strings.Join(parts, " ")
 }

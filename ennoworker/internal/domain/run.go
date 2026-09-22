@@ -346,6 +346,38 @@ const (
 	PublishPrivateToParent PublishMode = "private_to_parent"
 )
 
+// PromptSectionKind classifies one contributing layer of a composed system
+// prompt. It is provenance metadata for readers, never a precedence rule:
+// precedence is the segment order frozen into the Run.
+//
+// The vocabulary follows the platform/authoring split of
+// docs/design-philosophy.md: a section the platform owns (base, role envelope)
+// is closed, while a section that renders an authoring object (Role definition,
+// Skill body, project instruction file) is open but frozen at Run start.
+type PromptSectionKind string
+
+const (
+	PromptSectionBase          PromptSectionKind = "base"
+	PromptSectionRole          PromptSectionKind = "role"
+	PromptSectionContext       PromptSectionKind = "context"
+	PromptSectionSkillsCatalog PromptSectionKind = "skills_catalog"
+	PromptSectionSkillPreload  PromptSectionKind = "skill_preload"
+)
+
+// PromptSection identifies one frozen contribution to a Run's system prompt:
+// what produced it, how many bytes it contributed, and the digest of exactly
+// those bytes. The text itself is deliberately absent: it is stored once per
+// distinct composition, keyed by SystemPromptSnapshot.ComposedDigest, so run
+// rows stay small and identical compositions are shared.
+type PromptSection struct {
+	ID      string            `json:"id"`
+	Kind    PromptSectionKind `json:"kind"`
+	Source  string            `json:"source"`
+	Bytes   int               `json:"bytes"`
+	Digest  string            `json:"digest"`
+	SkillID string            `json:"skillId,omitempty"`
+}
+
 type SystemPromptSnapshot struct {
 	Version         int    `json:"version"`
 	AgentProfileID  string `json:"agentProfileId,omitempty"`
