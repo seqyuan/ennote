@@ -931,7 +931,15 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 		defer childMCPSet.Close()
 	}
 
-	systemPrompt := agent.RoleSystemPrompt(*resolved.Effective.Role, resolved.SystemPrompt.AgentPrompt)
+	// A private child's prompt is platform Role envelope plus the frozen Role
+	// definition. It is frozen into the same record as a public Run so a delegated
+	// Role is auditable the same way, and so a reader can see exactly which Role
+	// version's definition the child executed under.
+	childSegments := agent.RoleSystemPromptSegments(*resolved.Effective.Role, resolved.SystemPrompt.AgentPrompt)
+	systemPrompt, systemPromptSections := systemprompt.Compose(childSegments)
+	if freezeErr := e.runs.FreezeSystemPromptComposition(ctx, run.ID, systemPrompt, systemPromptSections); freezeErr != nil {
+		return domain.RunOutput{}, fmt.Errorf("freeze prompt composition: %w", freezeErr)
+	}
 	// task_only context: the frozen assignment is the only history, except for
 	// continuation children, which replay the exact source attempt's private
 	// transcript plus one explicit user instruction.
