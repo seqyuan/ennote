@@ -88,7 +88,8 @@ func validatePolicyConfig(kind domain.PolicyKind, raw json.RawMessage) (json.Raw
 			return nil, fmt.Errorf("invalid tool policy config: %w", err)
 		}
 		if config.Mode != "allow_existing_behavior" && config.Mode != "restricted" &&
-			config.Mode != string(domain.PermissionDiscuss) && config.Mode != string(domain.PermissionAuto) {
+			config.Mode != string(domain.PermissionDiscuss) && config.Mode != string(domain.PermissionAsk) &&
+			config.Mode != string(domain.PermissionAuto) {
 			return nil, fmt.Errorf("invalid tool policy mode %q", config.Mode)
 		}
 		if config.MaxTimeoutSeconds < 0 {

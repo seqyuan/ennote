@@ -38,7 +38,7 @@ func TestPolicyRepoCreatesImmutableVersions(t *testing.T) {
 
 func TestPolicyRepoAcceptsPermissionModes(t *testing.T) {
 	repo := newPolicyRepo(t)
-	for _, mode := range []domain.PermissionMode{domain.PermissionDiscuss, domain.PermissionAuto} {
+	for _, mode := range []domain.PermissionMode{domain.PermissionDiscuss, domain.PermissionAsk, domain.PermissionAuto} {
 		profile, err := repo.CreateVersion(context.Background(), store.CreatePolicyInput{Name: string(mode), Kind: domain.PolicyKindTool,
 			Config: json.RawMessage(`{"mode":"` + string(mode) + `"}`)})
 		require.NoError(t, err)
