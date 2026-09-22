@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
@@ -39,4 +40,38 @@ func TestPolicyStoreDoesNotAllowBuiltinDeactivation(t *testing.T) {
 	store := &fileconfig.PolicyStore{Path: filepath.Join(t.TempDir(), "policies.json")}
 	err := store.DeactivateProfile("builtin-tool-allow-existing-v1")
 	assert.ErrorContains(t, err, "builtin")
+}
+
+// TestBuiltinToolPoliciesCoverEveryPermissionMode pins the catalog contract the
+// Web composer depends on: each permission mode has exactly one active builtin
+// tool policy whose id is builtin-tool-<mode>-v<digits> and whose config.mode is
+// that mode. lib/permission-mode.ts matches the same pattern, so a rename or
+// version bump here has to be mirrored there.
+func TestBuiltinToolPoliciesCoverEveryPermissionMode(t *testing.T) {
+	store := &fileconfig.PolicyStore{}
+	profiles, err := store.Profiles(context.Background(), domain.PolicyKindTool)
+	require.NoError(t, err)
+	for _, mode := range []domain.PermissionMode{domain.PermissionDiscuss, domain.PermissionAsk, domain.PermissionAuto} {
+		pattern := regexp.MustCompile(`^builtin-tool-` + string(mode) + `-v[0-9]+$`)
+		matches := 0
+		for _, profile := range profiles {
+			if profile.Status != "active" || !pattern.MatchString(profile.ID) {
+				continue
+			}
+			var config domain.ToolPolicyConfig
+			require.NoError(t, json.Unmarshal(profile.Config, &config))
+			assert.Equal(t, string(mode), config.Mode, profile.ID)
+			matches++
+		}
+		assert.Equal(t, 1, matches, "expected exactly one active builtin %s tool policy", mode)
+	}
+}
+
+// TestBuiltinToolPolicyDefaultIsResolvable guards the empty-id fallback that
+// runs which omit toolPolicyProfileId depend on.
+func TestBuiltinToolPolicyDefaultIsResolvable(t *testing.T) {
+	store := &fileconfig.PolicyStore{}
+	snapshot, err := store.Resolve(context.Background(), "", domain.PolicyKindTool)
+	require.NoError(t, err)
+	assert.Equal(t, "builtin-tool-allow-existing-v1", snapshot.ID)
 }

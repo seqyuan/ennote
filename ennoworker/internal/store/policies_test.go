@@ -38,12 +38,28 @@ func TestPolicyRepoCreatesImmutableVersions(t *testing.T) {
 
 func TestPolicyRepoAcceptsPermissionModes(t *testing.T) {
 	repo := newPolicyRepo(t)
+	ctx := context.Background()
 	for _, mode := range []domain.PermissionMode{domain.PermissionDiscuss, domain.PermissionAsk, domain.PermissionAuto} {
-		profile, err := repo.CreateVersion(context.Background(), store.CreatePolicyInput{Name: string(mode), Kind: domain.PolicyKindTool,
+		profile, err := repo.CreateVersion(ctx, store.CreatePolicyInput{Name: string(mode), Kind: domain.PolicyKindTool,
 			Config: json.RawMessage(`{"mode":"` + string(mode) + `"}`)})
 		require.NoError(t, err)
 		assert.JSONEq(t, `{"mode":"`+string(mode)+`"}`, string(profile.Config))
+
+		// The created version must be selectable as the active default so a Run
+		// that omits toolPolicyProfileId resolves it.
+		require.NoError(t, repo.SetDefault(ctx, profile.ID))
+		snapshot, err := repo.Files.Resolve(ctx, "", domain.PolicyKindTool)
+		require.NoError(t, err)
+		assert.Equal(t, profile.ID, snapshot.ID)
+		assert.JSONEq(t, `{"mode":"`+string(mode)+`"}`, string(snapshot.Config))
 	}
+}
+
+func TestPolicyRepoRejectsUnknownToolPolicyMode(t *testing.T) {
+	repo := newPolicyRepo(t)
+	_, err := repo.CreateVersion(context.Background(), store.CreatePolicyInput{Name: "admin", Kind: domain.PolicyKindTool,
+		Config: json.RawMessage(`{"mode":"admin"}`)})
+	assert.ErrorContains(t, err, `invalid tool policy mode "admin"`)
 }
 
 func TestPolicyRepoRejectsUnknownOrInvalidConfiguration(t *testing.T) {
