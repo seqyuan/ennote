@@ -452,6 +452,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
             selectedSession={selectedSession}
             sessionTitle={selectedSessionRecord?.title || selectedSession || ""}
             activeRun={chat.run.activeRun}
+            inspectorRunId={chat.run.inspectorRunId}
             status={chat.run.status}
             permissionMode={chat.composer.displayedPermissionMode}
           />

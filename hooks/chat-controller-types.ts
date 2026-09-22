@@ -32,6 +32,12 @@ export type RunUsage = {
 
 export type RunView = {
   activeRun: string | null;
+  /**
+   * Run the inspector panel opens. The active Run while one is running,
+   * otherwise the newest Run the timeline knows about, so the frozen record
+   * stays readable after a Run settles.
+   */
+  inspectorRunId: string | null;
   activeRunStatus?: string;
   status: string;
   usage: RunUsage | null;

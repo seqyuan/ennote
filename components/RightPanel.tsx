@@ -4,7 +4,9 @@ import { ArrowLeft } from "lucide-react";
 import { FileTreePanel } from "./FileTreePanel";
 import { FileViewer } from "./FileViewer";
 import { GraphActivityPanel } from "./GraphActivityPanel";
+import { RunInspectorPanel } from "./RunInspectorPanel";
 import { TabBar, type Tab } from "./TabBar";
+import { useRunPromptComposition } from "@/hooks/useRunPromptComposition";
 import type { useResizable } from "@/hooks/useResizable";
 import type { PermissionMode } from "@/lib/permission-mode";
 
@@ -23,15 +25,19 @@ export function RightPanel(props: {
   selectedSession: string | null;
   sessionTitle: string;
   activeRun: string | null;
+  /** Run the inspector opens: the active Run, or the newest one the timeline has. */
+  inspectorRunId: string | null;
   status: string;
   permissionMode: PermissionMode;
 }) {
   const {
     open, onClose, resize, tabs, activeTabId, onSelectTab, onCloseTab,
     projectId, displayPath, onOpenFile, onPreviewFile,
-    selectedSession, sessionTitle, activeRun, status, permissionMode,
+    selectedSession, sessionTitle, activeRun, inspectorRunId, status, permissionMode,
   } = props;
   const activeFileTab = tabs.find((t) => t.id === activeTabId);
+  // One fetch per open inspector; the hook clears itself when no Run is targeted.
+  const prompt = useRunPromptComposition(activeTabId === "tools" ? inspectorRunId : null);
 
   return (
     <div
@@ -70,9 +76,14 @@ export function RightPanel(props: {
           <GraphActivityPanel sessionId={selectedSession} />
         )}
         {activeTabId === "tools" && (
-          <div style={{ padding: 18, color: "var(--text-muted)", fontSize: 13 }}>
-            <div style={{ fontWeight: 600, marginBottom: 12 }}>Session Status</div>
-            <div style={{ fontSize: 12 }}>
+          <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+            <RunInspectorPanel
+              runId={inspectorRunId}
+              composition={prompt.composition}
+              loading={prompt.loading}
+              error={prompt.error}
+            />
+            <div style={{ marginTop: "auto", padding: "0 16px 12px", fontSize: 11, color: "var(--text-dim)" }}>
               {selectedSession ? (
                 <>
                   <div>Session: {sessionTitle}</div>

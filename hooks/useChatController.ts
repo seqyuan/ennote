@@ -3,6 +3,7 @@
 import { useCallback, useMemo } from "react";
 import type { Session } from "@/components/settings/types";
 import { apiFetch } from "@/lib/worker-api.client";
+import { latestRunId } from "@/lib/run-inspection";
 import { useAgentSession } from "@/hooks/useAgentSession";
 import { useSessionMessages } from "@/hooks/useSessionMessages";
 import { useRunRecovery } from "@/hooks/useRunRecovery";
@@ -137,6 +138,7 @@ export function useChatController(deps: ChatControllerDeps) {
 
   const run = {
     activeRun: agent.activeRunID,
+    inspectorRunId: agent.activeRunID ?? latestRunId(messagesData.messages),
     activeRunStatus: agent.activeRun?.status,
     status: agent.status,
     usage: agent.usage,

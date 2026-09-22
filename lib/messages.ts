@@ -118,6 +118,20 @@ const messages: Record<Locale, Record<string, string>> = {
     "context.tools": "Tools",
     "context.messages": "Messages",
 
+    "inspector.noRun": "Send a message to inspect the prompt the model receives.",
+    "inspector.loading": "Loading the frozen run prompt…",
+    "inspector.run": "Run",
+    "inspector.frozen":
+      "Frozen before the first model request. Nothing here is re-derived from current settings.",
+    "inspector.unrecorded":
+      "This run did not record its prompt composition, so there is nothing to show.",
+    "inspector.composition": "Prompt composition",
+    "inspector.sections": "{count} sections",
+    "inspector.prompt": "Frozen prompt text",
+    "inspector.sectionsDigest": "Sections",
+    "inspector.composedDigest": "Composed",
+    "inspector.baseDigest": "Base prompt",
+
     "stats.counts": "{turns} turns · {steps} steps",
     "stats.llm": "LLM {duration}",
     "stats.toolCall": "Tool call {duration}",
@@ -363,6 +377,18 @@ const messages: Record<Locale, Record<string, string>> = {
     "context.system": "系统提示词",
     "context.tools": "工具",
     "context.messages": "对话消息",
+
+    "inspector.noRun": "发送一条消息后，可在此查看模型实际收到的提示词。",
+    "inspector.loading": "正在读取本次 Run 冻结的提示词…",
+    "inspector.run": "Run",
+    "inspector.frozen": "在首次模型请求前冻结。此处内容不会根据当前设置重新推导。",
+    "inspector.unrecorded": "该 Run 未记录提示词组成，无可显示内容。",
+    "inspector.composition": "提示词组成",
+    "inspector.sections": "共 {count} 段",
+    "inspector.prompt": "冻结的提示词全文",
+    "inspector.sectionsDigest": "组成",
+    "inspector.composedDigest": "全文",
+    "inspector.baseDigest": "基础提示词",
 
     "stats.counts": "{turns} 轮 · {steps} 步",
     "stats.llm": "LLM {duration}",
