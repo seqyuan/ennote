@@ -286,39 +286,13 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	if run.RunKind == domain.RunKindDelegatedAgent {
 		return e.executeDelegatedChild(ctx, run)
 	}
-	var resumeRecord *domain.ApprovalResume
-	if e.approvals != nil {
-		var err error
-		resumeRecord, err = e.approvals.BeginResume(ctx, run.ID)
-		if err != nil {
-			return domain.RunOutput{}, err
-		}
+	frozen, err := e.loadFrozenResume(ctx, run.ID)
+	if err != nil {
+		return domain.RunOutput{}, err
 	}
 	var resumeState *agent.ResumeState
-	if resumeRecord != nil {
-		resumeState = &agent.ResumeState{}
-		if err := json.Unmarshal(resumeRecord.Checkpoint.State, resumeState); err != nil {
-			return domain.RunOutput{}, domain.NewCodedError(domain.ErrorApprovalCheckpointInvalid, err)
-		}
-		// Validate the digest-version matrix (v3/v4 legacy → V1, v5 → V2).
-		switch {
-		case resumeState.Version <= 4:
-			if resumeState.ApprovalDigestVersion != 0 && resumeState.ApprovalDigestVersion != agent.ApprovalDigestV1 {
-				return domain.RunOutput{}, domain.NewCodedError(domain.ErrorApprovalCheckpointInvalid,
-					fmt.Errorf("legacy checkpoint %d carries unsupported digest version %d",
-						resumeState.Version, resumeState.ApprovalDigestVersion))
-			}
-			resumeState.ApprovalDigestVersion = agent.ApprovalDigestV1
-		case resumeState.Version == agent.ResumeStateVersion:
-			if resumeState.ApprovalDigestVersion != agent.ApprovalDigestV2 {
-				return domain.RunOutput{}, domain.NewCodedError(domain.ErrorApprovalCheckpointInvalid,
-					fmt.Errorf("checkpoint version %d requires digest version %d, got %d",
-						resumeState.Version, agent.ApprovalDigestV2, resumeState.ApprovalDigestVersion))
-			}
-		default:
-			return domain.RunOutput{}, domain.NewCodedError(domain.ErrorApprovalCheckpointInvalid,
-				fmt.Errorf("unsupported checkpoint version %d", resumeState.Version))
-		}
+	if frozen != nil {
+		resumeState = frozen.State
 	}
 
 	session, err := e.sessionDB.FindByID(ctx, run.SessionID)
@@ -725,9 +699,8 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		overflowRecovery = nil
 	}
 	var approvalResolution *agent.ApprovalResolution
-	if resumeRecord != nil {
-		approvalResolution = &agent.ApprovalResolution{Decision: resumeRecord.Decision,
-			BatchDigest: resumeRecord.Approval.BatchDigest}
+	if frozen != nil {
+		approvalResolution = frozen.Resolution
 	}
 	// Determine request generation: Claim count on this run from run_started
 	// events. Re-claims (e.g. parent resume after waiting_children) must start
@@ -870,6 +843,19 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
 			fmt.Errorf("load child assignment: %w", err))
 	}
+	// A child that suspended for approval resumes from its frozen checkpoint, the
+	// same way a public Run does. Rebuilding from the continuation seed instead
+	// would replay tool calls the child already executed, and would let it run a
+	// fresh batch that the user never approved.
+	frozen, err := e.loadFrozenResume(ctx, run.ID)
+	if err != nil {
+		return domain.RunOutput{}, err
+	}
+	var resumeState *agent.ResumeState
+	var approvalResolution *agent.ApprovalResolution
+	if frozen != nil {
+		resumeState, approvalResolution = frozen.State, frozen.Resolution
+	}
 
 	session, err := e.sessionDB.FindByID(ctx, run.SessionID)
 	if err != nil || session == nil {
@@ -939,22 +925,33 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 	// bodies frozen on its delegation item. Preloads are inlined data on purpose:
 	// a child has no /skills mount, so a Skill it cannot read is still a Skill it
 	// must be able to follow.
-	taskSkillIDs, taskSkillsErr := e.delegationRepo().TaskSkillsForChildRun(ctx, run.ID)
-	if taskSkillsErr != nil {
-		return domain.RunOutput{}, fmt.Errorf("load child task skills: %w", taskSkillsErr)
-	}
-	childSegments, childSegmentsErr := e.delegatedChildSegments(resolved.Effective.Role,
-		resolved.SystemPrompt.AgentPrompt, taskSkillIDs, fmt.Sprintf("task:%s", run.ID))
-	if childSegmentsErr != nil {
-		return domain.RunOutput{}, childSegmentsErr
-	}
-	systemPrompt, systemPromptSections := systemprompt.Compose(childSegments)
-	// A child has no /skills mount, so its catalog state is deliberately empty
-	// rather than "disabled": there is no catalog decision to record.
-	if freezeErr := e.runs.FreezeSystemPromptComposition(ctx, run.ID, store.PromptCompositionInput{
-		Prompt: systemPrompt, Sections: systemPromptSections,
-	}); freezeErr != nil {
-		return domain.RunOutput{}, fmt.Errorf("freeze prompt composition: %w", freezeErr)
+	//
+	// A resumed child keeps the prompt its checkpoint already carries. Recomposing
+	// it would be wasted work, and re-freezing it would fail closed whenever the
+	// Role or a project file changed while the child waited for approval — which
+	// is exactly what freezing is supposed to prevent, not to trip over.
+	var systemPrompt string
+	if frozen != nil {
+		systemPrompt = frozen.State.SystemPrompt
+	} else {
+		taskSkillIDs, taskSkillsErr := e.delegationRepo().TaskSkillsForChildRun(ctx, run.ID)
+		if taskSkillsErr != nil {
+			return domain.RunOutput{}, fmt.Errorf("load child task skills: %w", taskSkillsErr)
+		}
+		childSegments, childSegmentsErr := e.delegatedChildSegments(resolved.Effective.Role,
+			resolved.SystemPrompt.AgentPrompt, taskSkillIDs, fmt.Sprintf("task:%s", run.ID))
+		if childSegmentsErr != nil {
+			return domain.RunOutput{}, childSegmentsErr
+		}
+		var systemPromptSections []domain.PromptSection
+		systemPrompt, systemPromptSections = systemprompt.Compose(childSegments)
+		// A child has no /skills mount, so its catalog state is deliberately empty
+		// rather than "disabled": there is no catalog decision to record.
+		if freezeErr := e.runs.FreezeSystemPromptComposition(ctx, run.ID, store.PromptCompositionInput{
+			Prompt: systemPrompt, Sections: systemPromptSections,
+		}); freezeErr != nil {
+			return domain.RunOutput{}, fmt.Errorf("freeze prompt composition: %w", freezeErr)
+		}
 	}
 	// task_only context: the frozen assignment is the only history, except for
 	// continuation children, which replay the exact source attempt's private
@@ -1036,6 +1033,7 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 		InitialRuntime: resolved.Effective.InitialRuntime, Routing: resolved.Effective.Routing,
 		VisionPolicy: resolved.Effective.VisionPolicy, ThinkingEffort: resolved.Effective.ThinkingEffort,
 		SystemPrompt: systemPrompt, History: chatHistory,
+		Resume: resumeState, Approval: approvalResolution,
 	})
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorDelegationBudgetExceeded,
@@ -1056,6 +1054,14 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 			return domain.RunOutput{Suspended: true}, nil
 		}
 		return domain.RunOutput{}, runErr
+	}
+	// The approved batch is done with, so its checkpoint must stop being claimable.
+	// Without this a resumed child leaves the checkpoint claimed forever, and a
+	// later retry would find a checkpoint that no approval can resolve.
+	if e.approvals != nil {
+		if err := e.approvals.CompleteExecuting(context.WithoutCancel(ctx), run.ID); err != nil {
+			return domain.RunOutput{}, domain.NewCodedError(domain.ErrorEventPersistence, err)
+		}
 	}
 	if loop.SubmitResultGate.Result == nil {
 		// The model stopped without calling submit_result: the terminal contract
