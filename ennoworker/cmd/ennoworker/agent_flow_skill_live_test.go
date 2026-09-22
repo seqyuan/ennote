@@ -60,7 +60,7 @@ Your submit_result summary MUST begin with the exact token LIVE_SKILL_MARKER fol
 		Icon: "bot", Color: "neutral",
 		Model:             rolesource.ModelBinding{Ref: stack.ModelID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
 		Skills:            []rolesource.SkillBinding{{ID: "live-marker", Mode: domain.RoleSkillPreload}},
-		Authority:         domain.RoleAuthorityReadOnly,
+		Authority:         rolesource.AuthorityReadOnly,
 		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read", "ls", "grep", "find"},
 		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextTask,
 			AllowedModes: []domain.RoleContextMode{domain.RoleContextTask}, OwnExecutionContinuity: domain.RoleContinuityNone},

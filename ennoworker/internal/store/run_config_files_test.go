@@ -95,7 +95,7 @@ func TestFileRoleRevisionInvocationFreezesPublishedDefinition(t *testing.T) {
 		SchemaVersion: 1, Handle: "reviewer", Name: "Reviewer", Description: "Reviews output",
 		Positioning: "Independent", Icon: "bot", Color: "neutral",
 		Model:  rolesource.ModelBinding{Ref: model.ID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills: []rolesource.SkillBinding{}, Authority: domain.RoleAuthorityReadOnly,
+		Skills: []rolesource.SkillBinding{}, Authority: rolesource.AuthorityReadOnly,
 		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read", "grep"},
 		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextRoom,
 			AllowedModes: []domain.RoleContextMode{domain.RoleContextRoom}, OwnExecutionContinuity: domain.RoleContinuityNone},

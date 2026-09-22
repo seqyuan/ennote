@@ -63,7 +63,7 @@ func (d *RoleDiscovery) resolveDefinition(ctx context.Context, document *rolesou
 			ThinkingEffort: document.Model.ThinkingEffort, FallbackModelProfileIDs: fallbackIDs,
 			OverridableFields: []string{},
 		},
-		Skills: domain.RoleSkills{Entries: skills}, Authority: document.Authority,
+		Skills: domain.RoleSkills{Entries: skills}, Authority: document.Authority.Domain(),
 		PermissionCeiling: document.PermissionCeiling, AllowedTools: append([]string(nil), document.AllowedTools...),
 		ContextPolicy: domain.RoleContextPolicy{
 			DefaultMode: document.Context.DefaultMode, AllowedModes: append([]domain.RoleContextMode(nil), document.Context.AllowedModes...),

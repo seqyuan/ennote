@@ -121,6 +121,28 @@ func TestParseRejectsInvalidRoleMarkdown(t *testing.T) {
 	}
 }
 
+func TestParseNormalizesRoleAuthority(t *testing.T) {
+	readOnly, err := rolesource.Parse([]byte(validRoleMarkdown))
+	require.NoError(t, err)
+	assert.Equal(t, rolesource.AuthorityReadOnly, readOnly.Authority)
+	assert.Equal(t, domain.RoleAuthorityReadOnly, readOnly.Authority.Domain())
+
+	writeWorkspace, err := rolesource.Parse([]byte(strings.Replace(validRoleMarkdown, "authority: read_only", "authority: write_workspace", 1)))
+	require.NoError(t, err)
+	assert.Equal(t, rolesource.AuthorityWriteWorkspace, writeWorkspace.Authority)
+	assert.Equal(t, domain.RoleAuthorityMutation, writeWorkspace.Authority.Domain())
+
+	// The internal vocabulary must never be accepted in a portable Role file.
+	_, err = rolesource.Parse([]byte(strings.Replace(validRoleMarkdown, "authority: read_only", "authority: mutation", 1)))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "authority")
+
+	// An omitted authority fails closed to read_only.
+	omitted, err := rolesource.Parse([]byte(strings.Replace(validRoleMarkdown, "authority: read_only\n", "", 1)))
+	require.NoError(t, err)
+	assert.Equal(t, rolesource.AuthorityReadOnly, omitted.Authority)
+}
+
 func TestParseRejectsOversizedRoleFile(t *testing.T) {
 	_, err := rolesource.Parse([]byte("---\n" + strings.Repeat("x", 128*1024) + "\n---\nprompt"))
 	require.Error(t, err)

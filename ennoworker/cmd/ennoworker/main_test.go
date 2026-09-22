@@ -72,7 +72,7 @@ func TestDelegationAdmissionPolicyPromotesRoleApprovalAndHonorsKillSwitch(t *tes
 		SchemaVersion: 1, Handle: "approval-role", Name: "Approval",
 		Description: "Requires delegation approval.", Positioning: "Independent", Icon: "bot", Color: "neutral",
 		Model:  rolesource.ModelBinding{Ref: modelID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills: []rolesource.SkillBinding{}, Authority: domain.RoleAuthorityReadOnly,
+		Skills: []rolesource.SkillBinding{}, Authority: rolesource.AuthorityReadOnly,
 		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read", "grep"},
 		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextRoom,
 			AllowedModes: []domain.RoleContextMode{domain.RoleContextRoom}, OwnExecutionContinuity: domain.RoleContinuityNone},

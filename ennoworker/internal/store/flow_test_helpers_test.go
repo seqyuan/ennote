@@ -42,7 +42,7 @@ func setupFlowFixture(t *testing.T) (*sql.DB, *store.AgentFlowRunRepo, string, s
 		Description: "Flow task worker", Positioning: "Executes one task in a flow.",
 		Icon: "bot", Color: "neutral",
 		Model:  rolesource.ModelBinding{Ref: model.ID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills: []rolesource.SkillBinding{}, Authority: domain.RoleAuthorityReadOnly,
+		Skills: []rolesource.SkillBinding{}, Authority: rolesource.AuthorityReadOnly,
 		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read", "grep"},
 		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextRoom,
 			AllowedModes: []domain.RoleContextMode{domain.RoleContextRoom}, OwnExecutionContinuity: domain.RoleContinuityNone},

@@ -26,7 +26,7 @@ func setupPublishedRoleInvocation(t *testing.T) (*store.RunRepo, *sql.DB, domain
 		Description: "Inspect trust boundaries.", Positioning: "Inspect trust boundaries.",
 		Icon: "shield-check", Color: "red",
 		Model:  rolesource.ModelBinding{Ref: stack.DefaultRef, ThinkingEffort: domain.ThinkingMedium, Fallbacks: []string{}},
-		Skills: []rolesource.SkillBinding{}, Authority: domain.RoleAuthorityReadOnly,
+		Skills: []rolesource.SkillBinding{}, Authority: rolesource.AuthorityReadOnly,
 		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read", "grep"},
 		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextRoom,
 			AllowedModes:           []domain.RoleContextMode{domain.RoleContextRoom, domain.RoleContextReply, domain.RoleContextFresh},

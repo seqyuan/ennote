@@ -25,6 +25,27 @@ type ModelBinding struct {
 	Fallbacks      []string              `json:"fallbacks" yaml:"fallbacks"`
 }
 
+// Authority is the Role source-level write authority. It is deliberately not
+// domain.RoleAuthority: portable Role files and the Worker API spell the
+// mutation authority "write_workspace", while the frozen RoleDefinition uses
+// "mutation". normalizeAndValidate canonicalizes this value and Domain maps it
+// onto the internal vocabulary.
+type Authority string
+
+const (
+	AuthorityReadOnly       Authority = "read_only"
+	AuthorityWriteWorkspace Authority = "write_workspace"
+)
+
+// Domain maps the source authority onto the internal Role authority. Only the
+// values accepted by normalizeAndValidate reach this method.
+func (a Authority) Domain() domain.RoleAuthority {
+	if a == AuthorityWriteWorkspace {
+		return domain.RoleAuthorityMutation
+	}
+	return domain.RoleAuthorityReadOnly
+}
+
 type SkillBinding struct {
 	ID   string               `json:"id" yaml:"id"`
 	Mode domain.RoleSkillMode `json:"mode" yaml:"mode"`
@@ -64,7 +85,7 @@ type Document struct {
 	Color             string                `json:"color" yaml:"color"`
 	Model             ModelBinding          `json:"model" yaml:"model"`
 	Skills            []SkillBinding        `json:"skills" yaml:"skills"`
-	Authority         domain.RoleAuthority  `json:"authority" yaml:"authority"`
+	Authority         Authority             `json:"authority" yaml:"authority"`
 	PermissionCeiling domain.PermissionMode `json:"permissionCeiling" yaml:"permissionCeiling"`
 	AllowedTools      []string              `json:"allowedTools" yaml:"allowedTools"`
 	Context           ContextPolicy         `json:"context" yaml:"context"`
@@ -182,6 +203,15 @@ func normalizeAndValidate(document *Document) error {
 	}
 	if document.Color == "" {
 		document.Color = "neutral"
+	}
+	// Authority is required by the portable Role contract; an omitted value
+	// fails closed to read_only so a legacy file can never grant mutation.
+	switch document.Authority {
+	case "":
+		document.Authority = AuthorityReadOnly
+	case AuthorityReadOnly, AuthorityWriteWorkspace:
+	default:
+		return fmt.Errorf("unsupported Role authority %q", document.Authority)
 	}
 	if err := validateModelRef(document.Model.Ref); err != nil {
 		return fmt.Errorf("model.ref: %w", err)

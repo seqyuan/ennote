@@ -43,7 +43,7 @@ func TestLiveAgentFlowParallelConvergence(t *testing.T) {
 		Description: "Read-only workspace inspector.", Positioning: "Independent",
 		Icon: "bot", Color: "neutral",
 		Model:  rolesource.ModelBinding{Ref: stack.ModelID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills: []rolesource.SkillBinding{}, Authority: domain.RoleAuthorityReadOnly,
+		Skills: []rolesource.SkillBinding{}, Authority: rolesource.AuthorityReadOnly,
 		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read", "ls", "grep", "find"},
 		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextTask,
 			AllowedModes: []domain.RoleContextMode{domain.RoleContextTask}, OwnExecutionContinuity: domain.RoleContinuityNone},

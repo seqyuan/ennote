@@ -107,7 +107,7 @@ func TestLiveAgentFlowChildCallsMCP(t *testing.T) {
 		Description: "Calls the bound MCP echo tool.", Positioning: "Independent",
 		Icon: "bot", Color: "neutral",
 		Model:  rolesource.ModelBinding{Ref: stack.ModelID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills: []rolesource.SkillBinding{}, Authority: domain.RoleAuthorityReadOnly,
+		Skills: []rolesource.SkillBinding{}, Authority: rolesource.AuthorityReadOnly,
 		PermissionCeiling: domain.PermissionAuto, AllowedTools: []string{"test__echo"},
 		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextTask,
 			AllowedModes: []domain.RoleContextMode{domain.RoleContextTask}, OwnExecutionContinuity: domain.RoleContinuityNone},

@@ -65,7 +65,7 @@ func TestBackgroundMutationRoleDeniedAtomically(t *testing.T) {
 		SchemaVersion: 1, Handle: "mutator", Name: "Mutator", Description: "mutates",
 		Positioning: "Mutates files.", Icon: "bot", Color: "neutral",
 		Model:  rolesource.ModelBinding{Ref: modelID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills: []rolesource.SkillBinding{}, Authority: domain.RoleAuthorityMutation,
+		Skills: []rolesource.SkillBinding{}, Authority: rolesource.AuthorityWriteWorkspace,
 		PermissionCeiling: domain.PermissionAsk, AllowedTools: []string{"write"},
 		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextTask,
 			AllowedModes: []domain.RoleContextMode{domain.RoleContextTask}, OwnExecutionContinuity: domain.RoleContinuityNone},

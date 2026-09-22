@@ -42,12 +42,12 @@ func setupParallelFixture(t *testing.T) (db *sql.DB, projectID string, readerVer
 	})
 	require.NoError(t, err)
 
-	newRole := func(handle, authority string, tools []string) string {
+	newRole := func(handle string, authority rolesource.Authority, tools []string) string {
 		document := &rolesource.Document{
 			SchemaVersion: 1, Handle: handle, Name: handle, Description: handle,
 			Positioning: handle, Icon: "bot", Color: "neutral",
 			Model:  rolesource.ModelBinding{Ref: model.ID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-			Skills: []rolesource.SkillBinding{}, Authority: domain.RoleAuthority(authority),
+			Skills: []rolesource.SkillBinding{}, Authority: authority,
 			PermissionCeiling: domain.PermissionDiscuss,
 			AllowedTools:      tools,
 			Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextRoom,
@@ -59,7 +59,7 @@ func setupParallelFixture(t *testing.T) (db *sql.DB, projectID string, readerVer
 					MaxTotalTokens: 200000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 1_800_000}},
 			OutputContract: "text-v1", MaxLoopIterations: 8, Prompt: "Execute one task.",
 		}
-		if authority == string(domain.RoleAuthorityMutation) {
+		if authority == rolesource.AuthorityWriteWorkspace {
 			document.PermissionCeiling = domain.PermissionAuto
 		}
 		_, _, err := stack.Sources.CreateRole(document)
@@ -68,8 +68,8 @@ func setupParallelFixture(t *testing.T) (db *sql.DB, projectID string, readerVer
 		require.NoError(t, err)
 		return handle + "@v000001"
 	}
-	readerID := newRole("par-reader", string(domain.RoleAuthorityReadOnly), []string{"read", "grep"})
-	writerID := newRole("par-writer", string(domain.RoleAuthorityMutation), []string{"read", "grep", "write"})
+	readerID := newRole("par-reader", rolesource.AuthorityReadOnly, []string{"read", "grep"})
+	writerID := newRole("par-writer", rolesource.AuthorityWriteWorkspace, []string{"read", "grep", "write"})
 	testFlowSources, testFlowModels = stack.Sources, stack.ModelRepo
 	return db, project.ID, readerID, writerID
 }
