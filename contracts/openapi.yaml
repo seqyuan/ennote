@@ -710,7 +710,7 @@ paths:
       parameters:
         - name: kind
           in: query
-          schema: { type: string, enum: [tool, turn, vision, compaction] }
+          schema: { type: string, enum: [tool, turn, vision, compaction, delegation] }
       responses:
         "200":
           description: Versioned policy profiles
@@ -1811,20 +1811,7 @@ paths:
                   minItems: 1
                   items: { $ref: "#/components/schemas/TurnContentPart" }
                 baseMessageId: { type: string }
-                config:
-                  type: object
-                  additionalProperties: false
-                  properties:
-                    modelProfileId: { type: string }
-                    candidateModelProfileIds: { type: array, items: { type: string } }
-                    allowAutoRoute: { type: boolean }
-                    toolPolicyProfileId: { type: string }
-                    turnPolicyProfileId: { type: string }
-                    visionPolicyProfileId: { type: string }
-                    compactionPolicyProfileId: { type: string }
-                    maxIterations: { type: integer, minimum: 1 }
-                    toolExecution: { type: string, enum: [sequential, safe_parallel] }
-                    maxConcurrentReadTools: { type: integer, minimum: 1 }
+                config: { $ref: "#/components/schemas/RunConfigOverride" }
       responses:
         "202":
           description: Turn accepted
@@ -1876,7 +1863,7 @@ paths:
                   items: { $ref: "#/components/schemas/TurnContentPart" }
                 baseMessageId: { type: string }
                 target: { $ref: "#/components/schemas/InvocationTarget" }
-                config: { type: object, additionalProperties: true }
+                config: { $ref: "#/components/schemas/RunConfigOverride" }
       responses:
         "202":
           description: Invocation accepted
@@ -3224,6 +3211,22 @@ components:
     ThinkingEffort:
       type: string
       enum: [default, low, medium, high]
+    RunConfigOverride:
+      description: Per-Run override of the frozen configuration; every field mirrors the Worker's requested-config contract.
+      type: object
+      additionalProperties: false
+      properties:
+        modelProfileId: { type: string }
+        candidateModelProfileIds: { type: array, items: { type: string } }
+        allowAutoRoute: { type: boolean }
+        toolPolicyProfileId: { type: string }
+        turnPolicyProfileId: { type: string }
+        visionPolicyProfileId: { type: string }
+        compactionPolicyProfileId: { type: string }
+        maxIterations: { type: integer, minimum: 1 }
+        toolExecution: { type: string, enum: [sequential, safe_parallel] }
+        maxConcurrentReadTools: { type: integer, minimum: 1 }
+        thinkingEffort: { $ref: "#/components/schemas/ThinkingEffort" }
     ThinkingDialect:
       type: string
       enum: [none, openai_reasoning_effort]
@@ -3257,7 +3260,10 @@ components:
       properties:
         id: { type: string }
         name: { type: string }
-        kind: { type: string, enum: [tool, turn, vision, compaction] }
+        kind:
+          description: Policy kind. "delegation" profiles are Worker builtins and cannot be created through this API.
+          type: string
+          enum: [tool, turn, vision, compaction, delegation]
         version: { type: integer }
         config: { type: object, additionalProperties: true }
         status: { type: string, enum: [active, inactive] }

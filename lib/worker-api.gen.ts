@@ -2063,6 +2063,21 @@ export interface components {
         };
         /** @enum {string} */
         ThinkingEffort: "default" | "low" | "medium" | "high";
+        /** @description Per-Run override of the frozen configuration; every field mirrors the Worker's requested-config contract. */
+        RunConfigOverride: {
+            modelProfileId?: string;
+            candidateModelProfileIds?: string[];
+            allowAutoRoute?: boolean;
+            toolPolicyProfileId?: string;
+            turnPolicyProfileId?: string;
+            visionPolicyProfileId?: string;
+            compactionPolicyProfileId?: string;
+            maxIterations?: number;
+            /** @enum {string} */
+            toolExecution?: "sequential" | "safe_parallel";
+            maxConcurrentReadTools?: number;
+            thinkingEffort?: components["schemas"]["ThinkingEffort"];
+        };
         /** @enum {string} */
         ThinkingDialect: "none" | "openai_reasoning_effort";
         ModelProfile: {
@@ -2089,8 +2104,11 @@ export interface components {
         PolicyProfile: {
             id: string;
             name: string;
-            /** @enum {string} */
-            kind: "tool" | "turn" | "vision" | "compaction";
+            /**
+             * @description Policy kind. "delegation" profiles are Worker builtins and cannot be created through this API.
+             * @enum {string}
+             */
+            kind: "tool" | "turn" | "vision" | "compaction" | "delegation";
             version: number;
             config: {
                 [key: string]: unknown;
@@ -4356,7 +4374,7 @@ export interface operations {
     listPolicyProfiles: {
         parameters: {
             query?: {
-                kind?: "tool" | "turn" | "vision" | "compaction";
+                kind?: "tool" | "turn" | "vision" | "compaction" | "delegation";
             };
             header?: never;
             path?: never;
@@ -5742,19 +5760,7 @@ export interface operations {
                     text?: string;
                     content?: components["schemas"]["TurnContentPart"][];
                     baseMessageId?: string;
-                    config?: {
-                        modelProfileId?: string;
-                        candidateModelProfileIds?: string[];
-                        allowAutoRoute?: boolean;
-                        toolPolicyProfileId?: string;
-                        turnPolicyProfileId?: string;
-                        visionPolicyProfileId?: string;
-                        compactionPolicyProfileId?: string;
-                        maxIterations?: number;
-                        /** @enum {string} */
-                        toolExecution?: "sequential" | "safe_parallel";
-                        maxConcurrentReadTools?: number;
-                    };
+                    config?: components["schemas"]["RunConfigOverride"];
                 } | unknown | unknown;
             };
         };
@@ -5802,9 +5808,7 @@ export interface operations {
                     content?: components["schemas"]["TurnContentPart"][];
                     baseMessageId?: string;
                     target: components["schemas"]["InvocationTarget"];
-                    config?: {
-                        [key: string]: unknown;
-                    };
+                    config?: components["schemas"]["RunConfigOverride"];
                 } | unknown | unknown;
             };
         };
