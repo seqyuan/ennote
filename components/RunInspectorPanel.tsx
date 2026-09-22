@@ -14,10 +14,12 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight, FileClock } from "lucide-react";
 import { useT } from "@/components/LocaleProvider";
 import { formatBytes, shortDigest } from "@/lib/run-inspection";
+import type { RunMCPFrozen } from "@/hooks/useRunMCP";
 import type { RunPromptComposition } from "@/hooks/useRunPromptComposition";
 import type { components } from "@/lib/worker-api.gen";
 
 type PromptSection = components["schemas"]["PromptSection"];
+type RunMCPServerSnapshot = components["schemas"]["RunMCPServerSnapshot"];
 
 const KIND_LABELS: Record<string, string> = {
   base: "Platform",
@@ -40,9 +42,11 @@ const DIGEST: React.CSSProperties = {
 };
 
 /** Presentational body: pure props, so its states are directly testable. */
-export function RunInspectorBody({ runId, composition, loading, error, t }: {
+export function RunInspectorBody({ runId, composition, mcp, loading, error, t }: {
   runId: string | null;
   composition: RunPromptComposition | null;
+  /** Absent on the composition-only call sites; the MCP block then renders nothing. */
+  mcp?: RunMCPFrozen | null;
   loading: boolean;
   error: string | null;
   t: (key: string) => string;
@@ -93,6 +97,15 @@ export function RunInspectorBody({ runId, composition, loading, error, t }: {
         </span>}
       </div>}
     </div>
+
+    {recorded && mcp !== undefined && <div>
+      <div style={HEADING}>{t("inspector.mcp")}</div>
+      {mcp === null || (mcp.servers ?? []).length === 0
+        ? <div style={MUTED}>{t("inspector.mcpNone")}</div>
+        : <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {(mcp.servers ?? []).map((server) => <MCPServerRow key={server.id} server={server} t={t} />)}
+        </div>}
+    </div>}
 
     {recorded && <div>
       <button
@@ -147,6 +160,40 @@ function SectionRow({ section }: { section: PromptSection }) {
   </div>;
 }
 
+function MCPServerRow({ server, t }: { server: RunMCPServerSnapshot; t: (key: string) => string }) {
+  const unavailable = server.unavailableReason !== "";
+  return <div
+    data-mcp-server={server.bindingId}
+    style={{
+      padding: "5px 8px", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11,
+      borderColor: unavailable ? "var(--warn-border, var(--border))" : "var(--border)",
+    }}
+  >
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <span style={{ color: "var(--text)" }}>{server.bindingId}</span>
+        <span style={{ color: "var(--text-dim)" }}>{` · rev ${server.bindingRevision}`}</span>
+      </span>
+      {server.required && <span style={{
+        flexShrink: 0, fontSize: 9.5, fontWeight: 600, padding: "1px 5px", borderRadius: 4,
+        border: "1px solid var(--border)", color: "var(--text-dim)",
+      }}>{t("inspector.mcpRequired")}</span>}
+      <span style={{ flexShrink: 0, color: "var(--text-dim)" }}>
+        {t("inspector.mcpTools").replace("{count}", String((server.tools ?? []).length))}
+      </span>
+    </div>
+    {unavailable && <div style={{ marginTop: 3, color: "var(--text-dim)", fontSize: 10.5 }}>
+      {`${t("inspector.mcpUnavailable")}: ${server.unavailableReason}`}
+    </div>}
+    {(server.tools ?? []).length > 0 && <div style={{ marginTop: 3, display: "flex", flexDirection: "column", gap: 1 }}>
+      {(server.tools ?? []).map((tool) => <div key={tool.exposedName} style={{ display: "flex", gap: 8, fontSize: 10.5 }}>
+        <span style={{ ...DIGEST, flex: 1, minWidth: 0 }} title={tool.exposedName}>{tool.exposedName}</span>
+        <span style={{ flexShrink: 0, color: "var(--text-dim)" }}>{tool.riskClass}</span>
+      </div>)}
+    </div>}
+  </div>;
+}
+
 function DigestLine({ label, value }: { label: string; value: string }) {
   if (!value) return null;
   return <div style={{ display: "flex", gap: 8, fontSize: 10.5 }}>
@@ -155,12 +202,14 @@ function DigestLine({ label, value }: { label: string; value: string }) {
   </div>;
 }
 
-export function RunInspectorPanel({ runId, composition, loading, error }: {
+export function RunInspectorPanel({ runId, composition, mcp, loading, error }: {
   runId: string | null;
   composition: RunPromptComposition | null;
+  mcp: RunMCPFrozen | null;
   loading: boolean;
   error: string | null;
 }) {
   const t = useT();
-  return <RunInspectorBody runId={runId} composition={composition} loading={loading} error={error} t={t} />;
+  return <RunInspectorBody
+    runId={runId} composition={composition} mcp={mcp} loading={loading} error={error} t={t} />;
 }

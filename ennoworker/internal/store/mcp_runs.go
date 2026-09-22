@@ -461,3 +461,40 @@ func DigestCatalog(tools []domain.MCPCatalogEntry) string {
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
+
+// RunMCPServerWithTools is one frozen Run server together with the tools it
+// contributed. Tools are nested because they belong to the server: a reader
+// asking "did this Run reach the server I configured" needs the server's
+// identity and its outcome first, and its tools second.
+type RunMCPServerWithTools struct {
+	Server *RunMCPServerSnapshot
+	Tools  []RunMCPToolSnapshot
+}
+
+// RunMCPFrozen is one Run's frozen MCP surface.
+type RunMCPFrozen struct {
+	RunID   string
+	Servers []RunMCPServerWithTools
+}
+
+// LoadRunMCP reads the MCP servers and tools a Run froze before its first
+// Provider request, with each server's tools nested.
+//
+// The frozen rows carry no foreign key to agent_runs, so this returns an empty
+// surface for an unknown Run: a caller that must distinguish "no servers" from
+// "no such Run" has to resolve the Run itself.
+func (r *MCPRunRepo) LoadRunMCP(ctx context.Context, runID string) (RunMCPFrozen, error) {
+	frozen := RunMCPFrozen{RunID: runID, Servers: []RunMCPServerWithTools{}}
+	servers, err := r.ListFrozenServers(ctx, runID)
+	if err != nil {
+		return RunMCPFrozen{}, err
+	}
+	for _, server := range servers {
+		tools, err := r.ListFrozenTools(ctx, server.ID)
+		if err != nil {
+			return RunMCPFrozen{}, err
+		}
+		frozen.Servers = append(frozen.Servers, RunMCPServerWithTools{Server: server, Tools: tools})
+	}
+	return frozen, nil
+}

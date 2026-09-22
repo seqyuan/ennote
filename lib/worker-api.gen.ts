@@ -1293,6 +1293,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/runs/{runID}/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runID: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getRunMCP"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/runs/{runID}/children": {
         parameters: {
             query?: never;
@@ -2861,6 +2879,37 @@ export interface components {
             sectionsDigest?: string;
             /** @description Content address of the frozen composed prompt text, empty when the Run recorded none. */
             composedDigest?: string;
+        };
+        RunMCPToolSnapshot: {
+            /** @description Tool name as the server declares it. */
+            remoteName: string;
+            /** @description Name the model saw, server-scoped. */
+            exposedName: string;
+            description: string;
+            /** @enum {string} */
+            riskClass: "read_only" | "local_write" | "shell" | "external" | "delegation" | "sensitive";
+            /** @description How the server was configured: managed, project file, or bundled. */
+            sourceKind: string;
+            schemaDigest: string;
+        };
+        RunMCPServerSnapshot: {
+            id: string;
+            bindingId: string;
+            bindingRevision: number;
+            profileVersionId: string;
+            configDigest: string;
+            negotiatedProtocol: string;
+            serverIdentityDigest: string;
+            catalogDigest: string;
+            /** @description True when the Run could not proceed without this server, so an unavailable one explains a failed Run. */
+            required: boolean;
+            /** @description Empty when the server was reachable; otherwise why the frozen snapshot has no tools. */
+            unavailableReason: string;
+            tools: components["schemas"]["RunMCPToolSnapshot"][];
+        };
+        RunMCPFrozen: {
+            runId: string;
+            servers: components["schemas"]["RunMCPServerSnapshot"][];
         };
         PromptSection: {
             id: string;
@@ -6066,6 +6115,32 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Envelope"] & {
                         data?: components["schemas"]["RunPromptComposition"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            500: components["responses"]["Error"];
+        };
+    };
+    getRunMCP: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runID: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Frozen MCP servers and tools of one Run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RunMCPFrozen"];
                     };
                 };
             };

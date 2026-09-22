@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { RunInspectorBody } from "@/components/RunInspectorPanel";
+import type { RunMCPFrozen } from "@/hooks/useRunMCP";
 import type { RunPromptComposition } from "@/hooks/useRunPromptComposition";
 
 // The panel is read-only and prop-driven, so its states are pinned by rendering
@@ -29,6 +30,62 @@ function composition(overrides: Partial<RunPromptComposition> = {}): RunPromptCo
     ...overrides,
   };
 }
+
+function mcpSurface(): RunMCPFrozen {
+  return {
+    runId: "run-1",
+    servers: [
+      {
+        id: "srv-1", bindingId: "binding-a", bindingRevision: 2, profileVersionId: "profile-a@v000001",
+        configDigest: "config-a", negotiatedProtocol: "2025-06-18", serverIdentityDigest: "identity-a",
+        catalogDigest: "catalog-a", required: true, unavailableReason: "",
+        tools: [
+          { remoteName: "search", exposedName: "bio__search", description: "Search", riskClass: "external", sourceKind: "managed", schemaDigest: "d1" },
+        ],
+      },
+      {
+        id: "srv-2", bindingId: "binding-b", bindingRevision: 1, profileVersionId: "profile-b@v000001",
+        configDigest: "config-b", negotiatedProtocol: "", serverIdentityDigest: "", catalogDigest: "",
+        required: false, unavailableReason: "connection refused", tools: [],
+      },
+    ],
+  };
+}
+
+describe("RunInspectorBody MCP surface", () => {
+  it("names each frozen server with its tools and revision", () => {
+    const html = renderToStaticMarkup(<RunInspectorBody
+      runId="run-1" composition={composition()} mcp={mcpSurface()} loading={false} error={null} t={t} />);
+
+    expect(html).toContain("data-mcp-server=\"binding-a\"");
+    expect(html).toContain("bio__search");
+    expect(html).toContain("external");
+    expect(html).toContain("rev 2");
+  });
+
+  it("explains an unavailable server instead of showing it as absent", () => {
+    const html = renderToStaticMarkup(<RunInspectorBody
+      runId="run-1" composition={composition()} mcp={mcpSurface()} loading={false} error={null} t={t} />);
+
+    expect(html).toContain("data-mcp-server=\"binding-b\"");
+    expect(html).toContain("connection refused");
+    expect(html).toContain("inspector.mcpUnavailable");
+  });
+
+  it("states that no server was frozen rather than rendering an empty block", () => {
+    const html = renderToStaticMarkup(<RunInspectorBody
+      runId="run-1" composition={composition()} loading={false} error={null} t={t}
+      mcp={{ runId: "run-1", servers: [] }} />);
+
+    expect(html).toContain("inspector.mcpNone");
+  });
+
+  it("omits the MCP block entirely when the surface was not requested", () => {
+    const html = renderToStaticMarkup(
+      <RunInspectorBody runId="run-1" composition={composition()} loading={false} error={null} t={t} />);
+    expect(html).not.toContain("inspector.mcp");
+  });
+});
 
 describe("RunInspectorBody", () => {
   it("prompts for a Run when nothing is targeted", () => {

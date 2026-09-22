@@ -6,6 +6,7 @@ import { FileViewer } from "./FileViewer";
 import { GraphActivityPanel } from "./GraphActivityPanel";
 import { RunInspectorPanel } from "./RunInspectorPanel";
 import { TabBar, type Tab } from "./TabBar";
+import { useRunMCP } from "@/hooks/useRunMCP";
 import { useRunPromptComposition } from "@/hooks/useRunPromptComposition";
 import type { useResizable } from "@/hooks/useResizable";
 import type { PermissionMode } from "@/lib/permission-mode";
@@ -36,8 +37,10 @@ export function RightPanel(props: {
     selectedSession, sessionTitle, activeRun, inspectorRunId, status, permissionMode,
   } = props;
   const activeFileTab = tabs.find((t) => t.id === activeTabId);
-  // One fetch per open inspector; the hook clears itself when no Run is targeted.
-  const prompt = useRunPromptComposition(activeTabId === "tools" ? inspectorRunId : null);
+  // One fetch per open inspector; the hooks clear themselves with no target.
+  const inspectedRunId = activeTabId === "tools" ? inspectorRunId : null;
+  const prompt = useRunPromptComposition(inspectedRunId);
+  const mcp = useRunMCP(inspectedRunId);
 
   return (
     <div
@@ -80,6 +83,7 @@ export function RightPanel(props: {
             <RunInspectorPanel
               runId={inspectorRunId}
               composition={prompt.composition}
+              mcp={mcp.frozen}
               loading={prompt.loading}
               error={prompt.error}
             />

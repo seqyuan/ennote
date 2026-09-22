@@ -2027,6 +2027,24 @@ paths:
                       data: { $ref: "#/components/schemas/RunPromptComposition" }
         "404": { $ref: "#/components/responses/Error" }
         "500": { $ref: "#/components/responses/Error" }
+  /v1/runs/{runID}/mcp:
+    parameters:
+      - $ref: "#/components/parameters/RunID"
+    get:
+      operationId: getRunMCP
+      responses:
+        "200":
+          description: Frozen MCP servers and tools of one Run
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/RunMCPFrozen" }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
   /v1/runs/{runID}/children:
     parameters:
       - $ref: "#/components/parameters/RunID"
@@ -4242,6 +4260,48 @@ components:
         composedDigest:
           type: string
           description: Content address of the frozen composed prompt text, empty when the Run recorded none.
+    RunMCPToolSnapshot:
+      type: object
+      additionalProperties: false
+      required: [remoteName, exposedName, description, riskClass, sourceKind, schemaDigest]
+      properties:
+        remoteName: { type: string, description: "Tool name as the server declares it." }
+        exposedName: { type: string, description: "Name the model saw, server-scoped." }
+        description: { type: string }
+        riskClass: { type: string, enum: [read_only, local_write, shell, external, delegation, sensitive] }
+        sourceKind: { type: string, description: "How the server was configured: managed, project file, or bundled." }
+        schemaDigest: { type: string }
+    RunMCPServerSnapshot:
+      type: object
+      additionalProperties: false
+      required: [id, bindingId, bindingRevision, profileVersionId, configDigest, negotiatedProtocol, serverIdentityDigest, catalogDigest, required, unavailableReason, tools]
+      properties:
+        id: { type: string }
+        bindingId: { type: string }
+        bindingRevision: { type: integer, minimum: 0 }
+        profileVersionId: { type: string }
+        configDigest: { type: string }
+        negotiatedProtocol: { type: string }
+        serverIdentityDigest: { type: string }
+        catalogDigest: { type: string }
+        required:
+          type: boolean
+          description: "True when the Run could not proceed without this server, so an unavailable one explains a failed Run."
+        unavailableReason:
+          type: string
+          description: "Empty when the server was reachable; otherwise why the frozen snapshot has no tools."
+        tools:
+          type: array
+          items: { $ref: "#/components/schemas/RunMCPToolSnapshot" }
+    RunMCPFrozen:
+      type: object
+      additionalProperties: false
+      required: [runId, servers]
+      properties:
+        runId: { type: string }
+        servers:
+          type: array
+          items: { $ref: "#/components/schemas/RunMCPServerSnapshot" }
     PromptSection:
       type: object
       additionalProperties: false
