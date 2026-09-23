@@ -404,11 +404,16 @@ func TestMCPProjectFileMissing(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, store.MigrateFixtureSchema(db))
 	projectRepo := newFileProjects(t)
+	// The catalog cache's DB form has no schema (no migration declares
+	// mcp_catalog_cache), so point the fixture at the file form production uses:
+	// a DB-form cache always errors, which the optional path silently treats as a
+	// cache miss and would let this test pass for the wrong reason.
 	server := &Server{
 		DB: db, Token: "test-token", Projects: projectRepo,
 		MCP: &MCPServer{
 			Profiles: &store.MCPProfileRepo{DB: db}, Bindings: &store.MCPBindingRepo{DB: db},
-			Catalogs: &store.MCPCatalogRepo{DB: db}, Runs: &store.MCPRunRepo{DB: db},
+			Catalogs: &store.MCPCatalogRepo{CacheDir: filepath.Join(t.TempDir(), "mcp")},
+			Runs:     &store.MCPRunRepo{DB: db},
 		},
 	}
 	handler := server.Handler()
@@ -437,8 +442,10 @@ func TestMCPBundledCatalogAndCandidates(t *testing.T) {
 		DB: db, Token: "test-token", Projects: projectRepo,
 		MCP: &MCPServer{
 			Profiles: &store.MCPProfileRepo{DB: db}, Bindings: &store.MCPBindingRepo{DB: db},
-			Catalogs: &store.MCPCatalogRepo{DB: db}, Runs: &store.MCPRunRepo{DB: db},
-			Bundled: bundled,
+			// File form, matching production: see TestMCPProjectFileMissing.
+			Catalogs: &store.MCPCatalogRepo{CacheDir: filepath.Join(t.TempDir(), "mcp")},
+			Runs:     &store.MCPRunRepo{DB: db},
+			Bundled:  bundled,
 		},
 	}
 	handler := server.Handler()

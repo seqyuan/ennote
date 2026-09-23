@@ -180,9 +180,8 @@ func Connect(ctx context.Context, v *domain.MCPServerProfileVersion, opts Connec
 	}
 	s.session = session
 	if init := session.InitializeResult(); init != nil {
-		instructions, original := boundInstructions(init.Instructions)
 		s.handshake = ServerHandshake{ProtocolVersion: init.ProtocolVersion,
-			Instructions: instructions, InstructionBytes: original}
+			Instructions: boundInstructions(init.Instructions)}
 	}
 	// NOTE: on success we deliberately do NOT call cancel(): the SDK binds the
 	// connect context to the transport lifecycle (the SSE GET stream stays

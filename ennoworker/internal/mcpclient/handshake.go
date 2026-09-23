@@ -22,11 +22,11 @@ type ServerHandshake struct {
 	// ProtocolVersion is the revision the handshake negotiated: not what was
 	// requested, and not a default. An unavailable server never negotiated one.
 	ProtocolVersion string
-	// Instructions is the server's usage guidance, truncated to
-	// MaxInstructionBytes with an explicit marker when it was longer.
+	// Instructions is the server's usage guidance, bounded by
+	// MaxInstructionBytes. Truncated guidance says so in-band, and that marker is
+	// the only place truncation is stated: a separate byte counter would be a
+	// second, weaker copy of a fact the text already carries.
 	Instructions string
-	// InstructionBytes is the untruncated byte length of the server's guidance.
-	InstructionBytes int
 }
 
 // InstructionDigest is the digest of exactly the recorded instruction bytes, or
@@ -44,15 +44,14 @@ func (h ServerHandshake) InstructionDigest() string {
 // boundInstructions truncates guidance to the limit and appends an explicit
 // marker naming how much was dropped.
 //
-// The marker is in-band on purpose. A reader of the frozen prompt must be able to
-// tell that the text they see is not everything the server said, and the model
-// must not be led to believe it received complete guidance. The marker's own
+// The marker is in-band on purpose. A reader of the record must be able to tell
+// that the text they see is not everything the server said. The marker's own
 // bytes are not charged against the budget, so the reason is never itself
 // truncated away.
-func boundInstructions(raw string) (string, int) {
+func boundInstructions(raw string) string {
 	original := len(raw)
 	if original <= MaxInstructionBytes {
-		return raw, original
+		return raw
 	}
 	// Drop any partial trailing rune: the result may enter a prompt, where
 	// invalid UTF-8 is at best noise and at worst an encoding failure.
@@ -60,5 +59,5 @@ func boundInstructions(raw string) (string, int) {
 	for len(head) > 0 && !utf8.ValidString(head) {
 		head = head[:len(head)-1]
 	}
-	return head + fmt.Sprintf("\n[truncated: %d of %d bytes omitted]", original-len(head), original), original
+	return head + fmt.Sprintf("\n[truncated: %d of %d bytes omitted]", original-len(head), original)
 }

@@ -18,9 +18,12 @@ import (
 // server that returns a different toolset per identity cannot leak a catalog
 // across Projects or credential generations.
 //
-// CacheDir selects the file form, which is the only form in use: production
-// wires CacheDir, and no migration declares mcp_catalog_cache, so the SQL branch
-// is unreachable. Do not extend it without also giving it a schema.
+// CacheDir selects the file form, which is the only form in use: every caller —
+// production and tests — wires CacheDir. No migration declares
+// mcp_catalog_cache, so the SQL branch below always fails ("no such table"),
+// which its GetCatalog callers silently treat as a cache miss: a DB-form repo
+// performs no caching at all and says nothing about it. Give the table a schema,
+// or use the file form; do not extend the SQL branch meanwhile.
 type MCPCatalogRepo struct {
 	DB       *sql.DB
 	CacheDir string
@@ -49,10 +52,7 @@ type MCPCatalogCacheRow struct {
 	// ("latest"), while this is the revision the server actually agreed to.
 	NegotiatedProtocol string
 	Instructions       string
-	// InstructionBytes is the untruncated length, kept so a cached observation
-	// stays as complete as the live one it came from.
-	InstructionBytes int
-	FetchedAt        time.Time
+	FetchedAt          time.Time
 }
 
 // PutCatalog stores or replaces the binding-scoped catalog cache row.

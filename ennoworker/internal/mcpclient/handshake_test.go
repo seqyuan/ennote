@@ -10,20 +10,15 @@ import (
 
 func TestBoundInstructionsKeepsShortGuidanceVerbatim(t *testing.T) {
 	guidance := "Use search before fetch."
-	bounded, original := boundInstructions(guidance)
-	assert.Equal(t, guidance, bounded)
-	assert.Equal(t, len(guidance), original)
-
-	empty, size := boundInstructions("")
-	assert.Empty(t, empty)
-	assert.Equal(t, 0, size)
+	assert.Equal(t, guidance, boundInstructions(guidance))
+	assert.Empty(t, boundInstructions(""))
 }
 
 func TestBoundInstructionsKeepsExactlyTheLimit(t *testing.T) {
 	guidance := strings.Repeat("a", MaxInstructionBytes)
-	bounded, original := boundInstructions(guidance)
+	bounded := boundInstructions(guidance)
 	assert.Equal(t, guidance, bounded)
-	assert.Equal(t, MaxInstructionBytes, original)
+	assert.Equal(t, MaxInstructionBytes, len(bounded))
 	assert.NotContains(t, bounded, "truncated")
 }
 
@@ -31,10 +26,9 @@ func TestBoundInstructionsKeepsExactlyTheLimit(t *testing.T) {
 // tell that the text is not everything the server said.
 func TestBoundInstructionsTruncatesWithAnExplicitMarker(t *testing.T) {
 	guidance := strings.Repeat("a", MaxInstructionBytes) + strings.Repeat("b", 100)
-	bounded, original := boundInstructions(guidance)
+	bounded := boundInstructions(guidance)
 
-	assert.Equal(t, len(guidance), original)
-	assert.Less(t, len(bounded), original, "the recorded guidance must be smaller than what was sent")
+	assert.Less(t, len(bounded), len(guidance), "the recorded guidance must be smaller than what was sent")
 	assert.True(t, strings.HasPrefix(bounded, strings.Repeat("a", MaxInstructionBytes)))
 	assert.Contains(t, bounded, "100 of")
 	assert.Contains(t, bounded, "bytes omitted")
@@ -46,9 +40,9 @@ func TestBoundInstructionsTruncatesWithAnExplicitMarker(t *testing.T) {
 func TestBoundInstructionsNeverSplitsARune(t *testing.T) {
 	// Each rune is 3 bytes, so the limit lands mid-rune.
 	guidance := strings.Repeat("生", MaxInstructionBytes) + "bi"
-	bounded, original := boundInstructions(guidance)
+	bounded := boundInstructions(guidance)
 
-	assert.Equal(t, len(guidance), original)
+	assert.Less(t, len(bounded), len(guidance))
 	assert.True(t, utf8.ValidString(bounded), "truncated guidance must stay valid UTF-8")
 	assert.Contains(t, bounded, "bytes omitted")
 }

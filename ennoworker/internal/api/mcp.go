@@ -480,7 +480,6 @@ func (m *MCPServer) mcpDiscover(ctx context.Context, binding *domain.MCPProjectB
 		// this handshake, cached so a later Run can freeze them without dialing.
 		NegotiatedProtocol: handshake.ProtocolVersion,
 		Instructions:       handshake.Instructions,
-		InstructionBytes:   handshake.InstructionBytes,
 	})
 	if err != nil {
 		return MCPDiscovery{}, err
@@ -596,9 +595,8 @@ func (m *MCPServer) FreezeRun(ctx context.Context, runID, projectID string) ([]F
 				// freezing from cache does not downgrade the record.
 				entries = cached.Tools
 				handshake = mcpclient.ServerHandshake{
-					ProtocolVersion:  cached.NegotiatedProtocol,
-					Instructions:     cached.Instructions,
-					InstructionBytes: cached.InstructionBytes,
+					ProtocolVersion: cached.NegotiatedProtocol,
+					Instructions:    cached.Instructions,
 				}
 			} else {
 				discovery, discoverErr := m.discover(ctx, binding, version)
