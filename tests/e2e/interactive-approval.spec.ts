@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
+import { openSession, tryFulfillBlankSessionCreate } from "./harness";
 import { subscribedFrame } from "./session-feed";
 
 const project = { id: "approval-project", name: "Approval project", description: "", status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" };
@@ -52,10 +52,7 @@ async function mockApprovalApp(page: Page, onDecision: (decision: string) => voi
 }
 
 async function openApproval(page: Page) {
-  await page.goto("/");
-  await selectProject(page, project.name);
-  if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.getByText(session.title, { exact: true }).click();
+  await openSession(page, { projectId: project.id, sessionId: session.id });
   await expect(page.getByRole("region", { name: "Tool approval required" })).toBeVisible();
   await expect(page.locator(".pending-tool-batch .approval-panel")).toBeVisible();
 }
@@ -69,8 +66,6 @@ test("pending approval survives reload and resolves the whole batch", async ({ p
   await expect(page.getByRole("button", { name: /Permission mode: Ask/ })).toBeDisabled();
 
   await page.reload();
-  await selectProject(page, project.name);
-  await page.getByText(session.title, { exact: true }).click();
   await expect(page.getByRole("button", { name: "Approve batch" })).toBeVisible();
   await page.getByRole("button", { name: "Approve batch" }).click();
   await expect.poll(() => decision).toBe("approved");

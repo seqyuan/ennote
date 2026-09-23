@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
+import { openSession, tryFulfillBlankSessionCreate } from "./harness";
 import { subscribedFrame } from "./session-feed";
 
 const project = { id: "ms-project", name: "Multi-session workspace", description: "", status: "active",
@@ -58,8 +58,10 @@ test("two sessions keep independent resident stores when switching between them"
     return route.abort();
   });
 
-  await page.goto("/");
-  await selectProject(page, project.name);
+  // Seed the initial session rather than clicking for it: opening A is setup here,
+  // and clicking races the startup blank-session connect. The switches below are
+  // the behaviour under test and keep using selectSession.
+  await openSession(page, { projectId: project.id, sessionId: sessionA.id });
 
   // Open A: its message and active run are visible.
   await selectSession(page, sessionA.title);
@@ -122,8 +124,7 @@ test("an off-screen session converges to a later snapshot and refreshed history 
     return route.abort();
   });
 
-  await page.goto("/");
-  await selectProject(page, project.name);
+  await openSession(page, { projectId: project.id, sessionId: sessionA.id });
 
   await selectSession(page, sessionA.title);
   await expect(page.getByText("Alpha running", { exact: true })).toBeVisible();
