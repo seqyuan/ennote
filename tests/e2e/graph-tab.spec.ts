@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
+import { openSession, tryFulfillBlankSessionCreate } from "./harness";
 
 const now = "2026-08-07T00:00:00Z";
 const later = "2026-08-07T00:10:00Z";
@@ -47,9 +47,7 @@ async function mockGraphTab(page: Page) {
 
 async function openGraphTab(page: Page) {
   await mockGraphTab(page);
-  await page.goto("/");
-  await selectProject(page, project.name);
-  await page.getByRole("button", { name: session.title, exact: true }).click();
+  await openSession(page, { projectId: project.id, sessionId: session.id });
   await page.getByTitle("Show panel").click();
   await page.getByRole("tab", { name: "Graphs" }).click();
 }

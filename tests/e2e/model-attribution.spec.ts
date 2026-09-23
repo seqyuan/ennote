@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
+import { openSession, tryFulfillBlankSessionCreate } from "./harness";
 import { subscribedFrame } from "./session-feed";
 
 const now = "2026-07-28T00:00:00Z";
@@ -53,9 +53,7 @@ async function fulfill(route: Route, data: unknown) {
 
 test("host assistant replies attribute the resolved model name next to the speaker", async ({ page }) => {
   await mock(page);
-  await page.goto("/");
-  await selectProject(page, project.name);
-  await page.getByText(session.title, { exact: true }).click();
+  await openSession(page, { projectId: project.id, sessionId: session.id });
 
   await expect(page.getByText("the reply", { exact: true })).toBeVisible();
   const speaker = page.locator(".assistant-speaker");
@@ -94,9 +92,7 @@ test("streaming host replies attribute the model name in real time", async ({ pa
     return route.abort();
   });
 
-  await page.goto("/");
-  await selectProject(page, project.name);
-  await page.getByText(session.title, { exact: true }).click();
+  await openSession(page, { projectId: project.id, sessionId: session.id });
 
   await expect(page.getByText("streaming reply", { exact: true })).toBeVisible();
   const speaker = page.locator(".assistant-speaker");

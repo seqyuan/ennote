@@ -62,6 +62,35 @@ export async function openNavigationIfNeeded(page: Page) {
 }
 
 /**
+ * Open a Session through the app's own restore path, and wait for it to load.
+ *
+ * Selecting a project starts the connect hook on an async reuse-or-create-blank
+ * flow, and that flow's selection can land after a spec's own sidebar click and
+ * overwrite it. The spec then asserts against a blank session — which shows as
+ * "No session" and times out, intermittently and worse under parallel load.
+ * Seeding the stored project and session makes the hook restore them on its first
+ * ready tick instead, so there is nothing to race. It is also the path a
+ * returning user takes, so the coverage stays honest.
+ *
+ * Use this where opening a session is setup. A spec that tests opening a session
+ * itself (session-history) must keep clicking the row.
+ */
+export async function openSession(
+  page: Page,
+  input: { projectId: string; sessionId: string },
+): Promise<void> {
+  await page.addInitScript(([projectId, sessionId]) => {
+    try {
+      window.localStorage.setItem("ennote-selected-project", projectId);
+      window.localStorage.setItem("ennote-selected-session", sessionId);
+    } catch {
+      /* storage unavailable */
+    }
+  }, [input.projectId, input.sessionId]);
+  await page.goto("/");
+}
+
+/**
  * Pick a project in the sidebar. After blank-session startup the trigger's
  * title is the selected project name, not "Select project". Always click the
  * menu item (even when already selected) so mobile still closes the drawer.

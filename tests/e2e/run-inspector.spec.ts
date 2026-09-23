@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { tryFulfillBlankSessionCreate } from "./harness";
+import { openSession, tryFulfillBlankSessionCreate } from "./harness";
 
 const now = "2026-07-28T00:00:00Z";
 const project = { id: "inspect-project", name: "Inspect project", description: "", status: "active", createdAt: now, updatedAt: now };
@@ -103,20 +103,7 @@ async function mockInspector(page: Page, options: { recorded?: boolean } = {}) {
 
 async function openInspector(page: Page, options: { recorded?: boolean } = {}) {
   await mockInspector(page, options);
-  // Restore rather than navigate. The connect hook restores the stored project and
-  // session on its first sessions-loaded tick, which is how a returning user lands
-  // back in their session. It is also the only deterministic path: with no project
-  // selected the hook marks itself done, and afterwards it only ever adopts an
-  // existing blank session, so clicking the row races a blank auto-connect.
-  await page.addInitScript(([projectId, sessionId]) => {
-    try {
-      window.localStorage.setItem("ennote-selected-project", projectId);
-      window.localStorage.setItem("ennote-selected-session", sessionId);
-    } catch {
-      /* storage unavailable */
-    }
-  }, [project.id, session.id]);
-  await page.goto("/");
+  await openSession(page, { projectId: project.id, sessionId: session.id });
   // The inspector targets the newest Run the timeline knows about, so wait for
   // the conversation to be projected before opening the panel.
   await expect(page.getByText("the reply", { exact: true })).toBeVisible();
