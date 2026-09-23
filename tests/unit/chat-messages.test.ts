@@ -135,6 +135,8 @@ describe("structured conversation projection", () => {
       sourceThroughMessageId: "m2",
       baseLeafMessageId: "m4",
       createdAt: "2026-07-28T00:00:05Z",
+      promptVersion: "2026-07-28",
+      summaryContractDigest: "sha256:contract",
     };
     const timeline = mergeTimeline(
       [message("m1", "user", "one"), message("m2", "assistant", "two"), message("m3", "user", "three"), message("m4", "assistant", "four")],
@@ -143,6 +145,21 @@ describe("structured conversation projection", () => {
     );
     expect(timeline.map(item => item.id)).toEqual(["turn-m1", "compaction-checkpoint", "turn-m3"]);
     expect(timeline[1]).toMatchObject({ kind: "checkpoint", summary: "state summary", reclaimedTokens: 100 });
+  });
+
+  // A compaction Run has no faithful prompt text to show, so its instruction
+  // identity travels on the checkpoint instead and must survive the projection.
+  it("carries the summary contract identity onto the checkpoint node", () => {
+    const checkpoint: ContextCheckpoint = {
+      id: "checkpoint", status: "completed", reason: "manual", summary: "s", reclaimedTokens: 1,
+      firstKeptMessageId: "m1", baseLeafMessageId: "m1",
+      createdAt: "2026-07-28T00:00:05Z", promptVersion: "2026-07-28", summaryContractDigest: "sha256:contract",
+    };
+    const timeline = mergeTimeline([message("m1", "user", "one")], [checkpoint], []);
+    // The checkpoint is projected before the message it first keeps.
+    expect(timeline.find(node => node.kind === "checkpoint")).toMatchObject({
+      kind: "checkpoint", promptVersion: "2026-07-28", summaryContractDigest: "sha256:contract",
+    });
   });
 });
 
@@ -167,7 +184,8 @@ describe("split projection (projectBase + applyTransient)", () => {
   it("is equivalent to mergeTimeline across canonical/transient/checkpoint mixes", () => {
     const checkpoint: ContextCheckpoint = {
       id: "cp", status: "completed", reason: "manual", summary: "s", reclaimedTokens: 1,
-      firstKeptMessageId: "m1", sourceThroughMessageId: "m1", baseLeafMessageId: "m4", createdAt: "2026-07-28T00:00:05Z",
+      firstKeptMessageId: "m1", sourceThroughMessageId: "m1", baseLeafMessageId: "m4",
+      createdAt: "2026-07-28T00:00:05Z", promptVersion: "2026-07-28", summaryContractDigest: "sha256:contract",
     };
     const cases = [
       { messages: completedTurn(), checkpoints: [] as ContextCheckpoint[], transient: [] as TurnMessage[] },

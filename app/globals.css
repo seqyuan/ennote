@@ -655,6 +655,9 @@ button:disabled { cursor: default; }
 .checkpoint-separator summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; }
 .checkpoint-separator summary span { color: var(--text-dim); }
 .checkpoint-separator details > div { padding-top: 8px; white-space: pre-wrap; text-align: left; }
+/* A compaction Run has no concatenated prompt to show, so its instruction
+   identity is shown instead: contract version, then the contract digest. */
+.checkpoint-identity { display: flex; flex-wrap: wrap; gap: 10px; padding-top: 6px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
 /* History */
 .history-control { display: flex; justify-content: center; min-height: 34px; margin: 0 0 24px; }

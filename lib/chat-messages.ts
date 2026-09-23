@@ -11,7 +11,8 @@ type GeneratedCheckpoint = components["schemas"]["ContextCompaction"];
 
 export type ContextCheckpoint = Pick<GeneratedCheckpoint,
   "id" | "status" | "reason" | "summary" | "reclaimedTokens" | "firstKeptMessageId" |
-  "sourceThroughMessageId" | "baseLeafMessageId" | "createdAt">;
+  "sourceThroughMessageId" | "baseLeafMessageId" | "createdAt" | "promptVersion" |
+  "summaryContractDigest">;
 
 export interface TurnMessage {
   id: string;
@@ -115,6 +116,16 @@ export interface CheckpointNode {
   summary: string;
   reclaimedTokens: number;
   createdAt: string;
+  /**
+   * Which summary contract produced this checkpoint, and the digest of that
+   * contract and its source. A compaction Run's prompt is not a concatenation —
+   * a platform base in the system role plus a contract appended after serialized
+   * data in the user role — so there is no faithful "prompt text" to show for it.
+   * Its instruction identity is these two fields instead, and showing them is the
+   * honest form of the same information.
+   */
+  promptVersion: string;
+  summaryContractDigest: string;
 }
 
 export type ConversationNode = ConversationTurn | CheckpointNode;
@@ -483,7 +494,8 @@ function append(target: Map<string, ContextCheckpoint[]>, id: string, value: Con
 
 function checkpointNode(checkpoint: ContextCheckpoint): CheckpointNode {
   return { kind: "checkpoint", id: `compaction-${checkpoint.id}`, reason: checkpoint.reason,
-    summary: checkpoint.summary, reclaimedTokens: checkpoint.reclaimedTokens, createdAt: checkpoint.createdAt };
+    summary: checkpoint.summary, reclaimedTokens: checkpoint.reclaimedTokens, createdAt: checkpoint.createdAt,
+    promptVersion: checkpoint.promptVersion, summaryContractDigest: checkpoint.summaryContractDigest };
 }
 
 function userText(parts: CanonicalPart[]): string {

@@ -118,6 +118,9 @@ const messages: Record<Locale, Record<string, string>> = {
     "context.tools": "Tools",
     "context.messages": "Messages",
 
+    "checkpoint.promptVersion": "Summary contract",
+    "checkpoint.contract": "Digest",
+
     "inspector.noRun": "Send a message to inspect the prompt the model receives.",
     "inspector.loading": "Loading the frozen run prompt…",
     "inspector.run": "Run",
@@ -399,6 +402,9 @@ const messages: Record<Locale, Record<string, string>> = {
     "context.system": "系统提示词",
     "context.tools": "工具",
     "context.messages": "对话消息",
+
+    "checkpoint.promptVersion": "摘要契约版本",
+    "checkpoint.contract": "契约摘要",
 
     "inspector.noRun": "发送一条消息后，可在此查看模型实际收到的提示词。",
     "inspector.loading": "正在读取本次 Run 冻结的提示词…",

@@ -20,7 +20,8 @@ describe("latestRunId", () => {
   it("ignores checkpoint nodes so compaction never hides the last Run", () => {
     const nodes: ConversationNode[] = [
       turn("t1", "run-1"),
-      { kind: "checkpoint", id: "c1", reason: "threshold", summary: "s", reclaimedTokens: 1, createdAt: "2026-01-01T00:00:00Z" },
+      { kind: "checkpoint", id: "c1", reason: "threshold", summary: "s", reclaimedTokens: 1,
+        createdAt: "2026-01-01T00:00:00Z", promptVersion: "2026-07-28", summaryContractDigest: "sha256:contract" },
     ];
     expect(latestRunId(nodes)).toBe("run-1");
   });

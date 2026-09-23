@@ -342,6 +342,10 @@ export class SessionStore {
         sourceThroughMessageId: item.sourceThroughMessageId,
         baseLeafMessageId: item.baseLeafMessageId,
         createdAt: item.createdAt,
+        // A compaction Run's instruction identity travels on the checkpoint: its
+        // prompt is not a concatenation, so there is no prompt text to show.
+        promptVersion: item.promptVersion,
+        summaryContractDigest: item.summaryContractDigest,
       }));
     }
     this.notify();
