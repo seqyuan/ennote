@@ -158,7 +158,10 @@ func startOrReuseWorker(ctx context.Context, home string) (*managedWorker, error
 	if err != nil {
 		return nil, err
 	}
-	workerPath, workerArgs := findWorker()
+	workerPath, workerArgs, err := findWorker(home)
+	if err != nil {
+		return nil, err
+	}
 	command := exec.Command(workerPath, workerArgs...)
 	command.Env = append(os.Environ(),
 		"ENNOTE_HOME="+home,
@@ -745,25 +748,6 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 func httpGet(url string) (*http.Response, error) {
 	client := &http.Client{Timeout: 3 * time.Second}
 	return client.Get(url)
-}
-
-func findWorker() (string, []string) {
-	// Try pre-built binary first
-	if p := os.Getenv("ENNOTE_WORKER_PATH"); p != "" {
-		return p, nil
-	}
-	// Dev mode: use go run
-	if _, err := os.Stat("go.mod"); err == nil {
-		return "go", []string{"run", "./cmd/ennoworker"}
-	}
-	// Look for ennoworker binary next to ennogate
-	exe, _ := os.Executable()
-	dir := filepath.Dir(exe)
-	workerBin := filepath.Join(dir, "ennoworker")
-	if _, err := os.Stat(workerBin); err == nil {
-		return workerBin, nil
-	}
-	return "go", []string{"run", "./cmd/ennoworker"}
 }
 
 const devHTML = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Ennote</title>
