@@ -6,27 +6,39 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 )
 
-// MCPCatalogRepo persists the binding-scoped catalog cache and freezes Run
-// snapshots. The cache key includes binding revision and auth generation so a
-// server that returns a different toolset per identity cannot leak a catalog
-// across Projects or credential generations.
+// MCPCatalogRepo persists the binding-scoped catalog cache. The cache key
+// includes binding revision, auth generation and credential digest so a server
+// that returns a different toolset per identity cannot leak a catalog across
+// Projects or credential generations.
 //
-// CacheDir selects the file form, which is the only form in use: every caller —
-// production and tests — wires CacheDir. No migration declares
-// mcp_catalog_cache, so the SQL branch below always fails ("no such table"),
-// which its GetCatalog callers silently treat as a cache miss: a DB-form repo
-// performs no caching at all and says nothing about it. Give the table a schema,
-// or use the file form; do not extend the SQL branch meanwhile.
+// The cache is file-backed and has exactly one form. It used to have a SQL form
+// as well, against a table no migration declared: every read failed with "no such
+// table" and its callers treated that as a cache miss, so a SQL-configured repo
+// performed no caching at all and said nothing about it. That form is gone.
+// CacheDir is required, and its absence is now a wiring error rather than a
+// silent permanent miss.
 type MCPCatalogRepo struct {
-	DB       *sql.DB
 	CacheDir string
+}
+
+// ErrMCPCatalogCacheDirMissing reports a catalog repo that cannot store anything.
+var ErrMCPCatalogCacheDirMissing = errors.New("mcp catalog cache directory is required")
+
+// cacheDir guards the one configuration a file-backed cache cannot tolerate.
+func (r *MCPCatalogRepo) cacheDir() error {
+	if strings.TrimSpace(r.CacheDir) == "" {
+		return ErrMCPCatalogCacheDirMissing
+	}
+	return nil
 }
 
 // MCPRunRepo persists frozen Run server/tool snapshots and request state.
@@ -57,24 +69,10 @@ type MCPCatalogCacheRow struct {
 
 // PutCatalog stores or replaces the binding-scoped catalog cache row.
 func (r *MCPCatalogRepo) PutCatalog(ctx context.Context, row MCPCatalogCacheRow) error {
-	if r.CacheDir != "" {
-		return r.putCatalogFile(row)
-	}
-	toolsJSON, err := json.Marshal(row.Tools)
-	if err != nil {
+	if err := r.cacheDir(); err != nil {
 		return err
 	}
-	_, err = r.DB.ExecContext(ctx, `INSERT INTO mcp_catalog_cache
-		(binding_id, binding_revision, profile_version_id, protocol_version, auth_generation,
-		 credential_digest, server_identity_digest, catalog_digest, tools_json, annotations_json, fetched_at, stale_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
-		ON CONFLICT(binding_id, binding_revision, profile_version_id, protocol_version, auth_generation, credential_digest)
-		DO UPDATE SET server_identity_digest=excluded.server_identity_digest,
-			catalog_digest=excluded.catalog_digest, tools_json=excluded.tools_json,
-			annotations_json=excluded.annotations_json, fetched_at=excluded.fetched_at, stale_at=NULL`,
-		row.BindingID, row.BindingRevision, row.ProfileVersionID, row.ProtocolVersion, row.AuthGeneration,
-		row.CredentialDigest, row.ServerIdentityDigest, row.CatalogDigest, string(toolsJSON), row.AnnotationsJSON, roleTime(row.FetchedAt))
-	return err
+	return r.putCatalogFile(row)
 }
 
 // GetCatalog fetches a NON-STALE cache row for the exact binding revision +
@@ -82,41 +80,18 @@ func (r *MCPCatalogRepo) PutCatalog(ctx context.Context, row MCPCatalogCacheRow)
 // treated as a miss so future Runs must refresh.
 func (r *MCPCatalogRepo) GetCatalog(ctx context.Context, bindingID string, bindingRevision, authGeneration int,
 	profileVersionID, protocolVersion, credentialDigest string) (*MCPCatalogCacheRow, error) {
-	if r.CacheDir != "" {
-		return r.getCatalogFile(bindingID, bindingRevision, authGeneration, profileVersionID, protocolVersion, credentialDigest)
-	}
-	row := &MCPCatalogCacheRow{}
-	var toolsJSON, fetchedAt string
-	var staleAt sql.NullString
-	err := r.DB.QueryRowContext(ctx, `SELECT binding_id, binding_revision, profile_version_id, protocol_version,
-		auth_generation, credential_digest, server_identity_digest, catalog_digest, tools_json, annotations_json, fetched_at
-		FROM mcp_catalog_cache
-		WHERE binding_id=? AND binding_revision=? AND profile_version_id=? AND protocol_version=? AND auth_generation=?
-		  AND credential_digest=? AND (stale_at IS NULL OR stale_at = '')`,
-		bindingID, bindingRevision, profileVersionID, protocolVersion, authGeneration, credentialDigest).
-		Scan(&row.BindingID, &row.BindingRevision, &row.ProfileVersionID, &row.ProtocolVersion,
-			&row.AuthGeneration, &row.CredentialDigest, &row.ServerIdentityDigest, &row.CatalogDigest, &toolsJSON,
-			&row.AnnotationsJSON, &fetchedAt)
-	if err != nil {
+	if err := r.cacheDir(); err != nil {
 		return nil, err
 	}
-	_ = staleAt
-	row.FetchedAt, _ = time.Parse(time.RFC3339Nano, fetchedAt)
-	if err := json.Unmarshal([]byte(toolsJSON), &row.Tools); err != nil {
-		return nil, err
-	}
-	return row, nil
+	return r.getCatalogFile(bindingID, bindingRevision, authGeneration, profileVersionID, protocolVersion, credentialDigest)
 }
 
 // MarkCatalogStale marks a cached catalog stale so future Runs must refresh.
 func (r *MCPCatalogRepo) MarkCatalogStale(ctx context.Context, bindingID string, authGeneration int) error {
-	if r.CacheDir != "" {
-		return r.markCatalogFilesStale(bindingID, authGeneration)
+	if err := r.cacheDir(); err != nil {
+		return err
 	}
-	_, err := r.DB.ExecContext(ctx,
-		`UPDATE mcp_catalog_cache SET stale_at=? WHERE binding_id=? AND auth_generation=?`,
-		roleTime(time.Now().UTC()), bindingID, authGeneration)
-	return err
+	return r.markCatalogFilesStale(bindingID, authGeneration)
 }
 
 // RunMCPServerSnapshot is a frozen per-Run server record.
