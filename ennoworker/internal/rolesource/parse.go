@@ -271,12 +271,29 @@ func normalizeAndValidate(document *Document) error {
 	}
 	sort.Slice(document.Skills, func(i, j int) bool { return document.Skills[i].ID < document.Skills[j].ID })
 	document.AllowedTools = trimSortedUnique(document.AllowedTools)
+	if document.Context.DefaultMode != "" && !roleContextModes[document.Context.DefaultMode] {
+		return fmt.Errorf("unsupported context defaultMode %q", document.Context.DefaultMode)
+	}
+	for index := range document.Context.AllowedModes {
+		if !roleContextModes[document.Context.AllowedModes[index]] {
+			return fmt.Errorf("unsupported context allowedModes[%d] %q", index, document.Context.AllowedModes[index])
+		}
+	}
 	sort.Slice(document.Context.AllowedModes, func(i, j int) bool {
 		return document.Context.AllowedModes[i] < document.Context.AllowedModes[j]
 	})
 	document.Delegation.AllowedCallerKinds = trimSortedUnique(document.Delegation.AllowedCallerKinds)
 	document.Delegation.AllowedStrategies = trimSortedUnique(document.Delegation.AllowedStrategies)
 	return nil
+}
+
+// roleContextModes is the accepted Role execution-context vocabulary. A Role is
+// only invokable in the modes it declares: task_only is required to run as a
+// delegated child, reply to be addressed with reply_to, and room/fresh for
+// direct Host invocation.
+var roleContextModes = map[domain.RoleContextMode]bool{
+	domain.RoleContextRoom: true, domain.RoleContextReply: true,
+	domain.RoleContextFresh: true, domain.RoleContextTask: true,
 }
 
 func validateModelRef(ref string) error {

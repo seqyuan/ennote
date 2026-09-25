@@ -64,6 +64,24 @@ test("global file Role auto-saves structured fields and publishes explicitly", a
   await expect.poll(() => published).toBe(true);
 });
 
+test("global file Role authors the context modes delegation and reply need", async ({ page }) => {
+  const patches: Array<Record<string, unknown>> = [];
+  await mockRoles(page, (body) => { patches.push(body); });
+  await page.goto("/roles");
+  await expect(page.getByRole("option", { name: /Security Reviewer/ })).toBeVisible();
+  await expect(page.getByLabel("Default context mode")).toHaveValue("room");
+  // task_only is what lets the Role run as a delegated child; without a UI
+  // control for it a Role created here could never be delegated to.
+  await page.getByRole("checkbox", { name: "Task only" }).check();
+  await expect.poll(() => patches.length).toBeGreaterThan(0);
+  const document = patches.at(-1)?.document as { context: { allowedModes: string[] } };
+  expect(document.context.allowedModes).toContain("task_only");
+  await page.getByRole("checkbox", { name: "Reply" }).check();
+  await expect.poll(() => patches.length).toBeGreaterThan(1);
+  const replied = patches.at(-1)?.document as { context: { allowedModes: string[] } };
+  expect(replied.context.allowedModes).toEqual(expect.arrayContaining(["reply", "task_only"]));
+});
+
 for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
   test(`global Roles editor is usable at ${viewport.width}x${viewport.height}`, async ({ page }) => {
     await page.setViewportSize(viewport);

@@ -2574,8 +2574,8 @@ export interface components {
             allowedTools: string[];
             context: {
                 /** @enum {string} */
-                defaultMode: "room" | "fresh";
-                allowedModes: ("room" | "fresh")[];
+                defaultMode: "room" | "reply" | "fresh" | "task_only";
+                allowedModes: ("room" | "reply" | "fresh" | "task_only")[];
                 /** @enum {string} */
                 ownExecutionContinuity: "none";
             };

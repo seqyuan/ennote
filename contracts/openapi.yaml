@@ -3867,8 +3867,11 @@ components:
           additionalProperties: false
           required: [defaultMode, allowedModes, ownExecutionContinuity]
           properties:
-            defaultMode: { type: string, enum: [room, fresh] }
-            allowedModes: { type: array, uniqueItems: true, items: { type: string, enum: [room, fresh] } }
+            # task_only is required for a Role to run as a delegated child, and
+            # reply enables reply_to addressing; both are part of the frozen
+            # RoleContextPolicy vocabulary and must be authorable here.
+            defaultMode: { type: string, enum: [room, reply, fresh, task_only] }
+            allowedModes: { type: array, uniqueItems: true, items: { type: string, enum: [room, reply, fresh, task_only] } }
             ownExecutionContinuity: { type: string, enum: [none] }
         delegation:
           type: object

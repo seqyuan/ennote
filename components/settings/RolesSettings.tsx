@@ -8,6 +8,14 @@ import { apiFetch } from "@/lib/worker-api.client";
 
 type ThinkingEffort = "default" | "low" | "medium" | "high";
 
+// The frozen RoleContextPolicy vocabulary. task_only is required for a Role to
+// run as a delegated child; reply enables reply_to addressing.
+const ROLE_CONTEXT_MODES = ["room", "reply", "fresh", "task_only"] as const;
+type RoleContextMode = (typeof ROLE_CONTEXT_MODES)[number];
+const ROLE_CONTEXT_LABELS: Record<RoleContextMode, string> = {
+  room: "Room", reply: "Reply", fresh: "Fresh", task_only: "Task only",
+};
+
 interface RoleDocument {
   schemaVersion: number;
   handle: string;
@@ -21,7 +29,7 @@ interface RoleDocument {
   authority: "read_only" | "write_workspace";
   permissionCeiling: "discuss" | "auto" | "ask";
   allowedTools: string[];
-  context: { defaultMode: "room" | "fresh"; allowedModes: Array<"room" | "fresh">; ownExecutionContinuity: "none" };
+  context: { defaultMode: RoleContextMode; allowedModes: RoleContextMode[]; ownExecutionContinuity: "none" };
   delegation: {
     admission: "auto_within_budget" | "approval_required" | "deny";
     allowedCallerKinds: string[];
@@ -43,7 +51,7 @@ function defaultRole(handle: string, name: string, model: string): RoleDocument 
     schemaVersion: 1, handle, name, description: "", positioning: "", icon: "bot", color: "neutral",
     model: { ref: model, thinkingEffort: "default", fallbacks: [] }, skills: [],
     authority: "read_only", permissionCeiling: "discuss", allowedTools: ["read", "ls", "grep", "find"],
-    context: { defaultMode: "room", allowedModes: ["room", "fresh"], ownExecutionContinuity: "none" },
+    context: { defaultMode: "room", allowedModes: ["room", "fresh", "task_only"], ownExecutionContinuity: "none" },
     delegation: {
       admission: "auto_within_budget", allowedCallerKinds: ["host"], allowedStrategies: ["single", "parallel"],
       maxInvocationsPerParentRun: 16, maxConcurrentInstances: 16,
@@ -178,6 +186,17 @@ export function RolesSettings({ models, providers, setError }: {
     setDetail({ ...detail, document });
     void save(document);
   };
+  const toggleContextMode = (mode: RoleContextMode, checked: boolean) => {
+    updateAndSave((document) => {
+      const allowedModes = checked
+        ? ROLE_CONTEXT_MODES.filter((candidate) => candidate === mode || document.context.allowedModes.includes(candidate))
+        : document.context.allowedModes.filter((candidate) => candidate !== mode);
+      if (allowedModes.length === 0) return document;
+      const defaultMode = allowedModes.includes(document.context.defaultMode)
+        ? document.context.defaultMode : allowedModes[0];
+      return { ...document, context: { ...document.context, allowedModes, defaultMode } };
+    });
+  };
 
   const visible = roles.filter((role) => `${role.name} ${role.id}`.toLowerCase().includes(query.trim().toLowerCase()));
 
@@ -220,6 +239,19 @@ export function RolesSettings({ models, providers, setError }: {
               <label>Thinking<select value={detail.document.model.thinkingEffort} onChange={(event) => updateAndSave((document) => ({ ...document, model: { ...document.model, thinkingEffort: event.target.value as ThinkingEffort } }))}>{(["default", "low", "medium", "high"] as const).map((effort) => <option key={effort}>{effort}</option>)}</select></label>
               <label>Permission ceiling<select value={detail.document.permissionCeiling} onChange={(event) => updateAndSave((document) => ({ ...document, permissionCeiling: event.target.value as RoleDocument["permissionCeiling"] }))}><option value="discuss">Discuss</option><option value="auto">Auto</option><option value="ask">Ask</option></select></label>
               <label className="wide">Skills<input value={detail.document.skills.map((skill) => skill.id).join(", ")} onChange={(event) => updateLocal((document) => ({ ...document, skills: event.target.value.split(",").map((id) => id.trim()).filter(Boolean).map((id) => ({ id, mode: "available" as const })) }))} onBlur={() => void save(detail.document)} placeholder="report-writing, code-review" /></label>
+            </div></section>
+            <section><h3>Execution context</h3><div className="global-role-grid">
+              <label>Default mode<select aria-label="Default context mode" value={detail.document.context.defaultMode} onChange={(event) => updateAndSave((document) => ({ ...document, context: { ...document.context, defaultMode: event.target.value as RoleContextMode } }))}>{detail.document.context.allowedModes.map((mode) => <option key={mode} value={mode}>{ROLE_CONTEXT_LABELS[mode]}</option>)}</select></label>
+              <div className="global-role-modes wide">
+                <span>Allowed modes</span>
+                <div role="group" aria-label="Allowed context modes">
+                  {ROLE_CONTEXT_MODES.map((mode) => {
+                    const checked = detail.document.context.allowedModes.includes(mode);
+                    return <label key={mode} className="global-role-mode"><input type="checkbox" checked={checked} disabled={checked && detail.document.context.allowedModes.length === 1} onChange={(event) => toggleContextMode(mode, event.target.checked)} />{ROLE_CONTEXT_LABELS[mode]}</label>;
+                  })}
+                </div>
+                <p className="global-role-hint">Task only is required for Roles that run as delegated children. Reply enables addressing a specific message; Room shares the session lineage; Fresh starts from the addressed request.</p>
+              </div>
             </div></section>
             <section><h3>Role prompt</h3><label className="global-role-prompt"><textarea aria-label="Role prompt" value={detail.document.prompt} onChange={(event) => updateLocal((document) => ({ ...document, prompt: event.target.value }))} onBlur={() => void save(detail.document)} /></label></section>
           </div>
