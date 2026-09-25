@@ -14,6 +14,17 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 )
 
+// loadTurnTargetKind reads the invocation target kind of a turn so a format-2
+// config freeze can tell a Role turn (which must resolve a Role revision) from
+// a Host turn (which must not). A missing turn is an invalid invocation target.
+func loadTurnTargetKind(ctx context.Context, tx *sql.Tx, turnID string) (string, error) {
+	var kind string
+	if err := tx.QueryRowContext(ctx, `SELECT target_kind FROM turns WHERE id=?`, turnID).Scan(&kind); err != nil {
+		return "", domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("load invocation target: %w", err))
+	}
+	return kind, nil
+}
+
 func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.AgentRun) (*ResolvedRunConfig, error) {
 	if r.Providers == nil || r.Models == nil {
 		return nil, fmt.Errorf("file-backed model resolver is incomplete")
@@ -133,7 +144,13 @@ func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.Ag
 				OutputContract: roleDefinition.OutputContract,
 			}
 			rolePrompt = roleDefinition.RolePrompt
-		} else {
+		} else if targetKind, kindErr := loadTurnTargetKind(ctx, tx, run.TurnID); kindErr != nil {
+			return nil, kindErr
+		} else if targetKind == "role" {
+			// Only a Role turn carries a Role target to resolve. A format-2 Host
+			// turn (a plain user message on a room lineage already upgraded to the
+			// speaker ledger) must keep the Agent/default base prompt instead of
+			// failing as if its Role target were missing.
 			var roleID, versionID, contextMode string
 			if err := tx.QueryRowContext(ctx, `SELECT target_object_id,target_version_id,context_mode
 				FROM turns WHERE id=? AND target_kind='role'`, run.TurnID).Scan(&roleID, &versionID, &contextMode); err != nil {
