@@ -712,6 +712,25 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorEventPersistence, err)
 	}
 	claimGen := max(0, claimCount-1)
+	// Re-claims that are not approval resumes (e.g. a parent waking from
+	// waiting_children) must continue iteration numbering: tool_calls is unique
+	// on (run_id, iteration, call_index) with no request-generation component,
+	// so reusing iteration 1 would collide with the pre-wait batch and fail the
+	// run. Approval resumes already continue past the checkpoint iteration via
+	// ResumeState. A fresh run records no iterations and keeps the default.
+	startIteration := 0
+	if resumeState == nil {
+		var maxIteration int
+		if err := e.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(iteration),0) FROM (
+			SELECT iteration FROM model_calls WHERE run_id=?
+			UNION ALL SELECT iteration FROM tool_calls WHERE run_id=?)`,
+			run.ID, run.ID).Scan(&maxIteration); err != nil {
+			return domain.RunOutput{}, domain.NewCodedError(domain.ErrorEventPersistence, err)
+		}
+		if maxIteration > 0 {
+			startIteration = maxIteration + 1
+		}
+	}
 
 	result, err := loop.Run(ctx, agent.RunInput{
 		RunID: run.ID, Model: resolved.Effective.APIModel,
@@ -723,7 +742,7 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		SystemPrompt: systemPrompt, History: chatHistory, OverflowRecovery: overflowRecovery,
 		Resume: resumeState, Approval: approvalResolution,
 		SkillCatalogState: string(skillCatalogState), SkillCatalogDigest: skillCatalogDigest,
-		RequestGeneration: claimGen,
+		RequestGeneration: claimGen, StartIteration: startIteration,
 	})
 
 	// Queue observer hooks (RunEnd / SessionEnd) via durable outbox.
@@ -1145,6 +1164,63 @@ type delegationAdmissionToolPolicy struct {
 	KnownSkills map[string]bool
 }
 
+// rewriteDelegationArguments replaces only the task-list key the model used
+// ("tasks", or the legacy "delegations" for replayed calls) with the
+// system-resolved specs, leaving every other argument key byte-intact.
+//
+// Re-marshaling a narrow {tasks, delegations} struct instead used to
+// (a) inject `"delegations": null`, which the delegate_tasks schema rejects via
+// additionalProperties:false and which failed the whole Run as
+// tool_policy_failed, and (b) silently drop executionMode/autoResume, disabling
+// background delegation. Rewriting the raw object fixes both.
+func rewriteDelegationArguments(arguments json.RawMessage, listKey string, specs []domain.TaskSpec) (json.RawMessage, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(arguments, &raw); err != nil {
+		return nil, err
+	}
+	var items []map[string]json.RawMessage
+	if err := json.Unmarshal(raw[listKey], &items); err != nil {
+		return nil, err
+	}
+	if len(items) != len(specs) {
+		return nil, fmt.Errorf("delegation list has %d items but %d tasks were resolved", len(items), len(specs))
+	}
+	// Rewrite only the identity fields on each item and leave the rest of the
+	// item (notably budget) byte-identical to what the model sent. Building the
+	// item from domain.TaskSpec instead would emit zero-valued optional budget
+	// fields and fail the schema's per-field minimums.
+	quote := func(value string) json.RawMessage {
+		encoded, _ := json.Marshal(value)
+		return encoded
+	}
+	for index := range items {
+		spec := specs[index]
+		if listKey == "delegations" {
+			items[index]["roleHandle"] = quote(spec.Role)
+			items[index]["assignment"] = quote(spec.Goal)
+			delete(items[index], "role")
+			delete(items[index], "goal")
+		} else {
+			items[index]["role"] = quote(spec.Role)
+			items[index]["goal"] = quote(spec.Goal)
+			delete(items[index], "roleHandle")
+			delete(items[index], "assignment")
+		}
+		items[index]["roleVersionId"] = quote(spec.RoleVersionID)
+	}
+	encoded, err := json.Marshal(items)
+	if err != nil {
+		return nil, err
+	}
+	raw[listKey] = encoded
+	other := "delegations"
+	if listKey == "delegations" {
+		other = "tasks"
+	}
+	delete(raw, other)
+	return json.Marshal(raw)
+}
+
 // delegationAdmissionHook is the per-exec chain-listener form of
 // delegationAdmissionToolPolicy.BeforeToolBatch (design 一 Stage 1/2). It runs
 // after the builtin listeners and upgrades/denies delegation tool calls.
@@ -1168,8 +1244,10 @@ func delegationAdmissionHook(delegations *store.DelegationRepo, sessionID string
 		if json.Unmarshal(effectiveArguments, &input) != nil {
 			return d, nil // Registry schema validation reports malformed arguments.
 		}
+		listKey := "tasks"
 		specs := input.Tasks
 		if len(specs) == 0 {
+			listKey = "delegations"
 			specs = input.Delegations
 		}
 		if len(specs) == 0 {
@@ -1218,9 +1296,7 @@ func delegationAdmissionHook(delegations *store.DelegationRepo, sessionID string
 			}
 			return agent.PreToolDecision{Action: agent.ToolDeny, Code: denialCode, Reason: denial, RiskClass: domain.RiskDelegation}, nil
 		}
-		input.Tasks = specs
-		input.Delegations = nil
-		encodedArguments, err := json.Marshal(input)
+		encodedArguments, err := rewriteDelegationArguments(effectiveArguments, listKey, specs)
 		if err != nil {
 			return agent.PreToolDecision{}, err
 		}
@@ -1256,8 +1332,10 @@ func (p *delegationAdmissionToolPolicy) BeforeToolBatch(ctx context.Context, bat
 		if json.Unmarshal(effectiveArguments, &input) != nil {
 			continue // Registry schema validation reports malformed arguments.
 		}
+		listKey := "tasks"
 		specs := input.Tasks
 		if len(specs) == 0 {
+			listKey = "delegations"
 			specs = input.Delegations
 		}
 		if len(specs) == 0 {
@@ -1311,9 +1389,7 @@ func (p *delegationAdmissionToolPolicy) BeforeToolBatch(ctx context.Context, bat
 				Reason: denial, RiskClass: domain.RiskDelegation}
 			continue
 		}
-		input.Tasks = specs
-		input.Delegations = nil
-		encodedArguments, err := json.Marshal(input)
+		encodedArguments, err := rewriteDelegationArguments(effectiveArguments, listKey, specs)
 		if err != nil {
 			return nil, err
 		}

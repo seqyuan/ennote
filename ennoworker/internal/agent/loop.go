@@ -117,7 +117,13 @@ type RunInput struct {
 	// RequestGeneration distinguishes re-claims of the same Run (e.g. parent
 	// resume after waiting_children). Zero on first claim, incremented by the
 	// executor for re-claims so model_calls unique constraint is satisfied.
-	RequestGeneration  int
+	RequestGeneration int
+	// StartIteration continues iteration numbering on a re-claim that has no
+	// approval checkpoint (e.g. a parent waking from waiting_children).
+	// tool_calls is unique on (run_id, iteration, call_index) with no
+	// request-generation component, so a resumed attempt must not reuse an
+	// iteration the Run already recorded. Zero selects the default (1).
+	StartIteration     int
 	SystemPrompt       string
 	History            []domain.ChatMessage
 	OverflowRecovery   func(context.Context) ([]domain.ChatMessage, error)
@@ -240,6 +246,12 @@ func (l *Loop) Run(ctx context.Context, input RunInput) (RunResult, error) {
 			return runResult(messages, generated, final, resume.Iteration), nil
 		}
 		startIteration = resume.Iteration + 1
+	}
+	// A re-claim without an approval checkpoint (e.g. a parent waking from
+	// waiting_children) continues past every iteration the Run already recorded,
+	// so its tool calls cannot collide with the pre-wait batch.
+	if input.Resume == nil && input.StartIteration > startIteration {
+		startIteration = input.StartIteration
 	}
 
 	for iteration := startIteration; iteration <= maxIterations; iteration++ {
