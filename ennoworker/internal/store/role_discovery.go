@@ -70,7 +70,7 @@ func (d *RoleDiscovery) resolveDefinition(ctx context.Context, document *rolesou
 			OwnExecutionContinuity: document.Context.OwnExecutionContinuity,
 		},
 		DelegationPolicy: domain.RoleDelegationPolicy{
-			Admission:                  document.Delegation.Admission,
+			Admission:                  rolesource.AdmissionDomain(document.Delegation.Admission),
 			AllowedCallerKinds:         append([]string(nil), document.Delegation.AllowedCallerKinds...),
 			AllowedStrategies:          append([]string(nil), document.Delegation.AllowedStrategies...),
 			MaxInvocationsPerParentRun: document.Delegation.MaxInvocationsPerParentRun,

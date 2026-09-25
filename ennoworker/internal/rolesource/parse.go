@@ -56,6 +56,23 @@ func (a Authority) Domain() domain.RoleAuthority {
 	}
 }
 
+// AdmissionDeny is the portable Role-file spelling of a denied delegation
+// admission, as documented by the OpenAPI contract and emitted by the Role
+// editor. The internal domain vocabulary spells the same state "denied"
+// (domain.DelegationDenied).
+const AdmissionDeny domain.DelegationAdmission = "deny"
+
+// AdmissionDomain maps a portable Role-file admission onto the internal domain
+// vocabulary so a Role authored with the documented wire value is enforced
+// exactly like one written with the internal spelling. Unrecognized values pass
+// through unchanged so fail-closed consumers still reject them.
+func AdmissionDomain(value domain.DelegationAdmission) domain.DelegationAdmission {
+	if value == AdmissionDeny {
+		return domain.DelegationDenied
+	}
+	return value
+}
+
 type SkillBinding struct {
 	ID   string               `json:"id" yaml:"id"`
 	Mode domain.RoleSkillMode `json:"mode" yaml:"mode"`
