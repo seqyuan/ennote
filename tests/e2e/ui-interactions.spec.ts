@@ -123,3 +123,49 @@ test("creating a project uses a dialog instead of native prompts", async ({ page
   await expect(page.getByRole("dialog", { name: "Select Workspace Directory" })).not.toBeVisible();
   await expect(page.getByRole("button", { name: "seqyuan", exact: true })).toBeVisible();
 });
+
+test("adding a project tolerates a null session list from the worker", async ({ page }) => {
+  // Regression: the Worker's session list cache used to encode an empty list
+  // as JSON null; the sidebar then crashed on .map(null) and the app fell
+  // into the Next.js "This page couldn't load" Reload/Back screen right after
+  // creating a project. The UI must treat a null payload as an empty list.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.route("**/api/worker/v1/**", async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace("/api/worker", "");
+    if (path === "/v1/host/directories") {
+      return fulfill(route, {
+        path: "/home/seqyuan", home: "/home/seqyuan",
+        crumbs: [{ name: "seqyuan", path: "/home/seqyuan", hidden: false }],
+        entries: [{ name: "seqyuan", path: "/home/seqyuan", hidden: false }],
+        truncated: false,
+      });
+    }
+    if (path === "/v1/projects") {
+      if (route.request().method() === "POST") {
+        return fulfill(route, {
+          project: { ...project, id: "new-project", name: "seqyuan" },
+          workspace: { projectId: "new-project", hostPath: "/home/seqyuan", jail: "jail" },
+        }, 201);
+      }
+      return fulfill(route, [{ ...project, id: "new-project", name: "seqyuan" }]);
+    }
+    if (path === `/v1/projects/new-project/sessions`) {
+      // The buggy Worker payload: a literal JSON null instead of [].
+      return fulfill(route, null);
+    }
+    return route.abort();
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Add workspace" }).click();
+  await expect(page.getByRole("dialog", { name: "Select Workspace Directory" })).toBeVisible();
+  await page.getByRole("button", { name: "Open", exact: true }).click();
+
+  // The chat shell survives the null payload: no "Reload/Back" fallback
+  // screen, and the new project is selected with an empty session list.
+  await expect(page.getByRole("button", { name: "seqyuan", exact: true })).toBeVisible();
+  await expect(page.getByText("No sessions yet.")).toBeVisible();
+  await expect(page.getByText("This page couldn\u2019t load")).not.toBeVisible();
+  await expect(page.locator(".empty-hero")).toBeVisible();
+});

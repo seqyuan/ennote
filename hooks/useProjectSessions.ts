@@ -51,8 +51,11 @@ export function useProjectSessions(projectId: string | null) {
         : apiFetch<Session[]>(`${base}?${currentQuery.toString()}`, { signal: activeController.signal });
       const [active, visible] = await Promise.all([activeRequest, visibleRequest]);
       if (activeController.signal.aborted || generation.current !== version) return;
-      setActiveSessions(active);
-      setVisibleSessions(visible);
+      // Treat a null payload defensively as an empty list: the sessions
+      // endpoints must serialize [] but a malformed/empty payload must never
+      // take down the chat shell via .find/.map on null.
+      setActiveSessions(active ?? []);
+      setVisibleSessions(visible ?? []);
       setResolvedKey(requestKey);
       setError(null);
     } catch (reason) {

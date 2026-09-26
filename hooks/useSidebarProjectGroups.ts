@@ -62,7 +62,7 @@ export function useSidebarProjectGroups(
     const projectName = project?.name ?? projectId;
     setGroups((cur) => ({ ...cur, [projectId]: { projectId, projectName, sessions: [], loading: true, error: null } }));
     try {
-      const sessions = await apiFetch<Session[]>(`/v1/projects/${encodeURIComponent(projectId)}/sessions?status=active`);
+      const sessions = (await apiFetch<Session[]>(`/v1/projects/${encodeURIComponent(projectId)}/sessions?status=active`)) ?? [];
       if (generation.current !== version) return;
       setGroups((cur) => ({ ...cur, [projectId]: { projectId, projectName, sessions, loading: false, error: null } }));
     } catch (reason) {
@@ -97,7 +97,7 @@ export function useSidebarProjectGroups(
   const openArchived = useCallback(async (projectId: string) => {
     if (archived[projectId]) return;
     try {
-      const sessions = await apiFetch<Session[]>(`/v1/projects/${encodeURIComponent(projectId)}/sessions?status=archived`);
+      const sessions = (await apiFetch<Session[]>(`/v1/projects/${encodeURIComponent(projectId)}/sessions?status=archived`)) ?? [];
       setArchived((cur) => ({ ...cur, [projectId]: sessions }));
     } catch {
       setArchived((cur) => ({ ...cur, [projectId]: [] }));
@@ -106,7 +106,7 @@ export function useSidebarProjectGroups(
 
   const refreshArchived = useCallback(async (projectId: string) => {
     try {
-      const sessions = await apiFetch<Session[]>(`/v1/projects/${encodeURIComponent(projectId)}/sessions?status=archived`);
+      const sessions = (await apiFetch<Session[]>(`/v1/projects/${encodeURIComponent(projectId)}/sessions?status=archived`)) ?? [];
       setArchived((cur) => ({ ...cur, [projectId]: sessions }));
     } catch {
       setArchived((cur) => ({ ...cur, [projectId]: [] }));
