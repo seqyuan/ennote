@@ -300,7 +300,13 @@ func (m *Manager) ListByProject(ctx context.Context, projectID string, status st
 	m.mu.Lock()
 	if cached, ok := m.listCache[cacheKey]; ok {
 		m.mu.Unlock()
-		return append([]domain.Session(nil), cached...), nil
+		// Copy with an explicit capacity so an empty cached list stays a
+		// non-nil slice: appending zero elements to a nil slice yields nil,
+		// which would JSON-encode as null instead of [] and crash strict
+		// consumers on the other end of the wire.
+		sessions := make([]domain.Session, len(cached))
+		copy(sessions, cached)
+		return sessions, nil
 	}
 	m.mu.Unlock()
 
@@ -335,7 +341,11 @@ func (m *Manager) ListByProject(ctx context.Context, projectID string, status st
 		return sessions[i].ID < sessions[j].ID
 	})
 	m.mu.Lock()
-	m.listCache[cacheKey] = append([]domain.Session(nil), sessions...)
+	// Store a copy that stays non-nil for empty lists (see the cache-hit
+	// comment above): the stored value must marshal as [] on the wire.
+	stored := make([]domain.Session, len(sessions))
+	copy(stored, sessions)
+	m.listCache[cacheKey] = stored
 	m.mu.Unlock()
 	return sessions, nil
 }

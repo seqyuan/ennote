@@ -2,6 +2,7 @@ package sessionstore_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -131,6 +132,26 @@ func TestListByProjectReadsSessionDatabases(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, sessions, 2)
 	assert.ElementsMatch(t, []string{first.ID, second.ID}, []string{sessions[0].ID, sessions[1].ID})
+}
+
+// TestListByProjectEmptyListStaysNonNil pins the empty-list wire contract:
+// a project with no sessions must serialize as [] (never null), both on the
+// first (uncached) read and on the cached re-read. The old cache path used
+// append(nil, empty...), which yields a nil slice that json.Marshal encodes
+// as null and crashes frontend consumers that map over the payload.
+func TestListByProjectEmptyListStaysNonNil(t *testing.T) {
+	manager, _, projectID := setupManager(t)
+	ctx := context.Background()
+
+	for attempt := 1; attempt <= 3; attempt++ {
+		sessions, err := manager.ListByProject(ctx, projectID, "active")
+		require.NoError(t, err)
+		require.NotNil(t, sessions, "attempt %d: empty list must stay non-nil", attempt)
+		require.Len(t, sessions, 0)
+		encoded, err := json.Marshal(sessions)
+		require.NoError(t, err)
+		assert.Equal(t, "[]", string(encoded), "attempt %d: wire encoding must be []", attempt)
+	}
 }
 
 func TestSessionManifestIdentityMismatchFailsClosed(t *testing.T) {
