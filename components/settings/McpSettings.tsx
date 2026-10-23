@@ -27,7 +27,7 @@ export function McpSettings({ projectId, setError }: {
           type="button"
           onClick={() => mcp.setShowCreate((value) => !value)}
           style={{
-            padding: "5px 10px", borderRadius: 6, border: "1px solid var(--border)",
+            padding: "5px 10px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)",
             background: "var(--bg)", color: "var(--text)", fontSize: 12, cursor: "pointer",
           }}
         >

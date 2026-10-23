@@ -1,36 +1,22 @@
-/* Composer tokens, scoped to .composer-shell, aligned to the dsh InputBar.
-   The rest of the app keeps its palette; only the center-channel input and its
-   immediate chrome read these. */
+/* Composer consumes the shared design tokens. The --cmp-* names remain as a
+   local vocabulary for the composer surface; values resolve globally. */
 .composer-shell,
 .composer-seat {
-  --cmp-text-primary: #1a1a1a;
-  --cmp-text-secondary: #6b7280;
-  --cmp-text-tertiary: #9ca3af;
-  --cmp-hover: rgba(38, 49, 72, 0.06);
-  --cmp-border: rgba(0, 0, 0, 0.1);
-  --cmp-fill: #ffffff;
-  --cmp-fill-hover: rgb(241, 243, 245);
-  --cmp-selector-fill: rgb(245, 246, 247);
-  --cmp-brand: rgb(65, 118, 230);
-  --cmp-brand-hover: rgb(86, 134, 254);
-  --cmp-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.02), 0 2px 8px 0 rgba(0, 0, 0, 0.04);
-  --cmp-shadow-menu: 0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02), 0 12px 32px 0 rgba(0, 0, 0, 0.08);
-}
-
-html.dark .composer-shell,
-html.dark .composer-seat {
-  --cmp-text-primary: #e8e8e8;
-  --cmp-text-secondary: #9ca3af;
-  --cmp-text-tertiary: #6b7280;
-  --cmp-hover: rgba(255, 255, 255, 0.08);
-  --cmp-border: rgba(255, 255, 255, 0.06);
-  --cmp-fill: rgb(44, 44, 46);
-  --cmp-fill-hover: rgb(53, 54, 56);
-  --cmp-selector-fill: rgb(53, 54, 56);
-  --cmp-brand: rgb(103, 158, 254);
-  --cmp-brand-hover: rgb(122, 172, 255);
-  --cmp-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.24), 0 2px 8px 0 rgba(0, 0, 0, 0.28);
-  --cmp-shadow-menu: 0 0 1px 0 rgba(255, 255, 255, 0.12), 0 0 4px 0 rgba(0, 0, 0, 0.24), 0 12px 32px 0 rgba(0, 0, 0, 0.38);
+  --cmp-text-primary: var(--content-1);
+  --cmp-text-secondary: var(--content-2);
+  --cmp-text-tertiary: var(--content-3);
+  --cmp-hover: var(--surface-hover);
+  --cmp-border: var(--stroke-hairline);
+  --cmp-fill: var(--surface-0);
+  --cmp-fill-hover: var(--surface-hover);
+  --cmp-selector-fill: var(--surface-1);
+  --cmp-brand: var(--accent);
+  --cmp-brand-hover: var(--accent-hover);
+  --cmp-shadow: var(--elevation-soft);
+  --cmp-shadow-menu: var(--elevation-2);
+  --cmp-radius-panel: var(--radius-panel);
+  --cmp-radius-menu: var(--radius-md);
+  --cmp-radius-item: var(--radius-sm);
 }
 
 .composer-shell {
@@ -66,10 +52,10 @@ html.dark .composer-seat {
   width: 100%;
   padding-top: 10px;
   border: 1px solid var(--cmp-border);
-  border-radius: 22px;
+  border-radius: var(--cmp-radius-panel);
   background: var(--cmp-fill);
   box-shadow: var(--cmp-shadow);
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 24px;
 }
 .composer-editor:focus-within {
@@ -86,11 +72,11 @@ html.dark .composer-seat {
   content: "";
   position: absolute;
   inset: -1px;
-  border-radius: 22px;
+  border-radius: var(--cmp-radius-panel);
   background: rgba(0, 0, 0, 0.16);
   transition: background-color 100ms ease;
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' fill='none' rx='22' ry='22' stroke='black' stroke-width='2' stroke-dasharray='4 4'/%3E%3C/svg%3E");
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' fill='none' rx='22' ry='22' stroke='black' stroke-width='2' stroke-dasharray='4 4'/%3E%3C/svg%3E");
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' fill='none' rx='24' ry='24' stroke='black' stroke-width='2' stroke-dasharray='4 4'/%3E%3C/svg%3E");
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' fill='none' rx='24' ry='24' stroke='black' stroke-width='2' stroke-dasharray='4 4'/%3E%3C/svg%3E");
   pointer-events: none;
 }
 html.dark .composer-editor.composer-no-session::after {
@@ -174,8 +160,8 @@ html.dark .composer-editor.composer-no-session::after {
   height: 28px;
   padding: 0 8px;
   border: none;
-  border-radius: 24px;
-  font-size: 13px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-md);
   font-weight: 500;
   line-height: 20px;
   color: var(--cmp-brand);
@@ -195,7 +181,7 @@ html.dark .composer-editor.composer-no-session::after {
   margin: 0;
   padding: 0;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--cmp-selector-fill);
   color: var(--cmp-text-primary);
   cursor: pointer;
@@ -223,9 +209,9 @@ html.dark .composer-editor.composer-no-session::after {
   flex: none;
   padding: 0;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--cmp-brand);
-  color: #fff;
+  color: var(--accent-contrast);
   cursor: pointer;
   transition: background-color 100ms ease;
   transform: translateY(-2px);
@@ -241,10 +227,10 @@ html.dark .composer-editor.composer-no-session::after {
   height: 28px;
   padding: 0 8px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--cmp-text-secondary);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 500;
   cursor: pointer;
 }
@@ -270,11 +256,11 @@ html.dark .composer-editor.composer-no-session::after {
   height: 28px;
   padding: 0 4px 0 8px;
   border: none;
-  border-radius: 24px;
+  border-radius: var(--radius-full);
   outline: none;
   background: transparent;
   color: var(--cmp-text-secondary);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 20px;
   font-weight: 500;
   cursor: pointer;
@@ -324,7 +310,7 @@ html.dark .composer-editor.composer-no-session::after {
   overflow: hidden;
   padding: 4px;
   border: 1px solid var(--cmp-border);
-  border-radius: 12px;
+  border-radius: var(--cmp-radius-menu);
   background: var(--cmp-fill);
   box-shadow: var(--cmp-shadow-menu);
   color: var(--cmp-text-primary);
@@ -332,7 +318,7 @@ html.dark .composer-editor.composer-no-session::after {
 .model-select-empty {
   padding: 10px;
   color: var(--cmp-text-tertiary);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 20px;
 }
 
@@ -348,10 +334,10 @@ html.dark .composer-editor.composer-no-session::after {
   height: 40px;
   padding: 0 10px;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--cmp-radius-item);
   background: transparent;
   color: var(--cmp-text-primary);
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 22px;
   cursor: pointer;
   text-align: left;
@@ -392,7 +378,7 @@ html.dark .composer-editor.composer-no-session::after {
   padding: 5px 8px 3px;
   background: var(--cmp-fill);
   color: var(--cmp-text-tertiary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
   font-weight: 500;
 }
@@ -406,7 +392,7 @@ html.dark .composer-editor.composer-no-session::after {
   min-height: 38px;
   padding: 6px 8px;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--cmp-radius-item);
   outline: none;
   background: transparent;
   color: inherit;
@@ -433,7 +419,7 @@ html.dark .composer-editor.composer-no-session::after {
 .model-select-option-name {
   overflow: hidden;
   color: inherit;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 20px;
   font-weight: 500;
   text-overflow: ellipsis;
@@ -469,7 +455,7 @@ html.dark .composer-editor.composer-no-session::after {
   width: 28px;
   height: 28px;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: transparent;
   color: var(--cmp-text-secondary);
   cursor: pointer;
@@ -497,10 +483,10 @@ html.dark .composer-editor.composer-no-session::after {
   width: 264px;
   padding: 12px;
   border: 1px solid var(--cmp-border);
-  border-radius: 12px;
+  border-radius: var(--cmp-radius-menu);
   background: var(--cmp-fill);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 20px;
   color: var(--cmp-text-secondary);
   cursor: default;
@@ -531,7 +517,7 @@ html.dark .composer-editor.composer-no-session::after {
   gap: 1px;
   margin: 10px 0 12px;
   height: 4px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--cmp-hover);
   overflow: hidden;
 }
@@ -553,7 +539,7 @@ html.dark .composer-editor.composer-no-session::after {
 }
 .cm-color-system { --meter-tint: rgb(148, 163, 184); }
 .cm-color-tools { --meter-tint: rgb(167, 139, 250); }
-.cm-color-messages { --meter-tint: var(--cmp-brand, rgb(65, 118, 230)); }
+.cm-color-messages { --meter-tint: var(--cmp-brand); }
 .context-meter-rows {
   margin: 6px 0 0;
 }
@@ -581,7 +567,7 @@ html.dark .composer-editor.composer-no-session::after {
   margin: 0 auto;
   box-sizing: border-box;
   padding: 4px 0 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 20px;
   color: var(--cmp-text-tertiary);
   white-space: nowrap;
@@ -617,11 +603,11 @@ html.dark .composer-editor.composer-no-session::after {
   height: 28px;
   padding: 0 4px 0 8px;
   border: none;
-  border-radius: 24px;
+  border-radius: var(--radius-full);
   outline: none;
   background: transparent;
   color: var(--cmp-text-secondary);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 20px;
   font-weight: 500;
   cursor: pointer;
@@ -676,7 +662,7 @@ html.dark .composer-editor.composer-no-session::after {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--cmp-border);
-  border-radius: 12px;
+  border-radius: var(--cmp-radius-menu);
   background: var(--cmp-fill);
   box-shadow: var(--cmp-shadow-menu);
   color: var(--cmp-text-primary);
@@ -689,10 +675,10 @@ html.dark .composer-editor.composer-no-session::after {
   min-height: 40px;
   padding: 8px 10px;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--cmp-radius-item);
   background: transparent;
   color: var(--cmp-text-primary);
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 22px;
   text-align: left;
   cursor: pointer;
@@ -732,7 +718,7 @@ html.dark .composer-editor.composer-no-session::after {
   flex-direction: column;
   gap: 0;
   border: 1px solid var(--cmp-border);
-  border-radius: 12px;
+  border-radius: var(--cmp-radius-menu);
   background: var(--cmp-fill);
   box-shadow: var(--cmp-shadow-menu);
   animation: none;
@@ -744,12 +730,12 @@ html.dark .composer-editor.composer-no-session::after {
   gap: 8px;
   min-height: 40px;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: var(--cmp-radius-item);
 }
 .composer-config-label {
   flex: 0 0 auto;
   color: var(--cmp-text-tertiary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
@@ -765,7 +751,7 @@ html.dark .composer-editor.composer-no-session::after {
 }
 .composer-config-hint {
   color: var(--warning);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 .composer-config-hint.is-danger {
   color: var(--danger);
@@ -829,7 +815,7 @@ html.dark .composer-editor.composer-no-session::after {
   column-gap: 10px;
   align-items: center;
   justify-content: center;
-  font-size: 26px;
+  font-size: var(--text-display);
   line-height: 32px;
   font-weight: 500;
   color: var(--cmp-text-primary);
@@ -842,9 +828,7 @@ html.dark .composer-editor.composer-no-session::after {
   justify-content: center;
   width: 34px;
   height: 34px;
-  color: var(--cmp-text-primary);
-  font-size: 20px;
-  font-weight: 600;
+  color: var(--accent);
   transform-origin: 50% 60%;
 }
 @keyframes hero-fish-swim {
@@ -861,7 +845,7 @@ html.dark .composer-editor.composer-no-session::after {
   grid-row: 1;
   grid-column: 2;
   margin: 0;
-  font-size: 26px;
+  font-size: var(--text-display);
   line-height: 32px;
   font-weight: 500;
 }
@@ -873,11 +857,11 @@ html.dark .composer-editor.composer-no-session::after {
   margin-left: -3px;
   padding: 1px 7px 0;
   border: 1px solid var(--cmp-hover);
-  border-radius: 24px;
+  border-radius: var(--radius-full);
   background: color-mix(in srgb, var(--cmp-brand) 12%, transparent);
   color: var(--cmp-brand);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
   font-weight: 500;
   white-space: nowrap;
@@ -890,7 +874,7 @@ html.dark .composer-editor.composer-no-session::after {
   border: none;
   background: transparent;
   color: var(--cmp-text-tertiary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   text-decoration: underline;
   cursor: pointer;
 }
@@ -917,10 +901,10 @@ html.dark .composer-editor.composer-no-session::after {
   min-height: 28px;
   padding: 0 8px;
   border: none;
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   background: transparent;
   color: var(--cmp-text-primary);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 20px;
   font-weight: 500;
   cursor: pointer;
@@ -955,7 +939,7 @@ html.dark .composer-editor.composer-no-session::after {
   width: 100%;
   padding: 4px 0 0;
   color: var(--cmp-text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 .composer-followup-queue span {
   overflow: hidden;
@@ -963,7 +947,7 @@ html.dark .composer-editor.composer-no-session::after {
   white-space: nowrap;
 }
 .composer-drop-zone {
-  border-radius: 22px;
+  border-radius: var(--cmp-radius-panel);
 }
 .stats-line-sep {
   color: var(--cmp-text-tertiary);

@@ -32,14 +32,14 @@ const KIND_LABELS: Record<string, string> = {
 };
 
 const HEADING: React.CSSProperties = {
-  fontSize: 10, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase",
+  fontSize: 11, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase",
   color: "var(--text-dim)", marginBottom: 6,
 };
 
 const MUTED: React.CSSProperties = { color: "var(--text-dim)", fontSize: 11, lineHeight: 1.5 };
 
 const DIGEST: React.CSSProperties = {
-  fontFamily: "var(--font-mono, ui-monospace, monospace)", fontSize: 10.5, color: "var(--text-dim)",
+  fontFamily: "var(--font-mono, ui-monospace, monospace)", fontSize: 11, color: "var(--text-dim)",
   overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
 };
 
@@ -98,7 +98,7 @@ export function RunInspectorBody({ runId, composition, mcp, transcript, loading,
       <DigestLine label={t("inspector.sectionsDigest")} value={composition.sectionsDigest} />
       <DigestLine label={t("inspector.composedDigest")} value={composition.composedDigest} />
       <DigestLine label={t("inspector.baseDigest")} value={composition.digest} />
-      {composition.skillCatalogState !== "" && <div style={{ display: "flex", gap: 8, fontSize: 10.5 }}>
+      {composition.skillCatalogState !== "" && <div style={{ display: "flex", gap: 8, fontSize: 11 }}>
         <span style={{ ...MUTED, flexShrink: 0 }}>{t("inspector.skillCatalog")}</span>
         <span style={{ ...MUTED, color: "var(--text)" }}>
           {t(`inspector.catalog.${composition.skillCatalogState}`)}
@@ -131,8 +131,8 @@ export function RunInspectorBody({ runId, composition, mcp, transcript, loading,
         disabled={transcript.loadingOlder}
         onClick={transcript.loadOlder}
         style={{
-          marginTop: 6, padding: "3px 8px", borderRadius: 5, border: "1px solid var(--border)",
-          background: "none", color: "var(--text-dim)", fontSize: 10.5, cursor: "pointer",
+          marginTop: 6, padding: "3px 8px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)",
+          background: "none", color: "var(--text-dim)", fontSize: 11, cursor: "pointer",
         }}
       >{t("inspector.transcriptOlder")}</button>}
     </div> : null}
@@ -158,8 +158,8 @@ export function RunInspectorBody({ runId, composition, mcp, transcript, loading,
       {promptOpen && <pre
         data-run-prompt
         style={{
-          margin: "6px 0 0", padding: 10, borderRadius: 6, border: "1px solid var(--border)",
-          background: "var(--bg-panel)", fontSize: 10.5, lineHeight: 1.45,
+          margin: "6px 0 0", padding: 10, borderRadius: "var(--radius-sm)", border: "1px solid var(--border)",
+          background: "var(--bg-panel)", fontSize: 11, lineHeight: 1.45,
           whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 420, overflowY: "auto",
         }}
       >{composition.prompt}</pre>}
@@ -172,11 +172,11 @@ function SectionRow({ section }: { section: PromptSection }) {
     data-prompt-section={section.kind}
     style={{
       display: "flex", alignItems: "center", gap: 8, padding: "5px 8px",
-      border: "1px solid var(--border)", borderRadius: 6, fontSize: 11,
+      border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", fontSize: 11,
     }}
   >
     <span style={{
-      flexShrink: 0, fontSize: 9.5, fontWeight: 600, padding: "1px 5px", borderRadius: 4,
+      flexShrink: 0, fontSize: 11, fontWeight: 600, padding: "1px 5px", borderRadius: "var(--radius-xs)",
       border: "1px solid var(--border)", color: "var(--text-dim)",
     }}>{KIND_LABELS[section.kind] ?? section.kind}</span>
     <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -195,7 +195,7 @@ function MCPServerRow({ server, t }: { server: RunMCPServerSnapshot; t: (key: st
   return <div
     data-mcp-server={server.bindingId}
     style={{
-      padding: "5px 8px", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11,
+      padding: "5px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", fontSize: 11,
       borderColor: unavailable ? "var(--warn-border, var(--border))" : "var(--border)",
     }}
   >
@@ -205,31 +205,31 @@ function MCPServerRow({ server, t }: { server: RunMCPServerSnapshot; t: (key: st
         <span style={{ color: "var(--text-dim)" }}>{` · rev ${server.bindingRevision}`}</span>
       </span>
       {server.required && <span style={{
-        flexShrink: 0, fontSize: 9.5, fontWeight: 600, padding: "1px 5px", borderRadius: 4,
+        flexShrink: 0, fontSize: 11, fontWeight: 600, padding: "1px 5px", borderRadius: "var(--radius-xs)",
         border: "1px solid var(--border)", color: "var(--text-dim)",
       }}>{t("inspector.mcpRequired")}</span>}
       <span style={{ flexShrink: 0, color: "var(--text-dim)" }}>
         {t("inspector.mcpTools").replace("{count}", String((server.tools ?? []).length))}
       </span>
     </div>
-    {unavailable && <div style={{ marginTop: 3, color: "var(--text-dim)", fontSize: 10.5 }}>
+    {unavailable && <div style={{ marginTop: 3, color: "var(--text-dim)", fontSize: 11 }}>
       {`${t("inspector.mcpUnavailable")}: ${server.unavailableReason}`}
     </div>}
-    {server.negotiatedProtocol !== "" && <div style={{ marginTop: 2, ...MUTED, fontSize: 10.5 }}>
+    {server.negotiatedProtocol !== "" && <div style={{ marginTop: 2, ...MUTED, fontSize: 11 }}>
       {`${t("inspector.mcpProtocol")}: ${server.negotiatedProtocol}`}
     </div>}
     {server.instructions !== "" && <details style={{ marginTop: 3 }}>
-      <summary style={{ ...MUTED, fontSize: 10.5, cursor: "pointer" }} title={server.instructionsDigest}>
+      <summary style={{ ...MUTED, fontSize: 11, cursor: "pointer" }} title={server.instructionsDigest}>
         {t("inspector.mcpInstructions")}
       </summary>
       <div style={{
-        marginTop: 3, padding: "5px 7px", borderRadius: 5, background: "var(--bg-panel)",
-        fontSize: 10.5, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word",
+        marginTop: 3, padding: "5px 7px", borderRadius: "var(--radius-sm)", background: "var(--bg-panel)",
+        fontSize: 11, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word",
         maxHeight: 240, overflowY: "auto",
       }} data-mcp-instructions>{server.instructions}</div>
     </details>}
     {(server.tools ?? []).length > 0 && <div style={{ marginTop: 3, display: "flex", flexDirection: "column", gap: 1 }}>
-      {(server.tools ?? []).map((tool) => <div key={tool.exposedName} style={{ display: "flex", gap: 8, fontSize: 10.5 }}>
+      {(server.tools ?? []).map((tool) => <div key={tool.exposedName} style={{ display: "flex", gap: 8, fontSize: 11 }}>
         <span style={{ ...DIGEST, flex: 1, minWidth: 0 }} title={tool.exposedName}>{tool.exposedName}</span>
         <span style={{ flexShrink: 0, color: "var(--text-dim)" }}>{tool.riskClass}</span>
       </div>)}
@@ -246,7 +246,7 @@ function TranscriptRow({ message, t }: { message: RunMessagePage["messages"][num
   const summary = transcriptSummary(message.content);
   return <details
     data-transcript-ordinal={message.ordinal}
-    style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "4px 8px" }}
+    style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 8px" }}
   >
     <summary style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, cursor: "pointer" }}>
       <span style={{ ...MUTED, flexShrink: 0, width: 22, textAlign: "right" }}>{message.ordinal}</span>
@@ -256,7 +256,7 @@ function TranscriptRow({ message, t }: { message: RunMessagePage["messages"][num
       {message.visibility === "private" && <span
         data-transcript-private
         style={{
-          flexShrink: 0, fontSize: 9.5, padding: "1px 5px", borderRadius: 4,
+          flexShrink: 0, fontSize: 11, padding: "1px 5px", borderRadius: "var(--radius-xs)",
           border: "1px solid var(--border)", color: "var(--text-dim)",
         }}
       >{t("inspector.transcriptPrivate")}</span>}
@@ -272,8 +272,8 @@ function TranscriptRow({ message, t }: { message: RunMessagePage["messages"][num
 
 function TranscriptEntryView({ entry, t }: { entry: ReturnType<typeof transcriptEntries>[number]; t: (key: string) => string }) {
   const pre: React.CSSProperties = {
-    margin: 0, padding: "5px 7px", borderRadius: 5, background: "var(--bg-panel)",
-    fontSize: 10.5, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word",
+    margin: 0, padding: "5px 7px", borderRadius: "var(--radius-sm)", background: "var(--bg-panel)",
+    fontSize: 11, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word",
     maxHeight: 260, overflowY: "auto",
   };
   if (entry.kind === "text") return <div style={pre}>{entry.text}</div>;
@@ -292,7 +292,7 @@ function TranscriptEntryView({ entry, t }: { entry: ReturnType<typeof transcript
     {entry.arguments !== undefined && <div style={{ ...pre, marginTop: 3 }}>{entry.arguments}</div>}
   </details>;
   return <details>
-    <summary style={{ ...MUTED, cursor: "pointer", color: entry.isError ? "var(--danger, #dc2626)" : "var(--text-dim)" }}>
+    <summary style={{ ...MUTED, cursor: "pointer", color: entry.isError ? "var(--danger)" : "var(--text-dim)" }}>
       {`${entry.isError ? t("inspector.transcriptError") : t("inspector.transcriptResult")} ${entry.name}`}
     </summary>
     <div style={{ ...pre, marginTop: 3 }}>{entry.text}</div>
@@ -301,7 +301,7 @@ function TranscriptEntryView({ entry, t }: { entry: ReturnType<typeof transcript
 
 function DigestLine({ label, value }: { label: string; value: string }) {
   if (!value) return null;
-  return <div style={{ display: "flex", gap: 8, fontSize: 10.5 }}>
+  return <div style={{ display: "flex", gap: 8, fontSize: 11 }}>
     <span style={{ ...MUTED, flexShrink: 0 }}>{label}</span>
     <span style={{ ...DIGEST, minWidth: 0 }} title={value}>{value}</span>
   </div>;

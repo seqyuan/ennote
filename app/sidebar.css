@@ -1,49 +1,31 @@
-/* Sidebar design tokens, aligned to deepseek-harness --dsw-* values.
-   Scoped to .sidebar-container so the rest of the app keeps its palette. */
+/* Sidebar consumes the shared design tokens. The --sb-* names remain as a
+   local vocabulary for the sidebar layout, but every value resolves to the
+   global semantic layer so light/dark and accent changes stay in one place. */
 .sidebar-container,
 .workspace-nav-container {
-  --sb-fill: #f9fafb;                        /* dsw neutral-bluish-50 */
-  --sb-text-primary: rgb(15, 17, 21);        /* neutral-bluish-1000 */
-  --sb-text-secondary: rgb(97, 102, 107);    /* neutral-bluish-700 */
-  --sb-text-tertiary: rgb(129, 133, 140);    /* neutral-bluish-600 */
-  --sb-border-l1: rgba(0, 0, 0, 0.04);
-  --sb-border-l2: rgba(0, 0, 0, 0.10);
-  --sb-hover: rgba(38, 49, 72, 0.06);
-  --sb-active: rgb(235, 238, 242);           /* neutral-bluish-100 */
-  --sb-active-accent: rgb(228, 237, 253);    /* deepseek-100 */
-  --sb-button-fill: #ffffff;
-  --sb-button-hover: rgb(241, 243, 245);     /* neutral-bluish-75 */
-  --sb-brand: rgb(65, 118, 230);             /* deepseek-500 */
-  --sb-radius: 12px;
-  --sb-radius-row: 8px;
-  --sb-pad-x: 12px;
-  --sb-caption: rgb(173, 178, 184);          /* dsh chevron caption */
-  --sb-scrollbar-thumb: rgb(229, 229, 229);  /* dsw scrollbar-bg-l2 */
-  --sb-scrollbar-thumb-hover: rgb(84, 85, 87);
+  --sb-fill: var(--surface-1);
+  --sb-text-primary: var(--content-1);
+  --sb-text-secondary: var(--content-2);
+  --sb-text-tertiary: var(--content-3);
+  --sb-border-l1: var(--stroke-hairline);
+  --sb-border-l2: var(--stroke-strong);
+  --sb-hover: var(--surface-hover);
+  --sb-active: var(--surface-selected);
+  --sb-active-accent: var(--accent-soft);
+  --sb-button-fill: var(--surface-0);
+  --sb-button-hover: var(--surface-hover);
+  --sb-brand: var(--accent);
+  --sb-radius: var(--radius-md);
+  --sb-radius-row: var(--radius-sm);
+  --sb-pad-x: var(--space-3);
+  --sb-caption: var(--content-3);
+  --sb-scrollbar-thumb: var(--stroke-hairline);
+  --sb-scrollbar-thumb-hover: var(--content-3);
   --sb-scrollbar-width: 8px;
   --sb-scrollbar-offset: 2px;
 
   background: var(--sb-fill);
   border-right: 1px solid var(--sb-border-l1);
-}
-
-html.dark .sidebar-container,
-html.dark .workspace-nav-container {
-  --sb-fill: rgb(27, 27, 28);                /* neutral-bluish-900 */
-  --sb-text-primary: rgb(249, 250, 251);     /* neutral-bluish-50 */
-  --sb-text-secondary: rgb(207, 211, 214);   /* neutral-bluish-300 */
-  --sb-text-tertiary: rgb(151, 157, 166);    /* neutral-bluish-500 */
-  --sb-border-l1: rgba(255, 255, 255, 0.06);
-  --sb-border-l2: rgba(255, 255, 255, 0.12);
-  --sb-hover: rgba(255, 255, 255, 0.08);
-  --sb-active: rgb(44, 44, 46);              /* neutral-bluish-750 */
-  --sb-active-accent: rgb(53, 54, 56);       /* neutral-bluish-800 */
-  --sb-button-fill: rgb(44, 44, 46);
-  --sb-button-hover: rgb(53, 54, 56);
-  --sb-brand: rgb(103, 158, 254);            /* deepseek-400 */
-  --sb-caption: rgb(173, 178, 184);
-  --sb-scrollbar-thumb: rgb(84, 85, 87);
-  --sb-scrollbar-thumb-hover: rgb(151, 157, 166);
 }
 
 /* ---- Sidebar shell ---- */
@@ -56,7 +38,7 @@ html.dark .workspace-nav-container {
   overflow: hidden;
   padding: 6px var(--sb-pad-x);
   color: var(--sb-text-primary);
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 .sidebar.quiet-bars {
   --sb-scrollbar-thumb: transparent;
@@ -86,13 +68,10 @@ html.dark .workspace-nav-container {
   border: none;
   background: transparent;
   color: inherit;
-  cursor: pointer;
+  cursor: default;
   font: inherit;
   text-align: left;
 }
-.sidebar-brand:hover,
-.sidebar-brand:disabled { background: transparent; }
-.sidebar-brand:disabled { cursor: default; }
 .sidebar-brand-identity {
   display: inline-flex;
   align-items: center;
@@ -104,7 +83,7 @@ html.dark .workspace-nav-container {
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
-  font-size: 18px;
+  font-size: var(--text-xl);
   font-weight: 600;
   line-height: 24px;
   letter-spacing: 0.04em;
@@ -119,8 +98,7 @@ html.dark .workspace-nav-container {
   border: none;
   border-radius: 0;
   background: transparent;
-  color: inherit;
-  font: 700 16px/24px inherit;
+  color: var(--accent);
 }
 
 /* Desktop toggle (panel-left icon), right edge of the logo row. */
@@ -148,7 +126,7 @@ html.dark .workspace-nav-container {
   height: 28px;
   place-items: center;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--sb-text-secondary);
   cursor: pointer;
@@ -174,7 +152,7 @@ html.dark .workspace-nav-container {
   border-radius: var(--sb-radius);
   background: var(--sb-button-fill);
   color: var(--sb-text-primary);
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 500;
   line-height: 22px;
   cursor: pointer;
@@ -200,7 +178,7 @@ html.dark .workspace-nav-container {
   box-sizing: border-box;
   border-radius: var(--sb-radius-row);
   color: var(--sb-text-primary);
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 500;
   line-height: 20px;
   border: 0;
@@ -230,7 +208,7 @@ html.dark .workspace-nav-container {
   margin: 2px -4px 4px 0;
   padding-left: 4px;
   box-sizing: border-box;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   color: var(--sb-text-tertiary);
 }
 .workspace-label {
@@ -239,7 +217,7 @@ html.dark .workspace-nav-container {
   max-width: 45%;
   overflow: hidden;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 20px;
   opacity: 1;
   visibility: visible;
@@ -294,7 +272,7 @@ html.dark .workspace-nav-container {
   outline: none;
   background: transparent;
   color: var(--sb-text-primary);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 18px;
   opacity: 0;
   pointer-events: none;
@@ -327,7 +305,7 @@ html.dark .workspace-nav-container {
   margin-inline: -2px;
   padding: 0 4px 0 0;
   border: 1px solid var(--sb-border-l2);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   color: var(--sb-text-tertiary);
 }
 .sidebar-workspace-head.search-expanded .workspace-search-button { width: 28px; height: 30px; }
@@ -377,7 +355,7 @@ html.dark .workspace-nav-container {
 .sidebar-session-list::-webkit-scrollbar { width: var(--sb-scrollbar-width); }
 .sidebar-session-list::-webkit-scrollbar-track { background: transparent; }
 .sidebar-session-list::-webkit-scrollbar-thumb {
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--sb-scrollbar-thumb);
 }
 .sidebar-session-list::-webkit-scrollbar-thumb:hover {
@@ -406,7 +384,7 @@ html.dark .workspace-nav-container {
   padding: 18px;
   text-align: center;
   color: var(--sb-text-tertiary);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 /* ---- Settings foot (dsh SettingsRoot .trigger) ---- */
@@ -425,11 +403,11 @@ html.dark .workspace-nav-container {
   padding: 0 10px 0 8px;
   box-sizing: border-box;
   border: none;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--sb-text-primary);
   font-family: inherit;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 22px;
   cursor: pointer;
   overflow: hidden;
@@ -442,7 +420,7 @@ html.dark .workspace-nav-container {
   padding: 6px 10px;
   border-radius: var(--sb-radius-row);
   color: var(--sb-text-secondary);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 .sidebar .sidebar-item:hover { background: var(--sb-hover); color: var(--sb-text-primary); }
 .sidebar .sidebar-item.active { background: var(--sb-active); color: var(--sb-text-primary); font-weight: 600; }
@@ -461,10 +439,10 @@ html.dark .workspace-nav-container {
   margin: 0;
   padding: 0 12px 0 28px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--sb-text-tertiary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 400;
   line-height: 20px;
   text-align: left;
@@ -483,14 +461,13 @@ html.dark .workspace-nav-container {
 /* Desktop: the sidebar owns the collapse toggle now; keep the topbar hamburger
    only for the mobile off-canvas drawer. */
 @media (min-width: 641px) {
-  .topbar-sidebar-toggle { display: none !important; }
 }
 
 /* ---- WorkspaceNav (management pages) aligned to the sidebar language ---- */
 .workspace-nav {
   padding: 6px var(--sb-pad-x);
   color: var(--sb-text-primary);
-  font-size: 14px;
+  font-size: var(--text-base);
   background: transparent;
 }
 .workspace-nav .workspace-nav-brand {
@@ -513,7 +490,7 @@ html.dark .workspace-nav-container {
   padding: 7px 10px;
   border-radius: var(--sb-radius-row);
   color: var(--sb-text-secondary);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 500;
   text-decoration: none;
 }
@@ -583,7 +560,7 @@ html.dark .workspace-nav-container {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 20px;
 }
 
@@ -607,14 +584,14 @@ html.dark .workspace-nav-container {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 20px;
   margin: 0 6px 0 4px;
 }
 
 .sb-session-time {
   flex: none;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 20px;
   color: var(--sb-text-tertiary);
 }
@@ -624,7 +601,7 @@ html.dark .workspace-nav-container {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #22c55e;
+  background: var(--success);
 }
 
 /* Trailing actions surface on hover only. */
@@ -632,17 +609,20 @@ html.dark .workspace-nav-container {
   flex: none;
   display: none;
   align-items: center;
-  gap: 12px;
+  gap: 2px;
 }
 
 .sb-project-row:hover .sb-row-actions,
 .sb-session-row:hover .sb-row-actions,
+.sb-project-row:focus-within .sb-row-actions,
+.sb-session-row:focus-within .sb-row-actions,
 .sb-project-row.sb-menu-open .sb-row-actions,
 .sb-session-row.sb-menu-open .sb-row-actions {
   display: inline-flex;
 }
 
 .sb-session-row:hover .sb-session-time,
+.sb-session-row:focus-within .sb-session-time,
 .sb-session-row.sb-menu-open .sb-session-time {
   display: none;
 }
@@ -652,37 +632,43 @@ html.dark .workspace-nav-container {
   background: var(--sb-hover);
 }
 
+/* Row actions keep a 24px hit target (WCAG 2.5.8) while the row stays 34px
+   tall. They appear for pointer and keyboard users alike. */
 .sb-row-icon-btn {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 0;
   background: transparent;
   cursor: pointer;
   color: var(--sb-text-tertiary);
 }
 
-.sb-row-icon-btn:hover { color: var(--sb-text-primary); }
+.sb-row-icon-btn:hover,
+.sb-row-icon-btn:focus-visible { color: var(--sb-text-primary); background: var(--sb-active); }
 
 .sb-pin-star {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 0;
   background: transparent;
   cursor: pointer;
-  color: #ca8a04;
+  color: var(--warning);
 }
+
+.sb-pin-star:hover,
+.sb-pin-star:focus-visible { background: var(--sb-active); }
 
 .sb-pin-star.is-unpinned { color: var(--sb-text-tertiary); }
 
@@ -695,7 +681,7 @@ html.dark .workspace-nav-container {
   width: 160px;
   padding: 4px;
   border: 1px solid var(--sb-border-l1);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--sb-button-fill);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
 }
@@ -708,16 +694,16 @@ html.dark .workspace-nav-container {
   gap: 8px;
   padding: 5px 8px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--sb-text-primary);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--text-sm);
   text-align: left;
 }
 
 .sb-row-menu button:hover:not(:disabled) { background: var(--sb-hover); }
-.sb-row-menu button.is-danger { color: #e5484d; }
+.sb-row-menu button.is-danger { color: var(--danger); }
 
 /* Rename / delete dialog (dsh renameInput: 44px, 22px radius). */
 .sb-dialog-overlay {
@@ -735,21 +721,21 @@ html.dark .workspace-nav-container {
   width: min(360px, calc(100vw - 48px));
   padding: 20px;
   border: 1px solid var(--sb-border-l1);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   background: var(--sb-button-fill);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
 }
 
 .sb-dialog h3 {
   margin: 0 0 4px;
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 600;
   color: var(--sb-text-primary);
 }
 
 .sb-dialog p {
   margin: 0 0 14px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.6;
   color: var(--sb-text-secondary);
 }
@@ -760,10 +746,10 @@ html.dark .workspace-nav-container {
   height: 44px;
   padding: 7px 14px;
   border: 1px solid var(--sb-border-l2);
-  border-radius: 22px;
+  border-radius: var(--radius-full);
   outline: none;
   background: transparent;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 22px;
   color: var(--sb-text-primary);
 }
@@ -772,9 +758,9 @@ html.dark .workspace-nav-container {
 
 .sb-dialog-error {
   margin-top: 8px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
-  color: #e5484d;
+  color: var(--danger);
 }
 
 .sb-dialog-actions {
@@ -788,11 +774,11 @@ html.dark .workspace-nav-container {
   height: 34px;
   padding: 0 16px;
   border: 1px solid var(--sb-border-l2);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--sb-text-primary);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 500;
 }
 
@@ -800,12 +786,12 @@ html.dark .workspace-nav-container {
 .sb-dialog-actions button.sb-primary {
   background: var(--sb-brand);
   border-color: var(--sb-brand);
-  color: #fff;
+  color: var(--content-inverse);
 }
 .sb-dialog-actions button.sb-danger {
-  background: #e5484d;
-  border-color: #e5484d;
-  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--content-inverse);
 }
 .sb-dialog-actions button:disabled { opacity: 0.5; cursor: default; }
 

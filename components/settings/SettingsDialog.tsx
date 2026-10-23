@@ -188,7 +188,7 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
       className="settings-dialog-shell"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="settings-dialog-title settings-dialog-current"
+      aria-label="Settings"
     >
         {/* Body */}
         <div className="settings-dialog-body">

@@ -29,7 +29,7 @@ export function ProjectSelector(props: {
           padding: "6px 10px",
           background: selectedProject ? "var(--bg-hover)" : "rgba(37,99,235,0.06)",
           border: selectedProject ? "1px solid var(--border)" : "1px solid rgba(37,99,235,0.4)",
-          borderRadius: 7, cursor: "pointer",
+          borderRadius: "var(--radius-sm)", cursor: "pointer",
           fontSize: 12, color: "var(--text)", textAlign: "left" as const,
         }}
         title={selectedProject ? projects.find((p) => p.id === selectedProject)?.name ?? t("sidebar.selectProject") : t("sidebar.selectProject")}

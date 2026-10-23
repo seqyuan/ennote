@@ -1,7 +1,7 @@
 "use client";
 
 import { Bot, Check, ChevronDown, Search, UserRound } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { RoleSummary } from "@/components/settings/types";
 
 export function RoleTargetPicker({ roles, selectedRoleId, disabled, onSelect }: {
@@ -13,6 +13,8 @@ export function RoleTargetPicker({ roles, selectedRoleId, disabled, onSelect }: 
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const root = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const selected = roles.find((role) => role.id === selectedRoleId) ?? null;
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -25,23 +27,44 @@ export function RoleTargetPicker({ roles, selectedRoleId, disabled, onSelect }: 
     const close = (event: PointerEvent) => {
       if (!root.current?.contains(event.target as Node)) setOpen(false);
     };
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
     document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", onKeyDown);
+    };
   }, [open]);
 
   function choose(roleId: string | null) {
     onSelect(roleId);
     setOpen(false);
     setQuery("");
+    triggerRef.current?.focus();
+  }
+
+  function onMenuKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    const options = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="option"]') ?? []);
+    if (options.length === 0) return;
+    event.preventDefault();
+    const at = options.indexOf(document.activeElement as HTMLElement);
+    const next = (Math.max(at, 0) + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+    options[next]?.focus();
   }
 
   return <div className="role-target-picker" ref={root}>
-    <button type="button" className="role-target-trigger" disabled={disabled} aria-haspopup="listbox" aria-expanded={open}
+    <button ref={triggerRef} type="button" className="role-target-trigger" disabled={disabled} aria-haspopup="listbox" aria-expanded={open}
       onClick={() => setOpen((value) => !value)} title="Invocation target">
       {selected ? <Bot size={13} aria-hidden="true" /> : <UserRound size={13} aria-hidden="true" />}
       <span>{selected ? `@${selected.handle}` : "Host"}</span><ChevronDown size={12} aria-hidden="true" />
     </button>
-    {open && <div className="role-target-menu">
+    {open && <div ref={menuRef} className="role-target-menu" onKeyDown={onMenuKeyDown}>
       <label><Search size={13} aria-hidden="true" /><input autoFocus value={query} placeholder="Find a Role"
         onChange={(event) => setQuery(event.target.value)} /></label>
       <div role="listbox" aria-label="Invocation target">

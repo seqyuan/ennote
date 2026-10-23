@@ -15,7 +15,8 @@
     "build:web": "next build",
     "build:go": "cd ennoworker && go build -o ennogate ./cmd/ennogate && go build -o ennoworker ./cmd/ennoworker",
     "build": "npm run build:web && npm run build:go",
-    "lint": "eslint .",
+    "lint": "eslint . && npm run check:design",
+    "check:design": "node scripts/check-design-tokens.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -39,7 +40,6 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",
-    "@tailwindcss/postcss": "^4.3.3",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.20.1",
     "@types/react": "^19.2.17",
@@ -49,7 +49,6 @@
     "openapi-typescript": "^7.10.1",
     "postcss": "^8.5.25",
     "shiki": "^4.3.1",
-    "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
     "vitest": "^3.2.7"
   }

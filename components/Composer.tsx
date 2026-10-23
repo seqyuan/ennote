@@ -1,6 +1,8 @@
 "use client";
 
-import { Bot, ImagePlus, ListPlus, Minimize2, Paperclip, Plus } from "lucide-react";
+import {
+  Bot, File, FileSpreadsheet, FileText, ImagePlus, ListPlus, Minimize2, Paperclip, Plus, Presentation, X,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
 import { useT } from "@/components/LocaleProvider";
 import { RoleTargetPicker } from "@/components/RoleTargetPicker";
@@ -29,19 +31,21 @@ export interface PendingImage {
   height?: number;
 }
 
-const ATTACHMENT_DOC_ICONS: Record<string, { emoji: string; color: string }> = {
-  pdf: { emoji: "📄", color: "#ef4444" },
-  docx: { emoji: "📝", color: "#3b82f6" },
-  doc: { emoji: "📝", color: "#3b82f6" },
-  xlsx: { emoji: "📊", color: "#22c55e" },
-  xls: { emoji: "📊", color: "#22c55e" },
-  pptx: { emoji: "📽", color: "#f97316" },
-  ppt: { emoji: "📽", color: "#f97316" },
+type AttachmentIcon = { Icon: typeof FileText; color: string };
+
+const ATTACHMENT_DOC_ICONS: Record<string, AttachmentIcon> = {
+  pdf: { Icon: FileText, color: "var(--danger)" },
+  docx: { Icon: FileText, color: "var(--info)" },
+  doc: { Icon: FileText, color: "var(--info)" },
+  xlsx: { Icon: FileSpreadsheet, color: "var(--success)" },
+  xls: { Icon: FileSpreadsheet, color: "var(--success)" },
+  pptx: { Icon: Presentation, color: "var(--warning)" },
+  ppt: { Icon: Presentation, color: "var(--warning)" },
 };
 
-function docAttachmentIcon(name: string): { emoji: string; color: string } {
+function docAttachmentIcon(name: string): AttachmentIcon {
   const ext = name.toLowerCase().split(".").pop() ?? "";
-  return ATTACHMENT_DOC_ICONS[ext] ?? { emoji: "📎", color: "var(--text-muted)" };
+  return ATTACHMENT_DOC_ICONS[ext] ?? { Icon: File, color: "var(--content-3)" };
 }
 
 function formatAttachmentSize(bytes: number): string {
@@ -204,26 +208,25 @@ export function Composer({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={artifactPreviewURL(selectedSession, pendingImage.id)} alt={pendingImage.name} />
               <button type="button" onClick={clearPendingImage} aria-label={t("composer.removeImage")}>
-                <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
-                  <line x1="1" y1="1" x2="7" y2="7" /><line x1="7" y1="1" x2="1" y2="7" />
-                </svg>
+                <X size={10} aria-hidden="true" />
               </button>
             </div>
           )}
           {textAttachments.map((attachment) => {
             const icon = docAttachmentIcon(attachment.name);
+            const Icon = icon.Icon;
             const ext = attachment.name.toLowerCase().split(".").pop() ?? "";
             return (
               <span className="composer-attachment" key={attachment.id} title={attachment.name}>
-                <span className="composer-attachment-icon" style={{ color: icon.color }}>{icon.emoji}</span>
+                <span className="composer-attachment-icon" style={{ color: icon.color }}>
+                  <Icon size={14} aria-hidden="true" />
+                </span>
                 <span className="composer-attachment-body">
                   <span className="composer-attachment-name">{attachment.name}</span>
                   <span className="composer-attachment-meta">{ext.toUpperCase()} · {formatAttachmentSize(attachment.size)} · text</span>
                 </span>
                 <button type="button" onClick={() => removeTextAttachment(attachment.id)} aria-label={`${t("composer.remove")} ${attachment.name}`}>
-                  <svg width="7" height="7" viewBox="0 0 7 7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
-                    <line x1="1" y1="1" x2="6" y2="6" /><line x1="6" y1="1" x2="1" y2="6" />
-                  </svg>
+                  <X size={9} aria-hidden="true" />
                 </button>
               </span>
             );

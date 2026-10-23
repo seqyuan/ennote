@@ -58,7 +58,7 @@ export function ProjectMenu(props: {
             title={`${pinnedProjectIds.includes(project.id) ? t("sidebar.unpin") : t("sidebar.pin")} ${project.name}`}
             aria-label={pinnedProjectIds.includes(project.id) ? t("sidebar.unpin") : t("sidebar.pin")}
             onClick={() => togglePinProject(project.id)}
-            style={{ display: "grid", placeItems: "center", width: 26, height: 30, marginRight: 2, padding: 0, border: "none", borderRadius: 5, background: "transparent", cursor: "pointer", flexShrink: 0, color: pinnedProjectIds.includes(project.id) ? "#ca8a04" : "var(--text-dim)" }}
+            style={{ display: "grid", placeItems: "center", width: 26, height: 30, marginRight: 2, padding: 0, border: "none", borderRadius: "var(--radius-sm)", background: "transparent", cursor: "pointer", flexShrink: 0, color: pinnedProjectIds.includes(project.id) ? "var(--warning)" : "var(--text-dim)" }}
           >
             <Star size={13} fill={pinnedProjectIds.includes(project.id) ? "currentColor" : "none"} aria-hidden="true" />
           </button>

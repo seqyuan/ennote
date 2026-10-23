@@ -31,20 +31,20 @@ const flowStateLabel: Record<string, string> = {
 
 function flowStateColor(state?: string): string {
   switch (state) {
-    case "running": return "#2563EB";
-    case "completed": return "#16A34A";
-    case "failed": return "#DC2626";
-    case "cancelled": case "convergence_exceeded": case "budget_exceeded": return "#D97706";
+    case "running": return "var(--accent)";
+    case "completed": return "var(--success)";
+    case "failed": return "var(--danger)";
+    case "cancelled": case "convergence_exceeded": case "budget_exceeded": return "var(--warning)";
     default: return "var(--text-dim)";
   }
 }
 
 function nodeStateColor(state?: string): string {
   switch (state) {
-    case "running": return "#2563EB";
-    case "completed": return "#16A34A";
-    case "failed": return "#DC2626";
-    case "blocked": return "#D97706";
+    case "running": return "var(--accent)";
+    case "completed": return "var(--success)";
+    case "failed": return "var(--danger)";
+    case "blocked": return "var(--warning)";
     case "cancelled": case "interrupted": return "var(--text-dim)";
     default: return "var(--text-dim)";
   }
@@ -128,14 +128,14 @@ export function GraphActivityPanel({ sessionId }: {
           {sessionId ? "Graph runs" : "Graph runs"}
         </span>
         {running && (
-          <span style={{ fontSize: 10, color: "#2563EB", display: "flex", alignItems: "center", gap: 4 }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#2563EB", animation: "pulse 2s infinite" }} />
+          <span style={{ fontSize: 11, color: "var(--accent)", display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", animation: "pulse 2s infinite" }} />
             running
           </span>
         )}
       </div>
 
-      {error && <div style={{ padding: "8px 14px", fontSize: 11, color: "#DC2626" }}>{error}</div>}
+      {error && <div style={{ padding: "8px 14px", fontSize: 11, color: "var(--danger)" }}>{error}</div>}
 
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 8px 12px" }}>
         {!sessionId ? (
@@ -175,7 +175,7 @@ function RunCard({ run, nodes, expanded, onToggle, nodesLoading }: {
   const done = nodes.filter((node) => node.terminalState === "completed").length;
 
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 8, marginBottom: 8, overflow: "hidden" }}>
+    <div style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", marginBottom: 8, overflow: "hidden" }}>
       <button
         type="button"
         onClick={onToggle}
@@ -194,14 +194,14 @@ function RunCard({ run, nodes, expanded, onToggle, nodesLoading }: {
         <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {run.inputs?.name ? String(run.inputs.name) : "Graph run"}
         </span>
-        <span style={{ flexShrink: 0, fontSize: 10, color: "var(--text-dim)" }}>
+        <span style={{ flexShrink: 0, fontSize: 11, color: "var(--text-dim)" }}>
           {nodeCount > 0 ? `${done}/${nodeCount} tasks` : flowStateLabel[state ?? ""] ?? state}
         </span>
       </button>
 
       {expanded && (
         <div style={{ borderTop: "1px solid var(--border)", padding: "6px 10px 10px 22px" }}>
-          <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 6, display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 6, display: "flex", gap: 12, flexWrap: "wrap" }}>
             <span>state: {flowStateLabel[state ?? ""] ?? state}</span>
             {run.totalTokensUsed ? <span>tokens: {run.totalTokensUsed}</span> : null}
             {run.createdAt ? <span>{formatTime(run.createdAt)}</span> : null}
@@ -218,7 +218,7 @@ function RunCard({ run, nodes, expanded, onToggle, nodesLoading }: {
                   <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)" }}>
                     {node.handle}
                   </span>
-                  <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>
+                  <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 11 }}>
                     {nodeStateLabel[node.terminalState ?? ""] ?? node.terminalState}
                   </span>
                 </li>

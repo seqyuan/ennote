@@ -1,46 +1,29 @@
-/* Settings tokens + dsh-aligned shell and Models/General visual overrides.
-   Scoped to the settings backdrop so only the settings surfaces change. */
+/* Settings consumes the shared design tokens. The --stg-* names remain as a
+   local vocabulary for the settings shell; values resolve globally. */
 .settings-dialog-backdrop {
-  --stg-text-primary: #1a1a1a;
-  --stg-text-secondary: #6b7280;
-  --stg-text-tertiary: #9ca3af;
-  --stg-hover: rgba(38, 49, 72, 0.06);
-  --stg-nav-hover: rgb(241, 243, 245);
-  --stg-nav-active: rgb(235, 238, 242);
-  --stg-border-l2: rgba(0, 0, 0, 0.10);
-  --stg-border-l3: rgba(0, 0, 0, 0.12);
-  --stg-fill: #ffffff;
-  --stg-input-fill: #ffffff;
-  --stg-module: #f5f5f5;
-  --stg-brand: rgb(65, 118, 230);
-  --stg-shadow: 0 16px 48px rgba(0, 0, 0, 0.20);
-  --stg-danger: #b33b32;
+  --stg-text-primary: var(--content-1);
+  --stg-text-secondary: var(--content-2);
+  --stg-text-tertiary: var(--content-3);
+  --stg-hover: var(--surface-hover);
+  --stg-nav-hover: var(--surface-hover);
+  --stg-nav-active: var(--surface-selected);
+  --stg-border-l2: var(--stroke-hairline);
+  --stg-border-l3: var(--stroke-strong);
+  --stg-fill: var(--surface-0);
+  --stg-input-fill: var(--surface-0);
+  --stg-module: var(--surface-1);
+  --stg-brand: var(--accent);
+  --stg-shadow: var(--elevation-3);
+  --stg-danger: var(--danger);
 }
 
-html.dark .settings-dialog-backdrop {
-  --stg-text-primary: #e8e8e8;
-  --stg-text-secondary: #9ca3af;
-  --stg-text-tertiary: #6b7280;
-  --stg-hover: rgba(255, 255, 255, 0.08);
-  --stg-nav-hover: rgb(53, 54, 56);
-  --stg-nav-active: rgb(44, 44, 46);
-  --stg-border-l2: rgba(255, 255, 255, 0.12);
-  --stg-border-l3: rgba(255, 255, 255, 0.16);
-  --stg-fill: rgb(27, 27, 28);
-  --stg-input-fill: rgb(44, 44, 46);
-  --stg-module: rgb(53, 54, 56);
-  --stg-brand: rgb(103, 158, 254);
-  --stg-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
-  --stg-danger: #ed8178;
-}
-
-/* ---- Shell (dsh SettingsRoot): centered 800px, r24, 188px rail. ---- */
+/* ---- Shell: centered 800px, panel radius, 188px rail. ---- */
 .settings-dialog-shell {
   width: 800px;
   height: min(800px, calc(100vh - 48px));
   max-width: calc(100vw - 48px);
   border: none;
-  border-radius: 24px;
+  border-radius: var(--radius-panel);
   background: var(--stg-fill);
   box-shadow: var(--stg-shadow);
   overflow: hidden;
@@ -67,7 +50,7 @@ html.dark .settings-dialog-backdrop {
 
 .settings-dialog-navtitle {
   padding: 0 12px;
-  font-size: 16px;
+  font-size: var(--text-lg);
   line-height: 24px;
   font-weight: 500;
   color: var(--stg-text-primary);
@@ -77,9 +60,9 @@ html.dark .settings-dialog-backdrop {
   height: 40px;
   padding: 9px 16px 9px 12px;
   gap: 8px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   color: var(--stg-text-primary);
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 22px;
   font-weight: 400;
   cursor: pointer;
@@ -141,7 +124,7 @@ html.dark .settings-dialog-backdrop {
   height: 28px;
   padding: 0;
   border: none;
-  border-radius: 28px;
+  border-radius: var(--radius-full);
   background: transparent;
   cursor: pointer;
   color: var(--stg-text-primary);
@@ -165,12 +148,12 @@ html.dark .settings-dialog-backdrop {
   max-width: 720px;
 }
 .settings-dialog-shell .settings-tab-section > header h2 {
-  font-size: 16px;
+  font-size: var(--text-lg);
   line-height: 24px;
   font-weight: 500;
 }
 .settings-dialog-shell .settings-tab-section > header p {
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 22px;
   color: var(--stg-text-tertiary);
 }
@@ -183,7 +166,7 @@ html.dark .settings-dialog-backdrop {
 .settings-dialog-shell .settings-form label {
   gap: 6px;
   color: var(--stg-text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
   font-weight: 500;
 }
@@ -193,10 +176,10 @@ html.dark .settings-dialog-backdrop {
   height: 32px;
   padding: 0 10px;
   border: 1px solid var(--stg-border-l2);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--stg-input-fill);
   color: var(--stg-text-primary);
-  font: 14px/22px var(--font-sans);
+  font: var(--text-base)/22px var(--font-sans);
 }
 .settings-dialog-shell .settings-form textarea { height: 68px; padding: 8px 10px; }
 .settings-dialog-shell .settings-form input:focus,
@@ -209,9 +192,9 @@ html.dark .settings-dialog-backdrop {
   min-height: 36px;
   padding: 0 14px;
   border: none;
-  border-radius: 18px;
+  border-radius: var(--radius-full);
   background: var(--stg-brand);
-  color: #fff;
+  color: var(--accent-contrast);
   font-weight: 500;
   cursor: pointer;
 }
@@ -221,7 +204,7 @@ html.dark .settings-dialog-backdrop {
   min-height: 36px;
   padding: 0 14px;
   border: 1px solid var(--stg-border-l2);
-  border-radius: 18px;
+  border-radius: var(--radius-full);
   background: transparent;
   color: var(--stg-text-primary);
   font-weight: 400;
@@ -241,14 +224,14 @@ html.dark .settings-dialog-backdrop {
 }
 .settings-dialog-shell .compaction-model-policies header h4 {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
   font-weight: 500;
   color: var(--stg-text-primary);
 }
 .settings-dialog-shell .compaction-model-policies header p {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 16px;
   color: var(--stg-text-tertiary);
 }
@@ -262,7 +245,7 @@ html.dark .settings-dialog-backdrop {
   min-height: 30px;
   height: 30px;
   padding: 0 10px;
-  border-radius: 15px;
+  border-radius: var(--radius-full);
 }
 
 /* ---- General: appearance + permission + language rows ---- */
@@ -276,12 +259,12 @@ html.dark .settings-dialog-backdrop {
 }
 .settings-dialog-shell .settings-note {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
   color: var(--stg-text-tertiary);
 }
 .settings-dialog-shell .appearance-title {
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 22px;
   font-weight: 500;
   color: var(--stg-text-primary);
@@ -297,10 +280,10 @@ html.dark .settings-dialog-backdrop {
   height: 32px;
   padding: 0 12px;
   border: 1px solid var(--stg-border-l2);
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--stg-text-secondary);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 500;
   cursor: pointer;
 }
@@ -315,9 +298,9 @@ html.dark .settings-dialog-backdrop {
 /* ---- Models section (dsh ModelsSection vocabulary) ---- */
 .settings-models-saved {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
-  color: #2f9e44;
+  color: var(--success);
 }
 
 .settings-models-rows {
@@ -333,7 +316,7 @@ html.dark .settings-dialog-backdrop {
    card it expands into reads as the nested object. */
 .settings-models-rowcard {
   border: 1px solid var(--stg-border-l2);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
@@ -354,7 +337,7 @@ html.dark .settings-dialog-backdrop {
 }
 
 .settings-models-rowname {
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 22px;
   font-weight: 500;
   color: var(--stg-text-primary);
@@ -365,8 +348,8 @@ html.dark .settings-dialog-backdrop {
   flex: none;
   padding: 1px 6px;
   border: 1px solid var(--stg-border-l3);
-  border-radius: 4px;
-  font-size: 11px;
+  border-radius: var(--radius-xs);
+  font-size: var(--text-xs);
   line-height: 16px;
   color: var(--stg-text-secondary);
 }
@@ -388,11 +371,11 @@ html.dark .settings-dialog-backdrop {
   height: 28px;
   padding: 0 10px;
   border: 1px solid var(--stg-border-l2);
-  border-radius: 14px;
+  border-radius: var(--radius-full);
   background: transparent;
   color: var(--stg-text-primary);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
   cursor: pointer;
 }
@@ -415,7 +398,7 @@ html.dark .settings-dialog-backdrop {
 /* Editing surface: a filled module on the panel. */
 .settings-models-setupcard,
 .settings-models-addcard {
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--stg-module);
   padding: 14px 16px;
   display: flex;
@@ -449,11 +432,11 @@ html.dark .settings-dialog-backdrop {
   min-width: 180px;
   height: 44px;
   border: 1px dashed var(--stg-border-l3);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--stg-text-primary);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 22px;
   cursor: pointer;
 }
@@ -473,7 +456,7 @@ html.dark .settings-dialog-backdrop {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
   font-weight: 500;
   color: var(--stg-text-secondary);
@@ -485,9 +468,9 @@ html.dark .settings-dialog-backdrop {
   height: 32px;
   padding: 0 10px;
   border: 1px solid var(--stg-border-l2);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 22px;
   background: var(--stg-input-fill);
   color: var(--stg-text-primary);
@@ -525,7 +508,7 @@ html.dark .settings-dialog-backdrop {
   height: 8px;
   border-radius: 50%;
 }
-.settings-models-dot-ok { background: #2f9e44; }
+.settings-models-dot-ok { background: var(--success); }
 .settings-models-dot-missing { background: var(--stg-danger); }
 
 .settings-models-editor {
@@ -540,27 +523,27 @@ html.dark .settings-dialog-backdrop {
   gap: 8px;
 }
 .settings-models-editor-title {
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 22px;
   font-weight: 500;
   color: var(--stg-text-primary);
 }
 .settings-models-editor-route {
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
   color: var(--stg-text-tertiary);
 }
 
 .settings-models-error {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
   color: var(--stg-danger);
 }
 
 .settings-models-hint {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
   color: var(--stg-text-tertiary);
 }
@@ -579,11 +562,11 @@ html.dark .settings-dialog-backdrop {
   height: 36px;
   padding: 0 14px;
   border: none;
-  border-radius: 18px;
+  border-radius: var(--radius-full);
   background: var(--stg-brand);
-  color: #fff;
+  color: var(--accent-contrast);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 22px;
   font-weight: 500;
   cursor: pointer;
@@ -601,11 +584,11 @@ html.dark .settings-dialog-backdrop {
   height: 28px;
   padding: 0 10px;
   border: none;
-  border-radius: 14px;
+  border-radius: var(--radius-full);
   background: transparent;
   color: var(--stg-text-tertiary);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
   cursor: pointer;
 }
@@ -629,9 +612,9 @@ html.dark .settings-dialog-backdrop {
   width: fit-content;
   padding: 2px 4px;
   margin-left: -4px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
   font-weight: 500;
   color: var(--stg-text-secondary);
@@ -677,7 +660,7 @@ html.dark .settings-dialog-backdrop {
   gap: 2px;
 }
 .settings-models-catalog-title {
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
   font-weight: 500;
   color: var(--stg-text-secondary);
@@ -686,19 +669,19 @@ html.dark .settings-dialog-backdrop {
 .settings-models-catalog-empty {
   margin: 0;
   color: var(--stg-text-tertiary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
 }
 .settings-models-catalog-empty {
   padding: 12px;
   border: 1px dashed var(--stg-border-l3);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   text-align: center;
 }
 
 .settings-models-entry {
   border: 1px solid var(--stg-border-l2);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 6px;
 }
 .settings-models-entry-row {
@@ -720,7 +703,7 @@ html.dark .settings-dialog-backdrop {
 }
 .settings-models-entry-field-label {
   color: var(--stg-text-tertiary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
 }
 
@@ -732,7 +715,7 @@ html.dark .settings-dialog-backdrop {
   width: 28px;
   height: 28px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--stg-text-tertiary);
   cursor: pointer;
@@ -759,11 +742,11 @@ html.dark .settings-dialog-backdrop {
   height: 28px;
   padding: 0 10px;
   border: 1px solid var(--stg-border-l2);
-  border-radius: 14px;
+  border-radius: var(--radius-full);
   background: transparent;
   color: var(--stg-text-primary);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
   cursor: pointer;
 }
@@ -786,9 +769,9 @@ html.dark .settings-dialog-backdrop {
   height: 32px;
   padding: 0 10px;
   border: 1px solid var(--stg-border-l2);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 22px;
   background: var(--stg-input-fill);
   color: var(--stg-text-primary);
@@ -806,7 +789,7 @@ html.dark .settings-dialog-backdrop {
   height: 28px;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--stg-text-tertiary);
   cursor: pointer;
@@ -836,7 +819,7 @@ html.dark .settings-dialog-backdrop {
   list-style: none;
 }
 .settings-models-candidate {
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .settings-models-candidate-label {
   display: flex;
@@ -848,7 +831,7 @@ html.dark .settings-dialog-backdrop {
 .settings-models-candidate-id {
   flex: 1 1 auto;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 13px;
+  font-size: var(--text-md);
   overflow-wrap: anywhere;
 }
 
@@ -860,7 +843,7 @@ html.dark .settings-dialog-backdrop {
    add/setup cards, which already carry the module chrome (dsh). */
 .settings-dialog-shell .settings-models-rowcard > .provider-settings-row {
   border: none;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--stg-module);
   padding: 14px 16px;
   min-height: 0;
@@ -920,7 +903,7 @@ html.dark .settings-dialog-backdrop {
   }
   .settings-dialog-header .settings-dialog-current {
     display: block;
-    font-size: 16px;
+    font-size: var(--text-lg);
     line-height: 24px;
     font-weight: 500;
     color: var(--stg-text-primary);
@@ -956,7 +939,7 @@ html.dark .settings-dialog-backdrop {
     height: 40px;
     margin: 0;
     padding: 0 14px;
-    border-radius: 20px;
+    border-radius: var(--radius-full);
   }
   /* Active pill reads as selected on touch: brand-tinted fill + brand text. */
   .settings-dialog-tab.active {

@@ -1,0 +1,235 @@
+/*
+ * Ennote design tokens.
+ *
+ * One semantic layer for the whole shell. Feature CSS must consume these
+ * variables (or the legacy aliases at the bottom) instead of defining its own
+ * palette. New code should prefer the semantic names and the fixed scales;
+ * the aliases exist so older surfaces keep working while they migrate.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces */
+  --surface-0: #ffffff;
+  --surface-1: #f7f7f5;
+  --surface-2: #efefec;
+  --surface-3: #e7e7e3;
+  --surface-elevated: #ffffff;
+  --surface-sunken: #f2f2ef;
+  --surface-hover: rgba(24, 24, 27, 0.05);
+  --surface-selected: rgba(24, 24, 27, 0.08);
+
+  /* Content */
+  --content-1: #18181b;
+  --content-2: #52525b;
+  --content-3: #71717a;
+  --content-disabled: #a1a1aa;
+  --content-inverse: #ffffff;
+
+  /* Strokes */
+  --stroke-hairline: rgba(24, 24, 27, 0.09);
+  --stroke-strong: rgba(24, 24, 27, 0.18);
+  --stroke-focus: #2563eb;
+
+  /* Accent */
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-soft: rgba(37, 99, 235, 0.10);
+  --accent-contrast: #ffffff;
+
+  /* Semantic state */
+  --success: #15803d;
+  --success-soft: #ecfdf3;
+  --warning: #a16207;
+  --warning-soft: #fffbeb;
+  --danger: #b91c1c;
+  --danger-soft: #fef2f2;
+  --info: #0369a1;
+  --info-soft: #f0f9ff;
+
+  /* Conversation surfaces */
+  --user-bg: #eff6ff;
+  --assistant-bg: var(--surface-0);
+  --tool-bg: var(--surface-1);
+  --code-surface: #f4f4f2;
+  --bubble-bg: #f0f6ff;
+
+  /* Radius scale — do not introduce values outside this scale. */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-panel: 24px;
+  --radius-full: 999px;
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 40px;
+
+  /* Type scale */
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-display: 26px;
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.65;
+
+  /* Elevation. Elevated surfaces should drop their own 1px border and use
+     these shadows (the hairline is the first shadow layer). */
+  --elevation-1: 0 0 0 0.5px var(--stroke-hairline), 0 1px 2px rgba(24, 24, 27, 0.06);
+  --elevation-2: 0 0 0 0.5px var(--stroke-hairline), 0 8px 24px rgba(24, 24, 27, 0.10);
+  --elevation-3: 0 0 0 0.5px var(--stroke-hairline), 0 16px 40px rgba(24, 24, 27, 0.16);
+  --elevation-soft: 0 0 0 0.5px var(--stroke-hairline), 0 2px 8px rgba(24, 24, 27, 0.05);
+
+  /* Motion */
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 240ms;
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-decelerate: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Typography families */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI Var", "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "SFMono-Regular", "Cascadia Code", "Noto Sans Mono", "Fira Code", "JetBrains Mono", Consolas, monospace;
+
+  /* ---------------------------------------------------------------------
+   * Legacy aliases. Existing feature CSS reads these names. They resolve to
+   * the same semantic tokens above so a single change updates every surface.
+   * ------------------------------------------------------------------- */
+  --bg: var(--surface-0);
+  --bg-panel: var(--surface-1);
+  --bg-hover: var(--surface-hover);
+  --bg-selected: var(--surface-selected);
+  --bg-subtle: rgba(24, 24, 27, 0.03);
+  --border: var(--stroke-hairline);
+  --text: var(--content-1);
+  --text-muted: var(--content-2);
+  --text-dim: var(--content-3);
+  --radius: var(--radius-sm);
+  --canvas: var(--surface-0);
+  --panel: var(--surface-0);
+  --panel-subtle: var(--surface-1);
+  --hover: var(--surface-hover);
+  --selected: var(--surface-selected);
+  --border-strong: var(--stroke-strong);
+  --text-faint: var(--content-3);
+  --focus-ring: var(--stroke-focus);
+  --shadow-menu: 0 12px 32px rgba(24, 24, 27, 0.14), 0 2px 8px rgba(24, 24, 27, 0.08);
+
+  /* shadcn-style aliases retained for older Settings CSS. */
+  --background: var(--bg);
+  --foreground: var(--text);
+  --card: var(--bg-panel);
+  --card-foreground: var(--text);
+  --muted: var(--bg-hover);
+  --muted-foreground: var(--text-muted);
+  --input: var(--border);
+  --primary: var(--accent);
+  --primary-foreground: var(--accent-contrast);
+}
+
+html.dark {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --surface-0: #18181b;
+  --surface-1: #202023;
+  --surface-2: #26262a;
+  --surface-3: #2e2e33;
+  --surface-elevated: #26262a;
+  --surface-sunken: #141416;
+  --surface-hover: rgba(255, 255, 255, 0.07);
+  --surface-selected: rgba(255, 255, 255, 0.10);
+
+  /* Content */
+  --content-1: #f4f4f5;
+  --content-2: #c4c4cc;
+  --content-3: #a1a1aa;
+  --content-disabled: #71717a;
+  --content-inverse: #18181b;
+
+  /* Strokes */
+  --stroke-hairline: rgba(255, 255, 255, 0.10);
+  --stroke-strong: rgba(255, 255, 255, 0.18);
+  --stroke-focus: #93c5fd;
+
+  /* Accent */
+  --accent: #60a5fa;
+  --accent-hover: #93c5fd;
+  --accent-soft: rgba(96, 165, 250, 0.14);
+  --accent-contrast: #0f172a;
+
+  /* Semantic state */
+  --success: #4ade80;
+  --success-soft: #20372c;
+  --warning: #fbbf24;
+  --warning-soft: #3a3020;
+  --danger: #f87171;
+  --danger-soft: #402725;
+  --info: #38bdf8;
+  --info-soft: #172e3d;
+
+  /* Conversation surfaces */
+  --user-bg: #1e293b;
+  --assistant-bg: var(--surface-0);
+  --tool-bg: var(--surface-1);
+  --code-surface: #232326;
+  --bubble-bg: #1e293b;
+
+  /* Elevation */
+  --elevation-1: 0 0 0 0.5px var(--stroke-hairline), 0 1px 2px rgba(0, 0, 0, 0.32);
+  --elevation-2: 0 0 0 0.5px var(--stroke-hairline), 0 8px 24px rgba(0, 0, 0, 0.40);
+  --elevation-3: 0 0 0 0.5px var(--stroke-hairline), 0 16px 44px rgba(0, 0, 0, 0.52);
+  --elevation-soft: 0 0 0 0.5px var(--stroke-hairline), 0 2px 8px rgba(0, 0, 0, 0.28);
+
+  /* Legacy aliases */
+  --bg: var(--surface-0);
+  --bg-panel: var(--surface-1);
+  --bg-hover: var(--surface-hover);
+  --bg-selected: var(--surface-selected);
+  --bg-subtle: rgba(255, 255, 255, 0.04);
+  --border: var(--stroke-hairline);
+  --text: var(--content-1);
+  --text-muted: var(--content-2);
+  --text-dim: var(--content-3);
+  --radius: var(--radius-sm);
+  --canvas: var(--surface-0);
+  --panel: var(--surface-0);
+  --panel-subtle: var(--surface-1);
+  --hover: var(--surface-hover);
+  --selected: var(--surface-selected);
+  --border-strong: var(--stroke-strong);
+  --text-faint: var(--content-3);
+  --focus-ring: var(--stroke-focus);
+  --shadow-menu: 0 16px 36px rgba(0, 0, 0, 0.38), 0 2px 8px rgba(0, 0, 0, 0.30);
+
+  /* shadcn-style aliases */
+  --background: var(--bg);
+  --foreground: var(--text);
+  --card: var(--bg-panel);
+  --card-foreground: var(--text);
+  --muted: var(--bg-hover);
+  --muted-foreground: var(--text-muted);
+  --input: var(--border);
+  --primary: var(--accent);
+  --primary-foreground: var(--accent-contrast);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+    --motion-slow: 0ms;
+  }
+}

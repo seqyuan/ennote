@@ -2,6 +2,7 @@
 
 import { useId } from "react";
 import { useT } from "@/components/LocaleProvider";
+import { BrandMark } from "@/components/BrandMark";
 
 /**
  * Soft blue ellipse behind the centered composer (dsh HeroGlow / figma
@@ -28,7 +29,7 @@ export function HeroGlow() {
         </filter>
       </defs>
       <g filter={`url(#${glowFilterId})`}>
-        <ellipse cx="525.5" cy="234" rx="425.5" ry="134" fill="#6187D8" fillOpacity="0.08" />
+        <ellipse cx="525.5" cy="234" rx="425.5" ry="134" fill="var(--accent)" fillOpacity="0.08" />
       </g>
     </svg>
   );
@@ -49,7 +50,7 @@ export function EmptyHero(props: {
   return (
     <div className="empty-hero" data-testid="empty-hero">
       <div className="empty-hero-headline">
-        <span className="empty-hero-mark" aria-hidden="true">E</span>
+        <span className="empty-hero-mark" aria-hidden="true"><BrandMark size={28} /></span>
         <h1 className="empty-hero-title">{t("hero.headline")}</h1>
         <span className="empty-hero-preview">{t("hero.preview")}</span>
         {!hasModel && (

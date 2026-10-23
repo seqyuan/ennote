@@ -16,12 +16,12 @@ const labelStyle: React.CSSProperties = {
 };
 
 const inputStyle: React.CSSProperties = {
-  padding: "6px 8px", borderRadius: 6, border: "1px solid var(--border)",
+  padding: "6px 8px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)",
   background: "var(--bg)", color: "var(--text)", fontSize: 12, width: "100%",
 };
 
 const ghostButtonStyle: React.CSSProperties = {
-  padding: "4px 8px", borderRadius: 6, fontSize: 11,
+  padding: "4px 8px", borderRadius: "var(--radius-sm)", fontSize: 11,
   border: "1px solid var(--border)", background: "var(--bg)",
   color: "var(--text-muted)", cursor: "pointer",
 };
@@ -35,7 +35,7 @@ export function McpCreateForm({ mcp }: { mcp: ReturnType<typeof useMcpSettings> 
   return (
     <>
       {showCreate && (
-        <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <label style={labelStyle}>Display name
               <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} style={inputStyle} placeholder="PubMed" />
@@ -52,7 +52,7 @@ export function McpCreateForm({ mcp }: { mcp: ReturnType<typeof useMcpSettings> 
                   type="button"
                   onClick={() => setTransport(kind)}
                   style={{
-                    padding: "4px 10px", borderRadius: 6, fontSize: 11,
+                    padding: "4px 10px", borderRadius: "var(--radius-sm)", fontSize: 11,
                     border: "1px solid var(--border)",
                     background: transport === kind ? "var(--bg-selected)" : "var(--bg)",
                     color: transport === kind ? "var(--text)" : "var(--text-muted)",
@@ -83,8 +83,8 @@ export function McpCreateForm({ mcp }: { mcp: ReturnType<typeof useMcpSettings> 
             onClick={createProfile}
             disabled={!displayName.trim() || !slug.trim() || (transport === "stdio" ? !executable.trim() : !endpoint.trim())}
             style={{
-              padding: "6px 12px", borderRadius: 6, border: "none",
-              background: "var(--accent)", color: "#fff", fontSize: 12, cursor: "pointer", alignSelf: "flex-start",
+              padding: "6px 12px", borderRadius: "var(--radius-sm)", border: "none",
+              background: "var(--accent)", color: "var(--accent-contrast)", fontSize: 12, cursor: "pointer", alignSelf: "flex-start",
             }}
           >
             Create profile
@@ -110,7 +110,7 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
     : "";
 
   return (
-    <div key={binding.id} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+    <div key={binding.id} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
@@ -131,8 +131,8 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
             title={binding.required ? "Server is required: Run start fails when unreachable" : "Server is optional: Run start continues when unreachable"}
             onClick={() => updateBinding(binding, { required: !binding.required })}
             style={{
-              fontSize: 10, color: binding.required ? "var(--text)" : "var(--text-muted)",
-              border: "1px solid var(--border)", borderRadius: 4, padding: "1px 6px",
+              fontSize: 11, color: binding.required ? "var(--text)" : "var(--text-muted)",
+              border: "1px solid var(--border)", borderRadius: "var(--radius-xs)", padding: "1px 6px",
               background: "var(--bg)", cursor: "pointer",
             }}
           >
@@ -161,9 +161,9 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
               await updateBinding(binding, { desiredEnabled: next });
             }}
             style={{
-              padding: "4px 10px", borderRadius: 6, fontSize: 11, border: "1px solid var(--border)",
+              padding: "4px 10px", borderRadius: "var(--radius-sm)", fontSize: 11, border: "1px solid var(--border)",
               background: binding.desiredEnabled ? "var(--accent)" : "var(--bg)",
-              color: binding.desiredEnabled ? "#fff" : "var(--text)",
+              color: binding.desiredEnabled ? "var(--accent-contrast)" : "var(--text)",
               cursor: "pointer",
             }}
           >
@@ -175,7 +175,7 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
           <button type="button" title="Refresh tool catalog" onClick={() => refreshCatalog(binding)} style={ghostButtonStyle}>
             Refresh
           </button>
-          <button type="button" title="Remove binding" onClick={() => removeBinding(binding)} style={{ ...ghostButtonStyle, color: "#E11D48", borderColor: "var(--border)" }}>
+          <button type="button" title="Remove binding" onClick={() => removeBinding(binding)} style={{ ...ghostButtonStyle, color: "var(--danger)", borderColor: "var(--border)" }}>
             Remove
           </button>
         </div>
@@ -203,7 +203,7 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
                 onChange={(e) => setToolSearch((prev) => ({ ...prev, [binding.id!]: e.target.value }))}
                 style={{ ...inputStyle, marginBottom: 6 }}
               />
-              <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 6 }}>
+              <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                   <tbody>
                     {catalog
@@ -297,21 +297,21 @@ export function McpCandidateSection({ mcp }: { mcp: ReturnType<typeof useMcpSett
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {candidates.map((candidate) => (
           <div key={`${candidate.sourceKind}:${candidate.slug}`} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
             <div style={{ minWidth: 0 }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{candidate.displayName ?? candidate.slug}</span>
-              <span style={{ fontSize: 10, color: "var(--text-dim)", marginLeft: 6 }}>
+              <span style={{ fontSize: 11, color: "var(--text-dim)", marginLeft: 6 }}>
                 {candidate.transport} · {candidate.sourceKind}
               </span>
               {candidate.sourceKind === "project_file" && (
-                <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 300 }}>
+                <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 300 }}>
                   {candidate.sourceLocator}
                 </div>
               )}
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
               {candidate.alreadyBound ? (
-                <span style={{ fontSize: 10, color: "var(--text-dim)", border: "1px solid var(--border)", borderRadius: 4, padding: "2px 8px" }}>
+                <span style={{ fontSize: 11, color: "var(--text-dim)", border: "1px solid var(--border)", borderRadius: "var(--radius-xs)", padding: "2px 8px" }}>
                   Bound
                 </span>
               ) : (
@@ -345,7 +345,7 @@ export function McpCandidateSection({ mcp }: { mcp: ReturnType<typeof useMcpSett
                   <button type="button" title="Archive MCP profile"
                     aria-label={`Archive MCP profile ${profile.displayName ?? profile.slug}`}
                     onClick={() => archiveProfile(profile)}
-                    style={{ ...ghostButtonStyle, color: "#E11D48", padding: 4 }}>
+                    style={{ ...ghostButtonStyle, color: "var(--danger)", padding: 4 }}>
                     <Archive size={14} aria-hidden="true" />
                   </button>
                 ) : null;
@@ -353,25 +353,25 @@ export function McpCandidateSection({ mcp }: { mcp: ReturnType<typeof useMcpSett
             </div>
           </div>
           {diffView && diffView.slug === candidate.slug && (
-            <div style={{ border: "1px solid var(--border)", borderRadius: 6, padding: 8, marginTop: 6 }}>
+            <div style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 8, marginTop: 6 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>
                 Read-only diff: bound version vs project file
                 {diffView.digestTo && (
-                  <span style={{ fontWeight: 400, color: "var(--text-dim)", marginLeft: 6, fontFamily: "var(--font-mono, monospace)", fontSize: 10 }}>
+                  <span style={{ fontWeight: 400, color: "var(--text-dim)", marginLeft: 6, fontFamily: "var(--font-mono, monospace)", fontSize: 11 }}>
                     new config {diffView.digestTo.slice(0, 8)}
                   </span>
                 )}
               </div>
               {diffView.lines.some((line) => line.startsWith("+ ") || line.startsWith("- ")) ? (
-                <div style={{ maxHeight: 200, overflowY: "auto", fontSize: 10, fontFamily: "var(--font-mono, monospace)", color: "var(--text-muted)", whiteSpace: "pre-wrap" }}>
+                <div style={{ maxHeight: 200, overflowY: "auto", fontSize: 11, fontFamily: "var(--font-mono, monospace)", color: "var(--text-muted)", whiteSpace: "pre-wrap" }}>
                   {diffView.lines.map((line, index) => (
-                    <div key={index} style={{ color: line.startsWith("- ") ? "#E11D48" : line.startsWith("+ ") ? "#059669" : undefined }}>
+                    <div key={index} style={{ color: line.startsWith("- ") ? "var(--danger)" : line.startsWith("+ ") ? "var(--success)" : undefined }}>
                       {line}
                     </div>
                   ))}
                 </div>
               ) : (
-                <div style={{ fontSize: 10, color: "var(--text-dim)" }}>
+                <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
                   Connection fields are unchanged — the project file changed argv, env, headers, or timeout (config digest {diffView.digestTo ? diffView.digestTo.slice(0, 8) : "changed"}).
                 </div>
               )}
@@ -384,23 +384,23 @@ export function McpCandidateSection({ mcp }: { mcp: ReturnType<typeof useMcpSett
           const profileVersionIds = new Set((versions[profile.id!] ?? []).map(version => version.id));
           const bound = bindings.some(binding => profileVersionIds.has(binding.profileVersionId));
           return (
-            <div key={profile.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: 6 }}>
+            <div key={profile.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
               <div style={{ minWidth: 0 }}>
                 <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{profile.displayName}</span>
-                <span style={{ fontSize: 10, color: "var(--text-dim)", marginLeft: 6 }}>
+                <span style={{ fontSize: 11, color: "var(--text-dim)", marginLeft: 6 }}>
                   {profile.slug} · v{profile.latestVersion ?? 0} · managed
                 </span>
               </div>
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                 {bound ? (
-                  <span style={{ fontSize: 10, color: "var(--text-dim)", border: "1px solid var(--border)", borderRadius: 4, padding: "2px 8px" }}>
+                  <span style={{ fontSize: 11, color: "var(--text-dim)", border: "1px solid var(--border)", borderRadius: "var(--radius-xs)", padding: "2px 8px" }}>
                     Bound
                   </span>
                 ) : (
                   <button type="button" title="Archive MCP profile"
                     aria-label={`Archive MCP profile ${profile.displayName ?? profile.slug}`}
                     onClick={() => archiveProfile(profile)}
-                    style={{ ...ghostButtonStyle, color: "#E11D48", padding: 4 }}>
+                    style={{ ...ghostButtonStyle, color: "var(--danger)", padding: 4 }}>
                     <Archive size={14} aria-hidden="true" />
                   </button>
                 )}

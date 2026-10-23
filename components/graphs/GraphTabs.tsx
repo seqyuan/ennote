@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus } from "lucide-react";
+import { AlertTriangle, Plus } from "lucide-react";
 import type { GraphSummary } from "@/components/graphs/types";
 
 export function GraphTabs({ graphs, selected, onSelect, onAdd }: {
@@ -22,7 +22,7 @@ export function GraphTabs({ graphs, selected, onSelect, onAdd }: {
             onClick={() => onSelect(graph.id)}
           >
             <span>{graph.name}</span>
-            {graph.error && <i title={graph.error}>!</i>}
+            {graph.error && <span title={graph.error}><AlertTriangle size={12} aria-label={graph.error} /></span>}
           </button>
         ))}
       </div>

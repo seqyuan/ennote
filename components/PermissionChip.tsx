@@ -50,6 +50,8 @@ export function PermissionChip({
   const t = useT();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const id = useId();
   const locked = disabled || !permissionReady;
 
@@ -60,13 +62,45 @@ export function PermissionChip({
     const close = (event: MouseEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        triggerRef.current?.focus();
+        return;
+      }
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      event.preventDefault();
+      const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? []);
+      if (items.length === 0) return;
+      const at = items.indexOf(document.activeElement as HTMLElement);
+      const next = (Math.max(at, 0) + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+      items[next]?.focus();
+    };
     document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menuOpen]);
+
+  // Move focus into the menu when it opens so Escape and arrow keys work
+  // immediately, without requiring an extra Tab from the trigger.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const frame = window.requestAnimationFrame(() => {
+      const selected = menuRef.current?.querySelector<HTMLElement>('[aria-checked="true"]');
+      const first = menuRef.current?.querySelector<HTMLElement>('[role="menuitemradio"]');
+      (selected ?? first)?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [menuOpen]);
 
   return (
     <div ref={rootRef} className="permission-chip">
       <button
+        ref={triggerRef}
         type="button"
         className="permission-chip-trigger"
         aria-label={`${t("composer.permissionMode")}: ${modeLabel(permissionMode)}`}
@@ -83,7 +117,7 @@ export function PermissionChip({
         </svg>
       </button>
       {menuOpen && (
-        <div id={`${id}-menu`} className="permission-chip-menu" role="menu" aria-label={t("composer.permissionMode")}>
+        <div ref={menuRef} id={`${id}-menu`} className="permission-chip-menu" role="menu" aria-label={t("composer.permissionMode")}>
           {MODES.map((mode) => {
             const selected = mode === permissionMode;
             return (
@@ -93,7 +127,7 @@ export function PermissionChip({
                 role="menuitemradio"
                 aria-checked={selected}
                 className={selected ? "permission-chip-option selected" : "permission-chip-option"}
-                onClick={() => { setPermissionMode(mode); setOpen(false); }}
+                onClick={() => { setPermissionMode(mode); setOpen(false); triggerRef.current?.focus(); }}
               >
                 <span className="permission-chip-option-icon" aria-hidden><PermissionGlyph mode={mode} /></span>
                 <span className="permission-chip-option-label">{modeLabel(mode)}</span>

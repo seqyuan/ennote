@@ -167,7 +167,11 @@ export function AgentFlowSettings({ setError }: { setError: (value: string | nul
             <div><span>Graph</span><h2>{detail.document.name}</h2><code>{detail.document.id}</code></div>
             <div className="graph-document-actions">
               <span>v{latestVersion || "draft"}</span>
-              <div className={`graph-save-state ${busy === "saving" ? "is-saving" : ""}`}>{busy === "saving" ? <><Loader2 className="spin" size={14} /> Saving</> : <><Check size={14} /> Saved</>}</div>
+              <div className={`graph-save-state ${busy === "saving" ? "is-saving" : ""}`}>{busy === "saving"
+                ? <><Loader2 className="spin" size={14} /> Saving</>
+                : latestVersion > 0
+                  ? <><Check size={14} /> Saved v{latestVersion}</>
+                  : <><Check size={14} /> Draft saved</>}</div>
               <button type="button" onClick={() => void publishGraph()} disabled={Boolean(busy) || Object.keys(detail.document.tasks).length === 0}>{busy === "publishing" ? "Publishing…" : "Publish"}</button>
             </div>
           </header>

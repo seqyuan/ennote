@@ -2,7 +2,6 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { SessionSidebar } from "./SessionSidebar";
-import { SidebarExpandFab } from "./SidebarExpandFab";
 import { ChatWindow } from "./ChatWindow";
 import { TopBar } from "./TopBar";
 import { RightPanel } from "./RightPanel";
@@ -317,12 +316,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
   return (
     <ChildProgressProvider>
     <>
-      <div className={`app-shell${!sidebarOpen && !isMobile ? " sidebar-collapsed" : ""}`} data-testid="ennote-shell">
-        {/* Floating top-left expand button: the desktop sidebar fully collapses
-            to 0 width (no rail), so a fixed button in the corner reopens it.
-            Mobile keeps the topbar hamburger / settings-view menu button. */}
-        {!sidebarOpen && !isMobile && <SidebarExpandFab onClick={() => setSidebarOpen(true)} />}
-
+      <div className="app-shell" data-testid="ennote-shell">
         {/* Mobile overlay backdrop */}
         <div
           className="sidebar-overlay-backdrop"

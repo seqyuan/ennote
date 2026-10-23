@@ -5,12 +5,12 @@ import type { AnnotatedSkill, SkillInstallInfo, SkillRoot, SkillSearchResult, Sk
 import type { useSkillRoots } from "@/hooks/useSkillRoots";
 
 const inputStyle: React.CSSProperties = {
-  padding: "6px 8px", borderRadius: 6, border: "1px solid var(--border)",
+  padding: "6px 8px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)",
   background: "var(--bg)", color: "var(--text)", fontSize: 12, flex: 1, minWidth: 180,
 };
 
 const ghostButtonStyle: React.CSSProperties = {
-  padding: "3px 8px", borderRadius: 6, fontSize: 10,
+  padding: "3px 8px", borderRadius: "var(--radius-sm)", fontSize: 11,
   border: "1px solid var(--border)", background: "var(--bg)",
   color: "var(--text-muted)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4,
 };
@@ -31,7 +31,7 @@ export function SkillRootsPanel(props: {
       <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", marginTop: 12, marginBottom: 6 }}>
         Skills roots <span style={{ fontWeight: 400, color: "var(--text-dim)", marginLeft: 4 }}>{roots.length} additional</span>
       </div>
-      <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 6 }}>
+      <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 6 }}>
         Resolution paths are on the Worker host. Remote clients (Tauri) read the same configured roots — no per-client setup.
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -41,16 +41,16 @@ export function SkillRootsPanel(props: {
           </div>
         )}
         {roots.map((root) => (
-          <div key={root.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6 }}>
+          <div key={root.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{root.name}</span>
-                <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 8, border: "1px solid var(--border)", color: "var(--text-muted)", flexShrink: 0 }}>
+                <span style={{ fontSize: 11, padding: "1px 6px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", color: "var(--text-muted)", flexShrink: 0 }}>
                   {root.agentKind}
                 </span>
-                <span style={{ fontSize: 9, color: "var(--text-dim)", flexShrink: 0 }}>pri {root.priority}</span>
+                <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0 }}>pri {root.priority}</span>
               </div>
-              <div style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono, monospace)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 380 }}>
+              <div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono, monospace)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 380 }}>
                 {root.path}
               </div>
             </div>
@@ -59,16 +59,16 @@ export function SkillRootsPanel(props: {
               onClick={() => void toggleRoot(root)}
               disabled={rootBusy !== null}
               style={{
-                fontSize: 10, padding: "2px 8px", borderRadius: 6, border: "1px solid var(--border)",
+                fontSize: 11, padding: "2px 8px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)",
                 background: root.enabled ? "var(--accent)" : "var(--bg)",
-                color: root.enabled ? "#fff" : "var(--text)", cursor: "pointer", flexShrink: 0,
+                color: root.enabled ? "var(--accent-contrast)" : "var(--text)", cursor: "pointer", flexShrink: 0,
               }}
             >
               {root.enabled ? "Enabled" : "Disabled"}
             </button>
             <button type="button" onClick={() => void removeRoot(root)} disabled={rootBusy !== null}
               title={`Stop reading skills from ${root.path}`}
-              style={{ ...ghostButtonStyle, color: "#E11D48" }}>
+              style={{ ...ghostButtonStyle, color: "var(--danger)" }}>
               <X size={12} aria-hidden="true" />
             </button>
           </div>
@@ -78,7 +78,7 @@ export function SkillRootsPanel(props: {
             + Add skills root
           </button>
         ) : (
-          <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               <select
                 value={rootPreset}
@@ -110,7 +110,7 @@ export function SkillRootsPanel(props: {
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               <button type="button" onClick={() => void addRoot()} disabled={rootBusy !== null}
-                style={{ padding: "4px 12px", borderRadius: 6, border: "none", background: "var(--accent)", color: "#fff", fontSize: 11, cursor: "pointer" }}>
+                style={{ padding: "4px 12px", borderRadius: "var(--radius-sm)", border: "none", background: "var(--accent)", color: "var(--accent-contrast)", fontSize: 11, cursor: "pointer" }}>
                 {rootBusy === "add" ? "Adding…" : "Add root"}
               </button>
               <button type="button" onClick={() => setShowRootForm(false)} style={ghostButtonStyle}>
@@ -144,7 +144,7 @@ export function SkillMarketplace(props: {
   } = props;
 
   return (
-    <div className="skills-market-panel" style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+    <div className="skills-market-panel" style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>Marketplace</div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <input
@@ -174,11 +174,11 @@ export function SkillMarketplace(props: {
         <div style={{ fontSize: 11, color: "var(--text-dim)" }}>No skills match &quot;{query.trim()}&quot;.</div>
       )}
       {results.map((result) => (
-        <div key={result.package} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6 }}>
+        <div key={result.package} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
           <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "var(--font-mono, monospace)", fontSize: 11, color: "var(--text)" }}>
             {result.package}
           </span>
-          {result.installs && <span style={{ fontSize: 10, color: "var(--text-dim)", flexShrink: 0 }}>{result.installs}</span>}
+          {result.installs && <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0 }}>{result.installs}</span>}
           {result.url && (
             <a href={result.url} target="_blank" rel="noreferrer" title={result.url} style={{ color: "var(--text-muted)", display: "inline-flex", flexShrink: 0 }}>
               <ExternalLink size={13} aria-hidden="true" />
@@ -190,9 +190,9 @@ export function SkillMarketplace(props: {
             disabled={installing !== null}
             onClick={() => void onInstall(result.package)}
             style={{
-              padding: "3px 10px", borderRadius: 6, fontSize: 11, border: "none",
+              padding: "3px 10px", borderRadius: "var(--radius-sm)", fontSize: 11, border: "none",
               background: installing === result.package ? "var(--bg-selected)" : "var(--accent)",
-              color: installing === result.package ? "var(--text)" : "#fff", cursor: "pointer", flexShrink: 0,
+              color: installing === result.package ? "var(--text)" : "var(--accent-contrast)", cursor: "pointer", flexShrink: 0,
             }}
           >
             {installing === result.package ? "Installing…" : "Install"}
@@ -234,26 +234,26 @@ export function SkillInstalledList(props: {
             const key = updateKey(install);
             const updateState = updates[key];
             return (
-              <div key={`${skill.relPath}:${skill.skillId}`} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+              <div key={`${skill.relPath}:${skill.skillId}`} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 8, display: "flex", flexDirection: "column", gap: 6 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
                       <strong style={{ fontSize: 12, color: "var(--text)" }}>{skill.name}</strong>
-                      <span className="skill-row-scope" style={{ fontSize: 9, padding: "1px 6px", borderRadius: 8, border: "1px solid var(--border)", color: "var(--text-muted)", flexShrink: 0 }}>
+                      <span className="skill-row-scope" style={{ fontSize: 11, padding: "1px 6px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", color: "var(--text-muted)", flexShrink: 0 }}>
                         {install.scope}
                       </span>
                       {updateState?.state === "update-available" && (
-                        <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 8, background: "#FFFBEB", border: "1px solid #FDE68A", color: "#92400E", flexShrink: 0 }}>
+                        <span style={{ fontSize: 11, padding: "1px 6px", borderRadius: "var(--radius-sm)", background: "var(--warning-soft)", border: "1px solid var(--warning)", color: "var(--warning)", flexShrink: 0 }}>
                           Update available
                         </span>
                       )}
                     </div>
                     {skill.description && (
-                      <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 420 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 420 }}>
                         {skill.description}
                       </div>
                     )}
-                    <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                       <span style={{ fontFamily: "var(--font-mono, monospace)" }}>{install.package}</span>
                       {install.versionHash && <span style={{ fontFamily: "var(--font-mono, monospace)" }}>v{install.versionHash.slice(0, 8)}</span>}
                       {install.skillsShUrl && (
@@ -270,7 +270,7 @@ export function SkillInstalledList(props: {
                       onClick={() => void onToggle(skill)}
                       disabled={toggling === skill.relPath}
                       style={{
-                        fontSize: 10, padding: "2px 8px", borderRadius: 6, border: "1px solid var(--border)",
+                        fontSize: 11, padding: "2px 8px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)",
                         background: skill.disableModelInvocation ? "var(--bg-selected)" : "var(--bg)",
                         color: skill.disableModelInvocation ? "var(--text-dim)" : "var(--text)", cursor: "pointer",
                       }}
@@ -283,23 +283,23 @@ export function SkillInstalledList(props: {
                     </button>
                     {updateState?.state === "update-available" && (
                       <button type="button" onClick={() => void onUpdate(install)} disabled={checking !== null}
-                        style={{ ...ghostButtonStyle, color: "#92400E", borderColor: "#FDE68A" }}>
+                        style={{ ...ghostButtonStyle, color: "var(--warning)", borderColor: "var(--warning)" }}>
                         Update
                       </button>
                     )}
                     {updateState?.state === "up-to-date" && (
-                      <span style={{ fontSize: 10, color: "var(--text-dim)" }}>Up to date</span>
+                      <span style={{ fontSize: 11, color: "var(--text-dim)" }}>Up to date</span>
                     )}
                     {updateState?.state === "error" && updateState.message && (
-                      <span style={{ fontSize: 10, color: "#E11D48", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={updateState.message}>
+                      <span style={{ fontSize: 11, color: "var(--danger)", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={updateState.message}>
                         {updateState.message}
                       </span>
                     )}
                     {updateState?.state === "unsupported" && (
-                      <span style={{ fontSize: 10, color: "var(--text-dim)" }} title={updateState.message ?? ""}>No updates</span>
+                      <span style={{ fontSize: 11, color: "var(--text-dim)" }} title={updateState.message ?? ""}>No updates</span>
                     )}
                     <button type="button" title="Remove skill" onClick={() => void onRemove(skill)} disabled={removing !== null}
-                      style={{ ...ghostButtonStyle, color: "#E11D48" }}>
+                      style={{ ...ghostButtonStyle, color: "var(--danger)" }}>
                       {removing === skill.relPath ? "Removing…" : <X size={12} aria-hidden="true" />}
                     </button>
                   </div>
@@ -322,14 +322,14 @@ export function SkillCatalogList({ local }: { local: AnnotatedSkill[] }) {
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         {local.map((skill) => (
-          <div key={`${skill.relPath}:${skill.skillId}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", border: "1px solid var(--border)", borderRadius: 6 }}>
+          <div key={`${skill.relPath}:${skill.skillId}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
             <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, color: "var(--text)" }}>
               {skill.name}
             </span>
-            <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 8, border: "1px solid var(--border)", color: "var(--text-muted)", flexShrink: 0 }}>
+            <span style={{ fontSize: 11, padding: "1px 6px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", color: "var(--text-muted)", flexShrink: 0 }}>
               {skill.sourceInfo.scope ?? "local"}
             </span>
-            {skill.disableModelInvocation && <span style={{ fontSize: 9, color: "var(--text-dim)", flexShrink: 0 }}>invocation disabled</span>}
+            {skill.disableModelInvocation && <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0 }}>invocation disabled</span>}
           </div>
         ))}
       </div>
@@ -346,7 +346,7 @@ export function SkillDiagnostics({ diagnostics }: {
       <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", marginBottom: 4 }}>Catalog diagnostics</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         {diagnostics.map((diag, index) => (
-          <div key={index} style={{ fontSize: 10, color: diag.level === "skip" ? "#92400E" : "var(--text-dim)", fontFamily: "var(--font-mono, monospace)" }}>
+          <div key={index} style={{ fontSize: 11, color: diag.level === "skip" ? "var(--warning)" : "var(--text-dim)", fontFamily: "var(--font-mono, monospace)" }}>
             [{diag.level}] {diag.relPath ? `${diag.relPath}: ` : ""}{diag.message}
           </div>
         ))}

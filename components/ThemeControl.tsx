@@ -2,6 +2,7 @@
 
 import { Moon, Sun } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
+import { IconButton } from "@/components/ui";
 
 /**
  * Single-button theme toggle (annodex style): clicking switches between light
@@ -11,18 +12,16 @@ import { useTheme } from "@/hooks/useTheme";
 export function ThemeControl() {
   const { isDark, toggleTheme } = useTheme();
   return (
-    <button
-      type="button"
-      className="topbar-icon-button"
+    <IconButton
+      label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      aria-pressed={isDark}
       onClick={(event) => {
         const rect = event.currentTarget.getBoundingClientRect();
         toggleTheme({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
       }}
-      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-      aria-pressed={isDark}
     >
       {isDark ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}
-    </button>
+    </IconButton>
   );
 }

@@ -23,7 +23,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--picker-border-l2);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--picker-text-primary);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
@@ -41,7 +41,7 @@
   margin: 0;
   display: flex;
   align-items: flex-end;
-  font-size: 16px;
+  font-size: var(--text-lg);
   line-height: 24px;
   font-weight: 500;
 }
@@ -54,7 +54,7 @@
   gap: 4px;
   box-sizing: border-box;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
 .project-picker-crumb-bar:hover,
 .project-picker-crumb-bar:focus-within,
@@ -83,7 +83,7 @@
   background: transparent;
   color: var(--picker-text-tertiary);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 500;
   line-height: 20px;
   text-overflow: ellipsis;
@@ -113,7 +113,7 @@
   outline: none;
   background: transparent;
   color: var(--picker-text-primary);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 20px;
 }
 .project-picker-content {
@@ -157,7 +157,7 @@
   gap: 4px;
   padding: 4px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--picker-text-primary);
   cursor: pointer;
@@ -173,7 +173,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--picker-text-primary);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 500;
   line-height: 20px;
   text-overflow: ellipsis;
@@ -187,17 +187,17 @@
   padding: 2px 8px;
   background: var(--bg-panel);
   color: var(--picker-text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
 }
 .project-picker-status,
 .project-picker-error {
   padding: 4px 120px 4px 4px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
 }
 .project-picker-status { color: var(--picker-text-secondary); }
-.project-picker-error { color: var(--danger, #e11d48); }
+.project-picker-error { color: var(--danger); }
 .project-picker-footer {
   flex: none;
   display: flex;
@@ -215,9 +215,9 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 500;
 }
 .project-picker-button.outline {
@@ -229,7 +229,7 @@
 .project-picker-button.primary {
   border: 1px solid var(--accent);
   background: var(--accent);
-  color: #fff;
+  color: var(--content-inverse);
 }
 .project-picker-button.primary:hover:not(:disabled) { background: var(--accent-hover); }
 .project-picker-button:disabled { opacity: 0.45; cursor: default; }
@@ -243,7 +243,7 @@
   background: transparent;
   color: var(--picker-text-secondary);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 500;
   line-height: 20px;
   white-space: nowrap;
@@ -267,19 +267,19 @@
   flex-direction: column;
   gap: 12px;
   border: 1px solid var(--picker-border-l2);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--picker-text-primary);
 }
 .project-picker-create-dialog h3 {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--text-lg);
   font-weight: 500;
   line-height: 24px;
 }
 .project-picker-create-dialog p {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 22px;
 }
 .project-picker-create-dialog input {
@@ -288,11 +288,11 @@
   box-sizing: border-box;
   padding: 7px 14px;
   border: 1px solid var(--picker-border-l2);
-  border-radius: 22px;
+  border-radius: var(--radius-panel);
   outline: none;
   background: transparent;
   color: var(--picker-text-primary);
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 22px;
 }
 .project-picker-create-dialog input:focus { border-color: var(--accent); }

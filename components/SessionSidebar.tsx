@@ -124,8 +124,6 @@ export function SessionSidebar({
       <SidebarLogoRow
         onToggleSidebar={onToggleSidebar}
         onCloseNavigation={closeNavigation}
-        onNewSession={createSession}
-        newSessionDisabled={!selectedProject}
       />
 
       <NewSessionButton disabled={!selectedProject} onClick={createSession} />

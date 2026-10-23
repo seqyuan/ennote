@@ -131,11 +131,10 @@ test.describe("mobile drawer", () => {
     await expect(page.locator(".workspace-content")).toHaveAttribute("inert", "");
     const closeNavigation = page.getByRole("button", { name: "Close navigation" });
     await expect(closeNavigation).toBeVisible();
-    // The brand row (New chat shortcut) precedes the close X in DOM order
-    // after the dsh chrome alignment, so it is the dialog's first focusable;
-    // Settings remains the last nav cell. Shift+Tab wraps first→last and
-    // Tab wraps last→first inside the single modal DOM.
-    const firstCell = page.locator(".sidebar-brand");
+    // The close button is the drawer's first focusable control (the brand is
+    // inert now); Settings remains the last nav cell. Shift+Tab wraps
+    // first→last and Tab wraps last→first inside the single modal DOM.
+    const firstCell = page.getByRole("button", { name: "Close navigation" });
     await expect(firstCell).toBeVisible();
     await firstCell.focus();
     await firstCell.press("Shift+Tab");
