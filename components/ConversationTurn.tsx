@@ -8,6 +8,7 @@ import { MessageActions } from "@/components/MessageActions";
 import { MessageView } from "@/components/MessageView";
 import { RunStatus, type RunStatusProps } from "@/components/RunStatus";
 import { ToolCallView } from "@/components/ToolCallView";
+import { useT } from "@/components/LocaleProvider";
 import type { ApprovalDecision, ToolApprovalRequest } from "@/lib/approval";
 import type { ConversationTurn as ConversationTurnModel, ToolBatchStep } from "@/lib/chat-messages";
 
@@ -63,9 +64,11 @@ const ToolBatch = memo(function ToolBatch({ sessionId, batch, approval, resolvin
   resolving?: ApprovalDecision | null;
   decide?: (decision: ApprovalDecision, standingGrantCallIndexes?: number[]) => void;
 }) {
-  return <section className="tool-batch" aria-label={`Tool batch with ${batch.activities.length} actions`}>
+  const t = useT();
+  const count = batch.activities.length;
+  return <section className="tool-batch" aria-label={(count === 1 ? t("conversation.toolBatch.ariaOne") : t("conversation.toolBatch.ariaMany")).replace("{count}", String(count))}>
     <div className="tool-batch-heading"><Wrench size={14} aria-hidden="true" />
-      <span>{batch.activities.length === 1 ? "Tool activity" : `${batch.activities.length} tool activities`}</span>
+      <span>{count === 1 ? t("conversation.toolBatch.titleOne") : t("conversation.toolBatch.titleMany").replace("{count}", String(count))}</span>
     </div>
     <div className="tool-activity-list">{batch.activities.map(activity =>
       <ToolCallView sessionId={sessionId} activity={activity} key={activity.toolCallId} />)}</div>
@@ -78,10 +81,12 @@ export function PendingApprovalBatch({ approval, resolving, decide }: {
   resolving?: ApprovalDecision | null;
   decide?: (decision: ApprovalDecision, standingGrantCallIndexes?: number[]) => void;
 }) {
+  const t = useT();
   if (!decide) return null;
-  return <section className="tool-batch pending-tool-batch" aria-label={`Pending tool batch with ${approval.items.length} actions`}>
+  const count = approval.items.length;
+  return <section className="tool-batch pending-tool-batch" aria-label={(count === 1 ? t("conversation.toolBatch.ariaOne") : t("conversation.toolBatch.ariaMany")).replace("{count}", String(count))}>
     <div className="tool-batch-heading"><Wrench size={14} aria-hidden="true" />
-      <span>{approval.items.length === 1 ? "Pending tool activity" : `${approval.items.length} pending tool activities`}</span>
+      <span>{count === 1 ? t("conversation.toolBatch.pendingOne") : t("conversation.toolBatch.pendingMany").replace("{count}", String(count))}</span>
     </div>
     <ApprovalPanel approval={approval} resolving={resolving ?? null} decide={decide} />
   </section>;

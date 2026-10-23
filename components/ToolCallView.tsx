@@ -6,19 +6,20 @@ import {
   Search, ShieldAlert, Terminal, Users, XCircle,
 } from "lucide-react";
 import { ArtifactView } from "@/components/ArtifactView";
+import { useT } from "@/components/LocaleProvider";
 import { NestedActivityPanel } from "@/components/NestedActivityPanel";
 import type { ToolActivity } from "@/lib/chat-messages";
 import {
   boundedToolOutput, defaultToolExpanded, redactToolArguments, summarizeToolCall,
 } from "@/lib/tool-presentation";
 
-const riskLabels = {
-  read_only: "Read only",
-  local_write: "Local write",
-  shell: "Shell",
-  external: "External",
-  delegation: "Delegation",
-  sensitive: "Sensitive",
+const RISK_KEYS: Record<string, string> = {
+  read_only: "conversation.tool.risk.readOnly",
+  local_write: "conversation.tool.risk.localWrite",
+  shell: "conversation.tool.risk.shell",
+  external: "conversation.tool.risk.external",
+  delegation: "conversation.tool.risk.delegation",
+  sensitive: "conversation.tool.risk.sensitive",
 };
 
 function isDelegationTool(name: string): boolean {
@@ -29,6 +30,7 @@ function isDelegationTool(name: string): boolean {
 // call (task name, role, optional dependency chain) instead of raw arguments
 // JSON. Legacy delegate_roles history is still parsed for display.
 function DelegationTaskList({ arguments: rawArguments }: { arguments?: unknown }) {
+  const t = useT();
   const tasks = useMemo(() => {
     const args = (rawArguments && typeof rawArguments === "object"
       ? rawArguments as Record<string, unknown>
@@ -48,16 +50,17 @@ function DelegationTaskList({ arguments: rawArguments }: { arguments?: unknown }
     {tasks.map((task, index) => <div className="delegation-task" key={`${task.name}-${index}`} role="listitem">
       <span className="delegation-task-name">{task.name || "(task)"}</span>
       {task.role && <span className="delegation-task-role">@{task.role}</span>}
-      {task.depends.length > 0 && <span className="delegation-task-depends">after {task.depends.join(", ")}</span>}
+      {task.depends.length > 0 && <span className="delegation-task-depends">{t("conversation.tool.after").replace("{names}", task.depends.join(", "))}</span>}
     </div>)}
   </div>;
 }
 
 export function ToolCallView({ activity, sessionId }: { activity: ToolActivity; sessionId: string }) {
+  const t = useT();
   const summary = summarizeToolCall(activity.toolName, activity.arguments);
   const argumentsText = activity.arguments
     ? boundedToolOutput(JSON.stringify(redactToolArguments(activity.arguments), null, 2), 2200)
-    : activity.argumentsFragment ? "Arguments were incomplete." : "No arguments recorded.";
+    : activity.argumentsFragment ? t("conversation.tool.incompleteArguments") : t("conversation.tool.noArguments");
   const output = activity.result ? boundedToolOutput(activity.result.content) : "";
 
   return <div className="tool-activity-entry">
@@ -70,19 +73,19 @@ export function ToolCallView({ activity, sessionId }: { activity: ToolActivity; 
         <span className="tool-target">{summary.target}</span>
         {summary.detail && <span className="tool-detail">{summary.detail}</span>}
       </span>
-      <span className="tool-risk">{riskLabels[activity.riskClass]}</span>
-      <span className="tool-state">{stateIcon(activity.state)}{stateLabel(activity.state)}</span>
+      <span className="tool-risk">{t(RISK_KEYS[activity.riskClass] ?? "conversation.tool.risk.sensitive")}</span>
+      <span className="tool-state">{stateIcon(activity.state)}{stateLabel(activity.state, t)}</span>
     </summary>
     <div className="tool-activity-details">
       {isDelegationTool(activity.toolName)
         ? <DelegationTaskList arguments={activity.arguments} />
         : <details className="tool-detail-disclosure">
-          <summary>Arguments</summary>
+          <summary>{t("conversation.tool.arguments")}</summary>
           <pre>{argumentsText}</pre>
         </details>}
       {activity.result && <details className="tool-detail-disclosure" open={activity.state !== "completed" || undefined}>
-        <summary>{activity.result.isError ? "Error output" : "Result"}</summary>
-        <pre>{output || "No output"}</pre>
+        <summary>{activity.result.isError ? t("conversation.tool.errorOutput") : t("conversation.tool.result")}</summary>
+        <pre>{output || t("conversation.tool.noOutput")}</pre>
       </details>}
       </div>
     </details>
@@ -127,11 +130,11 @@ function stateIcon(state: ToolActivity["state"]) {
   return <CircleAlert {...props} />;
 }
 
-function stateLabel(state: ToolActivity["state"]): string {
-  if (state === "completed") return "Done";
-  if (state === "pending") return "Pending";
-  if (state === "running") return "Running";
-  if (state === "rejected") return "Rejected";
-  if (state === "interrupted") return "Interrupted";
-  return "Failed";
+function stateLabel(state: ToolActivity["state"], t: (key: string) => string): string {
+  if (state === "completed") return t("conversation.tool.state.done");
+  if (state === "pending") return t("conversation.tool.state.pending");
+  if (state === "running") return t("conversation.tool.state.running");
+  if (state === "rejected") return t("conversation.tool.state.rejected");
+  if (state === "interrupted") return t("conversation.tool.state.interrupted");
+  return t("conversation.tool.state.failed");
 }

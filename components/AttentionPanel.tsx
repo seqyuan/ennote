@@ -3,6 +3,7 @@
 import { Bell } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AttentionItemRow } from "@/components/AttentionItemRow";
+import { useT } from "@/components/LocaleProvider";
 import { useAttention } from "@/hooks/useAttention";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
@@ -16,6 +17,7 @@ export function AttentionPanel({ projectId, onNavigate }: {
   projectId: string | undefined;
   onNavigate: (item: AttentionItem) => void;
 }) {
+  const t = useT();
   const { items, pendingCount, refresh } = useAttention(projectId);
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -52,18 +54,19 @@ export function AttentionPanel({ projectId, onNavigate }: {
     (b.requiresAction ? 1 : 0) - (a.requiresAction ? 1 : 0));
 
   return <div className="attention-panel" ref={containerRef}>
-    <button type="button" className="attention-bell" aria-label={`Attention (${pendingCount})`}
-      title="Attention" onClick={() => setOpen(value => !value)}>
+    <button type="button" className="attention-bell"
+      aria-label={t("conversation.attention.aria").replace("{count}", String(pendingCount))}
+      title={t("conversation.attention.title")} onClick={() => setOpen(value => !value)}>
       <Bell size={15} aria-hidden="true" />
       {pendingCount > 0 && <span className="attention-badge">{pendingCount > 99 ? "99+" : pendingCount}</span>}
     </button>
-    {open && <div className="attention-popover" role="dialog" aria-label="Attention">
+    {open && <div className="attention-popover" role="dialog" aria-label={t("conversation.attention.title")}>
       <div className="attention-popover-header">
-        <strong>Attention</strong>
-        <span>{pendingCount} pending</span>
+        <strong>{t("conversation.attention.title")}</strong>
+        <span>{t("conversation.attention.pending").replace("{count}", String(pendingCount))}</span>
       </div>
       <div className="attention-list" role="list">
-        {actionFirst.length === 0 && <div className="attention-empty">Nothing needs attention.</div>}
+        {actionFirst.length === 0 && <div className="attention-empty">{t("conversation.attention.empty")}</div>}
         {actionFirst.map(item => <AttentionItemRow key={item.id} item={item}
           onNavigate={item => { setOpen(false); onNavigate(item); }}
           onDismiss={dismiss} />)}
