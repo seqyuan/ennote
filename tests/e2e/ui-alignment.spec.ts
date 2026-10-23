@@ -71,6 +71,31 @@ test("settings is modal and the theme preference stays synchronized", async ({ p
   await expect(page.getByRole("dialog", { name: "Settings" })).toHaveAttribute("aria-modal", "true");
 });
 
+test("settings search filters sections and clears before closing", async ({ page }) => {
+  await mockUI(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+
+  const search = page.getByRole("textbox", { name: "Search settings" });
+  await expect(search).toBeVisible();
+  await search.fill("api keys");
+  await expect(page.getByRole("tab", { name: "Models" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Policies" })).toHaveCount(0);
+
+  await search.press("Enter");
+  await expect(page.getByRole("tab", { name: "Models" })).toHaveAttribute("aria-selected", "true");
+
+  await search.fill("zzz");
+  await expect(page.getByText(/No settings match/)).toBeVisible();
+
+  // First Escape clears the query; the second closes the dialog.
+  await search.press("Escape");
+  await expect(search).toHaveValue("");
+  await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Settings" })).toHaveCount(0);
+});
+
 test.describe("mobile", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 

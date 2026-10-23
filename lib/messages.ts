@@ -287,6 +287,10 @@ const messages: Record<Locale, Record<string, string>> = {
     "settings.models.customNeedsModels": "A custom provider needs at least one model.",
     "settings.models.create": "Create provider",
     "settings.models.creating": "Creating…",
+    "settings.search.placeholder": "Search settings…",
+    "settings.search.aria": "Search settings",
+    "settings.search.clear": "Clear search",
+    "settings.search.empty": "No settings match “{query}”.",
 
     "conversation.toolBatch.ariaOne": "Tool batch with 1 action",
     "conversation.toolBatch.ariaMany": "Tool batch with {count} actions",
@@ -648,6 +652,10 @@ const messages: Record<Locale, Record<string, string>> = {
     "settings.models.customNeedsModels": "自定义提供方至少需要一个模型。",
     "settings.models.create": "创建提供方",
     "settings.models.creating": "创建中…",
+    "settings.search.placeholder": "搜索设置…",
+    "settings.search.aria": "搜索设置",
+    "settings.search.clear": "清除搜索",
+    "settings.search.empty": "没有匹配“{query}”的设置。",
 
     "conversation.toolBatch.ariaOne": "包含 1 个操作的工具批次",
     "conversation.toolBatch.ariaMany": "包含 {count} 个操作的工具批次",

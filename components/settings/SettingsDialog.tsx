@@ -1,7 +1,8 @@
 "use client";
 
-import { Database, FileText, Layers, Plug, Settings2, Shield, Sparkles, X } from "lucide-react";
+import { Database, FileText, Layers, Plug, Search, Settings2, Shield, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useT } from "@/components/LocaleProvider";
 import { ContextSettings } from "@/components/settings/ContextSettings";
 import { GeneralSettings } from "@/components/settings/GeneralSettings";
 import { McpSettings } from "@/components/settings/McpSettings";
@@ -89,9 +90,12 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
   onSessionUpdated: (session: Session) => void;
   projectId: string | null;
 }) {
+  const t = useT();
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab ?? "general");
+  const [query, setQuery] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -100,6 +104,11 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
       if (event.key === "Escape") {
         event.preventDefault();
         onClose();
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchRef.current?.focus();
         return;
       }
       if (event.key !== "Tab" || !dialogRef.current) return;
@@ -135,6 +144,21 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
     { id: "skills", label: "Skills", description: "Skill catalog, marketplace, and updates", icon: tabIcon("skills") },
   ];
 
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleTabs = normalizedQuery === ""
+    ? tabs
+    : tabs.filter((tab) => `${tab.label} ${tab.description}`.toLowerCase().includes(normalizedQuery));
+
+  const onSearchChange = (value: string) => {
+    setQuery(value);
+    const needle = value.trim().toLowerCase();
+    if (needle === "") return;
+    const matches = tabs.filter((tab) => `${tab.label} ${tab.description}`.toLowerCase().includes(needle));
+    if (matches.length > 0 && !matches.some((tab) => tab.id === activeTab)) {
+      setActiveTab(matches[0].id);
+    }
+  };
+
   return (
     <div
       ref={dialogRef}
@@ -148,7 +172,36 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
           {/* Tabs (dsh nav rail: section title on top, cells below) */}
           <div className="settings-dialog-tabs" role="tablist" aria-label="Settings sections">
             <div id="settings-dialog-title" className="settings-dialog-navtitle">Settings</div>
-            {tabs.map((tab, index) => {
+            <label className="settings-dialog-search">
+              <Search size={14} aria-hidden="true" />
+              <input
+                ref={searchRef}
+                type="text"
+                value={query}
+                placeholder={t("settings.search.placeholder")}
+                aria-label={t("settings.search.aria")}
+                onChange={(event) => onSearchChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape" && query !== "") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setQuery("");
+                    return;
+                  }
+                  if (event.key === "Enter" && visibleTabs.length > 0) {
+                    event.preventDefault();
+                    setActiveTab(visibleTabs[0].id);
+                  }
+                }}
+              />
+              {query !== "" && (
+                <button type="button" aria-label={t("settings.search.clear")} onClick={() => setQuery("")}>
+                  <X size={12} aria-hidden="true" />
+                </button>
+              )}
+            </label>
+            {visibleTabs.length === 0 && <div className="settings-dialog-empty">{t("settings.search.empty").replace("{query}", query.trim())}</div>}
+            {visibleTabs.map((tab, index) => {
               const active = activeTab === tab.id;
               return (
                 <button
@@ -157,13 +210,13 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
                   onClick={() => setActiveTab(tab.id)}
                   onKeyDown={(event) => {
                     let nextIndex: number | null = null;
-                    if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = (index + 1) % tabs.length;
-                    if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = (index - 1 + tabs.length) % tabs.length;
+                    if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = (index + 1) % visibleTabs.length;
+                    if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = (index - 1 + visibleTabs.length) % visibleTabs.length;
                     if (event.key === "Home") nextIndex = 0;
-                    if (event.key === "End") nextIndex = tabs.length - 1;
+                    if (event.key === "End") nextIndex = visibleTabs.length - 1;
                     if (nextIndex === null) return;
                     event.preventDefault();
-                    const nextTab = tabs[nextIndex];
+                    const nextTab = visibleTabs[nextIndex];
                     setActiveTab(nextTab.id);
                     window.requestAnimationFrame(() => document.getElementById(`settings-tab-${nextTab.id}`)?.focus());
                   }}

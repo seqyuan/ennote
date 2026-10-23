@@ -56,6 +56,54 @@
   color: var(--stg-text-primary);
 }
 
+/* Settings search: filters the nav rail by section label and description.
+   Hidden on mobile, where the tab strip is a bottom bar. */
+.settings-dialog-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  margin: 0 8px 6px;
+  padding: 0 9px;
+  border: 1px solid var(--stg-border-l2);
+  border-radius: var(--radius-sm);
+  background: var(--stg-input-fill);
+  color: var(--stg-text-tertiary);
+  box-sizing: border-box;
+}
+.settings-dialog-search:focus-within { border-color: var(--stg-brand); }
+.settings-dialog-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--stg-text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+.settings-dialog-search input::placeholder { color: var(--stg-text-tertiary); }
+.settings-dialog-search button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--stg-text-tertiary);
+  cursor: pointer;
+}
+.settings-dialog-search button:hover { background: var(--stg-hover); color: var(--stg-text-primary); }
+.settings-dialog-empty {
+  padding: 14px 12px;
+  color: var(--stg-text-tertiary);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
 .settings-dialog-tab {
   height: 40px;
   padding: 9px 16px 9px 12px;
@@ -933,6 +981,7 @@
   }
   .settings-dialog-tabs::-webkit-scrollbar { display: none; }
   .settings-dialog-navtitle { display: none; }
+  .settings-dialog-search { display: none; }
   .settings-dialog-tab {
     flex: 0 0 auto;
     width: auto;
