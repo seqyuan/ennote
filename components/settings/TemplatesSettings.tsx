@@ -3,6 +3,7 @@
 import { AlertTriangle, Info, Plus, Save, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
+import { useSettingsStatus } from "@/components/settings/SettingsStatus";
 import type { components } from "@/lib/worker-api.gen";
 
 type TemplateSummary = components["schemas"]["PromptTemplateSummary"];
@@ -37,6 +38,7 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
   const [formHint, setFormHint] = useState("");
   const [formBody, setFormBody] = useState("");
   const [saving, setSaving] = useState(false);
+  const { markSaving, markSaved } = useSettingsStatus();
 
   // Edit/repair state per template name.
   const [editing, setEditing] = useState<string | null>(null);
@@ -89,6 +91,7 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
     e.preventDefault();
     if (!formName.trim() || !formBody.trim()) return;
     setSaving(true);
+    markSaving();
     try {
       await apiFetch("/v1/prompt-templates", {
         method: "POST",
@@ -102,15 +105,18 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
       setFormName(""); setFormDesc(""); setFormHint(""); setFormBody("");
       setShowCreate(false);
       await load();
+      markSaved();
     } catch (err) { setError((err as Error).message); }
     finally { setSaving(false); }
   }
 
   async function doDelete(name: string) {
+    markSaving();
     try {
       await apiFetch(`/v1/prompt-templates/${encodeURIComponent(name)}`, { method: "DELETE" });
       setConfirmDelete(null);
       await load();
+      markSaved();
     } catch (err) { setError((err as Error).message); }
   }
 
@@ -136,6 +142,7 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
   async function doSaveEdit(name: string) {
     if (!editBody.trim()) return;
     setSaving(true);
+    markSaving();
     try {
       await apiFetch(`/v1/prompt-templates/${encodeURIComponent(name)}`, {
         method: "PUT",
@@ -147,6 +154,7 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
       });
       setEditing(null);
       await load();
+      markSaved();
     } catch (err) { setError((err as Error).message); }
     finally { setSaving(false); }
   }

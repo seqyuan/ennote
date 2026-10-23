@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
 import { confirmAction } from "@/components/ui/confirm";
+import { useSettingsStatus } from "@/components/settings/SettingsStatus";
 import type { AnnotatedSkill, SkillInstallInfo, SkillUpdateResult } from "@/components/settings/types";
 
 export function useSkillRowActions(
@@ -26,6 +27,7 @@ export function useSkillRowActions(
   const [checking, setChecking] = useState<string | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
+  const { markSaving, markSaved } = useSettingsStatus();
 
   const updateKey = useCallback((install: { package: string; scope: string }) => `${install.scope}\u0000${install.package}`, []);
 
@@ -57,6 +59,7 @@ export function useSkillRowActions(
   const update = useCallback(async (install: SkillInstallInfo) => {
     const key = updateKey(install);
     setChecking(key);
+    markSaving();
     try {
       await apiFetch<{ success: boolean; output?: string }>("/v1/skills/update", {
         method: "POST",
@@ -73,15 +76,17 @@ export function useSkillRowActions(
         return next;
       });
       await reload();
+      markSaved();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Update failed");
     } finally {
       setChecking(null);
     }
-  }, [projectId, setError, updateKey, reload]);
+  }, [projectId, setError, updateKey, reload, markSaving, markSaved]);
 
   const toggle = useCallback(async (skill: AnnotatedSkill) => {
     setToggling(skill.relPath);
+    markSaving();
     try {
       await apiFetch(`/v1/skills/disabled/${skill.relPath}`, {
         method: "PATCH",
@@ -91,12 +96,13 @@ export function useSkillRowActions(
       setSkills((current) => current.map((item) =>
         item.relPath === skill.relPath ? { ...item, disableModelInvocation: !skill.disableModelInvocation } : item));
       setError(null);
+      markSaved();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Toggle failed");
     } finally {
       setToggling(null);
     }
-  }, [setSkills, setError]);
+  }, [setSkills, setError, markSaving, markSaved]);
 
   const remove = useCallback(async (skill: AnnotatedSkill) => {
     if (!(await confirmAction({
@@ -106,16 +112,18 @@ export function useSkillRowActions(
       tone: "danger",
     }))) return;
     setRemoving(skill.relPath);
+    markSaving();
     try {
       await apiFetch(`/v1/skills/remove/${skill.relPath}`, { method: "POST" });
       setSkills((current) => current.filter((item) => item.relPath !== skill.relPath));
       setError(null);
+      markSaved();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Remove failed");
     } finally {
       setRemoving(null);
     }
-  }, [setSkills, setError]);
+  }, [setSkills, setError, markSaving, markSaved]);
 
   return { updateKey, updates, checking, toggling, removing, check, update, toggle, remove };
 }

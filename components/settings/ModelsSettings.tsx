@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useT } from "@/components/LocaleProvider";
+import { useSettingsStatus } from "@/components/settings/SettingsStatus";
 import { CredentialDot } from "@/components/settings/models/CredentialDot";
 import { CustomProviderCard } from "@/components/settings/models/CustomProviderCard";
 import { DeleteProviderModal } from "@/components/settings/models/DeleteProviderModal";
@@ -31,6 +32,7 @@ export function ModelsSettings({ providers, models, refresh, setError }: {
   setError: (value: string | null) => void;
 }) {
   const t = useT();
+  const { markSaving, markSaved } = useSettingsStatus();
   const [editing, setEditing] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [declaring, setDeclaring] = useState(false);
@@ -50,7 +52,7 @@ export function ModelsSettings({ providers, models, refresh, setError }: {
     ? providers.find(provider => provider.directory && provider.id === editing) ?? null
     : null;
 
-  const announceSaved = (name: string): void => { setSavedName(name); };
+  const announceSaved = (name: string): void => { setSavedName(name); markSaved(); };
 
   const closeDelete = (): void => {
     if (deleting) return;
@@ -62,11 +64,13 @@ export function ModelsSettings({ providers, models, refresh, setError }: {
     if (deleteTarget === null || deleting) return;
     setDeleting(true);
     setDeleteFailure(undefined);
+    markSaving();
     try {
       await apiFetch(`/v1/provider-profiles/${encodeURIComponent(deleteTarget.id)}`, { method: "DELETE" });
       setError(null);
       setDeleteTarget(null);
       await refresh();
+      markSaved();
     } catch (reason) {
       setDeleteFailure((reason as Error).message);
     } finally {

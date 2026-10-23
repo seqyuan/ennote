@@ -4,6 +4,7 @@ import { Monitor, Moon, Sun } from "lucide-react";
 import { useState } from "react";
 import { useLocale } from "@/components/LocaleProvider";
 import { useTheme } from "@/hooks/useTheme";
+import { useSettingsStatus } from "@/components/settings/SettingsStatus";
 import { readDefaultPermissionMode, writeDefaultPermissionMode } from "@/lib/default-permission";
 import { LOCALES } from "@/lib/locale";
 import { translate } from "@/lib/messages";
@@ -15,6 +16,7 @@ export function GeneralSettings() {
   const { mode, setThemeMode } = useTheme();
   const { locale, setLocale } = useLocale();
   const [defaultPermission, setDefaultPermission] = useState<PermissionMode>(() => readDefaultPermissionMode());
+  const { markSaved } = useSettingsStatus();
   const t = (key: string) => translate(locale, key);
   const themeOptions = [
     { id: "light" as const, label: "Light", icon: <Sun size={15} aria-hidden="true" /> },
@@ -35,7 +37,7 @@ export function GeneralSettings() {
               type="button"
               className={`appearance-cube ${mode === option.id ? "selected" : ""}`}
               aria-pressed={mode === option.id}
-              onClick={() => setThemeMode(option.id)}
+              onClick={() => { setThemeMode(option.id); markSaved(); }}
             >
               {option.icon}
               <span>{option.label}</span>
@@ -56,6 +58,7 @@ export function GeneralSettings() {
               onClick={() => {
                 setDefaultPermission(permission);
                 writeDefaultPermissionMode(permission);
+                markSaved();
               }}
             >
               <span>{permission === "discuss" ? "Discuss" : permission === "ask" ? "Ask" : "Auto"}</span>
@@ -72,7 +75,7 @@ export function GeneralSettings() {
               type="button"
               className={`appearance-cube ${locale === lang ? "selected" : ""}`}
               aria-pressed={locale === lang}
-              onClick={() => setLocale(lang)}
+              onClick={() => { setLocale(lang); markSaved(); }}
             >
               <span>{lang === "en" ? t("language.en") : t("language.zh")}</span>
             </button>

@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import { useEffect, useState, useCallback } from "react";
 import type { ModelProfile, PolicyProfile, Session, StandingApproval } from "@/components/settings/types";
 import { apiFetch } from "@/lib/worker-api.client";
+import { useSettingsStatus } from "@/components/settings/SettingsStatus";
 
 interface ModelOverride {
   modelProfileId: string;
@@ -20,21 +21,26 @@ export function ContextSettings({ policies, models, session, refresh, setError, 
   setError: (value: string | null) => void;
   onSessionUpdated: (session: Session) => void;
 }) {
+  const { markSaving, markSaved } = useSettingsStatus();
   async function createCompactionPolicy(name: string, config: Record<string, unknown>) {
+    markSaving();
     try {
       await apiFetch("/v1/policy-profiles", { method: "POST", body: JSON.stringify({ name, kind: "compaction", config }) });
       setError(null);
       await refresh();
+      markSaved();
     } catch (reason) {
       setError((reason as Error).message);
     }
   }
 
   async function setDefault(policyId: string) {
+    markSaving();
     try {
       await apiFetch(`/v1/policy-profiles/${encodeURIComponent(policyId)}/default`, { method: "PUT" });
       setError(null);
       await refresh();
+      markSaved();
     } catch (reason) {
       setError((reason as Error).message);
     }
@@ -42,12 +48,14 @@ export function ContextSettings({ policies, models, session, refresh, setError, 
 
   async function patchSession(body: Record<string, unknown>) {
     if (!session) return;
+    markSaving();
     try {
       const updated = await apiFetch<Session>(`/v1/sessions/${encodeURIComponent(session.id)}`, {
         method: "PATCH", body: JSON.stringify(body),
       });
       onSessionUpdated(updated);
       setError(null);
+      markSaved();
     } catch (reason) {
       setError((reason as Error).message);
     }
@@ -180,6 +188,7 @@ function CompactionPolicyEditor({ policies, models, onCreate, onDefault }: {
 }
 
 function StandingApprovalsSection({ sessionId }: { sessionId: string | null }) {
+  const { markSaving, markSaved } = useSettingsStatus();
   const [rules, setRules] = useState<StandingApproval[]>([]);
   const [loadedSessionID, setLoadedSessionID] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -210,14 +219,16 @@ function StandingApprovalsSection({ sessionId }: { sessionId: string | null }) {
 
   const revoke = useCallback(async (ruleId: string) => {
     if (!sessionId) return;
+    markSaving();
     try {
       await apiFetch(`/v1/sessions/${encodeURIComponent(sessionId)}/standing-approvals/${encodeURIComponent(ruleId)}/revoke`, { method: "POST" });
       setRules(prev => prev.filter(r => r.id !== ruleId));
       setLoadError(null);
+      markSaved();
     } catch (err) {
       setLoadError((err as Error).message);
     }
-  }, [sessionId]);
+  }, [sessionId, markSaving, markSaved]);
 
   if (!sessionId) return null;
 

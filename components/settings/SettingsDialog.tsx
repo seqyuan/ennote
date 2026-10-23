@@ -1,7 +1,7 @@
 "use client";
 
 import { Database, FileText, Layers, Plug, Search, Settings2, Shield, Sparkles, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useT } from "@/components/LocaleProvider";
 import { ContextSettings } from "@/components/settings/ContextSettings";
 import { GeneralSettings } from "@/components/settings/GeneralSettings";
@@ -10,6 +10,7 @@ import { SkillsSettings } from "@/components/settings/SkillsSettings";
 import { ModelsSettings } from "@/components/settings/ModelsSettings";
 import { PoliciesSettings } from "@/components/settings/PoliciesSettings";
 import { TemplatesSettings } from "@/components/settings/TemplatesSettings";
+import { SettingsStatusBadge, SettingsStatusProvider, useSettingsStatus } from "@/components/settings/SettingsStatus";
 import type { ModelProfile, PolicyProfile, ProviderProfile, Session, SettingsTab } from "@/components/settings/types";
 
 interface TabItem {
@@ -58,20 +59,22 @@ export function SettingsDialog({ open, onClose, initialTab, providers, models, p
       {/* Keyed by the opening section: the body remounts on every open, so
           the active tab resets exactly like dsh (close clears the section;
           the trigger reopens on the first nav row, onboarding re-targets). */}
-      <SettingsBody
-        key={initialTab ?? "general"}
-        initialTab={initialTab}
-        onClose={onClose}
-        providers={providers}
-        models={models}
-        policies={policies}
-        session={session}
-        refresh={refresh}
-        error={error}
-        setError={setError}
-        onSessionUpdated={onSessionUpdated}
-        projectId={projectId}
-      />
+      <SettingsStatusProvider>
+        <SettingsBody
+          key={initialTab ?? "general"}
+          initialTab={initialTab}
+          onClose={onClose}
+          providers={providers}
+          models={models}
+          policies={policies}
+          session={session}
+          refresh={refresh}
+          error={error}
+          setError={setError}
+          onSessionUpdated={onSessionUpdated}
+          projectId={projectId}
+        />
+      </SettingsStatusProvider>
     </div>
   );
 }
@@ -91,6 +94,11 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
   projectId: string | null;
 }) {
   const t = useT();
+  const { markError } = useSettingsStatus();
+  const reportError = useCallback((value: string | null) => {
+    setError(value);
+    if (value) markError(value);
+  }, [setError, markError]);
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab ?? "general");
   const [query, setQuery] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -239,6 +247,7 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
           <div className="settings-dialog-content">
             <div className="settings-dialog-header">
               <div className="settings-dialog-actions">
+                <SettingsStatusBadge />
                 {/* Mobile-only current-section title; the desktop nav rail
                     keeps its own "Settings" title (dsh). Shown in the top
                     bar on ≤640px, hidden on desktop. */}
@@ -271,36 +280,36 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
             )}
             {activeTab === "models" && (
               <div style={{ height: "100%", overflowY: "auto" }}>
-                <ModelsSettings providers={providers} models={models} refresh={refresh} setError={setError} />
+                <ModelsSettings providers={providers} models={models} refresh={refresh} setError={reportError} />
               </div>
             )}
             {activeTab === "policies" && (
               <div style={{ height: "100%", overflowY: "auto" }}>
-                <PoliciesSettings policies={policies} refresh={refresh} setError={setError} />
+                <PoliciesSettings policies={policies} refresh={refresh} setError={reportError} />
               </div>
             )}
             {activeTab === "context" && (
               <div style={{ height: "100%", overflowY: "auto" }}>
                 <ContextSettings
                   policies={policies} models={models} session={session}
-                  refresh={refresh} setError={setError}
+                  refresh={refresh} setError={reportError}
                   onSessionUpdated={onSessionUpdated}
                 />
               </div>
             )}
             {activeTab === "templates" && (
               <div style={{ height: "100%", overflowY: "auto" }}>
-                <TemplatesSettings projectId={projectId} setError={setError} />
+                <TemplatesSettings projectId={projectId} setError={reportError} />
               </div>
             )}
             {activeTab === "mcp" && (
               <div style={{ height: "100%", overflowY: "auto" }}>
-                <McpSettings projectId={projectId} setError={setError} />
+                <McpSettings projectId={projectId} setError={reportError} />
               </div>
             )}
             {activeTab === "skills" && (
               <div style={{ height: "100%", overflowY: "auto" }}>
-                <SkillsSettings projectId={projectId} setError={setError} />
+                <SkillsSettings projectId={projectId} setError={reportError} />
               </div>
             )}
             </div>

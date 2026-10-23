@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
 import { confirmAction } from "@/components/ui/confirm";
+import { useSettingsStatus } from "@/components/settings/SettingsStatus";
 import type { SkillRoot } from "@/components/settings/types";
 
 export function useSkillRoots(
@@ -29,9 +30,11 @@ export function useSkillRoots(
   const [rootPreset, setRootPreset] = useState("pi");
   const [rootPath, setRootPath] = useState("");
   const [rootBusy, setRootBusy] = useState<string | null>(null);
+  const { markSaving, markSaved } = useSettingsStatus();
 
   const addRoot = useCallback(async () => {
     setRootBusy("add");
+    markSaving();
     try {
       await apiFetch<SkillRoot>("/v1/skills/roots", {
         method: "POST",
@@ -47,15 +50,17 @@ export function useSkillRoots(
       setShowRootForm(false);
       setError(null);
       await reload();
+      markSaved();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Failed to add skill root");
     } finally {
       setRootBusy(null);
     }
-  }, [rootName, rootPreset, rootPath, setError, reload]);
+  }, [rootName, rootPreset, rootPath, setError, reload, markSaving, markSaved]);
 
   const toggleRoot = useCallback(async (root: SkillRoot) => {
     setRootBusy(root.id);
+    markSaving();
     try {
       const updated = await apiFetch<SkillRoot>(`/v1/skills/roots/${root.id}`, {
         method: "PATCH",
@@ -65,12 +70,13 @@ export function useSkillRoots(
       setRoots((current) => current.map((item) => item.id === root.id ? updated : item));
       setError(null);
       await reload();
+      markSaved();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Toggle failed");
     } finally {
       setRootBusy(null);
     }
-  }, [setRoots, setError, reload]);
+  }, [setRoots, setError, reload, markSaving, markSaved]);
 
   const removeRoot = useCallback(async (root: SkillRoot) => {
     if (!(await confirmAction({
@@ -80,17 +86,19 @@ export function useSkillRoots(
       tone: "danger",
     }))) return;
     setRootBusy(root.id);
+    markSaving();
     try {
       await apiFetch(`/v1/skills/roots/${root.id}`, { method: "DELETE" });
       setRoots((current) => current.filter((item) => item.id !== root.id));
       setError(null);
       await reload();
+      markSaved();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Remove failed");
     } finally {
       setRootBusy(null);
     }
-  }, [setRoots, setError, reload]);
+  }, [setRoots, setError, reload, markSaving, markSaved]);
 
   return {
     showRootForm, setShowRootForm,

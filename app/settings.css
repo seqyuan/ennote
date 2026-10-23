@@ -182,6 +182,24 @@
   background: var(--stg-nav-hover);
 }
 
+.settings-save-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  min-height: 26px;
+  padding: 0 8px;
+  border-radius: var(--radius-full);
+  color: var(--stg-text-tertiary);
+  font-size: var(--text-xs);
+  line-height: 1;
+  white-space: nowrap;
+}
+.settings-save-status span { overflow: hidden; text-overflow: ellipsis; }
+.settings-save-status[data-state="saving"] { color: var(--stg-text-secondary); }
+.settings-save-status[data-state="saved"] { color: var(--success); background: var(--success-soft); }
+.settings-save-status[data-state="error"] { color: var(--danger); background: var(--danger-soft); }
+
 .settings-dialog-panel {
   flex: 1;
   min-width: 0;

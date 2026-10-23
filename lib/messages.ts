@@ -291,6 +291,9 @@ const messages: Record<Locale, Record<string, string>> = {
     "settings.search.aria": "Search settings",
     "settings.search.clear": "Clear search",
     "settings.search.empty": "No settings match “{query}”.",
+    "settings.status.saving": "Saving…",
+    "settings.status.saved": "Saved",
+    "settings.status.failed": "Save failed",
 
     "conversation.toolBatch.ariaOne": "Tool batch with 1 action",
     "conversation.toolBatch.ariaMany": "Tool batch with {count} actions",
@@ -656,6 +659,9 @@ const messages: Record<Locale, Record<string, string>> = {
     "settings.search.aria": "搜索设置",
     "settings.search.clear": "清除搜索",
     "settings.search.empty": "没有匹配“{query}”的设置。",
+    "settings.status.saving": "保存中…",
+    "settings.status.saved": "已保存",
+    "settings.status.failed": "保存失败",
 
     "conversation.toolBatch.ariaOne": "包含 1 个操作的工具批次",
     "conversation.toolBatch.ariaMany": "包含 {count} 个操作的工具批次",

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
 import { confirmAction } from "@/components/ui/confirm";
+import { useSettingsStatus } from "@/components/settings/SettingsStatus";
 import { diffText } from "@/lib/agent-flow";
 import type { MCPCatalogEntry, MCPCandidate, MCPProjectBinding, MCPServerProfile, MCPServerProfileVersion } from "@/components/settings/types";
 
@@ -29,6 +30,7 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
   const [credEnv, setCredEnv] = useState<Record<string, string>>({});
   const [credRef, setCredRef] = useState<Record<string, string>>({});
   const [diffView, setDiffView] = useState<{ slug: string; lines: string[]; digestTo: string } | null>(null);
+  const { markSaving, markSaved } = useSettingsStatus();
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [transport, setTransport] = useState("stdio");
@@ -180,16 +182,19 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
       confirmLabel: "Archive profile",
       tone: "danger",
     }))) return;
+    markSaving();
     try {
       await apiFetch(`/v1/mcp/server-profiles/${encodeURIComponent(profile.id)}`, { method: "DELETE" });
       setError(null);
       await refresh();
+      markSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to archive MCP profile");
     }
   };
 
   const createProfile = async () => {
+    markSaving();
     try {
       const profile = await apiFetch<MCPServerProfile>("/v1/mcp/server-profiles", {
         method: "POST",
@@ -216,6 +221,7 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
       setArgv("");
       setEndpoint("");
       await refresh();
+      markSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create MCP profile");
     }
@@ -223,6 +229,7 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
 
   const bindCandidate = async (candidate: MCPCandidate) => {
     if (!projectId) return;
+    markSaving();
     try {
       // When an update is available the bound version is stale; always
       // re-materialize from the project file so a NEW immutable version is
@@ -248,6 +255,7 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
         });
       }
       await refresh();
+      markSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to bind MCP candidate");
     }
@@ -255,6 +263,7 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
 
   const updateBinding = async (binding: MCPProjectBinding, patch: Record<string, unknown>) => {
     if (!projectId) return;
+    markSaving();
     try {
       await apiFetch<MCPProjectBinding>(
         `/v1/projects/${projectId}/mcp/bindings/${binding.id}`,
@@ -265,6 +274,7 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
         },
       );
       await refresh();
+      markSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update MCP binding");
     }
@@ -331,9 +341,11 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
       confirmLabel: "Remove binding",
       tone: "danger",
     }))) return;
+    markSaving();
     try {
       await apiFetch(`/v1/projects/${projectId}/mcp/bindings/${binding.id}`, { method: "DELETE" });
       await refresh();
+      markSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to remove binding");
     }

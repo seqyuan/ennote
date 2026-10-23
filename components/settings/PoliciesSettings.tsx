@@ -4,6 +4,7 @@ import { Archive } from "lucide-react";
 import type { FormEvent } from "react";
 import type { PolicyProfile } from "@/components/settings/types";
 import { confirmAction } from "@/components/ui/confirm";
+import { useSettingsStatus } from "@/components/settings/SettingsStatus";
 import { apiFetch } from "@/lib/worker-api.client";
 
 const policySections: Array<{ kind: PolicyProfile["kind"]; title: string; description: string; defaultConfig: string }> = [
@@ -17,26 +18,31 @@ export function PoliciesSettings({ policies, refresh, setError }: {
   refresh: () => Promise<void>;
   setError: (value: string | null) => void;
 }) {
+  const { markSaving, markSaved } = useSettingsStatus();
   async function createPolicy(event: FormEvent<HTMLFormElement>, kind: PolicyProfile["kind"]) {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
     try {
       const config = JSON.parse(String(data.get("config") || "{}"));
+      markSaving();
       await apiFetch("/v1/policy-profiles", { method: "POST", body: JSON.stringify({ name: data.get("name"), kind, config }) });
       form.reset();
       setError(null);
       await refresh();
+      markSaved();
     } catch (reason) {
       setError((reason as Error).message);
     }
   }
 
   async function setDefault(policyId: string) {
+    markSaving();
     try {
       await apiFetch(`/v1/policy-profiles/${encodeURIComponent(policyId)}/default`, { method: "PUT" });
       setError(null);
       await refresh();
+      markSaved();
     } catch (reason) {
       setError((reason as Error).message);
     }
@@ -49,10 +55,12 @@ export function PoliciesSettings({ policies, refresh, setError }: {
       confirmLabel: "Deactivate",
       tone: "danger",
     }))) return;
+    markSaving();
     try {
       await apiFetch(`/v1/policy-profiles/${encodeURIComponent(policy.id)}`, { method: "DELETE" });
       setError(null);
       await refresh();
+      markSaved();
     } catch (reason) {
       setError((reason as Error).message);
     }

@@ -41,5 +41,6 @@ test("active policy profiles can be deactivated", async ({ page }) => {
   await page.getByLabel(`Deactivate policy ${policy.name} version ${policy.version}`).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Deactivate" }).click();
   await expect(page.getByText(policy.name)).toHaveCount(0);
+  await expect(page.locator('.settings-save-status[data-state="saved"]')).toBeVisible();
   expect(active).toBe(false);
 });
