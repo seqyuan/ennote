@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
+import { confirmAction } from "@/components/ui/confirm";
 import { diffText } from "@/lib/agent-flow";
 import type { MCPCatalogEntry, MCPCandidate, MCPProjectBinding, MCPServerProfile, MCPServerProfileVersion } from "@/components/settings/types";
 
@@ -172,7 +173,13 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
   }, [projectId, setError, loadVersions]);
 
   const archiveProfile = async (profile: MCPServerProfile) => {
-    if (!profile.id || !window.confirm(`Archive MCP profile “${profile.displayName ?? profile.slug}”?`)) return;
+    if (!profile.id) return;
+    if (!(await confirmAction({
+      title: `Archive MCP profile “${profile.displayName ?? profile.slug}”?`,
+      description: "Bindings that reference this profile will stop resolving for new Runs.",
+      confirmLabel: "Archive profile",
+      tone: "danger",
+    }))) return;
     try {
       await apiFetch(`/v1/mcp/server-profiles/${encodeURIComponent(profile.id)}`, { method: "DELETE" });
       setError(null);
@@ -318,7 +325,12 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
 
   const removeBinding = async (binding: MCPProjectBinding) => {
     if (!projectId) return;
-    if (!window.confirm("Remove this MCP binding? Tools will no longer be available to Runs.")) return;
+    if (!(await confirmAction({
+      title: "Remove this MCP binding?",
+      description: "Tools from this server will no longer be available to Runs in this project.",
+      confirmLabel: "Remove binding",
+      tone: "danger",
+    }))) return;
     try {
       await apiFetch(`/v1/projects/${projectId}/mcp/bindings/${binding.id}`, { method: "DELETE" });
       await refresh();

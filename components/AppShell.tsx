@@ -24,6 +24,7 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useProjectFiles } from "@/hooks/useProjectFiles";
 import { useProjectSelector } from "@/hooks/useProjectSelector";
 import { SettingsView } from "./SettingsView";
+import { ConfirmHost } from "@/components/ui/confirm";
 import type { WorkspaceView } from "./workspace-view";
 import { useWorkspaceSessionConnect } from "@/hooks/useWorkspaceSessionConnect";
 import { reuseOrCreateBlankSession, SELECTED_SESSION_KEY, writeStoredId } from "@/lib/ensure-blank-session";
@@ -478,6 +479,8 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
         onSessionUpdated={sessionNavigation.replaceSession}
         projectId={selectedProject}
       />
+
+      <ConfirmHost />
 
       {/* New project dialog */}
       {createProjectOpen && (

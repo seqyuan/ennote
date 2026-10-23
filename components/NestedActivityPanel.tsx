@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChildRunRow } from "@/components/ChildRunRow";
 import { DelegationFollowUpDialog } from "@/components/DelegationFollowUpDialog";
 import { DelegationGenerationHistory } from "@/components/DelegationGenerationHistory";
+import { confirmAction } from "@/components/ui/confirm";
 import { useChildProgress } from "@/hooks/useChildProgress";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
@@ -119,7 +120,12 @@ export function NestedActivityPanel({ parentRunId, toolCallId }: { parentRunId: 
   }, [busy, inspections]);
 
   const cancelGroup = useCallback(async (group: ActivityGroup) => {
-    if (busy || !window.confirm("Cancel all active tasks in this delegation?")) return;
+    if (busy || !(await confirmAction({
+      title: "Cancel all active tasks in this delegation?",
+      description: "Running children will be cancelled; completed results are kept.",
+      confirmLabel: "Cancel tasks",
+      tone: "danger",
+    }))) return;
     setBusy(`${group.id}:cancel`);
     try {
       await apiFetch(`/v1/delegations/${encodeURIComponent(group.id)}/cancel`, { method: "POST" });

@@ -3,6 +3,7 @@
 import { Check, Loader2, Plus, Workflow } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { GraphBuilderPanel } from "@/components/graphs/GraphBuilderPanel";
+import { confirmAction } from "@/components/ui/confirm";
 import { GraphDependencies } from "@/components/graphs/GraphDependencies";
 import { GraphTabs } from "@/components/graphs/GraphTabs";
 import { TaskAccordion } from "@/components/graphs/TaskAccordion";
@@ -118,9 +119,14 @@ export function AgentFlowSettings({ setError }: { setError: (value: string | nul
   };
 
   const saveTask = (id: string, task: GraphTask) => patchGraph({ task: { id, value: task } });
-  const removeTask = (id: string) => {
-    if (!window.confirm(`Remove Task “${detail?.document.tasks[id]?.name ?? id}”?`)) return;
-    void patchGraph({ task: { id, value: null } });
+  const removeTask = async (id: string) => {
+    if (!(await confirmAction({
+      title: `Remove Task “${detail?.document.tasks[id]?.name ?? id}”?`,
+      description: "This removes the task from the graph draft. Published versions are unaffected.",
+      confirmLabel: "Remove task",
+      tone: "danger",
+    }))) return;
+    await patchGraph({ task: { id, value: null } });
   };
   const addTask = async () => {
     const model = models[0];
@@ -182,7 +188,7 @@ export function AgentFlowSettings({ setError }: { setError: (value: string | nul
               {addTaskOpen && <div className="graph-add-task"><input value={newTask.id} onChange={(event) => setNewTask((value) => ({ ...value, id: event.target.value }))} placeholder="task_id" /><input value={newTask.name} onChange={(event) => setNewTask((value) => ({ ...value, name: event.target.value }))} placeholder="Task name" /><button type="button" onClick={() => void addTask()}>Add</button></div>}
               <div className="graph-task-list">
                 {Object.keys(detail.document.tasks).sort().map((id) => (
-                  <TaskAccordion key={id} id={id} task={detail.document.tasks[id]} expanded={expanded === id} busy={Boolean(busy)} models={models} onToggle={() => setExpanded((value) => value === id ? null : id)} onSave={(task) => void saveTask(id, task)} onRemove={() => removeTask(id)} />
+                  <TaskAccordion key={id} id={id} task={detail.document.tasks[id]} expanded={expanded === id} busy={Boolean(busy)} models={models} onToggle={() => setExpanded((value) => value === id ? null : id)} onSave={(task) => void saveTask(id, task)} onRemove={() => void removeTask(id)} />
                 ))}
                 {Object.keys(detail.document.tasks).length === 0 && <div className="graph-empty-state">No Tasks yet. Add one or ask Builder to draft the Graph.</div>}
               </div>

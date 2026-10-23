@@ -3,6 +3,7 @@
 import { Archive } from "lucide-react";
 import type { FormEvent } from "react";
 import type { PolicyProfile } from "@/components/settings/types";
+import { confirmAction } from "@/components/ui/confirm";
 import { apiFetch } from "@/lib/worker-api.client";
 
 const policySections: Array<{ kind: PolicyProfile["kind"]; title: string; description: string; defaultConfig: string }> = [
@@ -42,7 +43,12 @@ export function PoliciesSettings({ policies, refresh, setError }: {
   }
 
   async function deactivate(policy: PolicyProfile) {
-    if (!window.confirm(`Deactivate policy “${policy.name}” v${policy.version}?`)) return;
+    if (!(await confirmAction({
+      title: `Deactivate policy “${policy.name}” v${policy.version}?`,
+      description: "Existing Runs keep their frozen policy. New Runs will no longer select it as the default.",
+      confirmLabel: "Deactivate",
+      tone: "danger",
+    }))) return;
     try {
       await apiFetch(`/v1/policy-profiles/${encodeURIComponent(policy.id)}`, { method: "DELETE" });
       setError(null);

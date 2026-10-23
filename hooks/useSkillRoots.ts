@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
+import { confirmAction } from "@/components/ui/confirm";
 import type { SkillRoot } from "@/components/settings/types";
 
 export function useSkillRoots(
@@ -72,7 +73,12 @@ export function useSkillRoots(
   }, [setRoots, setError, reload]);
 
   const removeRoot = useCallback(async (root: SkillRoot) => {
-    if (!window.confirm(`Stop reading skills from "${root.path}"?`)) return;
+    if (!(await confirmAction({
+      title: `Stop reading skills from "${root.path}"?`,
+      description: "Installed skills under this root are no longer discovered.",
+      confirmLabel: "Stop reading",
+      tone: "danger",
+    }))) return;
     setRootBusy(root.id);
     try {
       await apiFetch(`/v1/skills/roots/${root.id}`, { method: "DELETE" });

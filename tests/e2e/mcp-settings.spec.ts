@@ -87,9 +87,7 @@ async function selectProjectAndOpenMCPSettings(page: Page) {
 for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
   test(`MCP settings discovers, binds, and enables at ${viewport.width}x${viewport.height}`, async ({ page }) => {
     await page.setViewportSize(viewport);
-    // The UI shows a security confirmation before enabling a stdio server;
-    // accept it so the enable proceeds.
-    page.on("dialog", (dialog) => void dialog.accept());
+    // The UI shows a security confirmation before enabling a stdio server.
     await mockMCP(page);
     await selectProjectAndOpenMCPSettings(page);
 
@@ -103,8 +101,9 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     await expect(page.getByText("Disabled")).toBeVisible();
     await expect(page.getByText("0 tools selected")).toBeVisible();
 
-    // Enable -> tool catalog loads; select a tool by checkbox.
+    // Enable -> security confirmation -> tool catalog loads.
     await page.getByRole("button", { name: "Disabled" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Enable server" }).click();
     await expect(page.getByText("Enabled")).toBeVisible();
     // Enable triggers a refresh that loads the tool catalog.
     const checkbox = page.locator('input[type="checkbox"]').first();
@@ -147,13 +146,13 @@ test("MCP settings shows Bound + Update available for a stale project-file candi
 
 test("MCP settings toggles required, edits credentials, and searches tools", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  page.on("dialog", (dialog) => void dialog.accept());
   await mockMCP(page);
   await selectProjectAndOpenMCPSettings(page);
 
   // Bind + enable.
   await page.getByRole("button", { name: "Bind", exact: true }).click();
   await page.getByRole("button", { name: "Disabled" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Enable server" }).click();
   await expect(page.getByText("Enabled")).toBeVisible();
 
   // Toggle required -> optional (button switches and persists).
@@ -229,8 +228,8 @@ test("unbound managed MCP profiles can be archived", async ({ page }) => {
   });
   await selectProjectAndOpenMCPSettings(page);
 
-  page.once("dialog", dialog => dialog.accept());
   await page.getByLabel("Archive MCP profile PubMed").click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Archive profile" }).click();
   await expect(page.getByLabel("Archive MCP profile PubMed")).toHaveCount(0);
   expect(archived).toBe(true);
 });

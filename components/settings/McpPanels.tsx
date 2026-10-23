@@ -2,6 +2,7 @@
 
 import { Archive } from "lucide-react";
 import type { MCPCatalogEntry, MCPProjectBinding } from "@/components/settings/types";
+import { confirmAction } from "@/components/ui/confirm";
 import type { useMcpSettings } from "@/hooks/useMcpSettings";
 
 const TRANSPORT_LABELS: Record<string, string> = {
@@ -156,7 +157,11 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
                     ? `Command: ${commandSummary}`
                     : `Endpoint: ${version.endpoint ?? ""}`
                   : "";
-                if (!window.confirm(`Enable this MCP server?\n${summary}\n\nOnly selected tools will be exposed to Runs.`)) return;
+                if (!(await confirmAction({
+                  title: "Enable this MCP server?",
+                  description: `${summary}\n\nOnly selected tools will be exposed to Runs.`,
+                  confirmLabel: "Enable server",
+                }))) return;
               }
               await updateBinding(binding, { desiredEnabled: next });
             }}

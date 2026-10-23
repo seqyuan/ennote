@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
+import { confirmAction } from "@/components/ui/confirm";
 import type { AnnotatedSkill, SkillInstallInfo, SkillUpdateResult } from "@/components/settings/types";
 
 export function useSkillRowActions(
@@ -98,7 +99,12 @@ export function useSkillRowActions(
   }, [setSkills, setError]);
 
   const remove = useCallback(async (skill: AnnotatedSkill) => {
-    if (!window.confirm(`Remove the skill "${skill.name}"?`)) return;
+    if (!(await confirmAction({
+      title: `Remove the skill "${skill.name}"?`,
+      description: "The skill files are removed from the managed catalog.",
+      confirmLabel: "Remove skill",
+      tone: "danger",
+    }))) return;
     setRemoving(skill.relPath);
     try {
       await apiFetch(`/v1/skills/remove/${skill.relPath}`, { method: "POST" });

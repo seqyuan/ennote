@@ -332,8 +332,8 @@ test("cancels an active delegation group when the action is valid", async ({ pag
 
   await selectSession(page);
   await expect(page.getByRole("button", { name: "Cancel delegation" })).toBeVisible();
-  page.once("dialog", dialog => dialog.accept());
   await page.getByRole("button", { name: "Cancel delegation" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Cancel tasks" }).click();
   await expect.poll(() => cancelled).toBe(true);
   await expect(page.getByRole("button", { name: "Cancel delegation" })).toHaveCount(0);
   await expect(page.locator('[data-child-run-id="child-cancel"] .child-run-status')).toContainText("Cancelled");

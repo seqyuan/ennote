@@ -138,9 +138,9 @@ test("toggle, check update, and remove a skill", async ({ page }) => {
   await expect.poll(() => updateBody).not.toBeNull();
   expect(updateBody).toMatchObject({ package: "openai/skills@pdf", scope: "global" });
 
-  // Remove (confirm dialog).
-  page.on("dialog", (dialog) => void dialog.accept());
+  // Remove (shared confirm dialog).
   await page.locator('button[title="Remove skill"]').click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Remove skill" }).click();
   await expect.poll(() => removed).toBe("/v1/skills/remove/pdf");
 });
 
@@ -200,7 +200,7 @@ test("skill roots: preset add, toggle, and remove via the settings surface", asy
   await expect(page.getByText("/home/u/.pi/agent/skills")).toBeVisible();
   await page.getByRole("button", { name: "Enabled", exact: true }).click();
   await expect.poll(() => patched).toContain("/v1/skills/roots/root-1");
-  page.on("dialog", (dialog) => void dialog.accept());
   await page.locator('button[title*="Stop reading skills"]').click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Stop reading" }).click();
   await expect.poll(() => deleted).toBe("/v1/skills/roots/root-1");
 });
