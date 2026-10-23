@@ -1,5 +1,6 @@
 "use client";
 
+import { FileText, Folder, Wrench, Workflow, X } from "lucide-react";
 import { useState } from "react";
 import { getFileIcon } from "./FileIcons";
 
@@ -80,26 +81,13 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
           >
             <span style={{ flexShrink: 0, opacity: isActive ? 1 : 0.7, display: "flex", alignItems: "center" }}>
               {tab.icon === "files" ? (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 7.5V6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1.5" />
-                  <path d="M3 7.5h18l-1.6 9.6A2 2 0 0 1 17.4 19H6.6a2 2 0 0 1-2-1.9z" />
-                </svg>
+                <Folder size={13} aria-hidden="true" />
               ) : tab.icon === "report" ? (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                </svg>
+                <FileText size={13} aria-hidden="true" />
               ) : tab.icon === "tools" ? (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.1-3.1a6 6 0 0 1-7.9 7.9l-5.7 5.7a2.1 2.1 0 0 1-3-3l5.7-5.7a6 6 0 0 1 7.9-7.9z" />
-                </svg>
+                <Wrench size={13} aria-hidden="true" />
               ) : tab.icon === "graph" ? (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="5" r="2" />
-                  <circle cx="5" cy="19" r="2" />
-                  <circle cx="19" cy="19" r="2" />
-                  <path d="M12 7v4M5 17v-2h6v4M19 17v-2h-6" />
-                </svg>
+                <Workflow size={13} aria-hidden="true" />
               ) : (
                 getFileIcon(tab.filePath ?? tab.label, 13)
               )}
@@ -135,10 +123,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
                 title="Close"
                 aria-label={`Close ${tab.label}`}
               >
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-                  <line x1="2" y1="2" x2="8" y2="8" />
-                  <line x1="8" y1="2" x2="2" y2="8" />
-                </svg>
+                <X size={10} aria-hidden="true" />
               </button>
             )}
           </div>

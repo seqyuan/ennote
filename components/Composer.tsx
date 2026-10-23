@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  Bot, File, FileSpreadsheet, FileText, ImagePlus, ListPlus, Minimize2, Paperclip, Plus, Presentation, X,
+  ArrowUp, Bot, File, FileSpreadsheet, FileText, ImagePlus, ListPlus, Minimize2, Paperclip, Plus, Presentation, Square, X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
 import { useT } from "@/components/LocaleProvider";
@@ -356,25 +356,18 @@ export function Composer({
               {activeRun && (
                 <button type="button" className="composer-followup" aria-label={t("composer.queueFollowUp")}
                   disabled={!input.trim() || compacting || reconnecting} onClick={followUp}>
-                  <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <line x1="5" y1="1" x2="5" y2="6" /><polyline points="2.5 3.5 5 1 7.5 3.5" />
-                    <line x1="2" y1="9" x2="8" y2="9" />
-                  </svg>
+                  <ListPlus size={12} aria-hidden="true" />
                   <span>{t("composer.followUp")}</span>
                 </button>
               )}
               {activeRun ? (
                 <button type="button" className="composer-primary" aria-label={t("composer.stopRun")} title={t("composer.stopRun")} onClick={cancel}>
-                  <svg width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true">
-                    <rect x="1.5" y="1.5" width="7" height="7" rx="1.5" fill="currentColor" />
-                  </svg>
+                  <Square size={12} fill="currentColor" aria-hidden="true" />
                 </button>
               ) : (
                 <button type="submit" className="composer-primary" aria-label={t("composer.send")}
                   disabled={inert || !selectedSession || (!permissionReady && !selectedRoleId) || (!input.trim() && !hasPendingImage && textAttachments.length === 0)}>
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M8.3125 0.980183C8.66767 1.0531 8.97902 1.20418 9.2627 1.43233C9.48724 1.61297 9.73029 1.85793 9.97949 2.10714L14.707 6.83468L13.293 8.24874L9 3.95577V15.0417H7V3.95577L2.70703 8.24874L1.29297 6.83468L6.02051 2.10714C6.26971 1.85793 6.51277 1.61297 6.7373 1.43233C6.97662 1.23986 7.28445 1.04402 7.6875 0.980183C7.8973 0.947006 8.1031 0.95516 8.3125 0.980183Z" fill="currentColor" />
-                  </svg>
+                  <ArrowUp size={16} aria-hidden="true" />
                 </button>
               )}
             </div>

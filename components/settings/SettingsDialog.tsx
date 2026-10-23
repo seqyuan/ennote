@@ -1,6 +1,6 @@
 "use client";
 
-import { X } from "lucide-react";
+import { Database, FileText, Layers, Plug, Settings2, Shield, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ContextSettings } from "@/components/settings/ContextSettings";
 import { GeneralSettings } from "@/components/settings/GeneralSettings";
@@ -19,62 +19,15 @@ interface TabItem {
 }
 
 function tabIcon(id: SettingsTab) {
-  if (id === "general") {
-    return (
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <line x1="4" y1="21" x2="4" y2="14" />
-        <line x1="4" y1="10" x2="4" y2="3" />
-        <line x1="12" y1="21" x2="12" y2="12" />
-        <line x1="12" y1="8" x2="12" y2="3" />
-        <line x1="20" y1="21" x2="20" y2="16" />
-        <line x1="20" y1="12" x2="20" y2="3" />
-        <line x1="1" y1="14" x2="7" y2="14" />
-        <line x1="9" y1="8" x2="15" y2="8" />
-        <line x1="17" y1="16" x2="23" y2="16" />
-      </svg>
-    );
+  switch (id) {
+    case "general": return <Settings2 size={15} aria-hidden="true" />;
+    case "models": return <Database size={15} aria-hidden="true" />;
+    case "policies": return <Shield size={15} aria-hidden="true" />;
+    case "context": return <Layers size={15} aria-hidden="true" />;
+    case "templates": return <FileText size={15} aria-hidden="true" />;
+    case "mcp": return <Plug size={15} aria-hidden="true" />;
+    case "skills": return <Sparkles size={15} aria-hidden="true" />;
   }
-  if (id === "models") {
-    return (
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="4" y="4" width="16" height="16" rx="2" />
-        <rect x="9" y="9" width="6" height="6" />
-        <line x1="9" y1="1" x2="9" y2="4" />
-        <line x1="15" y1="1" x2="15" y2="4" />
-        <line x1="9" y1="20" x2="9" y2="23" />
-        <line x1="15" y1="20" x2="15" y2="23" />
-      </svg>
-    );
-  }
-  if (id === "policies") {
-    return (
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-      </svg>
-    );
-  }
-  if (id === "mcp") {
-    return (
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="2" y="2" width="20" height="20" rx="2" />
-        <line x1="2" y1="12" x2="22" y2="12" />
-        <line x1="12" y1="2" x2="12" y2="22" />
-      </svg>
-    );
-  }
-  if (id === "skills") {
-    return (
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5l-1.9-4.6L5.5 9l4.6-1.4z" />
-        <path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z" />
-      </svg>
-    );
-  }
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.66 0 3-4.03 3-9s-1.34-9-3-9m0 18c-1.66 0-3-4.03-3-9s1.34-9 3-9m-9 9a9 9 0 0 1 9-9" />
-    </svg>
-  );
 }
 
 export function SettingsDialog({ open, onClose, initialTab, providers, models, policies, session, refresh, error, setError,
