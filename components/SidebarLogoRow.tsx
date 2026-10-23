@@ -1,6 +1,6 @@
 "use client";
 
-import { X } from "lucide-react";
+import { PanelLeft, X } from "lucide-react";
 import { useT } from "@/components/LocaleProvider";
 import { BrandMark } from "@/components/BrandMark";
 
@@ -35,10 +35,7 @@ export function SidebarLogoRow(props: {
         aria-expanded="true"
         aria-controls="workspace-navigation"
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <rect x="3" y="3" width="18" height="18" rx="2" />
-          <line x1="9" y1="3" x2="9" y2="21" />
-        </svg>
+        <PanelLeft size={16} aria-hidden="true" />
       </button>
 
       <button

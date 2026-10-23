@@ -1,6 +1,6 @@
 "use client";
 
-import { MoreHorizontal, Pencil, Plus, Star, Trash2, Triangle } from "lucide-react";
+import { ChevronRight, Folder, FolderOpen, MoreHorizontal, Pencil, Plus, Star, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useT } from "@/components/LocaleProvider";
 import type { Session } from "@/components/settings/types";
@@ -86,11 +86,11 @@ export function ProjectGroup({
       >
         <span className={`sb-row-slot sb-folder${isCurrent ? " sb-folder-active" : ""}`}>
           {isCollapsed
-            ? <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M1.5 5A1.5 1.5 0 0 1 3 3.5h3l1.2 1.5H13A1.5 1.5 0 0 1 14.5 6.5L13.6 11A1.5 1.5 0 0 1 12.1 12.5H3A1.5 1.5 0 0 1 1.5 11V5Z" /></svg>
-            : <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M1.5 5A1.5 1.5 0 0 1 3 3.5h3l1.2 1.5H13A1.5 1.5 0 0 1 14.5 6.5L13.6 11A1.5 1.5 0 0 1 12.1 12.5H3A1.5 1.5 0 0 1 1.5 11V5ZM1.5 8V11A1.5 1.5 0 0 0 3 12.5h10A1.5 1.5 0 0 0 14.5 11V8" /></svg>}
+            ? <Folder size={15} aria-hidden="true" />
+            : <FolderOpen size={15} aria-hidden="true" />}
         </span>
         <span className="sb-row-slot sb-chevron">
-          <Triangle size={10} fill="currentColor" stroke="none" style={{ transform: isCollapsed ? "none" : "rotate(90deg)", transition: "transform 0.15s" }} aria-hidden="true" />
+          <ChevronRight size={14} style={{ transform: isCollapsed ? "none" : "rotate(90deg)", transition: "transform 0.15s" }} aria-hidden="true" />
         </span>
         <span className="sb-project-title">{group.projectName}</span>
 

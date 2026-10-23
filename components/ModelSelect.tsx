@@ -13,6 +13,7 @@
  * model omits an explicit effort so the Worker default (`"default"`) applies,
  * matching dsh's select RPC that leaves `reasoningEffort` unset.
  */
+import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type FocusEvent } from "react";
 import { useT } from "@/components/LocaleProvider";
 import type { ModelProfile, ProviderProfile } from "@/components/settings/types";
@@ -29,22 +30,6 @@ type Pane = "root" | "model" | "effort";
 /** Simple {var} interpolation; ennote's translate has none. */
 function fill(template: string, vars: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (_, name: string) => vars[name] ?? `{${name}}`);
-}
-
-function ChevronRightIcon() {
-  return (
-    <svg className="model-select-cell-chevron" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M5.25 3.5L8.75 7L5.25 10.5" />
-    </svg>
-  );
-}
-
-function CheckIcon({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <polyline points="3 8.5 6.5 12 13 4.5" />
-    </svg>
-  );
 }
 
 export function ModelSelect({ models, providers = [], selectedModelId, setSelectedModelId, thinkingEffort, setThinkingEffort, disabled }: {
@@ -176,9 +161,7 @@ export function ModelSelect({ models, providers = [], selectedModelId, setSelect
       >
         <span className="model-select-trigger-label">{modelLabel}</span>
         {effortLabel !== undefined && <span className="model-select-trigger-effort">{effortLabel}</span>}
-        <svg className={open ? "model-select-chevron open" : "model-select-chevron"} width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M3.5 5.25L7 8.75L10.5 5.25" />
-        </svg>
+        <ChevronDown size={14} className={open ? "model-select-chevron open" : "model-select-chevron"} aria-hidden="true" />
       </button>
 
       {open && (
@@ -193,13 +176,13 @@ export function ModelSelect({ models, providers = [], selectedModelId, setSelect
               <button data-menu-index={itemIndex++} type="button" role="menuitem" className="model-select-cell" onClick={() => { setPane("model"); }}>
                 <span className="model-select-cell-label">{t("composer.modelSelect.model")}</span>
                 <span className="model-select-cell-value">{modelLabel}</span>
-                <ChevronRightIcon />
+                <ChevronRight size={14} className="model-select-cell-chevron" aria-hidden="true" />
               </button>
               {reasoning && (
                 <button data-menu-index={itemIndex++} type="button" role="menuitem" className="model-select-cell" onClick={() => { setPane("effort"); }}>
                   <span className="model-select-cell-label">{t("composer.modelSelect.effort")}</span>
                   <span className="model-select-cell-value">{effortLabel}</span>
-                  <ChevronRightIcon />
+                  <ChevronRight size={14} className="model-select-cell-chevron" aria-hidden="true" />
                 </button>
               )}
             </>
@@ -227,7 +210,7 @@ export function ModelSelect({ models, providers = [], selectedModelId, setSelect
                           <span className="model-select-option-name">{model.displayName || model.modelName}</span>
                         </span>
                         <span className="model-select-check">
-                          {isSelected && <CheckIcon />}
+                          {isSelected && <Check size={16} aria-hidden="true" />}
                         </span>
                       </button>
                     );
@@ -256,7 +239,7 @@ export function ModelSelect({ models, providers = [], selectedModelId, setSelect
                       <span className="model-select-option-name">{effortDisplayName(level)}</span>
                     </span>
                     <span className="model-select-check">
-                      {isActive && <CheckIcon />}
+                      {isActive && <Check size={16} aria-hidden="true" />}
                     </span>
                   </button>
                 );
