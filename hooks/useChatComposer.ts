@@ -305,6 +305,11 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
     if (!queued) setInputVersioned(text);
   }, [agent, input, selectedProject, selectedSession, expandedVersion, draftVersion, setInputVersioned, expandDraftOrFallback]);
 
+  const steerText = useCallback(async (text: string): Promise<boolean> => {
+    if (!agent.activeRunID || !text.trim()) return false;
+    return agent.steer(text);
+  }, [agent]);
+
   const followUp = useCallback(async () => {
     if (!agent.activeRunID || !input.trim()) return;
     const text = input;
@@ -436,6 +441,6 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
 
   return {
     composer,
-    actions: { submit, steer, followUp },
+    actions: { submit, steer, steerText, followUp },
   };
 }

@@ -758,6 +758,13 @@ func TestSubmitTurnQueueSteerAndCancel(t *testing.T) {
 	decodeData(t, queued, &item)
 	assert.Equal(t, domain.QueuedInputSteer, item.Kind)
 
+	cancelledInput := request(t, handler, http.MethodDelete, "/v1/runs/"+submission.Run.ID+"/inputs/"+item.ID, nil, true)
+	require.Equal(t, http.StatusOK, cancelledInput.Code, cancelledInput.Body.String())
+	var cancelledItem domain.QueuedInput
+	decodeData(t, cancelledInput, &cancelledItem)
+	assert.Equal(t, item.ID, cancelledItem.ID)
+	assert.Equal(t, "cancelled", cancelledItem.Status)
+
 	cancelled := request(t, handler, http.MethodPost, "/v1/runs/"+submission.Run.ID+"/cancel", map[string]any{}, true)
 	require.Equal(t, http.StatusOK, cancelled.Code, cancelled.Body.String())
 	assert.Equal(t, []string{submission.Run.ID}, controller.cancelled)

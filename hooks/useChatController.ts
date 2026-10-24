@@ -150,6 +150,7 @@ export function useChatController(deps: ChatControllerDeps) {
     decideApproval,
     cancel: () => void agent.cancel(),
     pendingFollowUps: agent.pendingFollowUps,
+    cancelFollowUp: agent.cancelFollowUp,
     recovery: recoveryData.recovery,
     retrying: recoveryData.retrying,
     retryRun: () => void retryRun(),

@@ -14,6 +14,7 @@ import (
 )
 
 var ErrRunNotActive = errors.New("agent run is not active")
+var ErrQueuedInputNotFound = errors.New("queued input not found")
 
 type QueueRepo struct{ DB *sql.DB }
 
@@ -186,6 +187,71 @@ func (r *QueueRepo) CancelPending(ctx context.Context, runID string) (int64, err
 		return 0, fmt.Errorf("cancel pending inputs: %w", err)
 	}
 	return result.RowsAffected()
+}
+
+// CancelInput cancels one still-queued input. It is idempotent only in the
+// sense that a second cancel reports not-found; the durable event keeps the
+// removal observable to other clients.
+func (r *QueueRepo) CancelInput(ctx context.Context, runID, inputID string) (*domain.QueuedInput, error) {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin queued input cancel: %w", err)
+	}
+	defer tx.Rollback()
+
+	var item domain.QueuedInput
+	var contentJSON, createdAt string
+	err = tx.QueryRowContext(ctx,
+		`SELECT id, run_id, session_id, client_request_id, seq, kind, content_json, status, created_at
+		 FROM run_input_queue WHERE id = ? AND run_id = ? AND status = 'queued'`,
+		inputID, runID,
+	).Scan(&item.ID, &item.RunID, &item.SessionID, &item.ClientRequestID, &item.Seq, &item.Kind, &contentJSON, &item.Status, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrQueuedInputNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load queued input: %w", err)
+	}
+	var content struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal([]byte(contentJSON), &content); err != nil {
+		return nil, fmt.Errorf("decode queued input: %w", err)
+	}
+	item.Text = content.Text
+	if item.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
+		return nil, fmt.Errorf("parse queued input timestamp: %w", err)
+	}
+
+	cancelledAt := time.Now().UTC()
+	result, err := tx.ExecContext(ctx,
+		`UPDATE run_input_queue SET status = 'cancelled', cancelled_at = ?
+		 WHERE id = ? AND run_id = ? AND status = 'queued'`,
+		cancelledAt.Format(time.RFC3339Nano), inputID, runID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("cancel queued input: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("cancel queued input rows: %w", err)
+	}
+	if affected == 0 {
+		return nil, ErrQueuedInputNotFound
+	}
+	item.Status = "cancelled"
+	payload, _ := json.Marshal(map[string]any{
+		"queueItemId": item.ID, "kind": item.Kind, "seq": item.Seq,
+	})
+	if _, err := appendEventsTx(ctx, tx, runID, domain.PendingEvent{
+		EventType: "input_cancelled", Payload: payload,
+	}); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit queued input cancel: %w", err)
+	}
+	return &item, nil
 }
 
 // ListQueuedBySession returns the session's still-queued inputs (steer and

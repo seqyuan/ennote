@@ -63,7 +63,7 @@ func (r *EventRepo) After(ctx context.Context, runID string, afterEventID int64,
 // never appear on the session's public timeline).
 const sessionEventWhitelist = `('message_committed','run_succeeded','run_failed','run_cancelled','run_interrupted',
  'context_compaction_completed','run_context_compaction_completed',
- 'approval_requested','approval_resolved','input_queued','input_injected')`
+ 'approval_requested','approval_resolved','input_queued','input_injected','input_cancelled')`
 
 // SessionEventsAfter returns session-scoped durable events after a cursor, in
 // event_id order. run_events has no session_id column, so the session filter is

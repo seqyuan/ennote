@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  ArrowUp, Bot, File, FileSpreadsheet, FileText, ImagePlus, ListPlus, Minimize2, Paperclip, Plus, Presentation, Square, X,
+  ArrowUp, File, FileSpreadsheet, FileText, ImagePlus, ListPlus, Minimize2, Paperclip, Plus, Presentation, Square, X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
 import { useT } from "@/components/LocaleProvider";
@@ -15,6 +15,7 @@ import type { SessionContextUsage, SessionStats } from "@/hooks/chat-controller-
 import { artifactPreviewURL } from "@/lib/artifacts";
 import type { PermissionMode, ThinkingEffort } from "@/lib/permission-mode";
 import { PromptCommandMenu } from "./PromptCommandMenu";
+import { QueueDock, type QueuedMessage } from "./QueueDock";
 
 export interface TextAttachment {
   id: string;
@@ -83,8 +84,10 @@ interface ComposerProps {
   uploadImage: (file: File) => void;
   submit: () => void;
   steer: () => void;
+  steerText: (text: string) => Promise<boolean>;
   followUp: () => void;
   cancel: () => void;
+  cancelFollowUp: (id: string) => Promise<boolean>;
   pendingFollowUps: { id: string; text: string }[];
   compactSession: () => void;
   /** No workspace: the dashed card opens the project picker (dsh inert). */
@@ -111,7 +114,7 @@ interface ComposerProps {
 export function Composer({
   selectedSession, activeLeafMessageId, input, setInput, activeRun, compacting, hasPendingImage, reconnecting,
   permissionMode, permissionReady, setPermissionMode, models, providers, selectedModelId, setSelectedModelId, thinkingEffort, setThinkingEffort,
-  roles, selectedRoleId, setSelectedRoleId, textAttachments, removeTextAttachment, pendingImage, clearPendingImage, attachFiles, uploadImage, submit, steer, followUp, cancel, compactSession,
+  roles, selectedRoleId, setSelectedRoleId, textAttachments, removeTextAttachment, pendingImage, clearPendingImage, attachFiles, uploadImage, submit, steer, steerText, followUp, cancel, cancelFollowUp, compactSession,
   pendingFollowUps,
   promptTemplates, showPromptPanel, onPromptSelect, onPromptPanelClose, expanding, expandDiag,
   panelRoles, panelFlows, onRoleSelect, onFlowSelect, contextUsage, stats,
@@ -141,9 +144,6 @@ export function Composer({
     };
   }, [configOpen]);
 
-  const configDot = Boolean(selectedRoleId) || permissionMode !== "discuss";
-  const selectedRole = roles.find((role) => role.id === selectedRoleId) ?? null;
-
   useEffect(() => {
     const element = textarea.current;
     if (!element) return;
@@ -166,6 +166,20 @@ export function Composer({
     event.preventDefault();
     form.current?.requestSubmit();
   }
+
+  const editQueued = useCallback(async (item: QueuedMessage) => {
+    if (!(await cancelFollowUp(item.id))) return;
+    setInput(item.text);
+    window.requestAnimationFrame(() => textarea.current?.focus());
+  }, [cancelFollowUp, setInput]);
+
+  const removeQueued = useCallback((item: QueuedMessage) => {
+    void cancelFollowUp(item.id);
+  }, [cancelFollowUp]);
+
+  const steerQueued = useCallback(async (item: QueuedMessage) => {
+    if (await cancelFollowUp(item.id)) await steerText(item.text);
+  }, [cancelFollowUp, steerText]);
 
   const canAttach = Boolean(selectedSession) && !activeRun && !compacting;
   const handleDragEnter = useCallback((event: DragEvent) => {
@@ -200,6 +214,7 @@ export function Composer({
   return (
     <div className="composer-shell" onDragEnter={handleDragEnter} onDragLeave={handleDragLeave} onDragOver={handleDragOver} onDrop={handleDrop}>
       {isDragOver && <div className="composer-drop-zone"><Paperclip size={18} />{t("composer.dropFiles")}</div>}
+      <QueueDock items={pendingFollowUps} onEdit={editQueued} onRemove={removeQueued} onSteer={steerQueued} />
 
       {(pendingImage || textAttachments.length > 0) && (
         <div className="composer-attachments" aria-label={t("composer.attachedFiles")}>
@@ -240,13 +255,29 @@ export function Composer({
           ref={configRef}
           onClick={() => { if (inert) onRequestProject?.(); }}
         >
+          <div className="composer-context-bar" aria-label={t("composer.runContext")}>
+            <RoleTargetPicker roles={roles} selectedRoleId={selectedRoleId} onSelect={setSelectedRoleId}
+              disabled={!selectedSession || activeRun || compacting} />
+            <PermissionChip
+              permissionMode={permissionMode}
+              permissionReady={permissionReady}
+              setPermissionMode={setPermissionMode}
+              disabled={!selectedSession || activeRun || compacting || Boolean(selectedRoleId)}
+            />
+            <span className="composer-context-spacer" aria-hidden="true" />
+            <ModelSelect
+              models={models}
+              providers={providers}
+              selectedModelId={selectedModelId}
+              setSelectedModelId={setSelectedModelId}
+              thinkingEffort={thinkingEffort}
+              setThinkingEffort={setThinkingEffort}
+              disabled={!selectedSession || activeRun || models.length === 0 || Boolean(selectedRoleId)}
+            />
+            <ContextMeter contextUsage={contextUsage} />
+          </div>
           {configOpen && (
-            <div className="composer-config-panel" role="dialog" aria-label={t("composer.runConfiguration")}>
-              <div className="composer-config-row">
-                <span className="composer-config-label">{t("composer.target")}</span>
-                <RoleTargetPicker roles={roles} selectedRoleId={selectedRoleId} onSelect={setSelectedRoleId}
-                  disabled={!selectedSession || activeRun || compacting} />
-              </div>
+            <div className="composer-config-panel" role="dialog" aria-label={t("composer.attachMenu")}>
               <div className="composer-config-row">
                 <span className="composer-config-label">{t("composer.attach")}</span>
                 <div className="composer-config-tools">
@@ -323,36 +354,9 @@ export function Composer({
                 onClick={() => setConfigOpen((value) => !value)}
               >
                 <Plus size={14} aria-hidden="true" />
-                {configDot && <span className="composer-plus-dot" aria-hidden="true" />}
               </button>
-              {selectedSession && (
-                <div className="composer-modes">
-                  <PermissionChip
-                    permissionMode={permissionMode}
-                    permissionReady={permissionReady}
-                    setPermissionMode={setPermissionMode}
-                    disabled={!selectedSession || activeRun || compacting || Boolean(selectedRoleId)}
-                  />
-                  {selectedRole && (
-                    <span className="composer-tag" title={t("composer.roleTarget")}>
-                      <Bot size={14} aria-hidden="true" />
-                      <span>{selectedRole.handle ? `@${selectedRole.handle}` : selectedRole.name}</span>
-                    </span>
-                  )}
-                </div>
-              )}
             </div>
             <div className="composer-trailing">
-              <ModelSelect
-                models={models}
-                providers={providers}
-                selectedModelId={selectedModelId}
-                setSelectedModelId={setSelectedModelId}
-                thinkingEffort={thinkingEffort}
-                setThinkingEffort={setThinkingEffort}
-                disabled={!selectedSession || activeRun || models.length === 0 || Boolean(selectedRoleId)}
-              />
-              <ContextMeter contextUsage={contextUsage} />
               {activeRun && (
                 <button type="button" className="composer-followup" aria-label={t("composer.queueFollowUp")}
                   disabled={!input.trim() || compacting || reconnecting} onClick={followUp}>
@@ -380,12 +384,6 @@ export function Composer({
         {!permissionReady && selectedSession && !selectedRoleId && <span className="composer-config-hint is-danger">{t("composer.policyUnavailable")}</span>}
         {expanding && <span className="composer-status" aria-live="polite">{t("composer.expanding")}</span>}
         {expandDiag && <span className="composer-status diag-warning" aria-live="polite">{expandDiag}</span>}
-        {pendingFollowUps.length > 0 && (
-          <div className="composer-followup-queue" aria-live="polite" role="status">
-            <ListPlus size={13} aria-hidden="true" />
-            <span>{t("composer.queued")}: {pendingFollowUps.map(item => item.text).join(" · ")}</span>
-          </div>
-        )}
       </div>
     </div>
   );

@@ -217,6 +217,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/runs/{runID}/retry", s.retryRun)
 	mux.HandleFunc("POST /v1/runs/{runID}/cancel", s.cancelRun)
 	mux.HandleFunc("POST /v1/runs/{runID}/inputs", s.queueInput)
+	mux.HandleFunc("DELETE /v1/runs/{runID}/inputs/{inputID}", s.cancelQueuedInput)
 	mux.HandleFunc("POST /v1/approval-requests/{approvalID}/decision", s.decideApproval)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/standing-approvals", s.listStandingApprovals)
 	mux.HandleFunc("POST /v1/sessions/{sessionID}/standing-approvals/{ruleID}/revoke", s.revokeStandingApproval)
@@ -1372,6 +1373,15 @@ func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, run)
 }
 
+func (s *Server) cancelQueuedInput(w http.ResponseWriter, r *http.Request) {
+	item, err := s.Queue.CancelInput(r.Context(), r.PathValue("runID"), r.PathValue("inputID"))
+	if err != nil {
+		s.writeStoreError(w, r, err)
+		return
+	}
+	writeData(w, http.StatusOK, item)
+}
+
 func (s *Server) queueInput(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Kind            domain.QueuedInputKind `json:"kind"`
@@ -1405,6 +1415,8 @@ func (s *Server) writeStoreError(w http.ResponseWriter, r *http.Request, err err
 		writeError(w, r, http.StatusConflict, "session_state_conflict", err.Error(), false)
 	case errors.Is(err, store.ErrRunNotFound):
 		writeError(w, r, http.StatusNotFound, "run_not_found", err.Error(), false)
+	case errors.Is(err, store.ErrQueuedInputNotFound):
+		writeError(w, r, http.StatusNotFound, "queued_input_not_found", err.Error(), false)
 	case errors.Is(err, store.ErrBranchNotFound):
 		writeError(w, r, http.StatusNotFound, "branch_not_found", err.Error(), false)
 	case errors.Is(err, store.ErrBranchPointNotActive):

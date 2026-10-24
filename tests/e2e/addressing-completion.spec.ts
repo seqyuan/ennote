@@ -68,7 +68,7 @@ test("typing @role completes a role target and clears the token", async ({ page 
   // The token is consumed and the role target is selected instead.
   await expect(textarea).toHaveValue("");
   await expect(panel).not.toBeVisible();
-  await expect(page.locator(".composer-tag")).toHaveText(/@security-reviewer/);
+  await expect(page.locator(".role-target-trigger")).toContainText("@security-reviewer");
 });
 
 test("typing @graph completes a graph invocation with version", async ({ page }) => {

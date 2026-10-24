@@ -187,7 +187,7 @@ export function ChatWindow({
           roles={composer.roles} selectedRoleId={composer.selectedRoleId} setSelectedRoleId={composer.setSelectedRoleId}
           textAttachments={composer.textAttachments} removeTextAttachment={composer.removeTextAttachment}
           pendingImage={composer.pendingImage} clearPendingImage={composer.clearPendingImage}
-          attachFiles={composer.attachFiles} uploadImage={composer.uploadImage} submit={actions.submit} steer={actions.steer} followUp={actions.followUp} cancel={run.cancel} compactSession={composer.compactSession}
+          attachFiles={composer.attachFiles} uploadImage={composer.uploadImage} submit={actions.submit} steer={actions.steer} steerText={actions.steerText} followUp={actions.followUp} cancel={run.cancel} cancelFollowUp={run.cancelFollowUp} compactSession={composer.compactSession}
           pendingFollowUps={run.pendingFollowUps}
           promptTemplates={composer.promptPanel.templates} showPromptPanel={composer.promptPanel.show} onPromptSelect={composer.promptPanel.onSelect}
           panelRoles={composer.promptPanel.roles} panelFlows={composer.promptPanel.flows} onRoleSelect={composer.promptPanel.onRoleSelect} onFlowSelect={composer.promptPanel.onFlowSelect}

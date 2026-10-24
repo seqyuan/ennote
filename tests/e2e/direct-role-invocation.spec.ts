@@ -79,7 +79,6 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
 
     await expect(page.getByText(`@${role.handle}`, { exact: true }).first()).toBeVisible();
     await expect(page.getByText("The boundary is explicit.")).toBeVisible();
-    await page.getByRole("button", { name: "Configure run", exact: true }).click();
     await page.getByTitle("Invocation target").click();
     await page.getByRole("option", { name: new RegExp(role.handle) }).click();
     await expect(page.getByTitle("Default Model")).toBeDisabled();

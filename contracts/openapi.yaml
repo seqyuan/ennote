@@ -2346,6 +2346,26 @@ paths:
                       data: { $ref: "#/components/schemas/QueuedInput" }
         "409":
           $ref: "#/components/responses/Error"
+  /v1/runs/{runID}/inputs/{inputID}:
+    parameters:
+      - $ref: "#/components/parameters/RunID"
+      - { name: inputID, in: path, required: true, schema: { type: string } }
+    delete:
+      operationId: cancelRunInput
+      summary: Cancel one still-queued steering or follow-up input
+      responses:
+        "200":
+          description: Queued input cancelled
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/QueuedInput" }
+        "404":
+          $ref: "#/components/responses/Error"
   /v1/approval-requests/{approvalID}/decision:
     parameters:
       - name: approvalID

@@ -82,3 +82,30 @@ func TestQueueRejectsInvalidModeAndKind(t *testing.T) {
 	_, err = queue.Drain(context.Background(), "missing", domain.QueuedInputSteer, "invalid")
 	assert.ErrorContains(t, err, "unsupported")
 }
+
+func TestCancelOneQueuedInputEmitsEventAndRejectsSecondCancel(t *testing.T) {
+	db, _, _ := newSessionDB(t)
+	runs := &store.RunRepo{DB: db}
+	queue := &store.QueueRepo{DB: db}
+	sessionID := createRunTestSession(t, runs)
+	submission, err := runs.SubmitTurn(context.Background(), domain.SubmitTurnInput{
+		SessionID: sessionID, ClientRequestID: "turn", Text: "start",
+	})
+	require.NoError(t, err)
+	item, err := queue.Enqueue(context.Background(), submission.Run.ID, "follow", domain.QueuedInputFollowUp, "later")
+	require.NoError(t, err)
+
+	cancelled, err := queue.CancelInput(context.Background(), submission.Run.ID, item.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "cancelled", cancelled.Status)
+
+	var status string
+	require.NoError(t, db.QueryRow(`SELECT status FROM run_input_queue WHERE id = ?`, item.ID).Scan(&status))
+	assert.Equal(t, "cancelled", status)
+	var cancelledEvents int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM run_events WHERE run_id = ? AND event_type = 'input_cancelled'`, submission.Run.ID).Scan(&cancelledEvents))
+	assert.Equal(t, 1, cancelledEvents)
+
+	_, err = queue.CancelInput(context.Background(), submission.Run.ID, item.ID)
+	assert.True(t, errors.Is(err, store.ErrQueuedInputNotFound), err)
+}

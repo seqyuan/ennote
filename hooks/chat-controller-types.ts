@@ -48,6 +48,7 @@ export type RunView = {
   resolvingApproval: ApprovalDecision | null;
   decideApproval: (decision: ApprovalDecision) => void;
   cancel: () => void;
+  cancelFollowUp: (id: string) => Promise<boolean>;
   pendingFollowUps: { id: string; text: string }[];
   recovery: RunRecovery | null;
   retrying: boolean;
@@ -117,6 +118,7 @@ export type ComposerView = {
 export type ChatActions = {
   submit: () => void;
   steer: () => void;
+  steerText: (text: string) => Promise<boolean>;
   followUp: () => void;
 };
 

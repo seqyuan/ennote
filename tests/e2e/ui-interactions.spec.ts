@@ -121,7 +121,7 @@ test("creating a project uses a dialog instead of native prompts", async ({ page
   expect(created).toMatchObject({ name: "seqyuan", hostPath: "/home/seqyuan" });
   // Dialog closes and the new project is auto-selected in the selector.
   await expect(page.getByRole("dialog", { name: "Select Workspace Directory" })).not.toBeVisible();
-  await expect(page.getByRole("button", { name: "seqyuan", exact: true })).toBeVisible();
+  await expect(page.locator(".sidebar-project-selector > button")).toContainText("seqyuan");
 });
 
 test("adding a project tolerates a null session list from the worker", async ({ page }) => {
@@ -164,7 +164,7 @@ test("adding a project tolerates a null session list from the worker", async ({ 
 
   // The chat shell survives the null payload: no "Reload/Back" fallback
   // screen, and the new project is selected with an empty session list.
-  await expect(page.getByRole("button", { name: "seqyuan", exact: true })).toBeVisible();
+  await expect(page.locator(".sidebar-project-selector > button")).toContainText("seqyuan");
   await expect(page.getByText("No sessions yet.")).toBeVisible();
   await expect(page.getByText("This page couldn\u2019t load")).not.toBeVisible();
   await expect(page.locator(".empty-hero")).toBeVisible();

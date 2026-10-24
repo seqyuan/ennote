@@ -68,6 +68,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
           resolved: () => {},
           delegated: () => {}, // delegationActive is carried by the snapshot
           followUpConsumed: () => { if (generation.current === version) setPendingFollowUps(current => current.slice(1)); },
+          inputCancelled: (id) => { if (generation.current === version) setPendingFollowUps(current => current.filter(item => item.id !== id)); },
         });
       }
     } catch (err) {
@@ -203,9 +204,9 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
     const run = activeRun;
     if (!run || !text.trim()) return { queued: false, runEnded: false };
     try {
-      await apiFetch(`/v1/runs/${encodeURIComponent(run.id)}/inputs`, { method: "POST",
+      const item = await apiFetch<{ id: string; text: string }>(`/v1/runs/${encodeURIComponent(run.id)}/inputs`, { method: "POST",
         body: JSON.stringify({ kind: "follow_up", text, clientRequestId: genId() }) });
-      setPendingFollowUps(current => [...current, { id: genId(), text }]);
+      setPendingFollowUps(current => [...current, { id: item.id, text: item.text || text }]);
       return { queued: true, runEnded: false };
     } catch (err) {
       // The run ended between render and submit: the caller can fall back to a
@@ -214,6 +215,19 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
       const runEnded = /not active|not_active/i.test(message);
       if (!runEnded) setError(message);
       return { queued: false, runEnded };
+    }
+  }, [activeRun]);
+
+  const cancelFollowUp = useCallback(async (id: string): Promise<boolean> => {
+    const run = activeRun;
+    if (!run) return false;
+    try {
+      await apiFetch(`/v1/runs/${encodeURIComponent(run.id)}/inputs/${encodeURIComponent(id)}`, { method: "DELETE" });
+      setPendingFollowUps(current => current.filter(item => item.id !== id));
+      return true;
+    } catch (err) {
+      setError(errorMessage(err, "Failed to cancel the queued message"));
+      return false;
     }
   }, [activeRun]);
 
@@ -262,6 +276,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
     cancel,
     steer,
     followUp,
+    cancelFollowUp,
     pendingFollowUps,
     decideApproval,
   };
@@ -311,7 +326,13 @@ async function streamAgentEvents(
   setUsage: (usage: RunUsage) => void,
   setContextUsage: (usage: SessionContextUsage) => void,
   signal: AbortSignal,
-  approval: { requested: () => void; resolved: () => void; delegated: () => void; followUpConsumed: () => void },
+  approval: {
+    requested: () => void;
+    resolved: () => void;
+    delegated: () => void;
+    followUpConsumed: () => void;
+    inputCancelled: (id: string) => void;
+  },
 ): Promise<boolean> {
   const response = await apiResponse(`/v1/runs/${encodeURIComponent(runId)}/events`, { signal });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -516,6 +537,11 @@ async function streamAgentEvents(
           case "approval_requested": setStatus("Waiting for approval"); approval.requested(); break;
           case "approval_resolved": setStatus("Resuming…"); approval.resolved(); break;
           case "follow_up_consumed": approval.followUpConsumed(); break;
+          case "input_cancelled": {
+            const queueItemId = String(payload.queueItemId ?? "");
+            if (queueItemId) approval.inputCancelled(queueItemId);
+            break;
+          }
           case "run_succeeded": setStatus("Completed"); return true;
           case "run_cancelled": setStatus("Cancelled"); return true;
           case "run_interrupted": setStatus("Interrupted"); return true;

@@ -1507,6 +1507,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/runs/{runID}/inputs/{inputID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runID: components["parameters"]["RunID"];
+                inputID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Cancel one still-queued steering or follow-up input */
+        delete: operations["cancelRunInput"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/approval-requests/{approvalID}/decision": {
         parameters: {
             query?: never;
@@ -6497,6 +6517,32 @@ export interface operations {
                 };
             };
             409: components["responses"]["Error"];
+        };
+    };
+    cancelRunInput: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runID: components["parameters"]["RunID"];
+                inputID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued input cancelled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["QueuedInput"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
         };
     };
     decideToolApproval: {

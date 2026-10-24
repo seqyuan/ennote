@@ -73,8 +73,8 @@ test("queues a follow-up while a run is active and clears it once consumed", asy
   // The run is active; queue a follow-up without interrupting it.
   await page.getByRole("textbox", { name: /agent/ }).fill("Summarize what you found");
   await page.getByRole("button", { name: "Queue follow-up", exact: true }).click();
-  const queue = page.locator(".composer-followup-queue");
-  await expect(queue).toContainText("Queued: Summarize what you found");
+  const queue = page.locator(".queue-dock");
+  await expect(queue).toContainText("Summarize what you found");
   await expect.poll(() => queuedBodies.length).toBeGreaterThan(0);
   expect(queuedBodies[0]).toMatchObject({ kind: "follow_up", text: "Summarize what you found" });
   expect(queuedBodies[0]).toHaveProperty("clientRequestId");
