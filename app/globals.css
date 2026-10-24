@@ -211,17 +211,6 @@ button:disabled { cursor: default; }
   }
 }
 
-/* ── Workspace nav pages (/roles, /graphs): keep the sidebar a normal flex
-   child even on mobile so the management content stays reachable. ── */
-.workspace-nav-page .sidebar-container {
-  position: relative !important;
-  transform: none !important;
-  box-shadow: none !important;
-  width: 260px !important;
-  min-width: 260px !important;
-  max-width: none !important;
-}
-
 /* Mobile sidebar */
 /* Tablet: the right panel becomes a full-screen drawer. Below 960px the
    sidebar (280) + panel (420) would leave under 300px for the conversation. */
@@ -276,62 +265,18 @@ button:disabled { cursor: default; }
 
 /* ── Sidebar Styles ── */
 
-.sidebar {
-  width: 100%; height: 100%; display: flex; flex-direction: column; overflow-y: auto;
-}
-.sidebar-brand {
-  display: flex; align-items: center; min-height: 54px; gap: 9px;
-  padding: 0 12px; border-bottom: 1px solid var(--border);
-}
-.sidebar-brand strong { font-size: var(--text-md); }
-.brand-mark {
-  display: grid; place-items: center; width: 23px; height: 23px;
-  border: 1px solid var(--text-dim); border-radius: var(--radius-xs);
-  background: var(--bg); color: var(--accent);
-  font: 800 var(--text-sm) var(--font-mono);
-}
-.sidebar-section { padding: 9px 0; }
 .sidebar-sessions { min-height: 0; overflow-y: auto; }
-.sidebar-title {
-  display: flex; justify-content: space-between; align-items: center;
-  min-height: 28px; padding: 4px 12px;
-  color: var(--text-muted); font-size: var(--text-xs); font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0;
-}
-.icon-btn, .icon-command {
+.icon-command {
   display: inline-grid; place-items: center; width: 32px; height: 32px;
   flex: 0 0 32px; padding: 0;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   background: transparent; color: var(--text-muted); cursor: pointer;
 }
-.icon-btn { width: 25px; height: 25px; min-width: 25px; padding: 0 5px; }
-.icon-btn:hover, .icon-command:not(:disabled):hover { background: var(--bg-hover); color: var(--text); border-color: var(--text-dim); }
+.icon-command:not(:disabled):hover { background: var(--bg-hover); color: var(--text); border-color: var(--text-dim); }
 .icon-command:disabled, .icon-command.is-disabled { opacity: 0.42; cursor: default; }
-.sidebar-item {
-  display: block; width: 100%; padding: 7px 12px; overflow: hidden; border: 0; background: transparent;
-  color: var(--text-muted); cursor: pointer; font-size: var(--text-md); text-align: left;
-  text-overflow: ellipsis; white-space: nowrap;
-}
-.sidebar-item:hover { background: var(--bg-hover); color: var(--text); }
-.sidebar-item.active { background: var(--bg-selected); color: var(--text); font-weight: 600; }
 .sidebar-settings { margin-top: auto; }
-.sidebar-button { display: flex; align-items: center; width: 100%; gap: 8px; }
-.sidebar-list, .session-list { margin: 0; padding: 0; list-style: none; }
+.session-list { margin: 0; padding: 0; list-style: none; }
 .navigation-close { display: none; margin-left: auto; }
-.session-search {
-  display: flex; align-items: center; height: 32px; gap: 7px; margin: 2px 10px 7px;
-  padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm);
-  background: var(--bg); color: var(--text-dim);
-}
-.session-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent); }
-.session-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: var(--text-sm); }
-.session-search input::placeholder { color: var(--text-dim); }
-.sidebar-icon-btn {
-  display: grid; place-items: center; width: 22px; height: 22px; padding: 0;
-  border: 1px solid var(--border); border-radius: var(--radius-sm);
-  background: var(--bg-panel); color: var(--text-dim); cursor: pointer;
-}
-.sidebar-icon-btn:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
 .sidebar-project-group { margin-bottom: 2px; }
 .sidebar-project-group > div:nth-child(2) { margin: 0 6px; }
 .sidebar-archived-toggle {
@@ -342,32 +287,6 @@ button:disabled { cursor: default; }
 }
 .sidebar-archived-toggle:hover { background: var(--bg-hover); color: var(--text-muted); }
 .sidebar-empty { padding: 14px 12px; color: var(--text-dim); font-size: var(--text-xs); line-height: 1.45; }
-.session-row {
-  position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 30px;
-  align-items: center;
-}
-.session-row .sidebar-item { min-width: 0; padding-right: 4px; }
-.session-row .sidebar-item[aria-disabled="true"] { cursor: default; }
-.session-actions { position: relative; }
-.session-action-trigger {
-  display: grid; width: 27px; height: 27px; place-items: center; padding: 0;
-  border: 0; border-radius: var(--radius-xs);
-  background: transparent; color: var(--text-dim); cursor: pointer;
-}
-.session-action-trigger:hover, .session-action-trigger[aria-expanded="true"] { background: var(--bg-hover); color: var(--text); }
-.session-action-menu {
-  position: fixed; z-index: 45; width: 160px; margin: 2px 0 0 -132px; padding: 4px;
-  border: 1px solid var(--border); border-radius: var(--radius-sm);
-  background: var(--bg); box-shadow: var(--shadow-menu);
-}
-.session-action-menu button {
-  display: flex; width: 100%; min-height: 32px; align-items: center; gap: 7px;
-  padding: 5px 7px; border: 0; border-radius: var(--radius-xs);
-  background: transparent; color: var(--text); cursor: pointer;
-  font-size: var(--text-xs); text-align: left;
-}
-.session-action-menu button:hover:not(:disabled) { background: var(--bg-hover); }
-.session-action-menu button:disabled { opacity: .5; cursor: default; }
 
 /* ── Chat Area ── */
 
@@ -860,72 +779,6 @@ button:disabled { cursor: default; }
   position: fixed; z-index: 60; inset: 0; display: grid; place-items: center;
   padding: 24px; background: color-mix(in srgb, #000 42%, transparent);
 }
-.settings-dialog {
-  display: flex; width: min(1120px, 100%); height: min(820px, 100%); min-height: 0; flex-direction: column;
-  border: 1px solid var(--text-dim); border-radius: var(--radius-sm);
-  background: var(--bg); box-shadow: var(--shadow-menu); overflow: hidden;
-}
-.settings-dialog-header {
-  display: flex; min-height: 62px; align-items: center; justify-content: space-between;
-  padding: 9px 16px 9px 20px; border-bottom: 1px solid var(--border); background: var(--bg-panel);
-}
-.settings-dialog-header > div { display: flex; min-width: 0; flex-direction: column; }
-.settings-dialog-header span { color: var(--text-dim); font-size: var(--text-xs); font-weight: 700; text-transform: uppercase; }
-.settings-dialog-header h1 { font-size: var(--text-xl); line-height: 1.3; }
-.settings-dialog-body { display: grid; grid-template-columns: 196px minmax(0, 1fr); min-height: 0; flex: 1; }
-.settings-tabs { display: flex; min-width: 0; flex-direction: column; gap: 3px; padding: 12px 9px; border-right: 1px solid var(--border); background: var(--bg-panel); }
-.settings-tabs button {
-  display: flex; width: 100%; min-height: 36px; align-items: center; gap: 8px; padding: 7px 9px;
-  border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-muted);
-  cursor: pointer; font-size: var(--text-sm); font-weight: 700; text-align: left;
-}
-.settings-tabs button:hover { background: var(--bg-hover); color: var(--text); }
-.settings-tabs button[aria-selected="true"] { background: var(--bg-selected); color: var(--text); }
-.settings-panels { min-width: 0; min-height: 0; overflow-y: auto; }
-.settings-panels > [role="tabpanel"] { min-height: 100%; }
-
-/* Annovibe-style settings dialog (new) */
-.settings-dialog-backdrop {
-  position: fixed; inset: 0; z-index: 1000;
-  background: rgba(0,0,0,0.38);
-  display: flex; align-items: center; justify-content: center;
-  padding: 22px;
-}
-.settings-dialog-shell {
-  width: min(1120px, 100%); height: min(82vh, 860px); min-height: 560px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.22);
-  overflow: hidden;
-  display: flex; flex-direction: column;
-}
-.settings-dialog-header {
-  height: 50px; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 12px; padding: 0 14px 0 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-}
-.settings-dialog-body {
-  flex: 1; min-height: 0;
-  display: flex; overflow: hidden;
-}
-.settings-dialog-tabs {
-  width: 190px; flex-shrink: 0;
-  padding: 8px; border-right: 1px solid var(--border);
-  background: var(--bg-panel); overflow-y: auto;
-}
-.settings-dialog-tab {
-  width: 100%; border: none; border-radius: var(--radius-sm);
-  padding: 9px 10px; margin: 0 0 4px;
-  display: flex; align-items: center; gap: 9px;
-  text-align: left; transition: background 0.12s, color 0.12s;
-}
-.settings-dialog-panel {
-  flex: 1; min-width: 0; min-height: 0;
-  overflow: hidden; background: var(--bg);
-}
 .settings-tab-section { padding: 22px 24px 36px; }
 .settings-tab-section > header { margin-bottom: 18px; }
 .settings-tab-section > header h2 { margin-bottom: 4px; font-size: var(--text-lg); }
@@ -1100,17 +953,7 @@ button:disabled { cursor: default; }
   .command-button span { display: none; }
 
   .settings-overlay { padding: 0; }
-  .settings-dialog { width: 100%; height: 100%; border: 0; border-radius: 0; }
-  .settings-dialog-header { min-height: 54px; padding-inline: 12px; }
-  .settings-dialog-body { display: flex; flex-direction: column; }
-  .settings-tabs { flex: 0 0 auto; flex-direction: row; gap: 0; padding: 0 6px; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); }
-  .settings-tabs button { width: auto; min-width: max-content; min-height: 42px; border-bottom: 2px solid transparent; border-radius: 0; }
-  .settings-tabs button[aria-selected="true"] { border-bottom-color: var(--accent); background: transparent; }
-  .settings-panels { flex: 1; }
   .settings-tab-section { padding: 18px 14px 30px; }
-  /* New annovibe-style settings dialog mobile rules moved to
-     app/settings.css (the later-loaded stylesheet wins the cascade there;
-     from globals.css they were silently defeated by settings.css). */
   .roles-settings { grid-template-columns: 1fr; grid-template-rows: minmax(180px, 36%) minmax(0, 1fr); }
   .roles-master { border-right: 0; border-bottom: 1px solid var(--border); }
   .roles-master > header { min-height: 48px; }
@@ -1573,18 +1416,6 @@ html.dark .file-code .shiki span { color: var(--shiki-dark); }
 .role-skill-mode { flex-shrink: 0; font-size: var(--text-xs); border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--bg); color: var(--text); padding: 1px 4px; }
 
 /* Worker-global management shell */
-.workspace-page-shell { display: grid; grid-template-columns: 228px minmax(0, 1fr); width: 100%; height: 100dvh; min-height: 0; overflow: hidden; background: var(--bg); }
-.workspace-nav-container { min-width: 0; min-height: 0; border-right: 1px solid var(--border); background: var(--bg-panel); }
-.workspace-nav { display: flex; height: 100%; min-height: 0; flex-direction: column; }
-.workspace-nav-brand { display: flex; min-height: 54px; align-items: center; gap: 9px; padding: 8px 14px; border-bottom: 1px solid var(--border); }
-.workspace-nav-brand strong { font-size: var(--text-md); }
-.workspace-nav nav { display: grid; gap: 3px; padding: 10px 9px; }
-.workspace-nav nav a { display: flex; min-height: 44px; align-items: center; gap: 9px; padding: 0 11px; border-radius: var(--radius-sm); color: var(--text-muted); font-size: var(--text-sm); font-weight: 600; text-decoration: none; }
-.workspace-nav nav a:hover { background: var(--bg-hover); color: var(--text); }
-.workspace-nav nav a.active { background: var(--bg-selected); color: var(--text); box-shadow: inset 2px 0 var(--accent); }
-.workspace-nav nav a.active svg { color: var(--accent); }
-.workspace-nav-foot { margin-top: auto; padding: 13px 16px max(13px, env(safe-area-inset-bottom)); border-top: 1px solid var(--border); color: var(--text-dim); font-size: var(--text-xs); }
-.workspace-page-content { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
 .workspace-page-header { display: flex; min-height: 66px; flex: 0 0 auto; align-items: center; padding: 10px 20px; border-bottom: 1px solid var(--border); background: var(--bg); }
 .workspace-page-header h1 { margin: 0; font-size: var(--text-xl); line-height: 1.3; }
 .workspace-page-header p { margin: 3px 0 0; color: var(--text-muted); font-size: var(--text-xs); line-height: 1.4; }
@@ -1619,7 +1450,7 @@ html.dark .file-code .shiki span { color: var(--shiki-dark); }
 
 .workspace-page-error { margin: 8px 12px 0; }
 .workspace-page-error button { display: grid; width: 32px; height: 32px; place-items: center; border: 0; background: transparent; color: inherit; cursor: pointer; }
-.workspace-mobile-menu, .workspace-nav-close, .workspace-nav-backdrop { display: none; }
+.workspace-mobile-menu { display: none; }
 
 /* Task-first Graph authoring */
 .graph-workspace { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
@@ -1657,7 +1488,7 @@ html.dark .file-code .shiki span { color: var(--shiki-dark); }
 .graph-editor-view { display: grid; grid-template-columns: minmax(0, 1fr) 310px; grid-template-rows: auto minmax(260px, 1fr); min-width: 0; min-height: 0; flex: 1; overflow: auto; }
 .graph-tasks-pane { grid-column: 1; grid-row: 1; min-width: 0; border-bottom: 1px solid var(--border); }
 .graph-dependencies-pane { grid-column: 1; grid-row: 2; min-width: 0; }
-.graph-builder-pane { grid-column: 2; grid-row: 1 / span 2; min-width: 0; border-left: 1px solid var(--border); background: var(--bg-panel); }
+.graph-builder-pane { display: flex; grid-column: 2; grid-row: 1 / span 2; min-width: 0; min-height: 0; flex-direction: column; border-left: 1px solid var(--border); background: var(--bg-panel); }
 .graph-section-heading { display: flex; min-height: 58px; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--border); }
 .graph-section-heading span { color: var(--text); font-size: var(--text-sm); font-weight: 700; }
 .graph-section-heading p { margin: 2px 0 0; color: var(--text-muted); font-size: var(--text-xs); }
@@ -1709,7 +1540,6 @@ html.dark .file-code .shiki span { color: var(--shiki-dark); }
 .graph-builder-empty textarea { width: 100%; min-height: 92px; resize: vertical; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--bg); color: var(--text); font-size: var(--text-xs); }
 .graph-builder-empty button { width: 100%; min-height: 38px; border: 0; border-radius: var(--radius-xs); background: var(--accent); color: var(--content-inverse); }
 .graph-builder-empty :disabled { opacity: .5; }
-.graph-builder-pane { display: flex; min-height: 0; flex-direction: column; }
 .graph-builder-content { display: flex; min-height: 0; flex: 1; flex-direction: column; }
 .graph-builder-model { display: grid; gap: 3px; padding: 9px 10px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: var(--text-xs); font-weight: 700; }
 .graph-builder-model select { width: 100%; min-height: 34px; padding: 4px 7px; border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--bg); color: var(--text); font-size: var(--text-xs); }
@@ -1739,17 +1569,11 @@ html.dark .file-code .shiki span { color: var(--shiki-dark); }
 .graph-builder-composer button { display: grid; width: 44px; min-height: 44px; place-items: center; align-self: end; border: 0; border-radius: var(--radius-xs); background: var(--accent); color: var(--content-inverse); cursor: pointer; }
 .graph-builder-composer button:disabled { opacity: .45; cursor: default; }
 
-.workspace-page-shell button:active:not(:disabled), .workspace-page-shell a:active { transform: translateY(1px); }
 
 @media (max-width: 760px) {
-  .workspace-page-shell { display: block; }
   .workspace-page-header { min-height: 62px; padding: max(8px, env(safe-area-inset-top)) 14px 8px 58px; }
   .workspace-page-header p { max-width: 270px; }
   .workspace-mobile-menu { position: fixed; z-index: 205; top: max(9px, env(safe-area-inset-top)); left: 9px; display: grid; width: 44px; height: 44px; place-items: center; border: 1px solid var(--border); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--bg) 88%, transparent); color: var(--text); cursor: pointer; backdrop-filter: blur(18px) saturate(130%); }
-  .workspace-nav-container { position: fixed; z-index: 240; inset: 0 auto 0 0; width: min(286px, 86vw); transform: translateX(-102%); box-shadow: none; transition: transform 240ms cubic-bezier(.22,.8,.24,1), box-shadow 240ms ease; }
-  .workspace-nav-container.is-open { transform: translateX(0); box-shadow: 8px 0 28px rgb(0 0 0 / 24%); }
-  .workspace-nav-backdrop { position: fixed; z-index: 230; inset: 0; display: block; border: 0; background: rgb(0 0 0 / 36%); backdrop-filter: blur(2px); }
-  .workspace-nav-close { position: absolute; z-index: 2; top: max(7px, env(safe-area-inset-top)); right: 7px; display: grid; width: 44px; height: 44px; place-items: center; border: 0; background: transparent; color: var(--text); cursor: pointer; }
   .workspace-page-content { height: 100dvh; }
   .graph-tabs-row { min-height: 50px; }
   .graph-tab, .graph-add-tab { min-height: 50px; }
@@ -1781,10 +1605,9 @@ html.dark .file-code .shiki span { color: var(--shiki-dark); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .workspace-nav-container, .workspace-page-shell * { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
 @media (prefers-reduced-transparency: reduce) {
-  .workspace-mobile-menu, .workspace-nav-backdrop { backdrop-filter: none; }
+  .workspace-mobile-menu { backdrop-filter: none; }
   .workspace-mobile-menu { background: var(--bg); }
 }
 .role-conflict-state { color: var(--danger); font-size: var(--text-sm); font-weight: 600; }
@@ -1795,7 +1618,7 @@ html.dark .file-code .shiki span { color: var(--shiki-dark); }
 @media (max-width: 640px) { .role-conflict-dialog { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); inset: 52px 8px 8px; } }
 
 @media (prefers-contrast: more) {
-  .graph-task, .graph-tab, .workspace-nav nav a { border-color: currentColor; }
+  .graph-task, .graph-tab { border-color: currentColor; }
   .graph-section-heading p, .graph-task-summary small, .workspace-page-header p { color: var(--text); }
 }
 

@@ -1,8 +1,7 @@
 /* Sidebar consumes the shared design tokens. The --sb-* names remain as a
    local vocabulary for the sidebar layout, but every value resolves to the
    global semantic layer so light/dark and accent changes stay in one place. */
-.sidebar-container,
-.workspace-nav-container {
+.sidebar-container {
   --sb-fill: var(--surface-1);
   --sb-text-primary: var(--content-1);
   --sb-text-secondary: var(--content-2);
@@ -279,7 +278,6 @@
   transition: opacity 120ms ease;
 }
 .workspace-search input::placeholder { color: var(--sb-text-tertiary); }
-.workspace-search-clear { width: 24px; height: 24px; color: var(--sb-text-secondary); }
 .workspace-head-actions {
   flex: none;
   display: flex;
@@ -456,56 +454,6 @@
 .sidebar .sidebar-project-group + .sidebar-project-group { margin-top: 4px; }
 .sidebar .sidebar-project-group [role="button"] {
   border-radius: var(--sb-radius-row);
-}
-
-/* Desktop: the sidebar owns the collapse toggle now; keep the topbar hamburger
-   only for the mobile off-canvas drawer. */
-@media (min-width: 641px) {
-}
-
-/* ---- WorkspaceNav (management pages) aligned to the sidebar language ---- */
-.workspace-nav {
-  padding: 6px var(--sb-pad-x);
-  color: var(--sb-text-primary);
-  font-size: var(--text-base);
-  background: transparent;
-}
-.workspace-nav .workspace-nav-brand {
-  min-height: 0;
-  height: 60px;
-  padding: 8px 0 8px 4px;
-  margin-bottom: 8px;
-  gap: 8px;
-  border-bottom: none;
-}
-.workspace-nav nav {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 0 0 8px;
-}
-.workspace-nav nav a {
-  min-height: 0;
-  height: auto;
-  padding: 7px 10px;
-  border-radius: var(--sb-radius-row);
-  color: var(--sb-text-secondary);
-  font-size: var(--text-md);
-  font-weight: 500;
-  text-decoration: none;
-}
-.workspace-nav nav a:hover { background: var(--sb-hover); color: var(--sb-text-primary); }
-.workspace-nav nav a.active {
-  background: var(--sb-active);
-  color: var(--sb-text-primary);
-  box-shadow: none;
-  font-weight: 600;
-}
-.workspace-nav nav a.active svg { color: var(--sb-brand); }
-.workspace-nav .workspace-nav-foot {
-  padding: 13px 4px max(13px, env(safe-area-inset-bottom));
-  border-top: 1px solid var(--sb-border-l1);
-  color: var(--sb-text-tertiary);
 }
 
 /* ---- Tree rows (dsh Rows.module.css: project 34px, session 32px, radius 8,

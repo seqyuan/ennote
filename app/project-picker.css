@@ -195,9 +195,9 @@
   padding: 4px 120px 4px 4px;
   font-size: var(--text-sm);
   line-height: 18px;
+  color: var(--danger);
 }
 .project-picker-status { color: var(--picker-text-secondary); }
-.project-picker-error { color: var(--danger); }
 .project-picker-footer {
   flex: none;
   display: flex;

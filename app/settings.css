@@ -17,6 +17,17 @@
   --stg-danger: var(--danger);
 }
 
+.settings-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px;
+  background: color-mix(in srgb, #000 42%, transparent);
+}
+
 /* ---- Shell: centered 800px, panel radius, 188px rail. ---- */
 .settings-dialog-shell {
   width: 800px;
@@ -737,8 +748,6 @@
   color: var(--stg-text-tertiary);
   font-size: var(--text-sm);
   line-height: 18px;
-}
-.settings-models-catalog-empty {
   padding: 12px;
   border: 1px dashed var(--stg-border-l3);
   border-radius: var(--radius-sm);

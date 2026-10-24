@@ -433,15 +433,6 @@ html.dark .composer-editor.composer-no-session::after {
 }
 
 /* Status line below the card. */
-.composer-status-line {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  width: min(100%, 920px);
-  margin: 0 auto;
-  padding: 6px 28px 0;
-}
 
 /* ---- Context meter (dsh ContextMeter, beside the send button) ---- */
 .context-meter {
@@ -574,11 +565,6 @@ html.dark .composer-editor.composer-no-session::after {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.stats-line-sep {
-  color: var(--cmp-text-tertiary);
-  margin: 0 10px;
-}
-
 .composer-status-line {
   display: flex;
   flex-direction: column;
