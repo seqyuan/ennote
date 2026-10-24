@@ -1115,3 +1115,22 @@
   font-size: var(--text-sm);
   line-height: 1.5;
 }
+
+.settings-delete-description {
+  margin: 0;
+  color: var(--stg-text-secondary);
+  font-size: var(--text-md);
+  line-height: 20px;
+}
+.settings-delete-error {
+  margin: 0;
+  color: var(--stg-danger);
+  font-size: var(--text-sm);
+  line-height: 18px;
+}
+
+.model-editor-chevron { transition: transform 120ms ease; }
+.model-editor-chevron[data-open="true"] { transform: rotate(90deg); }
+
+.templates-diag-block { margin-bottom: 12px; }
+.template-edit-form-inline { width: 100%; margin-top: 6px; }

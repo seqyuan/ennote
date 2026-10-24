@@ -89,8 +89,8 @@ export function ProjectGroup({
             ? <Folder size={15} aria-hidden="true" />
             : <FolderOpen size={15} aria-hidden="true" />}
         </span>
-        <span className="sb-row-slot sb-chevron">
-          <ChevronRight size={14} style={{ transform: isCollapsed ? "none" : "rotate(90deg)", transition: "transform 0.15s" }} aria-hidden="true" />
+        <span className="sb-row-slot sb-chevron" data-expanded={!isCollapsed || undefined}>
+          <ChevronRight size={14} aria-hidden="true" />
         </span>
         <span className="sb-project-title">{group.projectName}</span>
 
@@ -138,7 +138,7 @@ export function ProjectGroup({
 
       {!isCollapsed && (
         <div className="sb-project-children">
-          {group.error && <div className="sidebar-empty" style={{ color: "var(--danger)" }}>{group.error}</div>}
+          {group.error && <div className="sidebar-empty is-error">{group.error}</div>}
           {group.loading && matching.length === 0 ? (
             <div className="sidebar-empty">{t("sidebar.loading")}</div>
           ) : matching.length === 0 ? (

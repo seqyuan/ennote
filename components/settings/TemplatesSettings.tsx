@@ -221,7 +221,7 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
       </header>
 
       {recoveryMode && (
-        <div className="templates-diag diag-warn" style={{ marginBottom: 12 }}>
+        <div className="templates-diag diag-warn templates-diag-block">
           <AlertTriangle size={14} />
           <span>Global store is in recovery mode. Delete some entries to restore normal operation. Create is disabled.</span>
         </div>
@@ -261,7 +261,7 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
               <div className="template-actions">
                 {entry.editable && editing === entry.name ? (
                   // Edit/repair inline form.
-                  <div className="template-edit-form" style={{ width: "100%", marginTop: 6 }}>
+                  <div className="template-edit-form template-edit-form-inline">
                     {entry.valid && <div className="template-edit-readonly">Name: {entry.name}</div>}
                     <label>Description <input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} disabled={saving} /></label>
                     <label>Argument hint <input value={editHint} onChange={(e) => setEditHint(e.target.value)} disabled={saving} /></label>

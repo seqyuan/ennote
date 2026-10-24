@@ -1,7 +1,7 @@
 "use client";
 
 import { FileText, Folder, Wrench, Workflow, X } from "lucide-react";
-import { useState } from "react";
+import styles from "./TabBar.module.css";
 import { getFileIcon } from "./FileIcons";
 
 export interface Tab {
@@ -21,21 +21,8 @@ interface Props {
 }
 
 export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
-  const [hoveredClose, setHoveredClose] = useState<string | null>(null);
-
   return (
-    <div
-      role="tablist"
-      aria-label="Workspace panel tabs"
-      style={{
-        display: "flex",
-        alignItems: "flex-end",
-        background: "var(--bg-panel)",
-        overflowX: "auto",
-        flexShrink: 0,
-        height: 36,
-      }}
-    >
+    <div role="tablist" aria-label="Workspace panel tabs" className={styles.bar}>
       {tabs.map((tab, index) => {
         const isActive = tab.id === activeTabId;
         const closable = tab.closable !== false;
@@ -59,27 +46,10 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               onSelectTab(tabs[nextIndex].id);
               (event.currentTarget.parentElement?.children[nextIndex] as HTMLElement | undefined)?.focus();
             }}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              height: 36,
-              paddingLeft: 12,
-              paddingRight: 6,
-              borderRight: "1px solid var(--border)",
-              background: isActive ? "var(--bg)" : "var(--bg-panel)",
-              cursor: "pointer",
-              fontSize: 12,
-              color: isActive ? "var(--text)" : "var(--text-muted)",
-              whiteSpace: "nowrap",
-              maxWidth: 180,
-              minWidth: 80,
-              flexShrink: 0,
-              userSelect: "none",
-              transition: "background 0.1s, color 0.1s",
-            }}
+            className={styles.tab}
+            data-active={isActive || undefined}
           >
-            <span style={{ flexShrink: 0, opacity: isActive ? 1 : 0.7, display: "flex", alignItems: "center" }}>
+            <span className={styles.icon}>
               {tab.icon === "files" ? (
                 <Folder size={13} aria-hidden="true" />
               ) : tab.icon === "report" ? (
@@ -92,34 +62,14 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
                 getFileIcon(tab.filePath ?? tab.label, 13)
               )}
             </span>
-            <span
-              style={{
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                flex: 1,
-                fontWeight: isActive ? 500 : 400,
-              }}
-              title={tab.filePath ?? tab.label}
-            >
+            <span className={styles.label} title={tab.filePath ?? tab.label}>
               {tab.label}
             </span>
             {closable && (
               <button
+                type="button"
+                className={styles.close}
                 onClick={(e) => { e.stopPropagation(); onCloseTab(tab.id); }}
-                onMouseEnter={() => setHoveredClose(tab.id)}
-                onMouseLeave={() => setHoveredClose(null)}
-                style={{
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  width: 16, height: 16,
-                  background: hoveredClose === tab.id ? "var(--bg-hover)" : "transparent",
-                  border: "none",
-                  borderRadius: "var(--radius-xs)",
-                  color: hoveredClose === tab.id ? "var(--text)" : "var(--text-dim)",
-                  cursor: "pointer",
-                  padding: 0,
-                  flexShrink: 0,
-                  transition: "background 0.1s, color 0.1s",
-                }}
                 title="Close"
                 aria-label={`Close ${tab.label}`}
               >

@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { useT } from "@/components/LocaleProvider";
 import { FetchModelsButton } from "@/components/settings/models/FetchModelsButton";
@@ -20,14 +21,7 @@ function numberOf(model: ModelDraft, key: string): number | undefined {
 }
 
 function IconChevron({ open }: { open: boolean }) {
-  return (
-    <svg
-      width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden
-      style={{ transform: open ? "rotate(90deg)" : undefined, transition: "transform 120ms ease" }}
-    >
-      <path d="M6 3.5L10.5 8L6 12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+  return <ChevronRight size={14} className="model-editor-chevron" data-open={open || undefined} aria-hidden="true" />;
 }
 
 function IconTrash() {

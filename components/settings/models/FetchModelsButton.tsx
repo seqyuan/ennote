@@ -92,7 +92,7 @@ export function FetchModelsButton({ probe, existingIds, onAdopt, onError, disabl
         {fetching ? t("settings.models.fetching") : t("settings.models.fetchModels")}
       </button>
       {open && candidates && (
-        <div className="settings-overlay" style={{ display: "grid", placeItems: "center" }} role="dialog" aria-modal="true" aria-label={t("settings.models.fetchTitle")}>
+        <div className="settings-overlay" role="dialog" aria-modal="true" aria-label={t("settings.models.fetchTitle")}>
           <div className="project-create-dialog settings-models-fetch">
             <div className="project-create-header">
               <span>{t("settings.models.fetchTitle")}</span>
@@ -121,7 +121,7 @@ export function FetchModelsButton({ probe, existingIds, onAdopt, onError, disabl
                   </li>
                 ))}
               </ul>
-              <div className="project-create-actions" style={{ justifyContent: "flex-end" }}>
+              <div className="project-create-actions">
                 <button type="button" className="secondary-btn" onClick={close}>{t("settings.models.cancel")}</button>
                 <button type="button" className="secondary-btn" onClick={adopt}>{t("settings.models.fetchAdopt")}</button>
               </div>

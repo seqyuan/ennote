@@ -48,10 +48,6 @@ export function RightPanel(props: {
     <div
       className={`right-panel-container${open ? " right-panel-open" : " right-panel-closed"}`}
       style={{
-        background: "var(--bg)",
-        borderLeft: "1px solid var(--border)",
-        display: "flex",
-        flexDirection: "column",
         width: resize.width,
         minWidth: resize.width,
         transition: resize.isResizing ? "none" : undefined,
@@ -67,7 +63,7 @@ export function RightPanel(props: {
         onSelectTab={onSelectTab}
         onCloseTab={onCloseTab}
       />
-      <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+      <div className="right-panel-body">
         {activeTabId === "files" && (
           <FileTreePanel
             key={projectId ?? "no-project"}
@@ -81,7 +77,7 @@ export function RightPanel(props: {
           <GraphActivityPanel sessionId={selectedSession} />
         )}
         {activeTabId === "tools" && (
-          <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <div className="right-panel-tools">
             <RunInspectorPanel
               runId={inspectorRunId}
               composition={prompt.composition}
@@ -90,7 +86,7 @@ export function RightPanel(props: {
               loading={prompt.loading}
               error={prompt.error}
             />
-            <div style={{ marginTop: "auto", padding: "0 16px 12px", fontSize: 11, color: "var(--text-dim)" }}>
+            <div className="right-panel-summary">
               {selectedSession ? (
                 <>
                   <div>Session: {sessionTitle}</div>

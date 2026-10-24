@@ -769,3 +769,7 @@
 .sb-project-children .session-list {
   padding: 0 0 2px;
 }
+
+.sb-chevron svg { transition: transform 0.15s; }
+.sb-chevron[data-expanded="true"] svg { transform: rotate(90deg); }
+.sidebar-empty.is-error { color: var(--danger); }

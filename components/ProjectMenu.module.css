@@ -1,0 +1,53 @@
+.empty {
+  padding: 10px 12px;
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+}
+.row { display: flex; align-items: center; }
+.select {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 4px 8px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.select:hover:not([data-selected="true"]) { background: var(--bg-hover); }
+.select[data-selected="true"] {
+  background: var(--bg-selected);
+  font-weight: 600;
+}
+.folder {
+  flex-shrink: 0;
+  color: var(--accent);
+  opacity: 0.6;
+}
+.select[data-selected="true"] .folder { opacity: 1; }
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pin {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 30px;
+  margin-right: 2px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.pin[data-pinned="true"] { color: var(--warning); }

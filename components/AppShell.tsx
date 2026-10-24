@@ -321,8 +321,8 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
         {/* Mobile overlay backdrop */}
         <div
           className="sidebar-overlay-backdrop"
+          data-open={sidebarOpen || undefined}
           onClick={closeMobileNavigation}
-          style={{ opacity: sidebarOpen ? 1 : 0, pointerEvents: sidebarOpen ? "auto" : "none" }}
         />
 
         {/* Left sidebar */}
@@ -355,7 +355,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
         )}
 
         {/* Center: chat (or Roles/Graphs settings view) */}
-        <div className="workspace-content" inert={isMobile && sidebarOpen} style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
+        <div className="workspace-content" inert={isMobile && sidebarOpen}>
           {view === "chat" ? (
             <>
               {/* Top bar */}

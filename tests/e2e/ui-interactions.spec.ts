@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
+import { openSession, tryFulfillBlankSessionCreate } from "./harness";
 
 const project = { id: "ui-project", name: "UI review", description: "", status: "active",
   createdAt: "2026-08-06T00:00:00Z", updatedAt: "2026-08-06T00:00:00Z" };
@@ -15,10 +15,7 @@ async function fulfill(route: Route, data: unknown, status = 200) {
 }
 
 async function openConversation(page: Page) {
-  await page.goto("/");
-  await selectProject(page, project.name);
-  if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.getByRole("button", { name: session.title, exact: true }).click();
+  await openSession(page, { projectId: project.id, sessionId: session.id });
 }
 
 test("manual compaction uses an inline prompt bar and submits the focus instruction", async ({ page }) => {
