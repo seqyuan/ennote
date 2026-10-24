@@ -5,6 +5,7 @@ import type { FormEvent } from "react";
 import type { PolicyProfile } from "@/components/settings/types";
 import { confirmAction } from "@/components/ui/confirm";
 import { useSettingsStatus } from "@/components/settings/SettingsStatus";
+import { SettingsList, SettingsRow, SettingsSection } from "@/components/settings/SettingsPrimitives";
 import { apiFetch } from "@/lib/worker-api.client";
 
 const policySections: Array<{ kind: PolicyProfile["kind"]; title: string; description: string; defaultConfig: string }> = [
@@ -84,19 +85,24 @@ function PolicyEditor({ kind, title, description, policies, defaultConfig, onSub
   onDefault: (policyId: string) => Promise<void>;
   onDeactivate: (policy: PolicyProfile) => Promise<void>;
 }) {
-  return <section className="settings-subsection">
-    <header><h3>{title}</h3><p>{description}</p></header>
+  return <SettingsSection title={title} description={description}>
     <form className="settings-form policy-form" onSubmit={event => onSubmit(event, kind)}>
       <label>Name<input name="name" required /></label>
       <label>Configuration JSON<textarea name="config" required defaultValue={defaultConfig} /></label>
       <button type="submit">Create version</button>
     </form>
-    <div className="settings-list">{policies.filter(policy => policy.kind === kind).map(policy => <div className="settings-row" key={policy.id}>
-      <div><strong>{policy.name}</strong><span>v{policy.version} · {String(policy.config.mode ?? "configured")}</span></div>
-      <button className="secondary-btn" disabled={policy.status !== "active"} onClick={() => onDefault(policy.id)}>Use as default</button>
-      <button className="secondary-btn" type="button" disabled={policy.status !== "active"}
-        title="Deactivate policy" aria-label={`Deactivate policy ${policy.name} version ${policy.version}`}
-        onClick={() => onDeactivate(policy)}><Archive size={14} aria-hidden="true" /></button>
-    </div>)}</div>
-  </section>;
+    <SettingsList>
+      {policies.filter(policy => policy.kind === kind).map(policy => <SettingsRow
+        key={policy.id}
+        title={policy.name}
+        meta={`v${policy.version} · ${String(policy.config.mode ?? "configured")}`}
+        actions={<>
+          <button className="secondary-btn" disabled={policy.status !== "active"} onClick={() => onDefault(policy.id)}>Use as default</button>
+          <button className="secondary-btn" type="button" disabled={policy.status !== "active"}
+            title="Deactivate policy" aria-label={`Deactivate policy ${policy.name} version ${policy.version}`}
+            onClick={() => onDeactivate(policy)}><Archive size={14} aria-hidden="true" /></button>
+        </>}
+      />)}
+    </SettingsList>
+  </SettingsSection>;
 }

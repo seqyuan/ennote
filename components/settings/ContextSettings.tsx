@@ -5,6 +5,7 @@ import { useEffect, useState, useCallback } from "react";
 import type { ModelProfile, PolicyProfile, Session, StandingApproval } from "@/components/settings/types";
 import { apiFetch } from "@/lib/worker-api.client";
 import { useSettingsStatus } from "@/components/settings/SettingsStatus";
+import { SettingsList, SettingsRow, SettingsSection } from "@/components/settings/SettingsPrimitives";
 
 interface ModelOverride {
   modelProfileId: string;
@@ -65,8 +66,7 @@ export function ContextSettings({ policies, models, session, refresh, setError, 
     <header><h2 id="settings-context-heading">Context &amp; session</h2>
       <p>Compaction policy versions and defaults frozen into the next Session Run.</p></header>
     <CompactionPolicyEditor policies={policies} models={models} onCreate={createCompactionPolicy} onDefault={setDefault} />
-    <section className="settings-subsection current-session-settings">
-      <header><h3>Current session</h3><p>{session ? session.title : "Select a Session to configure its defaults."}</p></header>
+    <SettingsSection title="Current session" description={session ? session.title : "Select a Session to configure its defaults."} className="current-session-settings">
       <div className="session-default-grid">
         <label className="session-model-select">Default model<select disabled={!session}
           value={session?.defaultModelProfileId ?? ""}
@@ -81,7 +81,7 @@ export function ContextSettings({ policies, models, session, refresh, setError, 
             <option key={policy.id} value={policy.id}>{policy.name} v{policy.version}</option>)}
         </select></label>
       </div>
-    </section>
+    </SettingsSection>
     <StandingApprovalsSection sessionId={session?.id ?? null} />
   </section>;
 }
@@ -136,8 +136,7 @@ function CompactionPolicyEditor({ policies, models, onCreate, onDefault }: {
     setModelPolicies([]);
   }
 
-  return <section className="settings-subsection">
-    <header><h3>Context compaction</h3><p>Manual and bounded automatic context checkpoint behavior.</p></header>
+  return <SettingsSection title="Context compaction" description="Manual and bounded automatic context checkpoint behavior.">
     <form className="settings-form compaction-form" onSubmit={submit}>
       <label>Name<input name="name" required /></label>
       <label>Mode<select name="mode" defaultValue="manual_only"><option value="disabled">Disabled</option>
@@ -184,7 +183,7 @@ function CompactionPolicyEditor({ policies, models, onCreate, onDefault }: {
       <div><strong>{policy.name}</strong><span>v{policy.version} · {String(policy.config.mode ?? "configured")}</span></div>
       <button className="secondary-btn" disabled={policy.status !== "active"} onClick={() => onDefault(policy.id)}>Use as default</button>
     </div>)}</div>
-  </section>;
+  </SettingsSection>;
 }
 
 function StandingApprovalsSection({ sessionId }: { sessionId: string | null }) {
@@ -232,18 +231,18 @@ function StandingApprovalsSection({ sessionId }: { sessionId: string | null }) {
 
   if (!sessionId) return null;
 
-  return <section className="settings-subsection standing-approvals-section">
-    <header><h3>Standing approvals</h3>
-      <p>Tools automatically authorised for this session. Revoke to require approval again.</p></header>
+  return <SettingsSection title="Standing approvals" description="Tools automatically authorised for this session. Revoke to require approval again." className="standing-approvals-section">
     {loading && <div className="settings-empty">Loading…</div>}
     {!loading && error && <div className="settings-error">{error}</div>}
     {!loading && !error && visibleRules.length === 0 &&
       <div className="settings-empty">No standing approvals for this session.</div>}
-    {!loading && visibleRules.length > 0 && <div className="settings-list">
-      {visibleRules.map(rule => <div className="settings-row" key={rule.id}>
-        <div><strong>{rule.toolName}</strong><span>{rule.scopeDisplay}</span></div>
-        <button className="secondary-btn" onClick={() => revoke(rule.id)}>Revoke</button>
-      </div>)}
-    </div>}
-  </section>;
+    {!loading && visibleRules.length > 0 && <SettingsList>
+      {visibleRules.map(rule => <SettingsRow
+        key={rule.id}
+        title={rule.toolName}
+        meta={rule.scopeDisplay}
+        actions={<button className="secondary-btn" onClick={() => revoke(rule.id)}>Revoke</button>}
+      />)}
+    </SettingsList>}
+  </SettingsSection>;
 }

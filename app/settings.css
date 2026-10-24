@@ -334,18 +334,6 @@
   gap: 8px;
   padding: 14px 0;
 }
-.settings-dialog-shell .settings-note {
-  margin: 0;
-  font-size: var(--text-sm);
-  line-height: 18px;
-  color: var(--stg-text-tertiary);
-}
-.settings-dialog-shell .appearance-title {
-  font-size: var(--text-base);
-  line-height: 22px;
-  font-weight: 500;
-  color: var(--stg-text-primary);
-}
 .settings-dialog-shell .appearance-cubes {
   display: flex;
   gap: 8px;
@@ -1041,4 +1029,87 @@
     min-width: 44px;
     justify-content: center;
   }
+}
+
+/* ---- Shared settings section/row/card primitives ---- */
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--stroke-hairline);
+}
+.settings-section:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+.settings-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.settings-section-header > div:first-child { min-width: 0; }
+.settings-section-header h3 {
+  margin: 0;
+  color: var(--content-1);
+  font-size: var(--text-base);
+  font-weight: 600;
+  line-height: 1.35;
+}
+.settings-section-header p {
+  max-width: 72ch;
+  margin: 4px 0 0;
+  color: var(--content-3);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+.settings-section-actions,
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.settings-row-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+}
+.settings-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--stroke-hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-0);
+}
+.settings-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.settings-card-title {
+  color: var(--content-1);
+  font-size: var(--text-base);
+  font-weight: 500;
+  line-height: 1.35;
+}
+.settings-card-description {
+  margin-top: 2px;
+  color: var(--content-3);
+  font-size: var(--text-sm);
+  line-height: 1.5;
 }

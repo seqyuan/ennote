@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useLocale } from "@/components/LocaleProvider";
 import { useTheme } from "@/hooks/useTheme";
 import { useSettingsStatus } from "@/components/settings/SettingsStatus";
+import { SettingsSection } from "@/components/settings/SettingsPrimitives";
 import { readDefaultPermissionMode, writeDefaultPermissionMode } from "@/lib/default-permission";
 import { LOCALES } from "@/lib/locale";
 import { translate } from "@/lib/messages";
@@ -28,8 +29,7 @@ export function GeneralSettings() {
     <section className="settings-tab-section" aria-labelledby="settings-general-heading">
       <header><h2 id="settings-general-heading">{t("general.title")}</h2>
         <p>{t("general.desc")}</p></header>
-      <section className="settings-subsection appearance-group">
-        <div className="appearance-title">{t("general.appearance")}</div>
+      <SettingsSection title={t("general.appearance")} className="appearance-group">
         <div className="appearance-cubes" role="group" aria-label={t("general.appearance")}>
           {themeOptions.map((option) => (
             <button
@@ -44,10 +44,8 @@ export function GeneralSettings() {
             </button>
           ))}
         </div>
-      </section>
-      <section className="settings-subsection permission-group">
-        <div className="appearance-title">{t("general.permission")}</div>
-        <p className="settings-note">{t("general.permission.desc")}</p>
+      </SettingsSection>
+      <SettingsSection title={t("general.permission")} description={t("general.permission.desc")} className="permission-group">
         <div className="appearance-cubes" role="group" aria-label={t("general.permission")}>
           {PERMISSION_MODES.map((permission) => (
             <button
@@ -65,9 +63,8 @@ export function GeneralSettings() {
             </button>
           ))}
         </div>
-      </section>
-      <section className="settings-subsection language-group">
-        <div className="appearance-title">{t("general.language")}</div>
+      </SettingsSection>
+      <SettingsSection title={t("general.language")} className="language-group">
         <div className="appearance-cubes" role="group" aria-label={t("general.language")}>
           {LOCALES.map((lang) => (
             <button
@@ -81,7 +78,7 @@ export function GeneralSettings() {
             </button>
           ))}
         </div>
-      </section>
+      </SettingsSection>
     </section>
   );
 }
