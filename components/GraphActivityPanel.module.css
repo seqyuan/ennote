@@ -1,0 +1,153 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px 6px;
+}
+.title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.running {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-size: var(--text-xs);
+}
+.pulseDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 2s infinite;
+}
+.error {
+  padding: 8px 14px;
+  color: var(--danger);
+  font-size: var(--text-xs);
+}
+.scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 0 8px 12px;
+  overflow-y: auto;
+}
+.empty {
+  padding: 16px;
+  color: var(--text-dim);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.card {
+  margin-bottom: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.cardButton {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.cardButton[data-expanded="true"] { background: var(--bg-selected); }
+.chevron {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  transition: transform 0.15s;
+}
+.chevron[data-expanded="true"] { transform: rotate(90deg); }
+.stateDot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+.flowDot[data-flow-state="running"] { background: var(--accent); }
+.flowDot[data-flow-state="completed"] { background: var(--success); }
+.flowDot[data-flow-state="failed"] { background: var(--danger); }
+.flowDot[data-flow-state="cancelled"],
+.flowDot[data-flow-state="convergence_exceeded"],
+.flowDot[data-flow-state="budget_exceeded"] { background: var(--warning); }
+.cardTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cardSummary {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+}
+.details {
+  padding: 6px 10px 10px 22px;
+  border-top: 1px solid var(--border);
+}
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 6px;
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+}
+.stateLine {
+  padding: 4px 0;
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+}
+.nodeList { margin: 0; padding: 0; list-style: none; }
+.nodeRow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 0;
+  font-size: var(--text-xs);
+}
+.nodeDot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+.nodeDot[data-node-state="running"] { background: var(--accent); }
+.nodeDot[data-node-state="completed"] { background: var(--success); }
+.nodeDot[data-node-state="failed"] { background: var(--danger); }
+.nodeDot[data-node-state="blocked"] { background: var(--warning); }
+.nodeName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nodeState {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+}

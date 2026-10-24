@@ -2,6 +2,7 @@
 
 import { useMcpSettings } from "@/hooks/useMcpSettings";
 import { McpBindingCard, McpCandidateSection, McpCreateForm } from "./McpPanels";
+import styles from "./McpPanels.module.css";
 
 export function McpSettings({ projectId, setError }: {
   projectId: string | null;
@@ -10,26 +11,23 @@ export function McpSettings({ projectId, setError }: {
   const mcp = useMcpSettings(projectId, setError);
 
   if (!projectId) {
-    return <div style={{ fontSize: 12, color: "var(--text-dim)" }}>Open a project to manage MCP servers.</div>;
+    return <div className={styles.emptyText}>Open a project to manage MCP servers.</div>;
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+    <div className={styles.settingsRoot}>
       {/* Section header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+      <div className={styles.settingsHeader}>
         <div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>MCP servers</div>
-          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>
+          <div className={styles.settingsTitle}>MCP servers</div>
+          <div className={styles.settingsDescription}>
             Tools-first client. Servers are discovered, tested, then explicitly enabled per project.
           </div>
         </div>
         <button
           type="button"
           onClick={() => mcp.setShowCreate((value) => !value)}
-          style={{
-            padding: "5px 10px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)",
-            background: "var(--bg)", color: "var(--text)", fontSize: 12, cursor: "pointer",
-          }}
+          className={styles.addButton}
         >
           {mcp.showCreate ? "Cancel" : "+ Add server"}
         </button>
@@ -38,9 +36,9 @@ export function McpSettings({ projectId, setError }: {
       <McpCreateForm mcp={mcp} />
 
       {/* Bindings */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div className={styles.bindings}>
         {mcp.bindings.length === 0 && !mcp.loading && (
-          <div style={{ fontSize: 12, color: "var(--text-dim)" }}>No MCP servers bound to this project yet.</div>
+          <div className={styles.emptyText}>No MCP servers bound to this project yet.</div>
         )}
         {mcp.bindings.map((binding) => (
           <McpBindingCard key={binding.id} mcp={mcp} binding={binding} />
@@ -49,7 +47,7 @@ export function McpSettings({ projectId, setError }: {
 
       {/* Discovered candidates (project file, bundled, managed) */}
       <McpCandidateSection mcp={mcp} />
-      {mcp.loading && <div style={{ fontSize: 11, color: "var(--text-dim)" }}>Loading…</div>}
+      {mcp.loading && <div className={styles.loadingText}>Loading…</div>}
     </div>
   );
 }

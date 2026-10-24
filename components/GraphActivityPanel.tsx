@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
+import { ChevronRight, Workflow } from "lucide-react";
+import styles from "./GraphActivityPanel.module.css";
 import type { components } from "@/lib/worker-api.gen";
 
 type RunAgentFlow = components["schemas"]["RunAgentFlow"];
@@ -28,27 +30,6 @@ const flowStateLabel: Record<string, string> = {
   convergence_exceeded: "Convergence exceeded",
   budget_exceeded: "Budget exceeded",
 };
-
-function flowStateColor(state?: string): string {
-  switch (state) {
-    case "running": return "var(--accent)";
-    case "completed": return "var(--success)";
-    case "failed": return "var(--danger)";
-    case "cancelled": case "convergence_exceeded": case "budget_exceeded": return "var(--warning)";
-    default: return "var(--text-dim)";
-  }
-}
-
-function nodeStateColor(state?: string): string {
-  switch (state) {
-    case "running": return "var(--accent)";
-    case "completed": return "var(--success)";
-    case "failed": return "var(--danger)";
-    case "blocked": return "var(--warning)";
-    case "cancelled": case "interrupted": return "var(--text-dim)";
-    default: return "var(--text-dim)";
-  }
-}
 
 /**
  * GraphActivityPanel is the right-panel "Graphs" channel: it lists the Agent
@@ -121,29 +102,29 @@ export function GraphActivityPanel({ sessionId }: {
   const running = useMemo(() => runs.some((run) => run.state === "running"), [runs]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <div style={{ padding: "10px 14px 6px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", display: "flex", alignItems: "center", gap: 6 }}>
-          <GraphIcon />
-          {sessionId ? "Graph runs" : "Graph runs"}
+    <div className={styles.root}>
+      <div className={styles.header}>
+        <span className={styles.title}>
+          <Workflow size={13} aria-hidden="true" />
+          Graph runs
         </span>
         {running && (
-          <span style={{ fontSize: 11, color: "var(--accent)", display: "flex", alignItems: "center", gap: 4 }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", animation: "pulse 2s infinite" }} />
+          <span className={styles.running}>
+            <span className={styles.pulseDot} />
             running
           </span>
         )}
       </div>
 
-      {error && <div style={{ padding: "8px 14px", fontSize: 11, color: "var(--danger)" }}>{error}</div>}
+      {error && <div className={styles.error}>{error}</div>}
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 8px 12px" }}>
+      <div className={styles.scroll}>
         {!sessionId ? (
-          <div style={{ padding: 16, color: "var(--text-dim)", fontSize: 12, textAlign: "center" }}>
+          <div className={styles.empty}>
             Select a session to see its graph runs.
           </div>
         ) : runs.length === 0 ? (
-          <div style={{ padding: 16, color: "var(--text-dim)", fontSize: 12, textAlign: "center" }}>
+          <div className={styles.empty}>
             No graph runs in this session yet.
           </div>
         ) : (
@@ -175,50 +156,44 @@ function RunCard({ run, nodes, expanded, onToggle, nodesLoading }: {
   const done = nodes.filter((node) => node.terminalState === "completed").length;
 
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", marginBottom: 8, overflow: "hidden" }}>
+    <div className={styles.card}>
       <button
         type="button"
         onClick={onToggle}
-        style={{
-          display: "flex", alignItems: "center", gap: 8,
-          width: "100%", padding: "8px 10px",
-          background: expanded ? "var(--bg-selected)" : "transparent",
-          border: "none", cursor: "pointer", color: "var(--text)", textAlign: "left", fontSize: 12,
-        }}
+        className={styles.cardButton}
+        data-expanded={expanded || undefined}
         aria-expanded={expanded}
       >
-        <svg width="11" height="11" viewBox="0 0 10 10" fill="none" stroke="var(--text-dim)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, transform: expanded ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>
-          <polyline points="2 3.5 5 6.5 8 3.5" />
-        </svg>
-        <span style={{ width: 8, height: 8, borderRadius: "50%", background: flowStateColor(state), flexShrink: 0 }} />
-        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <ChevronRight size={11} className={styles.chevron} data-expanded={expanded || undefined} aria-hidden="true" />
+        <span className={`${styles.stateDot} ${styles.flowDot}`} data-flow-state={state} />
+        <span className={styles.cardTitle}>
           {run.inputs?.name ? String(run.inputs.name) : "Graph run"}
         </span>
-        <span style={{ flexShrink: 0, fontSize: 11, color: "var(--text-dim)" }}>
+        <span className={styles.cardSummary}>
           {nodeCount > 0 ? `${done}/${nodeCount} tasks` : flowStateLabel[state ?? ""] ?? state}
         </span>
       </button>
 
       {expanded && (
-        <div style={{ borderTop: "1px solid var(--border)", padding: "6px 10px 10px 22px" }}>
-          <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 6, display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <div className={styles.details}>
+          <div className={styles.meta}>
             <span>state: {flowStateLabel[state ?? ""] ?? state}</span>
             {run.totalTokensUsed ? <span>tokens: {run.totalTokensUsed}</span> : null}
             {run.createdAt ? <span>{formatTime(run.createdAt)}</span> : null}
           </div>
           {nodesLoading ? (
-            <div style={{ fontSize: 11, color: "var(--text-dim)", padding: "4px 0" }}>Loading tasks…</div>
+            <div className={styles.stateLine}>Loading tasks…</div>
           ) : nodes.length === 0 ? (
-            <div style={{ fontSize: 11, color: "var(--text-dim)", padding: "4px 0" }}>No task checkpoints.</div>
+            <div className={styles.stateLine}>No task checkpoints.</div>
           ) : (
-            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            <ul className={styles.nodeList}>
               {nodes.map((node) => (
-                <li key={node.taskIndex ?? node.handle} style={{ display: "flex", alignItems: "center", gap: 7, padding: "3px 0", fontSize: 11 }}>
-                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: nodeStateColor(node.terminalState), flexShrink: 0 }} />
-                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)" }}>
+                <li key={node.taskIndex ?? node.handle} className={styles.nodeRow}>
+                  <span className={styles.nodeDot} data-node-state={node.terminalState} />
+                  <span className={styles.nodeName}>
                     {node.handle}
                   </span>
-                  <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 11 }}>
+                  <span className={styles.nodeState}>
                     {nodeStateLabel[node.terminalState ?? ""] ?? node.terminalState}
                   </span>
                 </li>
@@ -239,15 +214,4 @@ function formatTime(value: string): string {
   if (minutes < 1) return "just now";
   if (minutes < 60) return `${minutes}m ago`;
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function GraphIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="5" r="2" />
-      <circle cx="5" cy="19" r="2" />
-      <circle cx="19" cy="19" r="2" />
-      <path d="M12 7v4M5 17v-2h6v4M19 17v-2h-6" />
-    </svg>
-  );
 }

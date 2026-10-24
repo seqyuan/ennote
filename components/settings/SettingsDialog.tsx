@@ -274,22 +274,22 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
               aria-labelledby={`settings-tab-${activeTab}`}
             >
             {activeTab === "general" && (
-              <div style={{ height: "100%", overflowY: "auto" }}>
+              <div className="settings-tab-scroll">
                 <GeneralSettings />
               </div>
             )}
             {activeTab === "models" && (
-              <div style={{ height: "100%", overflowY: "auto" }}>
+              <div className="settings-tab-scroll">
                 <ModelsSettings providers={providers} models={models} refresh={refresh} setError={reportError} />
               </div>
             )}
             {activeTab === "policies" && (
-              <div style={{ height: "100%", overflowY: "auto" }}>
+              <div className="settings-tab-scroll">
                 <PoliciesSettings policies={policies} refresh={refresh} setError={reportError} />
               </div>
             )}
             {activeTab === "context" && (
-              <div style={{ height: "100%", overflowY: "auto" }}>
+              <div className="settings-tab-scroll">
                 <ContextSettings
                   policies={policies} models={models} session={session}
                   refresh={refresh} setError={reportError}
@@ -298,17 +298,17 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
               </div>
             )}
             {activeTab === "templates" && (
-              <div style={{ height: "100%", overflowY: "auto" }}>
+              <div className="settings-tab-scroll">
                 <TemplatesSettings projectId={projectId} setError={reportError} />
               </div>
             )}
             {activeTab === "mcp" && (
-              <div style={{ height: "100%", overflowY: "auto" }}>
+              <div className="settings-tab-scroll">
                 <McpSettings projectId={projectId} setError={reportError} />
               </div>
             )}
             {activeTab === "skills" && (
-              <div style={{ height: "100%", overflowY: "auto" }}>
+              <div className="settings-tab-scroll">
                 <SkillsSettings projectId={projectId} setError={reportError} />
               </div>
             )}

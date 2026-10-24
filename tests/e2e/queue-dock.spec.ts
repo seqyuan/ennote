@@ -1,5 +1,5 @@
 import { expect, test, type Route } from "@playwright/test";
-import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
+import { openSession, tryFulfillBlankSessionCreate } from "./harness";
 import { subscribedFrame } from "./session-feed";
 
 const project = { id: "queue-project", name: "Queue workspace", description: "", status: "active",
@@ -63,9 +63,7 @@ test("queued follow-ups can be edited, removed, or steered immediately", async (
     return route.abort();
   });
 
-  await page.goto("/");
-  await selectProject(page, project.name);
-  await page.getByRole("button", { name: session.title, exact: true }).click();
+  await openSession(page, { projectId: project.id, sessionId: session.id });
   await expect(page.getByRole("button", { name: "Queue follow-up", exact: true })).toBeVisible();
 
   const textbox = page.getByRole("textbox", { name: /agent/ });

@@ -3,17 +3,7 @@
 import { ExternalLink, RefreshCw, Search, X } from "lucide-react";
 import type { AnnotatedSkill, SkillInstallInfo, SkillRoot, SkillSearchResult, SkillUpdateResult } from "@/components/settings/types";
 import type { useSkillRoots } from "@/hooks/useSkillRoots";
-
-const inputStyle: React.CSSProperties = {
-  padding: "6px 8px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)",
-  background: "var(--bg)", color: "var(--text)", fontSize: 12, flex: 1, minWidth: 180,
-};
-
-const ghostButtonStyle: React.CSSProperties = {
-  padding: "3px 8px", borderRadius: "var(--radius-sm)", fontSize: 11,
-  border: "1px solid var(--border)", background: "var(--bg)",
-  color: "var(--text-muted)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4,
-};
+import styles from "./SkillPanels.module.css";
 
 export function SkillRootsPanel(props: {
   roots: SkillRoot[];
@@ -28,63 +18,56 @@ export function SkillRootsPanel(props: {
 
   return (
     <>
-      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", marginTop: 12, marginBottom: 6 }}>
-        Skills roots <span style={{ fontWeight: 400, color: "var(--text-dim)", marginLeft: 4 }}>{roots.length} additional</span>
+      <div className={styles.sectionHeader}>
+        Skills roots <span className={styles.sectionCount}>{roots.length} additional</span>
       </div>
-      <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 6 }}>
+      <div className={styles.note}>
         Resolution paths are on the Worker host. Remote clients (Tauri) read the same configured roots — no per-client setup.
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div className={styles.stack}>
         {roots.length === 0 && !loading && (
-          <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
+          <div className={styles.empty}>
             No additional roots. Ennote reads <code>$ENNOTE_HOME/skills</code> on the Worker host by default; add pi, Claude Code, Codex, or Cursor skill directories here.
           </div>
         )}
         {roots.map((root) => (
-          <div key={root.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{root.name}</span>
-                <span style={{ fontSize: 11, padding: "1px 6px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", color: "var(--text-muted)", flexShrink: 0 }}>
-                  {root.agentKind}
-                </span>
-                <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0 }}>pri {root.priority}</span>
+          <div key={root.id} className={styles.rootRow}>
+            <div className={styles.rootIdentity}>
+              <div className={styles.rootTitleRow}>
+                <span className={styles.rootName}>{root.name}</span>
+                <span className={styles.badge}>{root.agentKind}</span>
+                <span className={styles.rootPriority}>pri {root.priority}</span>
               </div>
-              <div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono, monospace)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 380 }}>
-                {root.path}
-              </div>
+              <div className={styles.rootPath}>{root.path}</div>
             </div>
             <button
               type="button"
               onClick={() => void toggleRoot(root)}
               disabled={rootBusy !== null}
-              style={{
-                fontSize: 11, padding: "2px 8px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)",
-                background: root.enabled ? "var(--accent)" : "var(--bg)",
-                color: root.enabled ? "var(--accent-contrast)" : "var(--text)", cursor: "pointer", flexShrink: 0,
-              }}
+              className={styles.toggle}
+              data-enabled={root.enabled || undefined}
             >
               {root.enabled ? "Enabled" : "Disabled"}
             </button>
             <button type="button" onClick={() => void removeRoot(root)} disabled={rootBusy !== null}
               title={`Stop reading skills from ${root.path}`}
-              style={{ ...ghostButtonStyle, color: "var(--danger)" }}>
+              className={`${styles.ghostButton} ${styles.danger}`}>
               <X size={12} aria-hidden="true" />
             </button>
           </div>
         ))}
         {!showRootForm ? (
-          <button type="button" onClick={() => setShowRootForm(true)} style={ghostButtonStyle}>
+          <button type="button" onClick={() => setShowRootForm(true)} className={styles.ghostButton}>
             + Add skills root
           </button>
         ) : (
-          <div style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <div className={styles.rootForm}>
+            <div className={styles.inputRow}>
               <select
                 value={rootPreset}
                 onChange={(event) => setRootPreset(event.target.value)}
                 aria-label="Ecosystem preset"
-                style={{ ...inputStyle, width: 130 }}
+                className={`${styles.input} ${styles.inputPreset}`}
                 disabled={Boolean(rootPath.trim())}
               >
                 <option value="pi">pi</option>
@@ -98,22 +81,22 @@ export function SkillRootsPanel(props: {
                 onChange={(event) => setRootName(event.target.value)}
                 placeholder="Name (defaults to preset)"
                 aria-label="Root name"
-                style={{ ...inputStyle, minWidth: 140, flex: 0 }}
+                className={`${styles.input} ${styles.inputName}`}
               />
               <input
                 value={rootPath}
                 onChange={(event) => setRootPath(event.target.value)}
                 placeholder={rootPreset === "generic" ? "/absolute/path/to/skills" : "Optional explicit path (else preset)"}
                 aria-label="Root path"
-                style={inputStyle}
+                className={styles.input}
               />
             </div>
-            <div style={{ display: "flex", gap: 6 }}>
+            <div className={styles.actionRow}>
               <button type="button" onClick={() => void addRoot()} disabled={rootBusy !== null}
-                style={{ padding: "4px 12px", borderRadius: "var(--radius-sm)", border: "none", background: "var(--accent)", color: "var(--accent-contrast)", fontSize: 11, cursor: "pointer" }}>
+                className={styles.primaryButton}>
                 {rootBusy === "add" ? "Adding…" : "Add root"}
               </button>
-              <button type="button" onClick={() => setShowRootForm(false)} style={ghostButtonStyle}>
+              <button type="button" onClick={() => setShowRootForm(false)} className={styles.ghostButton}>
                 Cancel
               </button>
             </div>
@@ -144,9 +127,9 @@ export function SkillMarketplace(props: {
   } = props;
 
   return (
-    <div className="skills-market-panel" style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>Marketplace</div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+    <div className={`skills-market-panel ${styles.market}`}>
+      <div className={styles.marketTitle}>Marketplace</div>
+      <div className={styles.searchRow}>
         <input
           type="search"
           value={query}
@@ -154,33 +137,33 @@ export function SkillMarketplace(props: {
           onKeyDown={(event) => { if (event.key === "Enter") void onSearch(); }}
           placeholder="Search skills.sh…"
           aria-label="Search skills.sh"
-          style={inputStyle}
+          className={styles.input}
         />
         <select
           value={installScope}
           onChange={(event) => setInstallScope(event.target.value as "global" | "project")}
           aria-label="Install scope"
-          style={{ ...inputStyle, width: 110 }}
+          className={`${styles.input} ${styles.inputScope}`}
         >
           <option value="global">Global</option>
           <option value="project" disabled={!projectId || !projectTrusted}>Project{!projectTrusted && projectId ? " (needs trust)" : ""}</option>
         </select>
         <button type="button" onClick={() => void onSearch()} disabled={searching || !query.trim()}
-          style={{ ...ghostButtonStyle, display: "inline-flex", alignItems: "center", gap: 5 }}>
+          className={styles.ghostButton}>
           <Search size={13} aria-hidden="true" /> {searching ? "Searching…" : "Search"}
         </button>
       </div>
       {searched && results.length === 0 && !searching && (
-        <div style={{ fontSize: 11, color: "var(--text-dim)" }}>No skills match &quot;{query.trim()}&quot;.</div>
+        <div className={styles.empty}>No skills match &quot;{query.trim()}&quot;.</div>
       )}
       {results.map((result) => (
-        <div key={result.package} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
-          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "var(--font-mono, monospace)", fontSize: 11, color: "var(--text)" }}>
+        <div key={result.package} className={styles.resultRow}>
+          <span className={styles.resultPackage}>
             {result.package}
           </span>
-          {result.installs && <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0 }}>{result.installs}</span>}
+          {result.installs && <span className={styles.resultInstalls}>{result.installs}</span>}
           {result.url && (
-            <a href={result.url} target="_blank" rel="noreferrer" title={result.url} style={{ color: "var(--text-muted)", display: "inline-flex", flexShrink: 0 }}>
+            <a href={result.url} target="_blank" rel="noreferrer" title={result.url} className={`${styles.link} ${styles.linkIcon}`}>
               <ExternalLink size={13} aria-hidden="true" />
               <span className="sr-only">Open {result.package}</span>
             </a>
@@ -189,11 +172,8 @@ export function SkillMarketplace(props: {
             type="button"
             disabled={installing !== null}
             onClick={() => void onInstall(result.package)}
-            style={{
-              padding: "3px 10px", borderRadius: "var(--radius-sm)", fontSize: 11, border: "none",
-              background: installing === result.package ? "var(--bg-selected)" : "var(--accent)",
-              color: installing === result.package ? "var(--text)" : "var(--accent-contrast)", cursor: "pointer", flexShrink: 0,
-            }}
+            className={styles.installButton}
+            data-busy={installing === result.package || undefined}
           >
             {installing === result.package ? "Installing…" : "Install"}
           </button>
@@ -220,86 +200,79 @@ export function SkillInstalledList(props: {
 
   return (
     <>
-      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", marginTop: 12, marginBottom: 6 }}>
-        Installed <span style={{ fontWeight: 400, color: "var(--text-dim)", marginLeft: 4 }}>{installed.length}</span>
+      <div className={styles.sectionHeader}>
+        Installed <span className={styles.sectionCount}>{installed.length}</span>
       </div>
-      {loading && <div style={{ fontSize: 11, color: "var(--text-dim)" }}>Loading…</div>}
+      {loading && <div className={styles.empty}>Loading…</div>}
       {!loading && installed.length === 0 && (
-        <div style={{ fontSize: 11, color: "var(--text-dim)" }}>No installed skills yet — search the marketplace above.</div>
+        <div className={styles.empty}>No installed skills yet — search the marketplace above.</div>
       )}
       {!loading && installed.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div className={styles.stack}>
           {installed.map((skill) => {
             const install = skill.install!;
             const key = updateKey(install);
             const updateState = updates[key];
             return (
-              <div key={`${skill.relPath}:${skill.skillId}`} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                      <strong style={{ fontSize: 12, color: "var(--text)" }}>{skill.name}</strong>
-                      <span className="skill-row-scope" style={{ fontSize: 11, padding: "1px 6px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", color: "var(--text-muted)", flexShrink: 0 }}>
-                        {install.scope}
-                      </span>
+              <div key={`${skill.relPath}:${skill.skillId}`} className={styles.installedCard}>
+                <div className={styles.installedHead}>
+                  <div className={styles.installedIdentity}>
+                    <div className={styles.installedTitleRow}>
+                      <strong className={styles.installedName}>{skill.name}</strong>
+                      <span className={`skill-row-scope ${styles.badge}`}>{install.scope}</span>
                       {updateState?.state === "update-available" && (
-                        <span style={{ fontSize: 11, padding: "1px 6px", borderRadius: "var(--radius-sm)", background: "var(--warning-soft)", border: "1px solid var(--warning)", color: "var(--warning)", flexShrink: 0 }}>
-                          Update available
-                        </span>
+                        <span className={styles.updateBadge}>Update available</span>
                       )}
                     </div>
                     {skill.description && (
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 420 }}>
+                      <div className={styles.installedDescription}>
                         {skill.description}
                       </div>
                     )}
-                    <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                      <span style={{ fontFamily: "var(--font-mono, monospace)" }}>{install.package}</span>
-                      {install.versionHash && <span style={{ fontFamily: "var(--font-mono, monospace)" }}>v{install.versionHash.slice(0, 8)}</span>}
+                    <div className={styles.installedMeta}>
+                      <span className={styles.mono}>{install.package}</span>
+                      {install.versionHash && <span className={styles.mono}>v{install.versionHash.slice(0, 8)}</span>}
                       {install.skillsShUrl && (
-                        <a href={install.skillsShUrl} target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+                        <a href={install.skillsShUrl} target="_blank" rel="noreferrer" className={styles.link}>
                           skills.sh <ExternalLink size={10} aria-hidden="true" />
                         </a>
                       )}
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+                  <div className={styles.installedActions}>
                     <button
                       type="button"
                       title="Allow or block model invocation for this skill"
                       onClick={() => void onToggle(skill)}
                       disabled={toggling === skill.relPath}
-                      style={{
-                        fontSize: 11, padding: "2px 8px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)",
-                        background: skill.disableModelInvocation ? "var(--bg-selected)" : "var(--bg)",
-                        color: skill.disableModelInvocation ? "var(--text-dim)" : "var(--text)", cursor: "pointer",
-                      }}
+                      className={styles.toggle}
+                      data-disabled={skill.disableModelInvocation || undefined}
                     >
                       {skill.disableModelInvocation ? "Disabled" : "Enabled"}
                     </button>
                     <button type="button" title="Check for updates" onClick={() => void onCheck(install)}
-                      disabled={checking !== null} style={ghostButtonStyle}>
+                      disabled={checking !== null} className={styles.ghostButton}>
                       {checking === key ? <RefreshCw size={12} aria-hidden="true" className="delivery-spinner" /> : "Check"}
                     </button>
                     {updateState?.state === "update-available" && (
                       <button type="button" onClick={() => void onUpdate(install)} disabled={checking !== null}
-                        style={{ ...ghostButtonStyle, color: "var(--warning)", borderColor: "var(--warning)" }}>
+                        className={`${styles.ghostButton} ${styles.warning}`}>
                         Update
                       </button>
                     )}
                     {updateState?.state === "up-to-date" && (
-                      <span style={{ fontSize: 11, color: "var(--text-dim)" }}>Up to date</span>
+                      <span className={styles.statusText}>Up to date</span>
                     )}
                     {updateState?.state === "error" && updateState.message && (
-                      <span style={{ fontSize: 11, color: "var(--danger)", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={updateState.message}>
+                      <span className={styles.statusError} title={updateState.message}>
                         {updateState.message}
                       </span>
                     )}
                     {updateState?.state === "unsupported" && (
-                      <span style={{ fontSize: 11, color: "var(--text-dim)" }} title={updateState.message ?? ""}>No updates</span>
+                      <span className={styles.statusText} title={updateState.message ?? ""}>No updates</span>
                     )}
                     <button type="button" title="Remove skill" onClick={() => void onRemove(skill)} disabled={removing !== null}
-                      style={{ ...ghostButtonStyle, color: "var(--danger)" }}>
+                      className={`${styles.ghostButton} ${styles.danger}`}>
                       {removing === skill.relPath ? "Removing…" : <X size={12} aria-hidden="true" />}
                     </button>
                   </div>
@@ -317,19 +290,19 @@ export function SkillCatalogList({ local }: { local: AnnotatedSkill[] }) {
   if (local.length === 0) return null;
   return (
     <>
-      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", marginTop: 12, marginBottom: 6 }}>
-        Catalog <span style={{ fontWeight: 400, color: "var(--text-dim)", marginLeft: 4 }}>{local.length}</span>
+      <div className={styles.sectionHeader}>
+        Catalog <span className={styles.sectionCount}>{local.length}</span>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div className={styles.stack}>
         {local.map((skill) => (
-          <div key={`${skill.relPath}:${skill.skillId}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
-            <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, color: "var(--text)" }}>
+          <div key={`${skill.relPath}:${skill.skillId}`} className={styles.catalogRow}>
+            <span className={styles.catalogName}>
               {skill.name}
             </span>
-            <span style={{ fontSize: 11, padding: "1px 6px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", color: "var(--text-muted)", flexShrink: 0 }}>
+            <span className={styles.badge}>
               {skill.sourceInfo.scope ?? "local"}
             </span>
-            {skill.disableModelInvocation && <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0 }}>invocation disabled</span>}
+            {skill.disableModelInvocation && <span className={styles.statusText}>invocation disabled</span>}
           </div>
         ))}
       </div>
@@ -342,11 +315,11 @@ export function SkillDiagnostics({ diagnostics }: {
 }) {
   if (diagnostics.length === 0) return null;
   return (
-    <div style={{ marginTop: 12 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", marginBottom: 4 }}>Catalog diagnostics</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+    <div className={styles.diagnostics}>
+      <div className={styles.diagTitle}>Catalog diagnostics</div>
+      <div className={styles.diagList}>
         {diagnostics.map((diag, index) => (
-          <div key={index} style={{ fontSize: 11, color: diag.level === "skip" ? "var(--warning)" : "var(--text-dim)", fontFamily: "var(--font-mono, monospace)" }}>
+          <div key={index} className={styles.diagRow} data-level={diag.level === "skip" ? "skip" : undefined}>
             [{diag.level}] {diag.relPath ? `${diag.relPath}: ` : ""}{diag.message}
           </div>
         ))}
