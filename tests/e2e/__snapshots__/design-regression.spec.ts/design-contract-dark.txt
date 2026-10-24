@@ -1,0 +1,50 @@
+{
+  "root": {
+    "accent": "#60a5fa",
+    "surface0": "#18181b",
+    "surface1": "#202023",
+    "content1": "#f4f4f5",
+    "content2": "#c4c4cc",
+    "content3": "#a1a1aa",
+    "strokeHairline": "#ffffff1a",
+    "radiusXs": "4px",
+    "radiusSm": "8px",
+    "radiusMd": "12px",
+    "radiusPanel": "24px",
+    "textXs": "11px",
+    "textSm": "12px",
+    "textBase": "14px",
+    "textLg": "16px"
+  },
+  "topbar": {
+    "height": "48px",
+    "background-color": "rgb(24, 24, 27)",
+    "border-bottom-color": "rgba(255, 255, 255, 0.1)"
+  },
+  "sidebar": {
+    "background-color": "rgb(32, 32, 35)",
+    "border-right-color": "rgba(255, 255, 255, 0.1)"
+  },
+  "composer": {
+    "border-radius": "24px",
+    "background-color": "rgb(24, 24, 27)",
+    "border-color": "rgba(255, 255, 255, 0.1)",
+    "box-shadow": "rgba(255, 255, 255, 0.1) 0px 0px 0px 0.5px, rgba(0, 0, 0, 0.28) 0px 2px 8px 0px"
+  },
+  "branch": {
+    "height": "32px",
+    "border-radius": "8px",
+    "background-color": "rgb(32, 32, 35)",
+    "border-color": "rgba(255, 255, 255, 0.1)",
+    "color": "rgb(196, 196, 204)"
+  },
+  "toolBatch": {
+    "background-color": "rgb(32, 32, 35)",
+    "border-top-color": "rgba(255, 255, 255, 0.1)",
+    "border-bottom-color": "rgba(255, 255, 255, 0.1)"
+  },
+  "userBubble": {
+    "border-radius": "8px",
+    "background-color": "rgb(30, 41, 59)"
+  }
+}

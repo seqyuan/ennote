@@ -1,0 +1,25 @@
+{
+  "shell": {
+    "width": "800px",
+    "height": "800px",
+    "border-radius": "24px",
+    "background-color": "rgb(255, 255, 255)",
+    "box-shadow": "rgba(24, 24, 27, 0.09) 0px 0px 0px 0.5px, rgba(24, 24, 27, 0.16) 0px 16px 40px 0px"
+  },
+  "navtitle": {
+    "font-size": "16px",
+    "font-weight": "500",
+    "color": "rgb(24, 24, 27)"
+  },
+  "search": {
+    "height": "32px",
+    "border-radius": "8px",
+    "border-color": "rgba(24, 24, 27, 0.09)"
+  },
+  "tab": {
+    "height": "40px",
+    "border-radius": "12px",
+    "background-color": "rgba(24, 24, 27, 0.08)",
+    "font-size": "14px"
+  }
+}
