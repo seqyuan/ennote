@@ -8,6 +8,7 @@ import type { TurnMessage } from "@/lib/chat-messages";
 import { runFailureMessage, errorMessage } from "@/lib/provider-errors";
 import { registerChildProgress } from "@/hooks/useChildProgress";
 import { apiFetch, apiResponse } from "@/lib/worker-api.client";
+import { toolCallIdOf } from "@/lib/tool-identity";
 
 interface UseAgentSessionInput {
   sessionId: string | null;
@@ -386,7 +387,7 @@ async function streamAgentEvents(
     upsertMessage({ id: `${runId}-assistant-${iteration}`, role: "assistant", text: value.text, thinking: value.thinking });
   }
   function upsertTool(payload: Record<string, unknown>, state: TurnMessage["toolState"], fallback: string) {
-    const callID = String(payload.toolCallId ?? payload.id ?? payload.recordId ?? `event-${payload.callIndex ?? "unknown"}`);
+    const callID = toolCallIdOf(payload);
     const args = payload.arguments && typeof payload.arguments === "object" && !Array.isArray(payload.arguments)
       ? payload.arguments as Record<string, unknown> : undefined;
     upsertMessage({
@@ -490,7 +491,7 @@ async function streamAgentEvents(
           case "tool_output_delta": {
             // Live tool stdout/stderr streaming: accumulate per call so text appends.
             if (!wasLive) break;
-            const callID = String(payload.toolCallId ?? `event-${payload.callIndex ?? "unknown"}`);
+            const callID = toolCallIdOf(payload);
             const stream = String(payload.stream ?? "stdout");
             const text = String(payload.text ?? "");
             const entry = toolOutputs.get(callID) ?? { text: "", name: String(payload.toolName ?? "tool") };
@@ -516,13 +517,13 @@ async function streamAgentEvents(
           case "tool_call_completed": {
             setStatus("");
             if (payload.toolName === "delegate_tasks" || payload.toolName === "delegate_roles") approval.delegated();
-            const callID = String(payload.toolCallId ?? payload.recordId ?? `event-${payload.callIndex ?? "unknown"}`);
+            const callID = toolCallIdOf(payload);
             toolOutputs.delete(callID); // final result replaces the live preview
             upsertTool(payload, payload.isError ? "failed" : "completed", "No output");
             break;
           }
           case "tool_call_failed": {
-            const callID = String(payload.toolCallId ?? payload.recordId ?? `event-${payload.callIndex ?? "unknown"}`);
+            const callID = toolCallIdOf(payload);
             toolOutputs.delete(callID);
             upsertTool(payload, "failed", "Tool call failed.");
             break;
