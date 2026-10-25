@@ -17,6 +17,15 @@ const eslintConfig = [
     },
   },
   {
+    files: ["app/**/*.tsx", "components/**/*.tsx"],
+    rules: {
+      "jsx-a11y/control-has-associated-label": ["error", {
+        labelAttributes: ["aria-label", "title"],
+        ignoreElements: ["audio", "canvas", "embed", "input", "select", "textarea"],
+      }],
+    },
+  },
+  {
     ignores: ["ennoworker/**", "playwright-report/**", "test-results/**"],
   },
 ];

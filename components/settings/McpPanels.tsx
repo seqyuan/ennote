@@ -197,6 +197,7 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
                             <input
                               type="checkbox"
                               className={styles.toolCheckbox}
+                              aria-label={entry.remoteName}
                               checked={selected.includes(entry.remoteName!)}
                               onChange={() => toggleTool(binding, entry.remoteName!)}
                             />
