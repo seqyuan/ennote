@@ -10,6 +10,7 @@ import { ResizeHandle } from "./ResizeHandle";
 import { ProjectCreateDialog } from "./ProjectCreateDialog";
 import { SettingsDialog } from "./settings/SettingsDialog";
 import { useResizable } from "@/hooks/useResizable";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { useSessionTitle } from "@/hooks/useSessionTitle";
 import { useProjectSessions } from "@/hooks/useProjectSessions";
 import { useSidebarProjectGroups } from "@/hooks/useSidebarProjectGroups";
@@ -105,16 +106,13 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
     return () => window.cancelAnimationFrame(frame);
   }, [isMobile]);
 
+  useOverlayLayer(isMobile && sidebarOpen, closeMobileNavigation);
+
   useEffect(() => {
     if (!isMobile || !sidebarOpen) return;
     const navigation = document.querySelector<HTMLElement>(".sidebar-container");
     if (!navigation) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeMobileNavigation();
-        return;
-      }
       if (event.key !== "Tab") return;
       const focusable = Array.from(navigation.querySelectorAll<HTMLElement>(
         'button:not(:disabled), input:not(:disabled), select:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
