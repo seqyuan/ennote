@@ -44,7 +44,7 @@ export function SidebarLogoRow(props: {
         onClick={onCloseNavigation}
         aria-label={t("sidebar.closeNav")}
       >
-        <X size={15} />
+        <X size={15} aria-hidden="true" />
       </button>
     </div>
   );

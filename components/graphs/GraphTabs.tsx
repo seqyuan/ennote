@@ -22,7 +22,7 @@ export function GraphTabs({ graphs, selected, onSelect, onAdd }: {
             onClick={() => onSelect(graph.id)}
           >
             <span>{graph.name}</span>
-            {graph.error && <span title={graph.error}><AlertTriangle size={12} aria-label={graph.error} /></span>}
+            {graph.error && <span title={graph.error} aria-label={graph.error} role="img"><AlertTriangle size={12} aria-hidden="true" /></span>}
           </button>
         ))}
       </div>

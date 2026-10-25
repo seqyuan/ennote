@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { X } from "lucide-react";
 import { useT } from "@/components/LocaleProvider";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { apiFetch } from "@/lib/worker-api.client";
@@ -99,7 +100,7 @@ export function FetchModelsButton({ probe, existingIds, onAdopt, onError, disabl
           <div className="project-create-dialog settings-models-fetch">
             <div className="project-create-header">
               <span>{t("settings.models.fetchTitle")}</span>
-              <button type="button" className="follow-up-close" aria-label={t("settings.models.close")} title={t("settings.models.close")} onClick={close}>✕</button>
+              <button type="button" className="follow-up-close" aria-label={t("settings.models.close")} title={t("settings.models.close")} onClick={close}><X size={14} aria-hidden="true" /></button>
             </div>
             <div className="project-create-form">
               <p className="settings-models-hint">{t("settings.models.fetchDescription")}</p>

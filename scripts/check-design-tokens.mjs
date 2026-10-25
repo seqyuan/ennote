@@ -22,14 +22,14 @@ const SCAN_ROOTS = ["app", "components"];
 const ALLOWED_RADII = new Set([0, 1, 2]);
 const ALLOWED_COLORS = new Set(["#fff", "#ffffff", "#000", "#000000"]);
 
-function* walk(dir) {
+function* walk(dir, extension) {
   for (const entry of readdirSync(dir)) {
     const path = join(dir, entry);
     const stat = statSync(path);
     if (stat.isDirectory()) {
       if (entry === "node_modules" || entry.startsWith(".")) continue;
-      yield* walk(path);
-    } else if (entry.endsWith(".css")) {
+      yield* walk(path, extension);
+    } else if (entry.endsWith(extension)) {
       yield path;
     }
   }
@@ -38,7 +38,7 @@ function* walk(dir) {
 const errors = [];
 
 for (const root of SCAN_ROOTS) {
-  for (const file of walk(join(ROOT, root))) {
+  for (const file of walk(join(ROOT, root), ".css")) {
     if (file === TOKEN_FILE) continue;
     const rel = relative(ROOT, file);
     const text = readFileSync(file, "utf8");
@@ -73,8 +73,9 @@ for (const root of SCAN_ROOTS) {
 
 // Inline styles in components follow the same scale. Keep the checks narrow:
 // font sizes, numeric radii, and literal colors that bypass the token layer.
-for (const file of walk(join(ROOT, "components"))) {
-  if (!file.endsWith(".tsx")) continue;
+// The same pass rejects Unicode glyphs used as icon buttons; SVG icons are the
+// only allowed icon source.
+for (const root of SCAN_ROOTS) for (const file of walk(join(ROOT, root), ".tsx")) {
   const rel = relative(ROOT, file);
   const text = readFileSync(file, "utf8");
   const lines = text.split("\n");
@@ -101,6 +102,10 @@ for (const file of walk(join(ROOT, "components"))) {
       if (!ALLOWED_COLORS.has(value)) {
         errors.push(`${where} literal color ${match[0]} in a component; use a semantic token`);
       }
+    }
+
+    if (/>\s*[✕×]\s*</.test(line)) {
+      errors.push(`${where} uses a text glyph as an icon; render an SVG icon instead`);
     }
   });
 }

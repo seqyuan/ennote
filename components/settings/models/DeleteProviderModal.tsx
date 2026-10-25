@@ -1,5 +1,6 @@
 "use client";
 
+import { X } from "lucide-react";
 import { useT } from "@/components/LocaleProvider";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 
@@ -28,7 +29,7 @@ export function DeleteProviderModal({ open, providerName, busy, failure, onCance
       <div className="project-create-dialog">
         <div className="project-create-header">
           <span>{title}</span>
-          <button type="button" className="follow-up-close" aria-label={t("settings.models.close")} title={t("settings.models.close")} onClick={onCancel}>✕</button>
+          <button type="button" className="follow-up-close" aria-label={t("settings.models.close")} title={t("settings.models.close")} onClick={onCancel}><X size={14} aria-hidden="true" /></button>
         </div>
         <div className="project-create-form">
           <p className="settings-delete-description">{description}</p>
