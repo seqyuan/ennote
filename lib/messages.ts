@@ -2,7 +2,7 @@ import type { Locale } from "./locale";
 
 /** Minimal message dictionary. Full UI translation is a follow-up; this proves
  *  the locale mechanism on the General settings page and the language row. */
-const messages: Record<Locale, Record<string, string>> = {
+export const messages: Record<Locale, Record<string, string>> = {
   en: {
     "general.title": "General",
     "general.desc": "Appearance and workspace-level preferences.",
