@@ -225,6 +225,9 @@ func (l *Loop) maybePauseForQuestion(runID string, plans []plannedToolCall) erro
 		return nil
 	}
 	index := indexes[0]
+	if !plans[index].allowed {
+		return nil
+	}
 	if !l.AllowQuestions {
 		denyQuestionPlan(&plans[index], "questions_not_allowed", "ask_user is not available for delegated runs")
 		return nil
