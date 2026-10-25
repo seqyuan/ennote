@@ -3,6 +3,7 @@
 import { ArrowDown, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatRail } from "@/components/ChatRail";
+import { SelectionActions } from "@/components/SelectionActions";
 import { Composer } from "@/components/Composer";
 import { EmptyHero, HeroGlow } from "@/components/EmptyHero";
 import { HeroProjectChip } from "@/components/HeroProjectChip";
@@ -14,6 +15,8 @@ import { StreamingStatusBar } from "@/components/StreamingStatusBar";
 import type { BranchView, ChatActions, ComposerView, HistoryView, RunView } from "@/hooks/useChatController";
 import type { components } from "@/lib/worker-api.gen";
 import { useProjectSelector } from "@/hooks/useProjectSelector";
+import { useTextSelection } from "@/hooks/useTextSelection";
+import { buildExplainRequest, buildQuote } from "@/lib/selection-quote";
 import type { SidebarProject } from "./ProjectMenu";
 
 type RunRecovery = components["schemas"]["RunRecovery"];
@@ -50,6 +53,7 @@ export function ChatWindow({
   const newMessageCount = useRef(0);
   const [atBottom, setAtBottom] = useState(true);
   const [hasNew, setHasNew] = useState(false);
+  const [focusNonce, setFocusNonce] = useState(0);
   // Hero project chip + composer share one dropdown control; both live in the
   // middle channel so the sidebar keeps its own independent selector.
   const heroProject = useProjectSelector();
@@ -111,6 +115,24 @@ export function ChatWindow({
     && !run.pendingApproval;
   const isHero = !history.sessionId || isBlank;
   const inert = !selectedProject;
+  const textSelection = useTextSelection(messagesRef, { enabled: !isHero });
+  const { clear: clearSelection } = textSelection;
+
+  const quoteSelection = useCallback((text: string) => {
+    const quote = buildQuote(text, t("selection.source.chat"));
+    if (!quote) return;
+    composer.setInput([composer.input, quote].filter(Boolean).join("\n\n"));
+    clearSelection();
+    setFocusNonce((value) => value + 1);
+  }, [clearSelection, composer, t]);
+
+  const explainSelection = useCallback((text: string) => {
+    const quote = buildQuote(text, t("selection.source.chat"));
+    if (!quote) return;
+    composer.setInput([composer.input, buildExplainRequest(t("selection.explainPrompt"), quote)].filter(Boolean).join("\n\n"));
+    clearSelection();
+    setFocusNonce((value) => value + 1);
+  }, [clearSelection, composer, t]);
 
   // Follow the reader: the rail and jump-to-latest affordance only matter when
   // the transcript is actually scrollable away from its floor.
@@ -201,6 +223,14 @@ export function ChatWindow({
       </button>
     )}
     </div>}
+    {!isHero && textSelection.selection && (
+      <SelectionActions
+        selection={textSelection.selection}
+        onQuote={quoteSelection}
+        onExplain={explainSelection}
+        onDismiss={clearSelection}
+      />
+    )}
     {!isHero && <BackgroundDelegationStrip sessionId={history.sessionId ?? undefined} />}
     {!isHero && composer.compaction.open && (
       <CompactionPromptBar
@@ -234,6 +264,7 @@ export function ChatWindow({
           </div>
         )}
         <Composer selectedSession={history.sessionId} activeLeafMessageId={history.activeLeafMessageId} input={composer.input} setInput={composer.setInput}
+          focusNonce={focusNonce}
           activeRun={Boolean(run.activeRun)} compacting={run.compacting} hasPendingImage={Boolean(composer.pendingImage)} reconnecting={reconnecting}
           inert={inert} hero={isHero}
           onRequestProject={requestProject}

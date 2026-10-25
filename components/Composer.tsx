@@ -118,6 +118,8 @@ interface ComposerProps {
   expandDiag: string | null;
   contextUsage: SessionContextUsage | null;
   stats: SessionStats | null;
+  /** Increment to focus the textarea and place the caret at the end. */
+  focusNonce?: number;
 }
 
 export function Composer({
@@ -126,7 +128,7 @@ export function Composer({
   roles, selectedRoleId, setSelectedRoleId, textAttachments, removeTextAttachment, pendingImage, clearPendingImage, attachFiles, uploadImage, submit, steer, steerText, followUp, cancel, cancelFollowUp, compactSession,
   pendingFollowUps,
   promptTemplates, showPromptPanel, onPromptSelect, onPromptPanelClose, expanding, expandDiag,
-  panelRoles, panelFlows, onRoleSelect, onFlowSelect, contextUsage, stats,
+  panelRoles, panelFlows, onRoleSelect, onFlowSelect, contextUsage, stats, focusNonce,
   onRequestProject, inert = false, hero = false,
 }: ComposerProps) {
   const textarea = useRef<HTMLTextAreaElement>(null);
@@ -211,6 +213,15 @@ export function Composer({
     document.addEventListener("pointerdown", close);
     return () => document.removeEventListener("pointerdown", close);
   }, [configOpen]);
+
+  useEffect(() => {
+    if (!focusNonce) return;
+    const element = textarea.current;
+    if (!element) return;
+    element.focus();
+    const end = element.value.length;
+    element.setSelectionRange(end, end);
+  }, [focusNonce]);
 
   useEffect(() => {
     const element = textarea.current;
