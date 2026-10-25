@@ -76,7 +76,10 @@ const ToolBatch = memo(function ToolBatch({ sessionId, batch, isLast, approval, 
   const count = batch.activities.length;
   const hasActive = batch.activities.some((activity) => activity.state === "running" || activity.state === "pending");
   const failed = batch.activities.filter((activity) => activity.state === "failed" || activity.state === "rejected").length;
-  const expanded = override ?? shouldExpandBatch({ isLast, hasActive, hasApproval: Boolean(approval) });
+  const hasOutcome = failed > 0 || batch.activities.some((activity) =>
+    (activity.result?.artifacts.length ?? 0) > 0 ||
+    activity.toolName === "delegate_tasks" || activity.toolName === "delegate_roles");
+  const expanded = override ?? shouldExpandBatch({ isLast, hasActive, hasApproval: Boolean(approval), hasOutcome });
   const current = [...batch.activities].reverse().find((activity) => activity.state === "running" || activity.state === "pending")
     ?? batch.activities[batch.activities.length - 1];
   const now = current

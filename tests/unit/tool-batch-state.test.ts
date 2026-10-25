@@ -54,9 +54,10 @@ describe("tool batch state", () => {
   });
 
   it("expands the last, active, or approval-bearing batch by default", () => {
-    expect(shouldExpandBatch({ isLast: false, hasActive: false, hasApproval: false })).toBe(false);
-    expect(shouldExpandBatch({ isLast: true, hasActive: false, hasApproval: false })).toBe(true);
-    expect(shouldExpandBatch({ isLast: false, hasActive: true, hasApproval: false })).toBe(true);
-    expect(shouldExpandBatch({ isLast: false, hasActive: false, hasApproval: true })).toBe(true);
+    expect(shouldExpandBatch({ isLast: false, hasActive: false, hasApproval: false, hasOutcome: false })).toBe(false);
+    expect(shouldExpandBatch({ isLast: true, hasActive: false, hasApproval: false, hasOutcome: false })).toBe(true);
+    expect(shouldExpandBatch({ isLast: false, hasActive: true, hasApproval: false, hasOutcome: false })).toBe(true);
+    expect(shouldExpandBatch({ isLast: false, hasActive: false, hasApproval: true, hasOutcome: false })).toBe(true);
+    expect(shouldExpandBatch({ isLast: false, hasActive: false, hasApproval: false, hasOutcome: true })).toBe(true);
   });
 });

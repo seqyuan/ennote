@@ -12,10 +12,15 @@ export function toolBatchKey(batch: Pick<ToolBatchStep, "id" | "activities">): s
   return batch.activities[0]?.toolCallId || batch.id;
 }
 
-export function shouldExpandBatch({ isLast, hasActive, hasApproval }: {
+/**
+ * A folded batch may hide process, but it must not hide results: artifacts,
+ * delegation activity, and failures stay visible by default.
+ */
+export function shouldExpandBatch({ isLast, hasActive, hasApproval, hasOutcome }: {
   isLast: boolean;
   hasActive: boolean;
   hasApproval: boolean;
+  hasOutcome: boolean;
 }): boolean {
-  return isLast || hasActive || hasApproval;
+  return isLast || hasActive || hasApproval || hasOutcome;
 }
