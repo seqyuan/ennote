@@ -614,7 +614,9 @@ html.dark .composer-editor.composer-no-session::after {
   right: 0;
   z-index: var(--layer-popover-raised);
   box-sizing: border-box;
-  width: 264px;
+  width: 300px;
+  max-height: min(70vh, 420px);
+  overflow-y: auto;
   padding: 12px;
   border: 1px solid var(--cmp-border);
   border-radius: var(--cmp-radius-menu);
@@ -672,7 +674,11 @@ html.dark .composer-editor.composer-no-session::after {
   vertical-align: baseline;
 }
 .cm-color-system { --meter-tint: rgb(148, 163, 184); }
+.cm-color-role { --meter-tint: rgb(129, 140, 248); }
+.cm-color-rules { --meter-tint: rgb(45, 212, 191); }
+.cm-color-skills { --meter-tint: rgb(251, 191, 36); }
 .cm-color-tools { --meter-tint: rgb(167, 139, 250); }
+.cm-color-reminders { --meter-tint: rgb(251, 113, 133); }
 .cm-color-messages { --meter-tint: var(--cmp-brand); }
 .context-meter-rows {
   margin: 6px 0 0;
@@ -688,9 +694,18 @@ html.dark .composer-editor.composer-no-session::after {
   color: var(--cmp-text-secondary);
 }
 .context-meter-row dd {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
   margin: 0;
   font-variant-numeric: tabular-nums;
   color: var(--cmp-text-primary);
+}
+.context-meter-row-pct {
+  min-width: 30px;
+  color: var(--cmp-text-tertiary);
+  font-size: var(--text-xs);
+  text-align: right;
 }
 
 /* ---- StatsLine (dsh StatsLine row under the composer) ---- */

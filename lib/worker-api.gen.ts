@@ -2318,12 +2318,21 @@ export interface components {
             /** Format: date-time */
             modifiedAt: string;
         };
+        ContextCategory: {
+            /** @description Ennote-native context category key (version 1 defines system, role, rules, skills, tools, reminders, conversation). */
+            key: string;
+            tokens: number;
+        };
         SessionContextUsage: {
             contextWindow: number;
             projectedTokens: number;
             systemTokens: number;
             toolsTokens: number;
             messageTokens: number;
+            /** @description Additive breakdown of projectedTokens. Absent on legacy events and on Runs without a frozen prompt composition; clients must fall back to the three legacy totals. */
+            categories?: components["schemas"]["ContextCategory"][];
+            /** @description Version of the category key vocabulary. Omitted when categories is absent. */
+            categoriesVersion?: number;
         };
         SessionStats: {
             turns: number;

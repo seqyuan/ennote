@@ -23,15 +23,36 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
  * keeps its own tone while each locale owns the word order (dsh's READING_SLOT). */
 const READING_SLOT = "\u0000";
 
-const ROWS = [
+const LEGACY_ROWS = [
   { key: "systemTokens", label: "context.system", color: "cm-color-system" },
   { key: "toolsTokens", label: "context.tools", color: "cm-color-tools" },
   { key: "messageTokens", label: "context.messages", color: "cm-color-messages" },
 ] as const;
 
-export function ContextMeter({ contextUsage }: { contextUsage: SessionContextUsage | null }) {
+const CATEGORY_ROWS: Record<string, { label: string; color: string }> = {
+  system: { label: "context.system", color: "cm-color-system" },
+  role: { label: "context.role", color: "cm-color-role" },
+  rules: { label: "context.rules", color: "cm-color-rules" },
+  skills: { label: "context.skills", color: "cm-color-skills" },
+  tools: { label: "context.tools", color: "cm-color-tools" },
+  reminders: { label: "context.reminders", color: "cm-color-reminders" },
+  conversation: { label: "context.conversation", color: "cm-color-messages" },
+};
+
+interface MeterRow {
+  key: string;
+  label: string;
+  color: string;
+  tokens: number;
+}
+
+export function ContextMeter({ contextUsage, initialOpen = false }: {
+  contextUsage: SessionContextUsage | null;
+  /** Render the breakdown open on first paint (tests and deep links). */
+  initialOpen?: boolean;
+}) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initialOpen);
   const rootRef = useRef<HTMLSpanElement | null>(null);
 
   // A model switch (or run end) can drop the projection while this component
@@ -65,13 +86,32 @@ export function ContextMeter({ contextUsage }: { contextUsage: SessionContextUsa
     .replace("{percent}", READING_SLOT)
     .split(READING_SLOT)
     .map((part) => part.trim());
-  const breakdownTotal = contextUsage.systemTokens + contextUsage.toolsTokens + contextUsage.messageTokens;
+  const categories = contextUsage.categories ?? [];
+  const hasCategories = categories.length > 0 && categories.some((category) => category.tokens > 0);
+  const breakdownTotal = hasCategories
+    ? contextUsage.projectedTokens
+    : contextUsage.systemTokens + contextUsage.toolsTokens + contextUsage.messageTokens;
+  const rows: MeterRow[] = hasCategories
+    ? categories.map((category) => ({
+      key: category.key,
+      label: CATEGORY_ROWS[category.key]?.label ?? "context.other",
+      color: CATEGORY_ROWS[category.key]?.color ?? "cm-color-messages",
+      tokens: category.tokens,
+    }))
+    : LEGACY_ROWS.map((row) => ({
+      key: row.key,
+      label: row.label,
+      color: row.color,
+      tokens: contextUsage[row.key],
+    }));
   const parts = breakdownTotal === 0
     ? [{ key: "total", color: undefined, width: percent }]
-    : ROWS.map((row) => ({
+    : rows.map((row) => ({
       key: row.key,
       color: row.color,
-      width: percent * contextUsage[row.key] / breakdownTotal,
+      width: contextUsage.contextWindow > 0
+        ? row.tokens / contextUsage.contextWindow * 100
+        : percent * row.tokens / breakdownTotal,
     }));
   const segments = parts.filter((part) => part.width > 0);
 
@@ -119,13 +159,18 @@ export function ContextMeter({ contextUsage }: { contextUsage: SessionContextUsa
             ))}
           </div>
           <dl className="context-meter-rows">
-            {ROWS.map((row) => (
+            {rows.map((row) => (
               <div key={row.key} className="context-meter-row">
                 <dt>
                   <span className={`context-meter-swatch ${row.color}`} aria-hidden="true" />
                   {t(row.label)}
                 </dt>
-                <dd>{`~${formatTokens(contextUsage[row.key])}`}</dd>
+                <dd>
+                  {`~${formatTokens(row.tokens)}`}
+                  <span className="context-meter-row-pct">
+                    {`${Math.round(row.tokens / contextUsage.contextWindow * 100)}%`}
+                  </span>
+                </dd>
               </div>
             ))}
           </dl>

@@ -131,6 +131,10 @@ type RunInput struct {
 	Approval           *ApprovalResolution
 	SkillCatalogState  string // "disabled" | "materialized" | "" (legacy)
 	SkillCatalogDigest string
+	// PromptSections is the frozen composition of SystemPrompt. The executor
+	// supplies it from the same section list it froze, so context categories
+	// cannot drift from the prompt the model actually received.
+	PromptSections []domain.PromptSection
 }
 
 type RunResult struct {
@@ -787,7 +791,7 @@ func (l *Loop) streamWithRetry(ctx context.Context, input RunInput, iteration in
 	// Context occupancy: report the prepared request once per turn (not per
 	// retry attempt) so the client's context meter tracks the real surface.
 	if callOptions.Purpose == domain.ModelCallAgentTurn {
-		usage := splitContextUsage(request.Messages, request.Tools)
+		usage := splitContextUsage(request.Messages, request.Tools, input.PromptSections)
 		usage.ContextWindow = l.effectiveRuntime(runtime.Snapshot).ContextTokens
 		if err := l.recordContextUsage(ctx, input.RunID, usage); err != nil {
 			return domain.Completion{}, err

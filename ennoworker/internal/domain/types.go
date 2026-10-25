@@ -88,17 +88,17 @@ type CreateSessionInput struct {
 }
 
 type Message struct {
-	ID                    string            `json:"id"`
-	SessionID             string            `json:"sessionId"`
-	ParentMessageID       *string           `json:"parentMessageId,omitempty"`
-	Role                  string            `json:"role"`
-	Status                string            `json:"status"`
-	RunID                 *string           `json:"runId,omitempty"`
+	ID              string  `json:"id"`
+	SessionID       string  `json:"sessionId"`
+	ParentMessageID *string `json:"parentMessageId,omitempty"`
+	Role            string  `json:"role"`
+	Status          string  `json:"status"`
+	RunID           *string `json:"runId,omitempty"`
 	// ModelProfileID / APIModel are denormalized from the run's frozen
 	// effective config at read time so the UI can attribute a reply to a
 	// model without a separate run fetch.
-	ModelProfileID string `json:"modelProfileId,omitempty"`
-	APIModel       string `json:"apiModel,omitempty"`
+	ModelProfileID        string            `json:"modelProfileId,omitempty"`
+	APIModel              string            `json:"apiModel,omitempty"`
 	SpeakerKind           SpeakerKind       `json:"speakerKind"`
 	SpeakerObjectID       *string           `json:"speakerObjectId,omitempty"`
 	SpeakerVersionID      *string           `json:"speakerVersionId,omitempty"`
@@ -129,6 +129,19 @@ type SessionContextUsage struct {
 	SystemTokens    int `json:"systemTokens"`
 	ToolsTokens     int `json:"toolsTokens"`
 	MessageTokens   int `json:"messageTokens"`
+	// Categories is the additive breakdown of ProjectedTokens. It is absent on
+	// legacy events and on Runs whose prompt composition was not recorded;
+	// clients must fall back to the three legacy totals in that case.
+	Categories []ContextCategory `json:"categories,omitempty"`
+	// CategoriesVersion lets the client evolve labels without guessing the
+	// meaning of keys. Version 1 is the ennote-native seven-key set.
+	CategoriesVersion int `json:"categoriesVersion,omitempty"`
+}
+
+// ContextCategory is one additive slice of ProjectedTokens.
+type ContextCategory struct {
+	Key    string `json:"key"`
+	Tokens int    `json:"tokens"`
 }
 
 // SessionStats is the per-session aggregate the composer's StatsLine renders:

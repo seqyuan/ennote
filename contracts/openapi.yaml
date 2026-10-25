@@ -3502,6 +3502,15 @@ components:
         isDir: { type: boolean }
         size: { type: integer, format: int64, minimum: 0 }
         modifiedAt: { type: string, format: date-time }
+    ContextCategory:
+      type: object
+      additionalProperties: false
+      required: [key, tokens]
+      properties:
+        key:
+          type: string
+          description: Ennote-native context category key (version 1 defines system, role, rules, skills, tools, reminders, conversation).
+        tokens: { type: integer, minimum: 0 }
     SessionContextUsage:
       type: object
       additionalProperties: false
@@ -3512,6 +3521,14 @@ components:
         systemTokens: { type: integer, minimum: 0 }
         toolsTokens: { type: integer, minimum: 0 }
         messageTokens: { type: integer, minimum: 0 }
+        categories:
+          type: array
+          description: Additive breakdown of projectedTokens. Absent on legacy events and on Runs without a frozen prompt composition; clients must fall back to the three legacy totals.
+          items: { $ref: "#/components/schemas/ContextCategory" }
+        categoriesVersion:
+          type: integer
+          minimum: 1
+          description: Version of the category key vocabulary. Omitted when categories is absent.
     SessionStats:
       type: object
       additionalProperties: false

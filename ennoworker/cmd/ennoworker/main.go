@@ -393,6 +393,12 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	var skillCatalogState domain.SkillCatalogState
 	var skillCatalogDigest string
 	if resumeState != nil {
+		// A resumed Run keeps the frozen prompt; load its section record so
+		// context categories describe the same bytes. Missing sections simply
+		// omit categories (the legacy three totals remain authoritative).
+		if composition, loadErr := e.runs.LoadRunPromptComposition(ctx, run.ID); loadErr == nil {
+			systemPromptSections = composition.Sections
+		}
 		skillCatalogState = domain.SkillCatalogState(resumeState.SkillCatalogState)
 		if resumeState.SkillCatalogState == "materialized" && resumeState.SkillCatalogDigest != "" {
 			if err := skills.VerifyMaterializedCatalog(snapDir, resumeState.SkillCatalogDigest); err != nil {
@@ -742,6 +748,7 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		SystemPrompt: systemPrompt, History: chatHistory, OverflowRecovery: overflowRecovery,
 		Resume: resumeState, Approval: approvalResolution,
 		SkillCatalogState: string(skillCatalogState), SkillCatalogDigest: skillCatalogDigest,
+		PromptSections:    systemPromptSections,
 		RequestGeneration: claimGen, StartIteration: startIteration,
 	})
 
@@ -950,8 +957,12 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 	// Role or a project file changed while the child waited for approval — which
 	// is exactly what freezing is supposed to prevent, not to trip over.
 	var systemPrompt string
+	var systemPromptSections []domain.PromptSection
 	if frozen != nil {
 		systemPrompt = frozen.State.SystemPrompt
+		if composition, loadErr := e.runs.LoadRunPromptComposition(ctx, run.ID); loadErr == nil {
+			systemPromptSections = composition.Sections
+		}
 	} else {
 		taskSkillIDs, taskSkillsErr := e.delegationRepo().TaskSkillsForChildRun(ctx, run.ID)
 		if taskSkillsErr != nil {
@@ -962,7 +973,6 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 		if childSegmentsErr != nil {
 			return domain.RunOutput{}, childSegmentsErr
 		}
-		var systemPromptSections []domain.PromptSection
 		systemPrompt, systemPromptSections = systemprompt.Compose(childSegments)
 		// A child has no /skills mount, so its catalog state is deliberately empty
 		// rather than "disabled": there is no catalog decision to record.
@@ -1053,6 +1063,7 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 		VisionPolicy: resolved.Effective.VisionPolicy, ThinkingEffort: resolved.Effective.ThinkingEffort,
 		SystemPrompt: systemPrompt, History: chatHistory,
 		Resume: resumeState, Approval: approvalResolution,
+		PromptSections: systemPromptSections,
 	})
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorDelegationBudgetExceeded,
