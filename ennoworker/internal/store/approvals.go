@@ -14,10 +14,11 @@ import (
 )
 
 var (
-	ErrApprovalNotFound     = errors.New("approval request not found")
-	ErrApprovalConflict     = errors.New("approval decision conflicts with the stored decision")
-	ErrApprovalStale        = errors.New("approval request is no longer pending for this run")
-	ErrStandingGrantInvalid = errors.New("invalid standing grant selection")
+	ErrApprovalNotFound      = errors.New("approval request not found")
+	ErrApprovalConflict      = errors.New("approval decision conflicts with the stored decision")
+	ErrApprovalStale         = errors.New("approval request is no longer pending for this run")
+	ErrStandingGrantInvalid  = errors.New("invalid standing grant selection")
+	ErrQuestionInvalidAnswer = errors.New("invalid question answer")
 )
 
 type ApprovalRepo struct {
@@ -28,12 +29,42 @@ type ApprovalRepo struct {
 func (r *ApprovalRepo) Suspend(ctx context.Context, runID string, schemaVersion, iteration int,
 	batchDigest string, state json.RawMessage, items []domain.ApprovalItem,
 	candidates []domain.StandingGrantCandidate) (*domain.ToolApprovalRequest, error) {
-	if schemaVersion < 1 || iteration < 1 || strings.TrimSpace(batchDigest) == "" || !json.Valid(state) || len(items) == 0 {
-		return nil, fmt.Errorf("valid checkpoint version, iteration, digest, state, and approval items are required")
+	if len(items) == 0 {
+		return nil, fmt.Errorf("approval items are required")
+	}
+	return r.suspend(ctx, runID, schemaVersion, iteration, batchDigest, state,
+		domain.ApprovalKindTool, items, nil, candidates)
+}
+
+// SuspendQuestion stores a structured-question checkpoint in the same table as
+// a tool approval. The Run stays waiting_for_approval; readers branch on kind.
+func (r *ApprovalRepo) SuspendQuestion(ctx context.Context, runID string, schemaVersion, iteration int,
+	batchDigest string, state json.RawMessage, questions []domain.QuestionSpec) (*domain.ToolApprovalRequest, error) {
+	if len(questions) == 0 {
+		return nil, fmt.Errorf("question payload is required")
+	}
+	return r.suspend(ctx, runID, schemaVersion, iteration, batchDigest, state,
+		domain.ApprovalKindQuestion, nil, questions, nil)
+}
+
+func (r *ApprovalRepo) suspend(ctx context.Context, runID string, schemaVersion, iteration int,
+	batchDigest string, state json.RawMessage, kind domain.ApprovalKind,
+	items []domain.ApprovalItem, questions []domain.QuestionSpec,
+	candidates []domain.StandingGrantCandidate) (*domain.ToolApprovalRequest, error) {
+	if schemaVersion < 1 || iteration < 1 || strings.TrimSpace(batchDigest) == "" || !json.Valid(state) {
+		return nil, fmt.Errorf("valid checkpoint version, iteration, digest, and state are required")
 	}
 	encodedItems, err := json.Marshal(items)
 	if err != nil {
 		return nil, fmt.Errorf("encode approval items: %w", err)
+	}
+	var questionsJSON any
+	if kind == domain.ApprovalKindQuestion {
+		canonical, err := domain.CanonicalQuestions(questions)
+		if err != nil {
+			return nil, fmt.Errorf("encode questions: %w", err)
+		}
+		questionsJSON = string(canonical)
 	}
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -76,15 +107,18 @@ func (r *ApprovalRepo) Suspend(ctx context.Context, runID string, schemaVersion,
 		return nil, fmt.Errorf("insert execution checkpoint: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO tool_approval_requests
-		(id,run_id,session_id,checkpoint_id,iteration,batch_digest,status,items_json,requested_at)
-		VALUES(?,?,?,?,?,?,'pending',?,?)`, approvalID, runID, sessionID, checkpointID,
-		iteration, batchDigest, string(encodedItems), timestamp); err != nil {
+		(id,run_id,session_id,checkpoint_id,iteration,batch_digest,kind,status,items_json,questions_json,requested_at)
+		VALUES(?,?,?,?,?,?,?,'pending',?,?,?)`, approvalID, runID, sessionID, checkpointID,
+		iteration, batchDigest, string(kind), string(encodedItems), questionsJSON, timestamp); err != nil {
 		return nil, fmt.Errorf("insert approval request: %w", err)
 	}
-	// Persist standing candidates for the Decide transaction.
-	standingRepo := &StandingApprovalRepo{DB: r.DB}
-	if err := standingRepo.SaveCandidatesTx(ctx, tx, approvalID, candidates); err != nil {
-		return nil, fmt.Errorf("save standing candidates: %w", err)
+	// Persist standing candidates for the Decide transaction. Questions never
+	// carry standing grants.
+	if kind == domain.ApprovalKindTool {
+		standingRepo := &StandingApprovalRepo{DB: r.DB}
+		if err := standingRepo.SaveCandidatesTx(ctx, tx, approvalID, candidates); err != nil {
+			return nil, fmt.Errorf("save standing candidates: %w", err)
+		}
 	}
 	waitingStatus := domain.RunWaitingForApproval
 	for _, item := range items {
@@ -108,15 +142,29 @@ func (r *ApprovalRepo) Suspend(ctx context.Context, runID string, schemaVersion,
 	for _, item := range items {
 		toolNames = append(toolNames, item.ToolName)
 	}
-	if err := ProjectAttentionTx(ctx, tx, projectID, sessionID,
+	if kind == domain.ApprovalKindQuestion {
+		if err := ProjectAttentionTx(ctx, tx, projectID, sessionID,
+			domain.AttentionSourceToolApproval, approvalID, 0,
+			domain.AttentionNeedsInput, true,
+			map[string]any{"kind": "question", "approvalId": approvalID, "questionCount": len(questions)},
+			&domain.AttentionAction{Kind: "answer_question", ApprovalID: approvalID}); err != nil {
+			return nil, err
+		}
+	} else if err := ProjectAttentionTx(ctx, tx, projectID, sessionID,
 		domain.AttentionSourceToolApproval, approvalID, 0,
 		domain.AttentionApprovalRequired, true,
 		map[string]any{"kind": "tool_approval", "tools": toolNames},
 		&domain.AttentionAction{Kind: "tool_approval", ApprovalID: approvalID}); err != nil {
 		return nil, err
 	}
-	payload, _ := json.Marshal(map[string]any{"approvalId": approvalID, "iteration": iteration,
-		"batchDigest": batchDigest, "items": items})
+	payloadValues := map[string]any{"approvalId": approvalID, "iteration": iteration, "batchDigest": batchDigest}
+	if kind == domain.ApprovalKindQuestion {
+		payloadValues["kind"] = string(kind)
+		payloadValues["questions"] = questions
+	} else {
+		payloadValues["items"] = items
+	}
+	payload, _ := json.Marshal(payloadValues)
 	committed, err := appendEventsTx(ctx, tx, runID, domain.PendingEvent{EventType: "approval_requested", Payload: payload})
 	if err != nil {
 		return nil, err
@@ -128,8 +176,9 @@ func (r *ApprovalRepo) Suspend(ctx context.Context, runID string, schemaVersion,
 		r.Publisher.Publish(committed...)
 	}
 	approval := &domain.ToolApprovalRequest{ID: approvalID, RunID: runID, SessionID: sessionID,
-		CheckpointID: checkpointID, Iteration: iteration, BatchDigest: batchDigest,
-		Status: domain.ApprovalPending, Items: append([]domain.ApprovalItem(nil), items...), RequestedAt: now}
+		CheckpointID: checkpointID, Iteration: iteration, BatchDigest: batchDigest, Kind: kind,
+		Status: domain.ApprovalPending, Items: append([]domain.ApprovalItem(nil), items...),
+		Questions: append([]domain.QuestionSpec(nil), questions...), RequestedAt: now}
 	approval.Attribution, _ = loadApprovalAttribution(ctx, r.DB, runID)
 	return approval, nil
 }
@@ -178,6 +227,9 @@ func (r *ApprovalRepo) Decide(ctx context.Context, approvalID string, decision d
 	approval, runStatus, turnID, err := findApprovalForDecisionTx(ctx, tx, approvalID)
 	if err != nil {
 		return nil, err
+	}
+	if approval.Kind == domain.ApprovalKindQuestion {
+		return nil, ErrApprovalConflict
 	}
 	desired := domain.ApprovalStatus(decision)
 	if approval.Status != domain.ApprovalPending {
@@ -298,6 +350,123 @@ func (r *ApprovalRepo) Decide(ctx context.Context, approvalID string, decision d
 	return approval, nil
 }
 
+// Answer resolves a structured-question checkpoint. It shares the approval
+// transaction, CAS, attention, event, and enqueue semantics; only the payload
+// and status interpretation differ. `status='approved'` means answered here.
+func (r *ApprovalRepo) Answer(ctx context.Context, approvalID string,
+	answers []domain.QuestionAnswer, clientRequestID string) (*domain.ToolApprovalRequest, error) {
+	if strings.TrimSpace(clientRequestID) == "" {
+		return nil, fmt.Errorf("client request id is required")
+	}
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	approval, runStatus, turnID, err := findApprovalForDecisionTx(ctx, tx, approvalID)
+	if err != nil {
+		return nil, err
+	}
+	if approval.Kind != domain.ApprovalKindQuestion {
+		return nil, ErrApprovalConflict
+	}
+	canonical, err := domain.CanonicalAnswers(approval.Questions, answers)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrQuestionInvalidAnswer, err)
+	}
+	if approval.Status != domain.ApprovalPending {
+		if approval.Status == domain.ApprovalApproved {
+			stored, compareErr := domain.CanonicalAnswers(approval.Questions, approval.Answers)
+			if compareErr == nil && sameQuestionAnswers(stored, canonical) {
+				// The transaction is still open; reading through r.DB would
+				// deadlock on the single SQLite connection.
+				approval.Attribution, _ = loadApprovalAttribution(ctx, tx, approval.RunID)
+				return approval, nil
+			}
+		}
+		return nil, ErrApprovalConflict
+	}
+	if runStatus != domain.RunWaitingForApproval {
+		return nil, ErrApprovalStale
+	}
+	encodedAnswers, err := json.Marshal(canonical)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	timestamp := now.Format(time.RFC3339Nano)
+	result, err := tx.ExecContext(ctx, `UPDATE tool_approval_requests
+		SET status='approved',answers_json=?,decision_client_request_id=?,resolved_at=?
+		WHERE id=? AND status='pending' AND kind='question'`,
+		string(encodedAnswers), clientRequestID, timestamp, approvalID)
+	if err != nil {
+		return nil, err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return nil, ErrApprovalConflict
+	}
+	if err := ResolveAttentionForSourceTx(ctx, tx,
+		domain.AttentionSourceToolApproval, approvalID, 0); err != nil {
+		return nil, err
+	}
+	result, err = tx.ExecContext(ctx, `UPDATE agent_runs SET status='queued' WHERE id=? AND status=?`,
+		approval.RunID, runStatus)
+	if err != nil {
+		return nil, err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return nil, ErrApprovalStale
+	}
+	if turnID.Valid {
+		if _, err := tx.ExecContext(ctx, `UPDATE turns SET status='pending',updated_at=? WHERE id=?`, timestamp, turnID.String); err != nil {
+			return nil, err
+		}
+	}
+	resolvedPayload, _ := json.Marshal(map[string]any{
+		"approvalId": approval.ID, "kind": string(domain.ApprovalKindQuestion),
+		"answers": canonical, "iteration": approval.Iteration, "batchDigest": approval.BatchDigest,
+	})
+	queuedPayload, _ := json.Marshal(map[string]any{"reason": "question_answered", "approvalId": approval.ID})
+	committed, err := appendEventsTx(ctx, tx, approval.RunID,
+		domain.PendingEvent{EventType: "approval_resolved", Payload: resolvedPayload},
+		domain.PendingEvent{EventType: "run_queued", Payload: queuedPayload})
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	approval.Status = domain.ApprovalApproved
+	approval.Answers = canonical
+	approval.DecisionClientRequestID = clientRequestID
+	approval.ResolvedAt = &now
+	approval.Attribution, _ = loadApprovalAttribution(ctx, r.DB, approval.RunID)
+	if r.Publisher != nil {
+		r.Publisher.Publish(committed...)
+	}
+	return approval, nil
+}
+
+func sameQuestionAnswers(left, right []domain.QuestionAnswer) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index].QuestionID != right[index].QuestionID || left[index].OtherText != right[index].OtherText {
+			return false
+		}
+		if len(left[index].Values) != len(right[index].Values) {
+			return false
+		}
+		for valueIndex := range left[index].Values {
+			if left[index].Values[valueIndex] != right[index].Values[valueIndex] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func (r *ApprovalRepo) BeginResume(ctx context.Context, runID string) (*domain.ApprovalResume, error) {
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -305,7 +474,8 @@ func (r *ApprovalRepo) BeginResume(ctx context.Context, runID string) (*domain.A
 	}
 	defer tx.Rollback()
 	row := tx.QueryRowContext(ctx, `SELECT a.id,a.run_id,a.session_id,a.checkpoint_id,a.iteration,a.batch_digest,
-		a.status,a.items_json,a.decision_client_request_id,a.requested_at,a.resolved_at,
+		a.kind,a.status,a.items_json,a.questions_json,a.answers_json,a.decision_client_request_id,
+		a.requested_at,a.resolved_at,
 		c.schema_version,c.state_json,c.status,c.created_at,c.started_at,c.finished_at,ar.status
 		FROM tool_approval_requests a JOIN run_execution_checkpoints c ON c.id=a.checkpoint_id
 		JOIN agent_runs ar ON ar.id=a.run_id
@@ -384,7 +554,8 @@ func loadApprovalAttribution(ctx context.Context, reader approvalAttributionRead
 }
 
 const approvalSelect = `SELECT a.id,a.run_id,a.session_id,a.checkpoint_id,a.iteration,a.batch_digest,
-	a.status,a.items_json,a.decision_client_request_id,a.requested_at,a.resolved_at
+	a.kind,a.status,a.items_json,a.questions_json,a.answers_json,a.decision_client_request_id,
+	a.requested_at,a.resolved_at
 	FROM tool_approval_requests a`
 
 func findApprovalForDecisionTx(ctx context.Context, tx *sql.Tx, id string) (*domain.ToolApprovalRequest, domain.RunStatus, sql.NullString, error) {
@@ -407,15 +578,29 @@ func findApprovalForDecisionTx(ctx context.Context, tx *sql.Tx, id string) (*dom
 
 func scanApproval(scanner interface{ Scan(...any) error }) (*domain.ToolApprovalRequest, error) {
 	var approval domain.ToolApprovalRequest
-	var items, requestedAt string
-	var resolvedAt, requestID sql.NullString
+	var kind, items, requestedAt string
+	var questions, answers, resolvedAt, requestID sql.NullString
 	if err := scanner.Scan(&approval.ID, &approval.RunID, &approval.SessionID, &approval.CheckpointID,
-		&approval.Iteration, &approval.BatchDigest, &approval.Status, &items, &requestID,
-		&requestedAt, &resolvedAt); err != nil {
+		&approval.Iteration, &approval.BatchDigest, &kind, &approval.Status, &items, &questions,
+		&answers, &requestID, &requestedAt, &resolvedAt); err != nil {
 		return nil, err
+	}
+	approval.Kind = domain.ApprovalKind(kind)
+	if approval.Kind == "" {
+		approval.Kind = domain.ApprovalKindTool
 	}
 	if err := json.Unmarshal([]byte(items), &approval.Items); err != nil {
 		return nil, fmt.Errorf("decode approval items: %w", err)
+	}
+	if questions.Valid && questions.String != "" {
+		if err := json.Unmarshal([]byte(questions.String), &approval.Questions); err != nil {
+			return nil, fmt.Errorf("decode approval questions: %w", err)
+		}
+	}
+	if answers.Valid && answers.String != "" {
+		if err := json.Unmarshal([]byte(answers.String), &approval.Answers); err != nil {
+			return nil, fmt.Errorf("decode approval answers: %w", err)
+		}
 	}
 	approval.DecisionClientRequestID = requestID.String
 	var err error
@@ -435,19 +620,33 @@ func scanApproval(scanner interface{ Scan(...any) error }) (*domain.ToolApproval
 
 func scanApprovalResume(scanner interface{ Scan(...any) error }) (*domain.ApprovalResume, domain.RunStatus, error) {
 	var resume domain.ApprovalResume
-	var items, requestedAt, checkpointCreated, checkpointState string
-	var resolvedAt, requestID, checkpointStarted, checkpointFinished sql.NullString
+	var kind, items, requestedAt, checkpointCreated, checkpointState string
+	var questions, answers, resolvedAt, requestID, checkpointStarted, checkpointFinished sql.NullString
 	var runStatus domain.RunStatus
 	err := scanner.Scan(&resume.Approval.ID, &resume.Approval.RunID, &resume.Approval.SessionID,
 		&resume.Approval.CheckpointID, &resume.Approval.Iteration, &resume.Approval.BatchDigest,
-		&resume.Approval.Status, &items, &requestID, &requestedAt, &resolvedAt,
+		&kind, &resume.Approval.Status, &items, &questions, &answers, &requestID, &requestedAt, &resolvedAt,
 		&resume.Checkpoint.SchemaVersion, &checkpointState, &resume.Checkpoint.Status,
 		&checkpointCreated, &checkpointStarted, &checkpointFinished, &runStatus)
 	if err != nil {
 		return nil, "", err
 	}
+	resume.Approval.Kind = domain.ApprovalKind(kind)
+	if resume.Approval.Kind == "" {
+		resume.Approval.Kind = domain.ApprovalKindTool
+	}
 	if err := json.Unmarshal([]byte(items), &resume.Approval.Items); err != nil {
 		return nil, "", err
+	}
+	if questions.Valid && questions.String != "" {
+		if err := json.Unmarshal([]byte(questions.String), &resume.Approval.Questions); err != nil {
+			return nil, "", err
+		}
+	}
+	if answers.Valid && answers.String != "" {
+		if err := json.Unmarshal([]byte(answers.String), &resume.Approval.Answers); err != nil {
+			return nil, "", err
+		}
 	}
 	resume.Approval.DecisionClientRequestID = requestID.String
 	resume.Approval.RequestedAt, err = time.Parse(time.RFC3339Nano, requestedAt)

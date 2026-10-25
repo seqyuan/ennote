@@ -39,6 +39,20 @@ type QuestionAnswer struct {
 	OtherText  string   `json:"otherText,omitempty"`
 }
 
+// AskUserArguments is the raw tool payload. The dispatcher parses it before
+// any tool executes; the tool itself is a marker.
+type AskUserArguments struct {
+	Questions []QuestionSpec `json:"questions"`
+}
+
+func ParseAskUserQuestions(raw []byte) ([]QuestionSpec, error) {
+	var args AskUserArguments
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return nil, fmt.Errorf("decode ask_user arguments: %w", err)
+	}
+	return NormalizeQuestions(args.Questions)
+}
+
 var questionIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,32}$`)
 
 const (

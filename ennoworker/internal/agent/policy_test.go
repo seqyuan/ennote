@@ -27,7 +27,8 @@ func (m mapRiskClassifier) RiskClass(name string) domain.RiskClass {
 var testRiskMap = mapRiskClassifier{
 	"read": domain.RiskReadOnly, "ls": domain.RiskReadOnly, "grep": domain.RiskReadOnly,
 	"find": domain.RiskReadOnly, "search_compacted_history": domain.RiskReadOnly,
-	"todo": domain.RiskReadOnly, "git_readonly": domain.RiskReadOnly,
+	"ask_user": domain.RiskReadOnly,
+	"todo":     domain.RiskReadOnly, "git_readonly": domain.RiskReadOnly,
 	"write": domain.RiskLocalWrite, "edit": domain.RiskLocalWrite, "publish_artifact": domain.RiskLocalWrite,
 	"bash": domain.RiskShell, "exec": domain.RiskShell,
 	"web_fetch":      domain.RiskExternal,

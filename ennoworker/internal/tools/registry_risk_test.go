@@ -83,7 +83,8 @@ func TestDefaultRegistryRiskValues(t *testing.T) {
 	require.NoError(t, err)
 	expect := map[string]domain.RiskClass{
 		"read": domain.RiskReadOnly, "ls": domain.RiskReadOnly, "grep": domain.RiskReadOnly,
-		"find": domain.RiskReadOnly, "git_readonly": domain.RiskReadOnly,
+		"ask_user": domain.RiskReadOnly,
+		"find":     domain.RiskReadOnly, "git_readonly": domain.RiskReadOnly,
 		"write": domain.RiskLocalWrite, "edit": domain.RiskLocalWrite,
 		"bash": domain.RiskShell, "exec": domain.RiskShell,
 		"web_fetch": domain.RiskExternal,

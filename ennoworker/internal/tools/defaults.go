@@ -20,6 +20,7 @@ func NewDefaultRegistry(manager *workspace.Manager, artifactSinks ...*ArtifactSi
 		&BashTool{Workspace: manager, Artifacts: artifactSink},
 		&WebFetchTool{},
 		&GitReadonlyTool{Workspace: manager, WorkingDir: manager.Jail.Root()},
+		&AskUserTool{},
 	}
 	if artifactSink != nil {
 		registered = append(registered, &PublishArtifactTool{Jail: manager.Jail, Sink: artifactSink})

@@ -186,6 +186,9 @@ func scanAttentionItem(row interface{ Scan(...any) error }) (domain.AttentionIte
 func decodeAttentionAction(sourceKind domain.AttentionSourceKind, kind domain.AttentionKind, sourceID string, generation int) *domain.AttentionAction {
 	switch sourceKind {
 	case domain.AttentionSourceToolApproval:
+		if kind == domain.AttentionNeedsInput {
+			return &domain.AttentionAction{Kind: "answer_question", ApprovalID: sourceID}
+		}
 		return &domain.AttentionAction{Kind: "tool_approval", ApprovalID: sourceID}
 	case domain.AttentionSourceDelegationApproval:
 		return &domain.AttentionAction{Kind: "delegation_approval", ApprovalID: sourceID}
@@ -212,19 +215,21 @@ func (r *AttentionRepo) RebuildAttention(ctx context.Context, limit int) (int, e
 	defer tx.Rollback()
 
 	// Pending tool approvals.
-	toolRows, err := tx.QueryContext(ctx, `SELECT a.id,a.session_id,s.project_id,a.items_json
+	toolRows, err := tx.QueryContext(ctx, `SELECT a.id,a.session_id,s.project_id,a.kind,a.items_json,a.questions_json
 		FROM tool_approval_requests a JOIN sessions s ON s.id=a.session_id
 		WHERE a.status='pending' LIMIT ?`, limit)
 	if err != nil {
 		return 0, err
 	}
 	type pendingToolApproval struct {
-		id, sessionID, projectID, itemsJSON string
+		id, sessionID, projectID, kind, itemsJSON string
+		questionsJSON                             sql.NullString
 	}
 	var toolApprovals []pendingToolApproval
 	for toolRows.Next() {
 		var entry pendingToolApproval
-		if err := toolRows.Scan(&entry.id, &entry.sessionID, &entry.projectID, &entry.itemsJSON); err != nil {
+		if err := toolRows.Scan(&entry.id, &entry.sessionID, &entry.projectID, &entry.kind,
+			&entry.itemsJSON, &entry.questionsJSON); err != nil {
 			toolRows.Close()
 			return 0, err
 		}
@@ -235,6 +240,25 @@ func (r *AttentionRepo) RebuildAttention(ctx context.Context, limit int) (int, e
 	}
 	added := 0
 	for _, approval := range toolApprovals {
+		if approval.kind == string(domain.ApprovalKindQuestion) {
+			questionCount := 0
+			if approval.questionsJSON.Valid && approval.questionsJSON.String != "" {
+				var questions []domain.QuestionSpec
+				if err := json.Unmarshal([]byte(approval.questionsJSON.String), &questions); err != nil {
+					return 0, err
+				}
+				questionCount = len(questions)
+			}
+			if err := ProjectAttentionTx(ctx, tx, approval.projectID, approval.sessionID,
+				domain.AttentionSourceToolApproval, approval.id, 0,
+				domain.AttentionNeedsInput, true,
+				map[string]any{"kind": "question", "approvalId": approval.id, "questionCount": questionCount},
+				&domain.AttentionAction{Kind: "answer_question", ApprovalID: approval.id}); err != nil {
+				return 0, err
+			}
+			added++
+			continue
+		}
 		var items []domain.ApprovalItem
 		if err := json.Unmarshal([]byte(approval.itemsJSON), &items); err != nil {
 			return 0, err

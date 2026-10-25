@@ -78,6 +78,9 @@ type Loop struct {
 	// ApprovalDigestVersion pins the batch digest algorithm for resume. Zero on
 	// fresh runs (falls back to V1/V2 by wiring); set explicitly on resume.
 	ApprovalDigestVersion int
+	// AllowQuestions enables the ask_user pause path. Root Runs set it; child
+	// Runs leave it false so a delegated task cannot block on a parent user.
+	AllowQuestions bool
 	// BudgetController is wired only for delegated children. It performs durable
 	// admission before Provider/tool execution and reconciles Provider usage.
 	BudgetController RunBudgetController
@@ -530,6 +533,19 @@ func (l *Loop) Run(ctx context.Context, input RunInput) (RunResult, error) {
 					// live rules.
 					approvalRequired.State.StandingAuthorizations = approvalRequired.StandingAuthorizations
 					approvalRequired.State.ApprovalDigestVersion = approvalRequired.ApprovalDigestVersion
+				}
+				var questionRequired *QuestionRequiredError
+				if errors.As(err, &questionRequired) {
+					questionRequired.State = ResumeState{Version: ResumeStateVersion, Iteration: iteration,
+						Messages: cloneMessages(messages), Generated: cloneMessages(generated), Completion: completion,
+						Current: current, Routing: routing, RequestGeneration: requestGeneration,
+						TruncationRecoveries: truncationRecoveries, StuckSignatures: guard.Snapshot(),
+						InitialSteering: cloneMessages(initialSteering), SystemPrompt: input.SystemPrompt,
+						MidRunCompaction: midRunState, Todos: l.todoSnapshot(),
+						SkillCatalogState: input.SkillCatalogState, SkillCatalogDigest: input.SkillCatalogDigest}
+					// Questions reuse the approval checkpoint decoder; V2 is a
+					// gate marker here, not the approval batch digest algorithm.
+					questionRequired.State.ApprovalDigestVersion = ApprovalDigestV2
 				}
 				return runResult(messages, generated, completion, iteration), err
 			}

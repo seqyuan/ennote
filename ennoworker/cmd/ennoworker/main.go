@@ -652,6 +652,7 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		WorkspaceID: wSpace.ID, SessionID: session.ID, Events: e.writer, Hub: e.hub, Recorder: e.calls,
 		QueuedInputs: &queueAdapter{repo: &store.QueueRepo{DB: e.db}},
 		SteeringMode: domain.QueueOneAtATime, FollowUpMode: domain.QueueOneAtATime,
+		AllowQuestions:     true,
 		MaxIterations:      resolved.Effective.MaxIterations,
 		ContextTokens:      resolved.Effective.ContextTokens,
 		MaxOutput:          resolved.Effective.MaxOutputTokens,
@@ -765,6 +766,19 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 			if _, suspendErr := e.approvals.Suspend(context.WithoutCancel(ctx), run.ID,
 				agent.ResumeStateVersion, approvalRequired.State.Iteration, approvalRequired.BatchDigest,
 				encoded, approvalRequired.Items, approvalRequired.StandingCandidates); suspendErr != nil {
+				return domain.RunOutput{}, domain.NewCodedError(domain.ErrorEventPersistence, suspendErr)
+			}
+			return domain.RunOutput{Suspended: true}, nil
+		}
+		var questionRequired *agent.QuestionRequiredError
+		if errors.As(err, &questionRequired) && e.approvals != nil {
+			encoded, encodeErr := json.Marshal(questionRequired.State)
+			if encodeErr != nil {
+				return domain.RunOutput{}, domain.NewCodedError(domain.ErrorApprovalCheckpointInvalid, encodeErr)
+			}
+			if _, suspendErr := e.approvals.SuspendQuestion(context.WithoutCancel(ctx), run.ID,
+				agent.ResumeStateVersion, questionRequired.State.Iteration, questionRequired.Digest,
+				encoded, questionRequired.Questions); suspendErr != nil {
 				return domain.RunOutput{}, domain.NewCodedError(domain.ErrorEventPersistence, suspendErr)
 			}
 			return domain.RunOutput{Suspended: true}, nil

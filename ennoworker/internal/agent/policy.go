@@ -59,7 +59,9 @@ func (p *BuiltinToolPolicy) BeforeToolBatch(_ context.Context, _ ToolBatchContex
 		if p.config.Mode == "allow_existing_behavior" {
 			continue
 		}
-		if !containsString(p.config.AllowedTools, call.Name) && len(p.config.AllowedTools) > 0 {
+		// ask_user is a read-only platform tool: it never mutates state and must
+		// stay available in Discuss, whose explicit allowlist predates it.
+		if call.Name != "ask_user" && !containsString(p.config.AllowedTools, call.Name) && len(p.config.AllowedTools) > 0 {
 			decisions[index] = denyDecision("tool_not_allowed", "tool is not allowed by policy")
 			decisions[index].RiskClass = risk
 			continue
@@ -234,6 +236,9 @@ func AllowsTool(configJSON json.RawMessage, toolName string) bool {
 	var config domain.ToolPolicyConfig
 	if err := json.Unmarshal(configJSON, &config); err != nil {
 		return true // fail open for unparseable config
+	}
+	if toolName == "ask_user" {
+		return true
 	}
 	if len(config.AllowedTools) == 0 {
 		return true

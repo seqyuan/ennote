@@ -69,6 +69,16 @@ type ApprovalRequiredError struct {
 
 func (e *ApprovalRequiredError) Error() string { return "tool batch requires approval" }
 
+// QuestionRequiredError pauses a Run on an approval checkpoint with a
+// question payload instead of tool approvals.
+type QuestionRequiredError struct {
+	Digest    string                `json:"digest"`
+	Questions []domain.QuestionSpec `json:"questions"`
+	State     ResumeState           `json:"state"`
+}
+
+func (e *QuestionRequiredError) Error() string { return "tool batch requires user input" }
+
 type approvalPreviewer interface {
 	ApprovalPreview(domain.ToolCall) string
 }

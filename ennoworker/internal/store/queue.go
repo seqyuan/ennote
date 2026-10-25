@@ -15,6 +15,7 @@ import (
 
 var ErrRunNotActive = errors.New("agent run is not active")
 var ErrQueuedInputNotFound = errors.New("queued input not found")
+var ErrRunAwaitingQuestion = errors.New("agent run is waiting for a question answer")
 
 type QueueRepo struct{ DB *sql.DB }
 
@@ -53,6 +54,14 @@ func (r *QueueRepo) Enqueue(ctx context.Context, runID, clientRequestID string, 
 	}
 	if status != domain.RunQueued && status != domain.RunRunning && status != domain.RunWaitingForApproval {
 		return nil, ErrRunNotActive
+	}
+	if status == domain.RunWaitingForApproval {
+		var kind string
+		if err := tx.QueryRowContext(ctx,
+			`SELECT kind FROM tool_approval_requests WHERE run_id=? AND status='pending' LIMIT 1`, runID,
+		).Scan(&kind); err == nil && kind == string(domain.ApprovalKindQuestion) {
+			return nil, ErrRunAwaitingQuestion
+		}
 	}
 
 	var seq int64

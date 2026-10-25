@@ -55,11 +55,29 @@ func (l *Loop) executeToolBatchWithPolicy(ctx context.Context, runID string, ite
 		return results, false, domain.NewCodedError(domain.ErrorToolPolicyTerminated, errors.New("tool batch terminated by policy"))
 	}
 
+	var precomputed map[int]domain.ToolResult
+	questionResumed := false
+	if len(resolutions) > 0 && resolutions[0].Kind == domain.ApprovalKindQuestion {
+		index, result, resumeErr := l.prepareQuestionResume(runID, plans, resolutions[0])
+		if resumeErr != nil {
+			return nil, false, resumeErr
+		}
+		precomputed = map[int]domain.ToolResult{index: result}
+		plans[index].allowed = true
+		plans[index].requiresApproval = false
+		plans[index].decision = ToolDecision{Action: ToolAllow, Code: "question_answered", RiskClass: domain.RiskReadOnly}
+		questionResumed = true
+	} else if len(resolutions) == 0 {
+		if questionErr := l.maybePauseForQuestion(runID, plans); questionErr != nil {
+			return nil, false, questionErr
+		}
+	}
+
 	requiresApproval := false
 	for _, plan := range plans {
 		requiresApproval = requiresApproval || plan.requiresApproval
 	}
-	if requiresApproval {
+	if requiresApproval && !questionResumed {
 		// Digest version: resume states pin the exact version; fresh runs fall
 		// back to V1 only when no standing infrastructure is wired.
 		digestVersion := l.ApprovalDigestVersion
@@ -158,6 +176,15 @@ func (l *Loop) executeToolBatchWithPolicy(ctx context.Context, runID string, ite
 			index++
 			continue
 		}
+		if result, ok := precomputed[index]; ok {
+			if err := l.completePrecomputedToolCall(ctx, runID, iteration, index, plans[index], result); err != nil {
+				results[index] = result
+				return results, stopAfterBatch, err
+			}
+			results[index] = result
+			index++
+			continue
+		}
 		if mode == "sequential" || l.executionClass(plans[index].effective.Name) != domain.ExecutionReadOnly {
 			result, stop, err := l.executeOneToolPlan(ctx, runID, iteration, index, plans[index])
 			results[index] = result
@@ -181,6 +208,112 @@ func (l *Loop) executeToolBatchWithPolicy(ctx context.Context, runID string, ite
 		index = end
 	}
 	return results, stopAfterBatch, nil
+}
+
+// maybePauseForQuestion turns a valid ask_user call into a checkpoint question.
+// Invalid or disallowed calls are denied in place so the rest of the batch can
+// still execute and the model gets a tool-visible error instead of a failed Run.
+func (l *Loop) maybePauseForQuestion(runID string, plans []plannedToolCall) error {
+	indexes := askUserIndexes(plans)
+	if len(indexes) == 0 {
+		return nil
+	}
+	if len(indexes) > 1 {
+		for _, index := range indexes {
+			denyQuestionPlan(&plans[index], "question_batch_invalid", "at most one ask_user call is allowed per batch")
+		}
+		return nil
+	}
+	index := indexes[0]
+	if !l.AllowQuestions {
+		denyQuestionPlan(&plans[index], "questions_not_allowed", "ask_user is not available for delegated runs")
+		return nil
+	}
+	for planIndex, plan := range plans {
+		if planIndex == index {
+			continue
+		}
+		if plan.decision.RiskClass != domain.RiskReadOnly || plan.requiresApproval {
+			denyQuestionPlan(&plans[index], "question_batch_invalid",
+				"ask_user requires a read-only batch; call it alone or with read-only tools")
+			return nil
+		}
+	}
+	questions, err := domain.ParseAskUserQuestions(plans[index].effective.Arguments)
+	if err != nil {
+		denyQuestionPlan(&plans[index], "question_invalid", err.Error())
+		return nil
+	}
+	digest, err := domain.QuestionDigest(runID, plans[index].original.ID, questions)
+	if err != nil {
+		denyQuestionPlan(&plans[index], "question_invalid", err.Error())
+		return nil
+	}
+	return &QuestionRequiredError{Digest: digest, Questions: questions}
+}
+
+func (l *Loop) prepareQuestionResume(runID string, plans []plannedToolCall, resolution ApprovalResolution) (int, domain.ToolResult, error) {
+	indexes := askUserIndexes(plans)
+	if len(indexes) != 1 {
+		return 0, domain.ToolResult{}, domain.NewCodedError(domain.ErrorApprovalCheckpointInvalid,
+			fmt.Errorf("question checkpoint requires exactly one ask_user call"))
+	}
+	index := indexes[0]
+	questions, err := domain.ParseAskUserQuestions(plans[index].effective.Arguments)
+	if err != nil {
+		return 0, domain.ToolResult{}, domain.NewCodedError(domain.ErrorApprovalCheckpointInvalid, err)
+	}
+	digest, err := domain.QuestionDigest(runID, plans[index].original.ID, questions)
+	if err != nil {
+		return 0, domain.ToolResult{}, domain.NewCodedError(domain.ErrorApprovalCheckpointInvalid, err)
+	}
+	if digest != resolution.BatchDigest {
+		return 0, domain.ToolResult{}, domain.NewCodedError(domain.ErrorApprovalCheckpointInvalid,
+			fmt.Errorf("question digest mismatch"))
+	}
+	answers, err := domain.CanonicalAnswers(questions, resolution.Answers)
+	if err != nil {
+		return 0, domain.ToolResult{}, domain.NewCodedError(domain.ErrorApprovalCheckpointInvalid, err)
+	}
+	payload, err := json.Marshal(map[string]any{"answers": answers})
+	if err != nil {
+		return 0, domain.ToolResult{}, domain.NewCodedError(domain.ErrorApprovalCheckpointInvalid, err)
+	}
+	return index, domain.ToolResult{
+		ToolCallID: plans[index].original.ID,
+		ToolName:   plans[index].original.Name,
+		Content:    string(payload),
+	}, nil
+}
+
+func askUserIndexes(plans []plannedToolCall) []int {
+	var indexes []int
+	for index, plan := range plans {
+		if plan.effective.Name == "ask_user" {
+			indexes = append(indexes, index)
+		}
+	}
+	return indexes
+}
+
+func denyQuestionPlan(plan *plannedToolCall, code, reason string) {
+	plan.allowed = false
+	plan.requiresApproval = false
+	plan.decision = ToolDecision{Action: ToolDeny, Code: code, Reason: reason, RiskClass: plan.decision.RiskClass}
+}
+
+func (l *Loop) completePrecomputedToolCall(ctx context.Context, runID string, iteration, index int,
+	plan plannedToolCall, result domain.ToolResult) error {
+	startID := uuid.NewString()
+	if err := l.recordToolStarted(ctx, domain.ToolCallStart{
+		ID: startID, RunID: runID, Iteration: iteration, CallIndex: index, Call: plan.original,
+	}); err != nil {
+		return err
+	}
+	return l.recordToolCompleted(ctx, domain.ToolCallFinish{
+		ID: startID, RunID: runID, Iteration: iteration, CallIndex: index,
+		Call: plan.original, Result: result, Status: "completed", AttemptCount: 1,
+	})
 }
 
 func (l *Loop) preflightToolBatch(ctx context.Context, runID string, iteration int, calls []domain.ToolCall) ([]plannedToolCall, bool, error) {

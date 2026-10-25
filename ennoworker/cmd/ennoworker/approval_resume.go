@@ -78,6 +78,8 @@ func (e *agentExecutor) loadFrozenResume(ctx context.Context, runID string) (*fr
 		Resolution: &agent.ApprovalResolution{
 			Decision:    record.Decision,
 			BatchDigest: record.Approval.BatchDigest,
+			Kind:        record.Approval.Kind,
+			Answers:     record.Approval.Answers,
 		},
 	}, nil
 }
