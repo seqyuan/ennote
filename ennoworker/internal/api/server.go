@@ -219,6 +219,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/runs/{runID}/inputs", s.queueInput)
 	mux.HandleFunc("DELETE /v1/runs/{runID}/inputs/{inputID}", s.cancelQueuedInput)
 	mux.HandleFunc("POST /v1/approval-requests/{approvalID}/decision", s.decideApproval)
+	mux.HandleFunc("POST /v1/approval-requests/{approvalID}/answer", s.answerApprovalQuestion)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/standing-approvals", s.listStandingApprovals)
 	mux.HandleFunc("POST /v1/sessions/{sessionID}/standing-approvals/{ruleID}/revoke", s.revokeStandingApproval)
 	mux.HandleFunc("GET /v1/runs/{runID}/events", s.streamEvents)
@@ -1442,7 +1443,7 @@ func (s *Server) writeStoreError(w http.ResponseWriter, r *http.Request, err err
 		writeError(w, r, http.StatusBadRequest, string(domain.ErrorInvocationTargetInvalid), err.Error(), false)
 	case domain.ErrorCodeOf(err) == domain.ErrorCommitFormatNotEnabled:
 		writeError(w, r, http.StatusConflict, string(domain.ErrorCommitFormatNotEnabled), err.Error(), false)
-	case errors.Is(err, store.ErrRunNotActive), errors.Is(err, store.ErrInvalidRunState):
+	case errors.Is(err, store.ErrRunNotActive), errors.Is(err, store.ErrRunAwaitingQuestion), errors.Is(err, store.ErrInvalidRunState):
 		writeError(w, r, http.StatusConflict, "run_not_active", err.Error(), false)
 	case errors.Is(err, store.ErrDelegationGroupNotFound):
 		writeError(w, r, http.StatusNotFound, "delegation_group_not_found", err.Error(), false)

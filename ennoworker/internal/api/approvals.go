@@ -106,6 +106,55 @@ func (s *Server) decideApproval(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, approval)
 }
 
+func (s *Server) answerApprovalQuestion(w http.ResponseWriter, r *http.Request) {
+	if s.Approvals == nil {
+		writeError(w, r, http.StatusServiceUnavailable, "question_unavailable", "Structured questions are unavailable", true)
+		return
+	}
+	var input struct {
+		Answers         []domain.QuestionAnswer `json:"answers"`
+		ClientRequestID string                  `json:"clientRequestId"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if input.ClientRequestID == "" {
+		input.ClientRequestID = r.Header.Get("Idempotency-Key")
+	}
+	if input.ClientRequestID == "" {
+		input.ClientRequestID = newID()
+	}
+	approval, err := s.Approvals.Answer(r.Context(), r.PathValue("approvalID"), input.Answers, input.ClientRequestID)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrApprovalNotFound):
+			writeError(w, r, http.StatusNotFound, "approval_not_found", "approval request not found", false)
+		case errors.Is(err, store.ErrQuestionInvalidAnswer):
+			writeError(w, r, http.StatusBadRequest, "invalid_answer", err.Error(), false)
+		case errors.Is(err, store.ErrApprovalConflict), errors.Is(err, store.ErrApprovalStale),
+			errors.Is(err, store.ErrInvalidRunState):
+			writeError(w, r, http.StatusConflict, "question_conflict",
+				"question is no longer pending for this Run", false)
+		default:
+			writeError(w, r, http.StatusBadRequest, "invalid_answer", err.Error(), false)
+		}
+		return
+	}
+	run, err := s.Runs.Get(r.Context(), approval.RunID)
+	if err != nil {
+		s.writeStoreError(w, r, err)
+		return
+	}
+	if run.Status == domain.RunQueued && s.Control != nil {
+		if err := s.Control.Enqueue(context.Background(), run.ID); err != nil {
+			writeError(w, r, http.StatusServiceUnavailable, "run_enqueue_failed",
+				"answer was stored but the Run could not be scheduled", true)
+			return
+		}
+	}
+	writeData(w, http.StatusOK, approval)
+}
+
 func (s *Server) listStandingApprovals(w http.ResponseWriter, r *http.Request) {
 	if s.StandingApprovals == nil {
 		writeError(w, r, http.StatusServiceUnavailable, "standing_approval_unavailable", "Standing approvals are unavailable", true)

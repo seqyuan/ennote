@@ -22,6 +22,7 @@ func TestOwnerFromPathCoversSessionResources(t *testing.T) {
 		"/v1/runs/run-id/events":                          {kind: "run", id: "run-id"},
 		"/v1/delegations/group-id/retry":                  {kind: "delegation_group", id: "group-id"},
 		"/v1/approval-requests/approval-id/decision":      {kind: "approval", id: "approval-id"},
+		"/v1/approval-requests/approval-id/answer":        {kind: "approval", id: "approval-id"},
 		"/v1/projects/project-id/agent-flows/runs/run-id": {kind: "flow_run", id: "run-id"},
 	}
 	for path, expected := range tests {
