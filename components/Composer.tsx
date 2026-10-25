@@ -15,6 +15,7 @@ import type { SessionContextUsage, SessionStats } from "@/hooks/chat-controller-
 import { artifactPreviewURL } from "@/lib/artifacts";
 import type { PermissionMode, ThinkingEffort } from "@/lib/permission-mode";
 import { PromptCommandMenu } from "./PromptCommandMenu";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { QueueDock, type QueuedMessage } from "./QueueDock";
 
 export interface TextAttachment {
@@ -130,18 +131,15 @@ export function Composer({
   const configRef = useRef<HTMLDivElement>(null);
   const t = useT();
 
+  useOverlayLayer(configOpen, () => setConfigOpen(false));
+
   useEffect(() => {
     if (!configOpen) return;
     const close = (event: PointerEvent) => {
       if (!configRef.current?.contains(event.target as Node)) setConfigOpen(false);
     };
-    const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setConfigOpen(false); };
     document.addEventListener("pointerdown", close);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("pointerdown", close);
-      document.removeEventListener("keydown", onKey);
-    };
+    return () => document.removeEventListener("pointerdown", close);
   }, [configOpen]);
 
   useEffect(() => {

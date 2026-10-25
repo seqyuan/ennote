@@ -16,6 +16,7 @@
 import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type FocusEvent } from "react";
 import { useT } from "@/components/LocaleProvider";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import type { ModelProfile, ProviderProfile } from "@/components/settings/types";
 import {
   effortDisplayName,
@@ -88,6 +89,11 @@ export function ModelSelect({ models, providers = [], selectedModelId, setSelect
     if (restoreFocus) queueMicrotask(() => { triggerRef.current?.focus(); });
   };
 
+  useOverlayLayer(open, () => {
+    if (pane !== "root") setPane("root");
+    else close();
+  });
+
   useEffect(() => {
     if (!open) return;
     const closeOutside = (event: MouseEvent): void => {
@@ -105,17 +111,11 @@ export function ModelSelect({ models, providers = [], selectedModelId, setSelect
     items[next]?.focus();
   };
 
-  // Window-level keys: pane switches unmount the focused item, so focus can
-  // fall to <body>; Escape/arrows must still reach the menu.
+  // Window-level arrows: pane switches unmount the focused item, so focus can
+  // fall to <body>; Escape is owned by the shared overlay stack.
   useEffect(() => {
     if (!open) return;
     const onKey = (event: globalThis.KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        if (pane !== "root") setPane("root");
-        else close(true);
-        return;
-      }
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
         moveFocus(event.key === "ArrowDown" ? 1 : -1);
@@ -123,7 +123,7 @@ export function ModelSelect({ models, providers = [], selectedModelId, setSelect
     };
     window.addEventListener("keydown", onKey);
     return () => { window.removeEventListener("keydown", onKey); };
-  }, [open, pane]);
+  }, [open]);
 
   const onBlur = (event: FocusEvent<HTMLDivElement>): void => {
     if (!(event.relatedTarget instanceof Node)) return;

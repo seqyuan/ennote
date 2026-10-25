@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useT } from "@/components/LocaleProvider";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import type { PermissionMode } from "@/lib/permission-mode";
 
 const MODES: PermissionMode[] = ["discuss", "ask", "auto"];
@@ -57,18 +58,14 @@ export function PermissionChip({
 
   const menuOpen = open && !locked;
 
+  useOverlayLayer(menuOpen, () => setOpen(false));
+
   useEffect(() => {
     if (!menuOpen) return;
     const close = (event: MouseEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setOpen(false);
-        triggerRef.current?.focus();
-        return;
-      }
       if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
       event.preventDefault();
       const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? []);

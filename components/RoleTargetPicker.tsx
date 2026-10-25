@@ -2,6 +2,7 @@
 
 import { Bot, Check, ChevronDown, Search, UserRound } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import type { RoleSummary } from "@/components/settings/types";
 
 export function RoleTargetPicker({ roles, selectedRoleId, disabled, onSelect }: {
@@ -22,23 +23,15 @@ export function RoleTargetPicker({ roles, selectedRoleId, disabled, onSelect }: 
     return roles.filter((role) => [role.name, role.handle, role.positioning].some((value) => value.toLowerCase().includes(needle)));
   }, [query, roles]);
 
+  useOverlayLayer(open, () => setOpen(false));
+
   useEffect(() => {
     if (!open) return;
     const close = (event: PointerEvent) => {
       if (!root.current?.contains(event.target as Node)) setOpen(false);
     };
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setOpen(false);
-      triggerRef.current?.focus();
-    };
     document.addEventListener("pointerdown", close);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", close);
-      document.removeEventListener("keydown", onKeyDown);
-    };
+    return () => document.removeEventListener("pointerdown", close);
   }, [open]);
 
   function choose(roleId: string | null) {

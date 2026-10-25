@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { AttentionItemRow } from "@/components/AttentionItemRow";
 import { useT } from "@/components/LocaleProvider";
 import { useAttention } from "@/hooks/useAttention";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
 
@@ -22,20 +23,15 @@ export function AttentionPanel({ projectId, onNavigate }: {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  useOverlayLayer(open, () => setOpen(false));
+
   useEffect(() => {
     if (!open) return;
     const close = (event: PointerEvent) => {
       if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
     };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
     document.addEventListener("pointerdown", close);
-    document.addEventListener("keydown", escape);
-    return () => {
-      document.removeEventListener("pointerdown", close);
-      document.removeEventListener("keydown", escape);
-    };
+    return () => document.removeEventListener("pointerdown", close);
   }, [open]);
 
   const dismiss = async (item: AttentionItem) => {

@@ -13,6 +13,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useT } from "@/components/LocaleProvider";
 import type { SessionContextUsage } from "@/hooks/chat-controller-types";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { formatTokens } from "@/lib/stats-format";
 
 const RADIUS = 5.5;
@@ -41,20 +42,17 @@ export function ContextMeter({ contextUsage }: { contextUsage: SessionContextUsa
     if (!available && open) setOpen(false);
   }, [available, open]);
 
-  // Outside click / Escape close (Menu's pattern).
+  useOverlayLayer(open && available, () => setOpen(false));
+
+  // Outside click close (Menu's pattern).
   useEffect(() => {
     if (!open || !available) return;
     const onPointerDown = (event: PointerEvent) => {
       if (event.target instanceof Node && rootRef.current?.contains(event.target) === true) return;
       setOpen(false);
     };
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
     document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
+    return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [available, open]);
 
   if (contextUsage === null) return null;

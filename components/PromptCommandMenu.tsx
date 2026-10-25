@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 
 interface PromptTemplateItem {
   name: string;
@@ -145,14 +146,7 @@ export function PromptCommandMenu({
     return () => document.removeEventListener("mousedown", handler);
   }, [onClose]);
 
-  // Close on Escape.
-  useEffect(() => {
-    const handler = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") { onClose(); e.preventDefault(); }
-    };
-    document.addEventListener("keydown", handler, true);
-    return () => document.removeEventListener("keydown", handler, true);
-  }, [onClose]);
+  useOverlayLayer(entries.length > 0 && mode !== null, onClose);
 
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLUListElement>) => {
     switch (e.key) {
