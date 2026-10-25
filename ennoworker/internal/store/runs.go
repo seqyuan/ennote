@@ -930,6 +930,35 @@ func (r *RunRepo) buildRunTelemetryTx(ctx context.Context, tx *sql.Tx, runID, ti
 	return telemetry, nil
 }
 
+// resolveRunApprovalAttentionTx clears the attention rows for every pending
+// approval on a terminal Run. Questions share the approval source, so this
+// covers both kinds.
+func resolveRunApprovalAttentionTx(ctx context.Context, tx *sql.Tx, runID string) error {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id FROM tool_approval_requests WHERE run_id=? AND status='pending'`, runID)
+	if err != nil {
+		return fmt.Errorf("list pending approvals: %w", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := ResolveAttentionForSourceTx(ctx, tx, domain.AttentionSourceToolApproval, id, 0); err != nil {
+			return fmt.Errorf("resolve approval attention: %w", err)
+		}
+	}
+	return nil
+}
+
 func (r *RunRepo) transition(ctx context.Context, runID string, target domain.RunStatus, eventType string, errorCode, errorMessage *string) error {
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -1012,6 +1041,9 @@ func (r *RunRepo) transition(ctx context.Context, runID string, target domain.Ru
 			 WHERE run_id = ? AND status = 'queued'`, timestamp, runID,
 		); err != nil {
 			return fmt.Errorf("cancel pending run inputs: %w", err)
+		}
+		if err := resolveRunApprovalAttentionTx(ctx, tx, runID); err != nil {
+			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE tool_approval_requests SET status='cancelled',resolved_at=?
 			WHERE run_id=? AND status='pending'`, timestamp, runID); err != nil {
