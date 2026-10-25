@@ -66,6 +66,57 @@
   box-shadow: var(--cmp-shadow), 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
+/* Drag the top edge to set a manual input height. Sits between the form and
+   the editor so it never overlaps the run-configuration row. */
+.composer-resizer {
+  flex: 0 0 8px;
+  width: 100%;
+  position: relative;
+  cursor: row-resize;
+  touch-action: none;
+  border-radius: var(--radius-xs);
+}
+.composer-resizer::after {
+  content: "";
+  position: absolute;
+  left: 42%;
+  right: 42%;
+  top: 3px;
+  height: 2px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+.composer-resizer:hover::after,
+.composer-resizer:focus-visible::after,
+.composer-resizer[data-resizing="true"]::after {
+  background: var(--accent);
+}
+.composer-resizer:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* Static shortcut hint below the input; status messages keep their own row. */
+.composer-hint-row {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  max-width: min(952px, 100%);
+  margin: 4px auto 0;
+  padding: 0 16px;
+  overflow: hidden;
+  color: var(--content-3);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 640px) {
+  .composer-hint-row { display: none; }
+}
+
 /* One visible run configuration row: target, permission, model, context. */
 .composer-context-bar {
   display: flex;

@@ -3,7 +3,7 @@
 import {
   ArrowUp, File, FileSpreadsheet, FileText, ImagePlus, ListPlus, Minimize2, Paperclip, Plus, Presentation, Square, X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useT } from "@/components/LocaleProvider";
 import { RoleTargetPicker } from "@/components/RoleTargetPicker";
 import { PermissionChip } from "@/components/PermissionChip";
@@ -17,6 +17,14 @@ import type { PermissionMode, ThinkingEffort } from "@/lib/permission-mode";
 import { PromptCommandMenu } from "./PromptCommandMenu";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { QueueDock, type QueuedMessage } from "./QueueDock";
+
+const COMPOSER_MIN_HEIGHT = 120;
+const COMPOSER_MAX_HEIGHT = 336;
+const COMPOSER_HEIGHT_KEY = "ennote-composer-height";
+
+function clampComposerHeight(value: number): number {
+  return Math.min(COMPOSER_MAX_HEIGHT, Math.max(COMPOSER_MIN_HEIGHT, value));
+}
 
 export interface TextAttachment {
   id: string;
@@ -129,7 +137,69 @@ export function Composer({
   const dragCounter = useRef(0);
   const [configOpen, setConfigOpen] = useState(false);
   const configRef = useRef<HTMLDivElement>(null);
+  const [manualHeight, setManualHeight] = useState(() => {
+    if (typeof window === "undefined") return 0;
+    try {
+      const parsed = Number.parseInt(localStorage.getItem(COMPOSER_HEIGHT_KEY) ?? "", 10);
+      return Number.isFinite(parsed) ? clampComposerHeight(parsed) : 0;
+    } catch { return 0; }
+  });
+  const [resizing, setResizing] = useState(false);
+  const manualHeightRef = useRef(manualHeight);
+  const resizeStart = useRef<{ y: number; height: number } | null>(null);
   const t = useT();
+
+  const applyManualHeight = useCallback((value: number) => {
+    manualHeightRef.current = value;
+    setManualHeight(value);
+  }, []);
+
+  const persistManualHeight = useCallback((value: number) => {
+    try {
+      if (value > 0) localStorage.setItem(COMPOSER_HEIGHT_KEY, String(value));
+      else localStorage.removeItem(COMPOSER_HEIGHT_KEY);
+    } catch { /* storage unavailable */ }
+  }, []);
+
+  const resetComposerHeight = useCallback(() => {
+    applyManualHeight(0);
+    persistManualHeight(0);
+  }, [applyManualHeight, persistManualHeight]);
+
+  const beginResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || !event.isPrimary) return;
+    event.preventDefault();
+    const startHeight = manualHeightRef.current || textarea.current?.offsetHeight || COMPOSER_MIN_HEIGHT;
+    resizeStart.current = { y: event.clientY, height: startHeight };
+    setResizing(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+  }, []);
+
+  const moveResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const start = resizeStart.current;
+    if (!start) return;
+    event.preventDefault();
+    applyManualHeight(clampComposerHeight(start.height + start.y - event.clientY));
+  }, [applyManualHeight]);
+
+  const endResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!resizeStart.current) return;
+    resizeStart.current = null;
+    setResizing(false);
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    persistManualHeight(manualHeightRef.current);
+  }, [persistManualHeight]);
+
+  const resizeByKeyboard = useCallback((delta: number) => {
+    const current = manualHeightRef.current || textarea.current?.offsetHeight || COMPOSER_MIN_HEIGHT;
+    const next = clampComposerHeight(current + delta);
+    applyManualHeight(next);
+    persistManualHeight(next);
+  }, [applyManualHeight, persistManualHeight]);
 
   useOverlayLayer(configOpen, () => setConfigOpen(false));
 
@@ -146,8 +216,8 @@ export function Composer({
     const element = textarea.current;
     if (!element) return;
     element.style.height = "0px";
-    element.style.height = `${Math.min(element.scrollHeight, 336)}px`;
-  }, [input]);
+    element.style.height = `${Math.min(Math.max(element.scrollHeight, manualHeight), COMPOSER_MAX_HEIGHT)}px`;
+  }, [input, manualHeight]);
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -248,6 +318,25 @@ export function Composer({
       )}
 
       <form className="composer" onSubmit={onSubmit} ref={form}>
+        <div
+          className="composer-resizer"
+          data-resizing={resizing || undefined}
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label={t("composer.hint.resizeAria")}
+          title={t("composer.hint.resize")}
+          tabIndex={0}
+          onPointerDown={beginResize}
+          onPointerMove={moveResize}
+          onPointerUp={endResize}
+          onPointerCancel={endResize}
+          onDoubleClick={resetComposerHeight}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowUp") { event.preventDefault(); resizeByKeyboard(24); return; }
+            if (event.key === "ArrowDown") { event.preventDefault(); resizeByKeyboard(-24); return; }
+            if (event.key === "Enter" || event.key === " ") { event.preventDefault(); resetComposerHeight(); }
+          }}
+        />
         <div
           className={`composer-editor${inert ? " composer-no-session" : ""}`}
           ref={configRef}
@@ -377,6 +466,17 @@ export function Composer({
         </div>
       </form>
       <StatsLine stats={stats} />
+      {!inert && (
+        <div className="composer-hint-row" aria-hidden="true">
+          <span>{t("composer.hint.enter")}</span>
+          <span>·</span>
+          <span>{t("composer.hint.newline")}</span>
+          <span>·</span>
+          <span>{t("composer.hint.resize")}</span>
+          <span>·</span>
+          <span>{t("composer.dropFiles")}</span>
+        </div>
+      )}
       <div className="composer-status-line">
         {activeRun && <span className="composer-config-hint">{permissionMode} {t("composer.frozenForRun")}</span>}
         {!permissionReady && selectedSession && !selectedRoleId && <span className="composer-config-hint is-danger">{t("composer.policyUnavailable")}</span>}
