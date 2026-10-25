@@ -2,6 +2,7 @@
 
 import { useT } from "@/components/LocaleProvider";
 import type { useProjectSelector } from "@/hooks/useProjectSelector";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { ProjectMenu, type SidebarProject } from "./ProjectMenu";
 
 /**
@@ -26,6 +27,7 @@ export function HeroProjectChip(props: {
   const { projects, selectedProject, pinnedProjectIds, togglePinProject, onRequestProject, onSwitchProject, projectSelector } = props;
   const { open, close, rootRef } = projectSelector;
   const t = useT();
+  useOverlayLayer(open, close);
   const selectedName = selectedProject ? projects.find((p) => p.id === selectedProject)?.name ?? null : null;
 
   return (

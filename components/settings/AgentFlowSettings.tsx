@@ -9,6 +9,7 @@ import { GraphTabs } from "@/components/graphs/GraphTabs";
 import { TaskAccordion } from "@/components/graphs/TaskAccordion";
 import { modelOptions, type GraphDetail, type GraphSummary, type GraphTask } from "@/components/graphs/types";
 import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { apiFetch } from "@/lib/worker-api.client";
 
 export function AgentFlowSettings({ setError }: { setError: (value: string | null) => void }) {
@@ -21,6 +22,8 @@ export function AgentFlowSettings({ setError }: { setError: (value: string | nul
   const [busy, setBusy] = useState<"loading" | "saving" | "creating" | "publishing" | null>(null);
   const [latestVersion, setLatestVersion] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
+
+  useOverlayLayer(createOpen, () => setCreateOpen(false));
   const [newGraph, setNewGraph] = useState({ id: "", name: "" });
   const [addTaskOpen, setAddTaskOpen] = useState(false);
   const [newTask, setNewTask] = useState({ id: "", name: "" });

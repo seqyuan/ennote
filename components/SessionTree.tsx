@@ -2,6 +2,7 @@
 
 import { Archive, MoreHorizontal, Pencil, RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { isBlankSession } from "@/lib/session-blank";
 import type { Session } from "@/components/settings/types";
 import type { SessionLifecycleView } from "@/hooks/useProjectSessions";
@@ -116,6 +117,8 @@ function SessionRow({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+
+  useOverlayLayer(menuOpen, () => setMenuOpen(false));
   const menuRef = useRef<HTMLDivElement>(null);
   const t = useT();
 

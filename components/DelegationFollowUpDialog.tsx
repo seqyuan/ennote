@@ -2,6 +2,7 @@
 
 import { MessageSquareMore, Send, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
 
@@ -22,6 +23,8 @@ export function DelegationFollowUpDialog({ itemID, itemName, kind, sourceAttempt
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useOverlayLayer(true, onDone, { dismissOnEscape: !busy });
 
   useEffect(() => {
     inputRef.current?.focus();

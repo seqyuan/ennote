@@ -2,6 +2,7 @@
 
 import { ChevronRight, Folder, FolderOpen, MoreHorizontal, Pencil, Plus, Star, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { useT } from "@/components/LocaleProvider";
 import type { Session } from "@/components/settings/types";
 import { isBlankSession } from "@/lib/session-blank";
@@ -45,6 +46,8 @@ export function ProjectGroup({
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+
+  useOverlayLayer(menuOpen, () => setMenuOpen(false));
   const [deleteOpen, setDeleteOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const t = useT();

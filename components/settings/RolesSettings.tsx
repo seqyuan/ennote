@@ -3,6 +3,7 @@
 import { ArrowLeft, Bot, Check, FileText, Loader2, Plus, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { modelOptions } from "@/components/graphs/types";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import type { ModelProfile, ProviderProfile } from "@/components/settings/types";
 import { apiFetch } from "@/lib/worker-api.client";
 
@@ -77,6 +78,8 @@ export function RolesSettings({ models, providers, setError }: {
   const [newRole, setNewRole] = useState({ id: "", name: "" });
   const [conflict, setConflict] = useState(false);
   const [diskDetail, setDiskDetail] = useState<RoleDetail | null>(null);
+
+  useOverlayLayer(diskDetail !== null, () => setDiskDetail(null));
 
   const refresh = useCallback(async () => {
     const next = await apiFetch<RoleSummary[]>("/v1/global-roles");

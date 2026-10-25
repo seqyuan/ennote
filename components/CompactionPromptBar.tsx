@@ -3,6 +3,7 @@
 import { Minimize2, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { useT } from "@/components/LocaleProvider";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 
 // CompactionPromptBar is the inline confirmation for a manual context
 // checkpoint. It replaces the previous native prompt() and keeps the optional
@@ -16,6 +17,8 @@ export function CompactionPromptBar({ value, onChange, busy, onConfirm, onCancel
 }) {
   const t = useT();
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useOverlayLayer(true, onCancel, { dismissOnEscape: !busy });
 
   useEffect(() => {
     inputRef.current?.focus();

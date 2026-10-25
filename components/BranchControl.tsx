@@ -2,6 +2,7 @@
 
 import { Check, GitBranch } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import type { components } from "@/lib/worker-api.gen";
 
 type SessionBranch = components["schemas"]["SessionBranch"];
@@ -19,6 +20,8 @@ export function BranchControl({ branches, activeBranchId, loading, changing, dis
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const active = branches.find(branch => branch.id === activeBranchId);
+
+  useOverlayLayer(open, () => setOpen(false));
 
   useEffect(() => {
     if (!open) return;

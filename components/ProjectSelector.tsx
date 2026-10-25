@@ -3,6 +3,7 @@
 import { ChevronDown, Folder } from "lucide-react";
 import { useT } from "@/components/LocaleProvider";
 import type { useProjectSelector } from "@/hooks/useProjectSelector";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { ProjectMenu, type SidebarProject } from "./ProjectMenu";
 import styles from "./ProjectSelector.module.css";
 
@@ -19,6 +20,7 @@ export function ProjectSelector(props: {
   const { projects, selectedProject, pinnedProjectIds, togglePinProject, onSelect, control } = props;
   const { open: projectDropdownOpen, toggle, close, rootRef: controlRootRef } = control;
   const t = useT();
+  useOverlayLayer(projectDropdownOpen, close);
 
   return (
     <div ref={controlRootRef} className={`sidebar-project-selector ${styles.root}`}>
