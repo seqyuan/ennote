@@ -221,6 +221,7 @@
 }
 .queue-dock-actions { display: inline-flex; gap: 2px; }
 .queue-dock-action {
+  position: relative;
   display: grid;
   place-items: center;
   width: 24px;
@@ -232,6 +233,8 @@
   color: var(--cmp-text-tertiary);
   cursor: pointer;
 }
+/* 32px touch target without changing the 24px visual rhythm. */
+.queue-dock-action::before { content: ""; position: absolute; inset: -4px; }
 .queue-dock-action:hover { background: var(--cmp-hover); color: var(--cmp-text-primary); }
 .queue-dock-action.is-danger:hover { color: var(--danger); }
 
