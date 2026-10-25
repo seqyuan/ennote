@@ -3,6 +3,7 @@
 import { Database, FileText, Layers, Plug, Search, Settings2, Shield, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useT } from "@/components/LocaleProvider";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { ContextSettings } from "@/components/settings/ContextSettings";
 import { GeneralSettings } from "@/components/settings/GeneralSettings";
 import { McpSettings } from "@/components/settings/McpSettings";
@@ -105,15 +106,11 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
   const closeRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
+  useOverlayLayer(true, onClose);
+
   useEffect(() => {
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusDialog = window.requestAnimationFrame(() => closeRef.current?.focus());
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-        return;
-      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         searchRef.current?.focus();
@@ -138,9 +135,8 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
     return () => {
       window.cancelAnimationFrame(focusDialog);
       window.removeEventListener("keydown", onKeyDown);
-      previousFocus?.focus();
     };
-  }, [onClose]);
+  }, []);
 
   const tabs: TabItem[] = [
     { id: "general", label: "General", description: "Appearance and theme", icon: tabIcon("general") },
@@ -190,7 +186,7 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
                 aria-label={t("settings.search.aria")}
                 onChange={(event) => onSearchChange(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Escape" && query !== "") {
+                  if (event.key === "Escape" && query !== "" && !event.nativeEvent.isComposing) {
                     event.preventDefault();
                     event.stopPropagation();
                     setQuery("");

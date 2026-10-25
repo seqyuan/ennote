@@ -2,6 +2,7 @@
 
 import { Maximize2, Minimize2, X } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { FileViewer } from "./FileViewer";
 
 interface Props {
@@ -26,6 +27,8 @@ export function FilePreviewWindow({ projectId, filePath, fileName, onClose }: Pr
   const [bounds, setBounds] = useState<Bounds>(() => initialBounds());
   const restoredBounds = useRef<Bounds | null>(null);
   const interaction = useRef<{ kind: "move" | "resize"; x: number; y: number; bounds: Bounds } | null>(null);
+
+  useOverlayLayer(true, onClose);
 
   const beginInteraction = useCallback((kind: "move" | "resize", event: React.PointerEvent<HTMLElement>) => {
     if (event.button !== 0 || bounds.maximized) return;

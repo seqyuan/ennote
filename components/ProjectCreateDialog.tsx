@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "@/components/LocaleProvider";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
 
@@ -154,6 +155,15 @@ export function ProjectCreateDialog({ busy, onCreate, onClose }: {
   const targetName = targetPath ? basename(targetPath) : "";
   const crumbs = useMemo(() => parent ? visibleCrumbs(parent, t("directory.home")) : [], [parent, t]);
   const interactionLocked = busy || creatingFolder;
+
+  // One Escape consumes one layer of state: folder draft, path draft, then the
+  // dialog itself. The inputs keep their own handlers so typing keeps focus.
+  useOverlayLayer(true, () => {
+    if (interactionLocked) return;
+    if (folderDraft !== null) { setFolderDraft(null); return; }
+    if (pathDraft !== null) { setPathDraft(null); return; }
+    onClose();
+  });
 
   const openPathEditor = () => {
     if (!parent || interactionLocked) return;

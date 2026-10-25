@@ -47,9 +47,9 @@ describe("overlay stack", () => {
     const stack = createOverlayStack(target);
     const calls: string[] = [];
 
-    let releaseA = () => undefined;
-    let releaseB = () => undefined;
-    let releaseC = () => undefined;
+    let releaseA: () => void = () => undefined;
+    let releaseB: () => void = () => undefined;
+    let releaseC: () => void = () => undefined;
     releaseA = stack.push({ id: "a", onDismiss: () => { calls.push("a"); releaseA(); } });
     releaseB = stack.push({ id: "b", onDismiss: () => { calls.push("b"); releaseB(); } });
     releaseC = stack.push({ id: "c", onDismiss: () => { calls.push("c"); releaseC(); } });

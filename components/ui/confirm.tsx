@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Button } from "./index";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import styles from "./confirm.module.css";
 
 export interface ConfirmOptions {
@@ -55,7 +56,6 @@ export function ConfirmHost() {
   const current = useRef<ConfirmRequest | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
-  const previousFocus = useRef<HTMLElement | null>(null);
   const titleId = useId();
   const descriptionId = useId();
 
@@ -89,16 +89,12 @@ export function ConfirmHost() {
     }
   }, []);
 
+  useOverlayLayer(request !== null, () => settle(false));
+
   useEffect(() => {
     if (request === null) return;
-    previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const frame = window.requestAnimationFrame(() => cancelRef.current?.focus());
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        settle(false);
-        return;
-      }
       if (event.key !== "Tab" || dialogRef.current === null) return;
       const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
         'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
@@ -118,9 +114,8 @@ export function ConfirmHost() {
     return () => {
       window.cancelAnimationFrame(frame);
       document.removeEventListener("keydown", onKeyDown);
-      previousFocus.current?.focus();
     };
-  }, [request, settle]);
+  }, [request]);
 
   if (request === null) return null;
   const { options } = request;

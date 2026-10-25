@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useT } from "@/components/LocaleProvider";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { ModelDraft } from "@/lib/model-draft";
 import type { DiscoveredModel } from "@/components/settings/types";
@@ -74,6 +75,8 @@ export function FetchModelsButton({ probe, existingIds, onAdopt, onError, disabl
 
   const allPicked = candidates !== null && candidates.length > 0
     && candidates.every(candidate => picked.has(candidate.modelName));
+
+  useOverlayLayer(open && candidates !== null, close);
 
   const toggleAll = () => {
     if (!candidates) return;

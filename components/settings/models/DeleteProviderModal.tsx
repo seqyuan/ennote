@@ -1,6 +1,7 @@
 "use client";
 
 import { useT } from "@/components/LocaleProvider";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 
 /**
  * Confirmation dialog for deleting a provider. Names the provider in the title,
@@ -16,6 +17,7 @@ export function DeleteProviderModal({ open, providerName, busy, failure, onCance
   onConfirm: () => void;
 }) {
   const t = useT();
+  useOverlayLayer(open, onCancel, { dismissOnEscape: !busy });
   if (!open) return null;
   const title = t("settings.models.deleteTitle").replace("{provider}", providerName);
   const description = t("settings.models.deleteDescriptionWithCredential").replace("{provider}", providerName);
