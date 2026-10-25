@@ -1545,6 +1545,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/approval-requests/{approvalID}/answer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                approvalID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["answerApprovalQuestion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sessions/{sessionID}/standing-approvals": {
         parameters: {
             query?: never;
@@ -3236,7 +3254,7 @@ export interface components {
         };
         AttentionAction: {
             /** @enum {string} */
-            kind: "tool_approval" | "delegation_approval" | "delegation_input" | "none";
+            kind: "tool_approval" | "delegation_approval" | "delegation_input" | "answer_question" | "none";
             approvalId?: string;
             itemId?: string;
             attemptId?: string;
@@ -3286,15 +3304,43 @@ export interface components {
             /** @enum {string} */
             authority?: "read_only" | "mutation";
         };
+        QuestionOption: {
+            id: string;
+            label: string;
+            description?: string;
+        };
+        QuestionSpec: {
+            id: string;
+            prompt: string;
+            options: components["schemas"]["QuestionOption"][];
+            multiSelect?: boolean;
+            allowOther?: boolean;
+        };
+        QuestionAnswer: {
+            questionId: string;
+            values?: string[];
+            otherText?: string;
+        };
+        AnswerQuestionRequest: {
+            answers: components["schemas"]["QuestionAnswer"][];
+            clientRequestId?: string;
+        };
         ToolApprovalRequest: {
             id: string;
             runId: string;
             sessionId: string;
             iteration: number;
             batchDigest: string;
+            /**
+             * @description Question checkpoints reuse this record; status=approved means answered when kind=question.
+             * @enum {string}
+             */
+            kind?: "tool_approval" | "question";
             /** @enum {string} */
             status: "pending" | "approved" | "rejected" | "cancelled";
             items: components["schemas"]["ApprovalItem"][];
+            questions?: components["schemas"]["QuestionSpec"][];
+            answers?: components["schemas"]["QuestionAnswer"][];
             /** Format: date-time */
             requestedAt: string;
             /** Format: date-time */
@@ -6576,6 +6622,40 @@ export interface operations {
         };
         responses: {
             /** @description Approval decision stored */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ToolApprovalRequest"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    answerApprovalQuestion: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                approvalID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnswerQuestionRequest"];
+            };
+        };
+        responses: {
+            /** @description Answer stored and Run queued */
             200: {
                 headers: {
                     [name: string]: unknown;

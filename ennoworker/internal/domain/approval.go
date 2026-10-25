@@ -83,8 +83,11 @@ type ToolApprovalRequest struct {
 	CheckpointID            string               `json:"-"`
 	Iteration               int                  `json:"iteration"`
 	BatchDigest             string               `json:"batchDigest"`
+	Kind                    ApprovalKind         `json:"kind"`
 	Status                  ApprovalStatus       `json:"status"`
 	Items                   []ApprovalItem       `json:"items"`
+	Questions               []QuestionSpec       `json:"questions,omitempty"`
+	Answers                 []QuestionAnswer     `json:"answers,omitempty"`
 	DecisionClientRequestID string               `json:"-"`
 	RequestedAt             time.Time            `json:"requestedAt"`
 	ResolvedAt              *time.Time           `json:"resolvedAt,omitempty"`

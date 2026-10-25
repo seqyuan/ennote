@@ -2404,6 +2404,38 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /v1/approval-requests/{approvalID}/answer:
+    parameters:
+      - name: approvalID
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: answerApprovalQuestion
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AnswerQuestionRequest" }
+      responses:
+        "200":
+          description: Answer stored and Run queued
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ToolApprovalRequest" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   # ——— Standing approvals ———
 
   /v1/sessions/{sessionID}/standing-approvals:
@@ -4704,7 +4736,7 @@ components:
       additionalProperties: false
       required: [kind]
       properties:
-        kind: { type: string, enum: [tool_approval, delegation_approval, delegation_input, none] }
+        kind: { type: string, enum: [tool_approval, delegation_approval, delegation_input, answer_question, none] }
         approvalId: { type: string }
         itemId: { type: string }
         attemptId: { type: string }
@@ -4757,6 +4789,45 @@ components:
         displayName: { type: string }
         permissionCeiling: { type: string, enum: [discuss, ask, auto] }
         authority: { type: string, enum: [read_only, mutation] }
+    QuestionOption:
+      type: object
+      additionalProperties: false
+      required: [id, label]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        description: { type: string }
+    QuestionSpec:
+      type: object
+      additionalProperties: false
+      required: [id, prompt, options]
+      properties:
+        id: { type: string }
+        prompt: { type: string }
+        options:
+          type: array
+          items: { $ref: "#/components/schemas/QuestionOption" }
+        multiSelect: { type: boolean }
+        allowOther: { type: boolean }
+    QuestionAnswer:
+      type: object
+      additionalProperties: false
+      required: [questionId]
+      properties:
+        questionId: { type: string }
+        values:
+          type: array
+          items: { type: string }
+        otherText: { type: string }
+    AnswerQuestionRequest:
+      type: object
+      additionalProperties: false
+      required: [answers]
+      properties:
+        answers:
+          type: array
+          items: { $ref: "#/components/schemas/QuestionAnswer" }
+        clientRequestId: { type: string }
     ToolApprovalRequest:
       type: object
       required: [id, runId, sessionId, iteration, batchDigest, status, items, requestedAt]
@@ -4766,10 +4837,20 @@ components:
         sessionId: { type: string }
         iteration: { type: integer, minimum: 1 }
         batchDigest: { type: string }
+        kind:
+          type: string
+          enum: [tool_approval, question]
+          description: Question checkpoints reuse this record; status=approved means answered when kind=question.
         status: { type: string, enum: [pending, approved, rejected, cancelled] }
         items:
           type: array
           items: { $ref: "#/components/schemas/ApprovalItem" }
+        questions:
+          type: array
+          items: { $ref: "#/components/schemas/QuestionSpec" }
+        answers:
+          type: array
+          items: { $ref: "#/components/schemas/QuestionAnswer" }
         requestedAt: { type: string, format: date-time }
         resolvedAt: { type: string, format: date-time }
         attribution: { $ref: "#/components/schemas/ApprovalAttribution" }

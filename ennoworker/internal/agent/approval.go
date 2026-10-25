@@ -53,6 +53,8 @@ type ResumeState struct {
 type ApprovalResolution struct {
 	Decision                 domain.ApprovalDecision `json:"decision"`
 	BatchDigest              string                  `json:"batchDigest"`
+	Kind                     domain.ApprovalKind     `json:"kind,omitempty"`
+	Answers                  []domain.QuestionAnswer `json:"answers,omitempty"`
 	StandingGrantCallIndexes []int                   `json:"standingGrantCallIndexes,omitempty"`
 }
 

@@ -145,7 +145,17 @@ func TestUnusedColumnMigrationConvergesAnExistingDatabase(t *testing.T) {
 	require.NoError(t, err)
 	migrations := sessionmigrations.Sorted()
 	require.GreaterOrEqual(t, len(migrations), 2)
-	target := migrations[len(migrations)-1]
+	// This test builds the state immediately before 0009, the migration that
+	// dropped the dead column. Later additive migrations (0010+) must not move
+	// this baseline.
+	var target sessionmigrations.Migration
+	for _, migration := range migrations {
+		if migration.Version == 9 {
+			target = migration
+			break
+		}
+	}
+	require.Equal(t, 9, target.Version)
 	for _, migration := range migrations {
 		if migration.Version >= target.Version {
 			continue
