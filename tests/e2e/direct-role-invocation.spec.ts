@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
+import { openSession, tryFulfillBlankSessionCreate } from "./harness";
 
 const now = "2026-08-03T00:00:00Z";
 const project = { id: "role-project", name: "Role project", description: "", status: "active", createdAt: now, updatedAt: now };
@@ -71,11 +71,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     await page.setViewportSize(viewport);
     let invocation: Record<string, unknown> | undefined;
     await mockDirectRole(page, (body) => { invocation = body; });
-    await page.goto("/");
-    if (viewport.width <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
-    await selectProject(page, project.name);
-    if (viewport.width <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
-    await page.getByRole("button", { name: session.title, exact: true }).click();
+    await openSession(page, { projectId: project.id, sessionId: session.id });
 
     await expect(page.getByText(`@${role.handle}`, { exact: true }).first()).toBeVisible();
     await expect(page.getByText("The boundary is explicit.")).toBeVisible();

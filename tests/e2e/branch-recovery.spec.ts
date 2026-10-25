@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
+import { openSession as restoreSession, tryFulfillBlankSessionCreate } from "./harness";
 
 const project = { id: "branch-project", name: "Branch project", description: "", status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" };
 const policies = ["discuss", "ask", "auto"].map(mode => ({ id: `builtin-tool-${mode}-v1`, name: mode, kind: "tool", version: 1, config: { mode }, status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" }));
@@ -20,10 +20,7 @@ async function fulfill(route: Route, data: unknown, status = 200) {
 }
 
 async function openSession(page: Page) {
-  await page.goto("/");
-  await selectProject(page, project.name);
-  if ((page.viewportSize()?.width ?? 1280) <= 640) await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.getByRole("button", { name: "Lineage review", exact: true }).click();
+  await restoreSession(page, { projectId: project.id, sessionId: "branch-session" });
 }
 
 test("branch switching rejects a late response from the previously active lineage", async ({ page }) => {

@@ -1,7 +1,8 @@
 "use client";
 
-import { X } from "lucide-react";
-import { useCallback, useEffect, useRef } from "react";
+import { ArrowDown, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ChatRail } from "@/components/ChatRail";
 import { Composer } from "@/components/Composer";
 import { EmptyHero, HeroGlow } from "@/components/EmptyHero";
 import { HeroProjectChip } from "@/components/HeroProjectChip";
@@ -46,6 +47,9 @@ export function ChatWindow({
   const bottomRef = useRef<HTMLDivElement>(null);
   const preserveScroll = useRef(false);
   const previousMessageCount = useRef(0);
+  const newMessageCount = useRef(0);
+  const [atBottom, setAtBottom] = useState(true);
+  const [hasNew, setHasNew] = useState(false);
   // Hero project chip + composer share one dropdown control; both live in the
   // middle channel so the sidebar keeps its own independent selector.
   const heroProject = useProjectSelector();
@@ -75,7 +79,14 @@ export function ChatWindow({
     previousMessageCount.current = history.messages.length;
   }, [history.messages, run.status]);
 
-  useEffect(() => { previousMessageCount.current = 0; }, [history.activeBranchId, history.sessionId]);
+  useEffect(() => {
+    previousMessageCount.current = 0;
+    newMessageCount.current = 0;
+    queueMicrotask(() => {
+      setAtBottom(true);
+      setHasNew(false);
+    });
+  }, [history.activeBranchId, history.sessionId]);
 
   async function loadOlder() {
     const container = messagesRef.current;
@@ -101,6 +112,36 @@ export function ChatWindow({
   const isHero = !history.sessionId || isBlank;
   const inert = !selectedProject;
 
+  // Follow the reader: the rail and jump-to-latest affordance only matter when
+  // the transcript is actually scrollable away from its floor.
+  useEffect(() => {
+    const container = messagesRef.current;
+    if (!container) return;
+    const onScroll = () => {
+      const bottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+      setAtBottom(bottom);
+      if (bottom) setHasNew(false);
+    };
+    container.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => container.removeEventListener("scroll", onScroll);
+  }, [history.sessionId, isHero]);
+
+  useEffect(() => {
+    const count = history.messages.length;
+    if (count > newMessageCount.current && newMessageCount.current > 0 && !atBottom) {
+      setHasNew(true);
+    }
+    newMessageCount.current = count;
+  }, [history.messages.length, atBottom]);
+
+  const jumpToBottom = useCallback(() => {
+    const container = messagesRef.current;
+    if (!container) return;
+    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+    setHasNew(false);
+  }, []);
+
   return <main className="chat-area" data-phase={isHero ? "hero" : "active"}>
     {error && <div className="error-bar" role="alert"><span>{error}</span>
       <button onClick={clearError} aria-label={t("conversation.chat.dismissError")}><X size={15} aria-hidden="true" /></button></div>}
@@ -113,7 +154,8 @@ export function ChatWindow({
         {run.retrying ? t("conversation.chat.retrying") : t("conversation.chat.retry")}
       </button>}
     </div>}
-    {!isHero && <div className="messages" ref={messagesRef} data-testid="chat-messages">
+    {!isHero && <div className="chat-scroll-region">
+    <div className="messages" ref={messagesRef} data-testid="chat-messages">
       <div className="conversation-viewport">
         {history.hasMore && <div className="history-control">
           <button type="button" onClick={loadOlder} disabled={history.loadingOlder}>
@@ -144,6 +186,20 @@ export function ChatWindow({
         />
         <div ref={bottomRef} />
       </div>
+    </div>
+    <ChatRail nodes={history.messages} scrollContainer={messagesRef} />
+    {!atBottom && (
+      <button
+        type="button"
+        className="chat-jump-latest"
+        data-new={hasNew || undefined}
+        onClick={jumpToBottom}
+        aria-label={t(hasNew ? "conversation.newMessages" : "conversation.jumpLatest")}
+      >
+        <ArrowDown size={14} aria-hidden="true" />
+        {t(hasNew ? "conversation.newMessages" : "conversation.jumpLatest")}
+      </button>
+    )}
     </div>}
     {!isHero && <BackgroundDelegationStrip sessionId={history.sessionId ?? undefined} />}
     {!isHero && composer.compaction.open && (

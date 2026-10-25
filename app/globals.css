@@ -330,7 +330,30 @@ button:disabled { cursor: default; }
 .recovery-bar button:hover:not(:disabled) { background: var(--bg-hover); }
 .recovery-bar button:disabled { opacity: 0.55; cursor: default; }
 
+.chat-scroll-region { position: relative; display: flex; flex: 1; min-height: 0; }
 .messages { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.chat-jump-latest {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  color: var(--text-muted);
+  box-shadow: var(--shadow-menu);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transform: translateX(-50%);
+  backdrop-filter: blur(8px);
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.chat-jump-latest:hover { color: var(--text); border-color: var(--text-dim); }
+.chat-jump-latest[data-new="true"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
 .conversation-viewport {
   width: min(100%, 920px); min-height: 100%;
   margin: 0 auto; padding: 22px 28px 36px;
