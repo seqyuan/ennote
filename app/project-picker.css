@@ -9,7 +9,7 @@
   --picker-active: color-mix(in srgb, var(--text) 9%, transparent);
   position: fixed;
   inset: 0;
-  z-index: 300;
+  z-index: var(--layer-menu);
   display: grid;
   place-items: center;
   padding: 16px;
@@ -254,7 +254,7 @@
 .project-picker-nested-overlay {
   position: fixed;
   inset: 0;
-  z-index: 320;
+  z-index: var(--layer-mobile-panel);
   display: grid;
   place-items: center;
   padding: 16px;

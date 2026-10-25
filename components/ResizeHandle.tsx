@@ -113,7 +113,7 @@ export function ResizeHandle({ side, onResize, onResizeStart, onResizeEnd, ariaL
         position: "relative",
         touchAction: "none",
         width: 10,
-        zIndex: 250,
+        zIndex: "var(--layer-drag-overlay)",
       }}
     >
       <div className="resize-handle-line" />

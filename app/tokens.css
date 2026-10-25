@@ -92,6 +92,25 @@
   --elevation-3: 0 0 0 0.5px var(--stroke-hairline), 0 16px 40px rgba(24, 24, 27, 0.16);
   --elevation-soft: 0 0 0 0.5px var(--stroke-hairline), 0 2px 8px rgba(24, 24, 27, 0.05);
 
+  /* Global stacking layers. Surfaces that sit above other surfaces must use
+     these names instead of literal z-index values. Panel-local stacking
+     (tool cards, menus inside a popover, view transitions) stays literal and
+     is documented at the use site. */
+  --layer-sticky: 10;
+  --layer-popover: 60;
+  --layer-popover-raised: 100;
+  --layer-drawer-backdrop: 199;
+  --layer-drawer: 200;
+  --layer-chrome: 205;
+  --layer-drag-overlay: 250;
+  --layer-menu: 300;
+  --layer-mobile-panel: 320;
+  --layer-dialog: 400;
+  --layer-branch-menu: 420;
+  --layer-preview: 500;
+  --layer-modal: 1000;
+  --layer-confirm: 1200;
+
   /* Motion */
   --motion-fast: 120ms;
   --motion-base: 180ms;

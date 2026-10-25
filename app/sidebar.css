@@ -623,7 +623,7 @@
 /* Row context menu (positioned against the row). */
 .sb-row-menu {
   position: absolute;
-  z-index: 60;
+  z-index: var(--layer-popover);
   right: 8px;
   top: calc(100% - 4px);
   width: 160px;
@@ -657,7 +657,7 @@
 .sb-dialog-overlay {
   position: fixed;
   inset: 0;
-  z-index: 400;
+  z-index: var(--layer-dialog);
   display: flex;
   align-items: center;
   justify-content: center;

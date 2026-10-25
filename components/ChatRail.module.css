@@ -62,7 +62,7 @@
   text-align: left;
   transform: translateY(-50%);
   pointer-events: none;
-  z-index: 50;
+  z-index: var(--layer-popover);
 }
 .previewIndex {
   display: block;
