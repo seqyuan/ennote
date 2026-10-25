@@ -14,18 +14,24 @@ interface AssistantMessageProps {
   createBranch?: (messageId: string) => void;
   /** Turn footer metrics, attached only to the turn's last assistant step. */
   metrics?: TurnMetric;
+  /** First assistant step in the turn: renders the speaker row. */
+  isFirst?: boolean;
+  /** Last assistant step in the turn: renders as the final answer. */
+  isFinal?: boolean;
 }
 
-export const AssistantMessage = memo(function AssistantMessage({ step, activeLeafMessageId, branchDisabled, createBranch, metrics }: AssistantMessageProps) {
+export const AssistantMessage = memo(function AssistantMessage({ step, activeLeafMessageId, branchDisabled, createBranch, metrics, isFirst = true, isFinal = true }: AssistantMessageProps) {
   const roleSpeaker = step.speaker?.kind === "role";
   const label = step.speaker?.handle ? `@${step.speaker.handle}` : (step.speaker?.displayName || "Host");
   const modelName = step.speaker?.modelName;
   const copyText = step.blocks.filter(block => block.kind === "text").map(block => block.text).join("\n\n");
-  return <section className="assistant-step" data-message-id={step.sourceMessageId}>
-    <div className={roleSpeaker ? "assistant-speaker role" : "assistant-speaker"}>
+  return <section className="assistant-step" data-message-id={step.sourceMessageId}
+    data-variant={isFinal ? undefined : "commentary"}
+    data-continuation={isFirst ? undefined : "true"}>
+    {isFirst && <div className={roleSpeaker ? "assistant-speaker role" : "assistant-speaker"}>
       <span style={step.speaker?.color ? { color: step.speaker.color } : undefined}><Bot size={13} aria-hidden="true" /></span>
       <strong>{label}</strong>{roleSpeaker && <small>Role</small>}{modelName && <small className="assistant-model">{modelName}</small>}
-    </div>
+    </div>}
     {step.blocks.map((block, index) => {
       if (block.kind === "text") return <MessageView key={index} text={block.text} />;
       if (block.kind === "thinking") return <ThinkingBlock key={index} text={block.text} />;

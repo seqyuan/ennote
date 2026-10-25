@@ -382,6 +382,8 @@ button:disabled { cursor: default; }
 .collapsible-message-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-xs); }
 .agent-flow { display: flex; min-width: 0; flex-direction: column; gap: 16px; padding-left: 18px; }
 .assistant-step { min-width: 0; color: var(--text); }
+.assistant-step[data-continuation="true"] { margin-top: -8px; }
+.assistant-step[data-variant="commentary"] .markdown-body { color: var(--text-muted); }
 .assistant-step > .message-actions { margin-top: 8px; }
 .message-actions { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; }
 .message-clock { color: var(--text-dim); font: var(--text-xs)/1 var(--font-mono); }

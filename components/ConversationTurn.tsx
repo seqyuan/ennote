@@ -31,6 +31,7 @@ export const ConversationTurn = memo(function ConversationTurn({ sessionId, turn
   const approvalBatchID = pendingApproval ? turn.steps.find(step => step.kind === "tool_batch" &&
     pendingApproval.items.some(item => step.activities.some(activity => activity.toolCallId === item.toolCallId)))?.id : undefined;
   const lastAssistantIndex = turn.steps.map(step => step.kind).lastIndexOf("assistant");
+  const firstAssistantIndex = turn.steps.map(step => step.kind).indexOf("assistant");
   return <article className={`conversation-turn ${active ? "is-active" : ""}`} data-turn-id={turn.id}>
     {turn.user && <div className="user-row" data-message-id={turn.user.sourceMessageId ?? turn.user.id}>
       <div className="user-message"><CollapsibleMessage text={turn.user.text}><MessageView text={turn.user.text} /></CollapsibleMessage></div>
@@ -41,6 +42,7 @@ export const ConversationTurn = memo(function ConversationTurn({ sessionId, turn
     <div className="agent-flow">
       {turn.steps.map((step, index) => {
         if (step.kind === "assistant") return <AssistantMessage step={step} key={step.id}
+          isFirst={index === firstAssistantIndex} isFinal={index === lastAssistantIndex}
           metrics={index === lastAssistantIndex ? turn.metrics : undefined}
           activeLeafMessageId={activeLeafMessageId} branchDisabled={branchDisabled} createBranch={createBranch} />;
         if (step.kind === "steer") return <div className="steer-message" key={step.id}>
