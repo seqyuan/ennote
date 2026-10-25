@@ -158,7 +158,12 @@ export function SessionSidebar({
               placeholder={t("sidebar.searchSessions")}
               aria-label={t("sidebar.searchSessions")}
               onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => { if (event.key === "Escape") closeSearch(); }}
+              onKeyDown={(event) => {
+                if (event.key !== "Escape" || event.nativeEvent.isComposing) return;
+                event.preventDefault();
+                event.stopPropagation();
+                closeSearch();
+              }}
             />
             {searchExpanded && (
               <button type="button" className="workspace-search-clear" aria-label={t("sidebar.clearSearch")} onClick={closeSearch}>

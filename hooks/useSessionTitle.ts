@@ -54,7 +54,11 @@ export function useSessionTitle(deps: {
 
   const keyDown = useCallback((event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") { event.preventDefault(); void save(); }
-    else if (event.key === "Escape") setEditing(false);
+    else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      setEditing(false);
+    }
   }, [save]);
 
   return {

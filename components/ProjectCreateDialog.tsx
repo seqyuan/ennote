@@ -242,7 +242,7 @@ export function ProjectCreateDialog({ busy, onCreate, onClose }: {
                 onChange={(event) => setPathDraft(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && pathDraft.trim()) void land(pathDraft);
-                  if (event.key === "Escape") { event.stopPropagation(); setPathDraft(null); }
+                  if (event.key === "Escape" && !event.nativeEvent.isComposing) { event.stopPropagation(); setPathDraft(null); }
                 }}
               />
             )}
@@ -289,7 +289,7 @@ export function ProjectCreateDialog({ busy, onCreate, onClose }: {
               onChange={(event) => setFolderDraft(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") void createFolder();
-                if (event.key === "Escape" && !creatingFolder) { event.stopPropagation(); setFolderDraft(null); }
+                if (event.key === "Escape" && !creatingFolder && !event.nativeEvent.isComposing) { event.stopPropagation(); setFolderDraft(null); }
               }}
             />
             {createError && <div className="project-picker-error" role="alert">{createError}</div>}

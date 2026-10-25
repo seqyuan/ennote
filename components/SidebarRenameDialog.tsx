@@ -45,7 +45,7 @@ export function SidebarRenameDialog({ title, initialName, onCancel, onConfirm }:
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") void confirm();
-            if (e.key === "Escape") onCancel();
+            if (e.key === "Escape" && !e.nativeEvent.isComposing) { e.stopPropagation(); onCancel(); }
           }}
         />
         {error && <div className="sb-dialog-error" role="alert">{error}</div>}
