@@ -65,6 +65,10 @@ test("conversation groups tool activity, applies disclosure defaults, and redact
   await expect(page.locator('[data-tool-call-id="read-call"]')).not.toHaveAttribute("open", "");
   await expect(page.locator('[data-tool-call-id="write-call"]')).toHaveAttribute("open", "");
   await expect(page.locator(".tool-batch")).toHaveCount(1);
+  const batchSummary = page.locator(".tool-batch-summary").first();
+  await expect(batchSummary).toHaveAttribute("aria-expanded", "false");
+  await batchSummary.click();
+  await expect(batchSummary).toHaveAttribute("aria-expanded", "true");
   await expect(page.locator('[data-tool-call-id="read-call"] .tool-state')).toContainText("Done");
   await expect(page.locator('[data-tool-call-id="write-call"] .tool-state')).toContainText("Done");
   await page.locator('[data-tool-call-id="write-call"] .tool-detail-disclosure').first().getByText("Arguments", { exact: true }).click();
@@ -133,6 +137,7 @@ test.describe("mobile", () => {
   test("tool batches and composer stay inside the viewport", async ({ page }) => {
     await openSurface(page);
     await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
+    await page.locator(".tool-batch-summary").first().click();
     await expect(page.locator('[data-tool-call-id="write-call"]')).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     await page.screenshot({ path: "/tmp/ennote-conversation-surface-mobile.png", fullPage: true });

@@ -1,7 +1,7 @@
 "use client";
 
-import { memo } from "react";
-import { CornerDownRight, Wrench } from "lucide-react";
+import { memo, useId, useState } from "react";
+import { ChevronRight, CornerDownRight, Wrench } from "lucide-react";
 import { ApprovalPanel } from "@/components/ApprovalPanel";
 import { AssistantMessage } from "@/components/AssistantMessage";
 import { CollapsibleMessage } from "@/components/CollapsibleMessage";
@@ -12,6 +12,7 @@ import { ToolCallView } from "@/components/ToolCallView";
 import { useT } from "@/components/LocaleProvider";
 import type { ApprovalDecision, ToolApprovalRequest } from "@/lib/approval";
 import type { ConversationTurn as ConversationTurnModel, ToolBatchStep } from "@/lib/chat-messages";
+import { shouldExpandBatch, toolBatchKey } from "@/lib/tool-batch-state";
 
 interface ConversationTurnProps {
   sessionId: string;
@@ -49,7 +50,8 @@ export const ConversationTurn = memo(function ConversationTurn({ sessionId, turn
           <CornerDownRight size={14} aria-hidden="true" /><span>{step.text}</span>
         </div>;
         const matchesApproval = step.id === approvalBatchID;
-        return <ToolBatch sessionId={sessionId} batch={step} key={step.id}
+        return <ToolBatch sessionId={sessionId} batch={step} key={toolBatchKey(step)}
+          isLast={index === turn.steps.length - 1}
           approval={matchesApproval ? pendingApproval : null}
           resolving={resolvingApproval} decide={decideApproval} />;
       })}
@@ -60,21 +62,42 @@ export const ConversationTurn = memo(function ConversationTurn({ sessionId, turn
   </article>;
 });
 
-const ToolBatch = memo(function ToolBatch({ sessionId, batch, approval, resolving, decide }: {
+const ToolBatch = memo(function ToolBatch({ sessionId, batch, isLast, approval, resolving, decide }: {
   sessionId: string;
   batch: ToolBatchStep;
+  isLast: boolean;
   approval?: ToolApprovalRequest | null;
   resolving?: ApprovalDecision | null;
   decide?: (decision: ApprovalDecision, standingGrantCallIndexes?: number[]) => void;
 }) {
   const t = useT();
+  const bodyId = useId();
+  const [override, setOverride] = useState<boolean | null>(null);
   const count = batch.activities.length;
-  return <section className="tool-batch" aria-label={(count === 1 ? t("conversation.toolBatch.ariaOne") : t("conversation.toolBatch.ariaMany")).replace("{count}", String(count))}>
-    <div className="tool-batch-heading"><Wrench size={14} aria-hidden="true" />
-      <span>{count === 1 ? t("conversation.toolBatch.titleOne") : t("conversation.toolBatch.titleMany").replace("{count}", String(count))}</span>
+  const hasActive = batch.activities.some((activity) => activity.state === "running" || activity.state === "pending");
+  const failed = batch.activities.filter((activity) => activity.state === "failed" || activity.state === "rejected").length;
+  const expanded = override ?? shouldExpandBatch({ isLast, hasActive, hasApproval: Boolean(approval) });
+  const current = [...batch.activities].reverse().find((activity) => activity.state === "running" || activity.state === "pending")
+    ?? batch.activities[batch.activities.length - 1];
+  const now = current
+    ? (current.state === "running" || current.state === "pending"
+      ? t("conversation.toolBatch.running").replace("{tool}", current.toolName)
+      : current.toolName)
+    : "";
+
+  return <section className="tool-batch" data-open={expanded || undefined}
+    aria-label={(count === 1 ? t("conversation.toolBatch.ariaOne") : t("conversation.toolBatch.ariaMany")).replace("{count}", String(count))}>
+    <button type="button" className="tool-batch-summary" aria-expanded={expanded} aria-controls={bodyId}
+      onClick={() => setOverride(!expanded)}>
+      <ChevronRight size={14} className="tool-batch-chevron" aria-hidden="true" />
+      <span className="tool-batch-title">{count === 1 ? t("conversation.toolBatch.titleOne") : t("conversation.toolBatch.titleMany").replace("{count}", String(count))}</span>
+      {now && <span className="tool-batch-now">{now}</span>}
+      {failed > 0 && <span className="tool-batch-failed">{t("conversation.toolBatch.failed").replace("{count}", String(failed))}</span>}
+    </button>
+    <div id={bodyId} className="tool-batch-body" hidden={!expanded}>
+      <div className="tool-activity-list">{batch.activities.map(activity =>
+        <ToolCallView sessionId={sessionId} activity={activity} key={activity.toolCallId} />)}</div>
     </div>
-    <div className="tool-activity-list">{batch.activities.map(activity =>
-      <ToolCallView sessionId={sessionId} activity={activity} key={activity.toolCallId} />)}</div>
     {approval && decide && <ApprovalPanel approval={approval} resolving={resolving ?? null} decide={decide} />}
   </section>;
 });
