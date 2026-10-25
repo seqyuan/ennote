@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
+import { openSession, tryFulfillBlankSessionCreate } from "./harness";
 
 const project = { id: "selection-project", name: "Selection project", description: "", status: "active", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:00Z" };
 const session = { id: "selection-session", projectId: project.id, title: "Selection session", status: "active", activeLeafMessageId: "m2", createdAt: "2026-07-28T00:00:00Z", updatedAt: "2026-07-28T00:00:02Z" };
@@ -34,9 +34,7 @@ async function openSurface(page: Page) {
     if (path === `/v1/sessions/${session.id}/compactions`) return fulfill(route, []);
     return route.abort();
   });
-  await page.goto("/");
-  await selectProject(page, project.name);
-  await page.getByRole("button", { name: session.title, exact: true }).click();
+  await openSession(page, { projectId: project.id, sessionId: session.id });
   await expect(page.locator("[data-turn-id]")).toHaveCount(1);
 }
 
