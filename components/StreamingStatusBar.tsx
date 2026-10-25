@@ -7,6 +7,7 @@ interface StreamingStatusBarProps {
   status: string;
   activeRun: boolean;
   waiting: boolean;
+  waitingForQuestion?: boolean;
   reconnecting: boolean;
   compacting: boolean;
   /** Cumulative cache-hit tokens for the active run. */
@@ -17,7 +18,7 @@ interface StreamingStatusBarProps {
   outputTokens?: number;
 }
 
-export function StreamingStatusBar({ status, activeRun, waiting, reconnecting, compacting, cacheReadTokens = 0, inputTokens = 0, outputTokens = 0 }: StreamingStatusBarProps) {
+export function StreamingStatusBar({ status, activeRun, waiting, waitingForQuestion, reconnecting, compacting, cacheReadTokens = 0, inputTokens = 0, outputTokens = 0 }: StreamingStatusBarProps) {
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [clock, setClock] = useState(0);
 
@@ -42,7 +43,9 @@ export function StreamingStatusBar({ status, activeRun, waiting, reconnecting, c
 
   if (!activeRun && !status) return null;
   const elapsed = startedAt ? Math.max(0, Math.floor((clock - startedAt) / 1000)) : 0;
-  const label = compacting ? "Compacting context..." : reconnecting ? "Reconnecting..." : waiting ? "Waiting for approval..." : status || "Working...";
+  const label = compacting ? "Compacting context..." : reconnecting ? "Reconnecting..."
+    : waiting ? (waitingForQuestion ? "Waiting for your answer..." : "Waiting for approval...")
+    : status || "Working...";
 
   return (
     <div className="streaming-status" role="status" aria-live="polite">

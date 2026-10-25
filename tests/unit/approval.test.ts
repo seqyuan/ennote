@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { approvalRiskLabel, isPendingApproval, type ToolApprovalRequest } from "../../lib/approval";
+import { approvalRiskLabel, isPendingApproval, isPendingQuestion, type ToolApprovalRequest } from "../../lib/approval";
 
 const approval: ToolApprovalRequest = {
   id: "approval", runId: "run", sessionId: "session", iteration: 1, batchDigest: "digest",
@@ -13,6 +13,16 @@ describe("Interactive Approval helpers", () => {
     expect(isPendingApproval(approval)).toBe(true);
     expect(isPendingApproval({ ...approval, status: "approved" })).toBe(false);
     expect(isPendingApproval({ ...approval, items: [] })).toBe(false);
+  });
+
+  it("distinguishes a pending question from a pending approval", () => {
+    const question: ToolApprovalRequest = {
+      ...approval, kind: "question", items: [],
+      questions: [{ id: "scope", prompt: "Which?", options: [{ id: "a", label: "A" }, { id: "b", label: "B" }] }],
+    };
+    expect(isPendingApproval(question)).toBe(false);
+    expect(isPendingQuestion(question)).toBe(true);
+    expect(isPendingQuestion(approval)).toBe(false);
   });
 
   it("uses stable human-readable risk labels", () => {

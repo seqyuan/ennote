@@ -7,10 +7,11 @@ import { AssistantMessage } from "@/components/AssistantMessage";
 import { CollapsibleMessage } from "@/components/CollapsibleMessage";
 import { MessageActions } from "@/components/MessageActions";
 import { MessageView } from "@/components/MessageView";
+import { QuestionCard } from "@/components/QuestionCard";
 import { RunStatus, type RunStatusProps } from "@/components/RunStatus";
 import { ToolCallView } from "@/components/ToolCallView";
 import { useT } from "@/components/LocaleProvider";
-import type { ApprovalDecision, ToolApprovalRequest } from "@/lib/approval";
+import type { ApprovalDecision, QuestionAnswer, ToolApprovalRequest } from "@/lib/approval";
 import type { ConversationTurn as ConversationTurnModel, ToolBatchStep } from "@/lib/chat-messages";
 import { shouldExpandBatch, toolBatchKey } from "@/lib/tool-batch-state";
 
@@ -21,14 +22,16 @@ interface ConversationTurnProps {
   pendingApproval?: ToolApprovalRequest | null;
   resolvingApproval?: ApprovalDecision | null;
   decideApproval?: (decision: ApprovalDecision) => void;
+  answeringQuestion?: boolean;
+  answerQuestion?: (answers: QuestionAnswer[]) => void;
   runStatus?: RunStatusProps;
   activeLeafMessageId?: string;
   branchDisabled?: boolean;
   createBranch?: (messageId: string) => void;
 }
 
-export const ConversationTurn = memo(function ConversationTurn({ sessionId, turn, active = false, pendingApproval, resolvingApproval, decideApproval, runStatus,
-  activeLeafMessageId, branchDisabled, createBranch }: ConversationTurnProps) {
+export const ConversationTurn = memo(function ConversationTurn({ sessionId, turn, active = false, pendingApproval, resolvingApproval, decideApproval,
+  answeringQuestion, answerQuestion, runStatus, activeLeafMessageId, branchDisabled, createBranch }: ConversationTurnProps) {
   const approvalBatchID = pendingApproval ? turn.steps.find(step => step.kind === "tool_batch" &&
     pendingApproval.items.some(item => step.activities.some(activity => activity.toolCallId === item.toolCallId)))?.id : undefined;
   const lastAssistantIndex = turn.steps.map(step => step.kind).lastIndexOf("assistant");
@@ -56,7 +59,8 @@ export const ConversationTurn = memo(function ConversationTurn({ sessionId, turn
           resolving={resolvingApproval} decide={decideApproval} />;
       })}
       {pendingApproval && !approvalBatchID && <PendingApprovalBatch approval={pendingApproval}
-        resolving={resolvingApproval} decide={decideApproval} />}
+        resolving={resolvingApproval} decide={decideApproval}
+        answering={answeringQuestion} answer={answerQuestion} />}
       {runStatus && <RunStatus {...runStatus} />}
     </div>
   </article>;
@@ -105,12 +109,18 @@ const ToolBatch = memo(function ToolBatch({ sessionId, batch, isLast, approval, 
   </section>;
 });
 
-export function PendingApprovalBatch({ approval, resolving, decide }: {
+export function PendingApprovalBatch({ approval, resolving, decide, answering, answer }: {
   approval: ToolApprovalRequest;
   resolving?: ApprovalDecision | null;
   decide?: (decision: ApprovalDecision, standingGrantCallIndexes?: number[]) => void;
+  answering?: boolean;
+  answer?: (answers: QuestionAnswer[]) => void;
 }) {
   const t = useT();
+  if (approval.kind === "question") {
+    return <QuestionCard approval={approval} submitting={Boolean(answering)}
+      answer={answer ?? (() => undefined)} />;
+  }
   if (!decide) return null;
   const count = approval.items.length;
   return <section className="tool-batch pending-tool-batch" aria-label={(count === 1 ? t("conversation.toolBatch.ariaOne") : t("conversation.toolBatch.ariaMany")).replace("{count}", String(count))}>

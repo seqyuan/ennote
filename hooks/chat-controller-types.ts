@@ -1,6 +1,6 @@
 import type { PendingImage, TextAttachment } from "@/components/Composer";
 import type { ModelProfile, ProviderProfile, RoleSummary } from "@/components/settings/types";
-import type { ApprovalDecision, ToolApprovalRequest } from "@/lib/approval";
+import type { ApprovalDecision, QuestionAnswer, ToolApprovalRequest } from "@/lib/approval";
 import type { ConversationNode } from "@/lib/chat-messages";
 import type { PermissionMode, ThinkingEffort } from "@/lib/permission-mode";
 import type { components } from "@/lib/worker-api.gen";
@@ -47,6 +47,8 @@ export type RunView = {
   pendingApproval: ToolApprovalRequest | null;
   resolvingApproval: ApprovalDecision | null;
   decideApproval: (decision: ApprovalDecision) => void;
+  answeringQuestion: boolean;
+  answerQuestion: (answers: QuestionAnswer[]) => void;
   cancel: () => void;
   cancelFollowUp: (id: string) => Promise<boolean>;
   pendingFollowUps: { id: string; text: string }[];

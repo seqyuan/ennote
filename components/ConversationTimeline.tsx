@@ -5,7 +5,7 @@ import { ConversationTurn, PendingApprovalBatch } from "@/components/Conversatio
 import { useT } from "@/components/LocaleProvider";
 import { shortDigest } from "@/lib/run-inspection";
 import { RunStatus, type RunStatusProps } from "@/components/RunStatus";
-import type { ApprovalDecision, ToolApprovalRequest } from "@/lib/approval";
+import type { ApprovalDecision, QuestionAnswer, ToolApprovalRequest } from "@/lib/approval";
 import type { ConversationNode } from "@/lib/chat-messages";
 
 interface ConversationTimelineProps {
@@ -14,14 +14,16 @@ interface ConversationTimelineProps {
   pendingApproval: ToolApprovalRequest | null;
   resolvingApproval: ApprovalDecision | null;
   decideApproval: (decision: ApprovalDecision) => void;
+  answeringQuestion?: boolean;
+  answerQuestion?: (answers: QuestionAnswer[]) => void;
   runStatus?: RunStatusProps;
   activeLeafMessageId?: string;
   branchDisabled?: boolean;
   createBranch?: (messageId: string) => void;
 }
 
-export function ConversationTimeline({ sessionId, nodes, pendingApproval, resolvingApproval, decideApproval, runStatus,
-  activeLeafMessageId, branchDisabled, createBranch }: ConversationTimelineProps) {
+export function ConversationTimeline({ sessionId, nodes, pendingApproval, resolvingApproval, decideApproval,
+  answeringQuestion, answerQuestion, runStatus, activeLeafMessageId, branchDisabled, createBranch }: ConversationTimelineProps) {
   let lastTurnIndex = -1;
   for (let index = nodes.length - 1; index >= 0; index -= 1) {
     if (nodes[index].kind === "turn") { lastTurnIndex = index; break; }
@@ -32,10 +34,12 @@ export function ConversationTimeline({ sessionId, nodes, pendingApproval, resolv
       : <ConversationTurn sessionId={sessionId} turn={node} key={node.id} active={index === lastTurnIndex && Boolean(runStatus?.active)}
           pendingApproval={index === lastTurnIndex ? pendingApproval : null}
           resolvingApproval={resolvingApproval} decideApproval={decideApproval}
+          answeringQuestion={answeringQuestion} answerQuestion={answerQuestion}
           branchDisabled={branchDisabled} activeLeafMessageId={activeLeafMessageId} createBranch={createBranch}
           runStatus={index === lastTurnIndex ? runStatus : undefined} />)}
     {lastTurnIndex < 0 && pendingApproval && <div className="orphan-active-flow">
-      <PendingApprovalBatch approval={pendingApproval} resolving={resolvingApproval} decide={decideApproval} />
+      <PendingApprovalBatch approval={pendingApproval} resolving={resolvingApproval} decide={decideApproval}
+        answering={answeringQuestion} answer={answerQuestion} />
       {runStatus && <RunStatus {...runStatus} />}
     </div>}
   </div>;

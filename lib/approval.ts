@@ -11,6 +11,8 @@ export type ApprovalItem = components["schemas"]["ApprovalItem"] & {
 export type ActiveRunState = components["schemas"]["ActiveRunState"];
 export type AgentRun = components["schemas"]["AgentRun"];
 export type ApprovalDecision = "approved" | "rejected";
+export type QuestionSpec = components["schemas"]["QuestionSpec"];
+export type QuestionAnswer = components["schemas"]["QuestionAnswer"];
 
 const riskLabels: Record<ApprovalItem["riskClass"], string> = {
   read_only: "Read only",
@@ -26,5 +28,9 @@ export function approvalRiskLabel(risk: ApprovalItem["riskClass"]): string {
 }
 
 export function isPendingApproval(value: ToolApprovalRequest | null | undefined): value is ToolApprovalRequest {
-  return Boolean(value && value.status === "pending" && value.items.length > 0);
+  return Boolean(value && value.status === "pending" && value.kind !== "question" && value.items.length > 0);
+}
+
+export function isPendingQuestion(value: ToolApprovalRequest | null | undefined): value is ToolApprovalRequest {
+  return Boolean(value && value.status === "pending" && value.kind === "question" && (value.questions?.length ?? 0) > 0);
 }

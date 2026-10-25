@@ -59,6 +59,7 @@ export function ChatWindow({
   const heroProject = useProjectSelector();
   const waiting = run.activeRunStatus === "waiting_for_approval" ||
     run.activeRunStatus === "waiting_delegation_admission" || Boolean(run.pendingApproval);
+  const waitingForQuestion = run.pendingApproval?.kind === "question";
   const reconnecting = run.status === "Run connection interrupted" && !waiting;
 
   // Requesting a project from the empty state: with no projects yet the chip
@@ -190,16 +191,19 @@ export function ChatWindow({
           <strong>{t("conversation.chat.newConversation")}</strong><span>{t("conversation.chat.startHint")}</span>
         </div>}
         <ConversationTimeline sessionId={history.sessionId ?? ""} nodes={history.messages} pendingApproval={run.pendingApproval} resolvingApproval={run.resolvingApproval}
-          decideApproval={run.decideApproval} activeLeafMessageId={history.activeLeafMessageId}
+          decideApproval={run.decideApproval}
+          answeringQuestion={run.answeringQuestion} answerQuestion={run.answerQuestion}
+          activeLeafMessageId={history.activeLeafMessageId}
           branchDisabled={Boolean(run.activeRun) || branches.changing} createBranch={branches.createBranch}
           runStatus={run.activeRun || run.status ? {
-            status: run.status, active: Boolean(run.activeRun), waiting, reconnecting, compacting: run.compacting,
+            status: run.status, active: Boolean(run.activeRun), waiting, waitingForQuestion, reconnecting, compacting: run.compacting,
             permissionMode: composer.displayedPermissionMode,
           } : undefined} />
         <StreamingStatusBar
           status={run.activeRun ? run.status : ""}
           activeRun={Boolean(run.activeRun)}
           waiting={waiting}
+          waitingForQuestion={waitingForQuestion}
           reconnecting={reconnecting}
           compacting={run.compacting}
           cacheReadTokens={run.usage?.cacheReadTokens ?? 0}

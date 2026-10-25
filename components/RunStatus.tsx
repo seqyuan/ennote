@@ -6,14 +6,17 @@ export interface RunStatusProps {
   status: string;
   active: boolean;
   waiting: boolean;
+  waitingForQuestion?: boolean;
   reconnecting: boolean;
   compacting: boolean;
   permissionMode?: string;
 }
 
-export function RunStatus({ status, active, waiting, reconnecting, compacting, permissionMode }: RunStatusProps) {
+export function RunStatus({ status, active, waiting, waitingForQuestion, reconnecting, compacting, permissionMode }: RunStatusProps) {
   if (!active && !status) return null;
-  const label = reconnecting ? "Reconnecting to run" : waiting ? "Waiting for approval" : status || (compacting ? "Compacting context" : "Running");
+  const label = reconnecting ? "Reconnecting to run" : waiting
+    ? (waitingForQuestion ? "Waiting for your answer" : "Waiting for approval")
+    : status || (compacting ? "Compacting context" : "Running");
   const Icon = reconnecting ? RotateCw : waiting ? PauseCircle : active ? LoaderCircle : status.toLowerCase().includes("fail") ? CircleAlert : CircleCheck;
   return <div className={`run-status ${active ? "is-active" : ""} ${waiting ? "is-waiting" : ""}`} role="status">
     <Icon size={14} aria-hidden="true" className={active && !waiting ? "status-spin" : ""} />

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { AgentRun, ApprovalDecision, ToolApprovalRequest } from "@/lib/approval";
+import type { AgentRun, ApprovalDecision, QuestionAnswer, ToolApprovalRequest } from "@/lib/approval";
 import type { RunUsage, SessionContextUsage } from "@/hooks/chat-controller-types";
 import type { TurnMessage } from "@/lib/chat-messages";
 import { runFailureMessage, errorMessage } from "@/lib/provider-errors";
@@ -31,6 +31,7 @@ function genId(): string {
 export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMessage, refreshLatest, refreshSession,
   activeRun, pendingApproval }: UseAgentSessionInput) {
   const [resolvingApproval, setResolvingApproval] = useState<ApprovalDecision | null>(null);
+  const [answeringQuestion, setAnsweringQuestion] = useState(false);
   const [status, setStatus] = useState("");
   const [usage, setUsage] = useState<RunUsage | null>(null);
   const [contextUsage, setContextUsage] = useState<SessionContextUsage | null>(null);
@@ -55,7 +56,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
     if (!selected || run.sessionId !== selected) return;
     streamedRunId.current = run.id;
     streamConnected.current = true;
-    setStatus(pendingApproval ? "Waiting for approval" : run.runKind === "context_compaction" ? "Compaction queued…" :
+    setStatus(pendingApproval ? (pendingApproval.kind === "question" ? "Waiting for your answer" : "Waiting for approval") : run.runKind === "context_compaction" ? "Compaction queued…" :
       run.status === "waiting_children" ? "Delegated roles are working…" :
       run.status === "waiting_delegation_admission" ? "Waiting for delegation approval" : "Running…");
     setUsage(null);
@@ -193,7 +194,8 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
       await apiFetch(`/v1/runs/${encodeURIComponent(activeRun.id)}/inputs`, { method: "POST",
         body: JSON.stringify({ kind: "steer", text, clientRequestId: genId() }) });
       appendMessage({ id: genId(), role: "user", text: `↪ ${text}`, kind: "steer" });
-      setStatus(activeRun.status === "waiting_for_approval" ? "Waiting for approval" : "");
+      setStatus(activeRun.status === "waiting_for_approval"
+        ? (pendingApproval?.kind === "question" ? "Waiting for your answer" : "Waiting for approval") : "");
       return true;
     } catch (err) {
       setError(errorMessage(err, "Failed to steer the run"));
@@ -204,6 +206,10 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
   const followUp = useCallback(async (text: string): Promise<{ queued: boolean; runEnded: boolean }> => {
     const run = activeRun;
     if (!run || !text.trim()) return { queued: false, runEnded: false };
+    if (pendingApproval?.kind === "question") {
+      setError("Answer the question before sending another message");
+      return { queued: false, runEnded: false };
+    }
     try {
       const item = await apiFetch<{ id: string; text: string }>(`/v1/runs/${encodeURIComponent(run.id)}/inputs`, { method: "POST",
         body: JSON.stringify({ kind: "follow_up", text, clientRequestId: genId() }) });
@@ -231,6 +237,27 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
       return false;
     }
   }, [activeRun]);
+
+  const answerQuestion = useCallback(async (answers: QuestionAnswer[]) => {
+    const approval = pendingApproval;
+    if (!approval || approval.kind !== "question" || answeringQuestion) return;
+    setAnsweringQuestion(true);
+    try {
+      await apiFetch<ToolApprovalRequest>(`/v1/approval-requests/${encodeURIComponent(approval.id)}/answer`, {
+        method: "POST", headers: { "Idempotency-Key": genId() },
+        body: JSON.stringify({ answers, clientRequestId: genId() }),
+      });
+      setStatus("Answer submitted. Resuming…");
+      if (!streamConnected.current && activeRun) {
+        streamedRunId.current = null;
+        watchRun({ ...activeRun, status: "queued" });
+      }
+    } catch (err) {
+      setError(errorMessage(err, "Failed to answer the question"));
+    } finally {
+      setAnsweringQuestion(false);
+    }
+  }, [activeRun, answeringQuestion, pendingApproval, watchRun]);
 
   const decideApproval = useCallback(async (decision: ApprovalDecision, standingGrantCallIndexes?: number[]) => {
     const approval = pendingApproval;
@@ -268,6 +295,8 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
     compacting: activeRun?.runKind === "context_compaction",
     pendingApproval,
     resolvingApproval,
+    answeringQuestion,
+    answerQuestion,
     status,
     setStatus,
     usage,
