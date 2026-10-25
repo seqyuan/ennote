@@ -367,6 +367,19 @@ button:disabled { cursor: default; }
   border: 1px solid color-mix(in srgb, var(--border) 78%, var(--accent));
   border-radius: var(--radius-sm); background: var(--user-bg); color: var(--text);
 }
+.collapsible-message-body { min-width: 0; }
+.collapsible-message[data-collapsed="true"] .collapsible-message-body {
+  max-height: 260px; overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+}
+.collapsible-message-toggle {
+  display: block; margin: 6px 0 0 auto; padding: 0;
+  border: 0; background: transparent; color: var(--accent);
+  font-size: var(--text-xs); font-weight: 600; cursor: pointer;
+}
+.collapsible-message-toggle:hover { text-decoration: underline; }
+.collapsible-message-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-xs); }
 .agent-flow { display: flex; min-width: 0; flex-direction: column; gap: 16px; padding-left: 18px; }
 .assistant-step { min-width: 0; color: var(--text); }
 .assistant-step > .message-actions { margin-top: 8px; }

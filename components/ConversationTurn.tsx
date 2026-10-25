@@ -4,6 +4,7 @@ import { memo } from "react";
 import { CornerDownRight, Wrench } from "lucide-react";
 import { ApprovalPanel } from "@/components/ApprovalPanel";
 import { AssistantMessage } from "@/components/AssistantMessage";
+import { CollapsibleMessage } from "@/components/CollapsibleMessage";
 import { MessageActions } from "@/components/MessageActions";
 import { MessageView } from "@/components/MessageView";
 import { RunStatus, type RunStatusProps } from "@/components/RunStatus";
@@ -32,7 +33,7 @@ export const ConversationTurn = memo(function ConversationTurn({ sessionId, turn
   const lastAssistantIndex = turn.steps.map(step => step.kind).lastIndexOf("assistant");
   return <article className={`conversation-turn ${active ? "is-active" : ""}`} data-turn-id={turn.id}>
     {turn.user && <div className="user-row" data-message-id={turn.user.sourceMessageId ?? turn.user.id}>
-      <div className="user-message"><MessageView text={turn.user.text} /></div>
+      <div className="user-message"><CollapsibleMessage text={turn.user.text}><MessageView text={turn.user.text} /></CollapsibleMessage></div>
       <MessageActions text={turn.user.text} time={turn.user.createdAt}
         branchMessageId={turn.user.sourceMessageId !== activeLeafMessageId ? turn.user.sourceMessageId : undefined}
         branchDisabled={branchDisabled} onBranch={createBranch} />
