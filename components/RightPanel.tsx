@@ -20,6 +20,7 @@ export function RightPanel(props: {
   activeTabId: string;
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
+  onReorderTab?: (fromId: string, toId: string) => void;
   projectId: string | null;
   displayPath: string | null;
   onOpenFile: (path: string, name: string) => void;
@@ -33,7 +34,7 @@ export function RightPanel(props: {
   permissionMode: PermissionMode;
 }) {
   const {
-    open, onClose, resize, tabs, activeTabId, onSelectTab, onCloseTab,
+    open, onClose, resize, tabs, activeTabId, onSelectTab, onCloseTab, onReorderTab,
     projectId, displayPath, onOpenFile, onPreviewFile,
     selectedSession, sessionTitle, activeRun, inspectorRunId, status, permissionMode,
   } = props;
@@ -62,6 +63,7 @@ export function RightPanel(props: {
         activeTabId={activeTabId}
         onSelectTab={onSelectTab}
         onCloseTab={onCloseTab}
+        onReorder={onReorderTab}
       />
       <div className="right-panel-body">
         {activeTabId === "files" && (

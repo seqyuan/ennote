@@ -26,6 +26,8 @@
   transition: background 0.1s, color 0.1s;
 }
 .tab[data-active="true"] { background: var(--bg); color: var(--text); }
+.tab[data-dragging="true"] { opacity: 0.45; cursor: grabbing; }
+.tab[data-drop-target="true"] { box-shadow: inset 2px 0 var(--accent); }
 .icon {
   display: flex;
   align-items: center;

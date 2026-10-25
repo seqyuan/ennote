@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import type { Tab } from "@/components/TabBar";
+import { moveTab } from "@/lib/tab-order";
 
 /**
  * Right-panel file tabs: the "Files / Graphs / Status" static tabs plus any
@@ -13,6 +14,7 @@ export function useFileTabs(currentProjectId: string | null): {
   setActiveTabId: (id: string) => void;
   openFile: (path: string, name: string) => void;
   closeTab: (id: string) => void;
+  reorderTabs: (fromId: string, toId: string) => void;
 } {
   const [fileTabs, setFileTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("files");
@@ -37,5 +39,9 @@ export function useFileTabs(currentProjectId: string | null): {
     });
   }, [fileTabs]);
 
-  return { fileTabs, activeTabId, setActiveTabId, openFile, closeTab };
+  const reorderTabs = useCallback((fromId: string, toId: string) => {
+    setFileTabs((previous) => moveTab(previous, fromId, toId));
+  }, []);
+
+  return { fileTabs, activeTabId, setActiveTabId, openFile, closeTab, reorderTabs };
 }

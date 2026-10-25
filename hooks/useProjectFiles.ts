@@ -43,7 +43,7 @@ export function useProjectFiles({
   }, [projectId, setRunError, workspaceFor]);
 
   const fileTabsState = useFileTabs(projectId);
-  const { fileTabs, activeTabId: activeRightTabId, setActiveTabId: setActiveRightTabId, openFile, closeTab } = fileTabsState;
+  const { fileTabs, activeTabId: activeRightTabId, setActiveTabId: setActiveRightTabId, openFile, closeTab, reorderTabs } = fileTabsState;
 
   const handleOpenFile = useCallback((filePath: string, fileName: string) => {
     openFile(filePath, fileName);
@@ -73,5 +73,6 @@ export function useProjectFiles({
     handleOpenFile,
     handlePreviewFile,
     closeTab,
+    reorderTabs,
   };
 }

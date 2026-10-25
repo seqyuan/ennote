@@ -256,6 +256,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
     handleOpenFile,
     handlePreviewFile,
     closeTab,
+    reorderTabs,
   } = useProjectFiles({
     projectId: currentProjectId,
     workspaceFor,
@@ -438,6 +439,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
             activeTabId={activeRightTabId}
             onSelectTab={setActiveRightTabId}
             onCloseTab={closeTab}
+            onReorderTab={reorderTabs}
             projectId={currentProjectId ?? null}
             displayPath={currentCwd}
             onOpenFile={handleOpenFile}
