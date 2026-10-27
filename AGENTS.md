@@ -20,12 +20,15 @@ constraints, not a replacement for the local roadmap or detailed design plans.
 
 ## Client Architecture
 
-- Keep the Tauri App in this repository for V1. It is a native client shell over
-  the same Worker authority, not a separate business system.
-- Web and Tauri must share React components, generated Worker API types, domain
-  reducers, cache keys, and durable synchronization semantics.
-- Differences belong behind transport or native-capability interfaces. Do not
-  create a second Session, Attention, approval, or delegation implementation.
+- The V1 client is the local Web UI (Next.js static export served by
+  `ennogate`). It is a client of the Worker authority, not a separate business
+  system.
+- If a native Tauri shell is introduced, it stays in this repository and is a
+  native client shell over the same Worker authority. It must not create a
+  second Session, Attention, approval, or delegation implementation.
+- Web and any native shell must share React components, generated Worker API
+  types, domain reducers, cache keys, and durable synchronization semantics.
+- Differences belong behind transport or native-capability interfaces.
 - Scope every request, response, cache row, subscription, and event by account,
   Worker, and connection generation as applicable. Reject late cross-Worker data.
 - Offline App state is read-only in V1. Do not queue stale mutations for replay.
