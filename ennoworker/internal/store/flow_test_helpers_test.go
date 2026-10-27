@@ -236,25 +236,8 @@ func resolveFlowRoleForTest(t *testing.T, _ *sql.DB, roleRef string) (string, js
 	return handle + "@" + revision.ID(), encoded, nil
 }
 
-// testRoleDefinitionIsReadOnly mirrors the production roleDefinitionIsReadOnly
-// classification for the fixture-published roles.
+// testRoleDefinitionIsReadOnly defers to the shared domain classifier so the
+// fixture-published roles cannot disagree with production scheduling.
 func testRoleDefinitionIsReadOnly(roleDef domain.RoleDefinition) bool {
-	if roleDef.Authority != domain.RoleAuthorityReadOnly {
-		return false
-	}
-	for _, tool := range roleDef.AllowedTools {
-		if !testToolReadOnly(tool) {
-			return false
-		}
-	}
-	return true
-}
-
-func testToolReadOnly(tool string) bool {
-	switch tool {
-	case "read", "ls", "grep", "find", "git_readonly", "search_compacted_history", "todo":
-		return true
-	default:
-		return false
-	}
+	return domain.RoleDefinitionIsReadOnly(roleDef)
 }

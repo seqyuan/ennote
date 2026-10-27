@@ -277,39 +277,12 @@ func (s *Service) freezeTasks(ctx context.Context, document *graphsource.Documen
 			TaskIndex: indexOf[name], Handle: name,
 			RoleVersionID: role.VersionID, Skills: frozenSkills,
 			GoalDigest: agentflow.TaskGoalDigest(task.Goal), GoalText: task.Goal,
-			BudgetJSON: budgetJSON, ReadOnly: roleDefinitionIsReadOnly(role.Definition),
+			BudgetJSON: budgetJSON, ReadOnly: domain.RoleDefinitionIsReadOnly(role.Definition),
 			Writes:             append([]string(nil), task.Writes...),
 			RoleDefinitionJSON: roleDefJSON,
 		})
 	}
 	return freeze, nil
-}
-
-func roleDefinitionIsReadOnly(roleDef domain.RoleDefinition) bool {
-	if roleDef.Authority != domain.RoleAuthorityReadOnly {
-		return false
-	}
-	for _, tool := range roleDef.AllowedTools {
-		if !toolReadOnlyKind(tool) {
-			return false
-		}
-	}
-	return true
-}
-
-var readOnlyTools = map[string]bool{
-	"read": true, "ls": true, "grep": true, "find": true,
-	"bash_read": true, "sql_read": true,
-}
-
-func toolReadOnlyKind(tool string) bool {
-	if readOnlyTools[tool] {
-		return true
-	}
-	if strings.HasPrefix(tool, "mcp__") && !strings.Contains(tool, "__write__") {
-		return true
-	}
-	return false
 }
 
 // resolveTaskRole resolves one Task's Role facts at Run start:
