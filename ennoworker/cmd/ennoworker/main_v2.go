@@ -239,9 +239,10 @@ func run() error {
 		Artifacts: &artifacts.Service{}, Sessions: sessions,
 		Branches: &store.BranchRepo{}, Messages: &store.MessageRepo{}, Compactions: &store.CompactionRepo{Publisher: hub, Policies: policyFiles},
 		Approvals: &store.ApprovalRepo{Publisher: hub}, StandingApprovals: &store.StandingApprovalRepo{},
-		Delegations: &store.DelegationRepo{}, DelegationApprovals: &store.DelegationApprovalRepo{},
-		Attention:   &store.AttentionRepo{},
-		Runs: runTemplate, Queue: &store.QueueRepo{}, Events: &store.EventRepo{},
+		Delegations:         &store.DelegationRepo{RoleSources: globalSources, Models: models, Policies: policyFiles},
+		DelegationApprovals: &store.DelegationApprovalRepo{Policies: policyFiles},
+		Attention:           &store.AttentionRepo{},
+		Runs:                runTemplate, Queue: &store.QueueRepo{}, Events: &store.EventRepo{},
 		Hub: hub, Control: api.CoordinatorController{Coordinator: coordinator}, Projection: projector, InstanceID: instanceID,
 		PromptGate: executorRouter, Prompts: promptService, Doctor: doctor, MCP: mcpServer,
 		Skills: &skillsmgmt.Service{

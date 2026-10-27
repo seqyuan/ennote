@@ -2229,14 +2229,12 @@ paths:
                       data: { $ref: "#/components/schemas/DelegationHandlePage" }
         "404": { $ref: "#/components/responses/Error" }
         "500": { $ref: "#/components/responses/Error" }
-  /v1/delivery-events:
+  /v1/sessions/{sessionID}/delivery-events:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
     get:
       operationId: streamDeliveryEvents
       parameters:
-        - name: sessionId
-          in: query
-          required: true
-          schema: { type: string }
         - name: after
           in: query
           schema: { type: integer, format: int64 }

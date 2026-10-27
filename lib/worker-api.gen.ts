@@ -1437,11 +1437,13 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/delivery-events": {
+    "/v1/sessions/{sessionID}/delivery-events": {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+            };
             cookie?: never;
         };
         get: operations["streamDeliveryEvents"];
@@ -6440,12 +6442,13 @@ export interface operations {
     };
     streamDeliveryEvents: {
         parameters: {
-            query: {
-                sessionId: string;
+            query?: {
                 after?: number;
             };
             header?: never;
-            path?: never;
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+            };
             cookie?: never;
         };
         requestBody?: never;

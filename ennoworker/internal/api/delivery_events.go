@@ -25,11 +25,7 @@ func (s *Server) streamDeliveryEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusInternalServerError, "streaming_unsupported", "streaming is unavailable", false)
 		return
 	}
-	sessionID := r.URL.Query().Get("sessionId")
-	if sessionID == "" {
-		writeError(w, r, http.StatusBadRequest, "session_id_required", "sessionId is required", false)
-		return
-	}
+	sessionID := r.PathValue("sessionID")
 	if _, err := s.Sessions.FindByID(r.Context(), sessionID); err != nil {
 		s.writeStoreError(w, r, err)
 		return

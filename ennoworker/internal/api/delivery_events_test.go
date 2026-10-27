@@ -121,25 +121,42 @@ func collectDeliveryFrames(t *testing.T, handler http.Handler, path, lastEventID
 func TestDeliveryEventsStreamReplaysWithSameIDs(t *testing.T) {
 	_, handler, _, _, sessionID := setupDeliveryServer(t)
 
-	first := collectDeliveryFrames(t, handler, "/v1/delivery-events?sessionId="+sessionID, "")
+	first := collectDeliveryFrames(t, handler, "/v1/sessions/"+sessionID+"/delivery-events", "")
 	require.Len(t, first, 1)
 	eventID := first[0].EventID
 	require.Greater(t, eventID, int64(0))
 
 	// Reconnect with Last-Event-ID yields no duplicate logical event.
-	second := collectDeliveryFrames(t, handler, "/v1/delivery-events?sessionId="+sessionID, formatID(eventID))
+	second := collectDeliveryFrames(t, handler, "/v1/sessions/"+sessionID+"/delivery-events", formatID(eventID))
 	assert.Empty(t, second)
 
 	// after cursor yields the same.
 	third := collectDeliveryFrames(t, handler,
-		"/v1/delivery-events?sessionId="+sessionID+"&after="+formatID(eventID), "")
+		"/v1/sessions/"+sessionID+"/delivery-events"+"&after="+formatID(eventID), "")
 	assert.Empty(t, third)
 }
 
 func TestDeliveryEventsRequireSession(t *testing.T) {
 	_, handler, _, _, _ := setupDeliveryServer(t)
-	response := request(t, handler, http.MethodGet, "/v1/delivery-events", nil, true)
-	assert.Equal(t, http.StatusBadRequest, response.Code)
+	response := request(t, handler, http.MethodGet, "/v1/sessions/missing-session/delivery-events", nil, true)
+	assert.Equal(t, http.StatusNotFound, response.Code)
+}
+
+// The production wiring passes a template DelegationRepo (nil DB); the request
+// scoper must clone it with the session DB instead of panicking on the template.
+func TestDeliveryEventsUseProductionTemplateWiring(t *testing.T) {
+	server, handler := setupServer(t, nil)
+	ctx := context.Background()
+	project, _, err := server.Projects.CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: "delivery", HostPath: t.TempDir()})
+	require.NoError(t, err)
+	session, err := server.Sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID, Title: "delivery"})
+	require.NoError(t, err)
+	server.Delegations = &store.DelegationRepo{}
+
+	require.NotPanics(t, func() {
+		events := collectDeliveryFrames(t, handler, "/v1/sessions/"+session.ID+"/delivery-events", "")
+		assert.Empty(t, events)
+	})
 }
 
 func formatID(value int64) string {

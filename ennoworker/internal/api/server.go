@@ -208,7 +208,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/delegations/{groupID}/cancel", s.cancelDelegation)
 	mux.HandleFunc("GET /v1/delegation-handles/{handleID}", s.getDelegationHandle)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/delegation-handles", s.listSessionDelegationHandles)
-	mux.HandleFunc("GET /v1/delivery-events", s.streamDeliveryEvents)
+	mux.HandleFunc("GET /v1/sessions/{sessionID}/delivery-events", s.streamDeliveryEvents)
 	mux.HandleFunc("GET /v1/attention", s.listAttention)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/attention", s.listSessionAttention)
 	mux.HandleFunc("POST /v1/attention/{attentionID}/dismiss", s.dismissAttention)
