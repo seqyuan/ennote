@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -22,6 +23,10 @@ type Manager struct {
 	RuntimeVisibleDir string // sandbox-visible path for env vars
 	SkillsDir         string // host path for skills snapshot
 	Mode              SandboxMode
+	// ProtectedPaths are host paths that degraded (SandboxNone) commands may
+	// not reference. They cover the Ennote home, whose config holds provider
+	// credentials that plain host execution could otherwise read.
+	ProtectedPaths []string
 }
 
 // NewManager creates a Manager with workspace-only (backward compatible).
@@ -112,6 +117,40 @@ func (m *Manager) verifyRuntimeIO() error {
 }
 
 func (m *Manager) Degraded() bool { return m.Mode == SandboxNone }
+
+// ProtectHome registers the Ennote home directory as unreadable for degraded
+// command execution. Only SandboxNone is affected; bwrap already hides it.
+func (m *Manager) ProtectHome(home string) {
+	if home == "" {
+		return
+	}
+	abs, err := filepath.Abs(home)
+	if err != nil {
+		return
+	}
+	m.ProtectedPaths = append(m.ProtectedPaths, filepath.Clean(abs))
+}
+
+// ValidateCommand fails closed when a degraded command references the Ennote
+// home or the credential files inside it. This is a string-level guard for the
+// unsandboxed mode, not a substitute for bwrap.
+func (m *Manager) ValidateCommand(command string) error {
+	if m.Mode != SandboxNone {
+		return nil
+	}
+	for _, path := range m.ProtectedPaths {
+		path = filepath.Clean(path)
+		if strings.Contains(command, path) || strings.Contains(command, "~/.ennote") || strings.Contains(command, "$HOME/.ennote") {
+			return fmt.Errorf("sandbox mode %q cannot access the Ennote home (%s); enable ENNOTE_SANDBOX=bwrap for host credential isolation", m.Mode, path)
+		}
+	}
+	return nil
+}
+
+// ValidateArgv applies ValidateCommand to a structured argument vector.
+func (m *Manager) ValidateArgv(argv []string) error {
+	return m.ValidateCommand(strings.Join(argv, " "))
+}
 
 func (m *Manager) Probe(ctx context.Context) error {
 	if m.Mode == SandboxNone {

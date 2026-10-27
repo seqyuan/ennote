@@ -517,6 +517,7 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	if err != nil {
 		return domain.RunOutput{}, fmt.Errorf("create workspace: %w", err)
 	}
+	wManager.ProtectHome(e.homeDir)
 	artifactSink := &tools.ArtifactSink{Service: e.artifacts, ProjectID: session.ProjectID,
 		SessionID: run.SessionID, RunID: run.ID}
 	toolReg, err := tools.NewDefaultRegistry(wManager, artifactSink)
@@ -934,6 +935,7 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 	if err != nil {
 		return domain.RunOutput{}, fmt.Errorf("create workspace: %w", err)
 	}
+	wManager.ProtectHome(e.homeDir)
 	artifactSink := &tools.ArtifactSink{Service: e.artifacts, ProjectID: session.ProjectID,
 		SessionID: run.SessionID, RunID: run.ID}
 	toolReg, err := tools.NewDefaultRegistry(wManager, artifactSink)
@@ -1138,6 +1140,7 @@ func (e *agentExecutor) executeContextCompaction(ctx context.Context, run *domai
 	if err != nil {
 		return domain.RunOutput{}, err
 	}
+	manager.ProtectHome(e.homeDir)
 	registry, err := tools.NewDefaultRegistry(manager)
 	if err != nil {
 		return domain.RunOutput{}, err

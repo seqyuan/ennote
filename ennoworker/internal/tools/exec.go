@@ -46,6 +46,9 @@ func (t *ExecTool) execute(ctx context.Context, call domain.ToolCall, sink domai
 	if len(args.Argv) == 0 || strings.TrimSpace(args.Argv[0]) == "" {
 		return errorResult(call, fmt.Errorf("argv must contain an executable")), nil
 	}
+	if err := t.Workspace.ValidateArgv(args.Argv); err != nil {
+		return errorResult(call, err), nil
+	}
 	timeout := t.Timeout
 	if timeout <= 0 {
 		timeout = 2 * time.Minute

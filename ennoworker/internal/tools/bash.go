@@ -48,6 +48,9 @@ func (t *BashTool) execute(ctx context.Context, call domain.ToolCall, sink domai
 	if strings.TrimSpace(args.Command) == "" {
 		return errorResult(call, fmt.Errorf("command must not be empty")), nil
 	}
+	if err := t.Workspace.ValidateCommand(args.Command); err != nil {
+		return errorResult(call, err), nil
+	}
 	timeout := t.Timeout
 	if timeout <= 0 {
 		timeout = 2 * time.Minute

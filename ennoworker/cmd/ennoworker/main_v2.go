@@ -55,6 +55,9 @@ func run() error {
 		return err
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+	if cfg.SandboxMode == string(workspace.SandboxNone) {
+		slog.Warn("sandbox disabled (ENNOTE_SANDBOX=none): commands run directly on the host and can read host files; enable bubblewrap for real isolation")
+	}
 
 	var projections *projection.Stores
 	layout, err := storage.Bootstrap(cfg.HomeDir, func(layout storage.Layout) error {

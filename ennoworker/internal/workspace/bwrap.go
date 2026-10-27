@@ -76,7 +76,7 @@ func buildBwrapArgs(m *Manager) []string {
 func buildBwrapArgsMode(m *Manager, readOnlyWorkspace bool) []string {
 	args := []string{
 		"--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--unshare-uts",
-		"--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
+		"--unshare-net", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
 	}
 	for _, path := range []string{"/usr", "/bin", "/lib", "/lib64"} {
 		if _, err := os.Stat(path); err == nil {
