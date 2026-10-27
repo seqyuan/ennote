@@ -85,6 +85,14 @@ describe("tool presentation", () => {
     expect(classifyDisplayRisk("todo")).toBe("read_only");
   });
 
+  it("treats ask_user as a normal read-only conversation tool", () => {
+    expect(classifyDisplayRisk("ask_user")).toBe("read_only");
+    expect(summarizeToolCall("ask_user", {
+      questions: [{ id: "scope", prompt: "Which samples?" }, { id: "depth", prompt: "How deep?" }],
+    })).toEqual({ label: "Ask user", target: "2 questions" });
+    expect(summarizeToolCall("ask_user", {})).toEqual({ label: "Ask user", target: "0 questions" });
+  });
+
   it("bounds long output and uses risk and state for default disclosure", () => {
     expect(boundedToolOutput("x".repeat(50), 20)).toBe("xxxxxxxxxxxxxxxxxxxx\n[30 characters omitted]");
     expect(defaultToolExpanded("read_only", "completed")).toBe(false);

@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import {
-  CircleAlert, CircleCheck, Clock3, FilePenLine, FileText, FolderOpen, Globe2,
+  CircleAlert, CircleCheck, CircleHelp, Clock3, FilePenLine, FileText, FolderOpen, Globe2,
   Search, ShieldAlert, Terminal, Users, XCircle,
 } from "lucide-react";
 import { ArtifactView } from "@/components/ArtifactView";
@@ -107,6 +107,7 @@ function toolIcon(name: string) {
     case "search":
     case "find":
     case "search_compacted_history": return <Search {...props} />;
+    case "ask_user": return <CircleHelp {...props} />;
     case "write":
     case "edit":
     case "publish_artifact": return <FilePenLine {...props} />;

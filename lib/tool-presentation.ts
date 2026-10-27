@@ -1,7 +1,7 @@
 export type DisplayRiskClass = "read_only" | "local_write" | "shell" | "external" | "delegation" | "sensitive";
 export type ToolActivityState = "pending" | "running" | "completed" | "failed" | "rejected" | "interrupted";
 
-const readOnlyTools = new Set(["read", "ls", "list", "grep", "search", "find", "search_compacted_history", "todo"]);
+const readOnlyTools = new Set(["read", "ls", "list", "grep", "search", "find", "search_compacted_history", "todo", "ask_user"]);
 const writeTools = new Set(["write", "edit", "publish_artifact"]);
 const shellTools = new Set(["bash", "exec"]);
 const externalTools = new Set(["http", "http_request", "fetch", "web_search", "web_fetch"]);
@@ -68,6 +68,13 @@ export function summarizeToolCall(toolName: string, rawArguments: unknown): Tool
       return { label: "External request", target: oneLine(stringValue(args.url) || "External service", 180) };
     case "search_compacted_history":
       return { label: "Search compacted history", target: oneLine(stringValue(args.query) || "Session history", 180) };
+    case "ask_user": {
+      const questions = Array.isArray(args.questions) ? args.questions : [];
+      return {
+        label: "Ask user",
+        target: questions.length === 1 ? "1 question" : `${questions.length} questions`,
+      };
+    }
     case "delegate_tasks":
     case "delegate_roles": { // legacy alias stays readable in history
       const tasks = Array.isArray(args.tasks)

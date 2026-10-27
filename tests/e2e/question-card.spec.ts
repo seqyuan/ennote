@@ -45,7 +45,14 @@ async function mock(page: Page): Promise<{ answers: () => unknown[] }> {
     if (path === `/v1/sessions/${session.id}/context-usage`) return fulfill(route, null);
     if (path === `/v1/sessions/${session.id}/compactions`) return fulfill(route, []);
     if (path === `/v1/sessions/${session.id}/messages`) {
-      return fulfill(route, { messages: [message("m1", undefined, "user", "ask"), message("m2", "m1", "assistant", "waiting")], hasMore: false, activeLeafMessageId: "m2" });
+      const asked = {
+        ...message("m2", "m1", "assistant", "waiting"),
+        parts: [
+          { type: "text", text: "waiting" },
+          { type: "tool_call", toolCall: { id: "ask-call", name: "ask_user", arguments: { questions: approval.questions } } },
+        ],
+      };
+      return fulfill(route, { messages: [message("m1", undefined, "user", "ask"), asked], hasMore: false, activeLeafMessageId: "m2" });
     }
     if (path === `/v1/sessions/${session.id}/events`) {
       return route.fulfill({ status: 200, contentType: "text/event-stream",
@@ -65,6 +72,9 @@ test("renders a structured question and submits the selected option", async ({ p
   await openSession(page, { projectId: project.id, sessionId: session.id });
 
   await expect(page.getByText("Which samples should I include?", { exact: true })).toBeVisible();
+  await expect(page.getByText("Sensitive tool call", { exact: false })).toHaveCount(0);
+  await expect(page.locator('[data-tool-call-id="ask-call"]')).toContainText("Ask user");
+  await expect(page.locator('[data-tool-call-id="ask-call"]')).toHaveAttribute("data-risk", "read_only");
   await page.getByRole("radio", { name: /Tumor only/ }).check();
   await page.getByRole("button", { name: "Submit answer" }).click();
 
