@@ -357,6 +357,10 @@ paths:
                             items: { $ref: "#/components/schemas/RunAgentFlowNode" }
                           flowVersion: { type: integer }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/graph-runs/{runID}/cancel:
+    parameters:
+      - { name: sessionID, in: path, required: true, schema: { type: string } }
+      - { name: runID, in: path, required: true, schema: { type: string } }
     post:
       operationId: cancelSessionGraphRun
       summary: Cancel a running Graph Run
@@ -2760,9 +2764,9 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "500": { $ref: "#/components/responses/Error" }
-  /v1/skills/disabled/{relPath}:
+  /v1/skills/disabled/{relPath...}:
     parameters:
-      - name: relPath
+      - name: relPath...
         in: path
         required: true
         schema: { type: string, description: Skill rel path inside the user skills root; may contain slashes }
@@ -2926,9 +2930,9 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
-  /v1/skills/remove/{relPath}:
+  /v1/skills/remove/{relPath...}:
     parameters:
-      - name: relPath
+      - name: relPath...
         in: path
         required: true
         schema: { type: string, description: Skill rel path inside the user skills root; may contain slashes }

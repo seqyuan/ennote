@@ -264,6 +264,25 @@ export interface paths {
         /** One Graph Run with task checkpoints and the frozen flow version */
         get: operations["getSessionGraphRun"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{sessionID}/graph-runs/{runID}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: string;
+                runID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
         /** Cancel a running Graph Run */
         post: operations["cancelSessionGraphRun"];
         delete?: never;
@@ -1745,12 +1764,12 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/skills/disabled/{relPath}": {
+    "/v1/skills/disabled/{relPath...}": {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                relPath: string;
+                "relPath...": string;
             };
             cookie?: never;
         };
@@ -1832,12 +1851,12 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/skills/remove/{relPath}": {
+    "/v1/skills/remove/{relPath...}": {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                relPath: string;
+                "relPath...": string;
             };
             cookie?: never;
         };
@@ -7100,7 +7119,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                relPath: string;
+                "relPath...": string;
             };
             cookie?: never;
         };
@@ -7269,7 +7288,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                relPath: string;
+                "relPath...": string;
             };
             cookie?: never;
         };

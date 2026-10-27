@@ -42,6 +42,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
       - run: npm ci
+      - run: npm run generate:api
+      - run: git diff --exit-code lib/worker-api.gen.ts
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run check:appshell-size
