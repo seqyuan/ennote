@@ -60,9 +60,10 @@ type NodeUpdate struct {
 type ChildSpec struct {
 	Handle        string
 	RoleVersionID string
-	// SkillIDs are the task-level additive preload Skills frozen on the flow
-	// node. They supplement, but never replace or widen, the Role policy.
-	SkillIDs []string
+	// Skills are the task-level additive preload Skills frozen on the flow
+	// node, including the content digest pinned at freeze time. They
+	// supplement, but never replace or widen, the Role policy.
+	Skills domain.FrozenSkillRefs
 	// RoleDefinitionJSON is the full resolved RoleDefinition frozen at Run
 	// start. It is passed to child Run materialization so delegation never
 	// re-reads mutable Role files or the removed global role SQL.
@@ -356,6 +357,21 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 	}
 }
 
+// frozenSkillRefs returns the digest-pinned task Skills of a frozen node. Nodes
+// written before content pinning existed only carry the bare ID list, so they
+// fall back to unpinned refs: the child then loads the current Skill content,
+// exactly as it did before this schema.
+func frozenSkillRefs(node *domain.RunAgentFlowNode) domain.FrozenSkillRefs {
+	if len(node.FrozenSkills) > 0 {
+		return append(domain.FrozenSkillRefs(nil), node.FrozenSkills...)
+	}
+	refs := make(domain.FrozenSkillRefs, 0, len(node.SkillDigests))
+	for _, id := range node.SkillDigests {
+		refs = append(refs, domain.FrozenSkillRef{ID: id})
+	}
+	return refs
+}
+
 // dispatchRoleChild claims one role task (CAS pending -> running), creates its
 // child Run, records the child on the node, publishes the started event, and
 // enqueues the child. It never blocks: the caller batches role children and
@@ -373,7 +389,7 @@ func (o *Orchestrator) dispatchRoleChild(ctx context.Context, runID string, flow
 	}
 	child, err := o.Children.CreateTaskChild(ctx, runID, flow.SessionID, ChildSpec{
 		Handle: node.Handle, RoleVersionID: node.RoleVersionID,
-		SkillIDs: append([]string(nil), node.SkillDigests...), Assignment: goal, Budget: budget,
+		Skills: frozenSkillRefs(node), Assignment: goal, Budget: budget,
 		RoleDefinitionJSON: node.RoleDefinitionJSON,
 	})
 	if err != nil {
@@ -654,7 +670,7 @@ func (o *Orchestrator) runFanOutTask(ctx context.Context, runID string, flow *do
 		child, err := o.Children.CreateTaskChild(ctx, runID, flow.SessionID, ChildSpec{
 			Handle:        fmt.Sprintf("%s-%d", node.Handle, i),
 			RoleVersionID: node.RoleVersionID,
-			SkillIDs:      append([]string(nil), node.SkillDigests...),
+			Skills:        frozenSkillRefs(node),
 			Assignment:    goal, Budget: budget,
 			RoleDefinitionJSON: node.RoleDefinitionJSON,
 		})

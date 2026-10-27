@@ -1,11 +1,13 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agent"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/skills"
 	"github.com/seqyuan/ennote/ennoworker/internal/systemprompt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -51,7 +53,9 @@ func TestDelegatedChildSegmentsInlineFrozenTaskSkills(t *testing.T) {
 	writePreloadSkill(t, skillsDir, "task-skill", "TASK_PRELOAD_BODY")
 
 	executor := &agentExecutor{skillsDir: skillsDir}
-	segments, err := executor.delegatedChildSegments(childRole(), "Review.", []string{"role-skill", "task-skill"}, "task:child-9")
+	segments, err := executor.delegatedChildSegments(childRole(), "Review.", domain.FrozenSkillRefs{
+		{ID: "role-skill"}, {ID: "task-skill"},
+	}, "task:child-9")
 	require.NoError(t, err)
 
 	text, sections := systemprompt.Compose(segments)
@@ -82,8 +86,33 @@ func TestDelegatedChildSegmentsContainNoProjectContext(t *testing.T) {
 
 func TestDelegatedChildSegmentsFailLoudlyOnUnavailableTaskSkill(t *testing.T) {
 	executor := &agentExecutor{}
-	_, err := executor.delegatedChildSegments(childRole(), "Review.", []string{"gone"}, "task:child-3")
+	_, err := executor.delegatedChildSegments(childRole(), "Review.", domain.FrozenSkillRefs{{ID: "gone"}}, "task:child-3")
 	require.ErrorContains(t, err, "gone")
+}
+
+// Publish would otherwise be a lie: a Flow task that froze a Skill body must not
+// silently execute different content after someone edits the on-disk Skill.
+func TestDelegatedChildSegmentsFailClosedOnChangedSkillContent(t *testing.T) {
+	skillsDir := t.TempDir()
+	writePreloadSkill(t, skillsDir, "task-skill", "FROZEN_BODY")
+	frozen, err := skills.Load(filepath.Join(skillsDir, "task-skill"))
+	require.NoError(t, err)
+
+	executor := &agentExecutor{skillsDir: skillsDir}
+	refs := domain.FrozenSkillRefs{{ID: "task-skill", Digest: frozen.ContentHash}}
+	segments, err := executor.delegatedChildSegments(childRole(), "Review.", refs, "task:child-5")
+	require.NoError(t, err, "unchanged content still materializes")
+	text, _ := systemprompt.Compose(segments)
+	assert.Contains(t, text, "FROZEN_BODY")
+
+	// Edit the Skill after the freeze.
+	writePreloadSkill(t, skillsDir, "task-skill", "EDITED_BODY")
+	_, err = executor.delegatedChildSegments(childRole(), "Review.", refs, "task:child-5")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "task-skill")
+	assert.Contains(t, err.Error(), "frozen content digest")
+	assert.Contains(t, err.Error(), frozen.ContentHash)
+	assert.NotContains(t, err.Error(), "EDITED_BODY")
 }
 
 func TestDelegatedChildSegmentsEqualTheComposedPrompt(t *testing.T) {

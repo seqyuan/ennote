@@ -249,10 +249,13 @@ type RunAgentFlow struct {
 // RunAgentFlowNode is one task checkpoint. terminal_state + output_ref is the
 // flow checkpoint: completed tasks are never replayed on resume.
 type RunAgentFlowNode struct {
-	RunID         string          `json:"runId"`
-	TaskIndex     int             `json:"taskIndex"`
-	Handle        string          `json:"handle"`
-	RoleVersionID string          `json:"roleVersionId,omitempty"`
+	RunID         string `json:"runId"`
+	TaskIndex     int    `json:"taskIndex"`
+	Handle        string `json:"handle"`
+	RoleVersionID string `json:"roleVersionId,omitempty"`
+	// SkillDigests is the bare task Skill ID list. It is kept for the public
+	// Workers API shape (skillDigests: [id]); the digest-pinned view lives in
+	// FrozenSkills, decoded from the same column.
 	SkillDigests  []string        `json:"skillDigests,omitempty"`
 	GoalDigest    string          `json:"goalDigest,omitempty"`
 	GoalText      string          `json:"goalText,omitempty"`
@@ -276,6 +279,10 @@ type RunAgentFlowNode struct {
 	// start (global revision, graph-local role, or inline task role). It is
 	// used to materialize child Runs without re-reading mutable files.
 	RoleDefinitionJSON json.RawMessage `json:"roleDefinition,omitempty"`
+	// FrozenSkills carries the task-level additive Skills with the content
+	// digest frozen at Run start. It is internal (json:"-"): the public API
+	// keeps exposing the Skill ID list through SkillDigests.
+	FrozenSkills FrozenSkillRefs `json:"-"`
 }
 
 // FlowRunOutput is the folded flow output: the outputs port values plus the

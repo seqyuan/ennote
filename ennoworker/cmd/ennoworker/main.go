@@ -472,11 +472,11 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		// One ordered segment list produces both the exact prompt bytes and the
 		// per-section identity record that the Run freezes, so nothing can be in
 		// the prompt without also being in the record.
-		taskSkillIDs, taskSkillsErr := (&store.DelegationRepo{DB: e.db}).TaskSkillsForChildRun(ctx, run.ID)
+		taskSkills, taskSkillsErr := (&store.DelegationRepo{DB: e.db}).TaskFrozenSkillsForChildRun(ctx, run.ID)
 		if taskSkillsErr != nil {
 			return domain.RunOutput{}, fmt.Errorf("load task skills: %w", taskSkillsErr)
 		}
-		taskSegments, taskSkillsErr := e.taskPreloadSegments(resolved.Effective.Role, taskSkillIDs,
+		taskSegments, taskSkillsErr := e.taskPreloadSegments(resolved.Effective.Role, taskSkills,
 			fmt.Sprintf("task:%s", run.ID))
 		if taskSkillsErr != nil {
 			return domain.RunOutput{}, taskSkillsErr
@@ -980,12 +980,12 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 			systemPromptSections = composition.Sections
 		}
 	} else {
-		taskSkillIDs, taskSkillsErr := e.delegationRepo().TaskSkillsForChildRun(ctx, run.ID)
+		taskSkills, taskSkillsErr := e.delegationRepo().TaskFrozenSkillsForChildRun(ctx, run.ID)
 		if taskSkillsErr != nil {
 			return domain.RunOutput{}, fmt.Errorf("load child task skills: %w", taskSkillsErr)
 		}
 		childSegments, childSegmentsErr := e.delegatedChildSegments(resolved.Effective.Role,
-			resolved.SystemPrompt.AgentPrompt, taskSkillIDs, fmt.Sprintf("task:%s", run.ID))
+			resolved.SystemPrompt.AgentPrompt, taskSkills, fmt.Sprintf("task:%s", run.ID))
 		if childSegmentsErr != nil {
 			return domain.RunOutput{}, childSegmentsErr
 		}
@@ -1660,8 +1660,16 @@ func (e *agentExecutor) rolePreloadPrompt(role *domain.FrozenRoleExecution) stri
 // preload Skills are rendered separately and are de-duplicated here; explicit
 // task Skills must still exist in the current catalog so a removed or invalid
 // frozen binding fails loudly rather than silently weakening the task.
-func (e *agentExecutor) taskPreloadSegments(role *domain.FrozenRoleExecution, ids []string, source string) ([]systemprompt.Segment, error) {
-	if len(ids) == 0 {
+//
+// A ref that was frozen with a content digest is pinned: the on-disk Skill must
+// still hash to exactly that digest, otherwise the Run fails closed instead of
+// silently executing different Skill content than the published Flow froze.
+// An unpinned ref (empty digest) only exists for references written before
+// content pinning, or for model-authored delegate_tasks Skill lists; those keep
+// their historical behavior.
+func (e *agentExecutor) taskPreloadSegments(role *domain.FrozenRoleExecution, frozen domain.FrozenSkillRefs,
+	source string) ([]systemprompt.Segment, error) {
+	if len(frozen) == 0 {
 		return nil, nil
 	}
 	loaded := make(map[string]*skills.LoadedSkill)
@@ -1676,13 +1684,22 @@ func (e *agentExecutor) taskPreloadSegments(role *domain.FrozenRoleExecution, id
 			}
 		}
 	}
-	seen := make(map[string]struct{}, len(ids))
-	segments := make([]systemprompt.Segment, 0, len(ids))
-	for _, rawID := range ids {
-		id := strings.TrimSpace(rawID)
+	seen := make(map[string]struct{}, len(frozen))
+	segments := make([]systemprompt.Segment, 0, len(frozen))
+	for _, ref := range frozen {
+		id := strings.TrimSpace(ref.ID)
 		skill, ok := loaded[id]
 		if !ok {
-			return nil, fmt.Errorf("task skill %q is unavailable", id)
+			return nil, fmt.Errorf("task skill %q for %s is unavailable", id, source)
+		}
+		// Verify the pinned content before any de-duplication: even when the
+		// Role already preloads this Skill, the task froze a specific body and
+		// a changed catalog must not slip through another path.
+		if ref.Digest != "" && ref.Digest != skill.ContentHash {
+			return nil, fmt.Errorf("task skill %q for %s does not match its frozen content digest "+
+				"(frozen %s, on-disk %s): the Skill changed after this flow task was frozen, so the Run "+
+				"refuses to execute unpinned content. Restore the frozen Skill content or publish a new flow revision",
+				id, source, ref.Digest, skill.ContentHash)
 		}
 		if _, duplicate := seen[id]; duplicate {
 			continue
@@ -1697,8 +1714,8 @@ func (e *agentExecutor) taskPreloadSegments(role *domain.FrozenRoleExecution, id
 }
 
 // taskPreloadPrompt is the composed text of taskPreloadSegments.
-func (e *agentExecutor) taskPreloadPrompt(role *domain.FrozenRoleExecution, ids []string) (string, error) {
-	segments, err := e.taskPreloadSegments(role, ids, "task")
+func (e *agentExecutor) taskPreloadPrompt(role *domain.FrozenRoleExecution, frozen domain.FrozenSkillRefs) (string, error) {
+	segments, err := e.taskPreloadSegments(role, frozen, "task")
 	if err != nil {
 		return "", err
 	}
@@ -2023,12 +2040,12 @@ func describePromptSections(sections []domain.PromptSection) string {
 // naming a catalog would describe a capability the child does not have. Preload
 // Skills are inlined precisely because they must work without filesystem access.
 func (e *agentExecutor) delegatedChildSegments(role *domain.FrozenRoleExecution, agentPrompt string,
-	taskSkillIDs []string, taskSource string) ([]systemprompt.Segment, error) {
+	taskSkills domain.FrozenSkillRefs, taskSource string) ([]systemprompt.Segment, error) {
 	if role == nil {
 		return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
 			errors.New("delegated child prompt requires a frozen Role execution"))
 	}
-	taskSegments, err := e.taskPreloadSegments(role, taskSkillIDs, taskSource)
+	taskSegments, err := e.taskPreloadSegments(role, taskSkills, taskSource)
 	if err != nil {
 		return nil, err
 	}

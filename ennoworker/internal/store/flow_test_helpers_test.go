@@ -162,14 +162,16 @@ func freezeFlowForTest(t *testing.T, db *sql.DB, flowRuns *store.AgentFlowRunRep
 			add("task %q: Role %s is not auto_within_budget", name, task.Role)
 			continue
 		}
-		skillIDs := make([]string, 0, len(task.Skills))
+		// The test fixture has no on-disk Skill catalog, so frozen refs are
+		// unpinned (empty digest): this is the legacy compatibility shape.
+		frozenSkills := make(domain.FrozenSkillRefs, 0, len(task.Skills))
 		for _, skillName := range task.Skills {
 			id, ok := flowRuns.SkillCatalog[skillName]
 			if !ok {
 				add("task %q: skill %q is not in the catalog", name, skillName)
 				continue
 			}
-			skillIDs = append(skillIDs, id)
+			frozenSkills = append(frozenSkills, domain.FrozenSkillRef{ID: id})
 		}
 		ceiling := roleDef.DelegationPolicy.BudgetCeiling
 		if task.Budget != nil && task.Budget.Tokens > 0 {
@@ -186,7 +188,7 @@ func freezeFlowForTest(t *testing.T, db *sql.DB, flowRuns *store.AgentFlowRunRep
 		})
 		roleDefJSON, _ := json.Marshal(roleDef)
 		node.RoleVersionID = versionID
-		node.SkillIDs = skillIDs
+		node.Skills = frozenSkills
 		node.BudgetJSON = budgetJSON
 		node.ReadOnly = testRoleDefinitionIsReadOnly(roleDef)
 		node.Writes = append([]string(nil), task.Writes...)

@@ -80,9 +80,11 @@ func resolveGenerationItemStatesTx(ctx context.Context, tx *sql.Tx, groupID stri
 			}
 		}
 		if skillsJSON != "" && skillsJSON != "[]" {
-			if err := json.Unmarshal([]byte(skillsJSON), &state.item.Skills); err != nil {
+			ids, err := domain.SkillIDsFromJSON([]byte(skillsJSON))
+			if err != nil {
 				return nil, fmt.Errorf("decode skills for item %s: %w", state.item.ID, err)
 			}
+			state.item.Skills = ids
 		}
 		state.item.GroupID = groupID
 		state.item.AssignmentJSON = json.RawMessage(assignmentJSON)

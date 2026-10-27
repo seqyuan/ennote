@@ -30,9 +30,12 @@ type Service struct {
 	Models  *store.ModelRepo
 	// Sessions opens the owning Session database.
 	Sessions *sessionstore.Manager
-	// GlobalSkills maps global Skill id -> available. nil-safe: an unresolved
-	// global Skill fails the Run freeze loudly.
-	GlobalSkills map[string]bool
+	// GlobalSkills maps global Skill id -> its current content digest (the same
+	// sha256 directory hash skills.Load computes as LoadedSkill.ContentHash).
+	// nil-safe: an unresolved global Skill, or one whose digest is unknown,
+	// fails the Run freeze loudly instead of silently freezing an unpinned
+	// reference.
+	GlobalSkills map[string]string
 	// OnRunStarted wires the per-Session orchestrator for a freshly frozen
 	// flow run (enqueue child runs, events, recovery).
 	OnRunStarted func(ctx context.Context, db *sql.DB, sessionPath, runID string) error
@@ -244,6 +247,10 @@ func (s *Service) freezeTasks(ctx context.Context, document *graphsource.Documen
 		if err != nil {
 			return nil, fmt.Errorf("Task %q: %w", name, err)
 		}
+		frozenSkills, err := domain.NormalizeFrozenSkills(globalSkills)
+		if err != nil {
+			return nil, fmt.Errorf("Task %q: %w", name, err)
+		}
 		switch role.Definition.DelegationPolicy.Admission {
 		case domain.DelegationAutoWithinBudget:
 		case domain.DelegationDenied:
@@ -268,7 +275,7 @@ func (s *Service) freezeTasks(ctx context.Context, document *graphsource.Documen
 		roleDefJSON, _ := json.Marshal(role.Definition)
 		freeze = append(freeze, store.FlowNodeFreeze{
 			TaskIndex: indexOf[name], Handle: name,
-			RoleVersionID: role.VersionID, SkillIDs: globalSkills,
+			RoleVersionID: role.VersionID, Skills: frozenSkills,
 			GoalDigest: agentflow.TaskGoalDigest(task.Goal), GoalText: task.Goal,
 			BudgetJSON: budgetJSON, ReadOnly: roleDefinitionIsReadOnly(role.Definition),
 			Writes:             append([]string(nil), task.Writes...),
@@ -310,10 +317,11 @@ func toolReadOnlyKind(tool string) bool {
 //   - "local/<id>"   -> the Graph-private Role document (digest-versioned);
 //   - ""             -> a synthetic inline Role bound to the Task's model.
 //
-// Global Task Skills are validated and returned as additive preload ids;
-// local Task Skills are inlined into the Role prompt and tool allowlist.
+// Global Task Skills are validated, resolved to their current content digest,
+// and returned as additive preload refs; local Task Skills are inlined into the
+// Role prompt and tool allowlist.
 func (s *Service) resolveTaskRole(ctx context.Context, document *graphsource.Document,
-	taskID string, task graphsource.Task) (*frozenTaskRole, []string, error) {
+	taskID string, task graphsource.Task) (*frozenTaskRole, domain.FrozenSkillRefs, error) {
 	if task.Role != "" {
 		scope, id, _ := strings.Cut(task.Role, "/")
 		switch scope {
@@ -361,15 +369,19 @@ func (s *Service) resolveTaskRole(ctx context.Context, document *graphsource.Doc
 	}
 	prompt := inlineTaskPrompt
 	allowedTools := append([]string(nil), inlineBaseTools...)
-	globalSkills := make([]string, 0, len(task.Skills))
+	globalSkills := make(domain.FrozenSkillRefs, 0, len(task.Skills))
 	for _, ref := range task.Skills {
 		scope, id, _ := strings.Cut(ref, "/")
 		switch scope {
 		case "global":
-			if s.GlobalSkills == nil || !s.GlobalSkills[id] {
+			digest, ok := s.GlobalSkills[id]
+			if !ok {
 				return nil, nil, fmt.Errorf("global Skill %q is not available", id)
 			}
-			globalSkills = append(globalSkills, id)
+			if digest == "" {
+				return nil, nil, fmt.Errorf("global Skill %q has no content digest; refusing to freeze an unpinned Skill", id)
+			}
+			globalSkills = append(globalSkills, domain.FrozenSkillRef{ID: id, Digest: digest})
 		case "local":
 			loaded, loadErr := s.loadLocalSkill(document.ID, id)
 			if loadErr != nil {

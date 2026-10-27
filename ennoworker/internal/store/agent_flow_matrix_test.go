@@ -39,7 +39,7 @@ func TestAgentFlowMatrixRunAndEventsPersisted(t *testing.T) {
 	require.NoError(t, err, diagnostics)
 	require.Len(t, freeze, 3)
 	assert.Equal(t, roleVersionID, freeze[0].RoleVersionID)
-	assert.Equal(t, "skill-go-dev", freeze[0].SkillIDs[0])
+	assert.Equal(t, "skill-go-dev", freeze[0].Skills[0].ID)
 	assert.NotEmpty(t, freeze[0].GoalDigest)
 
 	session := sqlCreateSession(t, db, projectID)

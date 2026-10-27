@@ -44,10 +44,13 @@ type FlowNodeFreeze struct {
 	TaskIndex     int
 	Handle        string
 	RoleVersionID string
-	SkillIDs      []string
-	GoalDigest    string
-	GoalText      string
-	BudgetJSON    json.RawMessage
+	// Skills are the task-level additive Skills with the content digest
+	// observed at freeze time. A ref without a digest is unpinned (legacy
+	// callers that only know IDs); new Flow Runs always pin.
+	Skills     domain.FrozenSkillRefs
+	GoalDigest string
+	GoalText   string
+	BudgetJSON json.RawMessage
 	// ReadOnly/Writes are the scheduler's concurrency class for this node,
 	// frozen from the resolved Role definition and the task's declares.
 	ReadOnly bool
@@ -165,7 +168,10 @@ func (r *AgentFlowRunRepo) CreateFlowRun(ctx context.Context, input CreateFlowRu
 		if node.Handle == "" || node.GoalDigest == "" {
 			return nil, fmt.Errorf("flow freeze for task %d is incomplete", node.TaskIndex)
 		}
-		skillsJSON, _ := json.Marshal(node.SkillIDs)
+		skillsJSON, err := domain.EncodeFrozenSkills(node.Skills)
+		if err != nil {
+			return nil, fmt.Errorf("flow freeze for task %d: %w", node.TaskIndex, err)
+		}
 		budgetJSON := node.BudgetJSON
 		if len(budgetJSON) == 0 {
 			budgetJSON = json.RawMessage(`{}`)
@@ -496,8 +502,13 @@ func scanFlowNode(scan interface{ Scan(...any) error }) (*domain.RunAgentFlowNod
 	if childRunIDsJSON != "" {
 		_ = json.Unmarshal([]byte(childRunIDsJSON), &node.ChildRunIDs)
 	}
-	if skillsJSON.Valid {
-		_ = json.Unmarshal([]byte(skillsJSON.String), &node.SkillDigests)
+	if skillsJSON.Valid && skillsJSON.String != "" {
+		refs, err := domain.DecodeFrozenSkills([]byte(skillsJSON.String))
+		if err != nil {
+			return nil, fmt.Errorf("decode frozen skills for task %d: %w", node.TaskIndex, err)
+		}
+		node.FrozenSkills = refs
+		node.SkillDigests = refs.IDs()
 	}
 	if budgetJSON.Valid {
 		node.BudgetJSON = json.RawMessage(budgetJSON.String)

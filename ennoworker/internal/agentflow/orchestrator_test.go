@@ -329,7 +329,7 @@ func TestOrchestratorSerialExecutionAndHandoff(t *testing.T) {
 	children := newFakeChildren()
 	for _, node := range fake.nodes {
 		if node.Handle == "producer" {
-			node.SkillDigests = []string{"skill-go-dev"}
+			node.FrozenSkills = domain.FrozenSkillRefs{{ID: "skill-go-dev", Digest: "sha256:frozen"}}
 		}
 	}
 	events := &fakeEvents{}
@@ -339,7 +339,8 @@ func TestOrchestratorSerialExecutionAndHandoff(t *testing.T) {
 	assert.Equal(t, domain.FlowStateCompleted, state)
 	require.Len(t, children.created, 2, "producer+reviewer are role tasks; accept is terminal")
 	assert.Equal(t, "Implement src/main.go and fast", children.created[0].Assignment)
-	assert.Equal(t, []string{"skill-go-dev"}, children.created[0].SkillIDs)
+	assert.Equal(t, domain.FrozenSkillRefs{{ID: "skill-go-dev", Digest: "sha256:frozen"}}, children.created[0].Skills,
+		"the frozen content digest must reach child materialization")
 	assert.Equal(t, "Review [\"a.go\"]", children.created[1].Assignment)
 	assert.Equal(t, domain.RunSucceeded, fake.anchorStatus)
 	// Node checkpoints.

@@ -47,11 +47,11 @@ description: Emits a fixed marker token so the run can prove the Skill was loade
 ---
 
 Your submit_result summary MUST begin with the exact token LIVE_SKILL_MARKER followed by your answer.`), 0o600))
-	globalSkills := map[string]bool{}
+	globalSkills := map[string]string{}
 	for _, skill := range skills.Discover(skillsDir) {
-		globalSkills[skill.Manifest.ID] = true
+		globalSkills[skill.Manifest.ID] = skill.ContentHash
 	}
-	require.True(t, globalSkills["live-marker"], "live-marker skill must be discovered")
+	require.Contains(t, globalSkills, "live-marker", "live-marker skill must be discovered")
 
 	// ——— file-native global Role (reader) carrying a preload Skill ———
 	role := &rolesource.Document{

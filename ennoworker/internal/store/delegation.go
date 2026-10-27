@@ -64,6 +64,11 @@ type CreateDelegationItemInput struct {
 	// Skills are task-level additive preload Skill IDs. They do not change the
 	// frozen Role's tool policy or authority and are persisted for retry/recovery.
 	Skills []string
+	// FrozenSkills are digest-pinned task Skill refs frozen by an Agent Flow
+	// node. They are merged with Skills by ID (pinned wins, first occurrence
+	// keeps its position) and persisted alongside; model-authored task specs
+	// only ever supply the unpinned Skills list above.
+	FrozenSkills domain.FrozenSkillRefs
 	// Depends declares batch-scoped task dependencies: sibling item names in
 	// the same group that must settle before this item is ready to start.
 	// Empty means the item is an entry task. The topology is validated in
@@ -275,11 +280,11 @@ func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 		if err != nil {
 			return nil, nil, err
 		}
-		taskSkills, err := normalizeTaskSkillIDs(item.Skills)
+		taskSkills, err := taskSkillRefs(item.FrozenSkills, item.Skills)
 		if err != nil {
 			return nil, nil, fmt.Errorf("delegation item %s: %w", name, err)
 		}
-		skillsJSON, err := json.Marshal(taskSkills)
+		skillsJSON, err := domain.EncodeFrozenSkills(taskSkills)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -309,7 +314,7 @@ func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 			return nil, nil, fmt.Errorf("create delegation item %s: %w", name, err)
 		}
 		items = append(items, domain.DelegationItem{
-			ID: itemID, GroupID: groupID, Name: name, Skills: taskSkills,
+			ID: itemID, GroupID: groupID, Name: name, Skills: taskSkills.IDs(),
 			Depends: append([]string(nil), item.Depends...), RoleVersionID: item.RoleVersionID,
 			AssignmentJSON: append(json.RawMessage(nil), item.AssignmentJSON...), OutputContract: outputContract,
 			BudgetJSON: budgetJSON, Status: domain.DelegationItemPending, Ordinal: ordinal, CreatedAt: now,
@@ -321,27 +326,18 @@ func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 	return group, items, nil
 }
 
-// normalizeTaskSkillIDs freezes a stable, de-duplicated task Skill list while
-// rejecting blank IDs. Catalog availability is validated by the caller that
-// owns the effective Skill roots.
-func normalizeTaskSkillIDs(ids []string) ([]string, error) {
-	if len(ids) == 0 {
-		return []string{}, nil
-	}
-	normalized := make([]string, 0, len(ids))
-	seen := make(map[string]struct{}, len(ids))
+// taskSkillRefs freezes the task Skill list of one delegation item: the
+// digest-pinned refs from a frozen Flow node first (in declared order), then
+// any plain IDs as unpinned refs. Blank IDs are rejected and duplicates are
+// de-duplicated by ID, keeping the first occurrence, so the result depends only
+// on the input order and never on map iteration.
+func taskSkillRefs(pinned domain.FrozenSkillRefs, ids []string) (domain.FrozenSkillRefs, error) {
+	merged := make(domain.FrozenSkillRefs, 0, len(pinned)+len(ids))
+	merged = append(merged, pinned...)
 	for _, raw := range ids {
-		id := strings.TrimSpace(raw)
-		if id == "" {
-			return nil, fmt.Errorf("task skill id is required")
-		}
-		if _, exists := seen[id]; exists {
-			continue
-		}
-		seen[id] = struct{}{}
-		normalized = append(normalized, id)
+		merged = append(merged, domain.FrozenSkillRef{ID: raw})
 	}
-	return normalized, nil
+	return domain.NormalizeFrozenSkills(merged)
 }
 
 // ValidateTaskTopology validates model-authored TaskSpecs before delegation
@@ -749,6 +745,20 @@ func (r *DelegationRepo) ListItems(ctx context.Context, groupID string) ([]domai
 // delegation_item_attempts keeps retry children attached to the same task
 // contract without relying on the generation-zero child_run_id substrate.
 func (r *DelegationRepo) TaskSkillsForChildRun(ctx context.Context, childRunID string) ([]string, error) {
+	refs, err := r.TaskFrozenSkillsForChildRun(ctx, childRunID)
+	if err != nil {
+		return nil, err
+	}
+	if refs == nil {
+		return nil, nil
+	}
+	return refs.IDs(), nil
+}
+
+// TaskFrozenSkillsForChildRun returns the task Skill refs including the content
+// digests frozen on the delegation item. Legacy rows (bare ID arrays) decode to
+// unpinned refs.
+func (r *DelegationRepo) TaskFrozenSkillsForChildRun(ctx context.Context, childRunID string) (domain.FrozenSkillRefs, error) {
 	var encoded string
 	err := r.DB.QueryRowContext(ctx, `SELECT COALESCE(i.skills_json,'[]')
 		FROM delegation_item_attempts a JOIN delegation_items i ON i.id=a.item_id
@@ -759,11 +769,11 @@ func (r *DelegationRepo) TaskSkillsForChildRun(ctx context.Context, childRunID s
 	if err != nil {
 		return nil, err
 	}
-	var ids []string
-	if err := json.Unmarshal([]byte(encoded), &ids); err != nil {
+	refs, err := domain.DecodeFrozenSkills([]byte(encoded))
+	if err != nil {
 		return nil, fmt.Errorf("decode task skills for child run %s: %w", childRunID, err)
 	}
-	return ids, nil
+	return refs, nil
 }
 
 // ListActivity returns stable parent-visible group and child state without
@@ -883,9 +893,11 @@ func scanDelegationItems(rows *sql.Rows) ([]domain.DelegationItem, error) {
 			}
 		}
 		if skillsJSON.Valid && skillsJSON.String != "" && skillsJSON.String != "[]" {
-			if err := json.Unmarshal([]byte(skillsJSON.String), &item.Skills); err != nil {
+			ids, err := domain.SkillIDsFromJSON([]byte(skillsJSON.String))
+			if err != nil {
 				return nil, fmt.Errorf("decode skills for item %s: %w", item.ID, err)
 			}
+			item.Skills = ids
 		}
 		var err error
 		item.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)

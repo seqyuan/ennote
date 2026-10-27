@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/skills"
 	"github.com/seqyuan/ennote/ennoworker/internal/systemprompt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -64,7 +65,7 @@ func TestTaskPreloadSegmentsAttributeToTheTask(t *testing.T) {
 	writePreloadSkill(t, skillsDir, "task-skill", "TASK_BODY")
 
 	executor := &agentExecutor{skillsDir: skillsDir}
-	segments, err := executor.taskPreloadSegments(nil, []string{"task-skill"}, "task:child-run-1")
+	segments, err := executor.taskPreloadSegments(nil, domain.FrozenSkillRefs{{ID: "task-skill"}}, "task:child-run-1")
 	require.NoError(t, err)
 	require.Len(t, segments, 1)
 	assert.Equal(t, "task:child-run-1", segments[0].Source)
@@ -74,8 +75,47 @@ func TestTaskPreloadSegmentsAttributeToTheTask(t *testing.T) {
 	// An explicit task Skill must still exist in the current catalog: a removed
 	// or invalid frozen binding fails loudly instead of silently weakening the
 	// task.
-	_, err = executor.taskPreloadSegments(nil, []string{"missing"}, "task:x")
+	_, err = executor.taskPreloadSegments(nil, domain.FrozenSkillRefs{{ID: "missing"}}, "task:x")
 	require.ErrorContains(t, err, "missing")
+}
+
+// A task Skill frozen with a content digest is pinned: the on-disk Skill must
+// still hash to exactly that digest, or the Run fails closed.
+func TestTaskPreloadSegmentsVerifyFrozenContentDigest(t *testing.T) {
+	skillsDir := t.TempDir()
+	writePreloadSkill(t, skillsDir, "task-skill", "FROZEN_BODY")
+	frozen, err := skills.Load(filepath.Join(skillsDir, "task-skill"))
+	require.NoError(t, err)
+	require.NotEmpty(t, frozen.ContentHash)
+
+	executor := &agentExecutor{skillsDir: skillsDir}
+	pinned := domain.FrozenSkillRefs{{ID: "task-skill", Digest: frozen.ContentHash}}
+	segments, err := executor.taskPreloadSegments(nil, pinned, "task:run-1")
+	require.NoError(t, err, "unchanged content still runs")
+	require.Len(t, segments, 1)
+	assert.Contains(t, segments[0].Text, "FROZEN_BODY")
+
+	// Editing the Skill after the freeze must not silently change behaviour.
+	writePreloadSkill(t, skillsDir, "task-skill", "EDITED_BODY")
+	_, err = executor.taskPreloadSegments(nil, pinned, "task:run-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "task-skill")
+	assert.Contains(t, err.Error(), "frozen content digest")
+	assert.Contains(t, err.Error(), "task:run-1")
+	assert.Contains(t, err.Error(), frozen.ContentHash)
+}
+
+// Legacy (pre-pinning) references carry no digest and keep their old behaviour:
+// the current on-disk Skill body is used. Documented compatibility behaviour.
+func TestTaskPreloadSegmentsUseCurrentContentForLegacyUnpinnedRefs(t *testing.T) {
+	skillsDir := t.TempDir()
+	writePreloadSkill(t, skillsDir, "task-skill", "CURRENT_BODY")
+
+	executor := &agentExecutor{skillsDir: skillsDir}
+	segments, err := executor.taskPreloadSegments(nil, domain.FrozenSkillRefs{{ID: "task-skill"}}, "task:legacy")
+	require.NoError(t, err)
+	require.Len(t, segments, 1)
+	assert.Contains(t, segments[0].Text, "CURRENT_BODY")
 }
 
 // The string API and the segment API must agree byte for byte: freezing the
@@ -97,17 +137,21 @@ func TestPreloadSegmentsComposeToTheStringAPI(t *testing.T) {
 	require.Len(t, roleSections, 1)
 	assert.Contains(t, roleText, "ROLE_BODY")
 
-	taskSegments, err := executor.taskPreloadSegments(role, []string{"role-skill", "task-skill", "task-skill"}, "task:r")
+	taskSegments, err := executor.taskPreloadSegments(role, domain.FrozenSkillRefs{
+		{ID: "role-skill"}, {ID: "task-skill"}, {ID: "task-skill"},
+	}, "task:r")
 	require.NoError(t, err)
 	taskText, taskSections := systemprompt.Compose(taskSegments)
-	assert.Equal(t, mustTaskPreloadPrompt(t, executor, role, []string{"role-skill", "task-skill", "task-skill"}), taskText)
+	assert.Equal(t, mustTaskPreloadPrompt(t, executor, role, domain.FrozenSkillRefs{
+		{ID: "role-skill"}, {ID: "task-skill"}, {ID: "task-skill"},
+	}), taskText)
 	require.Len(t, taskSections, 1, "Role preloads are de-duplicated out of the task overlay")
 	assert.Equal(t, "task-skill", taskSections[0].SkillID)
 }
 
-func mustTaskPreloadPrompt(t *testing.T, executor *agentExecutor, role *domain.FrozenRoleExecution, ids []string) string {
+func mustTaskPreloadPrompt(t *testing.T, executor *agentExecutor, role *domain.FrozenRoleExecution, refs domain.FrozenSkillRefs) string {
 	t.Helper()
-	text, err := executor.taskPreloadPrompt(role, ids)
+	text, err := executor.taskPreloadPrompt(role, refs)
 	require.NoError(t, err)
 	return text
 }

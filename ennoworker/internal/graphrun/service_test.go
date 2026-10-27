@@ -16,6 +16,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
+	"github.com/seqyuan/ennote/ennoworker/internal/skills"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -127,7 +128,7 @@ func TestServiceFreezesFileNativeGraphRun(t *testing.T) {
 	var inlineDef domain.RoleDefinition
 	require.NoError(t, json.Unmarshal([]byte(roleDefJSON), &inlineDef))
 	assert.Equal(t, model.ID, inlineDef.ModelBinding.ModelProfileID)
-	assert.Equal(t, "[]", skillJSON)
+	assert.Equal(t, `{"schemaVersion":2,"skills":[]}`, skillJSON)
 
 	require.NoError(t, db.QueryRow(`SELECT handle, role_version_id, role_definition_json FROM run_agent_flow_nodes
 		WHERE run_id=? AND task_index=1`, run.RunID).
@@ -232,4 +233,120 @@ func TestServiceFreezesGraphLocalRole(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(roleDefJSON), &def))
 	assert.Equal(t, "Local prompt.", def.RolePrompt)
 	assert.Equal(t, model.ID, def.ModelBinding.ModelProfileID)
+}
+
+// skillGraphFixture publishes a one-task graph whose inline task requests one
+// global Skill, so the freeze path under test resolves a real catalog digest.
+// (Graph documents reject duplicate Skill references at publish time, so the
+// duplicate-dedupe invariant is exercised by the store/delegation tests.)
+type skillGraphFixture struct {
+	service   *graphrun.Service
+	sessions  *sessionstore.Manager
+	projectID string
+	sessionID string
+	digest    string
+}
+
+func newSkillGraphFixture(t *testing.T, globalSkills map[string]string) *skillGraphFixture {
+	t.Helper()
+	ctx := context.Background()
+	home := t.TempDir()
+	models := fileconfig.NewModelStore(
+		filepath.Join(home, "config", "models.json"),
+		filepath.Join(home, "config", "provider-auth.json"),
+		filepath.Join(home, "config", "settings.json"),
+	)
+	_, err := models.CreateProvider(ctx, fileconfig.CreateProviderInput{
+		Key: "provider", Name: "Provider", ProviderType: domain.ProviderOpenAICompatible,
+		BaseURL: "https://provider.test/v1", APIKey: "sk-skill-secret",
+	})
+	require.NoError(t, err)
+	model, err := models.CreateModel(ctx, fileconfig.CreateModelInput{
+		ProviderID: "provider", ModelName: "skill-model", ContextWindow: 32768, MaxOutputTokens: 4096,
+		SupportsToolUse: true, ThinkingDialect: domain.ThinkingDialectNone,
+		SupportedThinkingEfforts: []domain.ThinkingEffort{domain.ThinkingDefault}, IsDefault: true,
+	})
+	require.NoError(t, err)
+
+	sources := &globalsource.Store{HomeDir: home}
+	_, _, err = sources.CreateGraph("pinned", "Pinned")
+	require.NoError(t, err)
+	_, _, err = sources.UpdateGraph("pinned", mustGraphDigest(t, sources), func(document *graphsource.Document) error {
+		document.Tasks = map[string]graphsource.Task{
+			"build": {Name: "Build", Model: model.ID, Goal: "Build it",
+				Skills: []string{"global/go-dev"}},
+		}
+		document.Graph = map[string][]string{"build": {}}
+		return nil
+	})
+	require.NoError(t, err)
+	_, err = sources.PublishGraphRevision("pinned")
+	require.NoError(t, err)
+
+	projects := &projectstore.Store{Root: filepath.Join(home, "projects")}
+	project, _, err := projects.CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: "Project", HostPath: t.TempDir()})
+	require.NoError(t, err)
+	sessions := sessionstore.NewManager(projects.Root, projects)
+	t.Cleanup(func() { require.NoError(t, sessions.Close()) })
+	session, err := sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID, Title: "Session"})
+	require.NoError(t, err)
+
+	return &skillGraphFixture{
+		service: &graphrun.Service{Sources: sources, Models: &store.ModelRepo{Files: models},
+			Sessions: sessions, GlobalSkills: globalSkills},
+		sessions: sessions, projectID: project.ID, sessionID: session.ID,
+	}
+}
+
+func mustGraphDigest(t *testing.T, sources *globalsource.Store) string {
+	t.Helper()
+	current, _, err := sources.ReadGraph("pinned")
+	require.NoError(t, err)
+	digest, err := graphsource.SourceDigest(current)
+	require.NoError(t, err)
+	return digest
+}
+
+func TestServiceFreezesGlobalTaskSkillContentDigest(t *testing.T) {
+	ctx := context.Background()
+	skillsDir := t.TempDir()
+	skillDir := filepath.Join(skillsDir, "go-dev")
+	require.NoError(t, os.MkdirAll(skillDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "skill.json"),
+		[]byte(`{"id":"go-dev","version":"1","prompt":"SKILL.md"}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("GO_DEV_BODY"), 0o600))
+	loaded, err := skills.Load(skillDir)
+	require.NoError(t, err)
+	require.NotEmpty(t, loaded.ContentHash)
+
+	fixture := newSkillGraphFixture(t, map[string]string{"go-dev": loaded.ContentHash})
+	run, err := fixture.service.Start(ctx, fixture.projectID, "pinned", 0, fixture.sessionID, nil, nil)
+	require.NoError(t, err)
+
+	db, err := fixture.sessions.OpenSession(ctx, fixture.sessionID)
+	require.NoError(t, err)
+	var skillJSON string
+	require.NoError(t, db.QueryRow(`SELECT skill_digests_json FROM run_agent_flow_nodes
+		WHERE run_id=? AND task_index=0`, run.RunID).Scan(&skillJSON))
+	refs, err := domain.DecodeFrozenSkills([]byte(skillJSON))
+	require.NoError(t, err)
+	// The loader's own content hash, not a second invented digest.
+	assert.Equal(t, domain.FrozenSkillRefs{{ID: "go-dev", Digest: loaded.ContentHash}}, refs)
+
+	node, err := (&store.AgentFlowRunRepo{DB: db}).GetNode(ctx, run.RunID, 0)
+	require.NoError(t, err)
+	assert.Equal(t, refs, node.FrozenSkills)
+	assert.Equal(t, []string{"go-dev"}, node.SkillDigests, "the public ID list stays stable")
+}
+
+func TestServiceRejectsUnresolvedGlobalTaskSkill(t *testing.T) {
+	fixture := newSkillGraphFixture(t, map[string]string{})
+	_, err := fixture.service.Start(context.Background(), fixture.projectID, "pinned", 0, fixture.sessionID, nil, nil)
+	require.ErrorContains(t, err, `global Skill "go-dev" is not available`)
+}
+
+func TestServiceRejectsGlobalTaskSkillWithoutDigest(t *testing.T) {
+	fixture := newSkillGraphFixture(t, map[string]string{"go-dev": ""})
+	_, err := fixture.service.Start(context.Background(), fixture.projectID, "pinned", 0, fixture.sessionID, nil, nil)
+	require.ErrorContains(t, err, "refusing to freeze an unpinned Skill")
 }
