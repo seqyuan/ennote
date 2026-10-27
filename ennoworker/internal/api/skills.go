@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -71,6 +72,45 @@ func (s *Server) listSkills(w http.ResponseWriter, r *http.Request) {
 		result.ProjectResourcesLoaded = s.skillsTrusted(w, r, projectID)
 	}
 	writeData(w, http.StatusOK, result)
+}
+
+// createSkill authors a new Skill under the user skills root. The created
+// Skill is immediately visible to the live catalog (and to Flow/Role freeze),
+// because the catalog is re-read from disk at list/freeze time.
+func (s *Server) createSkill(w http.ResponseWriter, r *http.Request) {
+	if s.Skills == nil {
+		writeError(w, r, http.StatusServiceUnavailable, "skills_unavailable", "skills are unavailable", true)
+		return
+	}
+	var body struct {
+		ID           string   `json:"id"`
+		Name         string   `json:"name"`
+		Description  string   `json:"description"`
+		Prompt       string   `json:"prompt"`
+		AllowedTools []string `json:"allowedTools"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	result, err := s.Skills.Create(skillsmgmt.CreateInput{
+		ID:           body.ID,
+		Name:         body.Name,
+		Description:  body.Description,
+		Prompt:       body.Prompt,
+		AllowedTools: body.AllowedTools,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, skillsmgmt.ErrSkillExists):
+			writeError(w, r, http.StatusConflict, "skill_exists", err.Error(), false)
+		case errors.Is(err, skillsmgmt.ErrSkillIDInvalid), errors.Is(err, skillsmgmt.ErrSkillPromptRequired):
+			writeError(w, r, http.StatusBadRequest, "invalid_skill", err.Error(), false)
+		default:
+			writeInternal(w, r, err)
+		}
+		return
+	}
+	writeData(w, http.StatusCreated, result)
 }
 
 // toggleSkillDisabled sets or clears disable-model-invocation on a managed

@@ -273,6 +273,7 @@ func (s *Server) routes() http.Handler {
 	}
 
 	mux.HandleFunc("GET /v1/skills", s.listSkills)
+	mux.HandleFunc("POST /v1/skills", s.createSkill)
 	mux.HandleFunc("PATCH /v1/skills/disabled/{relPath...}", s.toggleSkillDisabled)
 	mux.HandleFunc("GET /v1/skills/search", s.searchSkills)
 	mux.HandleFunc("POST /v1/skills/install", s.installSkill)

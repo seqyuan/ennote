@@ -5,10 +5,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
+	"github.com/seqyuan/ennote/ennoworker/internal/skills"
 	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/seqyuan/ennote/ennoworker/internal/workspace"
@@ -256,6 +258,107 @@ func TestSkillRootCreateRefreshesCatalog(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "disable-model-invocation: true")
+}
+
+func TestCreateSkillEndpointFeedsLiveCatalog(t *testing.T) {
+	server, handler, _ := setupSkillsServer(t)
+
+	response := request(t, handler, http.MethodPost, "/v1/skills", map[string]any{
+		"id":           "release-notes",
+		"name":         "Release Notes",
+		"description":  "Draft release notes from git history.",
+		"prompt":       "Read the git log and write release notes.",
+		"allowedTools": []string{"read", "bash"},
+	}, true)
+	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+
+	var created struct {
+		ID           string   `json:"id"`
+		Path         string   `json:"path"`
+		Description  string   `json:"description"`
+		AllowedTools []string `json:"allowedTools"`
+	}
+	decodeData(t, response, &created)
+	assert.Equal(t, "release-notes", created.ID)
+	assert.Equal(t, filepath.Join(server.Skills.UserRoot, "release-notes"), created.Path)
+	assert.Equal(t, "Draft release notes from git history.", created.Description)
+	assert.Equal(t, []string{"read", "bash"}, created.AllowedTools)
+
+	// GET /v1/skills lists the new Skill without a Worker restart.
+	response = request(t, handler, http.MethodGet, "/v1/skills", nil, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var listed struct {
+		Skills []struct {
+			SkillID     string `json:"skillId"`
+			Name        string `json:"name"`
+			RelPath     string `json:"relPath"`
+			FilePath    string `json:"filePath"`
+			Description string `json:"description"`
+		} `json:"skills"`
+	}
+	decodeData(t, response, &listed)
+	found := false
+	for _, skill := range listed.Skills {
+		if skill.SkillID == "release-notes" {
+			found = true
+			assert.Equal(t, "release-notes", skill.RelPath)
+			assert.True(t, strings.HasSuffix(skill.FilePath, filepath.Join("release-notes", "SKILL.md")))
+			assert.Equal(t, "Draft release notes from git history.", skill.Description)
+		}
+	}
+	assert.True(t, found, "created skill must appear in the live catalog")
+
+	// Flow/Role freeze reads the catalog from disk at freeze time; the new ID
+	// must carry a non-empty digest there too (no restart, no cached snapshot).
+	frozen := skills.DigestCatalog(server.Skills.UserRoot)
+	assert.NotEmpty(t, frozen["release-notes"])
+
+	loaded, err := skills.Load(created.Path)
+	require.NoError(t, err)
+	assert.Contains(t, loaded.PromptText, "Read the git log and write release notes.")
+}
+
+func TestCreateSkillEndpointValidation(t *testing.T) {
+	server, handler, _ := setupSkillsServer(t)
+
+	invalidIDs := []string{"", "../escape", "a/b", "Upper", "with space", ".."}
+	for _, id := range invalidIDs {
+		response := request(t, handler, http.MethodPost, "/v1/skills",
+			map[string]any{"id": id, "prompt": "body"}, true)
+		assert.Equal(t, http.StatusBadRequest, response.Code, id)
+	}
+
+	// Empty prompt.
+	response := request(t, handler, http.MethodPost, "/v1/skills",
+		map[string]any{"id": "no-prompt", "prompt": "  "}, true)
+	assert.Equal(t, http.StatusBadRequest, response.Code)
+
+	// Unknown field rejected by the strict decoder.
+	response = request(t, handler, http.MethodPost, "/v1/skills",
+		map[string]any{"id": "strict-body", "prompt": "body", "extra": true}, true)
+	assert.Equal(t, http.StatusBadRequest, response.Code)
+
+	// Nothing escaped the user skills root.
+	_, err := os.Stat(filepath.Join(server.Skills.UserRoot, "..", "escape"))
+	assert.True(t, os.IsNotExist(err))
+
+	// Duplicate ID conflicts instead of overwriting.
+	response = request(t, handler, http.MethodPost, "/v1/skills",
+		map[string]any{"id": "duplicate-skill", "prompt": "first"}, true)
+	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+	response = request(t, handler, http.MethodPost, "/v1/skills",
+		map[string]any{"id": "duplicate-skill", "prompt": "second"}, true)
+	require.Equal(t, http.StatusConflict, response.Code, response.Body.String())
+	encoded, err := os.ReadFile(filepath.Join(server.Skills.UserRoot, "duplicate-skill", "SKILL.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), "first")
+}
+
+func TestCreateSkillRequiresAuth(t *testing.T) {
+	_, handler, _ := setupSkillsServer(t)
+	response := request(t, handler, http.MethodPost, "/v1/skills",
+		map[string]any{"id": "unauth-skill", "prompt": "body"}, false)
+	assert.Equal(t, http.StatusUnauthorized, response.Code)
 }
 
 func containsSkill(skills []struct {
