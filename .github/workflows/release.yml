@@ -65,24 +65,18 @@ jobs:
             exit 1
           fi
 
-      - name: Typecheck
-        run: npx tsc --noEmit
+      - name: Test
+        run: |
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run test:go
 
       - name: Build Frontend
         run: npm run build:web
 
       - name: Cross-Compile Go Binaries
-        run: |
-          cd ennoworker
-          for target in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
-            CGO_ENABLED=0 go build -ldflags="-s -w" -trimpath -o "../worker/ennogate-${target}" ./cmd/ennogate
-            CGO_ENABLED=0 go build -ldflags="-s -w" -trimpath -o "../worker/ennoworker-${target}" ./cmd/ennoworker
-          done
-          # Rename amd64 → x64 to match Node os.arch()
-          cd ../worker
-          for f in *-amd64; do mv "$f" "${f//-amd64/-x64}"; done
-          ls -lh
-          shasum -a 256 ennogate-* ennoworker-* | tee SHA256SUMS
+        run: npm run release:build-worker
 
       - name: Verify Linux Binaries Are Statically Linked
         # Without CGO_ENABLED=0 the linux-x64 build links glibc dynamically
@@ -98,17 +92,6 @@ jobs:
             fi
             echo "$f: statically linked"
           done
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          files: |
-            worker/ennogate-*
-            worker/ennoworker-*
-            worker/SHA256SUMS
-          fail_on_unmatched_files: true
 
       - name: Verify Tarball
         run: npm run pack:check
@@ -131,3 +114,28 @@ jobs:
           else
             npm publish --access public
           fi
+          # Accounts with 2FA may leave the publish staged instead of live.
+          # If the verification step below fails, approve the staged release
+          # from a trusted machine (npm stage list && npm stage approve <id>),
+          # then re-run this workflow. Do not re-run publish: npm rejects a
+          # version that is already staged with E409.
+
+      - name: Verify npm Version Is Live
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if ! npm view "$ENNOTE_NPM_PACKAGE@${{ steps.pkg.outputs.version }}" version; then
+            echo "::error::npm publish did not make ${{ steps.pkg.outputs.version }} visible. The release is probably staged (2FA): run 'npm stage list' and 'npm stage approve <id>', then re-run this workflow."
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: |
+            worker/ennogate-*
+            worker/ennoworker-*
+            worker/SHA256SUMS
+          fail_on_unmatched_files: true
