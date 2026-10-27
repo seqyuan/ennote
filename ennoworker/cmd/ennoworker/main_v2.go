@@ -110,14 +110,15 @@ func run() error {
 	}
 	hub := events.NewHub()
 	globalSources := &globalsource.Store{HomeDir: cfg.HomeDir}
-	// The same ID -> content digest catalog pins both Flow task Skills
-	// (graphrun) and Role preload Skills (RunRepo config freeze).
-	globalSkillCatalog := make(map[string]string)
-	for _, skill := range skills.Discover(cfg.SkillsDir, cfg.BuiltinSkillsDir) {
-		globalSkillCatalog[skill.Manifest.ID] = skill.ContentHash
+	// The same live ID -> content digest catalog pins both Flow task Skills
+	// (graphrun) and Role preload Skills (RunRepo config freeze). It is resolved
+	// at each freeze, never at startup, so a Skill created or edited through
+	// Ennote (or on disk) is usable without restarting the Worker.
+	skillCatalog := func() map[string]string {
+		return skills.DigestCatalog(cfg.SkillsDir, cfg.BuiltinSkillsDir)
 	}
 	runTemplate := &store.RunRepo{Publisher: hub, Providers: providers, Models: models, Policies: policyFiles,
-		RoleSources: globalSources, SkillDigests: globalSkillCatalog}
+		RoleSources: globalSources, SkillCatalog: skillCatalog}
 	routedRuns := &store.RoutedRunRepo{Sessions: sessionManager, Template: runTemplate}
 
 	executorRouter := &sessionExecutorRouter{sessions: sessionManager}
@@ -171,7 +172,7 @@ func run() error {
 	})
 	graphRuns := &graphrun.Service{
 		Sources: globalSources, Models: models, Sessions: sessionManager,
-		GlobalSkills: globalSkillCatalog,
+		SkillCatalog: skillCatalog,
 		OnRunStarted: func(_ context.Context, db *sql.DB, sessionPath, runID string) error {
 			startFlowOrchestrator(db, runID, hub, coordinator, globalSources, models, policyFiles)
 			return nil

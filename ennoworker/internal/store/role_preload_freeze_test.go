@@ -2,10 +2,13 @@ package store_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/skills"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -179,4 +182,76 @@ func claimDelegatedChildWithRoleSkills(t *testing.T, fixture *fileRunFixture, re
 	claimed, err := fixture.Runs.Claim(ctx, child.ID)
 	require.NoError(t, err)
 	return claimed
+}
+
+// writeCatalogSkill materializes one Skill directory under skillsDir and
+// returns the loader content digest the catalog must report for it.
+func writeCatalogSkill(t *testing.T, skillsDir, id, body string) string {
+	t.Helper()
+	dir := filepath.Join(skillsDir, id)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "skill.json"),
+		[]byte(`{"id":"`+id+`","version":"1","prompt":"SKILL.md"}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o600))
+	loaded, err := skills.Load(dir)
+	require.NoError(t, err)
+	require.NotEmpty(t, loaded.ContentHash)
+	return loaded.ContentHash
+}
+
+// freezeRoleInvocation submits, claims, and freezes one direct Role invocation,
+// returning the resolved config and the claimed Run.
+func freezeRoleInvocation(t *testing.T, runs *store.RunRepo, sessionID, requestID string,
+	role domain.RoleIdentity, version domain.RoleVersion) (*store.ResolvedRunConfig, *domain.AgentRun, error) {
+	t.Helper()
+	ctx := context.Background()
+	submission, err := runs.SubmitInvocation(ctx, roleInvocation(sessionID, requestID, role, version))
+	require.NoError(t, err)
+	claimed, err := runs.Claim(ctx, submission.Run.ID)
+	require.NoError(t, err)
+	resolved, err := runs.ResolveAndFreezeConfig(ctx, claimed)
+	return resolved, claimed, err
+}
+
+// A live SkillCatalog resolver must be read at freeze time, not when the RunRepo
+// fixture is constructed: a preload Skill created after the fixture exists pins
+// correctly, and a later edit pins the new digest on the next Run.
+func TestRoleConfigFreezeResolvesPreloadSkillsFromLiveCatalog(t *testing.T) {
+	skillsDir := t.TempDir()
+	runs, _, session, role, version, _ := setupPublishedRoleInvocationWithSkills(t,
+		[]rolesource.SkillBinding{{ID: "role-skill-a", Mode: domain.RoleSkillPreload}})
+	runs.SkillCatalog = func() map[string]string {
+		return skills.DigestCatalog(skillsDir)
+	}
+
+	// The Skill does not exist yet, so the live catalog cannot pin it: the
+	// freeze must fail loudly rather than publish an unpinned prompt.
+	_, stale, err := freezeRoleInvocation(t, runs, session.ID, "role-live-missing", role, version)
+	require.Error(t, err)
+	assert.Equal(t, domain.ErrorProviderConfigurationInvalid, domain.ErrorCodeOf(err))
+	assert.Contains(t, err.Error(), "role-skill-a")
+	// The failed freeze left no usable config, but its Run still owns the
+	// Session's single active slot; retire it before the next freeze.
+	require.NoError(t, runs.Fail(context.Background(), stale.ID, "qualification", "missing preload skill"))
+
+	// Create the preload Skill *after* the fixture exists.
+	firstDigest := writeCatalogSkill(t, skillsDir, "role-skill-a", "ROLE_SKILL_BODY_V1")
+	resolved, first, err := freezeRoleInvocation(t, runs, session.ID, "role-live-first", role, version)
+	require.NoError(t, err)
+	require.NotNil(t, resolved.Effective.Role)
+	assert.Equal(t, domain.FrozenSkillRefs{{ID: "role-skill-a", Digest: firstDigest}},
+		resolved.Effective.Role.FrozenSkills)
+
+	// A Session admits one active Run at a time; retire it so the next freeze
+	// runs against the edited Skill.
+	require.NoError(t, runs.Fail(context.Background(), first.ID, "qualification", "freeze captured"))
+
+	// Edit the Skill and freeze another Run: the new digest, not the first one.
+	secondDigest := writeCatalogSkill(t, skillsDir, "role-skill-a", "ROLE_SKILL_BODY_V2")
+	require.NotEqual(t, firstDigest, secondDigest)
+	resolved, _, err = freezeRoleInvocation(t, runs, session.ID, "role-live-second", role, version)
+	require.NoError(t, err)
+	require.NotNil(t, resolved.Effective.Role)
+	assert.Equal(t, domain.FrozenSkillRefs{{ID: "role-skill-a", Digest: secondDigest}},
+		resolved.Effective.Role.FrozenSkills)
 }

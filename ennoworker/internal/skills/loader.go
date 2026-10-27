@@ -338,6 +338,19 @@ func Discover(baseDirs ...string) []*LoadedSkill {
 	return skills
 }
 
+// DigestCatalog maps Skill ID -> content digest for every Skill currently on
+// disk under baseDirs. It re-reads the filesystem on every call, so a Skill
+// created or edited through Ennote (or directly on disk) is visible to the very
+// next freeze without a Worker restart. Later baseDirs win on a duplicate ID,
+// matching the merge order Discover/startup used before.
+func DigestCatalog(baseDirs ...string) map[string]string {
+	catalog := make(map[string]string)
+	for _, skill := range Discover(baseDirs...) {
+		catalog[skill.Manifest.ID] = skill.ContentHash
+	}
+	return catalog
+}
+
 func sha256Hex(data []byte) string {
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:])

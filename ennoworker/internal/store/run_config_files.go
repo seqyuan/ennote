@@ -25,8 +25,21 @@ func loadTurnTargetKind(ctx context.Context, tx *sql.Tx, turnID string) (string,
 	return kind, nil
 }
 
+// skillDigests returns the Skill digest catalog to use for one freeze: the
+// live resolver when configured, otherwise the static startup map. It never
+// panics on a nil resolver or nil map; a nil result is the legacy/fixture path
+// that leaves preload refs unpinned.
+func (r *RunRepo) skillDigests() map[string]string {
+	if r.SkillCatalog != nil {
+		if catalog := r.SkillCatalog(); catalog != nil {
+			return catalog
+		}
+	}
+	return r.SkillDigests
+}
+
 // freezeRolePreloadSkills pins every preload-mode Role Skill against the
-// startup Skill catalog. A published Role revision is immutable, but its
+// current Skill catalog. A published Role revision is immutable, but its
 // preload binding names a Skill that lives outside the revision; without a
 // digest a later on-disk edit would silently change the Role's prompt.
 //
@@ -39,7 +52,11 @@ func (r *RunRepo) freezeRolePreloadSkills(role *domain.FrozenRoleExecution) erro
 		return nil
 	}
 	role.FrozenSkills = nil
-	if r.SkillDigests == nil {
+	// Read the catalog once per freeze, straight from the current on-disk
+	// catalog, so a Skill created or edited after startup pins correctly
+	// without restarting the Worker.
+	catalog := r.skillDigests()
+	if catalog == nil {
 		return nil
 	}
 	refs := make(domain.FrozenSkillRefs, 0, len(role.Skills.Entries))
@@ -48,7 +65,7 @@ func (r *RunRepo) freezeRolePreloadSkills(role *domain.FrozenRoleExecution) erro
 			continue
 		}
 		id := strings.TrimSpace(entry.SkillID)
-		digest := strings.TrimSpace(r.SkillDigests[id])
+		digest := strings.TrimSpace(catalog[id])
 		if digest == "" {
 			return domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
 				fmt.Errorf("role %s (%s@%d) preload skill %q is missing from the Skill catalog or has no content digest; refusing to freeze an unpinned Role prompt",

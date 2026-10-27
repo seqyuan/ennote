@@ -350,3 +350,98 @@ func TestServiceRejectsGlobalTaskSkillWithoutDigest(t *testing.T) {
 	_, err := fixture.service.Start(context.Background(), fixture.projectID, "pinned", 0, fixture.sessionID, nil, nil)
 	require.ErrorContains(t, err, "refusing to freeze an unpinned Skill")
 }
+
+// writeCatalogSkill materializes one Skill directory under skillsDir and
+// returns the loader content digest the catalog must report for it.
+func writeCatalogSkill(t *testing.T, skillsDir, id, body string) string {
+	t.Helper()
+	dir := filepath.Join(skillsDir, id)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "skill.json"),
+		[]byte(`{"id":"`+id+`","version":"1","prompt":"SKILL.md"}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o600))
+	loaded, err := skills.Load(dir)
+	require.NoError(t, err)
+	require.NotEmpty(t, loaded.ContentHash)
+	return loaded.ContentHash
+}
+
+// newSession creates another Session in the fixture project (a Session admits
+// one active flow Run at a time, so successive freezes need their own Session).
+func (f *skillGraphFixture) newSession(t *testing.T, title string) string {
+	t.Helper()
+	session, err := f.sessions.Create(context.Background(),
+		domain.CreateSessionInput{ProjectID: f.projectID, Title: title})
+	require.NoError(t, err)
+	return session.ID
+}
+
+// frozenTaskSkillRefs reads back the Skill refs frozen for task_index 0.
+func frozenTaskSkillRefs(t *testing.T, fixture *skillGraphFixture, sessionID, runID string) domain.FrozenSkillRefs {
+	t.Helper()
+	db, err := fixture.sessions.OpenSession(context.Background(), sessionID)
+	require.NoError(t, err)
+	var skillJSON string
+	require.NoError(t, db.QueryRow(`SELECT skill_digests_json FROM run_agent_flow_nodes
+		WHERE run_id=? AND task_index=0`, runID).Scan(&skillJSON))
+	refs, err := domain.DecodeFrozenSkills([]byte(skillJSON))
+	require.NoError(t, err)
+	return refs
+}
+
+// A live SkillCatalog resolver must be read at freeze time, not at Service
+// construction time: a Skill created after the Service exists is usable, and a
+// later edit is picked up by the next Run without restarting the Worker.
+func TestServiceResolvesGlobalTaskSkillFromLiveCatalog(t *testing.T) {
+	ctx := context.Background()
+	skillsDir := t.TempDir()
+	fixture := newSkillGraphFixture(t, nil)
+	fixture.service.SkillCatalog = func() map[string]string {
+		return skills.DigestCatalog(skillsDir)
+	}
+
+	// Nothing on disk yet: the live catalog is empty, so the freeze fails
+	// loudly instead of freezing an unpinned Skill.
+	_, err := fixture.service.Start(ctx, fixture.projectID, "pinned", 0, fixture.sessionID, nil, nil)
+	require.ErrorContains(t, err, `global Skill "go-dev" is not available`)
+
+	// Create the Skill *after* the Service already exists.
+	firstSession := fixture.newSession(t, "before-edit")
+	firstDigest := writeCatalogSkill(t, skillsDir, "go-dev", "GO_DEV_BODY_V1")
+	firstRun, err := fixture.service.Start(ctx, fixture.projectID, "pinned", 0, firstSession, nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, domain.FrozenSkillRefs{{ID: "go-dev", Digest: firstDigest}},
+		frozenTaskSkillRefs(t, fixture, firstSession, firstRun.RunID))
+
+	// Edit the Skill and start another Run: the new freeze must see the new
+	// content digest, not the one observed by the first Run.
+	secondSession := fixture.newSession(t, "after-edit")
+	secondDigest := writeCatalogSkill(t, skillsDir, "go-dev", "GO_DEV_BODY_V2")
+	require.NotEqual(t, firstDigest, secondDigest)
+	secondRun, err := fixture.service.Start(ctx, fixture.projectID, "pinned", 0, secondSession, nil, nil)
+	require.NoError(t, err)
+	refs := frozenTaskSkillRefs(t, fixture, secondSession, secondRun.RunID)
+	assert.Equal(t, domain.FrozenSkillRefs{{ID: "go-dev", Digest: secondDigest}}, refs)
+	assert.NotEqual(t, firstDigest, refs[0].Digest)
+
+	// The first Run keeps its pinned digest; freezing is per Run.
+	assert.Equal(t, firstDigest, frozenTaskSkillRefs(t, fixture, firstSession, firstRun.RunID)[0].Digest)
+}
+
+// A live catalog that no longer knows a Skill (deleted on disk) must fail the
+// next freeze loudly, exactly like the static map did.
+func TestServiceLiveCatalogRejectsSkillDeletedFromDisk(t *testing.T) {
+	ctx := context.Background()
+	skillsDir := t.TempDir()
+	writeCatalogSkill(t, skillsDir, "go-dev", "GO_DEV_BODY")
+	fixture := newSkillGraphFixture(t, nil)
+	fixture.service.SkillCatalog = func() map[string]string {
+		return skills.DigestCatalog(skillsDir)
+	}
+	_, err := fixture.service.Start(ctx, fixture.projectID, "pinned", 0, fixture.sessionID, nil, nil)
+	require.NoError(t, err)
+
+	require.NoError(t, os.RemoveAll(filepath.Join(skillsDir, "go-dev")))
+	_, err = fixture.service.Start(ctx, fixture.projectID, "pinned", 0, fixture.sessionID, nil, nil)
+	require.ErrorContains(t, err, `global Skill "go-dev" is not available`)
+}

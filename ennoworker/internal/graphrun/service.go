@@ -32,10 +32,16 @@ type Service struct {
 	Sessions *sessionstore.Manager
 	// GlobalSkills maps global Skill id -> its current content digest (the same
 	// sha256 directory hash skills.Load computes as LoadedSkill.ContentHash).
+	// It is the static fallback used when SkillCatalog is nil (tests, fixtures).
 	// nil-safe: an unresolved global Skill, or one whose digest is unknown,
 	// fails the Run freeze loudly instead of silently freezing an unpinned
 	// reference.
 	GlobalSkills map[string]string
+	// SkillCatalog, when non-nil, resolves the Skill digest catalog at freeze
+	// time instead of using the startup map in GlobalSkills. Production wires
+	// skills.DigestCatalog so a Skill created or edited on disk is usable by the
+	// next started Flow without restarting the Worker.
+	SkillCatalog func() map[string]string
 	// OnRunStarted wires the per-Session orchestrator for a freshly frozen
 	// flow run (enqueue child runs, events, recovery).
 	OnRunStarted func(ctx context.Context, db *sql.DB, sessionPath, runID string) error
@@ -229,9 +235,26 @@ type frozenTaskRole struct {
 	Definition   domain.RoleDefinition
 }
 
+// skillDigests returns the Skill digest catalog to use for one freeze: the
+// live resolver when configured, otherwise the static startup map. It never
+// panics on a nil resolver or nil map, so an unconfigured Service fails closed
+// on any global Skill reference.
+func (s *Service) skillDigests() map[string]string {
+	if s.SkillCatalog != nil {
+		if catalog := s.SkillCatalog(); catalog != nil {
+			return catalog
+		}
+	}
+	return s.GlobalSkills
+}
+
 // freezeTasks resolves every Task into its frozen node snapshot in topological
 // order. Any failure aborts the whole Run (fail-closed; nothing is persisted).
 func (s *Service) freezeTasks(ctx context.Context, document *graphsource.Document) ([]store.FlowNodeFreeze, error) {
+	// Read the Skill digest catalog once per Run freeze, straight from the
+	// current on-disk catalog, so a Skill created or edited after startup is
+	// usable without restarting the Worker.
+	skillCatalog := s.skillDigests()
 	order, err := agentflow.TopologicalOrder(definitionFromDocument(document).Tasks)
 	if err != nil {
 		return nil, err
@@ -243,7 +266,7 @@ func (s *Service) freezeTasks(ctx context.Context, document *graphsource.Documen
 	freeze := make([]store.FlowNodeFreeze, 0, len(order))
 	for _, name := range order {
 		task := document.Tasks[name]
-		role, globalSkills, err := s.resolveTaskRole(ctx, document, name, task)
+		role, globalSkills, err := s.resolveTaskRole(ctx, document, name, task, skillCatalog)
 		if err != nil {
 			return nil, fmt.Errorf("Task %q: %w", name, err)
 		}
@@ -294,7 +317,7 @@ func (s *Service) freezeTasks(ctx context.Context, document *graphsource.Documen
 // and returned as additive preload refs; local Task Skills are inlined into the
 // Role prompt and tool allowlist.
 func (s *Service) resolveTaskRole(ctx context.Context, document *graphsource.Document,
-	taskID string, task graphsource.Task) (*frozenTaskRole, domain.FrozenSkillRefs, error) {
+	taskID string, task graphsource.Task, skillCatalog map[string]string) (*frozenTaskRole, domain.FrozenSkillRefs, error) {
 	if task.Role != "" {
 		scope, id, _ := strings.Cut(task.Role, "/")
 		switch scope {
@@ -347,7 +370,7 @@ func (s *Service) resolveTaskRole(ctx context.Context, document *graphsource.Doc
 		scope, id, _ := strings.Cut(ref, "/")
 		switch scope {
 		case "global":
-			digest, ok := s.GlobalSkills[id]
+			digest, ok := skillCatalog[id]
 			if !ok {
 				return nil, nil, fmt.Errorf("global Skill %q is not available", id)
 			}

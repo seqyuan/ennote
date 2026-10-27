@@ -260,3 +260,28 @@ func TestLoadMissingBothManifests(t *testing.T) {
 	_, err := Load(dir)
 	assert.ErrorContains(t, err, "neither skill.json nor SKILL.md")
 }
+
+// DigestCatalog re-reads the disk on every call, so an added or edited Skill is
+// visible to the very next freeze without a Worker restart.
+func TestDigestCatalogTracksCurrentDiskContents(t *testing.T) {
+	base := t.TempDir()
+	assert.Empty(t, DigestCatalog(base), "an empty skills root has no digests")
+
+	dir := filepath.Join(base, "live-skill")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "skill.json"),
+		[]byte(`{"id":"live-skill","prompt":"SKILL.md"}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("V1"), 0o644))
+
+	first := DigestCatalog(base)
+	require.Contains(t, first, "live-skill")
+	assert.NotEmpty(t, first["live-skill"])
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("V2"), 0o644))
+	second := DigestCatalog(base)
+	require.Contains(t, second, "live-skill")
+	assert.NotEqual(t, first["live-skill"], second["live-skill"], "edits change the pinned digest")
+
+	require.NoError(t, os.RemoveAll(dir))
+	assert.Empty(t, DigestCatalog(base), "deletions disappear from the catalog")
+}
