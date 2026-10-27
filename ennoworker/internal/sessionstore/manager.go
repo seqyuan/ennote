@@ -556,86 +556,13 @@ func openDatabase(path string) (*sql.DB, error) {
 }
 
 func migrate(db *sql.DB) error {
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
-		version INTEGER PRIMARY KEY,
-		applied_at TEXT NOT NULL
-	)`); err != nil {
-		return err
-	}
-	var current int
-	if err := db.QueryRow(`SELECT COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&current); err != nil {
-		return err
-	}
-	for _, migration := range sessionmigrations.Sorted() {
-		if migration.Version <= current {
-			continue
-		}
-		tx, err := db.Begin()
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(migration.SQL); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("session migration %d: %w", migration.Version, err)
-		}
-		if _, err := tx.Exec(`INSERT INTO schema_migrations(version,applied_at) VALUES(?,?)`, migration.Version, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
-			tx.Rollback()
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-	if err := backfillMessageSeq(db); err != nil {
-		return err
-	}
-	return nil
+	return sessionmigrations.Apply(db)
 }
 
-// backfillMessageSeq assigns session-monotonic seq values to messages created
-// before the seq column existed (seq = 0). It runs once per session database
-// (guarded by the seq=0 probe) and orders by created_at + id, which is
-// monotonic along every lineage (a parent is always inserted before its
-// child), so the client's consecutive-assertion over seq holds. New inserts
-// continue from MAX(seq).
+// backfillMessageSeq is kept as the package-local name for the existing tests;
+// the implementation lives with the single migration applier.
 func backfillMessageSeq(db *sql.DB) error {
-	var unsequenced int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM messages WHERE seq = 0`).Scan(&unsequenced); err != nil {
-		return fmt.Errorf("probe unsequenced messages: %w", err)
-	}
-	if unsequenced == 0 {
-		return nil
-	}
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	rows, err := tx.Query(`SELECT id FROM messages ORDER BY created_at, id`)
-	if err != nil {
-		return fmt.Errorf("enumerate messages for seq backfill: %w", err)
-	}
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return fmt.Errorf("scan message id for backfill: %w", err)
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Close(); err != nil {
-		return fmt.Errorf("close backfill rows: %w", err)
-	}
-	for index, id := range ids {
-		if _, err := tx.Exec(`UPDATE messages SET seq = ? WHERE id = ?`, index+1, id); err != nil {
-			return fmt.Errorf("backfill message seq: %w", err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit seq backfill: %w", err)
-	}
-	return nil
+	return sessionmigrations.BackfillMessageSeq(db)
 }
 
 func findSession(ctx context.Context, db *sql.DB, id string) (*domain.Session, error) {

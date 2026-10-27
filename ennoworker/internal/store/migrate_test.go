@@ -143,7 +143,8 @@ func TestUnusedColumnMigrationConvergesAnExistingDatabase(t *testing.T) {
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
 		version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`)
 	require.NoError(t, err)
-	migrations := sessionmigrations.Sorted()
+	migrations, err := sessionmigrations.Sorted()
+	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(migrations), 2)
 	// This test builds the state immediately before 0009, the migration that
 	// dropped the dead column. Later additive migrations (0010+) must not move
@@ -192,4 +193,25 @@ func hasColumn(t *testing.T, db *sql.DB, table, column string) bool {
 	}
 	require.NoError(t, rows.Err())
 	return false
+}
+
+// A migration inserted below the highest applied version must fail loudly
+// instead of being skipped by a MAX(version) comparison.
+func TestMigrateSessionRejectsOutOfOrderHistory(t *testing.T) {
+	db, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`)
+	require.NoError(t, err)
+	for _, version := range []int{1, 4, 5, 6, 7, 8, 9, 10} {
+		_, err := db.Exec(`INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)`,
+			version, "2026-10-26T00:00:00Z")
+		require.NoError(t, err)
+	}
+
+	err = store.MigrateSession(db)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "session migration 2 is out of order")
 }
