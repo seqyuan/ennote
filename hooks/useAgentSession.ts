@@ -189,19 +189,22 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
 
   const steer = useCallback(async (text: string) => {
     if (!activeRun || !text.trim()) return false;
+    if (pendingApproval?.kind === "question") {
+      setError("Answer the question before sending another message");
+      return false;
+    }
     try {
       setStatus("steering…");
       await apiFetch(`/v1/runs/${encodeURIComponent(activeRun.id)}/inputs`, { method: "POST",
         body: JSON.stringify({ kind: "steer", text, clientRequestId: genId() }) });
       appendMessage({ id: genId(), role: "user", text: `↪ ${text}`, kind: "steer" });
-      setStatus(activeRun.status === "waiting_for_approval"
-        ? (pendingApproval?.kind === "question" ? "Waiting for your answer" : "Waiting for approval") : "");
+      setStatus(activeRun.status === "waiting_for_approval" ? "Waiting for approval" : "");
       return true;
     } catch (err) {
       setError(errorMessage(err, "Failed to steer the run"));
       return false;
     }
-  }, [activeRun, appendMessage]);
+  }, [activeRun, appendMessage, pendingApproval]);
 
   const followUp = useCallback(async (text: string): Promise<{ queued: boolean; runEnded: boolean }> => {
     const run = activeRun;

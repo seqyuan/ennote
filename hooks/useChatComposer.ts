@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useT } from "@/components/LocaleProvider";
 import type { TextAttachment } from "@/components/Composer";
 import type { RunAgentFlow, Session } from "@/components/settings/types";
 import type { AgentRun } from "@/lib/approval";
@@ -48,6 +49,7 @@ function appendTextAttachments(text: string, attachments: TextAttachment[]): str
 export type ChatRuntime = {
   activeRunID: string | null;
   activeRunRecord: AgentRun | null;
+  questionPending: boolean;
   setStatus: (status: string) => void;
   setError: (error: string | null) => void;
   watchRun: (run: AgentRun) => void;
@@ -69,6 +71,7 @@ export type ChatComposerDeps = {
 export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerView; actions: ChatActions } {
   const { selectedSession, selectedProject, sessionRecord, promptCatalog, settings, runtime } = deps;
   const agent = runtime;
+  const t = useT();
 
   // Composer state (owned here; reset declaratively on session switch).
   const [input, setInput] = useState("");
@@ -282,6 +285,10 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
 
   const steer = useCallback(async () => {
     if (!agent.activeRunID || !input.trim()) return;
+    if (agent.questionPending) {
+      agent.setError(t("composer.answerQuestionFirst"));
+      return;
+    }
 
     // Same slash expansion gate for steer.
     if (input.startsWith("/") && expandedVersion !== draftVersion && selectedProject) {
@@ -303,12 +310,16 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
     setInputVersioned("");
     const queued = await agent.steer(text);
     if (!queued) setInputVersioned(text);
-  }, [agent, input, selectedProject, selectedSession, expandedVersion, draftVersion, setInputVersioned, expandDraftOrFallback]);
+  }, [agent, input, selectedProject, selectedSession, expandedVersion, draftVersion, setInputVersioned, expandDraftOrFallback, t]);
 
   const steerText = useCallback(async (text: string): Promise<boolean> => {
     if (!agent.activeRunID || !text.trim()) return false;
+    if (agent.questionPending) {
+      agent.setError(t("composer.answerQuestionFirst"));
+      return false;
+    }
     return agent.steer(text);
-  }, [agent]);
+  }, [agent, t]);
 
   const followUp = useCallback(async () => {
     if (!agent.activeRunID || !input.trim()) return;

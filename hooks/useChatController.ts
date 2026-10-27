@@ -81,6 +81,7 @@ export function useChatController(deps: ChatControllerDeps) {
     runtime: {
       activeRunID: agent.activeRunID,
       activeRunRecord: agent.activeRun,
+      questionPending: agent.pendingApproval?.kind === "question",
       setStatus: agent.setStatus,
       setError: agent.setError,
       watchRun: agent.watchRun,

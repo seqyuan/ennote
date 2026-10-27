@@ -269,7 +269,7 @@ export function ChatWindow({
         )}
         <Composer selectedSession={history.sessionId} activeLeafMessageId={history.activeLeafMessageId} input={composer.input} setInput={composer.setInput}
           focusNonce={focusNonce}
-          activeRun={Boolean(run.activeRun)} compacting={run.compacting} hasPendingImage={Boolean(composer.pendingImage)} reconnecting={reconnecting}
+          activeRun={Boolean(run.activeRun)} questionPending={Boolean(waitingForQuestion)} compacting={run.compacting} hasPendingImage={Boolean(composer.pendingImage)} reconnecting={reconnecting}
           inert={inert} hero={isHero}
           onRequestProject={requestProject}
           permissionMode={composer.displayedPermissionMode} permissionReady={composer.permissionReady} setPermissionMode={composer.setPermissionMode}

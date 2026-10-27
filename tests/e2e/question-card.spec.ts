@@ -75,6 +75,16 @@ test("renders a structured question and submits the selected option", async ({ p
   await expect(page.getByText("Sensitive tool call", { exact: false })).toHaveCount(0);
   await expect(page.locator('[data-tool-call-id="ask-call"]')).toContainText("Ask user");
   await expect(page.locator('[data-tool-call-id="ask-call"]')).toHaveAttribute("data-risk", "read_only");
+
+  // Enter must not steer (and must not surface an English 409) while a question
+  // is pending; the draft stays in the composer.
+  const composer = page.getByRole("textbox", { name: "Steer the agent" });
+  await composer.fill("use only the treated arm");
+  await composer.press("Enter");
+  await expect(composer).toHaveValue("use only the treated arm");
+  await expect(page.getByText(/409|not active|Failed to steer/i)).toHaveCount(0);
+  await expect(composer).toHaveAttribute("placeholder", "Answer the question above before sending another message");
+
   await page.getByRole("radio", { name: /Tumor only/ }).check();
   await page.getByRole("button", { name: "Submit answer" }).click();
 

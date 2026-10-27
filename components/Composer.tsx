@@ -70,6 +70,7 @@ interface ComposerProps {
   input: string;
   setInput: (value: string) => void;
   activeRun: boolean;
+  questionPending?: boolean;
   compacting: boolean;
   hasPendingImage: boolean;
   reconnecting: boolean;
@@ -123,7 +124,7 @@ interface ComposerProps {
 }
 
 export function Composer({
-  selectedSession, activeLeafMessageId, input, setInput, activeRun, compacting, hasPendingImage, reconnecting,
+  selectedSession, activeLeafMessageId, input, setInput, activeRun, questionPending = false, compacting, hasPendingImage, reconnecting,
   permissionMode, permissionReady, setPermissionMode, models, providers, selectedModelId, setSelectedModelId, thinkingEffort, setThinkingEffort,
   roles, selectedRoleId, setSelectedRoleId, textAttachments, removeTextAttachment, pendingImage, clearPendingImage, attachFiles, uploadImage, submit, steer, steerText, followUp, cancel, cancelFollowUp, compactSession,
   pendingFollowUps,
@@ -233,6 +234,7 @@ export function Composer({
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (activeRun) {
+      if (questionPending) return;
       if (!compacting && !reconnecting) steer();
     } else {
       submit();
@@ -243,6 +245,7 @@ export function Composer({
     if (!selectedSession) return;
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
+    if (activeRun && questionPending) return;
     form.current?.requestSubmit();
   }
 
@@ -412,7 +415,7 @@ export function Composer({
             rows={1}
             readOnly={inert}
             disabled={compacting}
-            placeholder={compacting ? t("composer.placeholderCompacting") : activeRun ? t("composer.placeholderSteer") : inert ? t("composer.placeholderNoSession") : hero ? t("composer.placeholderHero") : t("composer.placeholderDefault")}
+            placeholder={compacting ? t("composer.placeholderCompacting") : questionPending ? t("composer.answerQuestionFirst") : activeRun ? t("composer.placeholderSteer") : inert ? t("composer.placeholderNoSession") : hero ? t("composer.placeholderHero") : t("composer.placeholderDefault")}
             aria-label={activeRun ? t("composer.steerAria") : t("composer.messageAria")}
           />
           <input
@@ -457,7 +460,7 @@ export function Composer({
             <div className="composer-trailing">
               {activeRun && (
                 <button type="button" className="composer-followup" aria-label={t("composer.queueFollowUp")}
-                  disabled={!input.trim() || compacting || reconnecting} onClick={followUp}>
+                  disabled={!input.trim() || compacting || reconnecting || questionPending} onClick={followUp}>
                   <ListPlus size={12} aria-hidden="true" />
                   <span>{t("composer.followUp")}</span>
                 </button>
