@@ -34,6 +34,10 @@ ennote start
 - 支持平台：linux-x64 / linux-arm64 / darwin-x64 / darwin-arm64。
 - 发布流程：打版本 tag（`vX.Y.Z`）后，[release workflow](.github/workflows/release.yml) 自动构建四平台二进制、上传到该 tag 对应的 GitHub Release，并发布 npm 包。
 
+### 从 v0.1.x 升级
+
+v0.1.x 的旧数据库（`data/ennote.db`）不再被读取，但也不会被删除：升级后首次启动会把它（含 `-wal`/`-shm`）原子移动到 `data/legacy-v1/` 并打印一条 `archived legacy V1 database` 警告。迁移完成后再次启动不会改动该归档。需要找回旧数据时，从 `data/legacy-v1/` 手动复制即可。
+
 ## 目录
 
 ```

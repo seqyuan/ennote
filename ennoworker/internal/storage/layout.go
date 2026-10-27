@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -74,12 +75,12 @@ func ForHome(home string) Layout {
 	}
 }
 
-// Bootstrap removes the unsupported legacy database, creates the V2 directory
+// Bootstrap archives the unsupported legacy database, creates the V2 directory
 // skeleton, runs initialize, and writes the layout marker last. The caller must
 // invoke Bootstrap before opening any Worker business store.
 func Bootstrap(home string, initialize func(Layout) error) (Layout, error) {
 	layout := ForHome(home)
-	if err := removeLegacy(layout.LegacyDB); err != nil {
+	if err := archiveLegacy(layout); err != nil {
 		return Layout{}, err
 	}
 	for _, directory := range []string{
@@ -117,11 +118,53 @@ func Bootstrap(home string, initialize func(Layout) error) (Layout, error) {
 	return layout, nil
 }
 
-func removeLegacy(databasePath string) error {
-	for _, path := range []string{databasePath, databasePath + "-wal", databasePath + "-shm"} {
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("delete unsupported legacy store %s: %w", path, err)
+// archiveLegacy moves a v0.1.x database out of the way instead of deleting it.
+// It only runs while the V2 marker is absent; once the layout has been
+// initialized, legacy files are left untouched (including any that the user
+// restored manually).
+func archiveLegacy(layout Layout) error {
+	if _, err := os.Stat(layout.Marker); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("stat storage layout marker: %w", err)
+	}
+
+	legacyPaths := []string{layout.LegacyDB, layout.LegacyDB + "-wal", layout.LegacyDB + "-shm"}
+	exists := false
+	for _, path := range legacyPaths {
+		_, err := os.Stat(path)
+		if err == nil {
+			exists = true
+			break
 		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("stat legacy store %s: %w", path, err)
+		}
+	}
+	if !exists {
+		return nil
+	}
+
+	archiveDir := filepath.Join(layout.Data, "legacy-v1")
+	if err := os.MkdirAll(archiveDir, 0o700); err != nil {
+		return fmt.Errorf("create legacy archive directory %s: %w", archiveDir, err)
+	}
+	for _, path := range legacyPaths {
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return fmt.Errorf("stat legacy store %s: %w", path, err)
+		}
+		target := filepath.Join(archiveDir, filepath.Base(path))
+		if _, err := os.Stat(target); err == nil {
+			return fmt.Errorf("archive legacy store %s: destination %s already exists", path, target)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("stat legacy archive %s: %w", target, err)
+		}
+		if err := os.Rename(path, target); err != nil {
+			return fmt.Errorf("archive legacy store %s to %s: %w", path, target, err)
+		}
+		slog.Warn("archived legacy V1 database", "from", path, "to", target)
 	}
 	return nil
 }

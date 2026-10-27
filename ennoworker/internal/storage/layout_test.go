@@ -27,10 +27,9 @@ func TestForHomeBuildsV2Paths(t *testing.T) {
 	assert.Equal(t, filepath.Join(home, "data", "ennote.db"), layout.LegacyDB)
 }
 
-func TestBootstrapDeletesLegacyFilesOnEveryInvocation(t *testing.T) {
+func TestBootstrapArchivesLegacyFiles(t *testing.T) {
 	home := t.TempDir()
 	legacy := filepath.Join(home, "data", "ennote.db")
-	require.NoError(t, os.MkdirAll(filepath.Dir(legacy), 0o700))
 	writeLegacyFiles(t, legacy)
 
 	layout, err := storage.Bootstrap(home, func(layout storage.Layout) error {
@@ -43,13 +42,45 @@ func TestBootstrapDeletesLegacyFilesOnEveryInvocation(t *testing.T) {
 	require.NoError(t, err)
 	require.FileExists(t, layout.Marker)
 
+	archiveDir := filepath.Join(home, "data", "legacy-v1")
+	for _, name := range []string{"ennote.db", "ennote.db-wal", "ennote.db-shm"} {
+		contents, readErr := os.ReadFile(filepath.Join(archiveDir, name))
+		require.NoError(t, readErr)
+		assert.Equal(t, "legacy", string(contents))
+	}
+}
+
+func TestBootstrapLeavesArchiveUntouchedAfterMarkerExists(t *testing.T) {
+	home := t.TempDir()
+	legacy := filepath.Join(home, "data", "ennote.db")
+	writeLegacyFiles(t, legacy)
+
+	_, err := storage.Bootstrap(home, nil)
+	require.NoError(t, err)
+
+	archive := filepath.Join(home, "data", "legacy-v1", "ennote.db")
+	before, err := os.Stat(archive)
+	require.NoError(t, err)
+
+	// Simulate a user restoring a legacy file after the V2 layout exists.
 	writeLegacyFiles(t, legacy)
 	_, err = storage.Bootstrap(home, nil)
 	require.NoError(t, err)
-	for _, path := range []string{legacy, legacy + "-wal", legacy + "-shm"} {
-		_, statErr := os.Stat(path)
-		require.ErrorIs(t, statErr, os.ErrNotExist)
-	}
+	require.FileExists(t, legacy)
+
+	after, err := os.Stat(archive)
+	require.NoError(t, err)
+	assert.Equal(t, before.ModTime(), after.ModTime())
+	assert.Equal(t, before.Size(), after.Size())
+}
+
+func TestBootstrapDoesNotCreateEmptyArchiveDirectory(t *testing.T) {
+	home := t.TempDir()
+	_, err := storage.Bootstrap(home, nil)
+	require.NoError(t, err)
+
+	_, statErr := os.Stat(filepath.Join(home, "data", "legacy-v1"))
+	require.ErrorIs(t, statErr, os.ErrNotExist)
 }
 
 func TestBootstrapWritesMarkerOnlyAfterInitialization(t *testing.T) {
@@ -61,16 +92,19 @@ func TestBootstrapWritesMarkerOnlyAfterInitialization(t *testing.T) {
 	require.ErrorIs(t, statErr, os.ErrNotExist)
 }
 
-func TestBootstrapFailsWhenLegacyStoreCannotBeDeleted(t *testing.T) {
+func TestBootstrapFailsWhenLegacyStoreCannotBeArchived(t *testing.T) {
 	home := t.TempDir()
 	legacy := filepath.Join(home, "data", "ennote.db")
-	require.NoError(t, os.MkdirAll(filepath.Join(legacy, "child"), 0o700))
+	writeLegacyFiles(t, legacy)
+	// A regular file where the archive directory belongs makes MkdirAll fail.
+	require.NoError(t, os.WriteFile(filepath.Join(home, "data", "legacy-v1"), []byte("blocked"), 0o600))
 
 	_, err := storage.Bootstrap(home, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "delete unsupported legacy store")
+	assert.Contains(t, err.Error(), "create legacy archive directory")
 	_, statErr := os.Stat(filepath.Join(home, "storage-layout.json"))
 	require.ErrorIs(t, statErr, os.ErrNotExist)
+	require.FileExists(t, legacy)
 }
 
 func TestBootstrapRejectsUnknownMarkerFields(t *testing.T) {
