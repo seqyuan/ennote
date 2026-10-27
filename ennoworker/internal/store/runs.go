@@ -33,6 +33,12 @@ type RunRepo struct {
 	Models      *ModelRepo
 	Policies    *fileconfig.PolicyStore
 	RoleSources *globalsource.Store
+	// SkillDigests is the optional Skill catalog observed at startup, mapping
+	// Skill ID to loader ContentHash. When non-nil, freezing a Role config pins
+	// every preload Skill to its digest so later on-disk edits fail closed
+	// instead of silently changing a published Role's prompt. A nil catalog
+	// keeps legacy/fixture behavior: preload refs stay unpinned.
+	SkillDigests map[string]string
 }
 
 func (r *RunRepo) SubmitTurn(ctx context.Context, input domain.SubmitTurnInput) (*domain.TurnSubmission, error) {

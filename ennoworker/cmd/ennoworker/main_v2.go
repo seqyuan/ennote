@@ -110,14 +110,14 @@ func run() error {
 	}
 	hub := events.NewHub()
 	globalSources := &globalsource.Store{HomeDir: cfg.HomeDir}
-	// The global Skill catalog freezes ID -> content digest so a Flow Run pins
-	// the exact Skill body it was published against (the same dirHash the Skill
-	// loader exposes as LoadedSkill.ContentHash).
+	// The same ID -> content digest catalog pins both Flow task Skills
+	// (graphrun) and Role preload Skills (RunRepo config freeze).
 	globalSkillCatalog := make(map[string]string)
 	for _, skill := range skills.Discover(cfg.SkillsDir, cfg.BuiltinSkillsDir) {
 		globalSkillCatalog[skill.Manifest.ID] = skill.ContentHash
 	}
-	runTemplate := &store.RunRepo{Publisher: hub, Providers: providers, Models: models, Policies: policyFiles, RoleSources: globalSources}
+	runTemplate := &store.RunRepo{Publisher: hub, Providers: providers, Models: models, Policies: policyFiles,
+		RoleSources: globalSources, SkillDigests: globalSkillCatalog}
 	routedRuns := &store.RoutedRunRepo{Sessions: sessionManager, Template: runTemplate}
 
 	executorRouter := &sessionExecutorRouter{sessions: sessionManager}

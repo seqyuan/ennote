@@ -34,7 +34,8 @@ func TestRolePreloadSegmentsNameTheFrozenRoleVersion(t *testing.T) {
 		}},
 	}
 
-	segments := executor.rolePreloadSegments(role)
+	segments, err := executor.rolePreloadSegments(role)
+	require.NoError(t, err)
 	require.Len(t, segments, 1)
 	assert.Equal(t, "skill.preload.review-guard", segments[0].ID)
 	assert.Equal(t, domain.PromptSectionSkillPreload, segments[0].Kind)
@@ -47,17 +48,24 @@ func TestRolePreloadSegmentsNameTheFrozenRoleVersion(t *testing.T) {
 
 func TestRolePreloadSegmentsSkipAvailableAndMissingSkills(t *testing.T) {
 	executor := &agentExecutor{}
-	assert.Nil(t, executor.rolePreloadSegments(nil))
+	segments, err := executor.rolePreloadSegments(nil)
+	require.NoError(t, err)
+	assert.Nil(t, segments)
 
 	available := &domain.FrozenRoleExecution{Skills: domain.RoleSkills{
 		Entries: []domain.RoleSkillEntry{{SkillID: "x", Mode: domain.RoleSkillAvailable}}}}
-	assert.Empty(t, executor.rolePreloadSegments(available))
+	segments, err = executor.rolePreloadSegments(available)
+	require.NoError(t, err)
+	assert.Empty(t, segments)
 
-	// A Skill that was frozen at publish time but has since left the on-disk
-	// catalog is skipped defensively rather than aborting the Run.
+	// A legacy (unpinned) Skill that was frozen at publish time but has since
+	// left the on-disk catalog is skipped defensively rather than aborting the
+	// Run.
 	frozen := &domain.FrozenRoleExecution{Handle: "r", Version: 1, Skills: domain.RoleSkills{
 		Entries: []domain.RoleSkillEntry{{SkillID: "gone", Mode: domain.RoleSkillPreload}}}}
-	assert.Empty(t, executor.rolePreloadSegments(frozen))
+	segments, err = executor.rolePreloadSegments(frozen)
+	require.NoError(t, err)
+	assert.Empty(t, segments)
 }
 
 func TestTaskPreloadSegmentsAttributeToTheTask(t *testing.T) {
@@ -118,6 +126,79 @@ func TestTaskPreloadSegmentsUseCurrentContentForLegacyUnpinnedRefs(t *testing.T)
 	assert.Contains(t, segments[0].Text, "CURRENT_BODY")
 }
 
+// A Role preload Skill frozen with a content digest is pinned: the on-disk
+// Skill must still hash to exactly that digest, or prompt composition fails
+// closed instead of silently changing a published Role's prompt.
+func TestRolePreloadSegmentsVerifyFrozenContentDigest(t *testing.T) {
+	skillsDir := t.TempDir()
+	writePreloadSkill(t, skillsDir, "role-skill", "FROZEN_ROLE_BODY")
+	frozen, err := skills.Load(filepath.Join(skillsDir, "role-skill"))
+	require.NoError(t, err)
+	require.NotEmpty(t, frozen.ContentHash)
+
+	executor := &agentExecutor{skillsDir: skillsDir}
+	role := &domain.FrozenRoleExecution{
+		Handle: "analyst", Version: 2,
+		Skills: domain.RoleSkills{Entries: []domain.RoleSkillEntry{
+			{SkillID: "role-skill", Mode: domain.RoleSkillPreload},
+		}},
+		FrozenSkills: domain.FrozenSkillRefs{{ID: "role-skill", Digest: frozen.ContentHash}},
+	}
+	segments, err := executor.rolePreloadSegments(role)
+	require.NoError(t, err, "unchanged content still composes")
+	require.Len(t, segments, 1)
+	assert.Contains(t, segments[0].Text, "FROZEN_ROLE_BODY")
+
+	// Editing the Skill after the Role was published must not silently change
+	// what the frozen Role injects into the model prompt.
+	writePreloadSkill(t, skillsDir, "role-skill", "EDITED_ROLE_BODY")
+	_, err = executor.rolePreloadSegments(role)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "role-skill")
+	assert.Contains(t, err.Error(), "analyst@2")
+	assert.Contains(t, err.Error(), "frozen content digest")
+	assert.Contains(t, err.Error(), frozen.ContentHash)
+	assert.NotContains(t, err.Error(), "EDITED_ROLE_BODY")
+}
+
+// A pinned preload Skill that disappeared from the catalog fails closed too: a
+// published Role cannot silently lose a prompt constraint.
+func TestRolePreloadSegmentsFailClosedOnMissingPinnedSkill(t *testing.T) {
+	executor := &agentExecutor{}
+	role := &domain.FrozenRoleExecution{
+		Handle: "analyst", Version: 3,
+		Skills: domain.RoleSkills{Entries: []domain.RoleSkillEntry{
+			{SkillID: "gone", Mode: domain.RoleSkillPreload},
+		}},
+		FrozenSkills: domain.FrozenSkillRefs{{ID: "gone", Digest: "sha256:deadbeef"}},
+	}
+	_, err := executor.rolePreloadSegments(role)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "gone")
+	assert.Contains(t, err.Error(), "analyst@3")
+	assert.Contains(t, err.Error(), "sha256:deadbeef")
+}
+
+// Legacy Role snapshots carry no FrozenSkills. They keep the historical
+// behavior: the current on-disk body is used, and a missing Skill is skipped.
+func TestRolePreloadSegmentsUseCurrentContentForLegacyUnpinnedRole(t *testing.T) {
+	skillsDir := t.TempDir()
+	writePreloadSkill(t, skillsDir, "role-skill", "CURRENT_ROLE_BODY")
+
+	executor := &agentExecutor{skillsDir: skillsDir}
+	role := &domain.FrozenRoleExecution{
+		Handle: "analyst", Version: 1,
+		Skills: domain.RoleSkills{Entries: []domain.RoleSkillEntry{
+			{SkillID: "role-skill", Mode: domain.RoleSkillPreload},
+			{SkillID: "gone", Mode: domain.RoleSkillPreload},
+		}},
+	}
+	segments, err := executor.rolePreloadSegments(role)
+	require.NoError(t, err)
+	require.Len(t, segments, 1, "the missing legacy Skill is skipped defensively")
+	assert.Contains(t, segments[0].Text, "CURRENT_ROLE_BODY")
+}
+
 // The string API and the segment API must agree byte for byte: freezing the
 // composition must never change the prompt the model receives.
 func TestPreloadSegmentsComposeToTheStringAPI(t *testing.T) {
@@ -132,8 +213,12 @@ func TestPreloadSegmentsComposeToTheStringAPI(t *testing.T) {
 		}},
 	}}
 
-	roleText, roleSections := systemprompt.Compose(executor.rolePreloadSegments(role))
-	assert.Equal(t, executor.rolePreloadPrompt(role), roleText)
+	roleSegments, err := executor.rolePreloadSegments(role)
+	require.NoError(t, err)
+	roleText, roleSections := systemprompt.Compose(roleSegments)
+	rolePrompt, err := executor.rolePreloadPrompt(role)
+	require.NoError(t, err)
+	assert.Equal(t, rolePrompt, roleText)
 	require.Len(t, roleSections, 1)
 	assert.Contains(t, roleText, "ROLE_BODY")
 

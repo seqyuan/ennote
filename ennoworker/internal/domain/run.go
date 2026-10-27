@@ -131,7 +131,12 @@ type FrozenRoleExecution struct {
 	PermissionCeiling PermissionMode `json:"permissionCeiling"`
 	AllowedTools      []string       `json:"allowedTools"`
 	Skills            RoleSkills     `json:"skills"`
-	OutputContract    string         `json:"outputContract"`
+	// FrozenSkills pins the Role's preload Skills by content digest at config
+	// freeze time. It is a separate field so old run snapshots (which only have
+	// Skills) stay readable and unpinned; an empty ref digest also stays
+	// unpinned for compatibility.
+	FrozenSkills   FrozenSkillRefs `json:"frozenSkills,omitempty"`
+	OutputContract string          `json:"outputContract"`
 }
 
 type EffectiveRunConfig struct {

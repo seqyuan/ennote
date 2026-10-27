@@ -25,6 +25,49 @@ func loadTurnTargetKind(ctx context.Context, tx *sql.Tx, turnID string) (string,
 	return kind, nil
 }
 
+// freezeRolePreloadSkills pins every preload-mode Role Skill against the
+// startup Skill catalog. A published Role revision is immutable, but its
+// preload binding names a Skill that lives outside the revision; without a
+// digest a later on-disk edit would silently change the Role's prompt.
+//
+// A nil catalog (legacy tests/fixtures) leaves the refs unpinned. A non-nil
+// catalog must be able to name every preload Skill: a missing or digest-less
+// entry fails the freeze instead of publishing an unverifiable prompt.
+// 'available' Skills are not injected into the prompt and are not pinned.
+func (r *RunRepo) freezeRolePreloadSkills(role *domain.FrozenRoleExecution) error {
+	if role == nil {
+		return nil
+	}
+	role.FrozenSkills = nil
+	if r.SkillDigests == nil {
+		return nil
+	}
+	refs := make(domain.FrozenSkillRefs, 0, len(role.Skills.Entries))
+	for _, entry := range role.Skills.Entries {
+		if entry.Mode != domain.RoleSkillPreload {
+			continue
+		}
+		id := strings.TrimSpace(entry.SkillID)
+		digest := strings.TrimSpace(r.SkillDigests[id])
+		if digest == "" {
+			return domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
+				fmt.Errorf("role %s (%s@%d) preload skill %q is missing from the Skill catalog or has no content digest; refusing to freeze an unpinned Role prompt",
+					role.Handle, role.ObjectID, role.Version, id))
+		}
+		refs = append(refs, domain.FrozenSkillRef{ID: id, Digest: digest})
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	normalized, err := domain.NormalizeFrozenSkills(refs)
+	if err != nil {
+		return domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
+			fmt.Errorf("role %s preload skills: %w", role.Handle, err))
+	}
+	role.FrozenSkills = normalized
+	return nil
+}
+
 func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.AgentRun) (*ResolvedRunConfig, error) {
 	if r.Providers == nil || r.Models == nil {
 		return nil, fmt.Errorf("file-backed model resolver is incomplete")
@@ -202,6 +245,9 @@ func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.Ag
 			}
 			rolePrompt = roleDefinition.RolePrompt
 		}
+	}
+	if err := r.freezeRolePreloadSkills(frozenRole); err != nil {
+		return nil, err
 	}
 	if frozenRole == nil && sessionAgentID.Valid {
 		return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,

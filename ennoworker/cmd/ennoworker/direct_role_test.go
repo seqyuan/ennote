@@ -28,7 +28,8 @@ func TestRolePreloadPromptInjectsFrozenSkillPrompts(t *testing.T) {
 			{SkillID: "missing-skill", Mode: domain.RoleSkillPreload},
 		}},
 	}
-	fragment := executor.rolePreloadPrompt(role)
+	fragment, err := executor.rolePreloadPrompt(role)
+	require.NoError(t, err)
 	assert.Contains(t, fragment, "<preloaded_skill id=\"review-guard\">")
 	assert.Contains(t, fragment, "REVIEW_GUARD_PRELOAD")
 	assert.NotContains(t, fragment, "missing-skill")
@@ -36,10 +37,14 @@ func TestRolePreloadPromptInjectsFrozenSkillPrompts(t *testing.T) {
 
 func TestRolePreloadPromptSkipsAvailableAndNoSkillRoles(t *testing.T) {
 	executor := &agentExecutor{}
-	assert.Empty(t, executor.rolePreloadPrompt(nil))
+	prompt, err := executor.rolePreloadPrompt(nil)
+	require.NoError(t, err)
+	assert.Empty(t, prompt)
 	available := &domain.FrozenRoleExecution{Skills: domain.RoleSkills{
 		Entries: []domain.RoleSkillEntry{{SkillID: "x", Mode: domain.RoleSkillAvailable}}}}
-	assert.Empty(t, executor.rolePreloadPrompt(available))
+	prompt, err = executor.rolePreloadPrompt(available)
+	require.NoError(t, err)
+	assert.Empty(t, prompt)
 }
 
 func TestTaskPreloadPromptAddsExplicitSkillsWithoutDuplicatingRolePreloads(t *testing.T) {

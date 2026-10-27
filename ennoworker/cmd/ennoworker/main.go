@@ -484,7 +484,11 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		segments := make([]systemprompt.Segment, 0, len(baseSegments)+6)
 		segments = append(segments, baseSegments...)
 		segments = append(segments, projCtx.Segments(catalogPrompt)...)
-		segments = append(segments, e.rolePreloadSegments(resolved.Effective.Role)...)
+		roleSegments, roleSkillsErr := e.rolePreloadSegments(resolved.Effective.Role)
+		if roleSkillsErr != nil {
+			return domain.RunOutput{}, roleSkillsErr
+		}
+		segments = append(segments, roleSegments...)
 		segments = append(segments, taskSegments...)
 		systemPrompt, systemPromptSections = systemprompt.Compose(segments)
 		// Freeze what the model is about to be given before the first Provider
@@ -1619,18 +1623,23 @@ func (e *agentExecutor) livePublisherFor(run *domain.AgentRun) events.LivePublis
 // Each segment names the exact frozen Role version that carried the preload
 // binding, so the composition record shows which Role version put which Skill
 // body into the prompt.
-func (e *agentExecutor) rolePreloadSegments(role *domain.FrozenRoleExecution) []systemprompt.Segment {
+//
+// A preload Skill frozen with a content digest is pinned: the on-disk Skill must
+// still hash to exactly that digest, otherwise the Run fails closed. Legacy
+// snapshots without FrozenSkills keep their historical behavior: the current
+// on-disk body is used and a missing Skill is skipped defensively.
+func (e *agentExecutor) rolePreloadSegments(role *domain.FrozenRoleExecution) ([]systemprompt.Segment, error) {
 	if role == nil {
-		return nil
+		return nil, nil
 	}
 	var preloads []string
 	for _, entry := range role.Skills.Entries {
 		if entry.Mode == domain.RoleSkillPreload {
-			preloads = append(preloads, entry.SkillID)
+			preloads = append(preloads, strings.TrimSpace(entry.SkillID))
 		}
 	}
 	if len(preloads) == 0 {
-		return nil
+		return nil, nil
 	}
 	loaded := make(map[string]*skills.LoadedSkill)
 	for _, skill := range skills.Discover(e.skillsDir, e.builtinDir) {
@@ -1640,20 +1649,40 @@ func (e *agentExecutor) rolePreloadSegments(role *domain.FrozenRoleExecution) []
 	segments := make([]systemprompt.Segment, 0, len(preloads))
 	for _, id := range preloads {
 		skill, ok := loaded[id]
-		if !ok {
-			// Publish validation already guarantees the Skill exists; skip
-			// defensively if the on-disk catalog changed since publication.
+		digest, _ := role.FrozenSkills.Digest(id)
+		if digest == "" {
+			// Unpinned legacy preload: Publish validation already guaranteed the
+			// Skill existed, so skip defensively if the on-disk catalog changed.
+			if !ok {
+				continue
+			}
+			segments = append(segments, systemprompt.SkillSegment(id, skill.PromptText, source))
 			continue
+		}
+		if !ok {
+			return nil, fmt.Errorf("role preload skill %q for role %s@%d is unavailable: the Role revision pinned "+
+				"its content (%s) but the current Skill catalog no longer contains it. Restore the Skill or publish "+
+				"a new Role revision", id, role.Handle, role.Version, digest)
+		}
+		if digest != skill.ContentHash {
+			return nil, fmt.Errorf("role preload skill %q for role %s@%d does not match its frozen content digest "+
+				"(frozen %s, on-disk %s): the Skill changed after this Role revision was published, so the Run "+
+				"refuses to execute unpinned content. Restore the frozen Skill content or publish a new Role revision",
+				id, role.Handle, role.Version, digest, skill.ContentHash)
 		}
 		segments = append(segments, systemprompt.SkillSegment(id, skill.PromptText, source))
 	}
-	return segments
+	return segments, nil
 }
 
 // rolePreloadPrompt is the composed text of rolePreloadSegments.
-func (e *agentExecutor) rolePreloadPrompt(role *domain.FrozenRoleExecution) string {
-	prompt, _ := systemprompt.Compose(e.rolePreloadSegments(role))
-	return prompt
+func (e *agentExecutor) rolePreloadPrompt(role *domain.FrozenRoleExecution) (string, error) {
+	segments, err := e.rolePreloadSegments(role)
+	if err != nil {
+		return "", err
+	}
+	prompt, _ := systemprompt.Compose(segments)
+	return prompt, nil
 }
 
 // taskPreloadSegments renders explicit task Skills as an additive overlay. Role
@@ -1680,7 +1709,7 @@ func (e *agentExecutor) taskPreloadSegments(role *domain.FrozenRoleExecution, fr
 	if role != nil {
 		for _, entry := range role.Skills.Entries {
 			if entry.Mode == domain.RoleSkillPreload {
-				rolePreloads[entry.SkillID] = struct{}{}
+				rolePreloads[strings.TrimSpace(entry.SkillID)] = struct{}{}
 			}
 		}
 	}
@@ -2049,9 +2078,13 @@ func (e *agentExecutor) delegatedChildSegments(role *domain.FrozenRoleExecution,
 	if err != nil {
 		return nil, err
 	}
-	segments := make([]systemprompt.Segment, 0, 4+len(taskSegments))
+	roleSegments, err := e.rolePreloadSegments(role)
+	if err != nil {
+		return nil, err
+	}
+	segments := make([]systemprompt.Segment, 0, 4+len(taskSegments)+len(roleSegments))
 	segments = append(segments, agent.RoleSystemPromptSegments(*role, agentPrompt)...)
-	segments = append(segments, e.rolePreloadSegments(role)...)
+	segments = append(segments, roleSegments...)
 	segments = append(segments, taskSegments...)
 	return segments, nil
 }

@@ -115,6 +115,55 @@ func TestDelegatedChildSegmentsFailClosedOnChangedSkillContent(t *testing.T) {
 	assert.NotContains(t, err.Error(), "EDITED_BODY")
 }
 
+// A delegated child executes the frozen Role, so its Role preload Skills are
+// pinned exactly like task Skills: changed on-disk content fails closed.
+func TestDelegatedChildSegmentsFailClosedOnChangedRolePreloadContent(t *testing.T) {
+	skillsDir := t.TempDir()
+	writePreloadSkill(t, skillsDir, "role-skill", "FROZEN_ROLE_BODY")
+	frozen, err := skills.Load(filepath.Join(skillsDir, "role-skill"))
+	require.NoError(t, err)
+
+	role := childRole()
+	role.FrozenSkills = domain.FrozenSkillRefs{{ID: "role-skill", Digest: frozen.ContentHash}}
+	executor := &agentExecutor{skillsDir: skillsDir}
+	segments, err := executor.delegatedChildSegments(role, "Review.", nil, "task:child-6")
+	require.NoError(t, err, "unchanged Role content still materializes")
+	text, _ := systemprompt.Compose(segments)
+	assert.Contains(t, text, "FROZEN_ROLE_BODY")
+
+	writePreloadSkill(t, skillsDir, "role-skill", "EDITED_ROLE_BODY")
+	_, err = executor.delegatedChildSegments(role, "Review.", nil, "task:child-6")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "role-skill")
+	assert.Contains(t, err.Error(), "frozen content digest")
+	assert.Contains(t, err.Error(), frozen.ContentHash)
+	assert.Contains(t, err.Error(), "skill-reader@3")
+}
+
+// A task Skill that duplicates a Role preload is verified twice. Both paths
+// must agree on the frozen content, so a matching duplicate renders once and a
+// changed duplicate fails closed rather than slipping through de-duplication.
+func TestDelegatedChildSegmentsVerifyDuplicateRoleAndTaskSkillConsistently(t *testing.T) {
+	skillsDir := t.TempDir()
+	writePreloadSkill(t, skillsDir, "role-skill", "DUPLICATE_BODY")
+	frozen, err := skills.Load(filepath.Join(skillsDir, "role-skill"))
+	require.NoError(t, err)
+
+	role := childRole()
+	role.FrozenSkills = domain.FrozenSkillRefs{{ID: "role-skill", Digest: frozen.ContentHash}}
+	task := domain.FrozenSkillRefs{{ID: "role-skill", Digest: frozen.ContentHash}}
+	executor := &agentExecutor{skillsDir: skillsDir}
+	segments, err := executor.delegatedChildSegments(role, "Review.", task, "task:child-7")
+	require.NoError(t, err)
+	text, _ := systemprompt.Compose(segments)
+	assert.Equal(t, 1, strings.Count(text, "DUPLICATE_BODY"))
+
+	writePreloadSkill(t, skillsDir, "role-skill", "EDITED_DUPLICATE_BODY")
+	_, err = executor.delegatedChildSegments(role, "Review.", task, "task:child-7")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "role-skill")
+}
+
 func TestDelegatedChildSegmentsEqualTheComposedPrompt(t *testing.T) {
 	skillsDir := t.TempDir()
 	writePreloadSkill(t, skillsDir, "role-skill", "ROLE_PRELOAD_BODY")
@@ -125,6 +174,8 @@ func TestDelegatedChildSegmentsEqualTheComposedPrompt(t *testing.T) {
 	require.NoError(t, err)
 
 	text, _ := systemprompt.Compose(segments)
-	assert.Equal(t, agent.RoleSystemPrompt(*role, "Review.")+executor.rolePreloadPrompt(role), text,
+	rolePrompt, err := executor.rolePreloadPrompt(role)
+	require.NoError(t, err)
+	assert.Equal(t, agent.RoleSystemPrompt(*role, "Review.")+rolePrompt, text,
 		"the child prompt is the Role prompt followed by its preload bodies")
 }
