@@ -58,6 +58,21 @@ func run() error {
 	if hostname == "" {
 		hostname = "127.0.0.1"
 	}
+	access, err := resolveGateAccess(gateAccessInput{
+		Hostname:         hostname,
+		TLSCert:          os.Getenv("ENNOTE_TLS_CERT"),
+		TLSKey:           os.Getenv("ENNOTE_TLS_KEY"),
+		AllowLAN:         os.Getenv("ENNOTE_ALLOW_LAN"),
+		AllowInsecureLAN: os.Getenv("ENNOTE_ALLOW_INSECURE_LAN"),
+	})
+	if err != nil {
+		return err
+	}
+	if access.InsecureLAN {
+		slog.Warn("LAN access is enabled without TLS; passwords and session cookies travel in plaintext",
+			"host", hostname, "port", port,
+			"fix", "set ENNOTE_TLS_CERT/ENNOTE_TLS_KEY or restrict ENNOTE_HOSTNAME to loopback")
+	}
 	staticDir := os.Getenv("ENNOTE_STATIC_DIR")
 	if staticDir == "" {
 		staticDir = filepath.Join("..", "out")
@@ -67,7 +82,7 @@ func run() error {
 	}
 
 	// Claim the public port before touching the Worker lifecycle.
-	listener, err := net.Listen("tcp", net.JoinHostPort(hostname, port))
+	listener, err := net.Listen("tcp", net.JoinHostPort(access.Host, port))
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
@@ -83,15 +98,25 @@ func run() error {
 		HomeDir: home, Port: port,
 		WorkerURL: worker.state.URL,
 		Token:     worker.state.BootstrapToken, StaticDir: staticDir,
+		SecureCookie: access.SecureCookie,
 	}
 	httpServer := &http.Server{
 		Handler: gate.handler(), ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout: 30 * time.Second, WriteTimeout: 0, IdleTimeout: 90 * time.Second,
 	}
-	slog.Info("ennogate ready", "url", "http://"+net.JoinHostPort(hostname, port), "worker", worker.state.URL)
+	slog.Info("ennogate ready",
+		"url", access.Scheme()+"://"+net.JoinHostPort(access.Host, port),
+		"scheme", access.Scheme(), "host", access.Host, "tls", access.TLS,
+		"insecureLan", access.InsecureLAN, "worker", worker.state.URL)
 
 	serverErrors := make(chan error, 1)
-	go func() { serverErrors <- httpServer.Serve(listener) }()
+	go func() {
+		if access.TLS {
+			serverErrors <- httpServer.ServeTLS(listener, access.TLSCert, access.TLSKey)
+			return
+		}
+		serverErrors <- httpServer.Serve(listener)
+	}()
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(signals)
@@ -114,6 +139,73 @@ func run() error {
 		runErr = err
 	}
 	return runErr
+}
+
+type gateAccessInput struct {
+	Hostname         string
+	TLSCert          string
+	TLSKey           string
+	AllowLAN         string
+	AllowInsecureLAN string
+}
+
+type gateAccess struct {
+	Host         string
+	TLS          bool
+	TLSCert      string
+	TLSKey       string
+	InsecureLAN  bool
+	SecureCookie bool
+}
+
+func (a gateAccess) Scheme() string {
+	if a.TLS {
+		return "https"
+	}
+	return "http"
+}
+
+// resolveGateAccess enforces the LAN safety policy: loopback is always allowed,
+// while any non-loopback bind requires ENNOTE_ALLOW_LAN=1 plus either a TLS
+// certificate pair or an explicit acknowledgment that traffic will be plaintext.
+func resolveGateAccess(input gateAccessInput) (gateAccess, error) {
+	host := strings.TrimSpace(input.Hostname)
+	if host == "" {
+		return gateAccess{}, errors.New("ENNOTE_HOSTNAME must not be empty")
+	}
+	tlsConfigured := input.TLSCert != "" || input.TLSKey != ""
+	if tlsConfigured && (input.TLSCert == "" || input.TLSKey == "") {
+		return gateAccess{}, errors.New("ENNOTE_TLS_CERT and ENNOTE_TLS_KEY must be set together")
+	}
+	access := gateAccess{
+		Host:         host,
+		TLS:          tlsConfigured,
+		TLSCert:      input.TLSCert,
+		TLSKey:       input.TLSKey,
+		SecureCookie: tlsConfigured,
+	}
+	if isLoopbackHost(host) {
+		return access, nil
+	}
+	if input.AllowLAN != "1" {
+		return gateAccess{}, fmt.Errorf("refusing to bind non-loopback host %q: set ENNOTE_ALLOW_LAN=1 to enable LAN access", host)
+	}
+	if tlsConfigured {
+		return access, nil
+	}
+	if input.AllowInsecureLAN != "1" {
+		return gateAccess{}, fmt.Errorf("refusing plaintext LAN access on %q: set ENNOTE_TLS_CERT/ENNOTE_TLS_KEY for TLS, or ENNOTE_ALLOW_INSECURE_LAN=1 to accept the risk", host)
+	}
+	access.InsecureLAN = true
+	return access, nil
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	address := net.ParseIP(strings.Trim(host, "[]"))
+	return address != nil && address.IsLoopback()
 }
 
 type managedWorker struct {
@@ -327,6 +419,7 @@ type Gate struct {
 	StaticDir        string
 	LoginMaxFailures int
 	LoginLockout     time.Duration
+	SecureCookie     bool
 	Now              func() time.Time
 	mu               sync.Mutex
 	proxy            *httputil.ReverseProxy
@@ -340,6 +433,14 @@ var authKey = contextKey{"authenticated"}
 
 func (g *Gate) cookieName() string {
 	return fmt.Sprintf("ennote_session_%s", g.Port)
+}
+
+func (g *Gate) setSessionCookie(w http.ResponseWriter, token string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{
+		Name: g.cookieName(), Value: token, Path: "/",
+		HttpOnly: true, Secure: g.SecureCookie, SameSite: http.SameSiteLaxMode,
+		MaxAge: maxAge,
+	})
 }
 
 func (g *Gate) handler() http.Handler {
@@ -510,11 +611,7 @@ func (g *Gate) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	storeSession(token)
-	http.SetCookie(w, &http.Cookie{
-		Name: g.cookieName(), Value: token, Path: "/",
-		HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteLaxMode,
-		MaxAge: 86400 * 7,
-	})
+	g.setSessionCookie(w, token, 86400*7)
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
@@ -522,10 +619,7 @@ func (g *Gate) logout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(g.cookieName()); err == nil {
 		sessionStore.Delete(cookie.Value)
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name: g.cookieName(), Value: "", Path: "/",
-		MaxAge: -1,
-	})
+	g.setSessionCookie(w, "", -1)
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 

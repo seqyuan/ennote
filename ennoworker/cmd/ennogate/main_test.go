@@ -29,6 +29,49 @@ func TestValidateLoopbackWorkerURL(t *testing.T) {
 	}
 }
 
+func TestResolveGateAccessEnforcesLANOptInAndTLS(t *testing.T) {
+	loopback, err := resolveGateAccess(gateAccessInput{Hostname: "127.0.0.1"})
+	require.NoError(t, err)
+	assert.False(t, loopback.TLS)
+	assert.False(t, loopback.SecureCookie)
+
+	_, err = resolveGateAccess(gateAccessInput{Hostname: "0.0.0.0"})
+	require.ErrorContains(t, err, "ENNOTE_ALLOW_LAN=1")
+
+	_, err = resolveGateAccess(gateAccessInput{Hostname: "0.0.0.0", AllowLAN: "1"})
+	require.ErrorContains(t, err, "ENNOTE_ALLOW_INSECURE_LAN=1")
+
+	insecure, err := resolveGateAccess(gateAccessInput{Hostname: "0.0.0.0", AllowLAN: "1", AllowInsecureLAN: "1"})
+	require.NoError(t, err)
+	assert.True(t, insecure.InsecureLAN)
+	assert.False(t, insecure.SecureCookie)
+	assert.Equal(t, "http", insecure.Scheme())
+
+	tlsAccess, err := resolveGateAccess(gateAccessInput{
+		Hostname: "0.0.0.0", AllowLAN: "1", TLSCert: "cert.pem", TLSKey: "key.pem",
+	})
+	require.NoError(t, err)
+	assert.True(t, tlsAccess.TLS)
+	assert.True(t, tlsAccess.SecureCookie)
+	assert.False(t, tlsAccess.InsecureLAN)
+	assert.Equal(t, "https", tlsAccess.Scheme())
+
+	_, err = resolveGateAccess(gateAccessInput{Hostname: "0.0.0.0", AllowLAN: "1", TLSCert: "cert.pem"})
+	require.ErrorContains(t, err, "ENNOTE_TLS_CERT and ENNOTE_TLS_KEY")
+}
+
+func TestSetSessionCookieSecureFollowsTLS(t *testing.T) {
+	for _, secure := range []bool{true, false} {
+		gate := &Gate{Port: "45131", SecureCookie: secure}
+		recorder := httptest.NewRecorder()
+		gate.setSessionCookie(recorder, "token", 60)
+		cookies := recorder.Result().Cookies()
+		require.Len(t, cookies, 1)
+		assert.Equal(t, secure, cookies[0].Secure)
+		assert.True(t, cookies[0].HttpOnly)
+	}
+}
+
 func TestProbeWorkerRequiresReadyAuthenticatedMatchingInstance(t *testing.T) {
 	const token = "private-bootstrap-token"
 	const instanceID = "worker-instance"
@@ -164,6 +207,7 @@ func TestGateRequiresSetupAndLoginBeforeStaticOrWorkerAccess(t *testing.T) {
 	require.Len(t, cookies, 1)
 	sessionCookie := cookies[0]
 	assert.True(t, sessionCookie.HttpOnly)
+	assert.False(t, sessionCookie.Secure)
 	assert.Equal(t, http.SameSiteLaxMode, sessionCookie.SameSite)
 
 	staticRequest := gateRequest(http.MethodGet, "/", "", "", "127.0.0.1:9")

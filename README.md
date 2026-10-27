@@ -38,6 +38,21 @@ ennote start
 
 v0.1.x 的旧数据库（`data/ennote.db`）不再被读取，但也不会被删除：升级后首次启动会把它（含 `-wal`/`-shm`）原子移动到 `data/legacy-v1/` 并打印一条 `archived legacy V1 database` 警告。迁移完成后再次启动不会改动该归档。需要找回旧数据时，从 `data/legacy-v1/` 手动复制即可。
 
+### 局域网访问
+
+默认只监听 `127.0.0.1`。需要从局域网打开时：
+
+```bash
+# 推荐：TLS 终止在 ennogate，cookie 带 Secure
+ENNOTE_HOSTNAME=0.0.0.0 ENNOTE_ALLOW_LAN=1 \
+ENNOTE_TLS_CERT=/path/cert.pem ENNOTE_TLS_KEY=/path/key.pem ennogate
+
+# 不推荐：显式接受明文风险（密码和 7 天 cookie 会明文过网）
+ENNOTE_HOSTNAME=0.0.0.0 ENNOTE_ALLOW_LAN=1 ENNOTE_ALLOW_INSECURE_LAN=1 ennogate
+```
+
+非 loopback 地址在缺少 `ENNOTE_ALLOW_LAN=1` 时会拒绝启动；缺少 TLS 且没有 `ENNOTE_ALLOW_INSECURE_LAN=1` 时同样拒绝启动。
+
 ## 目录
 
 ```
