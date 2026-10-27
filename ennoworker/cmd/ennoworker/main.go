@@ -30,6 +30,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/runs"
 	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/skills"
+	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
 	"github.com/seqyuan/ennote/ennoworker/internal/spill"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/seqyuan/ennote/ennoworker/internal/systemprompt"
@@ -112,6 +113,28 @@ type agentExecutor struct {
 	OnChildRunsCreated func(ctx context.Context, runIDs []string)
 	// MCP wires the MCP tools-only client stores for Run freezing.
 	MCP *api.MCPServer
+}
+
+// registerCreateSkill exposes the Agent-driven Skill authoring tool. The
+// implementation writes into the Worker user skills root through skillsmgmt,
+// so it works in sandboxed Runs where the workspace cannot write there.
+func (e *agentExecutor) registerCreateSkill(registry *tools.Registry) error {
+	service := &skillsmgmt.Service{UserRoot: e.skillsDir, BuiltinRoot: e.builtinDir, HomeDir: e.homeDir}
+	_, err := registry.Register(&tools.CreateSkillTool{Create: func(input tools.CreateSkillInput) (tools.CreateSkillResult, error) {
+		created, err := service.Create(skillsmgmt.CreateInput{
+			ID: input.ID, Name: input.Name, Description: input.Description,
+			Prompt: input.Prompt, AllowedTools: input.AllowedTools,
+		})
+		if err != nil {
+			return tools.CreateSkillResult{}, err
+		}
+		return tools.CreateSkillResult{ID: created.ID, Path: created.Path,
+			Description: created.Description, AllowedTools: created.AllowedTools}, nil
+	}})
+	if err != nil {
+		return fmt.Errorf("register create_skill: %w", err)
+	}
+	return nil
 }
 
 // delegationRepo returns the Session-scoped delegation repository with the
@@ -527,6 +550,9 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	toolReg, err := tools.NewDefaultRegistry(wManager, artifactSink)
 	if err != nil {
 		return domain.RunOutput{}, fmt.Errorf("create tools: %w", err)
+	}
+	if err := e.registerCreateSkill(toolReg); err != nil {
+		return domain.RunOutput{}, err
 	}
 
 	todoStore := domain.NewTodoStore()
@@ -945,6 +971,9 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 	toolReg, err := tools.NewDefaultRegistry(wManager, artifactSink)
 	if err != nil {
 		return domain.RunOutput{}, fmt.Errorf("create tools: %w", err)
+	}
+	if err := e.registerCreateSkill(toolReg); err != nil {
+		return domain.RunOutput{}, err
 	}
 	todoStore := domain.NewTodoStore()
 	if _, err := toolReg.Register(&tools.TodoTool{Store: todoStore}); err != nil {

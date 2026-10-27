@@ -1,0 +1,7 @@
+{
+  "id": "skill-creator",
+  "version": "0.1.0",
+  "description": "Create a new reusable Ennote Skill from a user workflow, using the create_skill tool",
+  "prompt": "SKILL.md",
+  "allowedTools": ["create_skill", "read", "ls", "grep", "find"]
+}
