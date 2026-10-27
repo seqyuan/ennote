@@ -46,6 +46,10 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
   const currentSession = useRef(sessionId);
   const streamConnected = useRef(false);
   const streamedRunId = useRef<string | null>(null);
+  // Per-run accumulators and SSE cursors survive the reconnect that re-enters
+  // streamAgentEvents; without them a reconnect would restart local text at "".
+  const streamStates = useRef<Map<string, AgentStreamState>>(new Map());
+  const streamCursors = useRef<Map<string, { value?: string }>>(new Map());
   const [streamNonce, setStreamNonce] = useState(0);
 
   useEffect(() => { currentSession.current = sessionId; }, [sessionId]);
@@ -67,13 +71,17 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
       if (run.runKind === "context_compaction") {
         terminal = await streamCompactionEvents(run.id, setStatus, signal);
       } else {
+        const streamState = streamStates.current.get(run.id) ?? newAgentStreamState();
+        streamStates.current.set(run.id, streamState);
+        const cursor = streamCursors.current.get(run.id) ?? { value: undefined as string | undefined };
+        streamCursors.current.set(run.id, cursor);
         terminal = await streamAgentEvents(run.id, upsertMessage, setStatus, setUsage, setContextUsage, signal, {
           requested: () => {}, // approval projection is snapshot-authoritative
           resolved: () => {},
           delegated: () => {}, // delegationActive is carried by the snapshot
           followUpConsumed: () => { if (generation.current === version) setPendingFollowUps(current => current.slice(1)); },
           inputCancelled: (id) => { if (generation.current === version) setPendingFollowUps(current => current.filter(item => item.id !== id)); },
-        });
+        }, streamState, cursor);
       }
     } catch (err) {
       terminal = err instanceof TerminalRunError;
@@ -82,6 +90,10 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
       if (generation.current === version) streamConnected.current = false;
       if (!terminal && !signal.aborted && generation.current === version) {
         setStatus("Run connection interrupted");
+      }
+      if (terminal) {
+        streamStates.current.delete(run.id);
+        streamCursors.current.delete(run.id);
       }
       if (terminal && !signal.aborted && generation.current === version && currentSession.current === selected) {
         setPendingFollowUps([]);
@@ -125,6 +137,8 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
     streamController.current?.abort();
     decisionController.current?.abort();
     streamedRunId.current = null;
+    streamStates.current.clear();
+    streamCursors.current.clear();
     // eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate reset on session/branch switch
     resetLiveState();
   }, [lineageId, sessionId, resetLiveState]);
@@ -319,6 +333,22 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
 
 class TerminalRunError extends Error {}
 
+export interface AgentStreamState {
+  assistants: Map<number, { text: string; thinking: string }>;
+  toolDeltas: Map<string, { id: string; name: string; argumentsFragment: string }>;
+  toolOutputs: Map<string, { text: string; name: string }>;
+  usageByIteration: Map<number, RunUsage>;
+}
+
+export function newAgentStreamState(): AgentStreamState {
+  return {
+    assistants: new Map(),
+    toolDeltas: new Map(),
+    toolOutputs: new Map(),
+    usageByIteration: new Map(),
+  };
+}
+
 async function streamCompactionEvents(runId: string, setStatus: (status: string) => void, signal: AbortSignal): Promise<boolean> {
   const response = await apiResponse(`/v1/runs/${encodeURIComponent(runId)}/events`, { signal });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -354,7 +384,7 @@ async function streamCompactionEvents(runId: string, setStatus: (status: string)
   return false;
 }
 
-async function streamAgentEvents(
+export async function streamAgentEvents(
   runId: string,
   upsertMessage: (message: TurnMessage) => void,
   setStatus: (status: string) => void,
@@ -368,18 +398,20 @@ async function streamAgentEvents(
     followUpConsumed: () => void;
     inputCancelled: (id: string) => void;
   },
+  state: AgentStreamState,
+  cursor: { value?: string },
 ): Promise<boolean> {
-  const response = await apiResponse(`/v1/runs/${encodeURIComponent(runId)}/events`, { signal });
+  const headers = new Headers();
+  if (cursor.value) headers.set("Last-Event-ID", cursor.value);
+  const response = await apiResponse(`/v1/runs/${encodeURIComponent(runId)}/events`, { signal, headers });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const reader = response.body?.getReader();
   if (!reader) return false;
   const decoder = new TextDecoder();
   let buffer = "";
-  const assistants = new Map<number, { text: string; thinking: string }>();
-  const toolDeltas = new Map<string, { id: string; name: string; argumentsFragment: string }>();
+  const { assistants, toolDeltas, toolOutputs } = state;
   // Accumulate live tool stdout/stderr per (toolCallId, stream) so deltas append
   // instead of overwriting via the upsert merge.
-  const toolOutputs = new Map<string, { text: string; name: string }>();
   // Track live frames: live deltas (text_delta etc.) arrive with event: live.
   // Durable frames carry the same event types for legacy compatibility, but
   // since the worker now dual-writes, we must consume ONLY the live frames for
@@ -390,7 +422,7 @@ async function streamAgentEvents(
   // call, so a step that retries (or Anthropic, which reports usage twice per
   // attempt via message_start + message_delta) would otherwise double count.
   // Last-wins per iteration keeps the newest full snapshot for each step.
-  const usageByIteration = new Map<number, RunUsage>();
+  const { usageByIteration } = state;
 
   function recordUsage(iteration: number, usage: Partial<RunUsage>): void {
     usageByIteration.set(iteration, {
@@ -448,6 +480,11 @@ async function streamAgentEvents(
       buffer = lines.pop() ?? "";
       for (const rawLine of lines) {
         const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+        if (line.startsWith("id:")) {
+          const id = line.slice(3).trim();
+          if (id) cursor.value = id;
+          continue;
+        }
         if (line.startsWith("event:")) {
           currentEventName = line.slice(6).trim();
           liveFrame = currentEventName === "live";
