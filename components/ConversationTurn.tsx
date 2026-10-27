@@ -118,7 +118,7 @@ export function PendingApprovalBatch({ approval, resolving, decide, answering, a
 }) {
   const t = useT();
   if (approval.kind === "question") {
-    return <QuestionCard approval={approval} submitting={Boolean(answering)}
+    return <QuestionCard key={approval.id} approval={approval} submitting={Boolean(answering)}
       answer={answer ?? (() => undefined)} />;
   }
   if (!decide) return null;

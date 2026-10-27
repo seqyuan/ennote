@@ -22,7 +22,11 @@ export function QuestionCard({ approval, submitting, answer }: Props) {
   const [selected, setSelected] = useState<Record<string, string[]>>({});
   const [other, setOther] = useState<Record<string, boolean>>({});
   const [otherText, setOtherText] = useState<Record<string, string>>({});
-  const readOnly = approval.status !== "pending";
+  // The server may take a beat to clear the pending snapshot; keep a local
+  // receipt so the submitted answers stay visible instead of the card
+  // disappearing (or reverting to an empty form) as soon as the POST returns.
+  const [submittedAnswers, setSubmittedAnswers] = useState<QuestionAnswer[] | null>(null);
+  const readOnly = approval.status !== "pending" || submittedAnswers !== null;
 
   const answerFor = (questionID: string): QuestionAnswer | null => {
     if (other[questionID] === true) {
@@ -52,7 +56,8 @@ export function QuestionCard({ approval, submitting, answer }: Props) {
   };
 
   const answeredText = (questionID: string): string => {
-    const stored = approval.answers?.find((entry) => entry.questionId === questionID);
+    const source = approval.answers ?? submittedAnswers ?? [];
+    const stored = source.find((entry) => entry.questionId === questionID);
     if (!stored) return "";
     const labels = (stored.values ?? []).map((value) => {
       const option = questions.find((question) => question.id === questionID)?.options.find(
@@ -69,7 +74,7 @@ export function QuestionCard({ approval, submitting, answer }: Props) {
       <span className={styles.icon}><CircleHelp size={16} aria-hidden="true" /></span>
       <div>
         <strong>{t("conversation.question.title")}</strong>
-        <span>{t("conversation.question.waiting")}</span>
+        <span>{readOnly ? t("conversation.question.submitted") : t("conversation.question.waiting")}</span>
       </div>
     </header>
     <div className={styles.questions}>
@@ -131,7 +136,12 @@ export function QuestionCard({ approval, submitting, answer }: Props) {
     </div>
     {!readOnly && <div className={styles.actions}>
       <button type="button" className={styles.submit} disabled={!complete || submitting}
-        onClick={() => answer(questions.map((question) => answerFor(question.id)).filter((entry): entry is QuestionAnswer => entry !== null))}>
+        onClick={() => {
+          const answers = questions.map((question) => answerFor(question.id))
+            .filter((entry): entry is QuestionAnswer => entry !== null);
+          setSubmittedAnswers(answers);
+          answer(answers);
+        }}>
         {submitting ? t("conversation.question.submitting") : t("conversation.question.submit")}
       </button>
     </div>}

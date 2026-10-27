@@ -29,8 +29,9 @@ async function fulfill(route: Route, data: unknown) {
   await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data }) });
 }
 
-async function mock(page: Page): Promise<{ answers: () => unknown[] }> {
+async function mock(page: Page): Promise<{ answers: () => unknown[]; clearApproval: () => void }> {
   const bodies: unknown[] = [];
+  let currentApproval: unknown = approval;
   await page.route("**/api/worker/v1/**", async route => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
@@ -41,7 +42,7 @@ async function mock(page: Page): Promise<{ answers: () => unknown[] }> {
     if (path === "/v1/model-profiles") return fulfill(route, []);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
     if (path === `/v1/sessions/${session.id}`) return fulfill(route, session);
-    if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, { run, pendingApproval: approval });
+    if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, { run, pendingApproval: currentApproval });
     if (path === `/v1/sessions/${session.id}/context-usage`) return fulfill(route, null);
     if (path === `/v1/sessions/${session.id}/compactions`) return fulfill(route, []);
     if (path === `/v1/sessions/${session.id}/messages`) {
@@ -56,7 +57,7 @@ async function mock(page: Page): Promise<{ answers: () => unknown[] }> {
     }
     if (path === `/v1/sessions/${session.id}/events`) {
       return route.fulfill({ status: 200, contentType: "text/event-stream",
-        body: subscribedFrame({ activeRun: run, pendingApproval: approval, queuedInputs: [], checkpoints: [], delegationActive: false }) });
+        body: subscribedFrame({ activeRun: run, pendingApproval: currentApproval, queuedInputs: [], checkpoints: [], delegationActive: false }) });
     }
     if (path === `/v1/approval-requests/${approval.id}/answer`) {
       bodies.push(JSON.parse(route.request().postData() ?? "{}"));
@@ -64,7 +65,7 @@ async function mock(page: Page): Promise<{ answers: () => unknown[] }> {
     }
     return route.abort();
   });
-  return { answers: () => bodies };
+  return { answers: () => bodies, clearApproval: () => { currentApproval = null; } };
 }
 
 test("renders a structured question and submits the selected option", async ({ page }) => {
@@ -92,6 +93,19 @@ test("renders a structured question and submits the selected option", async ({ p
   expect(captured.answers()[0]).toMatchObject({
     answers: [{ questionId: "scope", values: ["Tumor only"] }],
   });
+
+  // The POST response does not necessarily clear the snapshot immediately; the
+  // card must stay visible as a read-only receipt of the submitted answer.
+  const card = page.getByRole("region", { name: "A question for you" });
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("Answer submitted.");
+  await expect(card).toContainText("Tumor only");
+  await expect(page.getByRole("button", { name: "Submit answer" })).toHaveCount(0);
+
+  // Once the snapshot clears the approval, the card goes away.
+  captured.clearApproval();
+  await openSession(page, { projectId: project.id, sessionId: session.id });
+  await expect(page.getByRole("region", { name: "A question for you" })).toHaveCount(0);
 });
 
 test("requires Other text when Other is selected", async ({ page }) => {
