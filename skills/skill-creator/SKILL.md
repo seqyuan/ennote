@@ -45,6 +45,11 @@ conversation.
    to bind it in a Role or a Flow. Do not claim it was tested unless you
    actually ran it.
 
+If the current Role has an explicit tool allowlist that does not include
+`create_skill`, stop and ask the user to add `create_skill` to that Role. Do not
+fall back to `bash` file writes: they do not work in sandboxed Runs and bypass
+Skill validation.
+
 ## Writing rules
 
 - Prefer short, imperative instructions over long explanations.
