@@ -1,7 +1,16 @@
 {
   "name": "@seqyuan/ennote",
   "version": "0.4.0",
-  "description": "AI-native bioinformatics agent workspace",
+  "description": "Auditable local agent runtime built around Agent Flow",
+  "keywords": [
+    "agent",
+    "agent-flow",
+    "orchestration",
+    "local-first",
+    "audit",
+    "approvals",
+    "sqlite"
+  ],
   "license": "MIT",
   "bin": {
     "ennote": "bin/ennote.js"
