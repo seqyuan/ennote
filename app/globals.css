@@ -774,7 +774,7 @@ button:disabled { cursor: default; }
   display: flex; align-items: center; justify-content: center;
   cursor: pointer; padding: 0; color: var(--text-dim);
 }
-.composer-attachment button::before { content: ""; position: absolute; inset: -5px; }
+.composer-attachment button::before { content: ""; position: absolute; inset: -9px; }
 .composer-attachment button:hover { color: var(--text); }
 .streaming-status { padding: 8px 0; color: var(--text-muted); font-size: var(--text-sm); }
 .streaming-status span { animation: pulse 1.5s infinite; }

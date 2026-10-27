@@ -22,6 +22,17 @@ const SCAN_ROOTS = ["app", "components"];
 const ALLOWED_RADII = new Set([0, 1, 2]);
 const ALLOWED_COLORS = new Set(["#fff", "#ffffff", "#000", "#000000"]);
 
+// Neutral scrim/shadow ink may stay literal; everything else must come from a
+// semantic token so the data-viz palette cannot drift back into components.
+function isNeutralRgb(value) {
+  const match = value.match(/^rgba?\(\s*(\d+)\s*[\s,/]\s*(\d+)\s*[\s,/]\s*(\d+)/i);
+  if (!match) return false;
+  const [r, g, b] = match.slice(1, 4).map(Number);
+  return (r === 0 && g === 0 && b === 0)
+    || (r === 255 && g === 255 && b === 255)
+    || (r === 24 && g === 24 && b === 27);
+}
+
 function* walk(dir, extension) {
   for (const entry of readdirSync(dir)) {
     const path = join(dir, entry);
@@ -64,6 +75,12 @@ for (const root of SCAN_ROOTS) {
       for (const match of line.matchAll(/#[0-9a-fA-F]{3,8}\b/g)) {
         const value = match[0].toLowerCase();
         if (!ALLOWED_COLORS.has(value)) {
+          errors.push(`${where} literal color ${match[0]}; use a semantic token`);
+        }
+      }
+
+      for (const match of line.matchAll(/rgba?\([^)]*\)/gi)) {
+        if (!isNeutralRgb(match[0])) {
           errors.push(`${where} literal color ${match[0]}; use a semantic token`);
         }
       }

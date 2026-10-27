@@ -1,6 +1,6 @@
 .toolbar {
   position: fixed;
-  z-index: var(--layer-popover);
+  z-index: var(--layer-selection);
   display: flex;
   align-items: center;
   gap: 2px;

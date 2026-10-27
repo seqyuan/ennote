@@ -43,6 +43,7 @@
 }
 .tab[data-active="true"] .label { font-weight: 500; }
 .close {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -57,4 +58,5 @@
   cursor: pointer;
   transition: background 0.1s, color 0.1s;
 }
+.close::before { content: ""; position: absolute; inset: -8px; }
 .close:hover { background: var(--bg-hover); color: var(--text); }

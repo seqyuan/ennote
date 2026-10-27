@@ -38,6 +38,14 @@
   --accent-soft: rgba(37, 99, 235, 0.10);
   --accent-contrast: #ffffff;
 
+  /* Context-meter category palette (data visualization). */
+  --data-cat-system: #94a3b8;
+  --data-cat-role: #818cf8;
+  --data-cat-rules: #2dd4bf;
+  --data-cat-skills: #fbbf24;
+  --data-cat-tools: #a78bfa;
+  --data-cat-reminders: #fb7185;
+
   /* Semantic state */
   --success: #15803d;
   --success-soft: #ecfdf3;
@@ -108,6 +116,7 @@
   --layer-dialog: 400;
   --layer-branch-menu: 420;
   --layer-preview: 500;
+  --layer-selection: 520;
   --layer-modal: 1000;
   --layer-confirm: 1200;
 

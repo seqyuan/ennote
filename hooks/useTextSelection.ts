@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
 export interface TextSelection {
   text: string;
@@ -95,5 +95,10 @@ export function useTextSelection(
     };
   }, [containerRef, enabled, minWidth]);
 
-  return { selection: enabled ? selection : null, clear: () => setSelection(null) };
+  const clear = useCallback(() => {
+    setSelection(null);
+    if (typeof window !== "undefined") window.getSelection()?.removeAllRanges();
+  }, []);
+
+  return { selection: enabled ? selection : null, clear };
 }

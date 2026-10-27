@@ -673,12 +673,12 @@ html.dark .composer-editor.composer-no-session::after {
   background: var(--meter-tint);
   vertical-align: baseline;
 }
-.cm-color-system { --meter-tint: rgb(148, 163, 184); }
-.cm-color-role { --meter-tint: rgb(129, 140, 248); }
-.cm-color-rules { --meter-tint: rgb(45, 212, 191); }
-.cm-color-skills { --meter-tint: rgb(251, 191, 36); }
-.cm-color-tools { --meter-tint: rgb(167, 139, 250); }
-.cm-color-reminders { --meter-tint: rgb(251, 113, 133); }
+.cm-color-system { --meter-tint: var(--data-cat-system); }
+.cm-color-role { --meter-tint: var(--data-cat-role); }
+.cm-color-rules { --meter-tint: var(--data-cat-rules); }
+.cm-color-skills { --meter-tint: var(--data-cat-skills); }
+.cm-color-tools { --meter-tint: var(--data-cat-tools); }
+.cm-color-reminders { --meter-tint: var(--data-cat-reminders); }
 .cm-color-messages { --meter-tint: var(--cmp-brand); }
 .context-meter-rows {
   margin: 6px 0 0;
