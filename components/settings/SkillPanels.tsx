@@ -2,7 +2,6 @@
 
 import { ExternalLink, RefreshCw, Search, X } from "lucide-react";
 import type { AnnotatedSkill, SkillInstallInfo, SkillRoot, SkillSearchResult, SkillUpdateResult } from "@/components/settings/types";
-import type { useSkillCreate } from "@/hooks/useSkillCreate";
 import type { useSkillRoots } from "@/hooks/useSkillRoots";
 import styles from "./SkillPanels.module.css";
 
@@ -104,89 +103,6 @@ export function SkillRootsPanel(props: {
           </div>
         )}
       </div>
-    </>
-  );
-}
-
-// SkillCreatePanel authors a new Skill on the Worker host from inline fields:
-// no browser prompt or modal, and no restart — the catalog reload that follows
-// the POST picks the new Skill up for Flows and Roles.
-export function SkillCreatePanel(props: { control: ReturnType<typeof useSkillCreate> }) {
-  const { control } = props;
-  const {
-    showForm, setShowForm, id, setId, name, setName, description, setDescription,
-    prompt, setPrompt, allowedToolsText, setAllowedToolsText, busy, canSubmit, create,
-  } = control;
-
-  return (
-    <>
-      <div className={styles.sectionHeader}>New skill</div>
-      <div className={styles.note}>
-        Authored under the Worker user skills root and usable by Flows and Roles immediately — no restart.
-      </div>
-      {!showForm ? (
-        <button type="button" onClick={() => setShowForm(true)} className={styles.ghostButton}>
-          + New skill
-        </button>
-      ) : (
-        <div className={styles.createForm}>
-          <div className={styles.inputRow}>
-            <input
-              value={id}
-              onChange={(event) => setId(event.target.value)}
-              placeholder="pdf-report"
-              aria-label="Skill ID"
-              autoComplete="off"
-              spellCheck={false}
-              className={`${styles.input} ${styles.inputID}`}
-            />
-            <input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="Name (defaults to the ID)"
-              aria-label="Skill name"
-              className={`${styles.input} ${styles.inputName}`}
-            />
-          </div>
-          <input
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder="Description (optional) — when should the model load this Skill?"
-            aria-label="Skill description"
-            className={styles.input}
-          />
-          <textarea
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            placeholder="SKILL.md body — the instructions the model follows"
-            aria-label="SKILL.md prompt"
-            rows={6}
-            className={styles.textarea}
-          />
-          <input
-            value={allowedToolsText}
-            onChange={(event) => setAllowedToolsText(event.target.value)}
-            placeholder="Allowed tools (optional, comma-separated: read, bash, edit)"
-            aria-label="Allowed tools"
-            autoComplete="off"
-            spellCheck={false}
-            className={styles.input}
-          />
-          <div className={styles.actionRow}>
-            <button
-              type="button"
-              onClick={() => void create()}
-              disabled={!canSubmit}
-              className={styles.primaryButton}
-            >
-              {busy ? "Creating…" : "Create skill"}
-            </button>
-            <button type="button" onClick={() => setShowForm(false)} disabled={busy} className={styles.ghostButton}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
     </>
   );
 }
