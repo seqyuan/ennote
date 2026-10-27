@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useT } from "@/components/LocaleProvider";
 import type { AgentRun, ApprovalDecision, QuestionAnswer, ToolApprovalRequest } from "@/lib/approval";
 import type { RunUsage, SessionContextUsage } from "@/hooks/chat-controller-types";
 import type { TurnMessage } from "@/lib/chat-messages";
@@ -30,6 +31,7 @@ function genId(): string {
 
 export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMessage, refreshLatest, refreshSession,
   activeRun, pendingApproval }: UseAgentSessionInput) {
+  const t = useT();
   const [resolvingApproval, setResolvingApproval] = useState<ApprovalDecision | null>(null);
   const [answeringQuestion, setAnsweringQuestion] = useState(false);
   const [status, setStatus] = useState("");
@@ -190,7 +192,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
   const steer = useCallback(async (text: string) => {
     if (!activeRun || !text.trim()) return false;
     if (pendingApproval?.kind === "question") {
-      setError("Answer the question before sending another message");
+      setError(t("run.status.answerQuestionFirst"));
       return false;
     }
     try {
@@ -204,13 +206,13 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
       setError(errorMessage(err, "Failed to steer the run"));
       return false;
     }
-  }, [activeRun, appendMessage, pendingApproval]);
+  }, [activeRun, appendMessage, pendingApproval, t]);
 
   const followUp = useCallback(async (text: string): Promise<{ queued: boolean; runEnded: boolean }> => {
     const run = activeRun;
     if (!run || !text.trim()) return { queued: false, runEnded: false };
     if (pendingApproval?.kind === "question") {
-      setError("Answer the question before sending another message");
+      setError(t("run.status.answerQuestionFirst"));
       return { queued: false, runEnded: false };
     }
     try {
@@ -226,7 +228,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
       if (!runEnded) setError(message);
       return { queued: false, runEnded };
     }
-  }, [activeRun]);
+  }, [activeRun, pendingApproval, t]);
 
   const cancelFollowUp = useCallback(async (id: string): Promise<boolean> => {
     const run = activeRun;

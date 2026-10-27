@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useT } from "@/components/LocaleProvider";
 import { formatTokenCount } from "@/lib/message-chrome";
+import { runStatusMessageKey } from "@/lib/run-status-copy";
 
 interface StreamingStatusBarProps {
   status: string;
@@ -19,6 +21,7 @@ interface StreamingStatusBarProps {
 }
 
 export function StreamingStatusBar({ status, activeRun, waiting, waitingForQuestion, reconnecting, compacting, cacheReadTokens = 0, inputTokens = 0, outputTokens = 0 }: StreamingStatusBarProps) {
+  const t = useT();
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [clock, setClock] = useState(0);
 
@@ -43,9 +46,10 @@ export function StreamingStatusBar({ status, activeRun, waiting, waitingForQuest
 
   if (!activeRun && !status) return null;
   const elapsed = startedAt ? Math.max(0, Math.floor((clock - startedAt) / 1000)) : 0;
+  const statusKey = runStatusMessageKey(status);
   const label = compacting ? "Compacting context..." : reconnecting ? "Reconnecting..."
-    : waiting ? (waitingForQuestion ? "Waiting for your answer..." : "Waiting for approval...")
-    : status || "Working...";
+    : waiting ? `${t(waitingForQuestion ? "run.status.waitingAnswer" : "run.status.waitingApproval")}…`
+    : statusKey ? t(statusKey) : status || "Working...";
 
   return (
     <div className="streaming-status" role="status" aria-live="polite">
