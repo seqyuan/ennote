@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -119,4 +120,20 @@ func TestLoadHasNoCloudDependency(t *testing.T) {
 	for _, name := range []string{"RelayURL", "ConnectToken", "AccountID", "RemoteConnector", "CloudAPI"} {
 		assert.NotContains(t, fields, name, "config must not expose a cloud field %q", name)
 	}
+}
+
+func TestParseLogLevelAndLoadValidation(t *testing.T) {
+	level, err := config.ParseLogLevel("debug")
+	require.NoError(t, err)
+	assert.Equal(t, slog.LevelDebug, level)
+
+	t.Setenv("ENNOTE_HOME", t.TempDir())
+	t.Setenv("ENNOTE_LOG_LEVEL", "warn")
+	if _, err := config.Load(); err != nil {
+		t.Fatalf("warn should be accepted: %v", err)
+	}
+
+	t.Setenv("ENNOTE_LOG_LEVEL", "verbose")
+	_, err = config.Load()
+	require.ErrorContains(t, err, "invalid ENNOTE_LOG_LEVEL")
 }

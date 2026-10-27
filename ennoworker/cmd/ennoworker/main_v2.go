@@ -50,6 +50,11 @@ func run() error {
 	if cfg.BootstrapToken == "" {
 		return fmt.Errorf("ENNOTE_BOOTSTRAP_TOKEN is required")
 	}
+	level, err := config.ParseLogLevel(cfg.LogLevel)
+	if err != nil {
+		return err
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
 
 	var projections *projection.Stores
 	layout, err := storage.Bootstrap(cfg.HomeDir, func(layout storage.Layout) error {

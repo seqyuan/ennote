@@ -2,9 +2,11 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/storage"
 )
@@ -61,6 +63,10 @@ func Load() (*Config, error) {
 		BuiltinSkillsDir:  os.Getenv("ENNOTE_BUILTIN_SKILLS_DIR"),
 	}
 
+	if _, err := ParseLogLevel(cfg.LogLevel); err != nil {
+		return nil, err
+	}
+
 	if v := os.Getenv("ENNOTE_MAX_CONCURRENT_RUNS"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 {
@@ -77,6 +83,23 @@ func sandboxMode() string {
 		return v
 	}
 	return "bwrap"
+}
+
+// ParseLogLevel maps ENNOTE_LOG_LEVEL onto a slog level. Unknown values fail
+// startup instead of silently falling back to info.
+func ParseLogLevel(value string) (slog.Level, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "info":
+		return slog.LevelInfo, nil
+	case "debug":
+		return slog.LevelDebug, nil
+	case "warn", "warning":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	default:
+		return slog.LevelInfo, fmt.Errorf("invalid ENNOTE_LOG_LEVEL %q (want debug, info, warn, or error)", value)
+	}
 }
 
 func logLevel() string {

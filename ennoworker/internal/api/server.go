@@ -300,15 +300,48 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 			w.Header().Set("X-Ennote-Worker-Instance", s.InstanceID)
 		}
 		r = r.WithContext(context.WithValue(r.Context(), requestIDKey{}, requestID))
+		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		started := time.Now()
+		defer func() {
+			slog.Info("http request",
+				"request_id", requestID, "method", r.Method, "path", r.URL.Path,
+				"status", recorder.status, "duration_ms", time.Since(started).Milliseconds())
+		}()
 		if !strings.HasPrefix(r.URL.Path, "/v1/health/") {
 			provided := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 			if s.Token == "" || len(provided) != len(s.Token) || subtle.ConstantTimeCompare([]byte(provided), []byte(s.Token)) != 1 {
-				writeError(w, r, http.StatusUnauthorized, "unauthorized", "worker authentication failed", false)
+				writeError(recorder, r, http.StatusUnauthorized, "unauthorized", "worker authentication failed", false)
 				return
 			}
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(recorder, r)
 	})
+}
+
+// statusRecorder keeps the access log's status while preserving the SSE
+// ResponseWriter capabilities handlers depend on.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *statusRecorder) Write(data []byte) (int, error) {
+	return r.ResponseWriter.Write(data)
+}
+
+func (r *statusRecorder) Flush() {
+	if flusher, ok := r.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
 }
 
 func (s *Server) live(w http.ResponseWriter, r *http.Request) {
@@ -1530,7 +1563,9 @@ func writeData(w http.ResponseWriter, status int, data any) {
 }
 
 func writeInternal(w http.ResponseWriter, r *http.Request, err error) {
-	_ = err
+	requestID, _ := r.Context().Value(requestIDKey{}).(string)
+	slog.Error("internal worker error",
+		"request_id", requestID, "method", r.Method, "path", r.URL.Path, "error", err)
 	writeError(w, r, http.StatusInternalServerError, "internal_error", "internal worker error", true)
 }
 
