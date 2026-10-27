@@ -12,6 +12,8 @@ interface StreamingStatusBarProps {
   waitingForQuestion?: boolean;
   reconnecting: boolean;
   compacting: boolean;
+  /** The primary status line is already rendered elsewhere (RunStatus). */
+  statusRendered?: boolean;
   /** Cumulative cache-hit tokens for the active run. */
   cacheReadTokens?: number;
   /** Cumulative billed input tokens for the active run (uncached + cacheRead + cacheWrite). */
@@ -20,7 +22,7 @@ interface StreamingStatusBarProps {
   outputTokens?: number;
 }
 
-export function StreamingStatusBar({ status, activeRun, waiting, waitingForQuestion, reconnecting, compacting, cacheReadTokens = 0, inputTokens = 0, outputTokens = 0 }: StreamingStatusBarProps) {
+export function StreamingStatusBar({ status, activeRun, waiting, waitingForQuestion, reconnecting, compacting, statusRendered = false, cacheReadTokens = 0, inputTokens = 0, outputTokens = 0 }: StreamingStatusBarProps) {
   const t = useT();
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [clock, setClock] = useState(0);
@@ -47,12 +49,12 @@ export function StreamingStatusBar({ status, activeRun, waiting, waitingForQuest
   if (!activeRun && !status) return null;
   const elapsed = startedAt ? Math.max(0, Math.floor((clock - startedAt) / 1000)) : 0;
   const statusKey = runStatusMessageKey(status);
-  const label = compacting ? "Compacting context..." : reconnecting ? "Reconnecting..."
+  const label = statusRendered ? "" : compacting ? "Compacting context..." : reconnecting ? "Reconnecting..."
     : waiting ? `${t(waitingForQuestion ? "run.status.waitingAnswer" : "run.status.waitingApproval")}…`
     : statusKey ? t(statusKey) : status || "Working...";
 
   return (
-    <div className="streaming-status" role="status" aria-live="polite">
+    <div className="streaming-status" role={statusRendered ? undefined : "status"} aria-live={statusRendered ? "off" : "polite"}>
       <span>{label}{startedAt ? `  ${formatElapsed(elapsed)}` : ""}{cacheReadTokens > 0 ? `  · cache ${formatTokenCount(cacheReadTokens)}` : ""}{(inputTokens > 0 || outputTokens > 0) ? `  · ↑${formatTokenCount(inputTokens)} ↓${formatTokenCount(outputTokens)}` : ""}</span>
     </div>
   );

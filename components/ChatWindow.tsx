@@ -206,6 +206,7 @@ export function ChatWindow({
           waitingForQuestion={waitingForQuestion}
           reconnecting={reconnecting}
           compacting={run.compacting}
+          statusRendered={Boolean(run.activeRun || run.status)}
           cacheReadTokens={run.usage?.cacheReadTokens ?? 0}
           inputTokens={(run.usage?.uncachedInputTokens ?? 0) + (run.usage?.cacheReadTokens ?? 0) + (run.usage?.cacheWriteTokens ?? 0)}
           outputTokens={run.usage?.outputTokens ?? 0}

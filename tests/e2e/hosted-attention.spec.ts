@@ -48,6 +48,11 @@ test("global attention bell shows pending items and navigates to the source sess
     sourceKind: "delegation_approval", sourceId: "approval-1", sourceGeneration: 1,
     kind: "approval_required", requiresAction: true, status: "pending",
     display: { kind: "retry_budget", generation: 1 }, createdAt: "2026-08-04T00:00:03Z" };
+  const questionItem = { id: "att-3", projectId: project.id, sessionId: sourceSession.id,
+    sourceKind: "tool_approval", sourceId: "approval-question", sourceGeneration: 0,
+    kind: "needs_input", requiresAction: true, status: "pending",
+    display: { kind: "question", approvalId: "approval-question", questionCount: 2 },
+    action: { kind: "answer_question", approvalId: "approval-question" }, createdAt: "2026-08-04T00:00:05Z" };
   const completionItem = { id: "att-2", projectId: project.id, sessionId: sourceSession.id,
     sourceKind: "delegation_completion", sourceId: "handle-1", sourceGeneration: 0,
     kind: "delegation_completed", requiresAction: false, status: "pending",
@@ -66,7 +71,7 @@ test("global attention bell shows pending items and navigates to the source sess
     if (path === `/v1/attention`) {
       const url = new URL(route.request().url());
       if (url.searchParams.get("projectId") === project.id && url.searchParams.get("status") === "pending") {
-        const items = dismissedCompletion ? [approvalItem] : [approvalItem, completionItem];
+        const items = dismissedCompletion ? [approvalItem, questionItem] : [approvalItem, questionItem, completionItem];
         return fulfill(route, { items, hasMore: false });
       }
       return fulfill(route, { items: [], hasMore: false });
@@ -81,18 +86,24 @@ test("global attention bell shows pending items and navigates to the source sess
   await selectProject(page);
   // The bell shows the pending count.
   await expect(page.locator(".attention-bell")).toBeVisible();
-  await expect(page.locator(".attention-badge")).toHaveText("2");
+  await expect(page.locator(".attention-badge")).toHaveText("3");
   await page.locator(".attention-bell").click();
-  // Action-required appears ahead of notifications.
-  await expect(page.locator(".attention-row").nth(0)).toContainText("approval");
-  await expect(page.locator(".attention-row").nth(1)).toContainText("Background delegation completed");
+  // Question items carry human labels instead of the raw answer_question enum.
+  const questionRow = page.locator('.attention-row[data-kind="needs_input"]');
+  await expect(questionRow).toContainText("2 questions");
+  await expect(questionRow).toContainText("Answer question");
+  await expect(questionRow).not.toContainText("answer_question");
+  const approvalRow = page.locator('.attention-row[data-kind="approval_required"]');
+  await expect(approvalRow).toContainText("approval");
+  const completionRow = page.locator('.attention-row[data-kind="delegation_completed"]');
+  await expect(completionRow).toContainText("Background delegation completed");
 
   // Notification can be dismissed.
-  await page.locator(".attention-row").nth(1).locator(".attention-dismiss").click();
-  await expect(page.locator(".attention-badge")).toHaveText("1");
+  await completionRow.locator(".attention-dismiss").click();
+  await expect(page.locator(".attention-badge")).toHaveText("2");
 
   // Selecting the approval item navigates to the source session.
-  await page.locator(".attention-row").nth(0).locator(".attention-main").click();
+  await approvalRow.locator(".attention-main").click();
   await expect(page.locator("#workspace-navigation")).toContainText("Source delegation");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });
