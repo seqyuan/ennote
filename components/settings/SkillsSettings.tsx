@@ -1,11 +1,13 @@
 "use client";
 
 import { useSkillCatalog } from "@/hooks/useSkillCatalog";
+import { useSkillCreate } from "@/hooks/useSkillCreate";
 import { useSkillRoots } from "@/hooks/useSkillRoots";
 import { useSkillMarketplace } from "@/hooks/useSkillMarketplace";
 import { useSkillRowActions } from "@/hooks/useSkillRowActions";
 import {
   SkillCatalogList,
+  SkillCreatePanel,
   SkillDiagnostics,
   SkillInstalledList,
   SkillMarketplace,
@@ -23,6 +25,7 @@ export function SkillsSettings({ projectId, setError }: {
   const roots = useSkillRoots(catalog.setRoots, catalog.load, setError);
   const marketplace = useSkillMarketplace(projectId, catalog.projectTrusted, catalog.load, setError);
   const rowActions = useSkillRowActions(projectId, catalog.setSkills, catalog.load, setError);
+  const create = useSkillCreate(catalog.load, setError);
 
   const installed = catalog.skills.filter((skill) => Boolean(skill.install));
   const local = catalog.skills.filter((skill) => !skill.install);
@@ -30,8 +33,11 @@ export function SkillsSettings({ projectId, setError }: {
   return <section className="settings-tab-section" aria-labelledby="settings-skills-heading">
     <header>
       <h2 id="settings-skills-heading">Skills</h2>
-      <p>Marketplace installs, catalog browsing, and per-skill invocation control.</p>
+      <p>Author new Skills, install from the marketplace, and control per-skill invocation.</p>
     </header>
+
+    {/* Author a new Skill (inline form, no prompt/modal) */}
+    <SkillCreatePanel control={create} />
 
     {/* Skills roots (additional resolution paths) */}
     <SkillRootsPanel roots={catalog.roots} loading={catalog.loading} control={roots} />
