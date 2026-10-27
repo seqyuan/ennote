@@ -13,6 +13,7 @@ checkpoint 和恢复状态都持久化在本地 SQLite 中。它不依赖账号�
 - 用 Task 图表达依赖、分支、收敛和只读 fan-out，而不是把复杂流程塞进一条提示词。
 - Agent Flow 是不可变版本；每次运行冻结 Role、Skill、模型和权限配置。
 - 每个 Task 是独立子 Run，带自己的预算、审批和输出契约。
+- Task 的 `writes` 声明只影响调度（reader/writer lane 与 disjoint writers），**不是沙箱隔离边界**。
 - 串行执行、checkpoint 续跑、取消与恢复都已落地，并经过真实 Provider 验证。
 - Graph 编辑器、版本校验、导入/导出共用同一套文件格式。
 
