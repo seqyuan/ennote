@@ -5,8 +5,9 @@ const required = new Set([
   "bin/ennote.js",
   "out/index.html",
   "package.json",
+  "skills/skill-creator/SKILL.md",
 ]);
-const allowedRoots = new Set(["README.md", "LICENSE", "bin", "out", "package.json"]);
+const allowedRoots = new Set(["README.md", "LICENSE", "bin", "out", "package.json", "skills"]);
 const forbidden = [
   /(^|\/)\.env(?:\.|$)/i,
   /\.db(?:-|$)/i,

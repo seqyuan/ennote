@@ -17,7 +17,8 @@
   },
   "files": [
     "bin",
-    "out"
+    "out",
+    "skills"
   ],
   "scripts": {
     "dev": "make dev",

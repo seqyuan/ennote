@@ -2,10 +2,10 @@
 
 dev:
 	npm run build:web
-	cd ennoworker && ENNOTE_HOSTNAME=127.0.0.1 ENNOTE_STATIC_DIR="$(CURDIR)/out" go run ./cmd/ennogate
+	cd ennoworker && ENNOTE_HOSTNAME=127.0.0.1 ENNOTE_STATIC_DIR="$(CURDIR)/out" ENNOTE_BUILTIN_SKILLS_DIR="$(CURDIR)/skills" go run ./cmd/ennogate
 
 dev-worker:
-	cd ennoworker && go run ./cmd/ennoworker
+	cd ennoworker && ENNOTE_BUILTIN_SKILLS_DIR="$(CURDIR)/skills" go run ./cmd/ennoworker
 
 build:
 	npm run build

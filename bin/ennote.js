@@ -302,6 +302,9 @@ async function startService(options) {
       ENNOTE_HOME: home,
       ENNOTE_STATIC_DIR: runtime.staticDir,
       ENNOTE_WORKER_PATH: runtime.worker,
+      ...(fs.existsSync(path.join(packageDir, "skills"))
+        ? { ENNOTE_BUILTIN_SKILLS_DIR: path.join(packageDir, "skills") }
+        : {}),
       PORT: String(port),
       ENNOTE_HOSTNAME: hostname,
     },
