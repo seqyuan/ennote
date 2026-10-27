@@ -98,10 +98,10 @@ describe("SessionStore residency (phase A)", () => {
 
   it("evicts least-recently-used stores beyond the cap", () => {
     const registry = createSessionRegistry();
-    for (let index = 0; index < 17; index += 1) registry.getStore(`s${index}`);
+    for (let index = 0; index < 9; index += 1) registry.getStore(`s${index}`);
 
     expect(registry.has("s0")).toBe(false);
-    expect(registry.has("s16")).toBe(true);
+    expect(registry.has("s8")).toBe(true);
   });
 
   it("disposeStore removes the store and aborts in-flight requests", () => {
@@ -115,6 +115,7 @@ describe("SessionStore residency (phase A)", () => {
 describe("SessionStore change feed (phase C)", () => {
   beforeEach(() => {
     apiFetch.mockReset();
+    apiEventStream.mockClear();
     streamOnEvent.handler = null;
     stubApi([{ id: "m1" }]);
   });
@@ -142,6 +143,21 @@ describe("SessionStore change feed (phase C)", () => {
 
     expect(store.getSnapshot().activeRun?.id).toBe("run-2");
     expect(store.getSnapshot().lastSeq).toBe(2);
+  });
+
+  it("pauses the change feed without losing the cached window", async () => {
+    const registry = createSessionRegistry();
+    const store = registry.getStore("s1");
+    await store.ensureLoaded("b1");
+    expect(apiEventStream).toHaveBeenCalledTimes(1);
+
+    store.pauseStream();
+    expect(store.getSnapshot().streamOpen).toBe(false);
+    expect(store.getSnapshot().loaded).toBe(true);
+
+    await store.ensureLoaded("b1");
+    expect(apiEventStream).toHaveBeenCalledTimes(2);
+    expect(store.getSnapshot().streamOpen).toBe(true);
   });
 
   it("re-syncs messages on message_committed", async () => {

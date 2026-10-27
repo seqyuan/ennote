@@ -25,8 +25,10 @@ type SessionStreamFrame =
 const PAGE_SIZE = 50;
 
 // Phase A residency cap (design §7): stores are kept in the module-level
-// registry and evicted least-recently-used once this limit is crossed.
-const STORE_LIMIT = 16;
+// registry and evicted least-recently-used once this limit is crossed. Only the
+// selected session keeps its change feed open (see pauseStream), so this is a
+// memory cap, not a connection cap.
+const STORE_LIMIT = 8;
 
 export interface SessionStoreSnapshot {
   sessionId: string;
@@ -98,6 +100,7 @@ export class SessionStore {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
   private eventCursor: string | undefined;
+  private streamPaused = false;
   private disposed = false;
 
   private listeners = new Set<Listener>();
@@ -246,8 +249,28 @@ export class SessionStore {
   // ——— session change feed (phase C) ———
 
   openStream = (): void => {
+    this.streamPaused = false;
     if (this.disposed || this.streamOpen || this.streamController) return;
     void this.openStreamInternal();
+  };
+
+  /**
+   * Stops consuming the session change feed without discarding cached history.
+   * The visible session reopens it on its next ensureLoaded; background sessions
+   * stay resident but hold no socket, keeping the browser under the HTTP/1.1
+   * per-origin connection budget.
+   */
+  pauseStream = (): void => {
+    this.streamPaused = true;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.reconnectAttempt = 0;
+    this.streamController?.abort();
+    this.streamController = null;
+    if (this.streamOpen) {
+      this.streamOpen = false;
+      this.notify();
+    }
   };
 
   dispose = (): void => {
@@ -278,10 +301,14 @@ export class SessionStore {
     } catch (cause) {
       if (cause instanceof WorkerGenerationChangedError) this.handleGenerationChanged();
     } finally {
-      this.streamController = null;
-      this.streamOpen = false;
-      this.notify();
-      if (!this.disposed) this.scheduleReconnect();
+      // A pause (or a newer stream) may already own the slot; the stale stream
+      // must not clobber the current one's state or schedule a reconnect.
+      if (this.streamController === controller) {
+        this.streamController = null;
+        this.streamOpen = false;
+        this.notify();
+        if (!this.disposed && !this.streamPaused) this.scheduleReconnect();
+      }
     }
   }
 
@@ -362,7 +389,7 @@ export class SessionStore {
   }
 
   private scheduleReconnect(): void {
-    if (this.disposed || this.reconnectTimer) return;
+    if (this.disposed || this.streamPaused || this.reconnectTimer) return;
     const delay = Math.min(1000 * 2 ** this.reconnectAttempt, 15000);
     this.reconnectAttempt += 1;
     this.reconnectTimer = setTimeout(() => {

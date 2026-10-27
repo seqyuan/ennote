@@ -86,9 +86,12 @@ export function useSessionStore(
   );
 
   // Trigger the (idempotent) load. Runs after paint, client-only; the store
-  // keeps the fetch alive across unmount so in-flight loads complete.
+  // keeps the fetch alive across unmount so in-flight loads complete, but its
+  // change feed is paused so hidden sessions do not hold a socket.
   useEffect(() => {
-    if (store) void store.ensureLoaded(branchId);
+    if (!store) return;
+    void store.ensureLoaded(branchId);
+    return () => store.pauseStream();
   }, [store, branchId]);
 
   const loaded = Boolean(sessionId) && snapshot.loaded && snapshot.dataBranchId === branchId;
