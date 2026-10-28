@@ -84,6 +84,21 @@ ennote pack inspect ~/Downloads/cell-qc.enpack --documents # 附带 flow/role/sk
 
 输出包含 `manifestDigest`（`pack.yaml` 原始字节）和 `packDigest`（排序后的 payload 行，排除顶层 `pack.sig`）、flow/role/skill 摘要、能力信封与 warnings。`format: flow` 与 `format: graph` 会如实标注，不会被悄悄降级。Worker 未启动时命令直接失败并提示 `ennote start`，不做离线降级。
 
+### 安装 / 列出 / 卸载 Agent Pack
+
+安装同样只通过 loopback Worker 落盘，CLI 自己不做解析或写盘。
+
+```bash
+ennote pack install ~/Downloads/cell-qc.enpack --dry-run   # 只出计划，不写任何文件
+ennote pack install ~/Downloads/cell-qc.enpack             # 正式安装（可传目录包）
+ennote pack install ~/src/cell-qc --as-flow qc-review=cell-qc-review
+ennote pack list                                          # 已安装 Pack 摘要
+ennote pack remove seqyuan/cell-qc-review                 # 卸载
+ennote pack remove seqyuan/cell-qc-review --force          # 覆盖本地编辑 / 共享 Role 的拒绝
+```
+
+S2a 只安装两种形态：Role-only Pack（每个 Role 变成 Worker 全局 Role 并发布 revision），以及 `format: graph` 的 Flow Pack（未发布 revision 的 Graph draft + 其私有 Role/Skill）。`format: flow`、非空 `mcp`、非空 `requires` 会被明确拒绝并返回稳定错误码（如 `pack_flow_format_unsupported`），不会降级安装。dry-run 恒返回计划（含 blockers），正式安装遇到 blocker/冲突返回 422。安装后的 Graph 默认不可运行：需要用户按现有 Graph 发布流程发布 revision 才算启用。
+
 ### 从 v0.1.x 升级
 
 v0.1.x 的旧数据库（`data/ennote.db`）不再被读取，但也不会被删除：升级后首次启动会把它（含 `-wal`/`-shm`）原子移动到 `data/legacy-v1/` 并打印一条 `archived legacy V1 database` 警告。迁移完成后再次启动不会改动该归档。需要找回旧数据时，从 `data/legacy-v1/` 手动复制即可。

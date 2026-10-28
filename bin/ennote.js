@@ -17,6 +17,7 @@ const DEFAULT_HOSTNAME = "127.0.0.1";
 const START_TIMEOUT_MS = 45_000;
 const STOP_TIMEOUT_MS = 15_000;
 const PACK_INSPECT_TIMEOUT_MS = 15_000;
+const PACK_REQUEST_TIMEOUT_MS = 15_000;
 const GITHUB_RELEASES_BASE = "https://github.com/seqyuan/ennote/releases/download";
 
 function platformSuffix(platform = os.platform(), arch = os.arch()) {
@@ -421,11 +422,20 @@ function loadWorkerEndpoint(home) {
 }
 
 function postJSON(url, body, headers, timeoutMs) {
+  return httpRequest("POST", url, body, headers, timeoutMs);
+}
+
+// httpRequest is the one place the CLI talks to the Worker. GET/DELETE carry no
+// body; POST serializes it. The Worker url is already pinned to loopback http by
+// loadWorkerEndpoint, so no transport negotiation happens here.
+function httpRequest(method, url, body, headers, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const payload = Buffer.from(JSON.stringify(body), "utf8");
+    const payload = body === undefined || body === null ? null : Buffer.from(JSON.stringify(body), "utf8");
     const request = http.request(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Content-Length": payload.length, ...headers },
+      method,
+      headers: payload
+        ? { "Content-Type": "application/json", "Content-Length": payload.length, ...headers }
+        : headers,
     }, (response) => {
       const chunks = [];
       response.on("data", (chunk) => chunks.push(chunk));
@@ -438,22 +448,13 @@ function postJSON(url, body, headers, timeoutMs) {
     request.setTimeout(timeoutMs, () => {
       request.destroy(new Error(`Worker request timed out after ${timeoutMs / 1000}s`));
     });
-    request.end(payload);
+    request.end(payload ?? undefined);
   });
 }
 
-async function requestPackInspect(endpoint, target, options = {}) {
-  const body = {
-    source: { kind: "path", path: target },
-    includeDocuments: Boolean(options.documents),
-  };
-  if (options.expectedDigest) body.expectedDigest = options.expectedDigest;
-  const response = await postJSON(
-    `${endpoint.url}/v1/packs/inspect`,
-    body,
-    { Authorization: `Bearer ${endpoint.token}` },
-    options.timeoutMs ?? PACK_INSPECT_TIMEOUT_MS,
-  );
+// decodeWorkerResponse unwraps the Worker error envelope and the data envelope.
+// A 204 (pack remove) has no data and yields null.
+function decodeWorkerResponse(response, action) {
   if (response.statusCode < 200 || response.statusCode >= 300) {
     let message = `Worker returned HTTP ${response.statusCode}`;
     let code;
@@ -469,16 +470,55 @@ async function requestPackInspect(endpoint, target, options = {}) {
     error.statusCode = response.statusCode;
     throw error;
   }
+  if (response.statusCode === 204 || response.body.trim() === "") return null;
   let parsed;
   try {
     parsed = JSON.parse(response.body);
   } catch {
-    throw new Error("Worker returned an unreadable inspect response");
+    throw new Error(`Worker returned an unreadable ${action} response`);
   }
   if (!parsed || typeof parsed !== "object" || parsed.data == null) {
-    throw new Error("Worker returned an unexpected inspect response");
+    throw new Error(`Worker returned an unexpected ${action} response`);
   }
   return parsed.data;
+}
+
+// requestJSON performs one authenticated Worker call. Every pack command except
+// install is GET/DELETE; install reuses postJSON so its body and headers stay in
+// one place.
+async function requestJSON(endpoint, method, pathname, options = {}) {
+  if (method === "POST") {
+    const response = await postJSON(
+      `${endpoint.url}${pathname}`,
+      options.body,
+      { Authorization: `Bearer ${endpoint.token}` },
+      options.timeoutMs ?? PACK_REQUEST_TIMEOUT_MS,
+    );
+    return decodeWorkerResponse(response, options.action ?? "pack");
+  }
+  const response = await httpRequest(
+    method,
+    `${endpoint.url}${pathname}`,
+    undefined,
+    { Authorization: `Bearer ${endpoint.token}` },
+    options.timeoutMs ?? PACK_REQUEST_TIMEOUT_MS,
+  );
+  return decodeWorkerResponse(response, options.action ?? "pack");
+}
+
+async function requestPackInspect(endpoint, target, options = {}) {
+  const body = {
+    source: { kind: "path", path: target },
+    includeDocuments: Boolean(options.documents),
+  };
+  if (options.expectedDigest) body.expectedDigest = options.expectedDigest;
+  const response = await postJSON(
+    `${endpoint.url}/v1/packs/inspect`,
+    body,
+    { Authorization: `Bearer ${endpoint.token}` },
+    options.timeoutMs ?? PACK_INSPECT_TIMEOUT_MS,
+  );
+  return decodeWorkerResponse(response, "inspect");
 }
 
 function formatPackSummary(data) {
@@ -533,18 +573,177 @@ function formatPackSummary(data) {
 async function packCommand(home, positionals, values) {
   const action = positionals[1];
   const target = positionals[2];
-  if (action !== "inspect") {
-    throw usageError(`Unknown pack command: ${action ?? ""}\nUsage: ennote pack inspect <file|dir> [--json] [--documents]`);
+  if (action === "inspect") {
+    if (!target) {
+      throw usageError("Usage: ennote pack inspect <file|dir> [--json] [--documents]");
+    }
+    const endpoint = loadWorkerEndpoint(home);
+    const data = await requestPackInspect(endpoint, path.resolve(target), {
+      documents: values.documents,
+    });
+    if (values.json) console.log(JSON.stringify(data));
+    else console.log(formatPackSummary(data));
+    return;
   }
-  if (!target) {
-    throw usageError("Usage: ennote pack inspect <file|dir> [--json] [--documents]");
+  if (action === "install") {
+    if (!target) {
+      throw usageError("Usage: ennote pack install <file|dir> [--dry-run] [--json] [--as-flow old=new] [--as-role old=new]");
+    }
+    // Renames are validated before the Worker is contacted, so a typo is a
+    // usage error instead of a refused install.
+    const renames = {
+      flows: parsePackRenames(values["as-flow"], "--as-flow"),
+      roles: parsePackRenames(values["as-role"], "--as-role"),
+    };
+    const endpoint = loadWorkerEndpoint(home);
+    const plan = await requestPackInstall(endpoint, path.resolve(target), {
+      dryRun: Boolean(values["dry-run"]),
+      renames,
+    });
+    if (values.json) console.log(JSON.stringify(plan));
+    else console.log(formatPackInstallPlan(plan, { dryRun: Boolean(values["dry-run"]) }));
+    return;
   }
-  const endpoint = loadWorkerEndpoint(home);
-  const data = await requestPackInspect(endpoint, path.resolve(target), {
-    documents: values.documents,
-  });
-  if (values.json) console.log(JSON.stringify(data));
-  else console.log(formatPackSummary(data));
+  if (action === "list") {
+    const endpoint = loadWorkerEndpoint(home);
+    const summaries = await requestJSON(endpoint, "GET", "/v1/packs", { action: "pack list" });
+    if (values.json) console.log(JSON.stringify(summaries ?? []));
+    else console.log(formatPackList(summaries ?? []));
+    return;
+  }
+  if (action === "remove") {
+    if (!target) {
+      throw usageError("Usage: ennote pack remove <publisher>/<name> [--force] [--json]");
+    }
+    const packId = parsePackID(target);
+    const endpoint = loadWorkerEndpoint(home);
+    const [publisher, name] = packId.split("/");
+    const query = values.force ? "?force=1" : "";
+    const pathname = `/v1/packs/${encodeURIComponent(publisher)}/${encodeURIComponent(name)}${query}`;
+    // A 204 carries no body; the CLI still reports the same shape as --json so
+    // scripts do not have to special-case the empty response.
+    const data = (await requestJSON(endpoint, "DELETE", pathname, { action: "pack remove" })) ?? {
+      packId,
+      removed: true,
+    };
+    if (values.json) console.log(JSON.stringify(data));
+    else console.log(`Removed ${data.packId ?? packId}${values.force ? " (forced)" : ""}`);
+    return;
+  }
+  throw usageError(
+    `Unknown pack command: ${action ?? ""}\nUsage: ennote pack <inspect|install|list|remove> ...`,
+  );
+}
+
+// parsePackRenames turns repeated --as-flow/--as-role old=new flags into the
+// renames object. A rename only changes the installed store id.
+function parsePackRenames(entries, flag) {
+  const renames = {};
+  for (const entry of entries ?? []) {
+    const text = String(entry);
+    const separator = text.indexOf("=");
+    if (separator <= 0 || separator === text.length - 1) {
+      throw usageError(`${flag} expects old=new, got ${text}`);
+    }
+    const from = text.slice(0, separator).trim();
+    const to = text.slice(separator + 1).trim();
+    if (from === "" || to === "") throw usageError(`${flag} expects old=new, got ${text}`);
+    if (Object.prototype.hasOwnProperty.call(renames, from) && renames[from] !== to) {
+      throw usageError(`${flag} maps ${from} twice (${renames[from]} and ${to})`);
+    }
+    renames[from] = to;
+  }
+  return renames;
+}
+
+// parsePackID validates <publisher>/<name> before it goes on the wire: a bad id
+// is a usage error, not a Worker 400/404.
+function parsePackID(value) {
+  const segments = String(value).split("/");
+  if (segments.length !== 2 || segments.some(segment => segment === "" || segment === "." || segment === "..")) {
+    throw usageError(`pack id must be <publisher>/<name>, got ${value}`);
+  }
+  return segments.join("/");
+}
+
+async function requestPackInstall(endpoint, target, options = {}) {
+  const body = { source: { kind: "path", path: target }, dryRun: Boolean(options.dryRun) };
+  const renames = options.renames ?? {};
+  const encoded = {};
+  if (Object.keys(renames.flows ?? {}).length > 0) encoded.flows = renames.flows;
+  if (Object.keys(renames.roles ?? {}).length > 0) encoded.roles = renames.roles;
+  if (Object.keys(encoded).length > 0) body.renames = encoded;
+  return requestJSON(endpoint, "POST", "/v1/packs/install", { body, action: "pack install" });
+}
+
+function formatPackActionCounts(actions) {
+  const counts = new Map();
+  for (const action of actions) {
+    counts.set(action.action, (counts.get(action.action) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, count]) => `${count} ${name}`)
+    .join(", ");
+}
+
+function formatPackInstallPlan(plan, options = {}) {
+  const pack = plan?.pack ?? {};
+  const lines = [];
+  const headline = plan?.reinstall === "noop"
+    ? "Already installed"
+    : options.dryRun ? "Dry run (nothing written)" : "Installed";
+  lines.push(`${headline}: ${pack.name ?? "(unnamed pack)"} (${pack.id ?? "?"}@${pack.version ?? "?"})`);
+  lines.push(`Manifest: ${plan?.manifestDigest ?? "?"}`);
+  lines.push(`Pack:     ${plan?.packDigest ?? "?"}`);
+
+  const actions = plan?.actions ?? [];
+  lines.push(`Actions (${actions.length}): ${formatPackActionCounts(actions) || "none"}`);
+  for (const action of actions) {
+    const scope = action.scope ? ` (${action.scope})` : "";
+    lines.push(`  - ${action.action} ${action.kind} ${action.storeId}${scope}`);
+  }
+
+  const state = plan?.state;
+  if (state) {
+    lines.push(`State:    ${state.installState ?? "?"}; flows ${state.flows?.length ?? 0}, roles ${state.roles?.length ?? 0}, skills ${state.skills?.length ?? 0}`);
+    const drafts = (state.flows ?? []).filter(flow => !flow.publishedRevision);
+    if (drafts.length > 0) {
+      lines.push(`Disabled: ${drafts.map(flow => flow.storeId).join(", ")} (draft Graph, no published revision — publish it to enable runs)`);
+    }
+    if (state.source?.path) lines.push(`Source:   ${state.source.path}`);
+    const external = state.externalRefs ?? {};
+    const externalSkills = external.skills ?? [];
+    const externalMcp = external.mcp ?? [];
+    if (externalSkills.length > 0 || externalMcp.length > 0) {
+      lines.push(`Recorded (not installed): skills ${externalSkills.join(", ") || "none"}; mcp ${externalMcp.join(", ") || "none"}`);
+    }
+  } else if (options.dryRun) {
+    lines.push("State:    not written (dry run)");
+  }
+
+  const blockers = plan?.blockers ?? [];
+  lines.push(`Blockers (${blockers.length})`);
+  for (const blocker of blockers) {
+    lines.push(`  - ${blocker.code} (${blocker.severity ?? "error"}): ${blocker.message}`);
+  }
+  const warnings = plan?.warnings ?? [];
+  lines.push(`Warnings (${warnings.length})`);
+  for (const warning of warnings) {
+    lines.push(`  - ${warning.code} (${warning.severity ?? "warning"}): ${warning.message}`);
+  }
+  return lines.join("\n");
+}
+
+function formatPackList(summaries) {
+  if (summaries.length === 0) return "No Agent Packs installed.";
+  const lines = [`Installed Agent Packs (${summaries.length})`];
+  for (const summary of summaries) {
+    const pack = summary.pack ?? {};
+    lines.push(`  - ${pack.name ?? "(unnamed pack)"} (${pack.id ?? "?"}@${pack.version ?? "?"}) ${summary.installState ?? "?"}`);
+    lines.push(`    flows ${summary.flowCount ?? 0}, roles ${summary.roleCount ?? 0}, skills ${summary.skillCount ?? 0}; installed ${summary.installedAt ?? "?"}`);
+  }
+  return lines.join("\n");
 }
 
 async function setPassword(home, reset) {
@@ -583,12 +782,19 @@ Commands:
   passwd          Set the local password
   passwd --reset  Remove the local password and require setup
   pack inspect    Inspect an Agent Pack (.enpack or directory) without installing
+  pack install    Install an Agent Pack from a .enpack file or directory
+  pack list       List installed Agent Packs
+  pack remove     Uninstall an Agent Pack (<publisher>/<name>)
 
 Options:
   --port, -p      Browser-facing port (default ${DEFAULT_PORT})
   --hostname, -H  Bind address (default ${DEFAULT_HOSTNAME})
-  --json          Machine-readable output (pack inspect prints the raw result)
+  --json          Machine-readable output (prints the Worker data payload)
   --documents     pack inspect: include flow, role, and skill source text
+  --dry-run       pack install: plan only and write nothing
+  --as-flow       pack install: old=new rename of an installed Graph id
+  --as-role       pack install: old=new rename of an installed Role handle
+  --force         pack remove: override local edits and shared global Roles
   --version, -v   Show version
   --help, -h      Show this help`);
 }
@@ -603,6 +809,10 @@ async function main(argv = process.argv.slice(2)) {
       hostname: { type: "string", short: "H", default: DEFAULT_HOSTNAME },
       json: { type: "boolean", default: false },
       documents: { type: "boolean", default: false },
+      "dry-run": { type: "boolean", default: false },
+      "as-flow": { type: "string", multiple: true },
+      "as-role": { type: "string", multiple: true },
+      force: { type: "boolean", default: false },
       reset: { type: "boolean", default: false },
       version: { type: "boolean", short: "v", default: false },
       help: { type: "boolean", short: "h", default: false },
@@ -640,8 +850,8 @@ async function main(argv = process.argv.slice(2)) {
       result = await setPassword(home, values.reset);
       break;
     case "pack":
-      // pack inspect talks to the running Worker instead of re-implementing
-      // manifest parsing and archive safety in Node.
+      // Every pack command talks to the running Worker instead of re-implementing
+      // manifest parsing, installation, or store writes in Node.
       await packCommand(home, positionals, values);
       return;
     default:
@@ -676,6 +886,12 @@ module.exports = {
   loadWorkerEndpoint,
   requestPackInspect,
   formatPackSummary,
+  requestJSON,
+  requestPackInstall,
+  parsePackRenames,
+  parsePackID,
+  formatPackInstallPlan,
+  formatPackList,
   packCommand,
   main,
 };
