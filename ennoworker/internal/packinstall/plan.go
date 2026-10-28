@@ -613,12 +613,7 @@ func (p *planner) resolveReferences() {
 						}
 					}
 					for _, ref := range task.Skills {
-						scope, id, ok := strings.Cut(ref, "/")
-						if !ok {
-							p.checkSkillRef(entry.ID, "flow task "+taskID, "global", ref)
-							continue
-						}
-						p.checkSkillRef(entry.ID, "flow task "+taskID, scope, id)
+						p.collectTaskSkillRef(entry.ID, "flow task "+taskID, ref)
 					}
 				}
 			}
@@ -631,12 +626,7 @@ func (p *planner) resolveReferences() {
 						p.collectFlowRoleRef(entry.ID, taskID, task.Role, refs)
 					}
 					for _, ref := range task.Skills {
-						scope, id, ok := strings.Cut(strings.TrimSpace(ref), "/")
-						if !ok {
-							p.checkSkillRef(entry.ID, "flow task "+taskID, "global", ref)
-							continue
-						}
-						p.checkSkillRef(entry.ID, "flow task "+taskID, scope, id)
+						p.collectTaskSkillRef(entry.ID, "flow task "+taskID, ref)
 					}
 				}
 			}
@@ -765,6 +755,20 @@ func (p *planner) collectFlowRoleRef(flowID, taskID, raw string, refs map[string
 			"flow %q task %q Role reference %q must use local/<handle>, global/<handle>, or a bare handle",
 			flowID, taskID, ref))
 	}
+}
+
+func (p *planner) collectTaskSkillRef(flowID, origin, raw string) {
+	ref := strings.TrimSpace(raw)
+	scope, id, scoped := strings.Cut(ref, "/")
+	if !scoped {
+		if entry, declared := p.skillEntries[ref]; declared {
+			p.checkSkillRef(flowID, origin, entry.Scope, ref)
+			return
+		}
+		p.checkSkillRef(flowID, origin, "global", ref)
+		return
+	}
+	p.checkSkillRef(flowID, origin, scope, id)
 }
 
 func (p *planner) checkSkillRef(flowID, origin, scope, id string) {
