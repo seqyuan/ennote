@@ -184,9 +184,10 @@ func run() error {
 	})
 	graphRuns := &graphrun.Service{
 		Sources: globalSources, Models: models, Sessions: sessionManager,
-		SkillCatalog: skillCatalog,
+		SkillCatalog: skillCatalog, Projects: projectFiles,
 		OnRunStarted: func(_ context.Context, db *sql.DB, sessionPath, runID string) error {
-			startFlowOrchestrator(db, runID, hub, coordinator, globalSources, models, policyFiles)
+			startFlowOrchestrator(db, runID, hub, coordinator, globalSources, models, policyFiles,
+				sessionManager, projectFiles, cfg.HomeDir, cfg.SandboxMode)
 			return nil
 		},
 	}
@@ -255,6 +256,10 @@ func run() error {
 		return err
 	}
 	doctor := &providerdoctor.Service{Providers: providers, Models: models, Timeout: 15 * time.Second}
+	checkAllowlist, checkUnrestricted, allowlistErr := store.CheckAllowlistFromPolicy(policyFiles)
+	if allowlistErr != nil {
+		slog.Warn("resolve check allowlist failed; check tasks will stay blocked", "error", allowlistErr)
+	}
 
 	server := &api.Server{
 		CatalogDB: projections.Catalog, UsageDB: projections.Usage, SessionStores: sessionManager,
@@ -275,13 +280,16 @@ func run() error {
 		},
 		SkillRoots: &store.SkillRootRepo{Settings: modelFiles.Settings},
 		Trust:      trustStore, GlobalSources: globalSources,
-		GraphBuilder: &graphbuilder.Service{Sources: globalSources, Completer: builderCompleter},
-		Packs:        packInstaller,
-		GraphRuns:    graphRuns,
-		FlowRuns:     graphRuns,
-		SkillCatalog: skillCatalog,
+		GraphBuilder:   &graphbuilder.Service{Sources: globalSources, Completer: builderCompleter},
+		Packs:          packInstaller,
+		GraphRuns:      graphRuns,
+		FlowRuns:       graphRuns,
+		SkillCatalog:   skillCatalog,
+		CheckRunner:    &store.CheckTaskRunner{PolicyResolver: store.FlowCheckPolicyResolver(policyFiles)},
+		CheckAllowlist: checkAllowlist, CheckAllowlistAllowsAll: checkUnrestricted,
 		GraphRunResume: func(_ context.Context, db *sql.DB, sessionID, runID string) error {
-			startFlowOrchestrator(db, runID, hub, coordinator, globalSources, models, policyFiles)
+			startFlowOrchestrator(db, runID, hub, coordinator, globalSources, models, policyFiles,
+				sessionManager, projectFiles, cfg.HomeDir, cfg.SandboxMode)
 			return nil
 		},
 	}
@@ -385,19 +393,47 @@ func recoverV2Sessions(ctx context.Context, sessions *sessionstore.Manager, temp
 // reconciled from child Run terminal facts.
 func startFlowOrchestrator(db *sql.DB, runID string,
 	hub *events.Hub, coordinator *runs.Coordinator, sources *globalsource.Store,
-	models *store.ModelRepo, policyFiles *fileconfig.PolicyStore) {
+	models *store.ModelRepo, policyFiles *fileconfig.PolicyStore,
+	sessions *sessionstore.Manager, projectFiles *projectstore.Store,
+	homeDir, sandbox string) {
 	// The orchestrator goroutine must outlive the HTTP request that created
 	// the run: it runs on the Worker lifetime context, never the request
 	// context (which is cancelled when the handler returns).
 	ctx := context.Background()
 	eventWriter := events.NewWriter(&store.EventRepo{DB: db}, hub)
+	checkRunner := &store.CheckTaskRunner{
+		DB: db, PolicyResolver: store.FlowCheckPolicyResolver(policyFiles),
+		MaxOutputBytes: 32 << 10, DefaultTimeoutSeconds: 120,
+		ManagerBuilder: func(ctx context.Context, sessionID string) (*workspace.Manager, error) {
+			session, err := sessions.FindByID(ctx, sessionID)
+			if err != nil {
+				return nil, fmt.Errorf("load check session: %w", err)
+			}
+			workspaceRecord, err := projectFiles.FindWorkspaceByProjectID(ctx, session.ProjectID)
+			if err != nil {
+				return nil, fmt.Errorf("load check workspace: %w", err)
+			}
+			root, err := workspace.CanonicalWorkspaceRoot(workspaceRecord.HostPath)
+			if err != nil {
+				return nil, err
+			}
+			manager, err := workspace.NewManager(root,
+				filepath.Join(homeDir, "runtime", "checks", sessionID), "", workspace.SandboxMode(sandbox))
+			if err != nil {
+				return nil, err
+			}
+			manager.ProtectHome(homeDir)
+			return manager, nil
+		},
+	}
 	orchestrator := &agentflow.Orchestrator{
 		Store: &store.OrchestratorStore{Runs: &store.AgentFlowRunRepo{DB: db}},
 		Children: &store.OrchestratorChildren{
 			DB: db, Delegations: &store.DelegationRepo{DB: db, RoleSources: sources, Models: models, Policies: policyFiles},
 			Policies: policyFiles,
 		},
-		Events: &store.FlowEventSink{Writer: eventWriter},
+		Events:  &store.FlowEventSink{Writer: eventWriter},
+		Checker: checkRunner,
 		Enqueue: func(ctx context.Context, childRunID string) error {
 			return coordinator.Enqueue(ctx, childRunID)
 		},

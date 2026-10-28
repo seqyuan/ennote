@@ -111,6 +111,9 @@ type Server struct {
 	// Packs installs, lists, and removes Agent Packs (S2a). Nil disables the
 	// install surface with a 503 instead of panicking or half-installing.
 	Packs *packinstall.Service
+	// CheckRunner is the policy/workspace template used for check approval
+	// reads and decisions. The request's Session DB is bound per call.
+	CheckRunner *store.CheckTaskRunner
 	// GraphRuns starts file-native Graph Runs (immutable revision + frozen
 	// execution plan in the owning Session database).
 	GraphRuns GraphRunStarter
@@ -258,6 +261,8 @@ func (s *Server) routes() http.Handler {
 	// V2 session-scoped Graph Run activity surface (list/detail/cancel/resume).
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/graph-runs", s.listSessionGraphRuns)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/graph-runs/{runID}", s.getSessionGraphRun)
+	mux.HandleFunc("GET /v1/sessions/{sessionID}/graph-runs/{runID}/check-approvals", s.listSessionCheckApprovals)
+	mux.HandleFunc("POST /v1/sessions/{sessionID}/graph-runs/{runID}/check-approvals/{taskIndex}/decision", s.decideSessionCheckApproval)
 	mux.HandleFunc("POST /v1/sessions/{sessionID}/graph-runs/{runID}/cancel", s.cancelSessionGraphRun)
 	mux.HandleFunc("POST /v1/sessions/{sessionID}/graph-runs/{runID}/resume", s.resumeSessionGraphRun)
 	if s.GraphBuilder != nil {

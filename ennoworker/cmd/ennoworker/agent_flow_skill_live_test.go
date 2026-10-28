@@ -130,7 +130,8 @@ Your submit_result summary MUST begin with the exact token LIVE_SKILL_MARKER fol
 		Sources: stack.Sources, Models: stack.ModelRepo, Sessions: stack.Sessions,
 		GlobalSkills: globalSkills,
 		OnRunStarted: func(_ context.Context, db *sql.DB, sessionPath, runID string) error {
-			startFlowOrchestrator(db, runID, hub, coordinator, stack.Sources, stack.ModelRepo, stack.Policies)
+			startFlowOrchestrator(db, runID, hub, coordinator, stack.Sources, stack.ModelRepo, stack.Policies,
+				stack.Sessions, stack.Projects, stack.Home, "none")
 			return nil
 		},
 	}

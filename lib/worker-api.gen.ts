@@ -381,6 +381,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sessions/{sessionID}/graph-runs/{runID}/check-approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: string;
+                runID: string;
+            };
+            cookie?: never;
+        };
+        /** List the check approvals of one Flow Run */
+        get: operations["listSessionCheckApprovals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{sessionID}/graph-runs/{runID}/check-approvals/{taskIndex}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: string;
+                runID: string;
+                taskIndex: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve or reject one pending check task
+         * @description First decision wins. A repeated or conflicting decision returns the
+         *     committed status with applied=false. The orchestrator consumes the
+         *     durable status; a rejected decision fails the flow and a later resume
+         *     clears the old row so the task can ask again.
+         */
+        post: operations["decideSessionCheckApproval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sessions/{sessionID}/graph-runs/{runID}/cancel": {
         parameters: {
             query?: never;
@@ -2246,6 +2293,20 @@ export interface components {
             createdAt?: string;
             updatedAt?: string;
             finishedAt?: string;
+        };
+        FlowCheckApproval: {
+            runId: string;
+            taskIndex: number;
+            taskHandle?: string;
+            command: string;
+            /** @enum {string} */
+            status: "pending" | "approved" | "rejected";
+            sessionId: string;
+            flowVersionId: string;
+            /** Format: date-time */
+            requestedAt: string;
+            /** Format: date-time */
+            resolvedAt?: string;
         };
         RunAgentFlowNode: {
             runId?: string;
@@ -4832,6 +4893,73 @@ export interface operations {
                 };
             };
             404: components["responses"]["Error"];
+        };
+    };
+    listSessionCheckApprovals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: string;
+                runID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Check approvals ordered by task index */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["FlowCheckApproval"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    decideSessionCheckApproval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: string;
+                runID: string;
+                taskIndex: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    decision: "approved" | "rejected";
+                    clientRequestId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Committed check approval */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["FlowCheckApproval"] & {
+                            applied: boolean;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
     cancelSessionGraphRun: {

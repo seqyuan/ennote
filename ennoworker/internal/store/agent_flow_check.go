@@ -120,9 +120,10 @@ func (c *CheckTaskRunner) DecideCheckApproval(ctx context.Context, runID string,
 // approval UI.
 func (c *CheckTaskRunner) ListPendingCheckApprovals(ctx context.Context, projectID string) ([]CheckApprovalRow, error) {
 	rows, err := c.DB.QueryContext(ctx, `SELECT a.run_id, a.task_index, a.command, a.requested_at,
-		f.session_id, f.flow_version_id
+		f.session_id, f.flow_version_id, COALESCE(n.handle, '')
 		FROM run_agent_flow_check_approvals a
 		JOIN run_agent_flow f ON f.run_id=a.run_id
+		LEFT JOIN run_agent_flow_nodes n ON n.run_id=a.run_id AND n.task_index=a.task_index
 		WHERE a.status='pending' AND f.project_id=? ORDER BY a.requested_at`, projectID)
 	if err != nil {
 		return nil, err
@@ -133,9 +134,10 @@ func (c *CheckTaskRunner) ListPendingCheckApprovals(ctx context.Context, project
 		var row CheckApprovalRow
 		var requestedAt string
 		if err := rows.Scan(&row.RunID, &row.TaskIndex, &row.Command, &requestedAt,
-			&row.SessionID, &row.FlowVersionID); err != nil {
+			&row.SessionID, &row.FlowVersionID, &row.TaskHandle); err != nil {
 			return nil, err
 		}
+		row.Status = agentflow.CheckApprovalPending
 		row.RequestedAt, _ = time.Parse(time.RFC3339Nano, requestedAt)
 		approvals = append(approvals, row)
 	}
@@ -144,12 +146,74 @@ func (c *CheckTaskRunner) ListPendingCheckApprovals(ctx context.Context, project
 
 // CheckApprovalRow is the UI-visible pending approval projection.
 type CheckApprovalRow struct {
-	RunID         string    `json:"runId"`
-	TaskIndex     int       `json:"taskIndex"`
-	Command       string    `json:"command"`
-	SessionID     string    `json:"sessionId"`
-	FlowVersionID string    `json:"flowVersionId"`
-	RequestedAt   time.Time `json:"requestedAt"`
+	RunID         string                        `json:"runId"`
+	TaskIndex     int                           `json:"taskIndex"`
+	TaskHandle    string                        `json:"taskHandle,omitempty"`
+	Command       string                        `json:"command"`
+	Status        agentflow.CheckApprovalStatus `json:"status"`
+	SessionID     string                        `json:"sessionId"`
+	FlowVersionID string                        `json:"flowVersionId"`
+	RequestedAt   time.Time                     `json:"requestedAt"`
+	ResolvedAt    *time.Time                    `json:"resolvedAt,omitempty"`
+}
+
+// ListCheckApprovals returns every check approval of one run, newest task last.
+func (c *CheckTaskRunner) ListCheckApprovals(ctx context.Context, runID string) ([]CheckApprovalRow, error) {
+	rows, err := c.DB.QueryContext(ctx, `SELECT a.run_id, a.task_index, a.command, a.status, a.requested_at,
+		a.resolved_at, f.session_id, f.flow_version_id, COALESCE(n.handle, '')
+		FROM run_agent_flow_check_approvals a
+		JOIN run_agent_flow f ON f.run_id=a.run_id
+		LEFT JOIN run_agent_flow_nodes n ON n.run_id=a.run_id AND n.task_index=a.task_index
+		WHERE a.run_id=? ORDER BY a.task_index`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var approvals []CheckApprovalRow
+	for rows.Next() {
+		var row CheckApprovalRow
+		var requestedAt string
+		var resolvedAt sql.NullString
+		if err := rows.Scan(&row.RunID, &row.TaskIndex, &row.Command, &row.Status, &requestedAt,
+			&resolvedAt, &row.SessionID, &row.FlowVersionID, &row.TaskHandle); err != nil {
+			return nil, err
+		}
+		row.RequestedAt, _ = time.Parse(time.RFC3339Nano, requestedAt)
+		if resolvedAt.Valid && resolvedAt.String != "" {
+			parsed, err := time.Parse(time.RFC3339Nano, resolvedAt.String)
+			if err == nil {
+				row.ResolvedAt = &parsed
+			}
+		}
+		approvals = append(approvals, row)
+	}
+	return approvals, rows.Err()
+}
+
+// GetCheckApproval returns one run/task approval or sql.ErrNoRows.
+func (c *CheckTaskRunner) GetCheckApproval(ctx context.Context, runID string, taskIndex int) (*CheckApprovalRow, error) {
+	var row CheckApprovalRow
+	var requestedAt string
+	var resolvedAt sql.NullString
+	err := c.DB.QueryRowContext(ctx, `SELECT a.run_id, a.task_index, a.command, a.status, a.requested_at,
+		a.resolved_at, f.session_id, f.flow_version_id, COALESCE(n.handle, '')
+		FROM run_agent_flow_check_approvals a
+		JOIN run_agent_flow f ON f.run_id=a.run_id
+		LEFT JOIN run_agent_flow_nodes n ON n.run_id=a.run_id AND n.task_index=a.task_index
+		WHERE a.run_id=? AND a.task_index=?`, runID, taskIndex).
+		Scan(&row.RunID, &row.TaskIndex, &row.Command, &row.Status, &requestedAt,
+			&resolvedAt, &row.SessionID, &row.FlowVersionID, &row.TaskHandle)
+	if err != nil {
+		return nil, err
+	}
+	row.RequestedAt, _ = time.Parse(time.RFC3339Nano, requestedAt)
+	if resolvedAt.Valid && resolvedAt.String != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, resolvedAt.String)
+		if err == nil {
+			row.ResolvedAt = &parsed
+		}
+	}
+	return &row, nil
 }
 
 // ExecuteCheck runs the check command in the workspace sandbox with bounded
@@ -172,6 +236,9 @@ func (c *CheckTaskRunner) ExecuteCheck(ctx context.Context, command string, time
 	wManager, err := c.ManagerBuilder(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("build workspace sandbox: %w", err)
+	}
+	if err := wManager.ValidateArgv(argv); err != nil {
+		return nil, err
 	}
 	timeout := time.Duration(c.DefaultTimeoutSeconds) * time.Second
 	if c.DefaultTimeoutSeconds <= 0 {

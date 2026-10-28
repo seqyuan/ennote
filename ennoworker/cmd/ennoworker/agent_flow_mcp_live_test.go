@@ -180,7 +180,8 @@ func TestLiveAgentFlowChildCallsMCP(t *testing.T) {
 	service := &graphrun.Service{
 		Sources: stack.Sources, Models: stack.ModelRepo, Sessions: stack.Sessions,
 		OnRunStarted: func(_ context.Context, db *sql.DB, sessionPath, runID string) error {
-			startFlowOrchestrator(db, runID, hub, coordinator, stack.Sources, stack.ModelRepo, stack.Policies)
+			startFlowOrchestrator(db, runID, hub, coordinator, stack.Sources, stack.ModelRepo, stack.Policies,
+				stack.Sessions, stack.Projects, stack.Home, "none")
 			return nil
 		},
 	}

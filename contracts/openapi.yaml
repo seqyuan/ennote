@@ -471,6 +471,69 @@ paths:
                             items: { $ref: "#/components/schemas/RunAgentFlowNode" }
                           flowVersion: { type: integer }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/graph-runs/{runID}/check-approvals:
+    parameters:
+      - { name: sessionID, in: path, required: true, schema: { type: string } }
+      - { name: runID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listSessionCheckApprovals
+      summary: List the check approvals of one Flow Run
+      responses:
+        "200":
+          description: Check approvals ordered by task index
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { type: array, items: { $ref: "#/components/schemas/FlowCheckApproval" } } }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/graph-runs/{runID}/check-approvals/{taskIndex}/decision:
+    parameters:
+      - { name: sessionID, in: path, required: true, schema: { type: string } }
+      - { name: runID, in: path, required: true, schema: { type: string } }
+      - { name: taskIndex, in: path, required: true, schema: { type: integer, minimum: 0 } }
+    post:
+      operationId: decideSessionCheckApproval
+      summary: Approve or reject one pending check task
+      description: |
+        First decision wins. A repeated or conflicting decision returns the
+        committed status with applied=false. The orchestrator consumes the
+        durable status; a rejected decision fails the flow and a later resume
+        clears the old row so the task can ask again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approved, rejected] }
+                clientRequestId: { type: string }
+      responses:
+        "200":
+          description: Committed check approval
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: "#/components/schemas/FlowCheckApproval"
+                          - type: object
+                            required: [applied]
+                            properties: { applied: { type: boolean } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /v1/sessions/{sessionID}/graph-runs/{runID}/cancel:
     parameters:
       - { name: sessionID, in: path, required: true, schema: { type: string } }
@@ -3436,6 +3499,20 @@ components:
         createdAt: { type: string }
         updatedAt: { type: string }
         finishedAt: { type: string }
+    FlowCheckApproval:
+      type: object
+      additionalProperties: false
+      required: [runId, taskIndex, command, status, sessionId, flowVersionId, requestedAt]
+      properties:
+        runId: { type: string }
+        taskIndex: { type: integer, minimum: 0 }
+        taskHandle: { type: string }
+        command: { type: string }
+        status: { type: string, enum: [pending, approved, rejected] }
+        sessionId: { type: string }
+        flowVersionId: { type: string }
+        requestedAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time }
     RunAgentFlowNode:
       type: object
       properties:

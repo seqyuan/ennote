@@ -554,6 +554,16 @@ func (r *AgentFlowRunRepo) ResumeFlowRun(ctx context.Context, runID string) (*do
 	if n, _ := res.RowsAffected(); n == 0 {
 		return nil, fmt.Errorf("flow run %s is not resumable", runID)
 	}
+	// A reset check node must ask for approval again. The approval row has a
+	// (run, task) primary key and CreateCheckApproval is a no-op when any row
+	// exists, so leaving a rejected row behind would make resume unschedulable.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM run_agent_flow_check_approvals
+		WHERE run_id=? AND task_index IN (
+			SELECT task_index FROM run_agent_flow_nodes
+			WHERE run_id=? AND terminal_state IN ('cancelled','interrupted','failed','blocked')
+		)`, runID, runID); err != nil {
+		return nil, err
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE run_agent_flow_nodes SET terminal_state='pending',
 		error_code=NULL, output_ref=NULL, finished_at=NULL
 		WHERE run_id=? AND terminal_state IN ('cancelled','interrupted','failed','blocked')`, runID); err != nil {
