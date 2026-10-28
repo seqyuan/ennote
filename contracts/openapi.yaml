@@ -2675,6 +2675,100 @@ paths:
         "413": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
 
+  /v1/packs/install:
+    post:
+      operationId: installPack
+      summary: Plan or apply an Agent Pack install
+      description: |
+        S2a installs exactly two pack shapes: a Role-only pack (each Role becomes
+        a Worker-global Role with a published revision) and a `format: graph`
+        pack Flow (an unpublishing Graph draft plus its Graph-private Roles and
+        Skills). `format: flow`, non-empty `mcp`, and non-empty `requires` are
+        refused with a stable blocker code instead of being downgraded.
+
+        `dryRun: true` always answers 200 with the plan, blockers included, and
+        never writes staging, store objects, or state. A real install answers
+        422 when any blocker or conflict remains. Installed Graphs stay disabled
+        until a user publishes a Graph revision through the existing Graph path;
+        the installer never publishes one.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PackInstallRequest" }
+      responses:
+        "200":
+          description: Install plan (dry run, reinstall no-op, or completed install)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/PackInstallPlan" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
+  /v1/packs:
+    get:
+      operationId: listPacks
+      summary: List installed Agent Packs
+      description: Reports one summary per installed pack by reading its state file only.
+      responses:
+        "200":
+          description: Installed pack summaries ordered by pack id
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/PackStateSummary" }
+        "401": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
+  /v1/packs/{publisher}/{name}:
+    delete:
+      operationId: removePack
+      summary: Uninstall an Agent Pack
+      description: |
+        Deletes every installed object this pack owns. Removal is refused while a
+        non-terminal flow Run references an installed flow, while an installed
+        object was edited locally, or while a global Role is still referenced by
+        another Graph. `force=true` overrides the last two. A locally edited Skill
+        is kept with a warning instead of being deleted.
+      parameters:
+        - name: publisher
+          in: path
+          required: true
+          schema: { type: string }
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+        - name: force
+          in: query
+          required: false
+          description: Override locally edited objects and shared global Roles
+          schema: { type: boolean }
+      responses:
+        "204": { description: Pack removed }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
   /v1/skills/roots:
     get:
       operationId: listSkillRoots
@@ -5207,6 +5301,14 @@ components:
         path: { type: string }
         ref: { type: string }
         kind: { type: string, enum: [vendored, external] }
+        scope:
+          type: string
+          enum: [flow, global]
+          description: >-
+            Install scope of a vendored skill. Defaults to global: flow installs
+            one copy below every flow that references it, global installs once
+            under the user skills root. An external ref has no install target and
+            therefore no scope.
         pathDigest: { type: string }
         promptBytes: { type: integer }
     PackMCP:
@@ -5288,6 +5390,213 @@ components:
         bytes: { type: integer }
         content: { type: string }
         truncated: { type: boolean }
+    PackInstallRequest:
+      type: object
+      additionalProperties: false
+      required: [source]
+      properties:
+        source: { $ref: "#/components/schemas/PackSource" }
+        expectedDigest:
+          type: string
+          description: Expected sha256 of the payload or the manifest; a mismatch refuses the install
+        dryRun:
+          type: boolean
+          description: Plan only and write nothing; defaults to false
+        renames:
+          $ref: "#/components/schemas/PackRenames"
+          description: Change installed store ids to avoid collisions; in-pack references are never rewritten
+    PackRenames:
+      type: object
+      additionalProperties: false
+      properties:
+        flows:
+          type: object
+          description: pack flow id -> installed Graph id
+          additionalProperties: { type: string }
+        roles:
+          type: object
+          description: pack Role handle -> installed Role handle
+          additionalProperties: { type: string }
+    PackInstallPlan:
+      type: object
+      additionalProperties: false
+      required:
+        - planVersion
+        - pack
+        - manifestDigest
+        - packDigest
+        - actions
+        - blockers
+        - warnings
+        - commitPoint
+        - willPublishFlowRevision
+      properties:
+        planVersion: { type: integer }
+        pack: { $ref: "#/components/schemas/PackIdentity" }
+        manifestDigest: { type: string }
+        packDigest: { type: string }
+        actions:
+          type: array
+          items: { $ref: "#/components/schemas/PackAction" }
+        blockers:
+          type: array
+          description: Non-empty when the install is refused; every blocker is non-retryable
+          items: { $ref: "#/components/schemas/PackIssue" }
+        warnings:
+          type: array
+          items: { $ref: "#/components/schemas/PackIssue" }
+        commitPoint:
+          type: string
+          enum: [state_file]
+          description: The install is observable only once its state file exists
+        willPublishFlowRevision:
+          type: boolean
+          description: Always false in S2a; an installed Graph stays an unpublished draft
+        reinstall:
+          type: string
+          enum: [noop]
+          description: Reported when the same pack bytes are already installed
+        state:
+          $ref: "#/components/schemas/PackState"
+          description: The committed install record; a dry run never reports one
+    PackAction:
+      type: object
+      additionalProperties: false
+      required: [kind, storeId, action]
+      properties:
+        kind: { type: string, enum: [graph, graph_role, role, role_revision, skill] }
+        storeId:
+          type: string
+          description: Installed store id; a Graph-private object is "<flow>/<id>"
+        action: { type: string, enum: [create, exists_identical, conflict, publish] }
+        scope: { type: string, enum: [flow, global] }
+    PackIssue:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code: { type: string }
+        severity: { type: string, enum: [error, warning, info] }
+        message: { type: string }
+    PackState:
+      type: object
+      additionalProperties: false
+      required:
+        - stateVersion
+        - pack
+        - manifestDigest
+        - packDigest
+        - signed
+        - installedAt
+        - installState
+        - source
+        - flows
+        - roles
+        - skills
+        - externalRefs
+        - modelRequirements
+      properties:
+        stateVersion: { type: integer }
+        pack: { $ref: "#/components/schemas/PackIdentity" }
+        manifestDigest: { type: string }
+        packDigest: { type: string }
+        signed:
+          type: boolean
+          description: Always false in S2a; S5 adds signature verification
+        installedAt: { type: string }
+        installState:
+          type: string
+          enum: [installed_draft]
+          description: The installed Graph has no published revision, so no Run can start from it
+        source: { $ref: "#/components/schemas/PackSource" }
+        flows:
+          type: array
+          items: { $ref: "#/components/schemas/PackFlowState" }
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/PackRoleState" }
+        skills:
+          type: array
+          items: { $ref: "#/components/schemas/PackSkillState" }
+        externalRefs: { $ref: "#/components/schemas/PackExternalRefs" }
+        modelRequirements: { $ref: "#/components/schemas/PackModelRequirements" }
+    PackFlowState:
+      type: object
+      additionalProperties: false
+      required: [packFlowId, storeId, format, sourceDigest, installedGraphDigest, publishedRevision]
+      properties:
+        packFlowId: { type: string }
+        storeId: { type: string }
+        format: { type: string, enum: [graph] }
+        sourceDigest: { type: string }
+        installedGraphDigest: { type: string }
+        publishedRevision:
+          type: string
+          nullable: true
+          description: Always null in S2a; publishing is a separate user action
+    PackRoleState:
+      type: object
+      additionalProperties: false
+      required: [packHandle, scope, storeId, digest]
+      properties:
+        packHandle: { type: string }
+        scope: { type: string, enum: [flow, global] }
+        storeId:
+          type: string
+          description: "\"<handle>\" for a global Role, \"<flow>/<handle>\" for a Graph-private Role"
+        digest: { type: string }
+        revision:
+          type: string
+          description: Published revision id; global Roles only
+    PackSkillState:
+      type: object
+      additionalProperties: false
+      required: [packId, storeId, scope, contentDigest]
+      properties:
+        packId: { type: string }
+        storeId:
+          type: string
+          description: "\"<id>\" for a global Skill, \"<flow>/<id>\" for a flow-scoped Skill"
+        scope: { type: string, enum: [flow, global] }
+        contentDigest: { type: string }
+    PackExternalRefs:
+      type: object
+      additionalProperties: false
+      required: [skills, mcp]
+      properties:
+        skills:
+          type: array
+          description: External Skill refs (name@version); recorded, never installed
+          items: { type: string }
+        mcp:
+          type: array
+          description: External MCP profile refs; recorded, never installed
+          items: { type: string }
+    PackStateSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - pack
+        - manifestDigest
+        - packDigest
+        - installedAt
+        - installState
+        - source
+        - flowCount
+        - roleCount
+        - skillCount
+        - externalRefs
+      properties:
+        pack: { $ref: "#/components/schemas/PackIdentity" }
+        manifestDigest: { type: string }
+        packDigest: { type: string }
+        installedAt: { type: string }
+        installState: { type: string, enum: [installed_draft] }
+        source: { $ref: "#/components/schemas/PackSource" }
+        flowCount: { type: integer }
+        roleCount: { type: integer }
+        skillCount: { type: integer }
+        externalRefs: { $ref: "#/components/schemas/PackExternalRefs" }
     ActiveRunState:
       type: object
       required: [run]

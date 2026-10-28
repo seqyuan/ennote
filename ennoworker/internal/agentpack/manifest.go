@@ -35,6 +35,15 @@ const (
 	RoleScopeGlobal = "global"
 )
 
+// Skill scopes. A flow-scoped vendored skill is installed below every flow that
+// references it (agents/graphs/<flow>/skills/<id>); a global vendored skill is
+// installed once under the user skills root. The default is global so every
+// pack written before scope existed keeps its meaning.
+const (
+	SkillScopeFlow   = "flow"
+	SkillScopeGlobal = "global"
+)
+
 // Vendored skill file names accepted at the skill directory root.
 var skillPromptNames = []string{"SKILL.md", "skill.md"}
 
@@ -127,11 +136,13 @@ type RoleEntry struct {
 }
 
 // SkillEntry declares a vendored skill directory or an external skill
-// reference. Exactly one of ID/Path and Ref must be set.
+// reference. Exactly one of ID/Path and Ref must be set. Scope only applies to
+// vendored skills and defaults to global.
 type SkillEntry struct {
-	ID   string `yaml:"id"`
-	Path string `yaml:"path"`
-	Ref  string `yaml:"ref"`
+	ID    string `yaml:"id"`
+	Path  string `yaml:"path"`
+	Ref   string `yaml:"ref"`
+	Scope string `yaml:"scope"`
 }
 
 // MCPEntry declares a reference to an existing MCP profile. S1 accepts only
@@ -281,12 +292,19 @@ func validateManifest(manifest *Manifest) error {
 		skill.ID = strings.TrimSpace(skill.ID)
 		skill.Path = strings.TrimSpace(skill.Path)
 		skill.Ref = strings.TrimSpace(skill.Ref)
+		skill.Scope = strings.TrimSpace(skill.Scope)
 		switch {
 		case skill.ID != "" && skill.Ref != "":
 			return fieldError(CodePackSkillInvalid, field, "skill must declare either id+path or ref, not both")
 		case skill.Ref != "":
 			if skill.Path != "" {
 				return fieldError(CodePackSkillInvalid, field+".path", "external skill ref must not declare a path")
+			}
+			if skill.Scope != "" {
+				// An external ref is resolved from the Worker-global catalog: it has
+				// no install target of its own, so a scope would be meaningless.
+				return fieldError(CodePackSkillInvalid, field+".scope",
+					"external skill ref must not declare a scope")
 			}
 			if !externalSkillRef.MatchString(skill.Ref) {
 				return fieldError(CodePackSkillInvalid, field+".ref",
@@ -299,6 +317,14 @@ func validateManifest(manifest *Manifest) error {
 			}
 			if skill.Path == "" {
 				return fieldError(CodePackSkillInvalid, field+".path", "vendored skill path is required")
+			}
+			switch skill.Scope {
+			case "":
+				skill.Scope = SkillScopeGlobal
+			case SkillScopeFlow, SkillScopeGlobal:
+			default:
+				return fieldError(CodePackSkillInvalid, field+".scope",
+					"unsupported skill scope %q (supported: %s, %s)", skill.Scope, SkillScopeFlow, SkillScopeGlobal)
 			}
 		default:
 			return fieldError(CodePackSkillInvalid, field, "skill must declare id+path or ref")

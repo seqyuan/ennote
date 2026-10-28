@@ -136,11 +136,15 @@ type RoleSummary struct {
 }
 
 // SkillSummary is one declared skill: a vendored directory or an external ref.
+// Scope is only meaningful for a vendored skill (flow installs it below each
+// referencing flow, global installs it under the user skills root); an external
+// ref carries no scope and reports the empty string.
 type SkillSummary struct {
 	ID          string `json:"id,omitempty"`
 	Path        string `json:"path,omitempty"`
 	Ref         string `json:"ref,omitempty"`
 	Kind        string `json:"kind"`
+	Scope       string `json:"scope,omitempty"`
 	PathDigest  string `json:"pathDigest,omitempty"`
 	PromptBytes int64  `json:"promptBytes,omitempty"`
 }

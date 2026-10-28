@@ -312,6 +312,7 @@ func (b *builder) analyseSkills() error {
 			ID:         entry.ID,
 			Path:       directory,
 			Kind:       SkillKindVendored,
+			Scope:      entry.Scope,
 			PathDigest: directoryDigest(directory, files),
 		}
 		prompt, promptBytes, err := validateVendoredSkill(field, directory, files)

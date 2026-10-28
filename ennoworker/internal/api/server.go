@@ -26,6 +26,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphbuilder"
 	"github.com/seqyuan/ennote/ennoworker/internal/modelcatalog"
+	"github.com/seqyuan/ennote/ennoworker/internal/packinstall"
 	"github.com/seqyuan/ennote/ennoworker/internal/prompts"
 	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
@@ -107,6 +108,9 @@ type Server struct {
 	Trust               *workspace.TrustStore
 	GlobalSources       *globalsource.Store
 	GraphBuilder        *graphbuilder.Service
+	// Packs installs, lists, and removes Agent Packs (S2a). Nil disables the
+	// install surface with a 503 instead of panicking or half-installing.
+	Packs *packinstall.Service
 	// GraphRuns starts file-native Graph Runs (immutable revision + frozen
 	// execution plan in the owning Session database).
 	GraphRuns GraphRunStarter
@@ -254,6 +258,10 @@ func (s *Server) routes() http.Handler {
 
 	// Read-only Agent Pack inspect (S1). Path-only and store-free by design.
 	mux.HandleFunc("POST /v1/packs/inspect", s.inspectPack)
+	// Agent Pack install, list, and remove (S2a). Same path-only source as S1.
+	mux.HandleFunc("POST /v1/packs/install", s.installPack)
+	mux.HandleFunc("GET /v1/packs", s.listPacks)
+	mux.HandleFunc("DELETE /v1/packs/{publisher}/{name}", s.removePack)
 
 	// MCP server profiles and bindings.
 	if s.MCP != nil {

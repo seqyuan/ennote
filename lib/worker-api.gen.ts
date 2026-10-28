@@ -1733,6 +1733,80 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/packs/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Plan or apply an Agent Pack install
+         * @description S2a installs exactly two pack shapes: a Role-only pack (each Role becomes
+         *     a Worker-global Role with a published revision) and a `format: graph`
+         *     pack Flow (an unpublishing Graph draft plus its Graph-private Roles and
+         *     Skills). `format: flow`, non-empty `mcp`, and non-empty `requires` are
+         *     refused with a stable blocker code instead of being downgraded.
+         *
+         *     `dryRun: true` always answers 200 with the plan, blockers included, and
+         *     never writes staging, store objects, or state. A real install answers
+         *     422 when any blocker or conflict remains. Installed Graphs stay disabled
+         *     until a user publishes a Graph revision through the existing Graph path;
+         *     the installer never publishes one.
+         */
+        post: operations["installPack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/packs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List installed Agent Packs
+         * @description Reports one summary per installed pack by reading its state file only.
+         */
+        get: operations["listPacks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/packs/{publisher}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Uninstall an Agent Pack
+         * @description Deletes every installed object this pack owns. Removal is refused while a
+         *     non-terminal flow Run references an installed flow, while an installed
+         *     object was edited locally, or while a global Role is still referenced by
+         *     another Graph. `force=true` overrides the last two. A locally edited Skill
+         *     is kept with a warning instead of being deleted.
+         */
+        delete: operations["removePack"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/skills/roots": {
         parameters: {
             query?: never;
@@ -3574,6 +3648,11 @@ export interface components {
             ref?: string;
             /** @enum {string} */
             kind: "vendored" | "external";
+            /**
+             * @description Install scope of a vendored skill. Defaults to global: flow installs one copy below every flow that references it, global installs once under the user skills root. An external ref has no install target and therefore no scope.
+             * @enum {string}
+             */
+            scope?: "flow" | "global";
             pathDigest?: string;
             promptBytes?: number;
         };
@@ -3622,6 +3701,132 @@ export interface components {
             bytes: number;
             content: string;
             truncated: boolean;
+        };
+        PackInstallRequest: {
+            source: components["schemas"]["PackSource"];
+            /** @description Expected sha256 of the payload or the manifest; a mismatch refuses the install */
+            expectedDigest?: string;
+            /** @description Plan only and write nothing; defaults to false */
+            dryRun?: boolean;
+            /** @description Change installed store ids to avoid collisions; in-pack references are never rewritten */
+            renames?: components["schemas"]["PackRenames"];
+        };
+        PackRenames: {
+            /** @description pack flow id -> installed Graph id */
+            flows?: {
+                [key: string]: string;
+            };
+            /** @description pack Role handle -> installed Role handle */
+            roles?: {
+                [key: string]: string;
+            };
+        };
+        PackInstallPlan: {
+            planVersion: number;
+            pack: components["schemas"]["PackIdentity"];
+            manifestDigest: string;
+            packDigest: string;
+            actions: components["schemas"]["PackAction"][];
+            /** @description Non-empty when the install is refused; every blocker is non-retryable */
+            blockers: components["schemas"]["PackIssue"][];
+            warnings: components["schemas"]["PackIssue"][];
+            /**
+             * @description The install is observable only once its state file exists
+             * @enum {string}
+             */
+            commitPoint: "state_file";
+            /** @description Always false in S2a; an installed Graph stays an unpublished draft */
+            willPublishFlowRevision: boolean;
+            /**
+             * @description Reported when the same pack bytes are already installed
+             * @enum {string}
+             */
+            reinstall?: "noop";
+            /** @description The committed install record; a dry run never reports one */
+            state?: components["schemas"]["PackState"];
+        };
+        PackAction: {
+            /** @enum {string} */
+            kind: "graph" | "graph_role" | "role" | "role_revision" | "skill";
+            /** @description Installed store id; a Graph-private object is "<flow>/<id>" */
+            storeId: string;
+            /** @enum {string} */
+            action: "create" | "exists_identical" | "conflict" | "publish";
+            /** @enum {string} */
+            scope?: "flow" | "global";
+        };
+        PackIssue: {
+            code: string;
+            /** @enum {string} */
+            severity?: "error" | "warning" | "info";
+            message: string;
+        };
+        PackState: {
+            stateVersion: number;
+            pack: components["schemas"]["PackIdentity"];
+            manifestDigest: string;
+            packDigest: string;
+            /** @description Always false in S2a; S5 adds signature verification */
+            signed: boolean;
+            installedAt: string;
+            /**
+             * @description The installed Graph has no published revision, so no Run can start from it
+             * @enum {string}
+             */
+            installState: "installed_draft";
+            source: components["schemas"]["PackSource"];
+            flows: components["schemas"]["PackFlowState"][];
+            roles: components["schemas"]["PackRoleState"][];
+            skills: components["schemas"]["PackSkillState"][];
+            externalRefs: components["schemas"]["PackExternalRefs"];
+            modelRequirements: components["schemas"]["PackModelRequirements"];
+        };
+        PackFlowState: {
+            packFlowId: string;
+            storeId: string;
+            /** @enum {string} */
+            format: "graph";
+            sourceDigest: string;
+            installedGraphDigest: string;
+            /** @description Always null in S2a; publishing is a separate user action */
+            publishedRevision: string | null;
+        };
+        PackRoleState: {
+            packHandle: string;
+            /** @enum {string} */
+            scope: "flow" | "global";
+            /** @description "<handle>" for a global Role, "<flow>/<handle>" for a Graph-private Role */
+            storeId: string;
+            digest: string;
+            /** @description Published revision id; global Roles only */
+            revision?: string;
+        };
+        PackSkillState: {
+            packId: string;
+            /** @description "<id>" for a global Skill, "<flow>/<id>" for a flow-scoped Skill */
+            storeId: string;
+            /** @enum {string} */
+            scope: "flow" | "global";
+            contentDigest: string;
+        };
+        PackExternalRefs: {
+            /** @description External Skill refs (name@version); recorded, never installed */
+            skills: string[];
+            /** @description External MCP profile refs; recorded, never installed */
+            mcp: string[];
+        };
+        PackStateSummary: {
+            pack: components["schemas"]["PackIdentity"];
+            manifestDigest: string;
+            packDigest: string;
+            installedAt: string;
+            /** @enum {string} */
+            installState: "installed_draft";
+            source: components["schemas"]["PackSource"];
+            flowCount: number;
+            roleCount: number;
+            skillCount: number;
+            externalRefs: components["schemas"]["PackExternalRefs"];
         };
         ActiveRunState: {
             run: components["schemas"]["AgentRun"];
@@ -7171,6 +7376,93 @@ export interface operations {
             404: components["responses"]["Error"];
             413: components["responses"]["Error"];
             422: components["responses"]["Error"];
+        };
+    };
+    installPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PackInstallRequest"];
+            };
+        };
+        responses: {
+            /** @description Install plan (dry run, reinstall no-op, or completed install) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["PackInstallPlan"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    listPacks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Installed pack summaries ordered by pack id */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["PackStateSummary"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    removePack: {
+        parameters: {
+            query?: {
+                /** @description Override locally edited objects and shared global Roles */
+                force?: boolean;
+            };
+            header?: never;
+            path: {
+                publisher: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pack removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
     listSkillRoots: {

@@ -28,6 +28,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/hooks"
 	"github.com/seqyuan/ennote/ennoworker/internal/llm"
 	"github.com/seqyuan/ennote/ennoworker/internal/mcpclient"
+	"github.com/seqyuan/ennote/ennoworker/internal/packinstall"
 	"github.com/seqyuan/ennote/ennoworker/internal/projection"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/prompts"
@@ -116,6 +117,17 @@ func run() error {
 	// Ennote (or on disk) is usable without restarting the Worker.
 	skillCatalog := func() map[string]string {
 		return skills.DigestCatalog(cfg.SkillsDir, cfg.BuiltinSkillsDir)
+	}
+	// The pack installer writes the same file-native stores the Graph, Role, and
+	// Skill surfaces read, so it shares their roots instead of keeping a second
+	// installed copy. A crash mid-install leaves only packs/staging/<txid>,
+	// which is garbage once this process is the only writer.
+	packInstaller := &packinstall.Service{
+		HomeDir: cfg.HomeDir, Sources: globalSources, Models: models,
+		SkillsRoot: cfg.SkillsDir, Sessions: sessionManager,
+	}
+	if err := packInstaller.GCStaging(); err != nil {
+		return fmt.Errorf("collect Agent Pack staging directories: %w", err)
 	}
 	runTemplate := &store.RunRepo{Publisher: hub, Providers: providers, Models: models, Policies: policyFiles,
 		RoleSources: globalSources, SkillCatalog: skillCatalog}
@@ -264,6 +276,7 @@ func run() error {
 		SkillRoots: &store.SkillRootRepo{Settings: modelFiles.Settings},
 		Trust:      trustStore, GlobalSources: globalSources,
 		GraphBuilder: &graphbuilder.Service{Sources: globalSources, Completer: builderCompleter},
+		Packs:        packInstaller,
 		GraphRuns:    graphRuns,
 		GraphRunResume: func(_ context.Context, db *sql.DB, sessionID, runID string) error {
 			startFlowOrchestrator(db, runID, hub, coordinator, globalSources, models, policyFiles)

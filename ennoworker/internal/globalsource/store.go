@@ -164,6 +164,31 @@ func (s Store) CreateGraph(id, name string) (*graphsource.Document, string, erro
 	return document, digest, err
 }
 
+// CreateGraphFromDocument publishes a fully authored Graph source document as a
+// new Graph draft. It is the whole-document analogue of CreateGraph and is used
+// by the Agent Pack installer so a pack Flow becomes an ordinary file-native
+// Graph. The document id is the directory name; an existing Graph is never
+// overwritten (the caller inspects first and decides create vs. identical).
+func (s Store) CreateGraphFromDocument(document *graphsource.Document) (string, error) {
+	if document == nil {
+		return "", fmt.Errorf("Graph source document is required")
+	}
+	encoded, err := graphsource.Encode(document)
+	if err != nil {
+		return "", err
+	}
+	// The Graph directory may already exist (an installer writes Graph-private
+	// skills and roles first), so only graph.yaml itself must be new.
+	graphDir, err := ensureSourceDir(s.GraphsDir(), document.ID)
+	if err != nil {
+		return "", err
+	}
+	if err := atomicWrite(filepath.Join(graphDir, "graph.yaml"), encoded, true); err != nil {
+		return "", err
+	}
+	return graphsource.SourceDigest(document)
+}
+
 func (s Store) UpdateGraph(id, expectedDigest string, mutate func(*graphsource.Document) error) (*graphsource.Document, string, error) {
 	document, digest, err := s.ReadGraph(id)
 	if err != nil {
@@ -267,6 +292,43 @@ func (s Store) CreateRole(document *rolesource.Document) (*rolesource.Document, 
 	return document, digest, err
 }
 
+// CreateGraphRole writes a Graph-private Role draft at
+// agents/graphs/<graphID>/roles/<handle>/role.md. The handle in the document is
+// the directory name, so a caller that installs under a renamed handle must
+// rewrite document.Handle first; a mismatch is rejected rather than silently
+// writing a Role a Graph can never resolve. Missing Graph/roles directories are
+// created 0700; an existing Role is never overwritten.
+func (s Store) CreateGraphRole(graphID string, document *rolesource.Document) (string, error) {
+	if document == nil {
+		return "", fmt.Errorf("Role source document is required")
+	}
+	handle := strings.TrimSpace(document.Handle)
+	if handle == "" || handle != document.Handle {
+		return "", fmt.Errorf("Role handle %q must match directory %q", document.Handle, handle)
+	}
+	encoded, err := rolesource.Encode(document)
+	if err != nil {
+		return "", err
+	}
+	graphDir, err := ensureSourceDir(s.GraphsDir(), graphID)
+	if err != nil {
+		return "", err
+	}
+	rolesDir, err := ensureSourceDir(graphDir, "roles")
+	if err != nil {
+		return "", err
+	}
+	roleDir, err := createSourceDir(rolesDir, handle)
+	if err != nil {
+		return "", err
+	}
+	if err := atomicWrite(filepath.Join(roleDir, "role.md"), encoded, true); err != nil {
+		_ = os.Remove(roleDir)
+		return "", err
+	}
+	return rolesource.SourceDigest(document)
+}
+
 func (s Store) UpdateRole(id, expectedDigest string, mutate func(*rolesource.Document) error) (*rolesource.Document, string, error) {
 	document, digest, err := s.ReadRole(id)
 	if err != nil {
@@ -301,6 +363,93 @@ func objectPath(root, id, filename string) (string, error) {
 		return "", fmt.Errorf("invalid object id %q", id)
 	}
 	return filepath.Join(root, id, filename), nil
+}
+
+// DeleteGraph removes the whole Graph directory, including its revisions and its
+// Graph-private roles and skills. Deletion is whole-object because a revision
+// sequence must stay contiguous: dropping one revision directory would corrupt
+// the object for every later read.
+func (s Store) DeleteGraph(graphID string) error {
+	return deleteObjectDir(s.GraphsDir(), graphID)
+}
+
+// DeleteGraphRole removes one Graph-private Role directory.
+func (s Store) DeleteGraphRole(graphID, handle string) error {
+	if !objectIDPattern.MatchString(graphID) {
+		return fmt.Errorf("invalid object id %q", graphID)
+	}
+	return deleteObjectDir(filepath.Join(s.GraphsDir(), graphID, "roles"), handle)
+}
+
+// DeleteRole removes the whole Worker-global Role directory, including every
+// published revision.
+func (s Store) DeleteRole(handle string) error {
+	return deleteObjectDir(s.RolesDir(), handle)
+}
+
+func deleteObjectDir(root, id string) error {
+	if !objectIDPattern.MatchString(id) {
+		return fmt.Errorf("invalid object id %q", id)
+	}
+	path := filepath.Join(root, id)
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("source object %q must be a regular directory", path)
+	}
+	if err := os.RemoveAll(path); err != nil {
+		return fmt.Errorf("delete source object: %w", err)
+	}
+	return syncDirectory(root)
+}
+
+// ensureSourceDir creates every missing level of segments below root with 0700
+// permissions and rejects a symlinked or non-directory level, so a source write
+// can never be redirected outside ENNOTE_HOME.
+func ensureSourceDir(root string, segments ...string) (string, error) {
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return "", fmt.Errorf("create source root: %w", err)
+	}
+	current := root
+	for _, segment := range segments {
+		if !objectIDPattern.MatchString(segment) {
+			return "", fmt.Errorf("invalid object id %q", segment)
+		}
+		current = filepath.Join(current, segment)
+		info, err := os.Lstat(current)
+		if err == nil {
+			if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+				return "", fmt.Errorf("source directory %q must be a regular directory", current)
+			}
+			continue
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		if err := os.Mkdir(current, 0o700); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				return "", fmt.Errorf("source directory %q already exists", current)
+			}
+			return "", fmt.Errorf("create source directory: %w", err)
+		}
+	}
+	return current, nil
+}
+
+func createSourceDir(root, id string) (string, error) {
+	if !objectIDPattern.MatchString(id) {
+		return "", fmt.Errorf("invalid object id %q", id)
+	}
+	path := filepath.Join(root, id)
+	if err := os.Mkdir(path, 0o700); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return "", fmt.Errorf("object %q already exists", id)
+		}
+		return "", fmt.Errorf("create object directory: %w", err)
+	}
+	return path, nil
 }
 
 func createObjectDir(root, id, filename string) (string, error) {
