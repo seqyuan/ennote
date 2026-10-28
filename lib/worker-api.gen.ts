@@ -986,6 +986,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/projects/{projectID}/graph-bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        /** List a Project's desired source enablement */
+        get: operations["listProjectGraphBindings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/graph-bindings/{graphID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                graphID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Enable or disable one published source revision
+         * @description Enabling without a revision pins the latest published revision; it never
+         *     leaves a moving "latest" reference. Publishing and enabling remain
+         *     separate operations. Flow Runs require an enabled binding.
+         */
+        put: operations["putProjectGraphBinding"];
+        post?: never;
+        /** Remove one Project source binding */
+        delete: operations["deleteProjectGraphBinding"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/projects/{projectID}/sessions": {
         parameters: {
             query?: never;
@@ -2936,6 +2981,20 @@ export interface components {
             graph: {
                 [key: string]: string[];
             };
+        };
+        ProjectGraphBinding: {
+            /** @enum {string} */
+            sourceKind?: "graph" | "flow";
+            graphId: string;
+            revision: string;
+            enabled: boolean;
+        };
+        GraphBindingMutation: {
+            /** @enum {string} */
+            sourceKind?: "graph" | "flow";
+            revision?: string;
+            enabled: boolean;
+            clientRequestId?: string;
         };
         GraphSummary: {
             id: string;
@@ -6042,6 +6101,88 @@ export interface operations {
                 };
             };
             502: components["responses"]["Error"];
+        };
+    };
+    listProjectGraphBindings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Project graph bindings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ProjectGraphBinding"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    putProjectGraphBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                graphID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GraphBindingMutation"];
+            };
+        };
+        responses: {
+            /** @description Persisted binding */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ProjectGraphBinding"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+        };
+    };
+    deleteProjectGraphBinding: {
+        parameters: {
+            query?: {
+                sourceKind?: "graph" | "flow";
+            };
+            header?: never;
+            path: {
+                projectID: string;
+                graphID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Binding removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
         };
     };
     listSessions: {

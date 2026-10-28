@@ -1440,6 +1440,61 @@ paths:
                         type: array
                         items: { $ref: "#/components/schemas/MCPCatalogEntry" }
         "502": { $ref: "#/components/responses/Error" }
+  /v1/projects/{projectID}/graph-bindings:
+    parameters:
+      - { name: projectID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listProjectGraphBindings
+      summary: List a Project's desired source enablement
+      responses:
+        "200":
+          description: Project graph bindings
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { type: array, items: { $ref: "#/components/schemas/ProjectGraphBinding" } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/projects/{projectID}/graph-bindings/{graphID}:
+    parameters:
+      - { name: projectID, in: path, required: true, schema: { type: string } }
+      - { name: graphID, in: path, required: true, schema: { type: string } }
+    put:
+      operationId: putProjectGraphBinding
+      summary: Enable or disable one published source revision
+      description: |
+        Enabling without a revision pins the latest published revision; it never
+        leaves a moving "latest" reference. Publishing and enabling remain
+        separate operations. Flow Runs require an enabled binding.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GraphBindingMutation" }
+      responses:
+        "200":
+          description: Persisted binding
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/ProjectGraphBinding" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteProjectGraphBinding
+      summary: Remove one Project source binding
+      parameters:
+        - { name: sourceKind, in: query, required: false, schema: { type: string, enum: [graph, flow] } }
+      responses:
+        "204": { description: Binding removed }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/projects/{projectID}/sessions:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
@@ -4326,6 +4381,24 @@ components:
         graph:
           type: object
           additionalProperties: { type: array, uniqueItems: true, items: { type: string } }
+    ProjectGraphBinding:
+      type: object
+      additionalProperties: false
+      required: [graphId, revision, enabled]
+      properties:
+        sourceKind: { type: string, enum: [graph, flow] }
+        graphId: { type: string }
+        revision: { type: string, pattern: "^$|^v[0-9]{6}$" }
+        enabled: { type: boolean }
+    GraphBindingMutation:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        sourceKind: { type: string, enum: [graph, flow] }
+        revision: { type: string, pattern: "^$|^v[0-9]{6}$" }
+        enabled: { type: boolean }
+        clientRequestId: { type: string }
     GraphSummary:
       type: object
       additionalProperties: false

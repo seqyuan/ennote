@@ -10,8 +10,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,11 +26,22 @@ const SchemaVersion = 1
 // already-deleted project id).
 var ErrNotFound = errors.New("project not found")
 
+// GraphBinding is one Project's desired enablement of a published source
+// revision. SourceKind is optional for older manifests; an empty value means
+// graph. A flow binding pins the exact revision it enables.
 type GraphBinding struct {
-	GraphID  string `json:"graphId"`
-	Revision string `json:"revision"`
-	Enabled  bool   `json:"enabled"`
+	SourceKind string `json:"sourceKind,omitempty"`
+	GraphID    string `json:"graphId"`
+	Revision   string `json:"revision"`
+	Enabled    bool   `json:"enabled"`
 }
+
+const (
+	SourceKindGraph = "graph"
+	SourceKindFlow  = "flow"
+)
+
+var revisionIDPattern = regexp.MustCompile(`^v[0-9]{6}$`)
 
 type MCPBinding struct {
 	ID                      string            `json:"id"`
@@ -53,6 +66,8 @@ type Manifest struct {
 type Store struct {
 	Root string
 	Now  func() time.Time
+
+	mu sync.Mutex
 }
 
 func (s *Store) CreateWithWorkspace(_ context.Context, input domain.CreateProjectInput) (*domain.Project, *domain.ProjectWorkspace, error) {
@@ -244,7 +259,82 @@ func validate(manifest Manifest, directoryID string) error {
 	if !filepath.IsAbs(manifest.Workspace.HostPath) {
 		return fmt.Errorf("project workspace hostPath must be absolute")
 	}
+	seen := map[string]bool{}
+	for _, binding := range manifest.GraphBindings {
+		kind := binding.SourceKind
+		if kind == "" {
+			kind = SourceKindGraph
+		}
+		if kind != SourceKindGraph && kind != SourceKindFlow {
+			return fmt.Errorf("graph binding has unsupported sourceKind %q", binding.SourceKind)
+		}
+		if strings.TrimSpace(binding.GraphID) == "" {
+			return fmt.Errorf("graph binding requires a graphId")
+		}
+		if binding.Revision != "" && !revisionIDPattern.MatchString(binding.Revision) {
+			return fmt.Errorf("graph binding revision %q must be vNNNNNN", binding.Revision)
+		}
+		key := kind + "\x00" + binding.GraphID
+		if seen[key] {
+			return fmt.Errorf("project has duplicate %s binding for %q", kind, binding.GraphID)
+		}
+		seen[key] = true
+	}
 	return nil
+}
+
+// UpdateGraphBindings applies one read-modify-write under the store mutex and
+// atomically rewrites project.json. Every graph/flow enablement change goes
+// through this method so two concurrent bindings cannot overwrite each other.
+func (s *Store) UpdateGraphBindings(_ context.Context, projectID string, mutate func(*[]GraphBinding) error) (*Manifest, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	manifest, err := s.read(projectID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) || isInvalidProjectID(err) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if mutate != nil {
+		if err := mutate(&manifest.GraphBindings); err != nil {
+			return nil, err
+		}
+	}
+	manifest.Project.UpdatedAt = s.now()
+	if err := validate(manifest, projectID); err != nil {
+		return nil, err
+	}
+	if err := s.persistManifest(projectID, manifest); err != nil {
+		return nil, err
+	}
+	return &manifest, nil
+}
+
+// FindGraphBinding returns one Project's binding for a source kind + id. An
+// absent binding is os.ErrNotExist so callers can distinguish "not enabled"
+// from a corrupt manifest.
+func (s *Store) FindGraphBinding(_ context.Context, projectID, sourceKind, graphID string) (*GraphBinding, error) {
+	manifest, err := s.ReadManifest(projectID)
+	if err != nil {
+		return nil, err
+	}
+	kind := strings.TrimSpace(sourceKind)
+	if kind == "" {
+		kind = SourceKindGraph
+	}
+	for _, binding := range manifest.GraphBindings {
+		bindingKind := binding.SourceKind
+		if bindingKind == "" {
+			bindingKind = SourceKindGraph
+		}
+		if bindingKind == kind && binding.GraphID == graphID {
+			copy := binding
+			copy.SourceKind = bindingKind
+			return &copy, nil
+		}
+	}
+	return nil, os.ErrNotExist
 }
 
 func (s *Store) UpdateMCPBindings(_ context.Context, projectID string, mutate func(*[]MCPBinding) error) (*Manifest, error) {

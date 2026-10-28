@@ -166,3 +166,50 @@ func TestProjectStoreRenameAndDeleteUnknownProject(t *testing.T) {
 	_, err = store.Delete(context.Background(), missing)
 	assert.ErrorIs(t, err, projectstore.ErrNotFound)
 }
+
+func TestGraphBindingUpdateIsAtomicAndKindAware(t *testing.T) {
+	ctx := context.Background()
+	store := &projectstore.Store{Root: filepath.Join(t.TempDir(), "projects"), Now: fixedNow}
+	project, _, err := store.CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: "Bindings", HostPath: t.TempDir()})
+	require.NoError(t, err)
+
+	_, err = store.UpdateGraphBindings(ctx, project.ID, func(bindings *[]projectstore.GraphBinding) error {
+		*bindings = append(*bindings, projectstore.GraphBinding{
+			SourceKind: projectstore.SourceKindFlow, GraphID: "qc-flow", Revision: "v000001", Enabled: true,
+		})
+		return nil
+	})
+	require.NoError(t, err)
+	binding, err := store.FindGraphBinding(ctx, project.ID, projectstore.SourceKindFlow, "qc-flow")
+	require.NoError(t, err)
+	assert.True(t, binding.Enabled)
+	assert.Equal(t, "v000001", binding.Revision)
+
+	// The same id in the graph namespace is a different binding.
+	_, err = store.FindGraphBinding(ctx, project.ID, projectstore.SourceKindGraph, "qc-flow")
+	require.ErrorIs(t, err, os.ErrNotExist)
+
+	// Duplicate (kind, id) is rejected at the manifest boundary.
+	_, err = store.UpdateGraphBindings(ctx, project.ID, func(bindings *[]projectstore.GraphBinding) error {
+		*bindings = append(*bindings, projectstore.GraphBinding{
+			SourceKind: projectstore.SourceKindFlow, GraphID: "qc-flow", Revision: "v000002", Enabled: false,
+		})
+		return nil
+	})
+	require.Error(t, err)
+}
+
+func TestGraphBindingRejectsMalformedRevision(t *testing.T) {
+	ctx := context.Background()
+	store := &projectstore.Store{Root: filepath.Join(t.TempDir(), "projects"), Now: fixedNow}
+	project, _, err := store.CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: "Bindings", HostPath: t.TempDir()})
+	require.NoError(t, err)
+	_, err = store.UpdateGraphBindings(ctx, project.ID, func(bindings *[]projectstore.GraphBinding) error {
+		*bindings = append(*bindings, projectstore.GraphBinding{
+			SourceKind: projectstore.SourceKindFlow, GraphID: "qc-flow", Revision: "latest", Enabled: true,
+		})
+		return nil
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "vNNNNNN")
+}
