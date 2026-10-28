@@ -22,6 +22,7 @@ const (
 	WarningFlowRefsGlobalRole  = "flow_refs_global_role"
 	WarningFlowRefsGlobalSkill = "flow_refs_global_skill"
 	WarningExternalSkillRef    = "external_skill_ref"
+	WarningExternalMCPRef      = "external_mcp_ref"
 	WarningFilesTruncated      = "files_truncated"
 	WarningDocumentsTruncated  = "documents_truncated"
 )
@@ -67,6 +68,7 @@ type Result struct {
 	Flows              []FlowSummary      `json:"flows"`
 	Roles              []RoleSummary      `json:"roles"`
 	Skills             []SkillSummary     `json:"skills"`
+	MCP                []MCPSummary       `json:"mcp"`
 	Requires           []string           `json:"requires"`
 	CapabilityEnvelope CapabilityEnvelope `json:"capabilityEnvelope"`
 	Files              []FileSummary      `json:"files"`
@@ -143,6 +145,12 @@ type SkillSummary struct {
 	PromptBytes int64  `json:"promptBytes,omitempty"`
 }
 
+// MCPSummary is one declared external MCP profile reference. S1 never resolves
+// or executes it; the ref is reported so the reviewer sees the dependency.
+type MCPSummary struct {
+	Ref string `json:"ref"`
+}
+
 // CapabilityEnvelope is the S1 review surface: what the pack can reach, spend,
 // and write, derived structurally from the manifest and flow sources.
 type CapabilityEnvelope struct {
@@ -152,6 +160,7 @@ type CapabilityEnvelope struct {
 	TaskCount          int           `json:"taskCount"`
 	Roles              []string      `json:"roles"`
 	Skills             []string      `json:"skills"`
+	RequiresMCP        []string      `json:"requiresMcp"`
 	ModelRequirements  ModelEnvelope `json:"modelRequirements"`
 	CheckCommands      []string      `json:"checkCommands"`
 	Tools              []string      `json:"tools"`

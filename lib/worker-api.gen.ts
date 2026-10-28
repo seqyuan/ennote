@@ -3506,6 +3506,8 @@ export interface components {
             flows: components["schemas"]["PackFlow"][];
             roles: components["schemas"]["PackRole"][];
             skills: components["schemas"]["PackSkill"][];
+            /** @description External MCP profile references; S1 never resolves or executes them */
+            mcp: components["schemas"]["PackMCP"][];
             requires: string[];
             capabilityEnvelope: components["schemas"]["PackCapabilityEnvelope"];
             files: components["schemas"]["PackFile"][];
@@ -3575,6 +3577,10 @@ export interface components {
             pathDigest?: string;
             promptBytes?: number;
         };
+        PackMCP: {
+            /** @description External MCP profile reference (name@version); never resolved in S1 */
+            ref: string;
+        };
         PackCapabilityEnvelope: {
             flowCount: number;
             roleCount: number;
@@ -3582,6 +3588,8 @@ export interface components {
             taskCount: number;
             roles: string[];
             skills: string[];
+            /** @description Sorted unique external MCP profile refs the pack declares */
+            requiresMcp: string[];
             modelRequirements: components["schemas"]["PackModelRequirements"];
             checkCommands: string[];
             tools: string[];

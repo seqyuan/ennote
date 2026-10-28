@@ -5075,6 +5075,7 @@ components:
         - flows
         - roles
         - skills
+        - mcp
         - requires
         - capabilityEnvelope
         - files
@@ -5107,6 +5108,10 @@ components:
         skills:
           type: array
           items: { $ref: "#/components/schemas/PackSkill" }
+        mcp:
+          type: array
+          description: External MCP profile references; S1 never resolves or executes them
+          items: { $ref: "#/components/schemas/PackMCP" }
         requires:
           type: array
           items: { type: string }
@@ -5204,10 +5209,18 @@ components:
         kind: { type: string, enum: [vendored, external] }
         pathDigest: { type: string }
         promptBytes: { type: integer }
+    PackMCP:
+      type: object
+      additionalProperties: false
+      required: [ref]
+      properties:
+        ref:
+          type: string
+          description: External MCP profile reference (name@version); never resolved in S1
     PackCapabilityEnvelope:
       type: object
       additionalProperties: false
-      required: [flowCount, roleCount, skillCount, taskCount, roles, skills, modelRequirements, checkCommands, tools, writes, flowMaxTotalTokens]
+      required: [flowCount, roleCount, skillCount, taskCount, roles, skills, requiresMcp, modelRequirements, checkCommands, tools, writes, flowMaxTotalTokens]
       properties:
         flowCount: { type: integer }
         roleCount: { type: integer }
@@ -5218,6 +5231,10 @@ components:
           items: { type: string }
         skills:
           type: array
+          items: { type: string }
+        requiresMcp:
+          type: array
+          description: Sorted unique external MCP profile refs the pack declares
           items: { type: string }
         modelRequirements: { $ref: "#/components/schemas/PackModelRequirements" }
         checkCommands:

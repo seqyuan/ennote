@@ -50,6 +50,9 @@ var (
 	skillIDPattern     = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,63}$`)
 	externalSkillRef   = regexp.MustCompile(`^[^\s@]+@[^\s@]+$`)
 	packRequiresRef    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9._-]*(?:@[0-9A-Za-z.+-]+)?$`)
+	// externalMCPRef is the only accepted MCP declaration form: a reference to
+	// an existing MCP profile (name@version), never an inline definition.
+	externalMCPRef = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*@[0-9A-Za-z.^~*+<>=_-]+$`)
 )
 
 // capabilityVocabulary is the accepted model requirement vocabulary. It mirrors
@@ -82,6 +85,7 @@ type Manifest struct {
 	Flows             []FlowEntry           `yaml:"flows"`
 	Roles             []RoleEntry           `yaml:"roles"`
 	Skills            []SkillEntry          `yaml:"skills"`
+	MCP               []MCPEntry            `yaml:"mcp"`
 	Requires          []string              `yaml:"requires"`
 	Docs              *Docs                 `yaml:"docs"`
 	Signature         *SignatureDeclaration `yaml:"signature"`
@@ -128,6 +132,13 @@ type SkillEntry struct {
 	ID   string `yaml:"id"`
 	Path string `yaml:"path"`
 	Ref  string `yaml:"ref"`
+}
+
+// MCPEntry declares a reference to an existing MCP profile. S1 accepts only
+// ref: KnownFields(true) therefore rejects an inline command/args/env block
+// outright, and the reference is never resolved or executed.
+type MCPEntry struct {
+	Ref string `yaml:"ref"`
 }
 
 // Docs points at the pack's human documentation.
@@ -298,6 +309,27 @@ func validateManifest(manifest *Manifest) error {
 			}
 			skillIDs[skill.ID] = true
 		}
+	}
+
+	mcpRefs := make([]string, 0, len(manifest.MCP))
+	for index := range manifest.MCP {
+		ref := strings.TrimSpace(manifest.MCP[index].Ref)
+		field := fmt.Sprintf("mcp[%d].ref", index)
+		if ref == "" {
+			return fieldError(CodePackManifestInvalid, field, "mcp ref is required")
+		}
+		if !externalMCPRef.MatchString(ref) {
+			return fieldError(CodePackManifestInvalid, field,
+				"mcp ref %q must use name@version (lowercase profile name, non-empty version)", ref)
+		}
+		mcpRefs = append(mcpRefs, ref)
+	}
+	// MCP refs are a declaration set: duplicates collapse and order is stable so
+	// two identical manifests always produce an identical result.
+	mcpRefs = sortedUnique(mcpRefs)
+	manifest.MCP = make([]MCPEntry, 0, len(mcpRefs))
+	for _, ref := range mcpRefs {
+		manifest.MCP = append(manifest.MCP, MCPEntry{Ref: ref})
 	}
 
 	if len(manifest.Flows) == 0 && len(manifest.Roles) == 0 {

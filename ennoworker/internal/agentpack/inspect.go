@@ -452,6 +452,13 @@ func (b *builder) collectWarnings() {
 		b.warn(WarningFlowOnlyPack, SeverityInfo,
 			"pack ships flows only; every task role must resolve from the Worker's global Roles")
 	}
+	// MCP refs are external by definition in S1: report each one as information,
+	// never as an error, and never resolve or execute it. manifest.MCP is already
+	// sorted and de-duplicated, so the warning order is stable.
+	for _, entry := range b.manifest.MCP {
+		b.warn(WarningExternalMCPRef, SeverityInfo,
+			"mcp "+entry.Ref+" is an external MCP profile reference; S1 never resolves or executes it")
+	}
 	sort.SliceStable(b.warnings, func(i, j int) bool {
 		if b.warnings[i].Code == b.warnings[j].Code {
 			return b.warnings[i].Message < b.warnings[j].Message
@@ -524,6 +531,7 @@ func (b *builder) result(source Source, includeDocuments bool) *Result {
 		Flows:              nonNilFlows(b.flows),
 		Roles:              nonNilRoles(b.roles),
 		Skills:             nonNilSkills(b.skills),
+		MCP:                nonNilMCP(b.manifest.MCP),
 		Requires:           append([]string{}, b.manifest.Requires...),
 		CapabilityEnvelope: capability,
 		Files:              summaries,
@@ -578,13 +586,18 @@ func (b *builder) capabilityEnvelope() CapabilityEnvelope {
 		taskCount += flow.TaskCount
 		flowTokens += flow.MaxTotalTokens
 	}
+	requiresMCP := make([]string, 0, len(b.manifest.MCP))
+	for _, entry := range b.manifest.MCP {
+		requiresMCP = append(requiresMCP, entry.Ref)
+	}
 	return CapabilityEnvelope{
-		FlowCount:  len(b.flows),
-		RoleCount:  len(b.roles),
-		SkillCount: len(b.skills),
-		TaskCount:  taskCount,
-		Roles:      sortedUnique(roles),
-		Skills:     sortedUnique(skillRefs),
+		FlowCount:   len(b.flows),
+		RoleCount:   len(b.roles),
+		SkillCount:  len(b.skills),
+		TaskCount:   taskCount,
+		Roles:       sortedUnique(roles),
+		Skills:      sortedUnique(skillRefs),
+		RequiresMCP: sortedUnique(requiresMCP),
 		ModelRequirements: ModelEnvelope{
 			Capabilities: capabilities, MinContextWindow: minContextWindow, PerRole: b.perRole,
 		},
@@ -676,6 +689,14 @@ func nonNilSkills(values []SkillSummary) []SkillSummary {
 		return []SkillSummary{}
 	}
 	return values
+}
+
+func nonNilMCP(values []MCPEntry) []MCPSummary {
+	summaries := make([]MCPSummary, 0, len(values))
+	for _, entry := range values {
+		summaries = append(summaries, MCPSummary{Ref: entry.Ref})
+	}
+	return summaries
 }
 
 func nonNilWarnings(values []Warning) []Warning {

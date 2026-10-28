@@ -263,6 +263,82 @@ func TestInspectSignatureIsReportedButNeverVerified(t *testing.T) {
 	assert.NotContains(t, warningCodes(result.Warnings), WarningUnsignedPack)
 }
 
+func TestParseManifestAcceptsExternalMCPRefs(t *testing.T) {
+	manifest, err := ParseManifest([]byte(strings.Replace(mixedManifest, "requires: []", "mcp:\n  - ref: pubmed@1\nrequires: []", 1)))
+	require.NoError(t, err)
+	require.Len(t, manifest.MCP, 1)
+	assert.Equal(t, "pubmed@1", manifest.MCP[0].Ref)
+}
+
+func TestParseManifestDedupesMCPRefsDeterministically(t *testing.T) {
+	source := strings.Replace(mixedManifest, "requires: []",
+		"mcp:\n  - ref: pubmed@1\n  - ref: bio-tools@0.2.0\n  - ref: pubmed@1\nrequires: []", 1)
+
+	first, err := ParseManifest([]byte(source))
+	require.NoError(t, err)
+	require.Len(t, first.MCP, 2)
+	assert.Equal(t, []MCPEntry{{Ref: "bio-tools@0.2.0"}, {Ref: "pubmed@1"}}, first.MCP)
+
+	// The same manifest always parses to the same sorted, de-duplicated set.
+	second, err := ParseManifest([]byte(source))
+	require.NoError(t, err)
+	assert.Equal(t, first.MCP, second.MCP)
+}
+
+func TestManifestRejectsInvalidMCPDeclarations(t *testing.T) {
+	cases := map[string]struct {
+		mcp  string
+		code string
+	}{
+		"blank-ref":      {mcp: "mcp:\n  - ref: \"\"\n", code: CodePackManifestInvalid},
+		"missing-ref":    {mcp: "mcp:\n  - {}\n", code: CodePackManifestInvalid},
+		"no-version":     {mcp: "mcp:\n  - ref: pubmed\n", code: CodePackManifestInvalid},
+		"uppercase-name": {mcp: "mcp:\n  - ref: PubMed@1\n", code: CodePackManifestInvalid},
+		"blank-version":  {mcp: "mcp:\n  - ref: pubmed@\n", code: CodePackManifestInvalid},
+		"inline-command": {mcp: "mcp:\n  - ref: pubmed@1\n    command: npx\n", code: CodePackManifestUnknownField},
+		"inline-args":    {mcp: "mcp:\n  - ref: pubmed@1\n    args: [-y, pubmed]\n", code: CodePackManifestUnknownField},
+		"inline-env":     {mcp: "mcp:\n  - ref: pubmed@1\n    env: {API_KEY: x}\n", code: CodePackManifestUnknownField},
+		"inline-block":   {mcp: "mcp:\n  - ref: pubmed@1\n    inline: {command: npx}\n", code: CodePackManifestUnknownField},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseManifest([]byte(strings.Replace(mixedManifest, "requires: []", testCase.mcp+"requires: []", 1)))
+			requireCode(t, err, testCase.code)
+		})
+	}
+}
+
+func TestInspectReportsExternalMCPRefs(t *testing.T) {
+	files := mixedPackFiles()
+	files[0] = entry{path: "pack.yaml", body: strings.Replace(mixedManifest, "requires: []",
+		"mcp:\n  - ref: pubmed@1\n  - ref: bio-tools@0.2.0\nrequires: []", 1)}
+
+	result := inspectFiles(t, files)
+	assert.Equal(t, []MCPSummary{{Ref: "bio-tools@0.2.0"}, {Ref: "pubmed@1"}}, result.MCP)
+	assert.Equal(t, []string{"bio-tools@0.2.0", "pubmed@1"}, result.CapabilityEnvelope.RequiresMCP)
+
+	// One info warning per ref, never an error.
+	mcpWarnings := make([]string, 0, 2)
+	for _, warning := range result.Warnings {
+		if warning.Code != WarningExternalMCPRef {
+			continue
+		}
+		assert.Equal(t, SeverityInfo, warning.Severity)
+		mcpWarnings = append(mcpWarnings, warning.Message)
+	}
+	require.Len(t, mcpWarnings, 2)
+	assert.Contains(t, mcpWarnings[0], "bio-tools@0.2.0")
+	assert.Contains(t, mcpWarnings[1], "pubmed@1")
+}
+
+func TestInspectWithoutMCPRefsReportsEmptySlices(t *testing.T) {
+	result := inspectFiles(t, mixedPackFiles())
+	assert.Empty(t, result.MCP)
+	assert.NotNil(t, result.MCP)
+	assert.Empty(t, result.CapabilityEnvelope.RequiresMCP)
+	assert.NotContains(t, warningCodes(result.Warnings), WarningExternalMCPRef)
+}
+
 func TestParseManifestRejectsEmptyAndMultiDocument(t *testing.T) {
 	_, err := ParseManifest(nil)
 	requireCode(t, err, CodePackManifestInvalid)

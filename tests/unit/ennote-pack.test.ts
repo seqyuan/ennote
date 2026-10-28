@@ -75,10 +75,11 @@ const inspectResult = {
   flows: [{ id: "qc-review", path: "flows/qc-review/graph.yaml", format: "graph", taskCount: 2, entryTask: "load", roles: ["qc-reviewer"], checkTasks: 0, fanOutTasks: 0, maxTotalTokens: 0, pathDigest: `sha256:${"c".repeat(64)}`, sourceDigest: `sha256:${"d".repeat(64)}` }],
   roles: [{ handle: "qc-reviewer", path: "roles/qc-reviewer/role.md", scope: "flow", name: "QC Reviewer", authority: "read_only", permissionCeiling: "discuss", allowedTools: ["read"], skills: [], pathDigest: `sha256:${"e".repeat(64)}`, sourceDigest: `sha256:${"f".repeat(64)}` }],
   skills: [{ id: "cell-qc-tables", path: "skills/cell-qc-tables", kind: "vendored", pathDigest: `sha256:${"1".repeat(64)}`, promptBytes: 12 }],
+  mcp: [{ ref: "pubmed@1" }],
   requires: [],
   capabilityEnvelope: {
     flowCount: 1, roleCount: 1, skillCount: 1, taskCount: 2,
-    roles: ["qc-reviewer"], skills: ["cell-qc-tables"],
+    roles: ["qc-reviewer"], skills: ["cell-qc-tables"], requiresMcp: ["pubmed@1"],
     modelRequirements: { capabilities: ["tool_use"], minContextWindow: 128000, perRole: {} },
     checkCommands: [], tools: ["read"], writes: [], flowMaxTotalTokens: 0,
   },
@@ -170,7 +171,14 @@ describe("ennote pack inspect", () => {
     expect(summary).toContain("Signature: Unsigned");
     expect(summary).toContain(`Manifest: ${inspectResult.manifestDigest}`);
     expect(summary).toContain("Flows (1)");
+    expect(summary).toContain("MCP (1)");
+    expect(summary).toContain("pubmed@1 (external ref, not resolved or executed)");
     expect(summary).toContain("unsigned_pack");
+  });
+
+  it("omits the MCP section when a pack declares no MCP refs", () => {
+    const summary = launcher.formatPackSummary({ ...inspectResult, mcp: [] });
+    expect(summary).not.toContain("MCP (");
   });
 
   it("prints the raw result with --json against a running stub Worker", async () => {

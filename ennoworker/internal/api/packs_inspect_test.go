@@ -336,6 +336,67 @@ flows:
 	assert.Contains(t, response.Body.String(), agentpack.CodePackDuplicateID)
 }
 
+// TestInspectPackDeclaresExternalMCPRefs covers the review surface for packs
+// that declare external MCP profiles: mixed and Role-only packs inspect
+// successfully, and the refs show up in both the result and the envelope.
+func TestInspectPackDeclaresExternalMCPRefs(t *testing.T) {
+	server, handler := packServer(t)
+
+	mixed := packFixtureFiles()
+	mixed["pack.yaml"] += `mcp:
+  - ref: pubmed@1
+  - ref: bio-tools@0.2.0
+  - ref: pubmed@1
+`
+	mixedRoot := writePackFixture(t, filepath.Join(server.HostHome, "mixed-mcp"), mixed)
+	response := inspectRequest(t, handler, map[string]any{"source": map[string]any{"kind": "path", "path": mixedRoot}})
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var mixedResult agentpack.Result
+	decodeData(t, response, &mixedResult)
+	assert.Equal(t, []agentpack.MCPSummary{{Ref: "bio-tools@0.2.0"}, {Ref: "pubmed@1"}}, mixedResult.MCP)
+	assert.Equal(t, []string{"bio-tools@0.2.0", "pubmed@1"}, mixedResult.CapabilityEnvelope.RequiresMCP)
+	assert.Contains(t, response.Body.String(), agentpack.WarningExternalMCPRef)
+
+	roleOnly := map[string]string{
+		"pack.yaml": `schema_version: 1
+id: seqyuan/reviewer
+name: Reviewer
+version: 0.1.0
+roles:
+  - handle: reviewer
+    path: roles/reviewer/role.md
+    scope: global
+mcp:
+  - ref: pubmed@1
+`,
+		"roles/reviewer/role.md": `---
+schemaVersion: 1
+handle: reviewer
+name: Reviewer
+model:
+  ref: anthropic/claude-sonnet-4
+authority: read_only
+---
+Review the incoming artifact.
+`,
+	}
+	roleRoot := writePackFixture(t, filepath.Join(server.HostHome, "role-only-mcp"), roleOnly)
+	response = inspectRequest(t, handler, map[string]any{"source": map[string]any{"kind": "path", "path": roleRoot}})
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var roleResult agentpack.Result
+	decodeData(t, response, &roleResult)
+	assert.Equal(t, []agentpack.MCPSummary{{Ref: "pubmed@1"}}, roleResult.MCP)
+	assert.Equal(t, []string{"pubmed@1"}, roleResult.CapabilityEnvelope.RequiresMCP)
+
+	// Inline MCP declarations are still rejected, not silently dropped.
+	inline := packFixtureFiles()
+	inline["pack.yaml"] += "mcp:\n  - ref: pubmed@1\n    command: npx\n"
+	inlineRoot := writePackFixture(t, filepath.Join(server.HostHome, "inline-mcp"), inline)
+	response = inspectRequest(t, handler, map[string]any{"source": map[string]any{"kind": "path", "path": inlineRoot}})
+	assert.Equal(t, http.StatusUnprocessableEntity, response.Code)
+	assert.Contains(t, response.Body.String(), agentpack.CodePackManifestUnknownField)
+}
+
 // TestInspectPackWorksWithoutStores pins the S1 constraint that inspect has no
 // store dependency: the server in packServer has every store field nil.
 func TestInspectPackWorksWithoutStores(t *testing.T) {

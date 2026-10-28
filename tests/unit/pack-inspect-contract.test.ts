@@ -7,6 +7,7 @@ const root = path.resolve(import.meta.dirname, "../..");
 
 type InspectRequest = components["schemas"]["PackInspectRequest"];
 type InspectResult = components["schemas"]["PackInspectResult"];
+type PackMCP = components["schemas"]["PackMCP"];
 
 describe("Agent Pack inspect contract", () => {
   it("generates the read-only inspect request, result, and operation types", () => {
@@ -21,6 +22,11 @@ describe("Agent Pack inspect contract", () => {
     expectTypeOf<InspectResult["flows"][number]["format"]>().toEqualTypeOf<"flow" | "graph">();
     expectTypeOf<InspectResult["roles"][number]["scope"]>().toEqualTypeOf<"flow" | "global">();
     expectTypeOf<InspectResult["signature"]["verified"]>().toEqualTypeOf<boolean>();
+    // External MCP profile refs are declared, never resolved: the result and the
+    // capability envelope both expose them as plain ref strings.
+    expectTypeOf<InspectResult["mcp"]>().toEqualTypeOf<PackMCP[]>();
+    expectTypeOf<PackMCP["ref"]>().toEqualTypeOf<string>();
+    expectTypeOf<InspectResult["capabilityEnvelope"]["requiresMcp"]>().toEqualTypeOf<string[]>();
     expectTypeOf<operations["inspectPack"]["requestBody"]["content"]["application/json"]>()
       .toMatchTypeOf<InspectRequest>();
 
@@ -34,6 +40,8 @@ describe("Agent Pack inspect contract", () => {
     expect(generated).toContain("PackInspectRequest: {");
     expect(generated).toContain("PackInspectResult: {");
     expect(generated).toContain("PackCapabilityEnvelope: {");
+    expect(generated).toContain("PackMCP: {");
+    expect(generated).toContain("requiresMcp: string[];");
 
     const contract = fs.readFileSync(path.join(root, "contracts/openapi.yaml"), "utf8");
     expect(contract).toContain("/v1/packs/inspect:");

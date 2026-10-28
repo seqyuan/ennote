@@ -510,6 +510,15 @@ function formatPackSummary(data) {
   for (const skill of skills) {
     lines.push(`  - ${skill.kind === "external" ? skill.ref : skill.id} (${skill.kind})`);
   }
+  // External MCP profile refs are reported but never resolved: the summary says
+  // so explicitly so a reviewer does not read the line as an installed profile.
+  const mcp = data.mcp ?? [];
+  if (mcp.length > 0) {
+    lines.push(`MCP (${mcp.length})`);
+    for (const profile of mcp) {
+      lines.push(`  - ${profile.ref} (external ref, not resolved or executed)`);
+    }
+  }
   const envelope = data.capabilityEnvelope ?? {};
   lines.push(`Checks:   ${(envelope.checkCommands ?? []).join(", ") || "none"}`);
   lines.push(`Writes:   ${(envelope.writes ?? []).join(", ") || "none"}`);
