@@ -19,6 +19,7 @@ const (
 	journalKindSkill        = "skill"
 	journalKindGraphRole    = "graph_role"
 	journalKindGraph        = "graph"
+	journalKindFlow         = "flow"
 	journalKindRole         = "role"
 	journalKindRoleRevision = "role_revision"
 )
@@ -233,8 +234,12 @@ func (s *Service) apply(plan *Plan, request Request, staging string, record *jou
 		if err != nil {
 			return fmt.Errorf("install %s %s: %w", target.format, target.storeID, err)
 		}
+		journalKind := journalKindGraph
+		if target.format == "flow" {
+			journalKind = journalKindFlow
+		}
 		if err := s.record(staging, record, journalEntry{
-			Kind: journalKindGraph, StoreID: target.storeID, Digest: digest,
+			Kind: journalKind, StoreID: target.storeID, Digest: digest,
 		}); err != nil {
 			return err
 		}
@@ -329,6 +334,10 @@ func (s *Service) rollback(record *journal) {
 			if _, digest, err := s.Sources.ReadGraph(entry.StoreID); err == nil && digest == entry.Digest {
 				_ = s.Sources.DeleteGraph(entry.StoreID)
 			}
+		case journalKindFlow:
+			if _, digest, err := s.Sources.ReadFlow(entry.StoreID); err == nil && digest == entry.Digest {
+				_ = s.Sources.DeleteGraph(entry.StoreID)
+			}
 		case journalKindGraphRole:
 			graphID, handle, found := strings.Cut(entry.StoreID, "/")
 			if !found {
@@ -361,7 +370,7 @@ func (s *Service) removeEmptyGraphDirs(record *journal) {
 		entry := record.Written[index]
 		graphID := ""
 		switch entry.Kind {
-		case journalKindGraph:
+		case journalKindGraph, journalKindFlow:
 			graphID = entry.StoreID
 		case journalKindGraphRole:
 			graphID, _, _ = strings.Cut(entry.StoreID, "/")

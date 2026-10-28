@@ -2,6 +2,8 @@ package packinstall_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
@@ -108,4 +110,18 @@ func TestRemoveFlowPackRefusesEnabledBinding(t *testing.T) {
 	require.NoError(t, f.service.Remove(context.Background(), "seqyuan/flow-pack", true))
 	_, _, err = f.sources.ReadFlow("qc-flow")
 	require.Error(t, err)
+}
+
+func TestFlowPackRollbackRemovesTheFlowDraft(t *testing.T) {
+	f := newFixture(t)
+	f.service.CheckAllowlistAllowsAll = true
+	manifestCopy := f.manifestCopyPath("seqyuan/flow-pack")
+	require.NoError(t, os.MkdirAll(filepath.Join(manifestCopy, "blocker"), 0o700))
+	source := writePack(t, flowPackFiles(f, roleFile(t, f.modelID, "qc-reviewer", "QC Reviewer")))
+	_, err := f.service.Install(context.Background(), packinstall.Request{SourcePath: source})
+	require.Error(t, err)
+	_, _, err = f.sources.ReadFlow("qc-flow")
+	require.Error(t, err)
+	_, err = os.Lstat(f.statePath("seqyuan/flow-pack"))
+	require.True(t, os.IsNotExist(err))
 }
