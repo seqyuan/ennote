@@ -16,6 +16,7 @@ const DEFAULT_PORT = "45131";
 const DEFAULT_HOSTNAME = "127.0.0.1";
 const START_TIMEOUT_MS = 45_000;
 const STOP_TIMEOUT_MS = 15_000;
+const PACK_INSPECT_TIMEOUT_MS = 15_000;
 const GITHUB_RELEASES_BASE = "https://github.com/seqyuan/ennote/releases/download";
 
 function platformSuffix(platform = os.platform(), arch = os.arch()) {
@@ -52,6 +53,18 @@ function statePaths(home) {
     log: path.join(home, "logs", "ennote.log"),
     auth: path.join(home, "config", "auth.json"),
   };
+}
+
+// workerStatePath is the owner-only handshake file ennoworker writes and
+// ennogate supervises (see internal/runtimeinfo.WorkerState).
+function workerStatePath(home) {
+  return path.join(home, "runtime", "worker-state.json");
+}
+
+function usageError(message) {
+  const error = new Error(message);
+  error.exitCode = 2;
+  return error;
 }
 
 function validateRuntime(paths) {
@@ -365,6 +378,166 @@ async function serviceStatus(home) {
   return { running: healthy, healthy, pid: state.pid, url: state.url, port: state.port };
 }
 
+function isLoopbackHostname(hostname) {
+  const name = String(hostname ?? "").replace(/^\[|\]$/g, "").toLowerCase();
+  if (name === "localhost" || name === "::1") return true;
+  const match = name.match(/^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  return Boolean(match) && match.slice(1).every(part => Number(part) <= 255);
+}
+
+// loadWorkerEndpoint reads the Worker handshake written by ennoworker and
+// refuses anything that is not a live loopback http Worker: ennote pack inspect
+// talks to the real Worker instead of re-implementing pack parsing in Node.
+function loadWorkerEndpoint(home) {
+  const file = workerStatePath(home);
+  if (!fs.existsSync(file)) {
+    throw new Error(`Ennote Worker is not running (${file} is missing). Start it with: ennote start`);
+  }
+  let state;
+  try {
+    state = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    throw new Error(`Ennote Worker state ${file} is unreadable. Restart it with: ennote restart`);
+  }
+  let parsed;
+  try {
+    parsed = new URL(String(state?.url ?? ""));
+  } catch {
+    throw new Error(`Ennote Worker state ${file} has an invalid url: ${state?.url ?? ""}`);
+  }
+  if (parsed.protocol !== "http:") {
+    throw new Error(`refusing Worker url ${state.url}: expected http:`);
+  }
+  if (!isLoopbackHostname(parsed.hostname)) {
+    throw new Error(`refusing non-loopback Worker url ${state.url}`);
+  }
+  if (!isPidAlive(state.pid)) {
+    throw new Error(`Ennote Worker pid ${state.pid} is not running. Start it with: ennote start`);
+  }
+  if (typeof state.bootstrapToken !== "string" || state.bootstrapToken === "") {
+    throw new Error(`Ennote Worker state ${file} has no bootstrap token. Restart it with: ennote restart`);
+  }
+  return { url: parsed.origin, token: state.bootstrapToken, pid: state.pid, instanceId: state.instanceId };
+}
+
+function postJSON(url, body, headers, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const payload = Buffer.from(JSON.stringify(body), "utf8");
+    const request = http.request(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Content-Length": payload.length, ...headers },
+    }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => resolve({
+        statusCode: response.statusCode ?? 0,
+        body: Buffer.concat(chunks).toString("utf8"),
+      }));
+    });
+    request.once("error", reject);
+    request.setTimeout(timeoutMs, () => {
+      request.destroy(new Error(`Worker request timed out after ${timeoutMs / 1000}s`));
+    });
+    request.end(payload);
+  });
+}
+
+async function requestPackInspect(endpoint, target, options = {}) {
+  const body = {
+    source: { kind: "path", path: target },
+    includeDocuments: Boolean(options.documents),
+  };
+  if (options.expectedDigest) body.expectedDigest = options.expectedDigest;
+  const response = await postJSON(
+    `${endpoint.url}/v1/packs/inspect`,
+    body,
+    { Authorization: `Bearer ${endpoint.token}` },
+    options.timeoutMs ?? PACK_INSPECT_TIMEOUT_MS,
+  );
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    let message = `Worker returned HTTP ${response.statusCode}`;
+    let code;
+    try {
+      const parsed = JSON.parse(response.body);
+      code = parsed?.error?.code;
+      if (parsed?.error?.message) message = parsed.error.message;
+    } catch {
+      // A non-JSON error body keeps the status-only message.
+    }
+    const error = new Error(code ? `${message} (${code})` : message);
+    error.code = code;
+    error.statusCode = response.statusCode;
+    throw error;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(response.body);
+  } catch {
+    throw new Error("Worker returned an unreadable inspect response");
+  }
+  if (!parsed || typeof parsed !== "object" || parsed.data == null) {
+    throw new Error("Worker returned an unexpected inspect response");
+  }
+  return parsed.data;
+}
+
+function formatPackSummary(data) {
+  const pack = data.pack ?? {};
+  const container = data.container ?? {};
+  const signature = data.signature ?? {};
+  const lines = [];
+  lines.push(`${pack.name ?? "(unnamed pack)"} (${pack.id ?? "?"}@${pack.version ?? "?"})`);
+  if (pack.description) lines.push(pack.description);
+  lines.push(`Source:   ${data.source?.path ?? "?"} (${container.kind ?? "?"}, ${container.bytes ?? 0} bytes)`);
+  lines.push(signature.present
+    ? `Signature: ${signature.algorithm} at ${signature.path} — UNVERIFIED (inspect never verifies signatures)`
+    : "Signature: Unsigned");
+  lines.push(`Manifest: ${data.manifestDigest ?? "?"}`);
+  lines.push(`Pack:     ${data.packDigest ?? "?"}`);
+
+  const flows = data.flows ?? [];
+  lines.push(`Flows (${flows.length})`);
+  for (const flow of flows) {
+    lines.push(`  - ${flow.id} [${flow.format}] ${flow.taskCount} task(s), ${flow.checkTasks} check, ${flow.fanOutTasks} fan-out, ${flow.maxTotalTokens} tokens`);
+  }
+  const roles = data.roles ?? [];
+  lines.push(`Roles (${roles.length})`);
+  for (const role of roles) {
+    lines.push(`  - ${role.handle} (${role.scope}) ${role.authority}, tools: ${(role.allowedTools ?? []).join(", ") || "none"}`);
+  }
+  const skills = data.skills ?? [];
+  lines.push(`Skills (${skills.length})`);
+  for (const skill of skills) {
+    lines.push(`  - ${skill.kind === "external" ? skill.ref : skill.id} (${skill.kind})`);
+  }
+  const envelope = data.capabilityEnvelope ?? {};
+  lines.push(`Checks:   ${(envelope.checkCommands ?? []).join(", ") || "none"}`);
+  lines.push(`Writes:   ${(envelope.writes ?? []).join(", ") || "none"}`);
+  lines.push(`Files:    ${data.filesTotal ?? 0}${data.filesTruncated ? " (truncated)" : ""}`);
+
+  const warnings = data.warnings ?? [];
+  lines.push(`Warnings (${warnings.length})`);
+  for (const warning of warnings) lines.push(`  - ${warning.code} (${warning.severity}): ${warning.message}`);
+  return lines.join("\n");
+}
+
+async function packCommand(home, positionals, values) {
+  const action = positionals[1];
+  const target = positionals[2];
+  if (action !== "inspect") {
+    throw usageError(`Unknown pack command: ${action ?? ""}\nUsage: ennote pack inspect <file|dir> [--json] [--documents]`);
+  }
+  if (!target) {
+    throw usageError("Usage: ennote pack inspect <file|dir> [--json] [--documents]");
+  }
+  const endpoint = loadWorkerEndpoint(home);
+  const data = await requestPackInspect(endpoint, path.resolve(target), {
+    documents: values.documents,
+  });
+  if (values.json) console.log(JSON.stringify(data));
+  else console.log(formatPackSummary(data));
+}
+
 async function setPassword(home, reset) {
   const authFile = statePaths(home).auth;
   ensureDirectory(path.dirname(authFile));
@@ -400,11 +573,13 @@ Commands:
   logs            Show recent service logs
   passwd          Set the local password
   passwd --reset  Remove the local password and require setup
+  pack inspect    Inspect an Agent Pack (.enpack or directory) without installing
 
 Options:
   --port, -p      Browser-facing port (default ${DEFAULT_PORT})
   --hostname, -H  Bind address (default ${DEFAULT_HOSTNAME})
-  --json          Machine-readable output
+  --json          Machine-readable output (pack inspect prints the raw result)
+  --documents     pack inspect: include flow, role, and skill source text
   --version, -v   Show version
   --help, -h      Show this help`);
 }
@@ -418,6 +593,7 @@ async function main(argv = process.argv.slice(2)) {
       port: { type: "string", short: "p", default: DEFAULT_PORT },
       hostname: { type: "string", short: "H", default: DEFAULT_HOSTNAME },
       json: { type: "boolean", default: false },
+      documents: { type: "boolean", default: false },
       reset: { type: "boolean", default: false },
       version: { type: "boolean", short: "v", default: false },
       help: { type: "boolean", short: "h", default: false },
@@ -454,6 +630,11 @@ async function main(argv = process.argv.slice(2)) {
     case "passwd":
       result = await setPassword(home, values.reset);
       break;
+    case "pack":
+      // pack inspect talks to the running Worker instead of re-implementing
+      // manifest parsing and archive safety in Node.
+      await packCommand(home, positionals, values);
+      return;
     default:
       throw new Error(`Unknown command: ${command}`);
   }
@@ -469,6 +650,7 @@ module.exports = {
   runtimeBinDir,
   runtimePaths,
   statePaths,
+  workerStatePath,
   serviceURL,
   validateRuntime,
   healthCheck,
@@ -481,12 +663,17 @@ module.exports = {
   stopService,
   serviceStatus,
   setPassword,
+  isLoopbackHostname,
+  loadWorkerEndpoint,
+  requestPackInspect,
+  formatPackSummary,
+  packCommand,
   main,
 };
 
 if (require.main === module) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
+    process.exitCode = Number.isInteger(error?.exitCode) ? error.exitCode : 1;
   });
 }

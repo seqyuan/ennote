@@ -71,6 +71,19 @@ ennote start
 - 支持平台：linux-x64 / linux-arm64 / darwin-x64 / darwin-arm64。
 - 发布流程：打版本 tag（`vX.Y.Z`）后，[release workflow](.github/workflows/release.yml) 运行测试、构建四平台二进制、验证 npm 版本已生效，最后创建 GitHub Release。
 
+### 审查 Agent Pack
+
+`ennote pack inspect` 调用正在运行的 Worker 做只读审查：不安装、不执行、不验证签名、不写磁盘。
+
+```bash
+ennote pack inspect ~/Downloads/cell-qc.enpack      # 归档
+ennote pack inspect ~/src/cell-qc                  # 目录包（需含 pack.yaml）
+ennote pack inspect ~/Downloads/cell-qc.enpack --json      # 原始 inspect 结果
+ennote pack inspect ~/Downloads/cell-qc.enpack --documents # 附带 flow/role/skill 正文
+```
+
+输出包含 `manifestDigest`（`pack.yaml` 原始字节）和 `packDigest`（排序后的 payload 行，排除顶层 `pack.sig`）、flow/role/skill 摘要、能力信封与 warnings。`format: flow` 与 `format: graph` 会如实标注，不会被悄悄降级。Worker 未启动时命令直接失败并提示 `ennote start`，不做离线降级。
+
 ### 从 v0.1.x 升级
 
 v0.1.x 的旧数据库（`data/ennote.db`）不再被读取，但也不会被删除：升级后首次启动会把它（含 `-wal`/`-shm`）原子移动到 `data/legacy-v1/` 并打印一条 `archived legacy V1 database` 警告。迁移完成后再次启动不会改动该归档。需要找回旧数据时，从 `data/legacy-v1/` 手动复制即可。
