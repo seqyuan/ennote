@@ -278,6 +278,8 @@ func run() error {
 		GraphBuilder: &graphbuilder.Service{Sources: globalSources, Completer: builderCompleter},
 		Packs:        packInstaller,
 		GraphRuns:    graphRuns,
+		FlowRuns:     graphRuns,
+		SkillCatalog: skillCatalog,
 		GraphRunResume: func(_ context.Context, db *sql.DB, sessionID, runID string) error {
 			startFlowOrchestrator(db, runID, hub, coordinator, globalSources, models, policyFiles)
 			return nil

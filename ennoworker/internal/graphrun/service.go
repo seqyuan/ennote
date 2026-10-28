@@ -18,6 +18,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
+	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/skills"
@@ -45,6 +46,9 @@ type Service struct {
 	// OnRunStarted wires the per-Session orchestrator for a freshly frozen
 	// flow run (enqueue child runs, events, recovery).
 	OnRunStarted func(ctx context.Context, db *sql.DB, sessionPath, runID string) error
+	// Projects supplies the Project GraphBinding a full flow Run requires.
+	// Graph-source Runs keep the historical behavior and do not consult it.
+	Projects *projectstore.Store
 }
 
 // FlowVersionID returns the portable immutable version ref for a Graph
@@ -384,7 +388,8 @@ func (s *Service) resolveTaskRole(ctx context.Context, document *graphsource.Doc
 				return nil, nil, fmt.Errorf("local Skill %q: %w", id, loadErr)
 			}
 			prompt += "\n\n<graph_local_skill id=\"" + id + "\" digest=\"" + loaded.ContentHash + "\">\n" + loaded.PromptText + "\n</graph_local_skill>"
-			allowedTools = append(allowedTools, loaded.Manifest.AllowedTools...)
+			// A local Skill may describe tools, but it can never widen the
+			// Role/Task allowlist it is preloaded into.
 		default:
 			return nil, nil, fmt.Errorf("unsupported Skill reference %q", ref)
 		}
@@ -426,7 +431,7 @@ func (s *Service) resolveLocalRole(ctx context.Context, graphID string, document
 			return nil, err
 		}
 		copy.Prompt += "\n\n<graph_local_skill id=\"" + id + "\" digest=\"" + loaded.ContentHash + "\">\n" + loaded.PromptText + "\n</graph_local_skill>"
-		copy.AllowedTools = append(copy.AllowedTools, loaded.Manifest.AllowedTools...)
+		// Graph-local Skill tool hints never widen the Role's allowlist.
 	}
 	definition, diagnostics := (&store.RoleDiscovery{Models: s.Models}).ResolveDocument(ctx, &copy)
 	if definition == nil {
