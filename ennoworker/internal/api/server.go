@@ -117,6 +117,16 @@ type Server struct {
 	// GraphRunResume restarts the orchestrator for a resumed Graph Run on the
 	// Worker lifetime context.
 	GraphRunResume func(ctx context.Context, db *sql.DB, sessionID, runID string) error
+	// FlowRuns starts a full Agent Flow from a project-bound immutable revision.
+	// Nil disables the /v1/flows run surface with a 503.
+	FlowRuns FlowRunStarter
+	// SkillCatalog is the live global Skill id -> digest catalog used by flow
+	// publish validation. Nil falls back to no global Skills.
+	SkillCatalog func() map[string]string
+	// CheckAllowlist is the sandbox executable allowlist for check tasks.
+	CheckAllowlist []string
+	// CheckAllowlistAllowsAll mirrors an allow_existing_behavior policy.
+	CheckAllowlistAllowsAll bool
 	// HostHome confines GET/POST /v1/host/directories. Empty uses os.UserHomeDir.
 	HostHome string
 }
@@ -236,6 +246,12 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/graphs/{graphID}/publish", s.publishGlobalGraph)
 	mux.HandleFunc("GET /v1/graphs/{graphID}/versions", s.listGlobalGraphVersions)
 	mux.HandleFunc("POST /v1/graphs/{graphID}/runs", s.runGlobalGraph)
+	// File-native full Agent Flow catalog and immutable revisions.
+	mux.HandleFunc("GET /v1/flows", s.listGlobalFlows)
+	mux.HandleFunc("GET /v1/flows/{flowID}", s.getGlobalFlow)
+	mux.HandleFunc("POST /v1/flows/{flowID}/publish", s.publishGlobalFlow)
+	mux.HandleFunc("GET /v1/flows/{flowID}/versions", s.listGlobalFlowVersions)
+	mux.HandleFunc("POST /v1/flows/{flowID}/runs", s.runGlobalFlow)
 	// V2 session-scoped Graph Run activity surface (list/detail/cancel/resume).
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/graph-runs", s.listSessionGraphRuns)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/graph-runs/{runID}", s.getSessionGraphRun)

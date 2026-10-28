@@ -11,6 +11,7 @@ package agentflow
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
@@ -42,6 +43,13 @@ func ParseDefinition(data []byte) (*domain.FlowDefinition, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&raw); err != nil {
+		return nil, fmt.Errorf("parse flow definition: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("flow definition must contain one YAML document")
+		}
 		return nil, fmt.Errorf("parse flow definition: %w", err)
 	}
 	if raw.SchemaVersion == nil {

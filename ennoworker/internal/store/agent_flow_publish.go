@@ -3,14 +3,17 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
+	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/skills"
 )
 
 var (
@@ -20,160 +23,178 @@ var (
 
 // --- Publish resolver wiring ---
 
-// FlowPublishOptions wires the publish-time validator. When Sources/Models
-// are set, role references resolve from the file-native Role catalog (V2);
-// otherwise the legacy global role SQL is used.
+// FlowPublishOptions wires the publish-time validator against the file-native
+// Role/Skill catalog. The legacy SQL profile tables were removed in V2, so
+// production always supplies Sources + Models.
 type FlowPublishOptions struct {
-	DB             *sql.DB
-	ProjectID      string // optional project scope (project_file flows)
-	FlowID         string // optional owning flow (flow-local role references)
+	// DB and ProjectID are retained for source compatibility with callers
+	// that still pass the legacy SQL handles. The file-native resolver never
+	// reads them.
+	DB        *sql.DB
+	ProjectID string
+	// FlowID is the owning flow; it enables flow-local Role and Skill
+	// resolution (local/<handle>, local/<skill>).
+	FlowID string
+	// Skills is the known global Skill id set. SkillCatalog, when set, is
+	// consulted first so a Skill created after startup is visible.
 	Skills         map[string]bool
+	SkillCatalog   func() map[string]string
 	CheckAllowlist []string
-	Sources        *globalsource.Store
-	Models         *ModelRepo
+	// CheckAllowlistAllowsAll mirrors the active policy mode
+	// (allow_existing_behavior), where every executable is permitted.
+	CheckAllowlistAllowsAll bool
+	Sources                 *globalsource.Store
+	Models                  *ModelRepo
 }
 
 // NewFlowValidator builds the publish validator.
 func NewFlowValidator(opts FlowPublishOptions) *agentflow.Validator {
 	return &agentflow.Validator{
 		Resolver: &flowPublishResolver{
-			db: opts.DB, projectID: opts.ProjectID, flowID: opts.FlowID, skills: opts.Skills,
+			flowID: opts.FlowID, skills: opts.Skills, skillCatalog: opts.SkillCatalog,
 			sources: opts.Sources, models: opts.Models,
 		},
-		CheckAllowlist: opts.CheckAllowlist,
-		MaxFanOut:      64,
-		MaxRounds:      100,
+		CheckAllowlist:          opts.CheckAllowlist,
+		CheckAllowlistAllowsAll: opts.CheckAllowlistAllowsAll,
+		MaxFanOut:               64,
+		MaxRounds:               100,
 	}
 }
 
 type flowPublishResolver struct {
-	db        *sql.DB
-	projectID string
-	flowID    string
-	skills    map[string]bool
-	sources   *globalsource.Store
-	models    *ModelRepo
+	flowID       string
+	skills       map[string]bool
+	skillCatalog func() map[string]string
+	sources      *globalsource.Store
+	models       *ModelRepo
 }
 
-// ResolveRole resolves a task role reference at publish time. A version-qualified
-// handle@version resolves against the shared catalog (project > global/builtin;
-// flow-scoped roles never match). A bare handle is a flow-local reference: it
-// resolves the owning flow's scope='flow' Role first, then falls back to the
-// shared catalog's current version — mirroring FreezeFlowDefinition semantics so
-// the same graph validates and freezes identically.
+// ResolveRole resolves a task role reference at publish time. The semantics
+// intentionally mirror graphrun freeze:
+//   - local/<handle>  -> the owning flow's Graph-private Role document;
+//   - global/<handle> -> latest (or an exact vNNNNNN / integer) published Role;
+//   - bare <handle>   -> flow-local first, then the shared catalog's latest;
+//   - handle@N        -> exact shared Role revision version N.
 func (f *flowPublishResolver) ResolveRole(ctx context.Context, roleRef string) (*agentflow.RoleInfo, error) {
-	handle, versionText, hasVersion := strings.Cut(strings.TrimSpace(roleRef), "@")
+	ref := strings.TrimSpace(roleRef)
+	handle, versionText, hasVersion := strings.Cut(ref, "@")
 	handle = strings.TrimSpace(handle)
 	if handle == "" {
 		return nil, fmt.Errorf("role reference %q has an empty handle", roleRef)
 	}
-	if f.sources != nil && f.models != nil {
-		// V2: role references resolve from the file-native Role catalog.
-		document, _, err := f.sources.ReadRoleRevision(handle, "v000001")
+	if f.sources == nil || f.models == nil {
+		return nil, fmt.Errorf("file-native Role catalog is unavailable")
+	}
+	if strings.HasPrefix(handle, "local/") {
+		if hasVersion {
+			return nil, fmt.Errorf("flow-local role %q cannot be version-pinned", handle)
+		}
+		id := strings.TrimSpace(strings.TrimPrefix(handle, "local/"))
+		if f.flowID == "" {
+			return nil, fmt.Errorf("flow-local role %q needs an owning flow", handle)
+		}
+		document, _, err := f.sources.ReadGraphRole(f.flowID, id)
 		if err != nil {
-			return nil, fmt.Errorf("role %q is not published: %w", handle, err)
+			return nil, fmt.Errorf("flow-local role %q: %w", id, err)
 		}
-		definition, diagnostics := (&RoleDiscovery{Models: f.models}).ResolveDocument(ctx, document)
-		if definition == nil {
-			if len(diagnostics) > 0 {
-				return nil, fmt.Errorf("role %q: %s", handle, diagnostics[0].Message)
+		return f.resolveDocument(ctx, document)
+	}
+	globalHandle := handle
+	if strings.HasPrefix(handle, "global/") {
+		globalHandle = strings.TrimSpace(strings.TrimPrefix(handle, "global/"))
+		if globalHandle == "" {
+			return nil, fmt.Errorf("role reference %q has an empty handle", roleRef)
+		}
+	}
+	if !hasVersion && !strings.HasPrefix(handle, "global/") {
+		if f.flowID != "" {
+			document, _, err := f.sources.ReadGraphRole(f.flowID, handle)
+			switch {
+			case err == nil:
+				return f.resolveDocument(ctx, document)
+			case errors.Is(err, os.ErrNotExist):
+				// fall through to the shared catalog
+			default:
+				return nil, fmt.Errorf("flow-local role %q: %w", handle, err)
 			}
-			return nil, fmt.Errorf("role %q failed to resolve", handle)
 		}
-		return &agentflow.RoleInfo{Definition: *definition}, nil
 	}
 	if !hasVersion {
-		// Bare handle: flow-local first, shared current fallback.
-		if f.flowID != "" {
-			var definitionJSON string
-			err := f.db.QueryRowContext(ctx, `SELECT v.definition_json
-				FROM agent_profiles p JOIN agent_profile_versions v ON v.id=p.current_version_id
-				WHERE p.object_kind='role' AND p.handle=? AND p.scope='flow' AND p.flow_id=?
-				  AND p.status='active' AND p.current_version_id IS NOT NULL`,
-				handle, f.flowID).Scan(&definitionJSON)
-			if err == nil {
-				return f.decodeRole(definitionJSON)
-			}
-			if !errors.Is(err, sql.ErrNoRows) {
-				return nil, err
-			}
+		document, _, err := f.sources.LatestRoleRevision(globalHandle)
+		if err != nil {
+			return nil, fmt.Errorf("role %q is not published: %w", globalHandle, err)
 		}
-		return f.resolveSharedCurrent(ctx, handle)
+		return f.resolveDocument(ctx, document)
 	}
 	versionText = strings.TrimSpace(versionText)
 	if versionText == "" {
-		return nil, fmt.Errorf("role reference %q must be handle@version", roleRef)
+		return nil, fmt.Errorf("role reference %q must use handle@version", roleRef)
 	}
-	var versionNumber int
-	if _, err := fmt.Sscanf(versionText, "%d", &versionNumber); err != nil || versionNumber < 1 {
-		return nil, fmt.Errorf("role reference %q has an invalid version", roleRef)
-	}
-	return f.resolveSharedVersion(ctx, handle, versionNumber)
-}
-
-func (f *flowPublishResolver) resolveSharedCurrent(ctx context.Context, handle string) (*agentflow.RoleInfo, error) {
-	var definitionJSON string
-	query := `SELECT v.definition_json FROM agent_profiles p
-		JOIN agent_profile_versions v ON v.id=p.current_version_id
-		WHERE p.object_kind='role' AND p.handle=? AND p.status='active'
-		  AND p.scope!='flow' AND p.current_version_id IS NOT NULL
-		  AND (p.project_id IS NULL OR p.project_id=?)
-		ORDER BY CASE WHEN p.project_id=? THEN 0 WHEN p.scope='builtin' THEN 1 ELSE 2 END LIMIT 1`
-	args := []any{handle, f.projectID, f.projectID}
-	if f.projectID == "" {
-		query = `SELECT v.definition_json FROM agent_profiles p
-			JOIN agent_profile_versions v ON v.id=p.current_version_id
-			WHERE p.object_kind='role' AND p.handle=? AND p.status='active'
-			  AND p.scope!='flow' AND p.project_id IS NULL AND p.current_version_id IS NOT NULL LIMIT 1`
-		args = []any{handle}
-	}
-	err := f.db.QueryRowContext(ctx, query, args...).Scan(&definitionJSON)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("role %q is not published", handle)
-	}
+	revisions, err := f.sources.ListRoleRevisions(globalHandle)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("role %q revisions: %w", globalHandle, err)
 	}
-	return f.decodeRole(definitionJSON)
+	for _, revision := range revisions {
+		if revision.ID() == versionText || strconv.Itoa(revision.Version) == versionText {
+			document, _, err := f.sources.ReadRoleRevision(globalHandle, revision.ID())
+			if err != nil {
+				return nil, err
+			}
+			return f.resolveDocument(ctx, document)
+		}
+	}
+	return nil, fmt.Errorf("role %q has no published version %q", globalHandle, versionText)
 }
 
-func (f *flowPublishResolver) resolveSharedVersion(ctx context.Context, handle string, versionNumber int) (*agentflow.RoleInfo, error) {
-	var definitionJSON string
-	var args []any
-	query := `SELECT v.definition_json FROM agent_profiles p
-		JOIN agent_profile_versions v ON v.agent_profile_id=p.id
-		WHERE p.object_kind='role' AND p.handle=? AND v.version=? AND v.status='published'
-		  AND p.status='active' AND p.scope!='flow' AND (p.project_id IS NULL OR p.project_id=?)
-		ORDER BY CASE WHEN p.project_id=? THEN 0 WHEN p.scope='builtin' THEN 1 ELSE 2 END LIMIT 1`
-	args = []any{handle, versionNumber, f.projectID, f.projectID}
-	if f.projectID == "" {
-		// Managed (global) flows may only reference global/builtin Roles.
-		query = `SELECT v.definition_json FROM agent_profiles p
-			JOIN agent_profile_versions v ON v.agent_profile_id=p.id
-			WHERE p.object_kind='role' AND p.handle=? AND v.version=? AND v.status='published'
-			  AND p.status='active' AND p.scope!='flow' AND p.project_id IS NULL LIMIT 1`
-		args = []any{handle, versionNumber}
+func (f *flowPublishResolver) resolveDocument(ctx context.Context, document *rolesource.Document) (*agentflow.RoleInfo, error) {
+	definition, diagnostics := (&RoleDiscovery{Models: f.models}).ResolveDocument(ctx, document)
+	if definition == nil {
+		if len(diagnostics) > 0 {
+			return nil, fmt.Errorf("role %q: %s", document.Handle, diagnostics[0].Message)
+		}
+		return nil, fmt.Errorf("role %q failed to resolve", document.Handle)
 	}
-	err := f.db.QueryRowContext(ctx, query, args...).Scan(&definitionJSON)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("role %q is not published", fmt.Sprintf("%s@%d", handle, versionNumber))
-	}
-	if err != nil {
-		return nil, err
-	}
-	return f.decodeRole(definitionJSON)
-}
-
-func (f *flowPublishResolver) decodeRole(definitionJSON string) (*agentflow.RoleInfo, error) {
-	var roleDef domain.RoleDefinition
-	if err := json.Unmarshal([]byte(definitionJSON), &roleDef); err != nil {
-		return nil, fmt.Errorf("decode Role definition: %w", err)
-	}
-	return &agentflow.RoleInfo{Definition: roleDef}, nil
+	return &agentflow.RoleInfo{Definition: *definition}, nil
 }
 
 func (f *flowPublishResolver) KnownSkill(ctx context.Context, name string) bool {
-	return f.skills[name]
+	ref := strings.TrimSpace(name)
+	scope, id, scoped := strings.Cut(ref, "/")
+	if scoped {
+		switch scope {
+		case "local":
+			return f.hasLocalSkill(id)
+		case "global":
+			return f.hasGlobalSkill(id)
+		default:
+			return false
+		}
+	}
+	return f.hasLocalSkill(ref) || f.hasGlobalSkill(ref)
+}
+
+func (f *flowPublishResolver) hasLocalSkill(id string) bool {
+	if f.sources == nil || f.flowID == "" || strings.TrimSpace(id) == "" {
+		return false
+	}
+	directory, err := f.sources.GraphResourceDir(f.flowID, "skills", id)
+	if err != nil {
+		return false
+	}
+	_, err = skills.Load(directory)
+	return err == nil
+}
+
+func (f *flowPublishResolver) hasGlobalSkill(id string) bool {
+	if id == "" {
+		return false
+	}
+	if f.skillCatalog != nil {
+		if _, ok := f.skillCatalog()[id]; ok {
+			return true
+		}
+	}
+	return f.skills != nil && f.skills[id]
 }
 
 // ToolReadOnly resolves a tool's fan_out safety through the shared conservative

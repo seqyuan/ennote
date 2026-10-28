@@ -232,6 +232,116 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/flows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List file-native full Agent Flow drafts
+         * @description Flow sources share the agent object store with Graphs but use
+         *     `flow.yaml` and the full Agent Flow contract (check, fan-out, terminal,
+         *     next). They are listed separately so the Graph editor never receives a
+         *     document it cannot represent.
+         */
+        get: operations["listFlows"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/flows/{flowID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flowID: string;
+            };
+            cookie?: never;
+        };
+        /** Read one editable FlowDefinition draft */
+        get: operations["getFlow"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/flows/{flowID}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flowID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate and publish one immutable Flow revision
+         * @description Runs the real `agentflow.Validator` (roles, skills, check allowlist,
+         *     fan-out read-only, budget, secrets) and then freezes the FlowDefinition
+         *     plus every flow-local Role into one immutable revision. Publishing never
+         *     enables the flow; project binding is a separate explicit action.
+         */
+        post: operations["publishFlow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/flows/{flowID}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flowID: string;
+            };
+            cookie?: never;
+        };
+        /** List immutable Flow revisions */
+        get: operations["listFlowVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/flows/{flowID}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flowID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a project-bound published Flow revision
+         * @description The Project binding pins the revision. An unpublished, unbound, or
+         *     disabled flow is rejected instead of falling back to the latest
+         *     revision.
+         */
+        post: operations["runFlow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sessions/{sessionID}/graph-runs": {
         parameters: {
             query?: never;
@@ -2699,12 +2809,37 @@ export interface components {
             hasMore: boolean;
             nextBeforeOrdinal?: number;
         };
+        GlobalFlowSummary: {
+            id: string;
+            path: string;
+            digest?: string;
+            latestVersion: number;
+            taskCount: number;
+            checkTasks: number;
+            fanOutTasks: number;
+            error?: string;
+        };
+        GlobalFlowDetail: {
+            id: string;
+            path: string;
+            digest: string;
+            latestVersion: number;
+            /** @description The canonical Agent Flow FlowDefinition (schemaVersion, id, budget, tasks, convergence, parallelism) */
+            definition: {
+                [key: string]: unknown;
+            };
+        };
         ImmutableFileRevision: {
             /** @enum {integer} */
             schemaVersion: 1;
             resourceId: string;
+            /** @enum {string} */
+            sourceKind?: "graph" | "flow";
             version: number;
             digest: string;
+            roleDigests?: {
+                [key: string]: string;
+            };
             /** Format: date-time */
             publishedAt: string;
         };
@@ -4443,6 +4578,146 @@ export interface operations {
             };
             404: components["responses"]["Error"];
             422: components["responses"]["Error"];
+        };
+    };
+    listFlows: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Flow catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["GlobalFlowSummary"][];
+                    };
+                };
+            };
+        };
+    };
+    getFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flowID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Parsed Flow draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["GlobalFlowDetail"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    publishFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flowID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Immutable Flow revision */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ImmutableFileRevision"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    listFlowVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flowID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Flow revisions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ImmutableFileRevision"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    runFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flowID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    sessionId: string;
+                    version?: number;
+                    inputs?: {
+                        [key: string]: unknown;
+                    };
+                    vars?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Durable Flow Run created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RunAgentFlow"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
     listSessionGraphRuns: {

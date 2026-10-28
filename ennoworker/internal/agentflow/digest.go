@@ -47,6 +47,32 @@ func TaskGoalDigest(goal string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// TaskOrder returns every task of a flow definition in dependency order.
+// Declared convergence back-edges are removed before the Kahn sort because a
+// convergence loop is an intentional cycle; any other cycle still fails.
+func TaskOrder(def *domain.FlowDefinition) ([]string, error) {
+	if def == nil {
+		return nil, fmt.Errorf("flow definition is required")
+	}
+	backEdges := make(map[[2]string]bool, len(def.Convergence))
+	for _, rule := range def.Convergence {
+		backEdges[[2]string{rule.From, rule.To}] = true
+	}
+	tasks := make(map[string]domain.FlowTask, len(def.Tasks))
+	for name, task := range def.Tasks {
+		depends := make([]string, 0, len(task.Depends))
+		for _, dep := range task.Depends {
+			if backEdges[[2]string{name, dep}] {
+				continue
+			}
+			depends = append(depends, dep)
+		}
+		task.Depends = depends
+		tasks[name] = task
+	}
+	return TopologicalOrder(tasks)
+}
+
 // TopologicalOrder returns task names in dependency order (dependencies first)
 // using Kahn's algorithm. The order is deterministic: at each step the
 // ready task with the smallest name wins.

@@ -44,6 +44,10 @@ type Validator struct {
 	Resolver Resolver
 	// CheckAllowlist is the sandbox executable allowlist for check tasks.
 	CheckAllowlist []string
+	// CheckAllowlistAllowsAll mirrors a policy mode that already permits every
+	// executable (allow_existing_behavior). It is opt-in so an empty allowlist
+	// still fails closed by default.
+	CheckAllowlistAllowsAll bool
 	// MaxFanOut bounds fan_out.max.
 	MaxFanOut int
 	// MaxRounds bounds convergence max_rounds.
@@ -55,6 +59,9 @@ func (v *Validator) fail(code, message, field string) ValidationDiagnostic {
 }
 
 func (v *Validator) allowedCheckExec(command string) bool {
+	if v.CheckAllowlistAllowsAll {
+		return true
+	}
 	if v.CheckAllowlist == nil {
 		return false
 	}

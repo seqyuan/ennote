@@ -312,6 +312,120 @@ paths:
                     properties: { data: { $ref: "#/components/schemas/RunAgentFlow" } }
         "404": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /v1/flows:
+    get:
+      operationId: listFlows
+      summary: List file-native full Agent Flow drafts
+      description: |
+        Flow sources share the agent object store with Graphs but use
+        `flow.yaml` and the full Agent Flow contract (check, fan-out, terminal,
+        next). They are listed separately so the Graph editor never receives a
+        document it cannot represent.
+      responses:
+        "200":
+          description: Flow catalog
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { type: array, items: { $ref: "#/components/schemas/GlobalFlowSummary" } } }
+  /v1/flows/{flowID}:
+    parameters:
+      - { name: flowID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getFlow
+      summary: Read one editable FlowDefinition draft
+      responses:
+        "200":
+          description: Parsed Flow draft
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/GlobalFlowDetail" } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/flows/{flowID}/publish:
+    parameters:
+      - { name: flowID, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: publishFlow
+      summary: Validate and publish one immutable Flow revision
+      description: |
+        Runs the real `agentflow.Validator` (roles, skills, check allowlist,
+        fan-out read-only, budget, secrets) and then freezes the FlowDefinition
+        plus every flow-local Role into one immutable revision. Publishing never
+        enables the flow; project binding is a separate explicit action.
+      responses:
+        "201":
+          description: Immutable Flow revision
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/ImmutableFileRevision" } }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/flows/{flowID}/versions:
+    parameters:
+      - { name: flowID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listFlowVersions
+      summary: List immutable Flow revisions
+      responses:
+        "200":
+          description: Flow revisions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { type: array, items: { $ref: "#/components/schemas/ImmutableFileRevision" } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/flows/{flowID}/runs:
+    parameters:
+      - { name: flowID, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: runFlow
+      summary: Run a project-bound published Flow revision
+      description: |
+        The Project binding pins the revision. An unpublished, unbound, or
+        disabled flow is rejected instead of falling back to the latest
+        revision.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [sessionId]
+              properties:
+                sessionId: { type: string }
+                version: { type: integer, minimum: 1 }
+                inputs: { type: object, additionalProperties: true }
+                vars: { type: object, additionalProperties: true }
+      responses:
+        "201":
+          description: Durable Flow Run created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/RunAgentFlow" } }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /v1/sessions/{sessionID}/graph-runs:
     parameters:
       - { name: sessionID, in: path, required: true, schema: { type: string } }
@@ -4048,6 +4162,32 @@ components:
           items: { $ref: "#/components/schemas/RunMessage" }
         hasMore: { type: boolean }
         nextBeforeOrdinal: { type: integer, minimum: 0 }
+    GlobalFlowSummary:
+      type: object
+      additionalProperties: false
+      required: [id, path, latestVersion, taskCount, checkTasks, fanOutTasks]
+      properties:
+        id: { type: string }
+        path: { type: string }
+        digest: { type: string }
+        latestVersion: { type: integer, minimum: 0 }
+        taskCount: { type: integer, minimum: 0 }
+        checkTasks: { type: integer, minimum: 0 }
+        fanOutTasks: { type: integer, minimum: 0 }
+        error: { type: string }
+    GlobalFlowDetail:
+      type: object
+      additionalProperties: false
+      required: [id, path, digest, latestVersion, definition]
+      properties:
+        id: { type: string }
+        path: { type: string }
+        digest: { type: string }
+        latestVersion: { type: integer, minimum: 0 }
+        definition:
+          type: object
+          additionalProperties: true
+          description: The canonical Agent Flow FlowDefinition (schemaVersion, id, budget, tasks, convergence, parallelism)
     ImmutableFileRevision:
       type: object
       additionalProperties: false
@@ -4055,8 +4195,12 @@ components:
       properties:
         schemaVersion: { type: integer, enum: [1] }
         resourceId: { type: string }
+        sourceKind: { type: string, enum: [graph, flow] }
         version: { type: integer, minimum: 1 }
         digest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+        roleDigests:
+          type: object
+          additionalProperties: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
         publishedAt: { type: string, format: date-time }
     GlobalRoleSummary:
       type: object

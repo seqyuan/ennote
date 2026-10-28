@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
+	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
 )
@@ -18,17 +20,32 @@ var objectIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,63}$`)
 
 var ErrConflict = errors.New("source digest conflict")
 
+// Source kinds share one agent object directory. Exactly one of graph.yaml and
+// flow.yaml exists below an object; revisions record the kind so a graph
+// revision can never be read as a flow revision (or vice versa).
+const (
+	SourceKindGraph = "graph"
+	SourceKindFlow  = "flow"
+)
+
+const (
+	graphSourceName = "graph.yaml"
+	flowSourceName  = "flow.yaml"
+)
+
 type Store struct {
 	HomeDir string
 }
 
 type GraphEntry struct {
-	ID       string                `json:"id"`
-	Name     string                `json:"name"`
-	Path     string                `json:"path"`
-	Digest   string                `json:"digest,omitempty"`
-	Document *graphsource.Document `json:"document,omitempty"`
-	Error    string                `json:"error,omitempty"`
+	ID         string                 `json:"id"`
+	Name       string                 `json:"name"`
+	SourceKind string                 `json:"sourceKind"`
+	Path       string                 `json:"path"`
+	Digest     string                 `json:"digest,omitempty"`
+	Document   *graphsource.Document  `json:"document,omitempty"`
+	Flow       *domain.FlowDefinition `json:"flow,omitempty"`
+	Error      string                 `json:"error,omitempty"`
 }
 
 type RoleEntry struct {
@@ -44,9 +61,14 @@ func (s Store) AgentsDir() string { return filepath.Join(s.HomeDir, "agents") }
 func (s Store) GraphsDir() string { return filepath.Join(s.AgentsDir(), "graphs") }
 func (s Store) RolesDir() string  { return filepath.Join(s.AgentsDir(), "roles") }
 
+// ListGraphs returns graph-source objects only. Flow objects share the same
+// parent directory but are reported by ListFlows, so the live Graph UI is never
+// handed a document it cannot render.
 func (s Store) ListGraphs() ([]GraphEntry, error) {
-	return listObjectDirs(s.GraphsDir(), "graph.yaml", func(id, path string, data []byte) GraphEntry {
-		entry := GraphEntry{ID: id, Name: id, Path: path}
+	return listObjectDirs(s.GraphsDir(), graphSourceName, func(id string) bool {
+		return s.hasOnlySource(id, graphSourceName, flowSourceName)
+	}, func(id, path string, data []byte) GraphEntry {
+		entry := GraphEntry{ID: id, Name: id, SourceKind: SourceKindGraph, Path: path}
 		document, err := graphsource.Parse(data)
 		if err != nil {
 			entry.Error = err.Error()
@@ -66,8 +88,47 @@ func (s Store) ListGraphs() ([]GraphEntry, error) {
 	})
 }
 
+// ListFlows returns flow-source objects only. The FlowDefinition is the same
+// canonical document run/publish consume, not a graph projection.
+func (s Store) ListFlows() ([]GraphEntry, error) {
+	return listObjectDirs(s.GraphsDir(), flowSourceName, func(id string) bool {
+		return s.hasOnlySource(id, flowSourceName, graphSourceName)
+	}, func(id, path string, data []byte) GraphEntry {
+		entry := GraphEntry{ID: id, Name: id, SourceKind: SourceKindFlow, Path: path}
+		definition, err := agentflow.ParseDefinition(data)
+		if err != nil {
+			entry.Error = err.Error()
+			return entry
+		}
+		if definition.ID != id {
+			entry.Error = fmt.Sprintf("Flow id %q must match directory %q", definition.ID, id)
+			return entry
+		}
+		entry.Name = definition.ID
+		entry.Flow = definition
+		entry.Digest, err = AgentFlowDigest(definition)
+		if err != nil {
+			entry.Error = err.Error()
+		}
+		return entry
+	})
+}
+
+// hasOnlySource reports whether an object directory contains the other source
+// kind but not filename, so each catalog skips objects owned by the other kind.
+// A directory holding both is included in both lists, where SourceKind fails
+// closed instead of silently preferring one document.
+func (s Store) hasOnlySource(id, filename, other string) bool {
+	self, selfErr := regularFileExists(filepath.Join(s.GraphsDir(), id, filename))
+	otherExists, otherErr := regularFileExists(filepath.Join(s.GraphsDir(), id, other))
+	if selfErr != nil || otherErr != nil {
+		return false
+	}
+	return otherExists && !self
+}
+
 func (s Store) ListRoles() ([]RoleEntry, error) {
-	return listObjectDirs(s.RolesDir(), "role.md", func(id, path string, data []byte) RoleEntry {
+	return listObjectDirs(s.RolesDir(), "role.md", nil, func(id, path string, data []byte) RoleEntry {
 		entry := RoleEntry{ID: id, Name: id, Path: path}
 		document, err := rolesource.Parse(data)
 		if err != nil {
@@ -88,7 +149,7 @@ func (s Store) ListRoles() ([]RoleEntry, error) {
 	})
 }
 
-func listObjectDirs[T any](root, filename string, parse func(id, path string, data []byte) T) ([]T, error) {
+func listObjectDirs[T any](root, filename string, skip func(id string) bool, parse func(id, path string, data []byte) T) ([]T, error) {
 	entries, err := os.ReadDir(root)
 	if errors.Is(err, os.ErrNotExist) {
 		return []T{}, nil
@@ -100,6 +161,9 @@ func listObjectDirs[T any](root, filename string, parse func(id, path string, da
 	for _, entry := range entries {
 		id := entry.Name()
 		if !objectIDPattern.MatchString(id) {
+			continue
+		}
+		if skip != nil && skip(id) {
 			continue
 		}
 		directory := filepath.Join(root, id)
@@ -124,8 +188,82 @@ func listObjectDirs[T any](root, filename string, parse func(id, path string, da
 	return result, nil
 }
 
+// SourceKind reports the kind of the object directory and fails closed when an
+// object contains both source files.
+func (s Store) SourceKind(id string) (string, error) {
+	if !objectIDPattern.MatchString(id) {
+		return "", fmt.Errorf("invalid object id %q", id)
+	}
+	directory := filepath.Join(s.GraphsDir(), id)
+	info, err := os.Lstat(directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", os.ErrNotExist
+	}
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return "", fmt.Errorf("source object %q must be a regular directory", id)
+	}
+	graphExists, err := regularFileExists(filepath.Join(directory, graphSourceName))
+	if err != nil {
+		return "", err
+	}
+	flowExists, err := regularFileExists(filepath.Join(directory, flowSourceName))
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case graphExists && flowExists:
+		return "", fmt.Errorf("source object %q contains both %s and %s", id, graphSourceName, flowSourceName)
+	case flowExists:
+		return SourceKindFlow, nil
+	case graphExists:
+		return SourceKindGraph, nil
+	default:
+		return "", os.ErrNotExist
+	}
+}
+
+// ReadSource returns the document for either source kind plus its canonical
+// digest. Exactly one of graphDocument/flowDefinition is non-nil.
+func (s Store) ReadSource(id string) (string, *graphsource.Document, *domain.FlowDefinition, string, error) {
+	kind, err := s.SourceKind(id)
+	if err != nil {
+		return "", nil, nil, "", err
+	}
+	switch kind {
+	case SourceKindGraph:
+		document, digest, err := s.ReadGraph(id)
+		return kind, document, nil, digest, err
+	case SourceKindFlow:
+		definition, digest, err := s.ReadFlow(id)
+		return kind, nil, definition, digest, err
+	default:
+		return "", nil, nil, "", fmt.Errorf("unsupported source kind %q", kind)
+	}
+}
+
+// AgentFlowDigest is the source digest of a FlowDefinition with the same
+// sha256: prefix as every other file-native source digest. It is the value a
+// flow revision stores and the value run freeze uses as ConfigDigest.
+func AgentFlowDigest(definition *domain.FlowDefinition) (string, error) {
+	digest, err := agentflow.ConfigDigest(definition)
+	if err != nil {
+		return "", err
+	}
+	return "sha256:" + digest, nil
+}
+
 func (s Store) ReadGraph(id string) (*graphsource.Document, string, error) {
-	path, err := objectPath(s.GraphsDir(), id, "graph.yaml")
+	kind, err := s.SourceKind(id)
+	if err != nil {
+		return nil, "", err
+	}
+	if kind != SourceKindGraph {
+		return nil, "", fmt.Errorf("source %q is a flow, not a Graph", id)
+	}
+	path, err := objectPath(s.GraphsDir(), id, graphSourceName)
 	if err != nil {
 		return nil, "", err
 	}
@@ -142,6 +280,35 @@ func (s Store) ReadGraph(id string) (*graphsource.Document, string, error) {
 	}
 	digest, err := graphsource.SourceDigest(document)
 	return document, digest, err
+}
+
+// ReadFlow reads the editable FlowDefinition draft at
+// agents/graphs/<id>/flow.yaml. It never accepts a graph source.
+func (s Store) ReadFlow(id string) (*domain.FlowDefinition, string, error) {
+	kind, err := s.SourceKind(id)
+	if err != nil {
+		return nil, "", err
+	}
+	if kind != SourceKindFlow {
+		return nil, "", fmt.Errorf("source %q is a Graph, not a flow", id)
+	}
+	path, err := objectPath(s.GraphsDir(), id, flowSourceName)
+	if err != nil {
+		return nil, "", err
+	}
+	data, err := readRegular(path)
+	if err != nil {
+		return nil, "", err
+	}
+	definition, err := agentflow.ParseDefinition(data)
+	if err != nil {
+		return nil, "", err
+	}
+	if definition.ID != id {
+		return nil, "", fmt.Errorf("Flow id %q must match directory %q", definition.ID, id)
+	}
+	digest, err := AgentFlowDigest(definition)
+	return definition, digest, err
 }
 
 func (s Store) CreateGraph(id, name string) (*graphsource.Document, string, error) {
@@ -187,6 +354,68 @@ func (s Store) CreateGraphFromDocument(document *graphsource.Document) (string, 
 		return "", err
 	}
 	return graphsource.SourceDigest(document)
+}
+
+// CreateFlowFromDefinition publishes a fully authored Agent Flow draft as
+// agents/graphs/<id>/flow.yaml. It never overwrites an existing Graph or Flow,
+// and it never publishes a revision (installs stay disabled by default).
+func (s Store) CreateFlowFromDefinition(definition *domain.FlowDefinition) (string, error) {
+	if definition == nil {
+		return "", fmt.Errorf("flow definition is required")
+	}
+	definition.ID = strings.TrimSpace(definition.ID)
+	if !objectIDPattern.MatchString(definition.ID) {
+		return "", fmt.Errorf("invalid flow id %q", definition.ID)
+	}
+	if _, err := s.SourceKind(definition.ID); err == nil {
+		return "", fmt.Errorf("source object %q already exists", definition.ID)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	encoded, err := agentflow.DefinitionToYAML(definition)
+	if err != nil {
+		return "", err
+	}
+	// Local roles and skills may already exist below the object directory.
+	flowDir, err := ensureSourceDir(s.GraphsDir(), definition.ID)
+	if err != nil {
+		return "", err
+	}
+	if err := atomicWrite(filepath.Join(flowDir, flowSourceName), encoded, true); err != nil {
+		return "", err
+	}
+	return AgentFlowDigest(definition)
+}
+
+// UpdateFlow applies one whole-document CAS update to a Flow draft. The ID is
+// the directory identity and can never change in place.
+func (s Store) UpdateFlow(id, expectedDigest string, mutate func(*domain.FlowDefinition) error) (*domain.FlowDefinition, string, error) {
+	definition, digest, err := s.ReadFlow(id)
+	if err != nil {
+		return nil, "", err
+	}
+	if expectedDigest == "" || expectedDigest != digest {
+		return nil, digest, ErrConflict
+	}
+	if mutate == nil {
+		return nil, digest, fmt.Errorf("flow mutation is required")
+	}
+	if err := mutate(definition); err != nil {
+		return nil, digest, err
+	}
+	if definition.ID != id {
+		return nil, digest, fmt.Errorf("Flow id cannot be changed")
+	}
+	encoded, err := agentflow.DefinitionToYAML(definition)
+	if err != nil {
+		return nil, digest, err
+	}
+	path, _ := objectPath(s.GraphsDir(), id, flowSourceName)
+	if err := atomicWrite(path, encoded, false); err != nil {
+		return nil, digest, err
+	}
+	newDigest, err := AgentFlowDigest(definition)
+	return definition, newDigest, err
 }
 
 func (s Store) UpdateGraph(id, expectedDigest string, mutate func(*graphsource.Document) error) (*graphsource.Document, string, error) {
@@ -368,7 +597,8 @@ func objectPath(root, id, filename string) (string, error) {
 // DeleteGraph removes the whole Graph directory, including its revisions and its
 // Graph-private roles and skills. Deletion is whole-object because a revision
 // sequence must stay contiguous: dropping one revision directory would corrupt
-// the object for every later read.
+// the object for every later read. The same call removes a flow-source object
+// because both kinds share one object directory.
 func (s Store) DeleteGraph(graphID string) error {
 	return deleteObjectDir(s.GraphsDir(), graphID)
 }
@@ -467,6 +697,22 @@ func createObjectDir(root, id, filename string) (string, error) {
 		return "", fmt.Errorf("create object directory: %w", err)
 	}
 	return path, nil
+}
+
+// regularFileExists reports whether path is a regular file. A symlink or any
+// non-regular type is rejected so a source kind cannot be redirected.
+func regularFileExists(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return false, fmt.Errorf("source must be a regular file")
+	}
+	return true, nil
 }
 
 func readRegular(path string) ([]byte, error) {
