@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -12,7 +11,6 @@ import (
 	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
-	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/workspace"
 )
 
@@ -37,30 +35,10 @@ type CheckTaskRunner struct {
 // (settings.default_tool_policy_profile_id, falling back to the builtin
 // allow-existing policy).
 func (c *CheckTaskRunner) CheckPolicyForSession(ctx context.Context, sessionID string) (*agentflow.CheckPolicy, error) {
-	if c.PolicyResolver != nil {
-		return c.PolicyResolver(ctx, c.DB, sessionID)
+	if c.PolicyResolver == nil {
+		return nil, fmt.Errorf("check policy resolver is not configured")
 	}
-	var policyID string
-	if err := c.DB.QueryRowContext(ctx, `SELECT COALESCE((SELECT value FROM settings WHERE key='default_tool_policy_profile_id'), '')`).
-		Scan(&policyID); err != nil {
-		return nil, err
-	}
-	if policyID == "" {
-		policyID = "builtin-tool-allow-existing-v1"
-	}
-	var configJSON string
-	if err := c.DB.QueryRowContext(ctx, `SELECT config_json FROM policy_profiles
-		WHERE id=? AND kind='tool' AND status='active'`, policyID).Scan(&configJSON); err != nil {
-		return nil, fmt.Errorf("tool policy %s is not active: %w", policyID, err)
-	}
-	var config domain.ToolPolicyConfig
-	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
-		return nil, err
-	}
-	return &agentflow.CheckPolicy{
-		Mode: config.Mode, AllowedTools: config.AllowedTools,
-		AllowedExecutables: config.AllowedExecutables, MaxTimeoutSeconds: config.MaxTimeoutSeconds,
-	}, nil
+	return c.PolicyResolver(ctx, c.DB, sessionID)
 }
 
 // CreateCheckApproval persists the durable Ask-mode approval for one check
