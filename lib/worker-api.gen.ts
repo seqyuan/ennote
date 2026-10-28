@@ -1946,17 +1946,18 @@ export interface paths {
         put?: never;
         /**
          * Plan or apply an Agent Pack install
-         * @description S2a installs exactly two pack shapes: a Role-only pack (each Role becomes
-         *     a Worker-global Role with a published revision) and a `format: graph`
-         *     pack Flow (an unpublishing Graph draft plus its Graph-private Roles and
-         *     Skills). `format: flow`, non-empty `mcp`, and non-empty `requires` are
-         *     refused with a stable blocker code instead of being downgraded.
+         * @description Installs Role-only packs, `format: graph` packs (an unpublished Graph
+         *     draft plus its Graph-private Roles and Skills), and `format: flow` packs
+         *     (an unpublished full Agent Flow draft plus bundled Roles/Skills). The
+         *     full-flow draft is validated by the real agentflow.Validator before any
+         *     write. Non-empty `mcp` and `requires` are still refused with a stable
+         *     blocker code instead of being downgraded.
          *
          *     `dryRun: true` always answers 200 with the plan, blockers included, and
          *     never writes staging, store objects, or state. A real install answers
-         *     422 when any blocker or conflict remains. Installed Graphs stay disabled
-         *     until a user publishes a Graph revision through the existing Graph path;
-         *     the installer never publishes one.
+         *     422 when any blocker or conflict remains. Installed sources stay disabled
+         *     until a user publishes a revision and enables it through a Project
+         *     binding; the installer never publishes one.
          */
         post: operations["installPack"];
         delete?: never;
@@ -4002,7 +4003,7 @@ export interface components {
         };
         PackAction: {
             /** @enum {string} */
-            kind: "graph" | "graph_role" | "role" | "role_revision" | "skill";
+            kind: "graph" | "flow" | "graph_role" | "role" | "role_revision" | "skill";
             /** @description Installed store id; a Graph-private object is "<flow>/<id>" */
             storeId: string;
             /** @enum {string} */

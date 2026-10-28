@@ -28,8 +28,12 @@ import (
 // Stable install error codes. They are wire codes: the API maps each one onto an
 // HTTP status and the CLI prints it verbatim. Every one is non-retryable.
 const (
-	// CodeFlowFormatUnsupported reports a format: flow entry (needs S2b).
+	// CodeFlowFormatUnsupported is retained for wire compatibility with S2a.
+	// S2b installs format: flow packs, so it is never emitted.
 	CodeFlowFormatUnsupported = "pack_flow_format_unsupported"
+	// CodeFlowValidationFailed reports a full-flow definition the real
+	// agentflow.Validator rejected before any write.
+	CodeFlowValidationFailed = "pack_flow_validation_failed"
 	// CodeMCPUnsupported reports a non-empty mcp list.
 	CodeMCPUnsupported = "pack_mcp_unsupported"
 	// CodeDependencyUnsupported reports a non-empty requires list.

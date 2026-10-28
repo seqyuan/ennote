@@ -209,22 +209,29 @@ func (s *Service) apply(plan *Plan, request Request, staging string, record *jou
 			PackHandle: target.packHandle, Scope: target.scope, StoreID: target.storeID, Digest: digest,
 		})
 	}
-	// 4. graph.yaml drafts. PublishGraphRevision is deliberately never called:
-	// an installed Graph has no revision, so graphrun.Start refuses it until a
-	// user publishes one through the ordinary Graph path.
+	// 4. Source drafts. PublishGraphRevision/PublishFlowRevision are deliberately
+	// never called: an installed source has no revision, so graphrun refuses it
+	// until a user publishes and binds one explicitly.
 	for _, target := range install.flows {
 		revision := (*string)(nil)
 		if target.action == ActionExistsIdentical {
 			state.Flows = append(state.Flows, FlowState{
-				PackFlowID: target.packFlowID, StoreID: target.storeID, Format: "graph",
+				PackFlowID: target.packFlowID, StoreID: target.storeID, Format: target.format,
 				SourceDigest: target.sourceDigest, InstalledGraphDigest: target.installedDigest,
 				PublishedRevision: revision,
 			})
 			continue
 		}
-		digest, err := s.Sources.CreateGraphFromDocument(target.document)
+		var digest string
+		var err error
+		switch target.format {
+		case "flow":
+			digest, err = s.Sources.CreateFlowFromDefinition(target.definition)
+		default:
+			digest, err = s.Sources.CreateGraphFromDocument(target.document)
+		}
 		if err != nil {
-			return fmt.Errorf("install Graph %s: %w", target.storeID, err)
+			return fmt.Errorf("install %s %s: %w", target.format, target.storeID, err)
 		}
 		if err := s.record(staging, record, journalEntry{
 			Kind: journalKindGraph, StoreID: target.storeID, Digest: digest,
@@ -232,7 +239,7 @@ func (s *Service) apply(plan *Plan, request Request, staging string, record *jou
 			return err
 		}
 		state.Flows = append(state.Flows, FlowState{
-			PackFlowID: target.packFlowID, StoreID: target.storeID, Format: "graph",
+			PackFlowID: target.packFlowID, StoreID: target.storeID, Format: target.format,
 			SourceDigest: target.sourceDigest, InstalledGraphDigest: digest,
 			PublishedRevision: revision,
 		})

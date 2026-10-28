@@ -11,7 +11,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/agentpack"
+	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/skills"
@@ -25,6 +28,7 @@ const PlanVersion = 1
 // Action kinds.
 const (
 	ActionKindGraph        = "graph"
+	ActionKindFlow         = "flow"
 	ActionKindGraphRole    = "graph_role"
 	ActionKindRole         = "role"
 	ActionKindRoleRevision = "role_revision"
@@ -131,11 +135,14 @@ type installPlan struct {
 type flowTarget struct {
 	packFlowID      string
 	storeID         string
+	format          string
 	sourceDigest    string
 	installedDigest string
-	// document is the installed form: its ID is storeID.
-	document *graphsource.Document
-	action   string
+	// Exactly one of document/definition is the installed form; its ID is
+	// storeID.
+	document   *graphsource.Document
+	definition *domain.FlowDefinition
+	action     string
 }
 
 type roleTarget struct {
@@ -198,14 +205,15 @@ func (s *Service) plan(ctx context.Context, request Request) (*Plan, error) {
 	planner := &planner{
 		service: s, ctx: ctx, request: request,
 		inspect: result, manifest: manifest, pkg: pkg,
-		flowStoreIDs:  map[string]string{},
-		roleStoreIDs:  map[string]string{},
-		flowDocs:      map[string]*graphsource.Document{},
-		roleDocs:      map[string]*rolesource.Document{},
-		flowRoleRefs:  map[string]map[string]bool{},
-		flowSkillRefs: map[string]map[string]bool{},
-		skillEntries:  map[string]agentpack.SkillEntry{},
-		skillInputs:   map[string]skillsmgmt.CreateInput{},
+		flowStoreIDs:    map[string]string{},
+		roleStoreIDs:    map[string]string{},
+		flowDocs:        map[string]*graphsource.Document{},
+		flowDefinitions: map[string]*domain.FlowDefinition{},
+		roleDocs:        map[string]*rolesource.Document{},
+		flowRoleRefs:    map[string]map[string]bool{},
+		flowSkillRefs:   map[string]map[string]bool{},
+		skillEntries:    map[string]agentpack.SkillEntry{},
+		skillInputs:     map[string]skillsmgmt.CreateInput{},
 	}
 	planner.plan = &Plan{
 		PlanVersion:             PlanVersion,
@@ -269,8 +277,9 @@ type planner struct {
 	flowStoreIDs map[string]string
 	roleStoreIDs map[string]string
 
-	flowDocs map[string]*graphsource.Document
-	roleDocs map[string]*rolesource.Document
+	flowDocs        map[string]*graphsource.Document
+	flowDefinitions map[string]*domain.FlowDefinition
+	roleDocs        map[string]*rolesource.Document
 
 	// flowRoleRefs and flowSkillRefs record which Graph-private object each flow
 	// pulls in, so a shared object is installed below every referencing flow.
@@ -295,14 +304,6 @@ func (p *planner) warn(code, severity, message string) {
 // checkLimits rejects everything S2a cannot install. Each rejection names the
 // reason instead of silently degrading the pack.
 func (p *planner) checkLimits() {
-	for _, flow := range p.inspect.Flows {
-		if flow.Format != agentpack.FlowFormatFlow {
-			continue
-		}
-		p.blocker(CodeFlowFormatUnsupported, fmt.Sprintf(
-			"flow %q uses format: flow (%d check task(s), %d fan-out task(s)); installing a full Agent Flow definition needs the S2b Flow source, CheckTaskRunner, and check approval path, so S2a refuses it instead of downgrading",
-			flow.ID, flow.CheckTasks, flow.FanOutTasks))
-	}
 	if len(p.inspect.MCP) > 0 {
 		refs := make([]string, 0, len(p.inspect.MCP))
 		for _, entry := range p.inspect.MCP {
@@ -429,6 +430,13 @@ func (p *planner) loadDocuments() error {
 					fmt.Sprintf("parse Graph source %s: %v", entry.Path, err))
 			}
 			p.flowDocs[entry.ID] = document
+		case agentpack.FlowFormatFlow:
+			definition, err := agentflow.ParseDefinition(file.Data)
+			if err != nil {
+				return newError(agentpack.CodePackFlowInvalid,
+					fmt.Sprintf("parse Agent Flow source %s: %v", entry.Path, err))
+			}
+			p.flowDefinitions[entry.ID] = definition
 		}
 	}
 	for _, entry := range p.manifest.Roles {
@@ -582,36 +590,54 @@ func (p *planner) skillInput(entry agentpack.SkillEntry, directory string) (skil
 // in, and rejects references whose declared scope contradicts the reference.
 func (p *planner) resolveReferences() {
 	for _, entry := range p.manifest.Flows {
-		if entry.Format != agentpack.FlowFormatGraph {
-			continue
-		}
 		refs := map[string]bool{}
 		for _, handle := range entry.Roles {
 			refs[handle] = true
 		}
-		document := p.flowDocs[entry.ID]
-		if document != nil {
-			for _, taskID := range sortedKeys(document.Tasks) {
-				task := document.Tasks[taskID]
-				if scope, handle, ok := strings.Cut(task.Role, "/"); ok && scope == "local" {
-					refs[handle] = true
-					if _, declared := p.roleDocs[handle]; !declared {
-						p.blocker(CodeRoleHandleConflict, fmt.Sprintf(
-							"flow %q task %q references local Role %q, which the pack does not declare", entry.ID, taskID, handle))
+		switch entry.Format {
+		case agentpack.FlowFormatGraph:
+			document := p.flowDocs[entry.ID]
+			if document != nil {
+				for _, taskID := range sortedKeys(document.Tasks) {
+					task := document.Tasks[taskID]
+					if scope, handle, ok := strings.Cut(task.Role, "/"); ok && scope == "local" {
+						refs[handle] = true
+						if _, declared := p.roleDocs[handle]; !declared {
+							p.blocker(CodeRoleHandleConflict, fmt.Sprintf(
+								"flow %q task %q references local Role %q, which the pack does not declare", entry.ID, taskID, handle))
+						}
+					} else if !strings.Contains(task.Role, "/") && task.Role != "" {
+						// Bare handle: flow-local when the pack declares it.
+						if _, declared := p.roleDocs[task.Role]; declared {
+							refs[task.Role] = true
+						}
 					}
-				} else if !strings.Contains(task.Role, "/") && task.Role != "" {
-					// Bare handle: flow-local when the pack declares it.
-					if _, declared := p.roleDocs[task.Role]; declared {
-						refs[task.Role] = true
+					for _, ref := range task.Skills {
+						scope, id, ok := strings.Cut(ref, "/")
+						if !ok {
+							p.checkSkillRef(entry.ID, "flow task "+taskID, "global", ref)
+							continue
+						}
+						p.checkSkillRef(entry.ID, "flow task "+taskID, scope, id)
 					}
 				}
-				for _, ref := range task.Skills {
-					scope, id, ok := strings.Cut(ref, "/")
-					if !ok {
-						p.checkSkillRef(entry.ID, "flow task "+taskID, "global", ref)
-						continue
+			}
+		case agentpack.FlowFormatFlow:
+			definition := p.flowDefinitions[entry.ID]
+			if definition != nil {
+				for _, taskID := range sortedKeys(definition.Tasks) {
+					task := definition.Tasks[taskID]
+					if task.Type == domain.FlowTaskRole {
+						p.collectFlowRoleRef(entry.ID, taskID, task.Role, refs)
 					}
-					p.checkSkillRef(entry.ID, "flow task "+taskID, scope, id)
+					for _, ref := range task.Skills {
+						scope, id, ok := strings.Cut(strings.TrimSpace(ref), "/")
+						if !ok {
+							p.checkSkillRef(entry.ID, "flow task "+taskID, "global", ref)
+							continue
+						}
+						p.checkSkillRef(entry.ID, "flow task "+taskID, scope, id)
+					}
 				}
 			}
 		}
@@ -652,7 +678,7 @@ func (p *planner) resolveReferences() {
 	// A flow-scoped Role's local/ Skill bindings are Graph-local Skills too: the
 	// Role is installed below the flow, so its Skill must be there as well.
 	for _, entry := range p.manifest.Flows {
-		if entry.Format != agentpack.FlowFormatGraph {
+		if entry.Format != agentpack.FlowFormatGraph && entry.Format != agentpack.FlowFormatFlow {
 			continue
 		}
 		for _, handle := range sortedKeys(p.flowRoleRefs[entry.ID]) {
@@ -688,6 +714,56 @@ func (p *planner) resolveReferences() {
 			p.blocker(CodeSkillInvalid, fmt.Sprintf(
 				"vendored skill %q is declared with scope: flow but no flow references it, so it would be installed nowhere", entry.ID))
 		}
+	}
+}
+
+func (p *planner) collectFlowRoleRef(flowID, taskID, raw string, refs map[string]bool) {
+	ref := strings.TrimSpace(raw)
+	if ref == "" {
+		return
+	}
+	handle, versionText, hasVersion := strings.Cut(ref, "@")
+	handle = strings.TrimSpace(handle)
+	scope, id, scoped := strings.Cut(handle, "/")
+	if !scoped {
+		if hasVersion {
+			return // global version pin; not a pack-local Role reference
+		}
+		if _, declared := p.roleDocs[handle]; declared {
+			refs[handle] = true
+		}
+		return
+	}
+	switch scope {
+	case "local":
+		if hasVersion {
+			p.blocker(CodeRoleHandleConflict, fmt.Sprintf(
+				"flow %q task %q pins local Role %q with @%s; flow-local Roles have no revisions", flowID, taskID, id, versionText))
+			return
+		}
+		entry, declared := p.roleEntry(id)
+		if !declared {
+			p.blocker(CodeRoleHandleConflict, fmt.Sprintf(
+				"flow %q task %q references local Role %q, which the pack does not declare", flowID, taskID, id))
+			return
+		}
+		if entry.Scope != agentpack.RoleScopeFlow {
+			p.blocker(CodeRoleHandleConflict, fmt.Sprintf(
+				"flow %q task %q references local/%s but the pack declares it with scope: %s; a local/ reference needs scope: flow",
+				flowID, taskID, id, entry.Scope))
+			return
+		}
+		refs[id] = true
+	case "global":
+		if entry, declared := p.roleEntry(id); declared && entry.Scope == agentpack.RoleScopeFlow {
+			p.blocker(CodeRoleHandleConflict, fmt.Sprintf(
+				"flow %q task %q references global/%s but the pack declares it with scope: flow; a global/ reference cannot resolve a flow-local Role",
+				flowID, taskID, id))
+		}
+	default:
+		p.blocker(CodeRoleHandleConflict, fmt.Sprintf(
+			"flow %q task %q Role reference %q must use local/<handle>, global/<handle>, or a bare handle",
+			flowID, taskID, ref))
 	}
 }
 
@@ -738,37 +814,69 @@ func (p *planner) planFlows() error {
 		sourceDigests[summary.ID] = summary.SourceDigest
 	}
 	for _, entry := range p.manifest.Flows {
-		if entry.Format != agentpack.FlowFormatGraph {
-			continue
-		}
-		document, ok := p.flowDocs[entry.ID]
-		if !ok {
-			continue
-		}
 		storeID := p.flowStoreIDs[entry.ID]
-		installed := *document
-		installed.ID = storeID
-		digest, err := graphsource.SourceDigest(&installed)
-		if err != nil {
-			return fmt.Errorf("digest installed Graph %s: %w", storeID, err)
+		switch entry.Format {
+		case agentpack.FlowFormatGraph:
+			document, ok := p.flowDocs[entry.ID]
+			if !ok {
+				continue
+			}
+			installed := *document
+			installed.ID = storeID
+			digest, err := graphsource.SourceDigest(&installed)
+			if err != nil {
+				return fmt.Errorf("digest installed Graph %s: %w", storeID, err)
+			}
+			action := p.service.graphAction(storeID, digest)
+			if action == ActionConflict {
+				p.blocker(CodeFlowIDConflict, fmt.Sprintf(
+					"source %q already exists with different content; the installer never overwrites a Graph", storeID))
+			}
+			if storeID != entry.ID {
+				p.warn(WarningRenamedFlow, SeverityInfo, fmt.Sprintf(
+					"flow %q is installed as Graph %q; in-pack references are not rewritten", entry.ID, storeID))
+			}
+			p.plan.install.flows = append(p.plan.install.flows, &flowTarget{
+				packFlowID: entry.ID, storeID: storeID, format: agentpack.FlowFormatGraph,
+				sourceDigest: sourceDigests[entry.ID], installedDigest: digest,
+				document: &installed, action: action,
+			})
+			p.plan.Actions = append(p.plan.Actions, Action{
+				Kind: ActionKindGraph, StoreID: storeID, Action: action,
+			})
+		case agentpack.FlowFormatFlow:
+			definition, ok := p.flowDefinitions[entry.ID]
+			if !ok {
+				continue
+			}
+			installed := *definition
+			installed.ID = storeID
+			if err := p.validateFlow(entry.ID, &installed); err != nil {
+				p.blocker(CodeFlowValidationFailed, err.Error())
+				continue
+			}
+			digest, err := globalsource.AgentFlowDigest(&installed)
+			if err != nil {
+				return fmt.Errorf("digest installed Flow %s: %w", storeID, err)
+			}
+			action := p.service.flowAction(storeID, digest)
+			if action == ActionConflict {
+				p.blocker(CodeFlowIDConflict, fmt.Sprintf(
+					"source %q already exists with different content; the installer never overwrites a Flow", storeID))
+			}
+			if storeID != entry.ID {
+				p.warn(WarningRenamedFlow, SeverityInfo, fmt.Sprintf(
+					"flow %q is installed as %q; in-pack references are not rewritten", entry.ID, storeID))
+			}
+			p.plan.install.flows = append(p.plan.install.flows, &flowTarget{
+				packFlowID: entry.ID, storeID: storeID, format: agentpack.FlowFormatFlow,
+				sourceDigest: sourceDigests[entry.ID], installedDigest: digest,
+				definition: &installed, action: action,
+			})
+			p.plan.Actions = append(p.plan.Actions, Action{
+				Kind: ActionKindFlow, StoreID: storeID, Action: action,
+			})
 		}
-		action := p.service.graphAction(storeID, digest)
-		if action == ActionConflict {
-			p.blocker(CodeFlowIDConflict, fmt.Sprintf(
-				"Graph %q already exists with different content; S2a never overwrites a Graph", storeID))
-		}
-		if storeID != entry.ID {
-			p.warn(WarningRenamedFlow, SeverityInfo, fmt.Sprintf(
-				"flow %q is installed as Graph %q; in-pack references are not rewritten", entry.ID, storeID))
-		}
-		p.plan.install.flows = append(p.plan.install.flows, &flowTarget{
-			packFlowID: entry.ID, storeID: storeID,
-			sourceDigest: sourceDigests[entry.ID], installedDigest: digest,
-			document: &installed, action: action,
-		})
-		p.plan.Actions = append(p.plan.Actions, Action{
-			Kind: ActionKindGraph, StoreID: storeID, Action: action,
-		})
 	}
 	return nil
 }
@@ -909,8 +1017,8 @@ func (p *planner) assignSkillAction(target *skillTarget) error {
 
 func (p *planner) sortActions() {
 	rank := map[string]int{
-		ActionKindGraph: 0, ActionKindGraphRole: 1, ActionKindRole: 2,
-		ActionKindRoleRevision: 3, ActionKindSkill: 4,
+		ActionKindGraph: 0, ActionKindFlow: 1, ActionKindGraphRole: 2, ActionKindRole: 3,
+		ActionKindRoleRevision: 4, ActionKindSkill: 5,
 	}
 	sort.SliceStable(p.plan.Actions, func(i, j int) bool {
 		left, right := p.plan.Actions[i], p.plan.Actions[j]
@@ -971,6 +1079,28 @@ func (s *Service) graphAction(storeID, digest string) string {
 	_, existing, err := s.Sources.ReadGraph(storeID)
 	switch {
 	case err == nil:
+		if existing == digest {
+			return ActionExistsIdentical
+		}
+		return ActionConflict
+	case errors.Is(err, os.ErrNotExist):
+		return ActionCreate
+	default:
+		return ActionConflict
+	}
+}
+
+func (s *Service) flowAction(storeID, digest string) string {
+	kind, err := s.Sources.SourceKind(storeID)
+	switch {
+	case err == nil:
+		if kind != globalsource.SourceKindFlow {
+			return ActionConflict
+		}
+		_, existing, readErr := s.Sources.ReadFlow(storeID)
+		if readErr != nil {
+			return ActionConflict
+		}
 		if existing == digest {
 			return ActionExistsIdentical
 		}

@@ -81,7 +81,7 @@ describe("Agent Pack install contract", () => {
     expectTypeOf(plan.commitPoint).toEqualTypeOf<"state_file">();
     expectTypeOf(plan.willPublishFlowRevision).toEqualTypeOf<boolean>();
     expectTypeOf<components["schemas"]["PackAction"]["kind"]>().toEqualTypeOf<
-      "graph" | "graph_role" | "role" | "role_revision" | "skill"
+      "graph" | "flow" | "graph_role" | "role" | "role_revision" | "skill"
     >();
     expectTypeOf<components["schemas"]["PackAction"]["action"]>().toEqualTypeOf<
       "create" | "exists_identical" | "conflict" | "publish"

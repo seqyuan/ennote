@@ -301,10 +301,11 @@ func TestPackInstallCreatesDraftAndState(t *testing.T) {
 	assert.Equal(t, state.InstalledAt, reinstalled.State.InstalledAt)
 }
 
-func TestPackInstallRefusesFullFlowAndMCPFormat(t *testing.T) {
+func TestPackInstallFlowPackAndMCPRefusal(t *testing.T) {
 	fixture := newPackInstallFixture(t)
-	flowPack := map[string]string{
-		"pack.yaml": `schema_version: 1
+	fixture.service.CheckAllowlistAllowsAll = true
+	flowPack := installPackFiles(fixture.modelID)
+	flowPack["pack.yaml"] = `schema_version: 1
 id: seqyuan/qc-flow
 name: QC Flow
 version: 0.1.0
@@ -312,46 +313,67 @@ flows:
   - id: qc-review
     path: flows/qc-review/flow.yaml
     format: flow
-`,
-		"flows/qc-review/flow.yaml": `schemaVersion: 1
+    roles: [qc-reviewer]
+roles:
+  - handle: qc-reviewer
+    path: roles/qc-reviewer/role.md
+    scope: flow
+skills:
+  - id: cell-qc-tables
+    path: skills/cell-qc-tables/
+`
+	flowPack["flows/qc-review/flow.yaml"] = `schemaVersion: 1
 id: qc-review
 budget:
-  max_total_tokens: 1000
+  max_total_tokens: 20000
 tasks:
   load:
-    role: qc-reviewer
+    role: local/qc-reviewer
     goal: Load the samplesheet
-`,
-	}
+    budget: {tokens: 1000}
+  gate:
+    type: check
+    command: "test -f ready"
+    depends: [load]
+  review:
+    role: local/qc-reviewer
+    goal: Review QC metrics
+    depends: [gate]
+    fan_out: {min: 1, max: 2}
+    budget: {tokens: 1000}
+  done:
+    type: role
+    depends: [review]
+    terminal: {status: success}
+`
 	source := fixture.writePack(t, "flow-only", flowPack)
 
 	response := fixture.install(t, map[string]any{"source": map[string]any{"kind": "path", "path": source}})
-	assert.Equal(t, http.StatusUnprocessableEntity, response.Code)
-	assert.Contains(t, response.Body.String(), packinstall.CodeFlowFormatUnsupported)
-	fixture.requirePacksDirAbsent(t)
-
-	// A dry run reports the same blocker instead of failing the request.
-	before := snapshotTree(t, fixture.home)
-	dryRun := fixture.install(t, map[string]any{
-		"source": map[string]any{"kind": "path", "path": source},
-		"dryRun": true,
-	})
-	require.Equal(t, http.StatusOK, dryRun.Code, dryRun.Body.String())
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	var plan packinstall.Plan
-	decodeData(t, dryRun, &plan)
-	require.Len(t, plan.Blockers, 1)
-	assert.Equal(t, packinstall.CodeFlowFormatUnsupported, plan.Blockers[0].Code)
-	assert.Equal(t, packinstall.SeverityError, plan.Blockers[0].Severity)
-	assert.Equal(t, before, snapshotTree(t, fixture.home))
+	decodeData(t, response, &plan)
+	require.Empty(t, plan.Blockers)
+	assert.False(t, plan.WillPublishFlowRevision)
+	flowAction, ok := findPlanAction(plan.Actions, packinstall.ActionKindFlow, "qc-review")
+	require.True(t, ok)
+	assert.Equal(t, packinstall.ActionCreate, flowAction.Action)
+	require.NotNil(t, plan.State)
+	require.Len(t, plan.State.Flows, 1)
+	assert.Equal(t, "flow", plan.State.Flows[0].Format)
+	assert.Nil(t, plan.State.Flows[0].PublishedRevision)
+	_, _, err := fixture.sources.ReadFlow("qc-review")
+	require.NoError(t, err)
+	revisions, err := fixture.sources.ListFlowRevisions("qc-review")
+	require.NoError(t, err)
+	assert.Empty(t, revisions)
 
-	// A declared MCP profile ref is likewise refused, not ignored.
+	// A declared MCP profile ref is still refused, not ignored.
 	mcpPack := installPackFiles(fixture.modelID)
 	mcpPack["pack.yaml"] += "mcp:\n  - ref: pubmed@1\n"
 	mcpSource := fixture.writePack(t, "mixed-mcp", mcpPack)
 	mcp := fixture.install(t, map[string]any{"source": map[string]any{"kind": "path", "path": mcpSource}})
 	assert.Equal(t, http.StatusUnprocessableEntity, mcp.Code)
 	assert.Contains(t, mcp.Body.String(), packinstall.CodeMCPUnsupported)
-	fixture.requirePacksDirAbsent(t)
 }
 
 func TestPackListAndRemove(t *testing.T) {
@@ -423,7 +445,7 @@ func TestPackInstallErrorStatusMapping(t *testing.T) {
 		{packinstall.CodeAlreadyInstalled, http.StatusConflict},
 		{packinstall.CodeVersionConflict, http.StatusConflict},
 		{packinstall.CodeNotInstalled, http.StatusNotFound},
-		{packinstall.CodeFlowFormatUnsupported, http.StatusUnprocessableEntity},
+		{packinstall.CodeFlowValidationFailed, http.StatusUnprocessableEntity},
 		{packinstall.CodeMCPUnsupported, http.StatusUnprocessableEntity},
 		{packinstall.CodeDependencyUnsupported, http.StatusUnprocessableEntity},
 		{packinstall.CodeInstallBlocked, http.StatusUnprocessableEntity},

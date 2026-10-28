@@ -12,7 +12,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
+	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 )
@@ -27,7 +29,17 @@ type Service struct {
 	Models     *store.ModelRepo
 	SkillsRoot string
 	Sessions   *sessionstore.Manager
-	Now        func() time.Time
+	// Policies supplies the active tool policy's check executable allowlist.
+	Policies *fileconfig.PolicyStore
+	// CheckAllowlist / CheckAllowlistAllowsAll are the resolved policy values
+	// used by the staged agentflow.Validator. Production fills both from
+	// store.CheckAllowlistFromPolicy.
+	CheckAllowlist          []string
+	CheckAllowlistAllowsAll bool
+	// Projects is optional; when set, removal refuses an enabled Project
+	// binding unless force is used.
+	Projects *projectstore.Store
+	Now      func() time.Time
 
 	mu sync.Mutex
 }

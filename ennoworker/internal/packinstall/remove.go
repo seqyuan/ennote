@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
 )
 
@@ -50,6 +51,15 @@ func (s *Service) Remove(ctx context.Context, packID string, force bool) error {
 		}
 	}
 	if !force {
+		bound, err := s.enabledBindings(ctx, state)
+		if err != nil {
+			return err
+		}
+		if len(bound) > 0 {
+			return errorf(CodeInstallBlocked,
+				"flow(s) %s are still enabled by a Project binding; disable the binding or remove with force",
+				strings.Join(bound, ", "))
+		}
 		edited, err := s.editedObjects(state)
 		if err != nil {
 			return err
@@ -83,6 +93,50 @@ func (s *Service) Remove(ctx context.Context, packID string, force bool) error {
 		}
 	}
 	return nil
+}
+
+// enabledBindings lists installed flow store ids that a Project still has
+// enabled. Force removal is allowed to leave the binding stale so a user can
+// still recover their files; the default path refuses to silently break a run.
+func (s *Service) enabledBindings(ctx context.Context, state *State) ([]string, error) {
+	if s.Projects == nil {
+		return nil, nil
+	}
+	owned := map[string]bool{}
+	for _, flow := range state.Flows {
+		if flow.Format == "flow" {
+			owned[flow.StoreID] = true
+		}
+	}
+	if len(owned) == 0 {
+		return nil, nil
+	}
+	projects, err := s.Projects.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	enabled := map[string]bool{}
+	for _, project := range projects {
+		manifest, err := s.Projects.ReadManifest(project.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, binding := range manifest.GraphBindings {
+			kind := binding.SourceKind
+			if kind == "" {
+				kind = projectstore.SourceKindGraph
+			}
+			if kind == projectstore.SourceKindFlow && binding.Enabled && owned[binding.GraphID] {
+				enabled[binding.GraphID] = true
+			}
+		}
+	}
+	ids := make([]string, 0, len(enabled))
+	for id := range enabled {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids, nil
 }
 
 // countActiveRuns counts the non-terminal run_agent_flow rows whose
@@ -123,16 +177,22 @@ func (s *Service) countActiveRuns(ctx context.Context, storeID string) (int, err
 func (s *Service) editedObjects(state *State) ([]string, error) {
 	edited := make([]string, 0)
 	for _, flow := range state.Flows {
-		_, digest, err := s.Sources.ReadGraph(flow.StoreID)
+		var digest string
+		var err error
+		if flow.Format == "flow" {
+			_, digest, err = s.Sources.ReadFlow(flow.StoreID)
+		} else {
+			_, digest, err = s.Sources.ReadGraph(flow.StoreID)
+		}
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			edited = append(edited, "graph:"+flow.StoreID)
+			edited = append(edited, flow.Format+":"+flow.StoreID)
 			continue
 		}
 		if digest != flow.InstalledGraphDigest {
-			edited = append(edited, "graph:"+flow.StoreID)
+			edited = append(edited, flow.Format+":"+flow.StoreID)
 		}
 	}
 	for _, role := range state.Roles {
@@ -198,6 +258,30 @@ func (s *Service) rolesReferencedByOtherGraphs(state *State) ([]string, error) {
 		for _, task := range graph.Document.Tasks {
 			handle, found := strings.CutPrefix(task.Role, "global/")
 			if found && handles[handle] {
+				referenced[handle] = true
+			}
+		}
+	}
+	flows, err := s.Sources.ListFlows()
+	if err != nil {
+		return nil, err
+	}
+	for _, flow := range flows {
+		if flow.Flow == nil || owned[flow.ID] {
+			continue
+		}
+		for _, task := range flow.Flow.Tasks {
+			ref := strings.TrimSpace(task.Role)
+			handle := ""
+			if value, found := strings.CutPrefix(ref, "global/"); found {
+				handle = value
+			} else if ref != "" && !strings.Contains(ref, "/") && !strings.Contains(ref, "@") {
+				if _, _, roleErr := s.Sources.ReadGraphRole(flow.ID, ref); errors.Is(roleErr, os.ErrNotExist) {
+					handle = ref
+				}
+			}
+			handle, _, _ = strings.Cut(handle, "@")
+			if handle != "" && handles[handle] {
 				referenced[handle] = true
 			}
 		}

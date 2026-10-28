@@ -318,6 +318,8 @@ func TestPlanBlockers(t *testing.T) {
 	const agentFlowSource = `schemaVersion: 1
 id: qc-review
 version: 1
+budget:
+  max_total_tokens: 20000
 tasks:
   load:
     role: qc-reviewer
@@ -345,8 +347,9 @@ roles:
     path: roles/qc-reviewer/role.md
     scope: global
 `
-	t.Run("flow format", func(t *testing.T) {
+	t.Run("flow format installs a draft", func(t *testing.T) {
 		f := newFixture(t)
+		f.service.CheckAllowlistAllowsAll = true
 		source := writePack(t, []packFile{
 			{path: "pack.yaml", body: flowFormatManifest},
 			{path: "flows/qc-review/flow.yaml", body: agentFlowSource},
@@ -354,11 +357,28 @@ roles:
 		})
 		plan, err := f.service.Plan(context.Background(), packinstall.Request{SourcePath: source})
 		require.NoError(t, err)
-		require.True(t, hasBlocker(plan, packinstall.CodeFlowFormatUnsupported), blockerCodes(plan))
-		message := plan.Blockers[0].Message
-		assert.Contains(t, message, "1 check task")
-		assert.Contains(t, message, "1 fan-out task")
-		assert.NotContains(t, blockerCodes(plan), packinstall.CodeMCPUnsupported)
+		require.Empty(t, plan.Blockers, blockerCodes(plan))
+		flowAction, ok := findAction(plan, packinstall.ActionKindFlow, "qc-review")
+		require.True(t, ok, plan.Actions)
+		assert.Equal(t, packinstall.ActionCreate, flowAction.Action)
+		assert.False(t, plan.WillPublishFlowRevision)
+
+		source = writePack(t, []packFile{
+			{path: "pack.yaml", body: flowFormatManifest},
+			{path: "flows/qc-review/flow.yaml", body: agentFlowSource},
+			{path: "roles/qc-reviewer/role.md", body: roleFile(t, f.modelID, "qc-reviewer", "QC Reviewer")},
+		})
+		installed, err := f.service.Install(context.Background(), packinstall.Request{SourcePath: source})
+		require.NoError(t, err)
+		require.NotNil(t, installed.State)
+		require.Len(t, installed.State.Flows, 1)
+		assert.Equal(t, "flow", installed.State.Flows[0].Format)
+		assert.Nil(t, installed.State.Flows[0].PublishedRevision)
+		_, _, err = f.sources.ReadFlow("qc-review")
+		require.NoError(t, err)
+		revisions, err := f.sources.ListFlowRevisions("qc-review")
+		require.NoError(t, err)
+		assert.Empty(t, revisions)
 	})
 
 	t.Run("mcp and dependency", func(t *testing.T) {

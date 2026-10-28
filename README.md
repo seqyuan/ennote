@@ -97,7 +97,9 @@ ennote pack remove seqyuan/cell-qc-review                 # 卸载
 ennote pack remove seqyuan/cell-qc-review --force          # 覆盖本地编辑 / 共享 Role 的拒绝
 ```
 
-S2a 只安装两种形态：Role-only Pack（每个 Role 变成 Worker 全局 Role 并发布 revision），以及 `format: graph` 的 Flow Pack（未发布 revision 的 Graph draft + 其私有 Role/Skill）。`format: flow`、非空 `mcp`、非空 `requires` 会被明确拒绝并返回稳定错误码（如 `pack_flow_format_unsupported`），不会降级安装。dry-run 恒返回计划（含 blockers），正式安装遇到 blocker/冲突返回 422。安装后的 Graph 默认不可运行：需要用户按现有 Graph 发布流程发布 revision 才算启用。
+安装支持三种形态：Role-only Pack（每个 Role 变成 Worker 全局 Role 并发布 revision）、`format: graph` Flow Pack（未发布 revision 的 Graph draft + 其私有 Role/Skill）、以及 `format: flow` Agent Flow Pack（未发布 revision 的完整 FlowDefinition draft + 其 flow-local Role/Skill；安装前用真实 `agentflow.Validator` 校验 check/fan-out/terminal/next，不会降级成 graph）。非空 `mcp`、非空 `requires` 仍会被明确拒绝并返回稳定错误码，不会降级安装。dry-run 恒返回计划（含 blockers），正式安装遇到 blocker/冲突返回 422。
+
+安装后的 source 默认不可运行：`format: graph` 需要发布 Graph revision；`format: flow` 需要 `POST /v1/flows/{id}/publish` 发布 revision，再由 Project GraphBinding 显式启用。安装器永远不会自动发布或自动启用。
 
 ### 从 v0.1.x 升级
 

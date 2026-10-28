@@ -125,6 +125,7 @@ func run() error {
 	packInstaller := &packinstall.Service{
 		HomeDir: cfg.HomeDir, Sources: globalSources, Models: models,
 		SkillsRoot: cfg.SkillsDir, Sessions: sessionManager,
+		Policies: policyFiles, Projects: projectFiles,
 	}
 	if err := packInstaller.GCStaging(); err != nil {
 		return fmt.Errorf("collect Agent Pack staging directories: %w", err)
@@ -260,6 +261,8 @@ func run() error {
 	if allowlistErr != nil {
 		slog.Warn("resolve check allowlist failed; check tasks will stay blocked", "error", allowlistErr)
 	}
+	packInstaller.CheckAllowlist = checkAllowlist
+	packInstaller.CheckAllowlistAllowsAll = checkUnrestricted
 
 	server := &api.Server{
 		CatalogDB: projections.Catalog, UsageDB: projections.Usage, SessionStores: sessionManager,
