@@ -338,6 +338,8 @@ func (s *Store) FindGraphBinding(_ context.Context, projectID, sourceKind, graph
 }
 
 func (s *Store) UpdateMCPBindings(_ context.Context, projectID string, mutate func(*[]MCPBinding) error) (*Manifest, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	manifest, err := s.ReadManifest(projectID)
 	if err != nil {
 		return nil, err
@@ -355,6 +357,8 @@ func (s *Store) UpdateMCPBindings(_ context.Context, projectID string, mutate fu
 // Rename updates a project's display name in place. The workspace host path
 // is untouched: renaming never moves the user's directory.
 func (s *Store) Rename(_ context.Context, projectID, name string) (*domain.Project, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("project name is required")
@@ -380,6 +384,8 @@ func (s *Store) Rename(_ context.Context, projectID, name string) (*domain.Proje
 // the session data already stored under the project. The manifest stays on
 // disk, so the deletion is recoverable.
 func (s *Store) Delete(_ context.Context, projectID string) (*domain.Project, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	manifest, err := s.read(projectID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) || isInvalidProjectID(err) {
