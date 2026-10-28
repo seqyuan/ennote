@@ -2642,6 +2642,39 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "500": { $ref: "#/components/responses/Error" }
 
+  /v1/packs/inspect:
+    post:
+      operationId: inspectPack
+      summary: Inspect an Agent Pack read-only without installing it
+      description: |
+        Path-only and store-free. Reads a `.enpack` archive or a pack directory
+        inside the Worker host home, validates `pack.yaml` strictly, and reports
+        payload digests, flows, roles, skills, the capability envelope, and
+        warnings. It never installs, executes, verifies signatures, or writes to
+        disk, so it works on a Worker whose stores are unavailable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PackInspectRequest" }
+      responses:
+        "200":
+          description: Inspect result
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/PackInspectResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+
   /v1/skills/roots:
     get:
       operationId: listSkillRoots
@@ -5005,6 +5038,239 @@ components:
         currentVersion: { type: string }
         latestVersion: { type: string }
         message: { type: string }
+    PackInspectRequest:
+      type: object
+      additionalProperties: false
+      required: [source]
+      properties:
+        source: { $ref: "#/components/schemas/PackSource" }
+        includeDocuments:
+          type: boolean
+          description: Echo flow, role, and vendored skill source text (bounded); defaults to false
+        expectedDigest:
+          type: string
+          description: Expected sha256 of the payload or the manifest; a mismatch fails the inspect
+    PackSource:
+      type: object
+      additionalProperties: false
+      required: [kind, path]
+      properties:
+        kind: { type: string, enum: [path] }
+        path:
+          type: string
+          description: Absolute host path inside the Worker host home
+    PackInspectResult:
+      type: object
+      additionalProperties: false
+      required:
+        - inspectVersion
+        - source
+        - container
+        - schemaVersion
+        - pack
+        - manifestDigest
+        - packDigest
+        - signature
+        - signed
+        - flows
+        - roles
+        - skills
+        - requires
+        - capabilityEnvelope
+        - files
+        - filesTotal
+        - filesTruncated
+        - warnings
+        - manifest
+      properties:
+        inspectVersion: { type: integer }
+        source: { $ref: "#/components/schemas/PackSource" }
+        container: { $ref: "#/components/schemas/PackContainer" }
+        schemaVersion: { type: integer }
+        pack: { $ref: "#/components/schemas/PackIdentity" }
+        manifestDigest:
+          type: string
+          description: sha256 of the raw pack.yaml bytes (comments and key order included)
+        packDigest:
+          type: string
+          description: sha256 over sorted payload path/digest lines, excluding the top-level pack.sig
+        signature: { $ref: "#/components/schemas/PackSignature" }
+        signed:
+          type: boolean
+          description: Always false in S1; inspect never verifies signatures
+        flows:
+          type: array
+          items: { $ref: "#/components/schemas/PackFlow" }
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/PackRole" }
+        skills:
+          type: array
+          items: { $ref: "#/components/schemas/PackSkill" }
+        requires:
+          type: array
+          items: { type: string }
+        capabilityEnvelope: { $ref: "#/components/schemas/PackCapabilityEnvelope" }
+        files:
+          type: array
+          items: { $ref: "#/components/schemas/PackFile" }
+        filesTotal: { type: integer }
+        filesTruncated: { type: boolean }
+        warnings:
+          type: array
+          items: { $ref: "#/components/schemas/PackWarning" }
+        manifest: { type: string }
+        documents:
+          type: array
+          items: { $ref: "#/components/schemas/PackDocument" }
+        documentsTruncated: { type: boolean }
+    PackContainer:
+      type: object
+      additionalProperties: false
+      required: [kind, bytes]
+      properties:
+        kind: { type: string, enum: [directory, archive] }
+        bytes: { type: integer }
+    PackIdentity:
+      type: object
+      additionalProperties: false
+      required: [id, name, version]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        version: { type: string }
+        license: { type: string }
+        requiresEnnote: { type: string }
+        description: { type: string }
+    PackSignature:
+      type: object
+      additionalProperties: false
+      required: [present, verified]
+      properties:
+        present: { type: boolean }
+        algorithm: { type: string, nullable: true }
+        path: { type: string, nullable: true }
+        verified:
+          type: boolean
+          description: Always false in S1; signature verification ships in S5
+    PackFlow:
+      type: object
+      additionalProperties: false
+      required: [id, path, format, taskCount, roles, checkTasks, fanOutTasks, maxTotalTokens, pathDigest, sourceDigest]
+      properties:
+        id: { type: string }
+        path: { type: string }
+        format:
+          type: string
+          enum: [flow, graph]
+          description: "flow: full Agent Flow definition; graph: graphsource role-task document"
+        taskCount: { type: integer }
+        entryTask: { type: string }
+        roles:
+          type: array
+          items: { type: string }
+        checkTasks: { type: integer }
+        fanOutTasks: { type: integer }
+        maxTotalTokens: { type: integer }
+        pathDigest: { type: string }
+        sourceDigest: { type: string }
+    PackRole:
+      type: object
+      additionalProperties: false
+      required: [handle, path, scope, name, authority, allowedTools, skills, pathDigest, sourceDigest]
+      properties:
+        handle: { type: string }
+        path: { type: string }
+        scope: { type: string, enum: [flow, global] }
+        name: { type: string }
+        authority: { type: string }
+        permissionCeiling: { type: string }
+        allowedTools:
+          type: array
+          items: { type: string }
+        skills:
+          type: array
+          items: { type: string }
+        pathDigest: { type: string }
+        sourceDigest: { type: string }
+    PackSkill:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        id: { type: string }
+        path: { type: string }
+        ref: { type: string }
+        kind: { type: string, enum: [vendored, external] }
+        pathDigest: { type: string }
+        promptBytes: { type: integer }
+    PackCapabilityEnvelope:
+      type: object
+      additionalProperties: false
+      required: [flowCount, roleCount, skillCount, taskCount, roles, skills, modelRequirements, checkCommands, tools, writes, flowMaxTotalTokens]
+      properties:
+        flowCount: { type: integer }
+        roleCount: { type: integer }
+        skillCount: { type: integer }
+        taskCount: { type: integer }
+        roles:
+          type: array
+          items: { type: string }
+        skills:
+          type: array
+          items: { type: string }
+        modelRequirements: { $ref: "#/components/schemas/PackModelRequirements" }
+        checkCommands:
+          type: array
+          items: { type: string }
+        tools:
+          type: array
+          items: { type: string }
+        writes:
+          type: array
+          items: { type: string }
+        flowMaxTotalTokens: { type: integer }
+    PackModelRequirements:
+      type: object
+      additionalProperties: false
+      required: [capabilities, minContextWindow, perRole]
+      properties:
+        capabilities:
+          type: array
+          items: { type: string }
+        minContextWindow: { type: integer }
+        perRole:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+    PackFile:
+      type: object
+      additionalProperties: false
+      required: [path, bytes, digest]
+      properties:
+        path: { type: string }
+        bytes: { type: integer }
+        digest: { type: string }
+    PackWarning:
+      type: object
+      additionalProperties: false
+      required: [code, severity, message]
+      properties:
+        code: { type: string }
+        severity: { type: string, enum: [info, warning] }
+        message: { type: string }
+    PackDocument:
+      type: object
+      additionalProperties: false
+      required: [kind, ref, path, bytes, content, truncated]
+      properties:
+        kind: { type: string, enum: [flow, role, skill] }
+        ref: { type: string }
+        path: { type: string }
+        bytes: { type: integer }
+        content: { type: string }
+        truncated: { type: boolean }
     ActiveRunState:
       type: object
       required: [run]

@@ -252,6 +252,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("PUT /v1/prompt-templates/{name}", s.updatePromptTemplate)
 	mux.HandleFunc("DELETE /v1/prompt-templates/{name}", s.deletePromptTemplate)
 
+	// Read-only Agent Pack inspect (S1). Path-only and store-free by design.
+	mux.HandleFunc("POST /v1/packs/inspect", s.inspectPack)
+
 	// MCP server profiles and bindings.
 	if s.MCP != nil {
 		mux.HandleFunc("GET /v1/mcp/server-profiles", s.listMCPServerProfiles)

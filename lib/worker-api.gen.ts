@@ -1709,6 +1709,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/packs/inspect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Inspect an Agent Pack read-only without installing it
+         * @description Path-only and store-free. Reads a `.enpack` archive or a pack directory
+         *     inside the Worker host home, validates `pack.yaml` strictly, and reports
+         *     payload digests, flows, roles, skills, the capability envelope, and
+         *     warnings. It never installs, executes, verifies signatures, or writes to
+         *     disk, so it works on a Worker whose stores are unavailable.
+         */
+        post: operations["inspectPack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/skills/roots": {
         parameters: {
             query?: never;
@@ -3452,6 +3476,144 @@ export interface components {
             currentVersion?: string;
             latestVersion?: string;
             message?: string;
+        };
+        PackInspectRequest: {
+            source: components["schemas"]["PackSource"];
+            /** @description Echo flow, role, and vendored skill source text (bounded); defaults to false */
+            includeDocuments?: boolean;
+            /** @description Expected sha256 of the payload or the manifest; a mismatch fails the inspect */
+            expectedDigest?: string;
+        };
+        PackSource: {
+            /** @enum {string} */
+            kind: "path";
+            /** @description Absolute host path inside the Worker host home */
+            path: string;
+        };
+        PackInspectResult: {
+            inspectVersion: number;
+            source: components["schemas"]["PackSource"];
+            container: components["schemas"]["PackContainer"];
+            schemaVersion: number;
+            pack: components["schemas"]["PackIdentity"];
+            /** @description sha256 of the raw pack.yaml bytes (comments and key order included) */
+            manifestDigest: string;
+            /** @description sha256 over sorted payload path/digest lines, excluding the top-level pack.sig */
+            packDigest: string;
+            signature: components["schemas"]["PackSignature"];
+            /** @description Always false in S1; inspect never verifies signatures */
+            signed: boolean;
+            flows: components["schemas"]["PackFlow"][];
+            roles: components["schemas"]["PackRole"][];
+            skills: components["schemas"]["PackSkill"][];
+            requires: string[];
+            capabilityEnvelope: components["schemas"]["PackCapabilityEnvelope"];
+            files: components["schemas"]["PackFile"][];
+            filesTotal: number;
+            filesTruncated: boolean;
+            warnings: components["schemas"]["PackWarning"][];
+            manifest: string;
+            documents?: components["schemas"]["PackDocument"][];
+            documentsTruncated?: boolean;
+        };
+        PackContainer: {
+            /** @enum {string} */
+            kind: "directory" | "archive";
+            bytes: number;
+        };
+        PackIdentity: {
+            id: string;
+            name: string;
+            version: string;
+            license?: string;
+            requiresEnnote?: string;
+            description?: string;
+        };
+        PackSignature: {
+            present: boolean;
+            algorithm?: string | null;
+            path?: string | null;
+            /** @description Always false in S1; signature verification ships in S5 */
+            verified: boolean;
+        };
+        PackFlow: {
+            id: string;
+            path: string;
+            /**
+             * @description flow: full Agent Flow definition; graph: graphsource role-task document
+             * @enum {string}
+             */
+            format: "flow" | "graph";
+            taskCount: number;
+            entryTask?: string;
+            roles: string[];
+            checkTasks: number;
+            fanOutTasks: number;
+            maxTotalTokens: number;
+            pathDigest: string;
+            sourceDigest: string;
+        };
+        PackRole: {
+            handle: string;
+            path: string;
+            /** @enum {string} */
+            scope: "flow" | "global";
+            name: string;
+            authority: string;
+            permissionCeiling?: string;
+            allowedTools: string[];
+            skills: string[];
+            pathDigest: string;
+            sourceDigest: string;
+        };
+        PackSkill: {
+            id?: string;
+            path?: string;
+            ref?: string;
+            /** @enum {string} */
+            kind: "vendored" | "external";
+            pathDigest?: string;
+            promptBytes?: number;
+        };
+        PackCapabilityEnvelope: {
+            flowCount: number;
+            roleCount: number;
+            skillCount: number;
+            taskCount: number;
+            roles: string[];
+            skills: string[];
+            modelRequirements: components["schemas"]["PackModelRequirements"];
+            checkCommands: string[];
+            tools: string[];
+            writes: string[];
+            flowMaxTotalTokens: number;
+        };
+        PackModelRequirements: {
+            capabilities: string[];
+            minContextWindow: number;
+            perRole: {
+                [key: string]: string[];
+            };
+        };
+        PackFile: {
+            path: string;
+            bytes: number;
+            digest: string;
+        };
+        PackWarning: {
+            code: string;
+            /** @enum {string} */
+            severity: "info" | "warning";
+            message: string;
+        };
+        PackDocument: {
+            /** @enum {string} */
+            kind: "flow" | "role" | "skill";
+            ref: string;
+            path: string;
+            bytes: number;
+            content: string;
+            truncated: boolean;
         };
         ActiveRunState: {
             run: components["schemas"]["AgentRun"];
@@ -6969,6 +7131,38 @@ export interface operations {
             };
             404: components["responses"]["Error"];
             500: components["responses"]["Error"];
+        };
+    };
+    inspectPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PackInspectRequest"];
+            };
+        };
+        responses: {
+            /** @description Inspect result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["PackInspectResult"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+            422: components["responses"]["Error"];
         };
     };
     listSkillRoots: {
