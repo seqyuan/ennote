@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -131,25 +130,32 @@ func (m *Manager) ProtectHome(home string) {
 	m.ProtectedPaths = append(m.ProtectedPaths, filepath.Clean(abs))
 }
 
-// ValidateCommand fails closed when a degraded command references the Ennote
-// home or the credential files inside it. This is a string-level guard for the
-// unsandboxed mode, not a substitute for bwrap.
+// ValidateCommand fails closed for degraded shell commands. Words are
+// reconstructed from their literal parts, so a path assembled by quotes,
+// backslash escapes, brace expansion or an unquoted glob is rejected just like
+// a plain literal. Every expansion or substitution is rejected too, because it
+// can become that path after the shell starts. This is not a sandbox. bwrap is
+// the isolation boundary.
 func (m *Manager) ValidateCommand(command string) error {
 	if m.Mode != SandboxNone {
 		return nil
 	}
-	for _, path := range m.ProtectedPaths {
-		path = filepath.Clean(path)
-		if strings.Contains(command, path) || strings.Contains(command, "~/.ennote") || strings.Contains(command, "$HOME/.ennote") {
-			return fmt.Errorf("sandbox mode %q cannot access the Ennote home (%s); enable ENNOTE_SANDBOX=bwrap for host credential isolation", m.Mode, path)
+	return m.rejectShellCommand(command)
+}
+
+// ValidateArgv checks structured arguments without shell parsing. exec does
+// not expand $VAR, ~, globs or braces, so only a literal protected path (and a
+// protected home directory name used as a path component) is rejected.
+func (m *Manager) ValidateArgv(argv []string) error {
+	if m.Mode != SandboxNone {
+		return nil
+	}
+	for _, arg := range argv {
+		if m.literalHitsHome(arg) {
+			return m.protectedPathError()
 		}
 	}
 	return nil
-}
-
-// ValidateArgv applies ValidateCommand to a structured argument vector.
-func (m *Manager) ValidateArgv(argv []string) error {
-	return m.ValidateCommand(strings.Join(argv, " "))
 }
 
 func (m *Manager) Probe(ctx context.Context) error {

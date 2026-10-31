@@ -36,7 +36,13 @@ func TestSandboxNoneRejectsProtectedHomePaths(t *testing.T) {
 
 	require.ErrorContains(t, manager.ValidateCommand("cat "+home+"/config/provider-auth.json"), "cannot access the Ennote home")
 	require.ErrorContains(t, manager.ValidateCommand("cat ~/.ennote/config/provider-auth.json"), "cannot access the Ennote home")
+	require.ErrorContains(t, manager.ValidateCommand(`cat "$HOME/.ennote/config/provider-auth.json"`), "cannot access the Ennote home")
+	require.ErrorContains(t, manager.ValidateCommand("echo $PATH"), "cannot access the Ennote home")
+	require.NoError(t, manager.ValidateCommand("echo hello"))
+	require.NoError(t, manager.ValidateArgv([]string{"echo", "$PATH"}))
+	require.ErrorContains(t, manager.ValidateArgv([]string{"cat", home + "/config/provider-auth.json"}), "cannot access the Ennote home")
 
 	manager.Mode = SandboxBubblewrap
 	require.NoError(t, manager.ValidateCommand("cat "+home+"/config/provider-auth.json"))
+	require.NoError(t, manager.ValidateCommand("echo $PATH"))
 }
