@@ -12,6 +12,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// bwrapUnavailable reports whether bubblewrap failed because the kernel or
+// policy layer denied the namespace/user-namespace setup rather than because
+// Ennote's arguments were wrong. The exact wording differs by distribution and
+// bwrap version, so match the common markers instead of one string.
+func bwrapUnavailable(output string) bool {
+	for _, marker := range []string{
+		"Permission denied",
+		"Operation not permitted",
+		"Creating new namespace failed",
+		"No permissions to create",
+		"setting up uid map",
+	} {
+		if strings.Contains(output, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestBubblewrapCommandMapsWorkspaceWhenAvailable(t *testing.T) {
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		if os.Getenv("ENNOTE_REQUIRE_BWRAP") == "1" {
@@ -24,7 +43,7 @@ func TestBubblewrapCommandMapsWorkspaceWhenAvailable(t *testing.T) {
 	cmd, err := manager.Command("/bin/sh", "pwd")
 	require.NoError(t, err)
 	output, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(output), "Permission denied") {
+	if err != nil && bwrapUnavailable(string(output)) {
 		if os.Getenv("ENNOTE_REQUIRE_BWRAP") == "1" {
 			t.Fatalf("bubblewrap is required in this job but user namespaces are unavailable: %s", output)
 		}
