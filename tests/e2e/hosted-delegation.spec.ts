@@ -289,6 +289,9 @@ test("shows background delegation completion without blocking the composer", asy
 
   await selectSession(page);
   await expect(page.locator(".background-delegation-strip")).toBeVisible();
+  // A durable completion opens the strip on its own: the fact must not hide
+  // behind an expansion the user has to guess.
+  await expect(page.locator(".background-delegation-header")).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByText("Background delegation", { exact: false }).first()).toBeVisible();
   await expect(page.getByText("consumed by parent", { exact: false })).toBeVisible();
   // The composer remains usable.

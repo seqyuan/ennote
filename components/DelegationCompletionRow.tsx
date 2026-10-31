@@ -1,6 +1,7 @@
 "use client";
 
 import { Bot, CircleAlert, CircleCheck, Clock3 } from "lucide-react";
+import { useT } from "@/components/LocaleProvider";
 import type { components } from "@/lib/worker-api.gen";
 
 type DelegationCompletion = components["schemas"]["DelegationCompletion"];
@@ -16,6 +17,7 @@ function boundedResult(result?: Record<string, unknown>): string {
 // compact, read-only row. The completion payload is the bounded public summary;
 // the private transcript stays behind the child Run endpoint.
 export function DelegationCompletionRow({ completion }: { completion: DelegationCompletion }) {
+  const t = useT();
   const kind = completion.kind ?? "completed";
   const status = completion.deliveryStatus ?? "pending";
   const active = status === "pending" || status === "resume_queued";
@@ -25,9 +27,18 @@ export function DelegationCompletionRow({ completion }: { completion: Delegation
   return <div className="delivery-row" data-delivery-status={status} role="listitem">
     <span className="delivery-icon">{icon}</span>
     <span className="delivery-identity">
-      <strong>Background delegation · generation {completion.generation}</strong>
-      <span>{status.replaceAll("_", " ")}</span>
+      <strong>{t("delegation.completion").replace("{generation}", String(completion.generation ?? ""))}</strong>
+      <span>{labeled(t, "delegation.handle", status)}</span>
     </span>
     <span className="delivery-summary"><Bot size={11} aria-hidden="true" />{boundedResult(completion.result)}</span>
   </div>;
+}
+
+// Translate a delegation enum value that may not have copy yet: an unknown
+// value is humanized rather than echoing the raw wire code. Shared with the
+// strip (which imports this module, so the helper lives here).
+export function labeled(t: (key: string) => string, prefix: string, value: string): string {
+  const key = `${prefix}.${value}`;
+  const text = t(key);
+  return text === key ? value.replaceAll("_", " ") : text;
 }
