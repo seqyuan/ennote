@@ -364,6 +364,7 @@ export function Composer({
               permissionReady={permissionReady}
               setPermissionMode={setPermissionMode}
               disabled={!selectedSession || activeRun || compacting || Boolean(selectedRoleId)}
+              frozen={activeRun}
             />
             <span className="composer-context-spacer" aria-hidden="true" />
             <ModelSelect
@@ -492,7 +493,6 @@ export function Composer({
         </div>
       )}
       <div className="composer-status-line">
-        {activeRun && <span className="composer-config-hint">{permissionMode} {t("composer.frozenForRun")}</span>}
         {!permissionReady && selectedSession && !selectedRoleId && <span className="composer-config-hint is-danger">{t("composer.policyUnavailable")}</span>}
         {expanding && <span className="composer-status" aria-live="polite">{t("composer.expanding")}</span>}
         {expandDiag && <span className="composer-status diag-warning" aria-live="polite">{expandDiag}</span>}

@@ -157,26 +157,6 @@
   cursor: pointer;
 }
 .queue-dock-title { color: var(--cmp-text-primary); font-weight: 600; }
-.queue-dock-count {
-  display: inline-grid;
-  place-items: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: var(--radius-full);
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: var(--text-xs);
-  font-weight: 600;
-}
-.queue-dock-summary {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--cmp-text-tertiary);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .queue-dock-chevron { flex: none; color: var(--cmp-text-tertiary); }
 .queue-dock-list {
   display: flex;
@@ -608,6 +588,8 @@ html.dark .composer-editor.composer-no-session::after {
   stroke-width: 2;
   stroke-linecap: round;
 }
+.context-meter-fill.is-high { stroke: var(--warning); }
+.context-meter-fill.is-critical { stroke: var(--danger); }
 .context-meter-panel {
   position: absolute;
   bottom: calc(100% + 8px);

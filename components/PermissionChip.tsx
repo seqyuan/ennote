@@ -41,12 +41,14 @@ function modeLabel(mode: PermissionMode): string {
 }
 
 export function PermissionChip({
-  permissionMode, permissionReady, setPermissionMode, disabled,
+  permissionMode, permissionReady, setPermissionMode, disabled, frozen = false,
 }: {
   permissionMode: PermissionMode;
   permissionReady: boolean;
   setPermissionMode: (mode: PermissionMode) => void;
   disabled: boolean;
+  /** The active run has frozen this mode. The chip stays disabled; the title carries the reason. */
+  frozen?: boolean;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -105,6 +107,7 @@ export function PermissionChip({
         aria-expanded={menuOpen}
         aria-controls={menuOpen ? `${id}-menu` : undefined}
         disabled={locked}
+        title={frozen ? `${modeLabel(permissionMode)} ${t("composer.frozenForRun")}` : undefined}
         onClick={() => setOpen((value) => !value)}
       >
         <span className="permission-chip-icon" aria-hidden><PermissionGlyph mode={permissionMode} /></span>

@@ -33,6 +33,16 @@ describe("ContextMeter category rows", () => {
     expect(html).toContain("cm-color-reminders");
   });
 
+  it("marks the ring when occupancy reaches the model reminder and the near-full line", () => {
+    const calm = renderToStaticMarkup(<ContextMeter contextUsage={usage({ projectedTokens: 40000 })} />);
+    const high = renderToStaticMarkup(<ContextMeter contextUsage={usage({ projectedTokens: 85000 })} />);
+    const critical = renderToStaticMarkup(<ContextMeter contextUsage={usage({ projectedTokens: 95000 })} />);
+    expect(calm).not.toContain("is-high");
+    expect(calm).not.toContain("is-critical");
+    expect(high).toContain("is-high");
+    expect(critical).toContain("is-critical");
+  });
+
   it("falls back to the three legacy totals without categories", () => {
     const html = renderToStaticMarkup(<ContextMeter contextUsage={usage()} initialOpen />);
     expect(html).toContain("System prompt");

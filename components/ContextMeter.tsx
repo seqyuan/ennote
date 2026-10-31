@@ -80,6 +80,7 @@ export function ContextMeter({ contextUsage, initialOpen = false }: {
   if (contextUsage.contextWindow <= 0) return null;
 
   const percent = Math.min(100, Math.round(contextUsage.projectedTokens / contextUsage.contextWindow * 100));
+  const pressure = percent >= 95 ? "is-critical" : percent >= 85 ? "is-high" : "";
   const reading = `${percent}%`;
   const aria = t("context.aria"); // "{percent} of context used" / "上下文已用 {percent}"
   const [headBefore = "", headAfter = ""] = aria
@@ -129,7 +130,7 @@ export function ContextMeter({ contextUsage, initialOpen = false }: {
         <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true">
           <circle className="context-meter-track" cx="7" cy="7" r={RADIUS} />
           <circle
-            className="context-meter-fill"
+            className={pressure ? `context-meter-fill ${pressure}` : "context-meter-fill"}
             cx="7"
             cy="7"
             r={RADIUS}

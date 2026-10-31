@@ -39,9 +39,7 @@ export function QueueDock({
         onClick={() => setCollapsed((value) => !value)}
       >
         <ListPlus size={14} aria-hidden="true" />
-        <span className="queue-dock-title">{t("composer.queue.title")}</span>
-        <span className="queue-dock-count">{items.length}</span>
-        <span className="queue-dock-summary">
+        <span className="queue-dock-title">
           {t("composer.queue.count").replace("{count}", String(items.length))}
         </span>
         <span className="queue-dock-chevron" aria-hidden="true">
