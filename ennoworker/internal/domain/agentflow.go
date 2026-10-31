@@ -100,7 +100,8 @@ type FlowTaskBudget struct {
 	Tokens int64 `json:"tokens,omitempty" yaml:"tokens,omitempty"`
 }
 
-// FlowFanOut declares a read-only parallel expansion (validation-only in Phase 1).
+// FlowFanOut declares a read-only parallel expansion. The orchestrator starts
+// Min instances and aggregates their outputs in order.
 type FlowFanOut struct {
 	Min int `json:"min" yaml:"min"`
 	Max int `json:"max" yaml:"max"`
@@ -113,7 +114,7 @@ type FlowTerminal struct {
 }
 
 // ConvergenceRule binds one convergence declaration to an actual back-edge.
-// Phase 1 validates the binding; execution is Phase 2.
+// The orchestrator counts rounds and terminalizes as convergence_exceeded.
 type ConvergenceRule struct {
 	From      string `json:"from" yaml:"from"`
 	To        string `json:"to" yaml:"to"`
@@ -132,7 +133,7 @@ type FlowTask struct {
 	Budget   *FlowTaskBudget   `json:"budget,omitempty" yaml:"budget,omitempty"`
 	Terminal *FlowTerminal     `json:"terminal,omitempty" yaml:"terminal,omitempty"`
 	Output   string            `json:"output,omitempty" yaml:"output,omitempty"`
-	Next     map[string]string `json:"next,omitempty" yaml:"next,omitempty"` // reserved for Phase 2
+	Next     map[string]string `json:"next,omitempty" yaml:"next,omitempty"`
 	// Writes declares the workspace paths this task mutates (globs relative to
 	// /workspace). Used to grant controlled parallelism between writers when
 	// the flow enables parallelism.allow_disjoint_writers; an unset/empty
