@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useT } from "@/components/LocaleProvider";
 import { apiFetch } from "@/lib/worker-api.client";
 import { ChevronRight, Workflow } from "lucide-react";
 import styles from "./GraphActivityPanel.module.css";
@@ -11,25 +12,12 @@ type RunAgentFlowNode = components["schemas"]["RunAgentFlowNode"];
 
 const pollIntervalMs = 1500;
 
-const nodeStateLabel: Record<string, string> = {
-  pending: "Pending",
-  running: "Running",
-  completed: "Done",
-  failed: "Failed",
-  blocked: "Blocked",
-  cancelled: "Cancelled",
-  interrupted: "Interrupted",
-};
-
-const flowStateLabel: Record<string, string> = {
-  pending: "Pending",
-  running: "Running",
-  completed: "Completed",
-  failed: "Failed",
-  cancelled: "Cancelled",
-  convergence_exceeded: "Convergence exceeded",
-  budget_exceeded: "Budget exceeded",
-};
+function catalogLabel(t: (key: string) => string, prefix: string, value: string | undefined): string {
+  if (!value) return "";
+  const key = `${prefix}.${value}`;
+  const text = t(key);
+  return text === key ? value : text;
+}
 
 /**
  * GraphActivityPanel is the right-panel "Graphs" channel: it lists the Agent
@@ -40,6 +28,7 @@ const flowStateLabel: Record<string, string> = {
 export function GraphActivityPanel({ sessionId }: {
   sessionId: string | null;
 }) {
+  const t = useT();
   const [runs, setRuns] = useState<RunAgentFlow[]>([]);
   const [nodes, setNodes] = useState<Record<string, RunAgentFlowNode[]>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -95,37 +84,36 @@ export function GraphActivityPanel({ sessionId }: {
     ).then((detail) => {
       if (cancelled) return;
       setNodes((previous) => ({ ...previous, [expanded]: detail.nodes ?? [] }));
-    }).catch(() => { if (!cancelled) setError("Failed to load graph tasks"); });
+    }).catch(() => { if (!cancelled) setError("graph.loadFailed"); });
     return () => { cancelled = true; };
   }, [expanded, sessionId]);
 
-  const running = useMemo(() => runs.some((run) => run.state === "running"), [runs]);
+  const runningCount = useMemo(() => runs.filter((run) => run.state === "running").length, [runs]);
 
   return (
     <div className={styles.root}>
       <div className={styles.header}>
         <span className={styles.title}>
           <Workflow size={13} aria-hidden="true" />
-          Graph runs
+          {t("graph.title")}
         </span>
-        {running && (
+        {runningCount > 0 && (
           <span className={styles.running}>
-            <span className={styles.pulseDot} />
-            running
+            {t("graph.running").replace("{count}", String(runningCount))}
           </span>
         )}
       </div>
 
-      {error && <div className={styles.error}>{error}</div>}
+      {error && <div className={styles.error}>{error === "graph.loadFailed" ? t(error) : error}</div>}
 
       <div className={styles.scroll}>
         {!sessionId ? (
           <div className={styles.empty}>
-            Select a session to see its graph runs.
+            {t("graph.emptySession")}
           </div>
         ) : runs.length === 0 ? (
           <div className={styles.empty}>
-            No graph runs in this session yet.
+            {t("graph.emptyRuns")}
           </div>
         ) : (
           runs.map((run) => (
@@ -136,6 +124,7 @@ export function GraphActivityPanel({ sessionId }: {
               expanded={expanded === run.runId}
               onToggle={() => setExpanded((current) => current === run.runId ? null : (run.runId ?? null))}
               nodesLoading={expanded === run.runId && nodes[run.runId ?? ""] === undefined}
+              t={t}
             />
           ))
         )}
@@ -144,16 +133,18 @@ export function GraphActivityPanel({ sessionId }: {
   );
 }
 
-function RunCard({ run, nodes, expanded, onToggle, nodesLoading }: {
+function RunCard({ run, nodes, expanded, onToggle, nodesLoading, t }: {
   run: RunAgentFlow;
   nodes: RunAgentFlowNode[];
   expanded: boolean;
   onToggle: () => void;
   nodesLoading: boolean;
+  t: (key: string) => string;
 }) {
   const state = run.state;
   const nodeCount = nodes.length;
   const done = nodes.filter((node) => node.terminalState === "completed").length;
+  const flowLabel = catalogLabel(t, "graph.flow", state);
 
   return (
     <div className={styles.card}>
@@ -167,24 +158,24 @@ function RunCard({ run, nodes, expanded, onToggle, nodesLoading }: {
         <ChevronRight size={11} className={styles.chevron} data-expanded={expanded || undefined} aria-hidden="true" />
         <span className={`${styles.stateDot} ${styles.flowDot}`} data-flow-state={state} />
         <span className={styles.cardTitle}>
-          {run.inputs?.name ? String(run.inputs.name) : "Graph run"}
+          {run.inputs?.name ? String(run.inputs.name) : t("graph.unnamed")}
         </span>
         <span className={styles.cardSummary}>
-          {nodeCount > 0 ? `${done}/${nodeCount} tasks` : flowStateLabel[state ?? ""] ?? state}
+          {nodeCount > 0 ? t("graph.tasks").replace("{done}", String(done)).replace("{total}", String(nodeCount)) : flowLabel}
         </span>
       </button>
 
       {expanded && (
         <div className={styles.details}>
           <div className={styles.meta}>
-            <span>state: {flowStateLabel[state ?? ""] ?? state}</span>
-            {run.totalTokensUsed ? <span>tokens: {run.totalTokensUsed}</span> : null}
-            {run.createdAt ? <span>{formatTime(run.createdAt)}</span> : null}
+            <span>{t("graph.stateLabel").replace("{state}", flowLabel)}</span>
+            {run.totalTokensUsed ? <span>{t("graph.tokens").replace("{count}", String(run.totalTokensUsed))}</span> : null}
+            {run.createdAt ? <span>{formatTime(run.createdAt, t)}</span> : null}
           </div>
           {nodesLoading ? (
-            <div className={styles.stateLine}>Loading tasks…</div>
+            <div className={styles.stateLine}>{t("graph.loadingTasks")}</div>
           ) : nodes.length === 0 ? (
-            <div className={styles.stateLine}>No task checkpoints.</div>
+            <div className={styles.stateLine}>{t("graph.noTasks")}</div>
           ) : (
             <ul className={styles.nodeList}>
               {nodes.map((node) => (
@@ -194,7 +185,7 @@ function RunCard({ run, nodes, expanded, onToggle, nodesLoading }: {
                     {node.handle}
                   </span>
                   <span className={styles.nodeState}>
-                    {nodeStateLabel[node.terminalState ?? ""] ?? node.terminalState}
+                    {catalogLabel(t, "graph.node", node.terminalState)}
                   </span>
                 </li>
               ))}
@@ -206,12 +197,12 @@ function RunCard({ run, nodes, expanded, onToggle, nodesLoading }: {
   );
 }
 
-function formatTime(value: string): string {
+function formatTime(value: string, t: (key: string) => string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   const now = new Date();
   const minutes = Math.floor((now.getTime() - date.getTime()) / 60000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 1) return t("graph.justNow");
+  if (minutes < 60) return t("graph.minutesAgo").replace("{count}", String(minutes));
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
