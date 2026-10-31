@@ -6,6 +6,8 @@ import { FileViewer } from "./FileViewer";
 import { GraphActivityPanel } from "./GraphActivityPanel";
 import { RunInspectorPanel } from "./RunInspectorPanel";
 import { TabBar, type Tab } from "./TabBar";
+import { useT } from "@/components/LocaleProvider";
+import { runStatusText } from "@/lib/run-status-copy";
 import { useRunMCP } from "@/hooks/useRunMCP";
 import { useRunTranscript } from "@/hooks/useRunTranscript";
 import { useRunPromptComposition } from "@/hooks/useRunPromptComposition";
@@ -88,24 +90,45 @@ export function RightPanel(props: {
               loading={prompt.loading}
               error={prompt.error}
             />
-            <div className="right-panel-summary">
-              {selectedSession ? (
-                <>
-                  <div>Session: {sessionTitle}</div>
-                  <div>Active run: {activeRun || "none"}</div>
-                  <div>Status: {status || "idle"}</div>
-                  <div>Permission: {permissionMode}</div>
-                </>
-              ) : (
-                <div>No session selected</div>
-              )}
-            </div>
+            <RightPanelSummary
+              selectedSession={selectedSession}
+              sessionTitle={sessionTitle}
+              activeRun={activeRun}
+              status={status}
+              permissionMode={permissionMode}
+            />
           </div>
         )}
         {activeFileTab?.projectId && activeFileTab.filePath && (
           <FileViewer projectId={activeFileTab.projectId} filePath={activeFileTab.filePath} fileName={activeFileTab.label} />
         )}
       </div>
+    </div>
+  );
+}
+
+// The summary reads Worker facts, so the run status must be rendered through
+// the copy layer: the wire form is `code` or `code\u001Fdetail`, never UI text.
+export function RightPanelSummary({ selectedSession, sessionTitle, activeRun, status, permissionMode }: {
+  selectedSession: string | null;
+  sessionTitle: string;
+  activeRun: string | null;
+  status: string;
+  permissionMode: PermissionMode;
+}) {
+  const t = useT();
+  return (
+    <div className="right-panel-summary">
+      {selectedSession ? (
+        <>
+          <div>Session: {sessionTitle}</div>
+          <div>Active run: {activeRun || "none"}</div>
+          <div>Status: {status ? runStatusText(status, t) : "idle"}</div>
+          <div>Permission: {permissionMode}</div>
+        </>
+      ) : (
+        <div>No session selected</div>
+      )}
     </div>
   );
 }

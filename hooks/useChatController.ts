@@ -141,6 +141,7 @@ export function useChatController(deps: ChatControllerDeps) {
     activeRun: agent.activeRunID,
     inspectorRunId: agent.activeRunID ?? latestRunId(messagesData.messages),
     activeRunStatus: agent.activeRun?.status,
+    startedAt: agent.activeRun?.startedAt || agent.activeRun?.createdAt || null,
     status: agent.status,
     usage: agent.usage,
     contextUsage: agent.contextUsage,

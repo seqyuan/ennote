@@ -39,6 +39,8 @@ export type RunView = {
    */
   inspectorRunId: string | null;
   activeRunStatus?: string;
+  /** startedAt when the run has entered running, otherwise createdAt. */
+  startedAt?: string | null;
   status: string;
   usage: RunUsage | null;
   contextUsage: SessionContextUsage | null;

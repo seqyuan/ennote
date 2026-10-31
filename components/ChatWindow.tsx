@@ -11,11 +11,11 @@ import { BackgroundDelegationStrip } from "@/components/BackgroundDelegationStri
 import { CompactionPromptBar } from "@/components/CompactionPromptBar";
 import { ConversationTimeline } from "@/components/ConversationTimeline";
 import { useT } from "@/components/LocaleProvider";
-import { StreamingStatusBar } from "@/components/StreamingStatusBar";
 import type { BranchView, ChatActions, ComposerView, HistoryView, RunView } from "@/hooks/useChatController";
 import type { components } from "@/lib/worker-api.gen";
 import { useProjectSelector } from "@/hooks/useProjectSelector";
 import { useTextSelection } from "@/hooks/useTextSelection";
+import { RUN_STATUS_RECONNECTING, decodeRunStatus } from "@/lib/run-status-copy";
 import { buildExplainRequest, buildQuote } from "@/lib/selection-quote";
 import type { SidebarProject } from "./ProjectMenu";
 
@@ -60,7 +60,7 @@ export function ChatWindow({
   const waiting = run.activeRunStatus === "waiting_for_approval" ||
     run.activeRunStatus === "waiting_delegation_admission" || Boolean(run.pendingApproval);
   const waitingForQuestion = run.pendingApproval?.kind === "question";
-  const reconnecting = run.status === "Run connection interrupted" && !waiting;
+  const reconnecting = decodeRunStatus(run.status).code === RUN_STATUS_RECONNECTING && !waiting;
 
   // Requesting a project from the empty state: with no projects yet the chip
   // and the inert composer go straight to the create dialog (dsh add-only);
@@ -197,20 +197,11 @@ export function ChatWindow({
           branchDisabled={Boolean(run.activeRun) || branches.changing} createBranch={branches.createBranch}
           runStatus={run.activeRun || run.status ? {
             status: run.status, active: Boolean(run.activeRun), waiting, waitingForQuestion, reconnecting, compacting: run.compacting,
-            permissionMode: composer.displayedPermissionMode,
+            startedAt: run.startedAt, runId: run.activeRun,
+            cacheReadTokens: run.usage?.cacheReadTokens ?? 0,
+            inputTokens: (run.usage?.uncachedInputTokens ?? 0) + (run.usage?.cacheReadTokens ?? 0) + (run.usage?.cacheWriteTokens ?? 0),
+            outputTokens: run.usage?.outputTokens ?? 0,
           } : undefined} />
-        <StreamingStatusBar
-          status={run.activeRun ? run.status : ""}
-          activeRun={Boolean(run.activeRun)}
-          waiting={waiting}
-          waitingForQuestion={waitingForQuestion}
-          reconnecting={reconnecting}
-          compacting={run.compacting}
-          statusRendered={Boolean(run.activeRun || run.status)}
-          cacheReadTokens={run.usage?.cacheReadTokens ?? 0}
-          inputTokens={(run.usage?.uncachedInputTokens ?? 0) + (run.usage?.cacheReadTokens ?? 0) + (run.usage?.cacheWriteTokens ?? 0)}
-          outputTokens={run.usage?.outputTokens ?? 0}
-        />
         <div ref={bottomRef} />
       </div>
     </div>

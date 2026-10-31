@@ -9,6 +9,7 @@ import type { TurnMessage } from "@/lib/chat-messages";
 import { runFailureMessage, errorMessage } from "@/lib/provider-errors";
 import { registerChildProgress } from "@/hooks/useChildProgress";
 import { apiFetch, apiResponse } from "@/lib/worker-api.client";
+import { RUN_STATUS_RECONNECTING, decodeRunStatus, encodeRunStatus } from "@/lib/run-status-copy";
 import { toolCallIdOf } from "@/lib/tool-identity";
 
 interface UseAgentSessionInput {
@@ -62,9 +63,9 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
     if (!selected || run.sessionId !== selected) return;
     streamedRunId.current = run.id;
     streamConnected.current = true;
-    setStatus(pendingApproval ? (pendingApproval.kind === "question" ? "Waiting for your answer" : "Waiting for approval") : run.runKind === "context_compaction" ? "Compaction queued…" :
-      run.status === "waiting_children" ? "Delegated roles are working…" :
-      run.status === "waiting_delegation_admission" ? "Waiting for delegation approval" : "Running…");
+    setStatus(pendingApproval ? encodeRunStatus(pendingApproval.kind === "question" ? "waiting_answer" : "waiting_approval") : run.runKind === "context_compaction" ? encodeRunStatus("compaction_queued") :
+      run.status === "waiting_children" ? encodeRunStatus("waiting_children") :
+      run.status === "waiting_delegation_admission" ? encodeRunStatus("waiting_delegation_admission") : encodeRunStatus("running"));
     setUsage(null);
     let terminal = false;
     try {
@@ -89,7 +90,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
     } finally {
       if (generation.current === version) streamConnected.current = false;
       if (!terminal && !signal.aborted && generation.current === version) {
-        setStatus("Run connection interrupted");
+        setStatus(encodeRunStatus(RUN_STATUS_RECONNECTING));
       }
       if (terminal) {
         streamStates.current.delete(run.id);
@@ -172,7 +173,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
   // the same run do not reset the reconnect timer.
   const activeRunId = activeRun?.id ?? null;
   useEffect(() => {
-    if (status !== "Run connection interrupted" || !activeRunId) return;
+    if (decodeRunStatus(status).code !== RUN_STATUS_RECONNECTING || !activeRunId) return;
     const timer = window.setTimeout(() => setStreamNonce(current => current + 1), 1000);
     return () => window.clearTimeout(timer);
   }, [status, activeRunId]);
@@ -195,7 +196,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
       await apiFetch(`/v1/runs/${encodeURIComponent(activeRun.id)}/cancel`, { method: "POST" });
       streamController.current?.abort();
       generation.current += 1;
-      setStatus("cancelled");
+      setStatus(encodeRunStatus("cancelled"));
       await refreshSession().catch(() => null);
       await refreshLatest();
     } catch (err) {
@@ -210,11 +211,11 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
       return false;
     }
     try {
-      setStatus("steering…");
+      setStatus(encodeRunStatus("steering"));
       await apiFetch(`/v1/runs/${encodeURIComponent(activeRun.id)}/inputs`, { method: "POST",
         body: JSON.stringify({ kind: "steer", text, clientRequestId: genId() }) });
       appendMessage({ id: genId(), role: "user", text: `↪ ${text}`, kind: "steer" });
-      setStatus(activeRun.status === "waiting_for_approval" ? "Waiting for approval" : "");
+      setStatus(activeRun.status === "waiting_for_approval" ? encodeRunStatus("waiting_approval") : "");
       return true;
     } catch (err) {
       setError(errorMessage(err, "Failed to steer the run"));
@@ -266,7 +267,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
         method: "POST", headers: { "Idempotency-Key": genId() },
         body: JSON.stringify({ answers, clientRequestId: genId() }),
       });
-      setStatus("Answer submitted. Resuming…");
+      setStatus(encodeRunStatus("answer_submitted"));
       if (!streamConnected.current && activeRun) {
         streamedRunId.current = null;
         watchRun({ ...activeRun, status: "queued" });
@@ -295,7 +296,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
         }), signal: controller.signal,
       });
       if (controller.signal.aborted || decisionGeneration.current !== version) return;
-      setStatus(decision === "approved" ? "Approval granted. Resuming…" : "Approval rejected. Resuming…");
+      setStatus(encodeRunStatus(decision === "approved" ? "approval_granted" : "approval_rejected"));
       if (!streamConnected.current && activeRun) {
         streamedRunId.current = null;
         watchRun({ ...activeRun, status: "queued" });
@@ -368,10 +369,10 @@ async function streamCompactionEvents(runId: string, setStatus: (status: string)
         if (!line.startsWith("data:")) continue;
         const event = JSON.parse(line.slice(5).trimStart());
         switch (event.type) {
-          case "context_compaction_started": setStatus("Compacting context…"); break;
-          case "context_compaction_retry_scheduled": setStatus(`Retrying compaction in ${event.payload?.delayMs ?? 0} ms…`); break;
-          case "context_compaction_retry_started": setStatus("Retrying compaction…"); break;
-          case "context_compaction_completed": setStatus("Context checkpoint ready"); break;
+          case "context_compaction_started": setStatus(encodeRunStatus("compacting")); break;
+          case "context_compaction_retry_scheduled": setStatus(encodeRunStatus("compaction_retry_wait", String(event.payload?.delayMs ?? 0))); break;
+          case "context_compaction_retry_started": setStatus(encodeRunStatus("compaction_retry")); break;
+          case "context_compaction_completed": setStatus(encodeRunStatus("checkpoint_ready")); break;
           case "context_compaction_failed": throw new TerminalRunError("Context compaction failed.");
           case "context_compaction_cancelled": throw new TerminalRunError("Context compaction was cancelled.");
           case "run_succeeded": return true;
@@ -519,20 +520,20 @@ export async function streamAgentEvents(
           }
           case "model_call_retry_scheduled":
             assistants.set(iteration, { text: "", thinking: "" }); flushAssistant(iteration);
-            setStatus(`Retrying model in ${payload.delayMs ?? 0} ms…`); break;
-          case "context_pruned": setStatus("Preparing context…"); break;
-          case "context_compaction_planned": setStatus("Compaction queued…"); break;
-          case "context_compaction_started": setStatus("Compacting context…"); break;
-          case "context_compaction_retry_scheduled": setStatus(`Retrying compaction in ${payload.delayMs ?? 0} ms…`); break;
-          case "context_compaction_completed": setStatus("Context checkpoint ready"); break;
-          case "run_context_compaction_planned": setStatus("Preparing current run context…"); break;
-          case "run_context_compaction_started": setStatus("Compacting current run context…"); break;
-          case "run_context_compaction_retry_scheduled": setStatus(`Retrying run compaction in ${payload.delayMs ?? 0} ms…`); break;
-          case "run_context_compaction_completed": setStatus("Current run context compacted"); break;
-          case "run_context_compaction_failed": setStatus("Run compaction skipped"); break;
+            setStatus(encodeRunStatus("model_retry", String(payload.delayMs ?? 0))); break;
+          case "context_pruned": setStatus(encodeRunStatus("preparing_context")); break;
+          case "context_compaction_planned": setStatus(encodeRunStatus("compaction_queued")); break;
+          case "context_compaction_started": setStatus(encodeRunStatus("compacting")); break;
+          case "context_compaction_retry_scheduled": setStatus(encodeRunStatus("compaction_retry_wait", String(payload.delayMs ?? 0))); break;
+          case "context_compaction_completed": setStatus(encodeRunStatus("checkpoint_ready")); break;
+          case "run_context_compaction_planned": setStatus(encodeRunStatus("preparing_run_context")); break;
+          case "run_context_compaction_started": setStatus(encodeRunStatus("compacting_run")); break;
+          case "run_context_compaction_retry_scheduled": setStatus(encodeRunStatus("run_compaction_retry", String(payload.delayMs ?? 0))); break;
+          case "run_context_compaction_completed": setStatus(encodeRunStatus("run_context_compacted")); break;
+          case "run_context_compaction_failed": setStatus(encodeRunStatus("run_compaction_skipped")); break;
           case "run_context_compaction_cancelled": setStatus(""); break;
-          case "context_checkpoint_selected": setStatus("Using context checkpoint…"); break;
-          case "output_truncated": setStatus(Number(payload.partialToolCallCount ?? 0) > 0 ? "Recovering truncated tool call…" : "Model output truncated"); break;
+          case "context_checkpoint_selected": setStatus(encodeRunStatus("using_checkpoint")); break;
+          case "output_truncated": setStatus(encodeRunStatus(Number(payload.partialToolCallCount ?? 0) > 0 ? "recovering_tool" : "output_truncated")); break;
           case "tool_call_delta": {
             if (!wasLive) break; // legacy durable deltas ignored
             const key = `${iteration}:${payload.index ?? 0}`;
@@ -584,7 +585,7 @@ export async function streamAgentEvents(
             break;
           }
           case "tool_call_started":
-            setStatus(`Running: ${payload.toolName ?? "tool"}…`); upsertTool(payload, "running", "Running"); break;
+            setStatus(encodeRunStatus("running_tool", String(payload.toolName ?? "tool"))); upsertTool(payload, "running", "Running"); break;
           case "tool_call_completed": {
             setStatus("");
             if (payload.toolName === "delegate_tasks" || payload.toolName === "delegate_roles") approval.delegated();
@@ -603,20 +604,20 @@ export async function streamAgentEvents(
           case "tool_policy_terminated":
           case "tool_call_skipped":
             upsertTool(payload, String(payload.reason ?? "").includes("approval_rejected") ? "rejected" : "failed", "Tool call skipped."); break;
-          case "model_route_selected": setStatus(`Using ${payload.apiModel ?? "selected model"}…`); break;
-          case "vision_fallback_started": setStatus("Describing image…"); break;
-          case "vision_fallback_completed": setStatus("Image description ready"); break;
-          case "approval_requested": setStatus("Waiting for approval"); approval.requested(); break;
-          case "approval_resolved": setStatus("Resuming…"); approval.resolved(); break;
+          case "model_route_selected": setStatus(encodeRunStatus("using_model", String(payload.apiModel ?? "selected model"))); break;
+          case "vision_fallback_started": setStatus(encodeRunStatus("describing_image")); break;
+          case "vision_fallback_completed": setStatus(encodeRunStatus("image_ready")); break;
+          case "approval_requested": setStatus(encodeRunStatus("waiting_approval")); approval.requested(); break;
+          case "approval_resolved": setStatus(encodeRunStatus("resuming")); approval.resolved(); break;
           case "follow_up_consumed": approval.followUpConsumed(); break;
           case "input_cancelled": {
             const queueItemId = String(payload.queueItemId ?? "");
             if (queueItemId) approval.inputCancelled(queueItemId);
             break;
           }
-          case "run_succeeded": setStatus("Completed"); return true;
-          case "run_cancelled": setStatus("Cancelled"); return true;
-          case "run_interrupted": setStatus("Interrupted"); return true;
+          case "run_succeeded": setStatus(encodeRunStatus("completed")); return true;
+          case "run_cancelled": setStatus(encodeRunStatus("cancelled")); return true;
+          case "run_interrupted": setStatus(encodeRunStatus("interrupted")); return true;
           case "run_failed": throw new TerminalRunError(runFailureMessage(payload.errorCode as string | undefined));
         }
       }

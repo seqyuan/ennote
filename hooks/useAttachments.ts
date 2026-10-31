@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import type { TextAttachment } from "@/components/Composer";
 import { errorMessage } from "@/lib/provider-errors";
+import { encodeRunStatus } from "@/lib/run-status-copy";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
 
@@ -49,7 +50,7 @@ export function useAttachments(deps: {
     data.set("sessionId", selectedSession);
     data.set("file", file);
     try {
-      runtime.setStatus("uploading image...");
+      runtime.setStatus(encodeRunStatus("uploading_image"));
       const artifact = await apiFetch<ImageArtifact>(`/v1/projects/${encodeURIComponent(selectedProject)}/attachments/images`, {
         method: "POST", body: data,
       });

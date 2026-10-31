@@ -617,9 +617,10 @@ button:disabled { cursor: default; }
   display: flex; align-items: center; min-height: 28px; gap: 7px;
   color: var(--text-muted); font-size: var(--text-xs);
 }
+.run-status [role="status"] { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.run-status-metrics { margin-left: auto; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .run-status.is-active { color: var(--accent); }
 .run-status.is-waiting { color: var(--warning); }
-.run-mode { margin-left: auto; color: var(--text-dim); text-transform: capitalize; }
 .status-spin { animation: status-spin 1.2s linear infinite; }
 @keyframes status-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
@@ -776,8 +777,6 @@ button:disabled { cursor: default; }
 }
 .composer-attachment button::before { content: ""; position: absolute; inset: -9px; }
 .composer-attachment button:hover { color: var(--text); }
-.streaming-status { padding: 8px 0; color: var(--text-muted); font-size: var(--text-sm); }
-.streaming-status span { animation: pulse 1.5s infinite; }
 .file-command { position: relative; }
 .file-command input { display: none; }
 

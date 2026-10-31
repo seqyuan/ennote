@@ -15,6 +15,7 @@ import {
 } from "@/lib/permission-mode";
 import { DEFAULT_PERMISSION_EVENT, readDefaultPermissionMode } from "@/lib/default-permission";
 import { errorMessage } from "@/lib/provider-errors";
+import { encodeRunStatus } from "@/lib/run-status-copy";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
 import type { usePromptTemplates } from "@/hooks/usePromptTemplates";
@@ -177,7 +178,7 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
     const attachmentSummary = attachments.length ? `[Files: ${attachments.map((item) => item.name).join(", ")}]` : "";
     setInputVersioned("");
     clearAttachments();
-    agent.setStatus("sending...");
+    agent.setStatus(encodeRunStatus("sending"));
     agent.appendTransient({ id: genId(), role: "user", text: [text, image ? `[Image: ${image.name}]` : "", attachmentSummary].filter(Boolean).join("\n") });
     try {
       const payload = image ? {
