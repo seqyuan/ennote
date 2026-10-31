@@ -44,6 +44,14 @@ import (
 )
 
 func run() error {
+	// The supervisor (ennogate) forwards this process's stderr through a pipe of
+	// its own. If the supervisor dies, the pipe's read end closes and the next
+	// routine log write would raise SIGPIPE, which by default kills the Worker
+	// and every in-flight Run with it. Disarm the signal before the first log
+	// line: routine logs keep going to stderr, and a write to the now-broken
+	// supervisor pipe yields EPIPE (a discarded write error) instead of
+	// terminating the process.
+	ignoreSIGPIPE()
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
