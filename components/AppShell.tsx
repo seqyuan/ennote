@@ -41,14 +41,13 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
     workspaceFor, togglePinProject, pinnedProjectIds, renameProject, deleteProject,
   } = useWorkspace();
 
-  // Session selection stays in the chat shell; the composer reset that used to
-  // live in selectSession is now declarative inside useChatController.
+  // selectedSessionRef mirrors the latest pick for in-flight blank auto-connect.
   const [selectedSession, setSelectedSessionState] = useState<string | null>(null);
+  const selectedSessionRef = useRef<string | null>(null);
 
-  // Main-area view (chat / roles / graphs). Switching only swaps the
-  // center+right region; the sidebar stays mounted. The URL is kept in
-  // sync (?view=roles) via history.replaceState so deep links, refresh,
-  // and browser back/forward preserve the view.
+  // Main-area view (chat / roles / graphs): switching swaps only the
+  // center+right region; the URL stays in sync (?view=roles) so deep links and
+  // back/forward preserve the view.
   const [view, setView] = useState<WorkspaceView>(initialView ?? "chat");
   const changeView = useCallback((next: WorkspaceView) => {
     setView(next);
@@ -70,6 +69,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
   }, []);
 
   const selectSession = useCallback((sessionId: string | null) => {
+    selectedSessionRef.current = sessionId;
     setSelectedSessionState(sessionId);
     writeStoredId(SELECTED_SESSION_KEY, sessionId);
   }, []);
@@ -78,8 +78,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
   const sidebarResize = useResizable({ initialWidth: 280, minWidth: 264, maxWidth: 420, storageKey: "--ennote-sidebar-width" });
   const rightPanelResize = useResizable({ initialWidth: 420, minWidth: 280, maxWidth: 1000, storageKey: "--ennote-right-panel-width", direction: "left" });
 
-  // Project selector dropdown is owned here for the sidebar; the middle
-  // channel (hero chip + composer) keeps its own instance inside ChatWindow.
+  // Project selector dropdown for the sidebar; ChatWindow owns the middle one.
   const projectSelector = useProjectSelector();
 
   // Right panel layout state (file tabs live in useFileTabs)
@@ -89,8 +88,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
 
   // Top bar
   const navigationTriggerRef = useRef<HTMLButtonElement>(null);
-  // Settings view's mobile menu button (focus target when the chat TopBar is
-  // not rendered because a Roles/Graphs view is active).
+  // Settings view's mobile menu button (no chat TopBar on Roles/Graphs views).
   const settingsMenuTriggerRef = useRef<HTMLButtonElement>(null);
 
   const closeMobileNavigation = useCallback(() => {
@@ -153,9 +151,8 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
     void refreshSettings();
   }, [refreshSettings, workspaceOpenSettings]);
 
-  // First-run guidance: with no usable provider yet, open the Models
-  // section once. Closing the dialog persists the dismissal, so a refresh
-  // never re-opens it (see useOnboardingSettings).
+  // First-run guidance: open Models once with no usable provider; closing the
+  // dialog persists the dismissal, so a refresh never re-opens it.
   const { closeSettings } = useOnboardingSettings({
     loading: settings.loading,
     error: settings.error,
@@ -174,15 +171,21 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
   }, [changeView, closeMobileNavigation, isMobile, selectSession, sessionNavigation, workspaceSwitchProject]);
 
   // Startup auto-connect (useWorkspaceSessionConnect): the project is already
-  // selected by WorkspaceProvider, so reuse/create the blank without switching
-  // — switching closes an open Settings dialog (setSettingsOpen(false)).
+  // selected by WorkspaceProvider, so reuse/create the blank (switching closes
+  // an open Settings dialog).
   const connectBlankSession = useCallback(async (projectId: string) => {
+    // Reuse-or-create can await a create round-trip; a user (or e2e) picking a
+    // sidebar session meanwhile must win, so apply the blank only while the
+    // selection is unchanged. "New session" navigates nothing, so it still wins.
+    const startedWith = selectedSessionRef.current;
     try {
       const session = await reuseOrCreateBlankSession(projectId, sessionNavigation.activeSessions);
       chat.run.setError(null);
       sessionNavigation.replaceSession(session);
-      selectSession(session.id);
-      changeView("chat");
+      if (selectedSessionRef.current === startedWith) {
+        selectSession(session.id);
+        changeView("chat");
+      }
       await sessionNavigation.refresh();
       sidebarGroups.refresh(projectId);
     } catch (reason) {
