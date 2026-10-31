@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -114,14 +114,20 @@ try {
   // Pre-populate binary cache if smoke test provides pre-built binaries
   const smokeWorkerDir = process.env.ENNOTE_SMOKE_WORKER_DIR;
   if (smokeWorkerDir) {
-    const { mkdir, copyFile } = await import("node:fs/promises");
     const suffix = installedPkg.version;
     await mkdir(resolve(home, "bin"), { recursive: true });
     for (const name of ["ennogate", "ennoworker"]) {
       for (const arch of ["linux-x64", "darwin-arm64", "darwin-x64", "linux-arm64"]) {
         const src = resolve(smokeWorkerDir, `${name}-${arch}`);
         const dest = resolve(home, "bin", `${name}-${suffix}-${arch}`);
-        try { await copyFile(src, dest); fs.chmodSync(dest, 0o700); } catch { /* ignore missing platform */ }
+        try {
+          await copyFile(src, dest);
+        } catch (error) {
+          // Only binaries that were not built for this run are skipped.
+          if (error?.code !== "ENOENT") throw error;
+          continue;
+        }
+        await chmod(dest, 0o700);
       }
     }
   }
