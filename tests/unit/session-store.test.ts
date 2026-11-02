@@ -96,6 +96,25 @@ describe("SessionStore residency (phase A)", () => {
     expect(store.getSnapshot().transient[0].text).toBe("updated");
   });
 
+  it("withdraws one optimistic transient and notifies only when it existed", () => {
+    const registry = createSessionRegistry();
+    const store = registry.getStore("s1");
+    store.appendTransient({ id: "accepted", role: "user", text: "kept" });
+    store.appendTransient({ id: "rejected", role: "user", text: "retried after failure" });
+
+    const listener = vi.fn();
+    const unsubscribe = store.subscribe(listener);
+    store.removeTransient("rejected");
+
+    expect(store.getSnapshot().transient.map((item) => item.id)).toEqual(["accepted"]);
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    // A second removal of the same id is a no-op, not a notify storm.
+    store.removeTransient("rejected");
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
   it("evicts least-recently-used stores beyond the cap", () => {
     const registry = createSessionRegistry();
     for (let index = 0; index < 9; index += 1) registry.getStore(`s${index}`);

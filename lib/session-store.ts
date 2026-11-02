@@ -246,6 +246,18 @@ export class SessionStore {
     this.notify();
   };
 
+  /**
+   * Drops one optimistic transient. A submit the Worker rejected must not keep
+   * its bubble: the draft returns to the composer, so a leftover ghost turn
+   * would show the same text twice once the user retries.
+   */
+  removeTransient = (id: string): void => {
+    const next = this.transient.filter((item) => item.id !== id);
+    if (next.length === this.transient.length) return;
+    this.transient = next;
+    this.notify();
+  };
+
   // ——— session change feed (phase C) ———
 
   openStream = (): void => {

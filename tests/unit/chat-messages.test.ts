@@ -228,6 +228,22 @@ describe("split projection (projectBase + applyTransient)", () => {
     expect(openTurnRef?.metrics).toBeUndefined(); // base.openTurn untouched
   });
 
+  it("drops the ghost turn left by a rejected submit", () => {
+    const base = projectBase(twoTurns(), []);
+    const optimistic: TurnMessage = { id: "submit-1", role: "user", text: "Third" };
+
+    // The optimistic bubble is a transient turn until the Worker accepts it...
+    const pending = applyTransient(base, [optimistic]);
+    expect(pending).toHaveLength(base.nodes.length + 2);
+
+    // ...and SessionStore.removeTransient takes it back, leaving the base
+    // projection untouched (same node references, no ghost turn).
+    const afterFailure = applyTransient(base, []);
+    expect(afterFailure).toHaveLength(base.nodes.length + 1);
+    expect(afterFailure[0]).toBe(base.nodes[0]);
+    expect(afterFailure.some(node => node.kind === "turn" && node.user?.text === "Third")).toBe(false);
+  });
+
   it("does not mutate base when a streaming tool delta merges into a canonical tool call", () => {
     const base = projectBase([
       message("m1", "user", "go"),

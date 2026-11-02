@@ -39,6 +39,7 @@ const noopLoadOlder = async (): Promise<boolean> => false;
 const noopRefresh = async (): Promise<void> => {};
 const noopAppend = (): void => {};
 const noopUpsert = (): void => {};
+const noopRemove = (): void => {};
 
 /** Stable empty base for the not-loaded state (branch switch / first render). */
 const EMPTY_BASE: TimelineBase = { nodes: [], openTurn: null, calls: new Map(), syntheticTurn: 0 };
@@ -53,6 +54,7 @@ export interface UseSessionStoreResult {
   refreshLatest: () => Promise<void>;
   appendTransient: (message: TurnMessage) => void;
   upsertTransient: (message: TurnMessage) => void;
+  removeTransient: (id: string) => void;
   // Transient projection from the session change feed (phase C).
   activeRun: AgentRun | null;
   pendingApproval: ToolApprovalRequest | null;
@@ -123,6 +125,7 @@ export function useSessionStore(
     refreshLatest: store ? store.refreshLatest : noopRefresh,
     appendTransient: store ? store.appendTransient : noopAppend,
     upsertTransient: store ? store.upsertTransient : noopUpsert,
+    removeTransient: store ? store.removeTransient : noopRemove,
     activeRun: snapshot.activeRun,
     pendingApproval: snapshot.pendingApproval,
     queuedInputs: snapshot.queuedInputs,

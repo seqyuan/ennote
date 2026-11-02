@@ -57,6 +57,7 @@ export type ChatRuntime = {
   steer: (text: string) => Promise<boolean>;
   followUp: (text: string) => Promise<{ queued: boolean; runEnded: boolean }>;
   appendTransient: (message: TurnMessage) => void;
+  removeTransient: (id: string) => void;
   refreshSelectedSession: () => Promise<Session | null>;
 };
 
@@ -176,10 +177,11 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
     const attachments = textAttachments;
     const contextualText = appendTextAttachments(text, attachments);
     const attachmentSummary = attachments.length ? `[Files: ${attachments.map((item) => item.name).join(", ")}]` : "";
+    const optimisticId = genId();
     setInputVersioned("");
     clearAttachments();
     agent.setStatus(encodeRunStatus("sending"));
-    agent.appendTransient({ id: genId(), role: "user", text: [text, image ? `[Image: ${image.name}]` : "", attachmentSummary].filter(Boolean).join("\n") });
+    agent.appendTransient({ id: optimisticId, role: "user", text: [text, image ? `[Image: ${image.name}]` : "", attachmentSummary].filter(Boolean).join("\n") });
     try {
       const payload = image ? {
         content: [...(contextualText ? [{ type: "text", text: contextualText }] : []), { type: "image", artifactId: image.id }],
@@ -198,7 +200,13 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
       void agent.watchRun(turn.run as AgentRun);
     } catch (reason) {
       if (selectedSessionRef.current === sessionAtSend) {
+        // A rejected submit leaves no residue: the draft and its attachments go
+        // back to the composer, the optimistic bubble is withdrawn (the Worker
+        // never accepted it), and the "sending" status is released.
+        setInputVersioned(text);
         restoreAttachments(image, attachments);
+        agent.removeTransient(optimisticId);
+        agent.setStatus("");
         agent.setError(errorMessage(reason, "Failed to send the message"));
       }
     }

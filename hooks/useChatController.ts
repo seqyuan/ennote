@@ -88,6 +88,7 @@ export function useChatController(deps: ChatControllerDeps) {
       steer: agent.steer,
       followUp: agent.followUp,
       appendTransient: messagesData.appendTransient,
+      removeTransient: messagesData.removeTransient,
       refreshSelectedSession,
     },
   });
