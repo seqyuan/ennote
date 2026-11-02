@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/ssrf"
 	"golang.org/x/net/html/charset"
 	"golang.org/x/net/idna"
 )
@@ -82,7 +83,7 @@ func (t *WebFetchTool) StandingApprovalScope(arguments json.RawMessage) (domain.
 	// Direct IP literal: only provide standing scope for non-blocked IPs.
 	if ip, err := netip.ParseAddr(host); err == nil {
 		ip = ip.Unmap()
-		if isBlockedIPLiteral(ip) {
+		if ssrf.IsBlocked(ip, ssrf.LoopbackBlocked) {
 			return domain.StandingApprovalScope{}, fmt.Errorf("IP %s is blocked for standing approval", ip)
 		}
 		keyHost := host
@@ -279,7 +280,7 @@ func (t *WebFetchTool) resolveAndValidate(ctx context.Context, host string) (net
 			return netip.Addr{}, fmt.Errorf("invalid IP address resolved for %s", host)
 		}
 		ip = ip.Unmap()
-		if isBlockedIP(ip) {
+		if ssrf.IsBlocked(ip, ssrf.LoopbackBlocked) {
 			return netip.Addr{}, fmt.Errorf("resolved IP %s for %s is blocked", ip, host)
 		}
 	}
@@ -363,66 +364,6 @@ type crossOriginRedirectError struct {
 
 func (e *crossOriginRedirectError) Error() string {
 	return "cross-origin redirect to " + e.Target
-}
-
-// blockedIPPrefixes defines CIDR prefixes that are always blocked.
-var blockedIPPrefixes = func() []netip.Prefix {
-	prefixes := []string{
-		// Loopback
-		"127.0.0.0/8",
-		"::1/128",
-		// RFC 1918 private
-		"10.0.0.0/8",
-		"172.16.0.0/12",
-		"192.168.0.0/16",
-		// Link-local
-		"169.254.0.0/16",
-		"fe80::/10",
-		// Unspecified
-		"0.0.0.0/8",
-		"::/128",
-		// Multicast
-		"224.0.0.0/4",
-		"ff00::/8",
-		// CGNAT
-		"100.64.0.0/10",
-		// Benchmark / documentation
-		"198.18.0.0/15",
-		"192.0.2.0/24",
-		"198.51.100.0/24",
-		"203.0.113.0/24",
-		// IPv6 documentation
-		"2001:db8::/32",
-		// IPv6 ULA
-		"fc00::/7",
-		// IPv4-mapped IPv6
-		"::ffff:0:0/96",
-		// NAT64 well-known prefix
-		"64:ff9b::/96",
-		// 6to4
-		"2002::/16",
-		// Teredo
-		"2001::/32",
-		// Broadcast
-		"255.255.255.255/32",
-	}
-	var result []netip.Prefix
-	for _, s := range prefixes {
-		p, err := netip.ParsePrefix(s)
-		if err == nil {
-			result = append(result, p)
-		}
-	}
-	return result
-}()
-
-func isBlockedIP(ip netip.Addr) bool {
-	for _, prefix := range blockedIPPrefixes {
-		if prefix.Contains(ip) {
-			return true
-		}
-	}
-	return false
 }
 
 // readAndClassifyBody reads the response body up to the limit, classifies
@@ -615,13 +556,6 @@ func looksLikeIPv4Form(host string) bool {
 
 var singleIntRe = regexp.MustCompile(`^[0-9]+$`)
 var decimalSegRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)*$`)
-
-// isBlockedIPLiteral checks whether an IP is in blocked ranges using the
-// same blockedIPPrefixes as the execution path, but without doing DNS.
-// This is used in the standing scope path where we only know the IP literal.
-func isBlockedIPLiteral(ip netip.Addr) bool {
-	return isBlockedIP(ip)
-}
 
 // idnaLookupHost converts a Unicode hostname to ASCII (Punycode) using
 // IDNA Lookup profile. This is a pure string transformation — no DNS.

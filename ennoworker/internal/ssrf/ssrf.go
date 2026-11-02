@@ -1,7 +1,8 @@
 // Package ssrf rejects provider URLs that would let an authenticated caller
 // probe private, link-local, or metadata addresses through the Worker.
-// Loopback is allowed so local inference (Ollama, LM Studio) keeps working;
-// non-loopback endpoints must use HTTPS.
+// Provider endpoints may dial loopback so local inference (Ollama, LM Studio)
+// keeps working; non-loopback endpoints must use HTTPS. Callers that fetch
+// untrusted URLs on the user's behalf pass LoopbackBlocked instead.
 package ssrf
 
 import (
@@ -50,12 +51,22 @@ var blockedPrefixes = func() []netip.Prefix {
 	return out
 }()
 
-// IsBlocked reports whether ip is a non-loopback address the Worker must not
-// dial on behalf of a provider diagnose/discover request.
-func IsBlocked(ip netip.Addr) bool {
+// LoopbackPolicy states whether the calling path may dial loopback addresses.
+// Provider configuration uses LoopbackAllowed; anything fetching a URL supplied
+// by untrusted content uses LoopbackBlocked.
+type LoopbackPolicy bool
+
+const (
+	LoopbackAllowed LoopbackPolicy = true
+	LoopbackBlocked LoopbackPolicy = false
+)
+
+// IsBlocked reports whether ip is an address the Worker must not dial under the
+// given loopback policy.
+func IsBlocked(ip netip.Addr, loopback LoopbackPolicy) bool {
 	ip = ip.Unmap()
 	if ip.IsLoopback() {
-		return false
+		return loopback == LoopbackBlocked
 	}
 	for _, prefix := range blockedPrefixes {
 		if prefix.Contains(ip) {
@@ -86,7 +97,7 @@ func ValidateProviderURL(raw string) error {
 	if parsed.Scheme == "http" && !loopback {
 		return fmt.Errorf("provider URL must use HTTPS unless it is loopback")
 	}
-	if ip, err := netip.ParseAddr(host); err == nil && IsBlocked(ip) {
+	if ip, err := netip.ParseAddr(host); err == nil && IsBlocked(ip, LoopbackAllowed) {
 		return fmt.Errorf("provider URL must not target a private or link-local address")
 	}
 	return nil
@@ -158,7 +169,7 @@ func parseHTTPURL(raw string) (*url.URL, error) {
 func resolveAndValidate(ctx context.Context, host string) (netip.Addr, error) {
 	if ip, err := netip.ParseAddr(host); err == nil {
 		ip = ip.Unmap()
-		if IsBlocked(ip) {
+		if IsBlocked(ip, LoopbackAllowed) {
 			return netip.Addr{}, fmt.Errorf("provider URL must not target a private or link-local address")
 		}
 		return ip, nil
@@ -180,7 +191,7 @@ func resolveAndValidate(ctx context.Context, host string) (netip.Addr, error) {
 			return netip.Addr{}, fmt.Errorf("invalid IP address resolved for %s", host)
 		}
 		ip = ip.Unmap()
-		if IsBlocked(ip) {
+		if IsBlocked(ip, LoopbackAllowed) {
 			return netip.Addr{}, fmt.Errorf("resolved IP %s for %s is blocked", ip, host)
 		}
 		if i == 0 || (first.Is6() && ip.Is4()) {

@@ -2,7 +2,6 @@ package tools
 
 import (
 	"encoding/json"
-	"net/netip"
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
@@ -189,22 +188,6 @@ func TestLooksLikeLegacyIPv4Literal(t *testing.T) {
 			assert.Equal(t, tt.legacy, looksLikeLegacyIPv4Literal(tt.host),
 				"looksLikeLegacyIPv4Literal(%q) = %v, want %v", tt.host, looksLikeLegacyIPv4Literal(tt.host), tt.legacy)
 		})
-	}
-}
-
-func TestIsBlockedIPLiteral(t *testing.T) {
-	blocked := []string{"127.0.0.1", "::1", "10.0.0.1", "192.168.1.1", "169.254.1.1", "0.0.0.0", "224.0.0.1", "255.255.255.255", "fc00::1", "2001:db8::1"}
-	allowed := []string{"93.184.216.34", "1.1.1.1", "8.8.8.8", "2606:2800:220:1:248:1893:25c8:1946"}
-
-	for _, ipStr := range blocked {
-		ip, _ := netip.ParseAddr(ipStr)
-		require.NotZero(t, ip, "could not parse %s", ipStr)
-		assert.True(t, isBlockedIPLiteral(ip.Unmap()), "expected blocked: %s", ipStr)
-	}
-	for _, ipStr := range allowed {
-		ip, _ := netip.ParseAddr(ipStr)
-		require.NotZero(t, ip, "could not parse %s", ipStr)
-		assert.False(t, isBlockedIPLiteral(ip.Unmap()), "expected allowed: %s", ipStr)
 	}
 }
 
