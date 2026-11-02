@@ -7,9 +7,8 @@ import { TopBar } from "./TopBar";
 import { RightPanel } from "./RightPanel";
 import { FilePreviewWindow } from "./FilePreviewWindow";
 import { ResizeHandle } from "./ResizeHandle";
-import { ProjectCreateDialog } from "./ProjectCreateDialog";
+import { AppShellDialogs } from "./AppShellDialogs";
 import { OfflineBanner } from "./OfflineBanner";
-import { SettingsDialog } from "./settings/SettingsDialog";
 import { useResizable } from "@/hooks/useResizable";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { useSessionTitle } from "@/hooks/useSessionTitle";
@@ -26,7 +25,6 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useProjectFiles } from "@/hooks/useProjectFiles";
 import { useProjectSelector } from "@/hooks/useProjectSelector";
 import { SettingsView } from "./SettingsView";
-import { ConfirmHost } from "@/components/ui/confirm";
 import type { WorkspaceView } from "./workspace-view";
 import { useWorkspaceSessionConnect } from "@/hooks/useWorkspaceSessionConnect";
 import { useOfflineStatus } from "@/hooks/useOfflineStatus";
@@ -38,7 +36,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
   const isMobile = useMediaQuery("(max-width: 640px)");
   const {
     projects, projectsReady, selectedProject, switchProject: workspaceSwitchProject,
-    createProjectOpen, openCreateProject, confirmCreateProject, cancelCreateProject, createProjectBusy,
+    openCreateProject,
     settingsOpen, settingsTab, openSettings: workspaceOpenSettings, closeSettings: workspaceCloseSettings,
     workspaceFor, togglePinProject, pinnedProjectIds, renameProject, deleteProject,
   } = useWorkspace();
@@ -473,32 +471,21 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
         />
       )}
 
-      {/* Settings dialog */}
-      <SettingsDialog
-        open={settingsOpen}
-        onClose={closeSettings}
-        initialTab={settingsTab}
+      {/* Settings / confirm / new-project dialogs, in their original overlay order. */}
+      <AppShellDialogs
+        settingsOpen={settingsOpen}
+        settingsTab={settingsTab}
+        onCloseSettings={closeSettings}
         providers={settings.providers}
         models={settings.models}
         policies={settings.policies}
         session={selectedSessionRecord}
-        refresh={settings.refresh}
+        projectId={selectedProject}
         error={settings.error}
+        refresh={settings.refresh}
         setError={settings.setError}
         onSessionUpdated={sessionNavigation.replaceSession}
-        projectId={selectedProject}
       />
-
-      <ConfirmHost />
-
-      {/* New project dialog */}
-      {createProjectOpen && (
-        <ProjectCreateDialog
-          busy={createProjectBusy}
-          onCreate={confirmCreateProject}
-          onClose={cancelCreateProject}
-        />
-      )}
     </>
     </ChildProgressProvider>
   );
