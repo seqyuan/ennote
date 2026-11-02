@@ -134,3 +134,13 @@ jobs:
       - run: npm run smoke:installed
         env:
           ENNOTE_SMOKE_WORKER_DIR: ${{ github.workspace }}/worker
+
+  # AGENTS.md "Repository Hygiene": docs/, doc/, worker/, out/ and the built Go
+  # binaries are local-only. .gitignore cannot stop `git add -f`, so the tracked
+  # set is asserted. Also checks that package.json and package-lock.json agree on
+  # the version, because release.yml only compares the tag against package.json.
+  guard-repo-hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm run check:repo-hygiene
