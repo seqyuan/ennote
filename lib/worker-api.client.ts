@@ -22,11 +22,31 @@ export class WorkerGenerationChangedError extends Error {
   }
 }
 
+export class WorkerOfflineError extends Error {
+  constructor() {
+    super("You are offline. Ennote is read-only until the connection returns.");
+    this.name = "WorkerOfflineError";
+  }
+}
+
+// Offline App state is read-only (AGENTS.md): a mutation is rejected before it
+// reaches the network and is never queued for replay, so a refactor cannot turn
+// the missing queue into an implicit one. Reads stay ungated — the loopback
+// Worker keeps serving the localhost/LAN Web with no network at all.
+const READ_ONLY_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+function assertNotOfflineMutation(init?: RequestInit): void {
+  if (typeof navigator === "undefined" || navigator.onLine !== false) return;
+  if (READ_ONLY_METHODS.has((init?.method ?? "GET").toUpperCase())) return;
+  throw new WorkerOfflineError();
+}
+
 export function workerAPIPath(path: string): string {
   return path.startsWith("/api/worker/") ? path : `/api/worker${path}`;
 }
 
 export async function apiResponse(path: string, init?: RequestInit): Promise<Response> {
+  assertNotOfflineMutation(init);
   const requestGeneration = workerGeneration;
   const response = await fetch(workerAPIPath(path), init);
   acceptWorkerGeneration(response, requestGeneration);

@@ -1,0 +1,8 @@
+.banner {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  font-size: var(--text-sm);
+  color: var(--warning);
+  background: var(--warning-soft);
+  border-bottom: 1px solid var(--border);
+}

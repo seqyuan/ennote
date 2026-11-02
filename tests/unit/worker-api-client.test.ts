@@ -55,4 +55,24 @@ describe("worker API response formats", () => {
     await expect(apiFetch("/v1/projects")).rejects.toBeInstanceOf(WorkerGenerationChangedError);
     await expect(apiFetch("/v1/projects")).resolves.toEqual({ ok: true });
   });
+
+  it("rejects a mutation before it reaches the network while offline", async () => {
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ data: { ok: true } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchSpy);
+    vi.stubGlobal("navigator", { onLine: false });
+    const { apiFetch, WorkerOfflineError } = await import("@/lib/worker-api.client");
+
+    // Offline App state is read-only: the mutation never leaves the client and is
+    // never queued for replay.
+    await expect(apiFetch("/v1/projects", { method: "POST", body: "{}" }))
+      .rejects.toBeInstanceOf(WorkerOfflineError);
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    // Reads stay ungated so a loopback Worker keeps serving the local Web.
+    await expect(apiFetch("/v1/projects")).resolves.toEqual({ ok: true });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
 });

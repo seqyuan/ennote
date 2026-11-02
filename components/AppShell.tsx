@@ -8,6 +8,7 @@ import { RightPanel } from "./RightPanel";
 import { FilePreviewWindow } from "./FilePreviewWindow";
 import { ResizeHandle } from "./ResizeHandle";
 import { ProjectCreateDialog } from "./ProjectCreateDialog";
+import { OfflineBanner } from "./OfflineBanner";
 import { SettingsDialog } from "./settings/SettingsDialog";
 import { useResizable } from "@/hooks/useResizable";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
@@ -28,6 +29,7 @@ import { SettingsView } from "./SettingsView";
 import { ConfirmHost } from "@/components/ui/confirm";
 import type { WorkspaceView } from "./workspace-view";
 import { useWorkspaceSessionConnect } from "@/hooks/useWorkspaceSessionConnect";
+import { useOfflineStatus } from "@/hooks/useOfflineStatus";
 import { reuseOrCreateBlankSession, SELECTED_SESSION_KEY, writeStoredId } from "@/lib/ensure-blank-session";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { SettingsTab, Session } from "@/components/settings/types";
@@ -315,6 +317,9 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
 
   const combinedError = chat.error ?? sessionNavigation.error;
   const clearCombinedError = () => { chat.clearError(); sessionNavigation.setError(null); };
+  // Offline App state is read-only (AGENTS.md): the banner explains why a
+  // mutation is refused instead of being queued.
+  const offline = useOfflineStatus();
 
   return (
     <ChildProgressProvider>
@@ -358,6 +363,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
 
         {/* Center: chat (or Roles/Graphs settings view) */}
         <div className="workspace-content" inert={isMobile && sidebarOpen}>
+          <OfflineBanner offline={offline} />
           {view === "chat" ? (
             <>
               {/* Top bar */}
