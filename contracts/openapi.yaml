@@ -3345,6 +3345,129 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
+  /v1/delegation-items/{itemID}/{command}:
+    parameters:
+      - name: itemID
+        in: path
+        required: true
+        schema: { type: string }
+      - name: command
+        in: path
+        required: true
+        schema: { type: string, enum: [input, follow-up] }
+    post:
+      operationId: continueDelegationItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DelegationInputCommand" }
+      responses:
+        "200":
+          description: New continuation generation and child Run
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    additionalProperties: false
+                    required: [generation]
+                    properties:
+                      generation: { $ref: "#/components/schemas/DelegationGeneration" }
+                      childRunId: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /v1/attention:
+    get:
+      operationId: listAttention
+      parameters:
+        - name: projectId
+          in: query
+          schema: { type: string }
+        - name: sessionId
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, resolved, dismissed] }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        "200":
+          description: Pending-first attention items
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AttentionPage" }
+        "500": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/attention:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    get:
+      operationId: listSessionAttention
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, resolved, dismissed] }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        "200":
+          description: Attention items for one session
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AttentionPage" }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /v1/attention/{attentionID}/dismiss:
+    parameters:
+      - name: attentionID
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: dismissAttention
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [clientRequestId]
+              properties:
+                clientRequestId: { type: string }
+      responses:
+        "200":
+          description: Notification dismissed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { type: object, properties: { status: { type: string } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
 
 components:
   securitySchemes:
@@ -6076,126 +6199,3 @@ components:
         globalTemplates: { type: array, items: { $ref: '#/components/schemas/GlobalPromptTemplateEntry' } }
         globalRecoveryMode: { type: boolean }
         diagnostics: { type: array, items: { $ref: '#/components/schemas/PromptTemplateDiagnostic' } }
-
-  /v1/delegation-items/{itemID}/{command}:
-    parameters:
-      - name: itemID
-        in: path
-        required: true
-        schema: { type: string }
-      - name: command
-        in: path
-        required: true
-        schema: { type: string, enum: [input, follow-up] }
-    post:
-      operationId: continueDelegationItem
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/DelegationInputCommand" }
-      responses:
-        "200":
-          description: New continuation generation and child Run
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    additionalProperties: false
-                    required: [generation]
-                    properties:
-                      generation: { $ref: "#/components/schemas/DelegationGeneration" }
-                      childRunId: { type: string }
-        "400": { $ref: "#/components/responses/Error" }
-        "403": { $ref: "#/components/responses/Error" }
-        "404": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/Error" }
-        "500": { $ref: "#/components/responses/Error" }
-  /v1/attention:
-    get:
-      operationId: listAttention
-      parameters:
-        - name: projectId
-          in: query
-          schema: { type: string }
-        - name: sessionId
-          in: query
-          schema: { type: string }
-        - name: status
-          in: query
-          schema: { type: string, enum: [pending, resolved, dismissed] }
-        - name: limit
-          in: query
-          schema: { type: integer, minimum: 1, maximum: 100 }
-      responses:
-        "200":
-          description: Pending-first attention items
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data: { $ref: "#/components/schemas/AttentionPage" }
-        "500": { $ref: "#/components/responses/Error" }
-  /v1/sessions/{sessionID}/attention:
-    parameters:
-      - $ref: "#/components/parameters/SessionID"
-    get:
-      operationId: listSessionAttention
-      parameters:
-        - name: status
-          in: query
-          schema: { type: string, enum: [pending, resolved, dismissed] }
-        - name: limit
-          in: query
-          schema: { type: integer, minimum: 1, maximum: 100 }
-      responses:
-        "200":
-          description: Attention items for one session
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data: { $ref: "#/components/schemas/AttentionPage" }
-        "404": { $ref: "#/components/responses/Error" }
-        "500": { $ref: "#/components/responses/Error" }
-  /v1/attention/{attentionID}/dismiss:
-    parameters:
-      - name: attentionID
-        in: path
-        required: true
-        schema: { type: string }
-    post:
-      operationId: dismissAttention
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [clientRequestId]
-              properties:
-                clientRequestId: { type: string }
-      responses:
-        "200":
-          description: Notification dismissed
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data: { type: object, properties: { status: { type: string } } }
-        "400": { $ref: "#/components/responses/Error" }
-        "404": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/Error" }
-        "500": { $ref: "#/components/responses/Error" }
