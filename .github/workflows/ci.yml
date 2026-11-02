@@ -144,3 +144,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: npm run check:repo-hygiene
+
+  # AGENTS.md "Authority and Runtime": ennoworker must remain loopback-only.
+  # LAN Web is ennogate's product mode and keeps its own resolveGateAccess gate.
+  guard-worker-loopback:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm run check:worker-loopback
