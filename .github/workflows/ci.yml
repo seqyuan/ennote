@@ -152,3 +152,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: npm run check:worker-loopback
+
+  # AGENTS.md "Commit and Release Conventions": the message-timeline projection
+  # and its controller are a streaming hot path, so an edit there must ship with
+  # the unit test that pins the reference-preservation semantics.
+  guard-chat-messages-pairing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check hot-path and test pairing
+        run: npm run check:test-pairing
+        env:
+          # Base of the PR, or the tip before a push: the change set this job
+          # reviews. Without a base the guard prints a hint instead of failing.
+          ENNOTE_PAIRING_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}

@@ -35,6 +35,7 @@
     "check:appshell-size": "[ \"$(awk 'END{print NR}' components/AppShell.tsx)\" -le 500 ] && echo 'AppShell OK ('$(awk 'END{print NR}' components/AppShell.tsx)' lines)' || (echo 'AppShell exceeds 500 lines' && exit 1)",
     "check:repo-hygiene": "node scripts/check-repo-hygiene.mjs",
     "check:worker-loopback": "node scripts/check-worker-loopback.mjs",
+    "check:test-pairing": "node scripts/check-chat-messages-pairing.mjs",
     "generate:api": "openapi-typescript contracts/openapi.yaml -o lib/worker-api.gen.ts",
     "release:build-worker": "node scripts/build-workers.mjs",
     "release:prepare": "npm run build:web && npm run release:build-worker && npm run pack:check",
