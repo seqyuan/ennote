@@ -66,7 +66,7 @@ func allowlistPreHook(config domain.ToolPolicyConfig) PreToolHook {
 		if config.Mode == "allow_existing_behavior" {
 			return next(exec)
 		}
-		if !containsString(config.AllowedTools, exec.Effective.Name) && len(config.AllowedTools) > 0 {
+		if !allowsToolName(config, exec.Effective.Name) {
 			return PreToolDecision{Action: ToolDeny, Code: "tool_not_allowed",
 				Reason: "tool is not allowed by policy", RiskClass: exec.RiskClass}, nil
 		}

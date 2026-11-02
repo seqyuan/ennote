@@ -33,6 +33,7 @@ func mustPolicyJSON(t *testing.T, config domain.ToolPolicyConfig) json.RawMessag
 func TestDefaultPolicyChainMatchesBuiltin(t *testing.T) {
 	risk := fixedRiskClassifier{
 		"read":      domain.RiskReadOnly,
+		"ask_user":  domain.RiskReadOnly,
 		"write":     domain.RiskLocalWrite,
 		"bash":      domain.RiskShell,
 		"exec":      domain.RiskShell,
@@ -92,6 +93,18 @@ func TestDefaultPolicyChainMatchesBuiltin(t *testing.T) {
 				{name: "read", args: `{}`},
 				{name: "write", args: `{}`},
 				{name: "bash", args: `{"command":"echo hi"}`},
+			},
+		},
+		{
+			name:   "discuss_allowlist_keeps_ask_user",
+			config: domain.ToolPolicyConfig{Mode: string(domain.PermissionDiscuss), AllowedTools: []string{"read"}},
+			calls: []struct {
+				name string
+				args string
+			}{
+				{name: "read", args: `{}`},
+				{name: "ask_user", args: `{"questions":[]}`}, // read-only platform tool, exempt from the allowlist
+				{name: "write", args: `{}`},                  // not allowlisted
 			},
 		},
 		{
@@ -160,4 +173,29 @@ func TestDefaultPolicyChainRedactMatchesBuiltin(t *testing.T) {
 	got, err := frozen.Post(context.Background(), pipelineExec("read"), result)
 	require.NoError(t, err)
 	assert.Equal(t, want.Result, got.Result)
+}
+
+// TestPolicyChainAllowsAskUserUnderDiscuss pins the ask_user exemption on the
+// production (chain) path: Discuss mode carries an explicit allowlist that
+// predates ask_user, and ask_user is a read-only platform tool that must stay
+// available so the model can ask instead of guessing.
+func TestPolicyChainAllowsAskUserUnderDiscuss(t *testing.T) {
+	config := domain.ToolPolicyConfig{Mode: string(domain.PermissionDiscuss), AllowedTools: []string{"read"}}
+	snapshot := domain.PolicySnapshot{ID: "p", Version: 1, Config: mustPolicyJSON(t, config)}
+	chain, err := DefaultPolicyChain(snapshot)
+	require.NoError(t, err)
+	frozen, err := chain.Freeze()
+	require.NoError(t, err)
+
+	call := domain.ToolCall{ID: "q", Name: "ask_user", Arguments: json.RawMessage(`{"questions":[]}`)}
+	execs := []*ToolExecution{{RunID: "r", CallIndex: 0, Original: call, Effective: call, RiskClass: domain.RiskReadOnly}}
+	got, terminate, err := frozen.Preflight(context.Background(), execs)
+	require.NoError(t, err)
+	assert.False(t, terminate)
+	assert.Equal(t, []ToolDecision{{Action: ToolAllow, RiskClass: domain.RiskReadOnly}}, got)
+
+	// The same predicate backs the standalone static check.
+	assert.True(t, allowsToolName(config, "ask_user"))
+	assert.True(t, AllowsTool(snapshot.Config, "ask_user"))
+	assert.False(t, allowsToolName(config, "write"))
 }
