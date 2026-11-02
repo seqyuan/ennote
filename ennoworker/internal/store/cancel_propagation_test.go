@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 
@@ -57,9 +58,18 @@ func runsMustGetParentID(t *testing.T, runs *store.RunRepo, childID string) stri
 }
 
 func TestParentCancelPropagatesToChildrenAndGroup(t *testing.T) {
-	runs, delegations, _, childID := setupParentWithChild(t)
+	runs, delegations, submission, childID := setupParentWithChild(t)
 	ctx := context.Background()
 	parentID := runsMustGetParentID(t, runs, childID)
+
+	// Park the child on a pending tool approval so the parent cancel has to
+	// settle child-owned approval and attention rows, not just its status.
+	_, err := runs.Claim(ctx, childID)
+	require.NoError(t, err)
+	approvals := &store.ApprovalRepo{DB: runs.DB}
+	request, err := approvals.Suspend(ctx, childID, 1, 2, "child-approval-digest",
+		json.RawMessage(`{"version":1}`), approvalItems(), nil)
+	require.NoError(t, err)
 
 	require.NoError(t, runs.Cancel(ctx, parentID))
 
@@ -79,4 +89,32 @@ func TestParentCancelPropagatesToChildrenAndGroup(t *testing.T) {
 	var groupStatus string
 	require.NoError(t, runs.DB.QueryRow(`SELECT status FROM delegation_groups WHERE parent_run_id=?`, parentID).Scan(&groupStatus))
 	assert.Equal(t, "cancelled", groupStatus)
+
+	// The child must reach cancelled through the same transactional terminal
+	// cleanup the child's own Cancel would run: no pending attention, every
+	// pending approval cancelled, and a run_cancelled event.
+	var pendingAttention int
+	require.NoError(t, runs.DB.QueryRow(
+		`SELECT COUNT(*) FROM attention_items WHERE session_id=? AND status='pending'`, submission.Run.SessionID).Scan(&pendingAttention))
+	assert.Zero(t, pendingAttention, "child approval attention must be resolved by the parent cancel")
+	var approvalStatus string
+	require.NoError(t, runs.DB.QueryRow(`SELECT status FROM tool_approval_requests WHERE id=?`, request.ID).Scan(&approvalStatus))
+	assert.Equal(t, string(domain.ApprovalCancelled), approvalStatus)
+	var childCancelEvents, parentCancelEvents int
+	require.NoError(t, runs.DB.QueryRow(
+		`SELECT COUNT(*) FROM run_events WHERE run_id=? AND event_type='run_cancelled'`, childID).Scan(&childCancelEvents))
+	require.NoError(t, runs.DB.QueryRow(
+		`SELECT COUNT(*) FROM run_events WHERE run_id=? AND event_type='run_cancelled'`, parentID).Scan(&parentCancelEvents))
+	assert.Equal(t, 1, childCancelEvents, "child cancel must be announced on the child event stream")
+	assert.Equal(t, 1, parentCancelEvents)
+
+	// Cancelling again is idempotent: no duplicate terminal events, no new
+	// work to clean up.
+	require.NoError(t, runs.Cancel(ctx, parentID))
+	require.NoError(t, runs.DB.QueryRow(
+		`SELECT COUNT(*) FROM run_events WHERE run_id=? AND event_type='run_cancelled'`, childID).Scan(&childCancelEvents))
+	require.NoError(t, runs.DB.QueryRow(
+		`SELECT COUNT(*) FROM run_events WHERE run_id=? AND event_type='run_cancelled'`, parentID).Scan(&parentCancelEvents))
+	assert.Equal(t, 1, childCancelEvents)
+	assert.Equal(t, 1, parentCancelEvents)
 }

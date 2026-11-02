@@ -773,8 +773,10 @@ func (r *RunRepo) Fail(ctx context.Context, runID, code, message string) error {
 
 func (r *RunRepo) Cancel(ctx context.Context, runID string) error {
 	// Structured concurrency: propagate cancel to children, items, and the
-	// group before the parent itself terminalizes. Child budget reservations
-	// are reconciled in the same transaction; over-cancellation is safe.
+	// group before the parent itself terminalizes. Children are terminalized
+	// through applyTerminalTx so their approvals, attention rows, active calls,
+	// and events settle in this same transaction; child budget reservations are
+	// reconciled here too. Over-cancellation is safe.
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -798,11 +800,28 @@ func (r *RunRepo) Cancel(ctx context.Context, runID string) error {
 	if err := rows.Close(); err != nil {
 		return err
 	}
+	var childEvents []domain.RunEvent
 	for _, childID := range childIDs {
-		if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status='cancelled', finished_at=?
-			WHERE id=? AND status IN ('queued','running','waiting_for_approval')`, now, childID); err != nil {
+		current, turnID, err := loadRunStateTx(ctx, tx, childID)
+		if err != nil {
 			return err
 		}
+		if current == domain.RunCancelled {
+			continue
+		}
+		if !domain.CanTransitionRun(current, domain.RunCancelled) {
+			return fmt.Errorf("%w: %s -> %s", ErrInvalidRunState, current, domain.RunCancelled)
+		}
+		callEvents, err := applyTerminalTx(ctx, tx, childID, turnID, domain.RunCancelled, nil, nil, now)
+		if err != nil {
+			return err
+		}
+		pending := append(callEvents, runStatusEvent("run_cancelled", domain.RunCancelled, nil, nil))
+		committed, err := appendEventsTx(ctx, tx, childID, pending...)
+		if err != nil {
+			return err
+		}
+		childEvents = append(childEvents, committed...)
 		if _, err := tx.ExecContext(ctx, `UPDATE delegation_item_attempts SET status='cancelled',finished_at=?,error_code='run_cancelled'
 			WHERE child_run_id=? AND status IN ('queued','running')`, now, childID); err != nil {
 			return err
@@ -839,6 +858,9 @@ func (r *RunRepo) Cancel(ctx context.Context, runID string) error {
 	}
 	if err := tx.Commit(); err != nil {
 		return err
+	}
+	if r.Publisher != nil {
+		r.Publisher.Publish(childEvents...)
 	}
 	return r.transition(ctx, runID, domain.RunCancelled, "run_cancelled", nil, nil)
 }
@@ -978,15 +1000,9 @@ func (r *RunRepo) transition(ctx context.Context, runID string, target domain.Ru
 	}
 	defer tx.Rollback()
 
-	var current domain.RunStatus
-	var turnID sql.NullString
-	if err := tx.QueryRowContext(ctx,
-		`SELECT status, turn_id FROM agent_runs WHERE id = ?`, runID,
-	).Scan(&current, &turnID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrRunNotFound
-		}
-		return fmt.Errorf("load run state: %w", err)
+	current, turnID, err := loadRunStateTx(ctx, tx, runID)
+	if err != nil {
+		return err
 	}
 	if current == target {
 		return nil
@@ -1001,6 +1017,66 @@ func (r *RunRepo) transition(ctx context.Context, runID string, target domain.Ru
 	}
 
 	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
+	var callEvents []domain.PendingEvent
+	if target.Terminal() {
+		callEvents, err = applyTerminalTx(ctx, tx, runID, turnID, target, errorCode, errorMessage, timestamp)
+	} else {
+		err = writeRunStateTx(ctx, tx, runID, turnID, target, errorCode, errorMessage, timestamp)
+	}
+	if err != nil {
+		return err
+	}
+	statusEvent := runStatusEvent(eventType, target, errorCode, errorMessage)
+
+	// Emit run_telemetry BEFORE the terminal event so SSE consumers always
+	// receive the structured summary before the stream closes (§4.5).
+	var pendingEvents []domain.PendingEvent
+	if target.Terminal() {
+		telemetry, telemetryErr := r.buildRunTelemetryTx(ctx, tx, runID, timestamp)
+		if telemetryErr != nil {
+			// Telemetry is best-effort: never block the terminal transition.
+			telemetry = domain.RunTelemetryPayload{Partial: true}
+		}
+		telemetryPayload, _ := json.Marshal(telemetry)
+		pendingEvents = append(callEvents,
+			domain.PendingEvent{EventType: "run_telemetry", Payload: telemetryPayload},
+			statusEvent)
+	} else {
+		pendingEvents = append(callEvents, statusEvent)
+	}
+	committedEvents, err := appendEventsTx(ctx, tx, runID, pendingEvents...)
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit run transition: %w", err)
+	}
+	if r.Publisher != nil {
+		r.Publisher.Publish(committedEvents...)
+	}
+	return nil
+}
+
+// loadRunStateTx reads the durable status and owning turn of a Run. Callers
+// validate the requested transition against the returned status themselves so
+// they can report the exact invalid edge.
+func loadRunStateTx(ctx context.Context, tx *sql.Tx, runID string) (domain.RunStatus, sql.NullString, error) {
+	var current domain.RunStatus
+	var turnID sql.NullString
+	if err := tx.QueryRowContext(ctx,
+		`SELECT status, turn_id FROM agent_runs WHERE id = ?`, runID,
+	).Scan(&current, &turnID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return current, turnID, ErrRunNotFound
+		}
+		return current, turnID, fmt.Errorf("load run state: %w", err)
+	}
+	return current, turnID, nil
+}
+
+// writeRunStateTx persists the Run status and mirrors it onto the owning turn.
+func writeRunStateTx(ctx context.Context, tx *sql.Tx, runID string, turnID sql.NullString,
+	target domain.RunStatus, errorCode, errorMessage *string, timestamp string) error {
 	var startedAt, finishedAt any
 	if target == domain.RunRunning {
 		startedAt = timestamp
@@ -1025,51 +1101,73 @@ func (r *RunRepo) transition(ctx context.Context, runID string, target domain.Ru
 			return fmt.Errorf("update turn state: %w", err)
 		}
 	}
-	var callEvents []domain.PendingEvent
-	if target.Terminal() {
-		if target == domain.RunSucceeded {
-			var activeCalls int
-			if err := tx.QueryRowContext(ctx, `SELECT
-				(SELECT COUNT(*) FROM model_calls WHERE run_id = ? AND status = 'started') +
-				(SELECT COUNT(*) FROM tool_calls WHERE run_id = ? AND status = 'started')`, runID, runID).Scan(&activeCalls); err != nil {
-				return fmt.Errorf("check active calls before success: %w", err)
-			}
-			if activeCalls != 0 {
-				return fmt.Errorf("successful run still has %d active calls", activeCalls)
-			}
-		} else {
-			callEvents, err = closeStartedCallsTx(ctx, tx, runID, target, errorCode, timestamp)
-			if err != nil {
-				return err
-			}
-			compactionEvents, closeErr := closeActiveCompactionsTx(ctx, tx, runID, target, errorCode, errorMessage, timestamp)
-			if closeErr != nil {
-				return closeErr
-			}
-			callEvents = append(callEvents, compactionEvents...)
-		}
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE run_input_queue SET status = 'cancelled', cancelled_at = ?
-			 WHERE run_id = ? AND status = 'queued'`, timestamp, runID,
-		); err != nil {
-			return fmt.Errorf("cancel pending run inputs: %w", err)
-		}
-		if err := resolveRunApprovalAttentionTx(ctx, tx, runID); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE tool_approval_requests SET status='cancelled',resolved_at=?
-			WHERE run_id=? AND status='pending'`, timestamp, runID); err != nil {
-			return fmt.Errorf("cancel pending approvals: %w", err)
-		}
-		checkpointStatus := domain.CheckpointInterrupted
-		if target == domain.RunCancelled {
-			checkpointStatus = domain.CheckpointCancelled
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE run_execution_checkpoints SET status=?,finished_at=?
-			WHERE run_id=? AND status IN ('pending','executing')`, checkpointStatus, timestamp, runID); err != nil {
-			return fmt.Errorf("close execution checkpoints: %w", err)
-		}
+	return nil
+}
+
+// applyTerminalTx is the single terminal path: it writes the terminal status
+// and every side effect that must commit with it — active call and compaction
+// closure, queued-input cancellation, approval and attention resolution, and
+// checkpoint closure. It returns the events produced by those closures; the
+// caller must append them (plus its own status event) with appendEventsTx
+// inside the same transaction. Callers must hold tx and have already validated
+// the transition.
+func applyTerminalTx(ctx context.Context, tx *sql.Tx, runID string, turnID sql.NullString,
+	target domain.RunStatus, errorCode, errorMessage *string, timestamp string) ([]domain.PendingEvent, error) {
+	if !target.Terminal() {
+		return nil, fmt.Errorf("%s is not a terminal run status", target)
 	}
+	if err := writeRunStateTx(ctx, tx, runID, turnID, target, errorCode, errorMessage, timestamp); err != nil {
+		return nil, err
+	}
+	var callEvents []domain.PendingEvent
+	if target == domain.RunSucceeded {
+		var activeCalls int
+		if err := tx.QueryRowContext(ctx, `SELECT
+			(SELECT COUNT(*) FROM model_calls WHERE run_id = ? AND status = 'started') +
+			(SELECT COUNT(*) FROM tool_calls WHERE run_id = ? AND status = 'started')`, runID, runID).Scan(&activeCalls); err != nil {
+			return nil, fmt.Errorf("check active calls before success: %w", err)
+		}
+		if activeCalls != 0 {
+			return nil, fmt.Errorf("successful run still has %d active calls", activeCalls)
+		}
+	} else {
+		var err error
+		callEvents, err = closeStartedCallsTx(ctx, tx, runID, target, errorCode, timestamp)
+		if err != nil {
+			return nil, err
+		}
+		compactionEvents, closeErr := closeActiveCompactionsTx(ctx, tx, runID, target, errorCode, errorMessage, timestamp)
+		if closeErr != nil {
+			return nil, closeErr
+		}
+		callEvents = append(callEvents, compactionEvents...)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE run_input_queue SET status = 'cancelled', cancelled_at = ?
+		 WHERE run_id = ? AND status = 'queued'`, timestamp, runID,
+	); err != nil {
+		return nil, fmt.Errorf("cancel pending run inputs: %w", err)
+	}
+	if err := resolveRunApprovalAttentionTx(ctx, tx, runID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE tool_approval_requests SET status='cancelled',resolved_at=?
+		WHERE run_id=? AND status='pending'`, timestamp, runID); err != nil {
+		return nil, fmt.Errorf("cancel pending approvals: %w", err)
+	}
+	checkpointStatus := domain.CheckpointInterrupted
+	if target == domain.RunCancelled {
+		checkpointStatus = domain.CheckpointCancelled
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE run_execution_checkpoints SET status=?,finished_at=?
+		WHERE run_id=? AND status IN ('pending','executing')`, checkpointStatus, timestamp, runID); err != nil {
+		return nil, fmt.Errorf("close execution checkpoints: %w", err)
+	}
+	return callEvents, nil
+}
+
+// runStatusEvent builds the run_events row announcing a Run status change.
+func runStatusEvent(eventType string, target domain.RunStatus, errorCode, errorMessage *string) domain.PendingEvent {
 	payload := map[string]any{"status": target}
 	if errorCode != nil {
 		payload["errorCode"] = *errorCode
@@ -1078,34 +1176,7 @@ func (r *RunRepo) transition(ctx context.Context, runID string, target domain.Ru
 		payload["errorMessage"] = *errorMessage
 	}
 	encoded, _ := json.Marshal(payload)
-
-	// Emit run_telemetry BEFORE the terminal event so SSE consumers always
-	// receive the structured summary before the stream closes (§4.5).
-	var pendingEvents []domain.PendingEvent
-	if target.Terminal() {
-		telemetry, telemetryErr := r.buildRunTelemetryTx(ctx, tx, runID, timestamp)
-		if telemetryErr != nil {
-			// Telemetry is best-effort: never block the terminal transition.
-			telemetry = domain.RunTelemetryPayload{Partial: true}
-		}
-		telemetryPayload, _ := json.Marshal(telemetry)
-		pendingEvents = append(callEvents,
-			domain.PendingEvent{EventType: "run_telemetry", Payload: telemetryPayload},
-			domain.PendingEvent{EventType: eventType, Payload: encoded})
-	} else {
-		pendingEvents = append(callEvents, domain.PendingEvent{EventType: eventType, Payload: encoded})
-	}
-	committedEvents, err := appendEventsTx(ctx, tx, runID, pendingEvents...)
-	if err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit run transition: %w", err)
-	}
-	if r.Publisher != nil {
-		r.Publisher.Publish(committedEvents...)
-	}
-	return nil
+	return domain.PendingEvent{EventType: eventType, Payload: encoded}
 }
 
 func closeActiveCompactionsTx(ctx context.Context, tx *sql.Tx, runID string, target domain.RunStatus,
