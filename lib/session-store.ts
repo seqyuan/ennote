@@ -7,7 +7,7 @@ import {
   type ContextCheckpoint,
   type TurnMessage,
 } from "@/lib/chat-messages";
-import { apiEventStream, apiFetch, WorkerGenerationChangedError, type WorkerSSEEvent } from "@/lib/worker-api.client";
+import { apiEventStream, apiFetch, type WorkerSSEEvent } from "@/lib/worker-api.client";
 
 type ContextCompaction = components["schemas"]["ContextCompaction"];
 type AgentRun = components["schemas"]["AgentRun"];
@@ -310,8 +310,13 @@ export class SessionStore {
         (event) => this.handleStreamFrame(event),
         { signal: controller.signal, headers },
       );
-    } catch (cause) {
-      if (cause instanceof WorkerGenerationChangedError) this.handleGenerationChanged();
+    } catch {
+      // A Worker generation change is not handled inside the store, deliberately.
+      // WorkerGenerationGuard listens for WORKER_GENERATION_CHANGED_EVENT and
+      // reloads the whole page, which rebuilds every cache row (canonical window,
+      // checkpoints, transient projection) from the new Worker. A partial reset
+      // here would be exactly the state that reload throws away, so generation
+      // recovery lives in one place: the reload. Do not add an in-store reset.
     } finally {
       // A pause (or a newer stream) may already own the slot; the stale stream
       // must not clobber the current one's state or schedule a reconnect.
@@ -388,16 +393,6 @@ export class SessionStore {
       }));
     }
     this.notify();
-  }
-
-  private handleGenerationChanged(): void {
-    this.workerInstanceId = null;
-    this.eventCursor = undefined;
-    this.reconnectAttempt = 0;
-    this.activeRun = null;
-    this.pendingApproval = null;
-    this.queuedInputs = [];
-    this.delegationActive = false;
   }
 
   private scheduleReconnect(): void {

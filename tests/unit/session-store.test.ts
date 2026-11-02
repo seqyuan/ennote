@@ -1,13 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { apiFetch, streamOnEvent, apiEventStream } = vi.hoisted(() => {
+const { apiFetch, streamOnEvent, streamReject, apiEventStream } = vi.hoisted(() => {
   const streamOnEvent: { handler: ((event: { id?: string; data: unknown }) => void) | null } = { handler: null };
+  const streamReject: { reject: ((reason: unknown) => void) | null } = { reject: null };
   return {
     apiFetch: vi.fn(),
     streamOnEvent,
+    streamReject,
     apiEventStream: vi.fn((_path: string, onEvent: unknown, init?: RequestInit) => {
       streamOnEvent.handler = onEvent as (event: { id?: string; data: unknown }) => void;
       return new Promise<void>((_resolve, reject) => {
+        streamReject.reject = reject;
         init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
       });
     }),
@@ -20,6 +23,7 @@ vi.mock("@/lib/worker-api.client", () => ({
   WorkerGenerationChangedError: class WorkerGenerationChangedError extends Error {},
 }));
 
+import { WorkerGenerationChangedError } from "@/lib/worker-api.client";
 import { createSessionRegistry } from "@/lib/session-store";
 
 function messageCalls(): number {
@@ -189,5 +193,31 @@ describe("SessionStore change feed (phase C)", () => {
     await vi.waitFor(() => expect(messageCalls()).toBe(before + 1));
 
     expect(store.getSnapshot().lastSeq).toBe(2);
+  });
+
+  it("leaves generation recovery to the page reload", async () => {
+    const registry = createSessionRegistry();
+    const store = registry.getStore("s1");
+    await store.ensureLoaded("b1");
+    expect(messageCalls()).toBe(1);
+    streamOnEvent.handler!({ data: { type: "subscribed", instanceId: "w1", lastSeq: 3, snapshot: snapshot("run-1") } });
+    expect(store.getSnapshot().activeRun?.id).toBe("run-1");
+
+    // A Worker generation change means a different Worker process.
+    // WorkerGenerationGuard reloads the page on that event, so the store performs
+    // no half reset of its own — the projection it holds is discarded by the
+    // reload, not silently emptied here.
+    streamReject.reject!(new WorkerGenerationChangedError());
+    await vi.waitFor(() => expect(store.getSnapshot().streamOpen).toBe(false));
+
+    const snap = store.getSnapshot();
+    expect(snap.loaded).toBe(true);
+    expect(snap.canonical).toEqual([{ id: "m1" }]);
+    expect(snap.workerInstanceId).toBe("w1");
+    expect(snap.activeRun?.id).toBe("run-1");
+    await store.ensureLoaded("b1");
+    expect(messageCalls()).toBe(1);
+
+    registry.disposeStore("s1");
   });
 });
