@@ -168,3 +168,24 @@ jobs:
           # Base of the PR, or the tip before a push: the change set this job
           # reviews. Without a base the guard prints a hint instead of failing.
           ENNOTE_PAIRING_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+
+  # AGENTS.md "Commit and Release Conventions": Conventional Commits with a
+  # scoped subject. The range is the PR's commits or the pushes since the
+  # previous tip; merge commits are skipped.
+  guard-commit-message:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check Conventional Commit messages
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          base="${PR_BASE:-$PUSH_BEFORE}"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            echo "::warning::no comparison base for this event; skipped the commit message guard"
+            exit 0
+          fi
+          npm run check:commit-message -- "$base..HEAD"

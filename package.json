@@ -36,6 +36,7 @@
     "check:repo-hygiene": "node scripts/check-repo-hygiene.mjs",
     "check:worker-loopback": "node scripts/check-worker-loopback.mjs",
     "check:test-pairing": "node scripts/check-chat-messages-pairing.mjs",
+    "check:commit-message": "node scripts/check-commit-message.mjs",
     "generate:api": "openapi-typescript contracts/openapi.yaml -o lib/worker-api.gen.ts",
     "release:build-worker": "node scripts/build-workers.mjs",
     "release:prepare": "npm run build:web && npm run release:build-worker && npm run pack:check",
