@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/seqyuan/ennote/ennoworker/internal/buildinfo"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/systemprompt"
 )
@@ -146,10 +147,28 @@ func digestDelegationPolicy(snapshot *domain.DelegationPolicySnapshot) (string, 
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
+// newSystemPromptSnapshot freezes the base prompt together with the build that
+// froze it: platformVersion is the running build's version, so a Run record can
+// be traced back to the binary that produced it. Snapshots written before the
+// version was stamped carry "hosted-v1" and keep decoding (see
+// decodeSystemPromptSnapshot).
 func newSystemPromptSnapshot(agentProfileID, prompt string) (domain.SystemPromptSnapshot, error) {
 	snapshot := domain.SystemPromptSnapshot{
-		Version: 1, AgentProfileID: agentProfileID, AgentPrompt: prompt, PlatformVersion: "hosted-v1",
+		Version: 1, AgentProfileID: agentProfileID, AgentPrompt: prompt, PlatformVersion: buildinfo.Version,
 	}
+	digest, err := digestSystemPromptSnapshot(snapshot)
+	if err != nil {
+		return snapshot, err
+	}
+	snapshot.Digest = digest
+	return snapshot, nil
+}
+
+// digestSystemPromptSnapshot derives the snapshot digest from the snapshot's own
+// fields. Decoding re-derives it from the row rather than from the running build
+// so a snapshot stays verifiable after an upgrade: the recorded platformVersion
+// is part of what the digest commits, and changing it invalidates the row.
+func digestSystemPromptSnapshot(snapshot domain.SystemPromptSnapshot) (string, error) {
 	digestInput := struct {
 		Version         int    `json:"version"`
 		AgentProfileID  string `json:"agentProfileId,omitempty"`
@@ -158,11 +177,10 @@ func newSystemPromptSnapshot(agentProfileID, prompt string) (domain.SystemPrompt
 	}{snapshot.Version, snapshot.AgentProfileID, snapshot.AgentPrompt, snapshot.PlatformVersion}
 	encoded, err := json.Marshal(digestInput)
 	if err != nil {
-		return snapshot, err
+		return "", err
 	}
 	sum := sha256.Sum256(encoded)
-	snapshot.Digest = hex.EncodeToString(sum[:])
-	return snapshot, nil
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func decodeSystemPromptSnapshot(encoded, expectedDigest string) (domain.SystemPromptSnapshot, error) {
@@ -173,12 +191,12 @@ func decodeSystemPromptSnapshot(encoded, expectedDigest string) (domain.SystemPr
 	if err := json.Unmarshal([]byte(encoded), &snapshot); err != nil {
 		return snapshot, fmt.Errorf("decode frozen system prompt snapshot: %w", err)
 	}
-	calculated, err := newSystemPromptSnapshot(snapshot.AgentProfileID, snapshot.AgentPrompt)
+	calculated, err := digestSystemPromptSnapshot(snapshot)
 	if err != nil {
 		return snapshot, err
 	}
-	if snapshot.Version != 1 || snapshot.PlatformVersion != "hosted-v1" || snapshot.Digest == "" ||
-		snapshot.Digest != calculated.Digest || expectedDigest != snapshot.Digest {
+	if snapshot.Version != 1 || snapshot.PlatformVersion == "" || snapshot.Digest == "" ||
+		snapshot.Digest != calculated || expectedDigest != snapshot.Digest {
 		return snapshot, errors.New("frozen system prompt snapshot digest mismatch")
 	}
 	if err := validatePromptSections(snapshot); err != nil {

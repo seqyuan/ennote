@@ -3514,10 +3514,13 @@ components:
         data: {}
     RuntimeInfo:
       type: object
-      required: [instanceId]
+      required: [instanceId, version, sandbox, degraded]
       additionalProperties: false
       properties:
         instanceId: { type: string, minLength: 1 }
+        version: { type: string, minLength: 1 }
+        sandbox: { type: string }
+        degraded: { type: boolean }
     MCPServerProfile:
       type: object
       properties:

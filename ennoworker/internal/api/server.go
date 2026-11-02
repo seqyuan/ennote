@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/artifacts"
+	"github.com/seqyuan/ennote/ennoworker/internal/buildinfo"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
@@ -400,8 +401,15 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// runtimeInfo reports the identity of the running build. instanceId names the
+// process (the client's connection generation); version, sandbox, and degraded
+// name what that process is, so a support report can be tied to a build instead
+// of to whatever the client claims it launched.
 func (s *Server) runtimeInfo(w http.ResponseWriter, r *http.Request) {
-	writeData(w, http.StatusOK, map[string]any{"instanceId": s.InstanceID})
+	writeData(w, http.StatusOK, map[string]any{
+		"instanceId": s.InstanceID, "version": buildinfo.Version,
+		"sandbox": s.Sandbox, "degraded": s.Sandbox == "none",
+	})
 }
 
 func (s *Server) drainSessionProjection(ctx context.Context, sessionID string) {

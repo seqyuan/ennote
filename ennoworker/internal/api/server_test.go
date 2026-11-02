@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/artifacts"
+	"github.com/seqyuan/ennote/ennoworker/internal/buildinfo"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
 	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
@@ -364,10 +365,19 @@ func TestRuntimeIdentityRequiresWorkerAuthentication(t *testing.T) {
 	require.Equal(t, http.StatusOK, authorized.Code, authorized.Body.String())
 	var data struct {
 		InstanceID string `json:"instanceId"`
+		Version    string `json:"version"`
+		Sandbox    string `json:"sandbox"`
+		Degraded   bool   `json:"degraded"`
 	}
 	decodeData(t, authorized, &data)
 	assert.Equal(t, "runtime-instance", data.InstanceID)
 	assert.Equal(t, "runtime-instance", authorized.Header().Get("X-Ennote-Worker-Instance"))
+	// A support report has to be able to name the build that answered it: the
+	// identity endpoint reports the version, and the isolation state with it.
+	assert.Equal(t, buildinfo.Version, data.Version)
+	assert.NotEmpty(t, data.Version)
+	assert.Equal(t, "none", data.Sandbox)
+	assert.True(t, data.Degraded)
 }
 
 func TestProviderDoctorAPIUsesExplicitModelWithoutRunPersistence(t *testing.T) {

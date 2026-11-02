@@ -2252,6 +2252,9 @@ export interface components {
         };
         RuntimeInfo: {
             instanceId: string;
+            version: string;
+            sandbox: string;
+            degraded: boolean;
         };
         MCPServerProfile: {
             id?: string;
