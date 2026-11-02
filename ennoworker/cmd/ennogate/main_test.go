@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -123,12 +124,16 @@ func TestProcessAliveRecognizesCurrentAndMissingProcess(t *testing.T) {
 	assert.False(t, processAlive(-1))
 }
 
+// gateRequest builds a request the way a browser on the gate's own port sends
+// it: Host and Origin are the loopback address. Tests that exercise the host
+// guard override req.Host (and usually Origin) afterwards.
 func gateRequest(method, target, body, origin, remote string) *http.Request {
-	var bodyReader *strings.Reader
-	req := httptest.NewRequest(method, target, nil)
+	var bodyReader io.Reader
 	if body != "" {
 		bodyReader = strings.NewReader(body)
-		req = httptest.NewRequest(method, target, bodyReader)
+	}
+	req := httptest.NewRequest(method, "http://127.0.0.1:45131"+target, bodyReader)
+	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.RemoteAddr = remote
@@ -176,17 +181,18 @@ func TestGateRequiresSetupAndLoginBeforeStaticOrWorkerAccess(t *testing.T) {
 	handler.ServeHTTP(foreignResponse, foreignSetup)
 	assert.Equal(t, http.StatusForbidden, foreignResponse.Code)
 
-	lanSetup := gateRequest(http.MethodPost, "/api/auth/setup", `{"password":"test-password"}`, "http://example.com", "192.0.2.10:9")
+	lanSetup := gateRequest(http.MethodPost, "/api/auth/setup", `{"password":"test-password"}`, "http://192.0.2.10:45131", "192.0.2.10:9")
+	lanSetup.Host = "192.0.2.10:45131"
 	lanResponse := httptest.NewRecorder()
 	handler.ServeHTTP(lanResponse, lanSetup)
 	assert.Equal(t, http.StatusForbidden, lanResponse.Code)
 
-	shortSetup := gateRequest(http.MethodPost, "/api/auth/setup", `{"password":"abcd"}`, "http://example.com", "127.0.0.1:9")
+	shortSetup := gateRequest(http.MethodPost, "/api/auth/setup", `{"password":"abcd"}`, "http://127.0.0.1:45131", "127.0.0.1:9")
 	shortResponse := httptest.NewRecorder()
 	handler.ServeHTTP(shortResponse, shortSetup)
 	assert.Equal(t, http.StatusBadRequest, shortResponse.Code)
 
-	setupRequest := gateRequest(http.MethodPost, "/api/auth/setup", `{"password":"test-password"}`, "http://example.com", "127.0.0.1:9")
+	setupRequest := gateRequest(http.MethodPost, "/api/auth/setup", `{"password":"test-password"}`, "http://127.0.0.1:45131", "127.0.0.1:9")
 	setupResponse := httptest.NewRecorder()
 	handler.ServeHTTP(setupResponse, setupRequest)
 	require.Equal(t, http.StatusOK, setupResponse.Code, setupResponse.Body.String())
@@ -198,7 +204,7 @@ func TestGateRequiresSetupAndLoginBeforeStaticOrWorkerAccess(t *testing.T) {
 	handler.ServeHTTP(loginRedirect, gateRequest(http.MethodGet, "/", "", "", "127.0.0.1:9"))
 	assert.Equal(t, "/login", loginRedirect.Header().Get("Location"))
 
-	loginRequest := gateRequest(http.MethodPost, "/api/auth/login", `{"password":"test-password"}`, "http://example.com", "127.0.0.1:9")
+	loginRequest := gateRequest(http.MethodPost, "/api/auth/login", `{"password":"test-password"}`, "http://127.0.0.1:45131", "127.0.0.1:9")
 	loginResponse := httptest.NewRecorder()
 	handler.ServeHTTP(loginResponse, loginRequest)
 	require.Equal(t, http.StatusOK, loginResponse.Code, loginResponse.Body.String())
@@ -231,7 +237,7 @@ func TestGateRequiresSetupAndLoginBeforeStaticOrWorkerAccess(t *testing.T) {
 	require.Equal(t, http.StatusOK, proxyResponse.Code, proxyResponse.Body.String())
 	assert.Equal(t, int32(1), upstreamCalls.Load())
 
-	logoutRequest := gateRequest(http.MethodPost, "/api/auth/logout", "", "http://example.com", "127.0.0.1:9")
+	logoutRequest := gateRequest(http.MethodPost, "/api/auth/logout", "", "http://127.0.0.1:45131", "127.0.0.1:9")
 	logoutRequest.AddCookie(sessionCookie)
 	logoutResponse := httptest.NewRecorder()
 	handler.ServeHTTP(logoutResponse, logoutRequest)
@@ -267,20 +273,184 @@ func TestGateLocksLoginAfterRepeatedFailures(t *testing.T) {
 	gate := &Gate{HomeDir: home, StaticDir: staticDir, WorkerURL: "http://127.0.0.1:9", Token: "token", LoginMaxFailures: 3, LoginLockout: time.Hour}
 	handler := gate.handler()
 
-	setup := gateRequest(http.MethodPost, "/api/auth/setup", `{"password":"test-password"}`, "http://example.com", "127.0.0.1:9")
+	setup := gateRequest(http.MethodPost, "/api/auth/setup", `{"password":"test-password"}`, "http://127.0.0.1:45131", "127.0.0.1:9")
 	setupResponse := httptest.NewRecorder()
 	handler.ServeHTTP(setupResponse, setup)
 	require.Equal(t, http.StatusOK, setupResponse.Code, setupResponse.Body.String())
 
 	for i := 0; i < 3; i++ {
-		wrong := gateRequest(http.MethodPost, "/api/auth/login", `{"password":"nope-nope"}`, "http://example.com", "192.0.2.20:9")
+		wrong := gateRequest(http.MethodPost, "/api/auth/login", `{"password":"nope-nope"}`, "http://127.0.0.1:45131", "192.0.2.20:9")
 		resp := httptest.NewRecorder()
 		handler.ServeHTTP(resp, wrong)
 		assert.Equal(t, http.StatusUnauthorized, resp.Code)
 	}
-	locked := gateRequest(http.MethodPost, "/api/auth/login", `{"password":"test-password"}`, "http://example.com", "192.0.2.20:9")
+	locked := gateRequest(http.MethodPost, "/api/auth/login", `{"password":"test-password"}`, "http://127.0.0.1:45131", "192.0.2.20:9")
 	lockedResponse := httptest.NewRecorder()
 	handler.ServeHTTP(lockedResponse, locked)
 	assert.Equal(t, http.StatusTooManyRequests, lockedResponse.Code)
 	assert.NotEmpty(t, lockedResponse.Header().Get("Retry-After"))
+}
+
+func TestNormalizeHost(t *testing.T) {
+	cases := map[string]string{
+		"127.0.0.1:45131":  "127.0.0.1",
+		"127.0.0.1":        "127.0.0.1",
+		"LOCALHOST:45131":  "localhost",
+		"localhost.":       "localhost",
+		"localhost.:45131": "localhost",
+		"[::1]:45131":      "::1",
+		"[::1]":            "::1",
+		"::1":              "::1",
+		"evil.example:80":  "evil.example",
+		"":                 "",
+	}
+	for input, want := range cases {
+		assert.Equal(t, want, normalizeHost(input), input)
+	}
+}
+
+func TestParseGateAllowedHostsNormalizesEntries(t *testing.T) {
+	assert.Empty(t, parseGateAllowedHosts(""))
+	assert.Empty(t, parseGateAllowedHosts(" , ,"))
+	assert.Equal(t, []string{"ennote.example", "myhost.local"},
+		parseGateAllowedHosts(" Ennote.Example:443 , myhost.local. ,"))
+}
+
+// TestGateHostAllowlist covers the DNS-rebinding hole: a rebound DNS name reaches
+// the gate over 127.0.0.1 with Host == Origin == the attacker's domain, so CSRF
+// and the loopback check would both pass. The host guard has to reject it first.
+func TestGateHostAllowlist(t *testing.T) {
+	const setupBody = `{"password":"test-password"}`
+	cases := []struct {
+		name          string
+		bindHost      string
+		allowedHosts  string
+		method        string
+		target        string
+		host          string
+		origin        string
+		remote        string
+		wantStatus    int
+		wantBodyParts []string
+	}{
+		{
+			name: "wildcard bind rejects rebound dns name", bindHost: "0.0.0.0",
+			method: http.MethodPost, target: "/api/auth/setup", host: "evil.example",
+			origin: "http://evil.example", remote: "127.0.0.1:9", wantStatus: http.StatusForbidden,
+			wantBodyParts: []string{"host_not_allowed", "ENNOTE_GATE_ALLOWED_HOSTS"},
+		},
+		{
+			name: "wildcard bind allows lan ip literal", bindHost: "0.0.0.0",
+			method: http.MethodPost, target: "/api/auth/setup", host: "192.168.1.5:4123",
+			origin: "http://192.168.1.5:4123", remote: "127.0.0.1:9", wantStatus: http.StatusOK,
+		},
+		{
+			name: "wildcard bind rejects unlisted mdns name", bindHost: "0.0.0.0",
+			method: http.MethodPost, target: "/api/auth/setup", host: "myhost.local:4123",
+			origin: "http://myhost.local:4123", remote: "127.0.0.1:9", wantStatus: http.StatusForbidden,
+			wantBodyParts: []string{"host_not_allowed"},
+		},
+		{
+			name: "ipv6 wildcard bind behaves like ipv4 wildcard", bindHost: "::",
+			method: http.MethodPost, target: "/api/auth/setup", host: "evil.example",
+			origin: "http://evil.example", remote: "127.0.0.1:9", wantStatus: http.StatusForbidden,
+		},
+		{
+			name: "allowlist admits configured dns name", bindHost: "0.0.0.0", allowedHosts: "myhost.local",
+			method: http.MethodPost, target: "/api/auth/setup", host: "myhost.local:4123",
+			origin: "http://myhost.local:4123", remote: "127.0.0.1:9", wantStatus: http.StatusOK,
+		},
+		{
+			name: "allowlist entry is normalized before matching", bindHost: "0.0.0.0", allowedHosts: " MyHost.Local:443 ,",
+			method: http.MethodPost, target: "/api/auth/setup", host: "myhost.local:4123",
+			origin: "http://myhost.local:4123", remote: "127.0.0.1:9", wantStatus: http.StatusOK,
+		},
+		{
+			name: "allowlist matches host without port", bindHost: "0.0.0.0", allowedHosts: "myhost.local",
+			method: http.MethodPost, target: "/api/auth/setup", host: "myhost.local",
+			origin: "http://myhost.local", remote: "127.0.0.1:9", wantStatus: http.StatusOK,
+		},
+		{
+			name: "loopback bind allows localhost", bindHost: "127.0.0.1",
+			method: http.MethodPost, target: "/api/auth/setup", host: "localhost:4123",
+			origin: "http://localhost:4123", remote: "127.0.0.1:9", wantStatus: http.StatusOK,
+		},
+		{
+			name: "loopback bind allows ipv4 loopback", bindHost: "127.0.0.1",
+			method: http.MethodPost, target: "/api/auth/setup", host: "127.0.0.1:4123",
+			origin: "http://127.0.0.1:4123", remote: "127.0.0.1:9", wantStatus: http.StatusOK,
+		},
+		{
+			name: "loopback bind allows ipv6 loopback", bindHost: "127.0.0.1",
+			method: http.MethodPost, target: "/api/auth/setup", host: "[::1]:4123",
+			origin: "http://[::1]:4123", remote: "127.0.0.1:9", wantStatus: http.StatusOK,
+		},
+		{
+			name: "trailing dot and uppercase are normalized", bindHost: "127.0.0.1",
+			method: http.MethodPost, target: "/api/auth/setup", host: "LOCALHOST.:4123",
+			origin: "http://LOCALHOST.:4123", remote: "127.0.0.1:9", wantStatus: http.StatusOK,
+		},
+		{
+			name: "loopback bind rejects unlisted dns name", bindHost: "127.0.0.1",
+			method: http.MethodPost, target: "/api/auth/setup", host: "evil.example",
+			origin: "http://evil.example", remote: "127.0.0.1:9", wantStatus: http.StatusForbidden,
+		},
+		{
+			name: "trailing dot does not bypass the allowlist", bindHost: "0.0.0.0",
+			method: http.MethodPost, target: "/api/auth/setup", host: "evil.example.",
+			origin: "http://evil.example.", remote: "127.0.0.1:9", wantStatus: http.StatusForbidden,
+		},
+		{
+			name: "empty host is rejected", bindHost: "0.0.0.0",
+			method: http.MethodPost, target: "/api/auth/setup", host: "",
+			origin: "http://evil.example", remote: "127.0.0.1:9", wantStatus: http.StatusForbidden,
+		},
+		{
+			name: "read request from rebound dns name is rejected", bindHost: "0.0.0.0",
+			method: http.MethodGet, target: "/", host: "evil.example",
+			remote: "127.0.0.1:9", wantStatus: http.StatusForbidden,
+			wantBodyParts: []string{"host_not_allowed"},
+		},
+		{
+			name: "host guard runs before authentication", bindHost: "0.0.0.0",
+			method: http.MethodGet, target: "/api/worker/v1/health/ready", host: "evil.example",
+			remote: "127.0.0.1:9", wantStatus: http.StatusForbidden,
+			wantBodyParts: []string{"host_not_allowed"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			staticDir := t.TempDir()
+			require.NoError(t, os.MkdirAll(filepath.Join(home, "config"), 0o700))
+			require.NoError(t, os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("STATIC"), 0o600))
+			gate := &Gate{
+				HomeDir: home, Port: "45131", StaticDir: staticDir,
+				WorkerURL: "http://127.0.0.1:9", Token: "token",
+				BindHost: tc.bindHost, AllowedHosts: parseGateAllowedHosts(tc.allowedHosts),
+			}
+			handler := gate.handler()
+
+			body := ""
+			if tc.method == http.MethodPost {
+				body = setupBody
+			}
+			request := gateRequest(tc.method, tc.target, body, tc.origin, tc.remote)
+			request.Host = tc.host
+
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			require.Equal(t, tc.wantStatus, response.Code, response.Body.String())
+			for _, part := range tc.wantBodyParts {
+				assert.Contains(t, response.Body.String(), part)
+			}
+			authFile := filepath.Join(home, "config", "auth.json")
+			if tc.wantStatus == http.StatusOK {
+				assert.FileExists(t, authFile)
+				return
+			}
+			assert.NoFileExists(t, authFile)
+		})
+	}
 }

@@ -94,15 +94,22 @@ func run() error {
 	}
 	defer stopManagedWorker(worker, 5*time.Second)
 
+	allowedHosts := parseGateAllowedHosts(os.Getenv("ENNOTE_GATE_ALLOWED_HOSTS"))
 	gate := &Gate{
 		HomeDir: home, Port: port,
 		WorkerURL: worker.state.URL,
 		Token:     worker.state.BootstrapToken, StaticDir: staticDir,
 		SecureCookie: access.SecureCookie,
+		BindHost:     access.Host,
+		AllowedHosts: allowedHosts,
 	}
 	httpServer := &http.Server{
 		Handler: gate.handler(), ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout: 30 * time.Second, WriteTimeout: 0, IdleTimeout: 90 * time.Second,
+	}
+	if isWildcardBindHost(access.Host) && len(allowedHosts) == 0 {
+		slog.Info("LAN access via a hostname requires ENNOTE_GATE_ALLOWED_HOSTS; loopback names and IP literals are always allowed",
+			"hint", "ENNOTE_GATE_ALLOWED_HOSTS=ennote.example")
 	}
 	slog.Info("ennogate ready",
 		"url", access.Scheme()+"://"+net.JoinHostPort(access.Host, port),
@@ -200,12 +207,20 @@ func resolveGateAccess(input gateAccessInput) (gateAccess, error) {
 	return access, nil
 }
 
+// isLoopbackHost mirrors isLoopbackHostname in bin/ennote.js: the CLI and the
+// gate sit on the same loopback trust boundary, so both spellings have to agree
+// on what counts as loopback. Keep the two implementations in sync.
 func isLoopbackHost(host string) bool {
 	if strings.EqualFold(host, "localhost") {
 		return true
 	}
 	address := net.ParseIP(strings.Trim(host, "[]"))
 	return address != nil && address.IsLoopback()
+}
+
+func isWildcardBindHost(host string) bool {
+	address := net.ParseIP(strings.Trim(strings.TrimSpace(host), "[]"))
+	return address != nil && address.IsUnspecified()
 }
 
 type managedWorker struct {
@@ -420,11 +435,17 @@ type Gate struct {
 	LoginMaxFailures int
 	LoginLockout     time.Duration
 	SecureCookie     bool
-	Now              func() time.Time
-	mu               sync.Mutex
-	proxy            *httputil.ReverseProxy
-	proxyReady       bool
-	logins           loginLimiter
+	// BindHost is the configured listen host; the host guard only uses it to
+	// advertise a reachable address when it rejects a request.
+	BindHost string
+	// AllowedHosts are DNS names from ENNOTE_GATE_ALLOWED_HOSTS, already
+	// normalized by parseGateAllowedHosts.
+	AllowedHosts []string
+	Now          func() time.Time
+	mu           sync.Mutex
+	proxy        *httputil.ReverseProxy
+	proxyReady   bool
+	logins       loginLimiter
 }
 
 type contextKey struct{ name string }
@@ -480,7 +501,57 @@ func (g *Gate) handler() http.Handler {
 		files.ServeHTTP(w, r)
 	})))
 
-	return g.csrfMiddleware(mux)
+	return g.hostGuard(g.csrfMiddleware(mux))
+}
+
+// hostGuard is the outermost layer: it rejects requests whose Host header cannot
+// belong to a legitimate client, before CSRF and authentication run. CSRF only
+// compares Origin to r.Host, and isLoopbackRequest only inspects RemoteAddr, so a
+// DNS name rebound to 127.0.0.1 satisfies both; pinning Host closes that hole.
+func (g *Gate) hostGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := normalizeHost(r.Host)
+		if g.allowsHost(host) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"error": map[string]string{
+				"code": "host_not_allowed",
+				"message": fmt.Sprintf("host %q is not allowed; access via %s, or set ENNOTE_GATE_ALLOWED_HOSTS",
+					host, g.accessURL()),
+			},
+		})
+	})
+}
+
+// allowsHost accepts loopback names, any IP literal and explicitly configured DNS
+// names. A browser only sends an IP literal as Host when the page origin is that
+// same IP, so literals are not a DNS-rebinding surface, and always accepting them
+// keeps a broken allowlist from locking the operator out of the gate.
+func (g *Gate) allowsHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	if isLoopbackHost(host) || net.ParseIP(host) != nil {
+		return true
+	}
+	for _, allowed := range g.AllowedHosts {
+		if host == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+// accessURL is the address advertised when a Host is rejected. A wildcard bind
+// has no reachable URL of its own, so it falls back to loopback.
+func (g *Gate) accessURL() string {
+	host := normalizeHost(g.BindHost)
+	if host == "" || isWildcardBindHost(host) {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, g.Port)
 }
 
 func (g *Gate) requireAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -765,6 +836,36 @@ func clientIP(r *http.Request) string {
 func isLoopbackRequest(r *http.Request) bool {
 	ip := net.ParseIP(clientIP(r))
 	return ip != nil && ip.IsLoopback()
+}
+
+// normalizeHost reduces a Host header value or an allowlist entry to the bare
+// lowercase hostname: the port is dropped, IPv6 brackets are removed and a
+// trailing FQDN dot is ignored. Requests and configuration go through the same
+// function so neither side can spell a host in a way the other misses.
+func normalizeHost(hostport string) string {
+	host := strings.TrimSpace(hostport)
+	if host == "" {
+		return ""
+	}
+	if name, _, err := net.SplitHostPort(host); err == nil {
+		host = name
+	} else if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	}
+	return strings.ToLower(strings.TrimSuffix(host, "."))
+}
+
+// parseGateAllowedHosts reads ENNOTE_GATE_ALLOWED_HOSTS: a comma-separated list
+// of DNS names that may appear in the Host header on top of loopback names and
+// IP literals.
+func parseGateAllowedHosts(raw string) []string {
+	var hosts []string
+	for _, entry := range strings.Split(raw, ",") {
+		if host := normalizeHost(entry); host != "" {
+			hosts = append(hosts, host)
+		}
+	}
+	return hosts
 }
 
 func (l *loginLimiter) blocked(ip string, now time.Time) (time.Duration, bool) {

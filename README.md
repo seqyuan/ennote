@@ -120,6 +120,16 @@ ENNOTE_HOSTNAME=0.0.0.0 ENNOTE_ALLOW_LAN=1 ENNOTE_ALLOW_INSECURE_LAN=1 ennogate
 
 非 loopback 地址在缺少 `ENNOTE_ALLOW_LAN=1` 时会拒绝启动；缺少 TLS 且没有 `ENNOTE_ALLOW_INSECURE_LAN=1` 时同样拒绝启动。
 
+ennogate 对每个请求校验 `Host` 头（防 DNS rebinding）：`localhost`、loopback 地址和任意 IP 字面量始终放行；用主机名（含反向代理、自定义 DNS 名）访问时必须显式列入 `ENNOTE_GATE_ALLOWED_HOSTS`（逗号分隔），否则返回 403，请改用 IP 或 `127.0.0.1` 访问：
+
+```bash
+ENNOTE_HOSTNAME=0.0.0.0 ENNOTE_ALLOW_LAN=1 \
+ENNOTE_GATE_ALLOWED_HOSTS=ennote.example \
+ENNOTE_TLS_CERT=/path/cert.pem ENNOTE_TLS_KEY=/path/key.pem ennogate
+```
+
+未设置 `ENNOTE_GATE_ALLOWED_HOSTS` 时，主机名访问（包括 `myhost.local` 这类 mDNS 名）一律 403：攻击者可以让自己的域名解析到 127.0.0.1，但无法让浏览器在 `Host` 头里写入一个未经授权的主机名。
+
 ## 目录
 
 ```
