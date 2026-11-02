@@ -99,7 +99,9 @@ export function RightPanel(props: {
             />
           </div>
         )}
-        {activeFileTab?.projectId && activeFileTab.filePath && (
+        {activeFileTab?.projectId === projectId && activeFileTab.filePath && (
+          // Never render a row the current Project does not own, even if a caller
+          // hands the panel a tab list that was not scoped (useFileTabs scopes it).
           <FileViewer projectId={activeFileTab.projectId} filePath={activeFileTab.filePath} fileName={activeFileTab.label} />
         )}
       </div>
