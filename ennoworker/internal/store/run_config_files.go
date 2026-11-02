@@ -327,9 +327,26 @@ func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.Ag
 	}
 	// A frozen Role's permission ceiling pins the tool policy the same way the
 	// published definition does: discuss/ask/auto map to the builtin profiles.
+	// A delegated child additionally converges on its parent's frozen mode so a
+	// Role can never loosen the permission the parent Run is running under.
 	toolPolicyID := requestedConfig.ToolPolicyProfileID
 	if frozenRole != nil {
-		switch roleDefinition.PermissionCeiling {
+		ceiling := roleDefinition.PermissionCeiling
+		ceilingRank, ok := permissionModeRank(ceiling)
+		if !ok {
+			return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
+				errors.New("invalid Role permission ceiling"))
+		}
+		if run.ParentRunID != "" {
+			parentMode, err := parentFrozenToolPolicyModeTx(ctx, tx, run.ParentRunID)
+			if err != nil {
+				return nil, err
+			}
+			if parentRank, parentOK := permissionModeRank(parentMode); parentOK && parentRank < ceilingRank {
+				ceiling = parentMode
+			}
+		}
+		switch ceiling {
 		case domain.PermissionDiscuss:
 			toolPolicyID = "builtin-tool-discuss-v3"
 		case domain.PermissionAsk:
@@ -526,6 +543,51 @@ func (r *RunRepo) fileRuntimeCandidates(ctx context.Context, ids []string) ([]do
 		return candidates[i].ContextTokens < candidates[j].ContextTokens
 	})
 	return candidates, nil
+}
+
+// permissionModeRank orders the selectable permission modes from strictest to
+// loosest. Modes outside that set (allow_existing_behavior, restricted) are
+// deployment policies with no comparable ceiling, so ok is false and they never
+// tighten or loosen another Run's mode.
+func permissionModeRank(mode domain.PermissionMode) (rank int, ok bool) {
+	switch mode {
+	case domain.PermissionDiscuss:
+		return 0, true
+	case domain.PermissionAsk:
+		return 1, true
+	case domain.PermissionAuto:
+		return 2, true
+	default:
+		return 0, false
+	}
+}
+
+// parentFrozenToolPolicyModeTx reads the tool policy mode frozen on a child
+// Run's parent. A delegated child is only created after its parent froze an
+// effective config, so a missing or unreadable snapshot is an inconsistent
+// child state rather than a reason to fall back to the looser Role ceiling.
+func parentFrozenToolPolicyModeTx(ctx context.Context, tx *sql.Tx, parentRunID string) (domain.PermissionMode, error) {
+	var effectiveJSON string
+	if err := tx.QueryRowContext(ctx, `SELECT effective_config_json FROM agent_runs WHERE id=?`, parentRunID).
+		Scan(&effectiveJSON); err != nil {
+		return "", domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
+			fmt.Errorf("load parent Run effective config: %w", err))
+	}
+	if strings.TrimSpace(effectiveJSON) == "" || strings.TrimSpace(effectiveJSON) == "{}" {
+		return "", domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
+			errors.New("parent Run has no frozen effective config"))
+	}
+	var effective domain.EffectiveRunConfig
+	if err := json.Unmarshal([]byte(effectiveJSON), &effective); err != nil {
+		return "", domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
+			fmt.Errorf("decode parent Run effective config: %w", err))
+	}
+	var toolPolicy domain.ToolPolicyConfig
+	if err := json.Unmarshal(effective.ToolPolicy.Config, &toolPolicy); err != nil {
+		return "", domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
+			fmt.Errorf("decode parent Run tool policy: %w", err))
+	}
+	return domain.PermissionMode(toolPolicy.Mode), nil
 }
 
 func freezeFileDelegationPolicyTx(ctx context.Context, tx *sql.Tx, policies *fileconfig.PolicyStore, runID string) (*domain.DelegationPolicySnapshot, error) {
