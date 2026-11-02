@@ -175,7 +175,7 @@ func TestUnusedColumnMigrationConvergesAnExistingDatabase(t *testing.T) {
 	assert.False(t, hasColumn(t, db, "agent_runs", "skill_snapshot_digest"))
 
 	var applied int
-	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version=?`, target.Version).Scan(&applied))
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM migration_history WHERE prefix='session' AND version=?`, target.Version).Scan(&applied))
 	assert.Equal(t, 1, applied, "the migration must be recorded exactly once")
 }
 

@@ -1,11 +1,26 @@
 package usagemigrations
 
-import "embed"
+import (
+	"database/sql"
+	"embed"
+
+	"github.com/seqyuan/ennote/ennoworker/internal/sqlmigrations"
+)
 
 //go:embed *.sql
 var FS embed.FS
 
-func InitialSchema() (string, error) {
-	contents, err := FS.ReadFile("0001_usage.sql")
-	return string(contents), err
+// Set is the usage projection history. Usage databases written before
+// versioning existed carry the InitialSchema tables and no version table at all:
+// InitialSchemaTables lets the applier adopt that state instead of replaying the
+// schema on a populated database.
+func Set() sqlmigrations.Set {
+	return sqlmigrations.Set{Prefix: "usage", FS: FS, InitialSchemaTables: []string{
+		"usage_aggregates", "applied_projection_events",
+	}}
+}
+
+// Apply brings one usage projection database to the current schema.
+func Apply(db *sql.DB) error {
+	return sqlmigrations.Apply(db, Set())
 }

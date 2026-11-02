@@ -4,126 +4,35 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
-	"io/fs"
-	"sort"
-	"strconv"
-	"strings"
-	"time"
+
+	"github.com/seqyuan/ennote/ennoworker/internal/sqlmigrations"
 )
 
 //go:embed *.sql
 var FS embed.FS
 
-type Migration struct {
-	Version int
-	SQL     string
-}
+// Migration is one embedded Session schema step.
+type Migration = sqlmigrations.Migration
 
-// Sorted returns the embedded migrations ordered by version. Invalid file names
-// and duplicate versions are hard errors: silently skipping a migration file
-// would leave production databases on a different schema than tests.
+// Sorted returns the embedded Session migrations ordered by version.
 func Sorted() ([]Migration, error) {
-	return sorted(FS)
+	return sqlmigrations.Sorted(FS)
 }
 
-func sorted(fsys fs.FS) ([]Migration, error) {
-	entries, err := fs.ReadDir(fsys, ".")
-	if err != nil {
-		return nil, fmt.Errorf("read session migrations: %w", err)
-	}
-	migrations := make([]Migration, 0, len(entries))
-	seen := make(map[int]string, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
-			continue
-		}
-		name := strings.TrimSuffix(entry.Name(), ".sql")
-		parts := strings.SplitN(name, "_", 2)
-		if len(parts) != 2 || parts[1] == "" {
-			return nil, fmt.Errorf("invalid session migration file name %q", entry.Name())
-		}
-		version, err := strconv.Atoi(parts[0])
-		if err != nil || version <= 0 {
-			return nil, fmt.Errorf("invalid session migration version in %q", entry.Name())
-		}
-		if previous, ok := seen[version]; ok {
-			return nil, fmt.Errorf("duplicate session migration version %d: %q and %q", version, previous, entry.Name())
-		}
-		contents, err := fs.ReadFile(fsys, entry.Name())
-		if err != nil {
-			return nil, fmt.Errorf("read session migration %q: %w", entry.Name(), err)
-		}
-		seen[version] = entry.Name()
-		migrations = append(migrations, Migration{Version: version, SQL: string(contents)})
-	}
-	sort.Slice(migrations, func(i, j int) bool { return migrations[i].Version < migrations[j].Version })
-	return migrations, nil
+// Set is the Session database history. Sessions written before versioning
+// existed recorded what they had applied in schema_migrations without a prefix
+// or a checksum; those rows are adopted on the first start of this build, and
+// the old table is left in place so a rollback to the previous binary still
+// sees its own bookkeeping.
+func Set() sqlmigrations.Set {
+	return sqlmigrations.Set{Prefix: "session", FS: FS, LegacyVersionTable: "schema_migrations"}
 }
 
-// Apply brings one Session database to the current schema. It is the single
-// applier for production and test fixtures: migrations run in version order,
-// each in its own transaction, and the applied set must be a prefix of the
-// embedded history. A lower-numbered migration discovered after a higher one
-// has been recorded is an out-of-order history and fails instead of being
-// silently skipped by a MAX(version) check.
+// Apply brings one Session database to the current schema, then runs the data
+// backfills that the schema steps do not cover.
 func Apply(db *sql.DB) error {
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
-		version INTEGER PRIMARY KEY,
-		applied_at TEXT NOT NULL
-	)`); err != nil {
-		return fmt.Errorf("create schema_migrations: %w", err)
-	}
-	migrations, err := Sorted()
-	if err != nil {
+	if err := sqlmigrations.Apply(db, Set()); err != nil {
 		return err
-	}
-	rows, err := db.Query(`SELECT version FROM schema_migrations`)
-	if err != nil {
-		return fmt.Errorf("read applied session migrations: %w", err)
-	}
-	applied := make(map[int]bool)
-	maxApplied := 0
-	for rows.Next() {
-		var version int
-		if err := rows.Scan(&version); err != nil {
-			rows.Close()
-			return fmt.Errorf("scan applied session migration: %w", err)
-		}
-		applied[version] = true
-		if version > maxApplied {
-			maxApplied = version
-		}
-	}
-	if err := rows.Close(); err != nil {
-		return fmt.Errorf("close applied session migrations: %w", err)
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("read applied session migrations: %w", err)
-	}
-
-	for _, migration := range migrations {
-		if applied[migration.Version] {
-			continue
-		}
-		if migration.Version <= maxApplied {
-			return fmt.Errorf("session migration %d is out of order: version %d is already applied", migration.Version, maxApplied)
-		}
-		tx, err := db.Begin()
-		if err != nil {
-			return fmt.Errorf("begin session migration %d: %w", migration.Version, err)
-		}
-		if _, err := tx.Exec(migration.SQL); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("session migration %d: %w", migration.Version, err)
-		}
-		if _, err := tx.Exec(`INSERT INTO schema_migrations(version,applied_at) VALUES(?,?)`,
-			migration.Version, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("record session migration %d: %w", migration.Version, err)
-		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit session migration %d: %w", migration.Version, err)
-		}
 	}
 	return BackfillMessageSeq(db)
 }

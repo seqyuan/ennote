@@ -50,7 +50,7 @@ func TestSessionSchemaContainsOnlySessionAuthorityTables(t *testing.T) {
 	for _, table := range []string{
 		"sessions", "messages", "turns", "agent_runs", "run_events", "tool_calls",
 		"delegation_groups", "run_agent_flow", "run_mcp_servers", "skill_snapshots",
-		"projection_outbox", "session_store_metadata", "schema_migrations",
+		"projection_outbox", "session_store_metadata", "migration_history",
 	} {
 		var count int
 		require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&count))

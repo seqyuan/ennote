@@ -18,19 +18,11 @@ type Stores struct {
 }
 
 func Open(catalogPath, usagePath string) (*Stores, error) {
-	catalogSchema, err := catalogmigrations.InitialSchema()
-	if err != nil {
-		return nil, err
-	}
-	usageSchema, err := usagemigrations.InitialSchema()
-	if err != nil {
-		return nil, err
-	}
-	catalog, err := openRebuildable(catalogPath, catalogSchema)
+	catalog, err := openRebuildable(catalogPath, catalogmigrations.Apply)
 	if err != nil {
 		return nil, fmt.Errorf("open catalog projection: %w", err)
 	}
-	usage, err := openRebuildable(usagePath, usageSchema)
+	usage, err := openRebuildable(usagePath, usagemigrations.Apply)
 	if err != nil {
 		catalog.Close()
 		return nil, fmt.Errorf("open usage projection: %w", err)
@@ -51,7 +43,10 @@ func (s *Stores) Close() error {
 	return first
 }
 
-func openRebuildable(path, schema string) (*sql.DB, error) {
+// openRebuildable opens a projection database and migrates it. A projection is
+// derived data: when migration fails the file is quarantined and rebuilt from
+// the Session store rather than leaving the Worker unable to start.
+func openRebuildable(path string, migrate func(*sql.DB) error) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
@@ -66,7 +61,7 @@ func openRebuildable(path, schema string) (*sql.DB, error) {
 			db.Close()
 			return nil, err
 		}
-		if _, err := db.Exec(schema); err != nil {
+		if err := migrate(db); err != nil {
 			db.Close()
 			return nil, err
 		}
