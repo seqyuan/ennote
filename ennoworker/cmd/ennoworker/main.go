@@ -940,10 +940,6 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 	if err != nil {
 		return domain.RunOutput{}, fmt.Errorf("canonical workspace root: %w", err)
 	}
-	trusted, trustErr := e.trustStore.IsTrusted(wSpace.ID, canonicalRoot)
-	if trustErr != nil {
-		return domain.RunOutput{}, fmt.Errorf("check workspace trust: %w", trustErr)
-	}
 
 	provider, err := e.resolveProvider(resolved)
 	if err != nil {
@@ -956,12 +952,10 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 	if err := os.MkdirAll(ioDir, 0o700); err != nil {
 		return domain.RunOutput{}, fmt.Errorf("create runtime io dir: %w", err)
 	}
-	var wManager *workspace.Manager
-	if trusted {
-		wManager, err = workspace.NewManager(canonicalRoot, ioDir, "", workspace.SandboxMode(e.sandbox))
-	} else {
-		wManager, err = workspace.NewManager(canonicalRoot, ioDir, "", workspace.SandboxMode(e.sandbox))
-	}
+	// A delegated child runs in the same workspace as its parent: the trust
+	// decision was already made and frozen when the parent resolved its config,
+	// so there is nothing to branch on here.
+	wManager, err := workspace.NewManager(canonicalRoot, ioDir, "", workspace.SandboxMode(e.sandbox))
 	if err != nil {
 		return domain.RunOutput{}, fmt.Errorf("create workspace: %w", err)
 	}
