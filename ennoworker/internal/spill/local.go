@@ -9,6 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strings"
+	"time"
 )
 
 // Local is the local filesystem spill provider. It writes session-scoped files
@@ -87,4 +90,136 @@ func (l *Local) SaveText(ctx context.Context, input SaveInput) (Ref, error) {
 		return Ref{Locator: path, Bytes: int64(written), RetrievalHint: "read or grep this file"}, nil
 	}
 	return Ref{}, fmt.Errorf("could not allocate a spill filename")
+}
+
+// Reclaim defaults. Spill files hold full tool output so a model can read it
+// back; nothing consumes them after the Run that produced them, and the locator
+// only lives in that Run's transcript, so an unbounded root grows forever on a
+// long-lived install.
+const (
+	DefaultMaxAge   = 14 * 24 * time.Hour
+	DefaultMaxBytes = int64(512 << 20)
+)
+
+// ReclaimOptions bounds what Reclaim keeps. A zero MaxAge or MaxBytes disables
+// that rule; Reclaim never deletes anything else.
+type ReclaimOptions struct {
+	MaxAge   time.Duration
+	MaxBytes int64
+	// Now is the reference time for MaxAge; zero means time.Now().
+	Now time.Time
+}
+
+// ReclaimResult reports what Reclaim did. Failed counts entries it could not
+// inspect or remove: reclamation is best effort and never blocks startup.
+type ReclaimResult struct {
+	Removed      int
+	RemovedBytes int64
+	Failed       int
+}
+
+// Reclaim removes spill files past the retention age, then the oldest files
+// until the root is under the byte cap. Symlinks are left untouched and never
+// followed: a spill root is user-writable, so removing what a link points at
+// would turn cleanup into an arbitrary delete.
+func (l *Local) Reclaim(ctx context.Context, opts ReclaimOptions) (ReclaimResult, error) {
+	var result ReclaimResult
+	if l.Root == "" {
+		return result, nil
+	}
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	type entry struct {
+		path    string
+		modTime time.Time
+		size    int64
+	}
+	var files []entry
+	var total int64
+	err := filepath.WalkDir(l.Root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if os.IsNotExist(walkErr) {
+				return nil
+			}
+			result.Failed++
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil || !info.Mode().IsRegular() {
+			result.Failed++
+			return nil
+		}
+		files = append(files, entry{path: path, modTime: info.ModTime(), size: info.Size()})
+		total += info.Size()
+		return nil
+	})
+	if err != nil {
+		return result, err
+	}
+
+	keep := opts.MaxAge <= 0
+	for _, file := range files {
+		if !keep && now.Sub(file.modTime) > opts.MaxAge {
+			if removeErr := os.Remove(file.path); removeErr != nil && !os.IsNotExist(removeErr) {
+				result.Failed++
+				continue
+			}
+			result.Removed++
+			result.RemovedBytes += file.size
+			total -= file.size
+			continue
+		}
+	}
+	if opts.MaxBytes > 0 && total > opts.MaxBytes {
+		sort.Slice(files, func(i, j int) bool { return files[i].modTime.Before(files[j].modTime) })
+		for _, file := range files {
+			if total <= opts.MaxBytes {
+				break
+			}
+			if !fileStillPresent(file.path) {
+				continue
+			}
+			if removeErr := os.Remove(file.path); removeErr != nil {
+				result.Failed++
+				continue
+			}
+			result.Removed++
+			result.RemovedBytes += file.size
+			total -= file.size
+		}
+	}
+	l.removeEmptySessionDirs()
+	return result, nil
+}
+
+func fileStillPresent(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
+}
+
+// removeEmptySessionDirs drops the per-session directories left behind once all
+// their files are gone, so a long-lived install does not accumulate one empty
+// directory per session forever.
+func (l *Local) removeEmptySessionDirs() {
+	entries, err := os.ReadDir(l.Root)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "session-") {
+			continue
+		}
+		_ = os.Remove(filepath.Join(l.Root, entry.Name()))
+	}
 }

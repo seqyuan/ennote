@@ -38,6 +38,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/skills"
 	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
+	"github.com/seqyuan/ennote/ennoworker/internal/spill"
 	"github.com/seqyuan/ennote/ennoworker/internal/storage"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/seqyuan/ennote/ennoworker/internal/workspace"
@@ -203,6 +204,19 @@ func run() error {
 	if err := recoverV2Sessions(context.Background(), sessionManager, runTemplate, coordinator, graphRuns,
 		globalSources, models, policyFiles); err != nil {
 		return err
+	}
+
+	// Spill files hold full tool output for the Run that produced it; nothing
+	// reads them once that Run is over. Reclaim on startup so a long-lived
+	// install does not grow the home directory forever, and never block startup
+	// on it: the pass is best effort and reports instead of failing.
+	if reclaimed, spillErr := spill.NewLocal(filepath.Join(cfg.HomeDir, "spill")).Reclaim(
+		context.Background(), spill.ReclaimOptions{MaxAge: spill.DefaultMaxAge, MaxBytes: spill.DefaultMaxBytes},
+	); spillErr != nil {
+		slog.Warn("reclaim spill files", "error", spillErr)
+	} else if reclaimed.Removed > 0 || reclaimed.Failed > 0 {
+		slog.Info("reclaimed spill files", "files", reclaimed.Removed,
+			"bytes", reclaimed.RemovedBytes, "failed", reclaimed.Failed)
 	}
 
 	builtins, err := prompts.LoadBuiltins()
