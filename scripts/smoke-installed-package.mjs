@@ -206,7 +206,9 @@ try {
     }
 
     const offlinePort = await freePort();
-    const offline = cli(["start", "--port", String(offlinePort), "--hostname", "127.0.0.1", "--json"], {
+    // The start call is what exercises the fallback; its own stdout is not the
+    // evidence we assert on (the log and the state file are).
+    cli(["start", "--port", String(offlinePort), "--hostname", "127.0.0.1", "--json"], {
       env: { ENNOTE_HOME: offlineHome, ENNOTE_RELEASES_BASE: "https://127.0.0.1:1" },
     });
     const offlineLog = await readFile(resolve(offlineHome, "logs", "ennote.log"), "utf8");
