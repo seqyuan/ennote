@@ -2967,6 +2967,39 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
+        /**
+         * @description Non-durable rendering delta kinds, a different axis from the durable
+         *     RunEvent types: a text_delta never reaches the event log, and a durable
+         *     message_committed has no live counterpart. Several names exist in both
+         *     sets, so a frame is discriminated by field presence (liveSeq versus
+         *     eventId), never by `type` alone.
+         * @enum {string}
+         */
+        RunLiveEventType: "text_delta" | "thinking_delta" | "tool_call_delta" | "vision_description_delta" | "tool_output_delta" | "child_progress";
+        /**
+         * @description One live delta as written on GET /v1/runs/{runID}/events with an
+         *     `event: live` field and no `id:` line, so it never advances the durable
+         *     cursor. The payload shape is decided by `type` and is deliberately open
+         *     here.
+         */
+        RunLiveEventFrame: {
+            runId: string;
+            type: components["schemas"]["RunLiveEventType"];
+            streamId?: string;
+            /** Format: int64 */
+            liveSeq: number;
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            createdAt: string;
+        };
+        /**
+         * @description One frame of GET /v1/runs/{runID}/events, describing the JSON carried on
+         *     the SSE `data:` line. Durable frames carry eventId/seq and an `id:` line;
+         *     live frames carry liveSeq and `event: live`.
+         */
+        RunEventStreamFrame: components["schemas"]["RunEvent"] | components["schemas"]["RunLiveEventFrame"];
         RunMessage: {
             id: string;
             runId: string;
@@ -4170,6 +4203,52 @@ export interface components {
             checkpoints?: components["schemas"]["ContextCompaction"][];
             delegationActive?: boolean;
         };
+        /**
+         * @description First frame of GET /v1/sessions/{sessionID}/events: the authoritative
+         *     transient baseline a reconnecting client replaces its state with.
+         */
+        SessionSubscribedFrame: {
+            /** @constant */
+            type: "subscribed";
+            instanceId: string;
+            /** Format: int64 */
+            lastSeq: number;
+            snapshot: components["schemas"]["SessionRunSnapshot"];
+        };
+        /** @description Full replacement of the transient projection, emitted only when it changes. */
+        SessionSnapshotFrame: {
+            /** @constant */
+            type: "snapshot";
+            /** Format: int64 */
+            lastSeq: number;
+            snapshot: components["schemas"]["SessionRunSnapshot"];
+        };
+        /**
+         * @description The message_committed variant of the durable session feed. Unlike every
+         *     other durable frame it omits eventId/seq (the SSE `id:` line carries the
+         *     cursor) and adds the committed seq range so the client can re-sync one
+         *     page of the timeline without refetching the session.
+         */
+        SessionMessageCommittedFrame: {
+            /** @constant */
+            type: "message_committed";
+            runId: string;
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Format: int64 */
+            firstSeq: number;
+            /** Format: int64 */
+            lastSeq: number;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        /**
+         * @description One frame of GET /v1/sessions/{sessionID}/events. Transient frames are
+         *     subscribed/snapshot; durable frames reuse the RunEvent shape except for
+         *     message_committed, which carries a seq range instead of eventId/seq.
+         */
+        SessionEventStreamFrame: components["schemas"]["SessionSubscribedFrame"] | components["schemas"]["SessionSnapshotFrame"] | components["schemas"]["SessionMessageCommittedFrame"] | components["schemas"]["RunEvent"];
         TurnSubmission: {
             turnId: string;
             userMessageId: string;
@@ -6681,13 +6760,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Session change feed (durable event whitelist + transient snapshots) */
+            /**
+             * @description Session change feed (durable event whitelist + transient snapshots).
+             *     Each SSE `data:` line is one SessionEventStreamFrame.
+             */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/event-stream": string;
+                    "text/event-stream": components["schemas"]["SessionEventStreamFrame"];
                 };
             };
             404: components["responses"]["Error"];
@@ -7474,17 +7556,17 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Replay-safe durable delivery event stream */
+            /**
+             * @description Replay-safe durable delivery event stream. Each frame is
+             *     `event: delivery` with the event id in the SSE `id:` line; the
+             *     `data:` line is one DeliveryEvent, not a wrapper around it.
+             */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/event-stream": {
-                        /** Format: int64 */
-                        id?: number;
-                        data?: components["schemas"]["DeliveryEvent"];
-                    };
+                    "text/event-stream": components["schemas"]["DeliveryEvent"];
                 };
             };
             400: components["responses"]["Error"];
@@ -7763,13 +7845,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Replayable server-sent event stream */
+            /**
+             * @description Replayable server-sent event stream. Each SSE `data:` line is one
+             *     RunEventStreamFrame; `event: live` frames are non-durable deltas.
+             */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/event-stream": string;
+                    "text/event-stream": components["schemas"]["RunEventStreamFrame"];
                 };
             };
             404: components["responses"]["Error"];

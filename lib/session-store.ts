@@ -15,12 +15,12 @@ type ToolApprovalRequest = components["schemas"]["ToolApprovalRequest"];
 type QueuedInput = components["schemas"]["QueuedInput"];
 type SessionRunSnapshot = components["schemas"]["SessionRunSnapshot"];
 
-// Frames of the session change feed (GET /v1/sessions/{id}/events).
-type SessionStreamFrame =
-  | { type: "subscribed"; instanceId?: string; lastSeq?: number; snapshot?: SessionRunSnapshot }
-  | { type: "snapshot"; lastSeq?: number; snapshot?: SessionRunSnapshot }
-  | { type: "message_committed"; runId?: string; payload?: unknown; firstSeq?: number; lastSeq?: number; createdAt?: string }
-  | { type: string; eventId?: number; runId?: string; seq?: number; payload?: unknown; createdAt?: string };
+// Frames of the session change feed (GET /v1/sessions/{id}/events). The shapes
+// come from contracts/openapi.yaml rather than being restated here, so a frame
+// field that changes on the Worker side fails typecheck in this consumer
+// instead of silently arriving as undefined. The Go half of the same guard is
+// internal/api/stream_contract_test.go.
+type SessionStreamFrame = components["schemas"]["SessionEventStreamFrame"];
 
 const PAGE_SIZE = 50;
 

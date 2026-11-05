@@ -1794,10 +1794,12 @@ paths:
           schema: { type: string }
       responses:
         "200":
-          description: Session change feed (durable event whitelist + transient snapshots)
+          description: |
+            Session change feed (durable event whitelist + transient snapshots).
+            Each SSE `data:` line is one SessionEventStreamFrame.
           content:
             text/event-stream:
-              schema: { type: string }
+              schema: { $ref: "#/components/schemas/SessionEventStreamFrame" }
         "404": { $ref: "#/components/responses/Error" }
   /v1/sessions/{sessionID}/artifacts/{artifactID}:
     parameters:
@@ -2476,14 +2478,13 @@ paths:
           schema: { type: integer, format: int64 }
       responses:
         "200":
-          description: Replay-safe durable delivery event stream
+          description: |
+            Replay-safe durable delivery event stream. Each frame is
+            `event: delivery` with the event id in the SSE `id:` line; the
+            `data:` line is one DeliveryEvent, not a wrapper around it.
           content:
             text/event-stream:
-              schema:
-                type: object
-                properties:
-                  id: { type: integer, format: int64 }
-                  data: { $ref: "#/components/schemas/DeliveryEvent" }
+              schema: { $ref: "#/components/schemas/DeliveryEvent" }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "500": { $ref: "#/components/responses/Error" }
@@ -2729,10 +2730,12 @@ paths:
       operationId: streamRunEvents
       responses:
         "200":
-          description: Replayable server-sent event stream
+          description: |
+            Replayable server-sent event stream. Each SSE `data:` line is one
+            RunEventStreamFrame; `event: live` frames are non-durable deltas.
           content:
             text/event-stream:
-              schema: { type: string }
+              schema: { $ref: "#/components/schemas/RunEventStreamFrame" }
         "404":
           $ref: "#/components/responses/Error"
 
@@ -4393,6 +4396,45 @@ components:
             - run_interrupted
         payload: { type: object, additionalProperties: true }
         createdAt: { type: string, format: date-time }
+    RunLiveEventType:
+      type: string
+      description: |
+        Non-durable rendering delta kinds, a different axis from the durable
+        RunEvent types: a text_delta never reaches the event log, and a durable
+        message_committed has no live counterpart. Several names exist in both
+        sets, so a frame is discriminated by field presence (liveSeq versus
+        eventId), never by `type` alone.
+      enum:
+        - text_delta
+        - thinking_delta
+        - tool_call_delta
+        - vision_description_delta
+        - tool_output_delta
+        - child_progress
+    RunLiveEventFrame:
+      type: object
+      additionalProperties: false
+      description: |
+        One live delta as written on GET /v1/runs/{runID}/events with an
+        `event: live` field and no `id:` line, so it never advances the durable
+        cursor. The payload shape is decided by `type` and is deliberately open
+        here.
+      required: [runId, type, liveSeq, payload, createdAt]
+      properties:
+        runId: { type: string }
+        type: { $ref: "#/components/schemas/RunLiveEventType" }
+        streamId: { type: string }
+        liveSeq: { type: integer, format: int64 }
+        payload: { type: object, additionalProperties: true }
+        createdAt: { type: string, format: date-time }
+    RunEventStreamFrame:
+      description: |
+        One frame of GET /v1/runs/{runID}/events, describing the JSON carried on
+        the SSE `data:` line. Durable frames carry eventId/seq and an `id:` line;
+        live frames carry liveSeq and `event: live`.
+      oneOf:
+        - $ref: "#/components/schemas/RunEvent"
+        - $ref: "#/components/schemas/RunLiveEventFrame"
     RunMessage:
       type: object
       additionalProperties: false
@@ -6037,6 +6079,53 @@ components:
           type: array
           items: { $ref: "#/components/schemas/ContextCompaction" }
         delegationActive: { type: boolean }
+    SessionSubscribedFrame:
+      type: object
+      additionalProperties: false
+      description: |
+        First frame of GET /v1/sessions/{sessionID}/events: the authoritative
+        transient baseline a reconnecting client replaces its state with.
+      required: [type, instanceId, lastSeq, snapshot]
+      properties:
+        type: { type: string, const: subscribed }
+        instanceId: { type: string }
+        lastSeq: { type: integer, format: int64 }
+        snapshot: { $ref: "#/components/schemas/SessionRunSnapshot" }
+    SessionSnapshotFrame:
+      type: object
+      additionalProperties: false
+      description: Full replacement of the transient projection, emitted only when it changes.
+      required: [type, lastSeq, snapshot]
+      properties:
+        type: { type: string, const: snapshot }
+        lastSeq: { type: integer, format: int64 }
+        snapshot: { $ref: "#/components/schemas/SessionRunSnapshot" }
+    SessionMessageCommittedFrame:
+      type: object
+      additionalProperties: false
+      description: |
+        The message_committed variant of the durable session feed. Unlike every
+        other durable frame it omits eventId/seq (the SSE `id:` line carries the
+        cursor) and adds the committed seq range so the client can re-sync one
+        page of the timeline without refetching the session.
+      required: [type, runId, payload, firstSeq, lastSeq, createdAt]
+      properties:
+        type: { type: string, const: message_committed }
+        runId: { type: string }
+        payload: { type: object, additionalProperties: true }
+        firstSeq: { type: integer, format: int64 }
+        lastSeq: { type: integer, format: int64 }
+        createdAt: { type: string, format: date-time }
+    SessionEventStreamFrame:
+      description: |
+        One frame of GET /v1/sessions/{sessionID}/events. Transient frames are
+        subscribed/snapshot; durable frames reuse the RunEvent shape except for
+        message_committed, which carries a seq range instead of eventId/seq.
+      oneOf:
+        - $ref: "#/components/schemas/SessionSubscribedFrame"
+        - $ref: "#/components/schemas/SessionSnapshotFrame"
+        - $ref: "#/components/schemas/SessionMessageCommittedFrame"
+        - $ref: "#/components/schemas/RunEvent"
     TurnSubmission:
       type: object
       required: [turnId, userMessageId, run, existing]
