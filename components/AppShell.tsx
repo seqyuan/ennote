@@ -27,7 +27,7 @@ import { useProjectSelector } from "@/hooks/useProjectSelector";
 import { SettingsView } from "./SettingsView";
 import type { WorkspaceView } from "./workspace-view";
 import { useWorkspaceSessionConnect } from "@/hooks/useWorkspaceSessionConnect";
-import { useOfflineStatus } from "@/hooks/useOfflineStatus";
+import { useWorkerReachability } from "@/hooks/useWorkerReachability";
 import { reuseOrCreateBlankSession, SELECTED_SESSION_KEY, writeStoredId } from "@/lib/ensure-blank-session";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { SettingsTab, Session } from "@/components/settings/types";
@@ -316,8 +316,10 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
   const combinedError = chat.error ?? sessionNavigation.error;
   const clearCombinedError = () => { chat.clearError(); sessionNavigation.setError(null); };
   // Offline App state is read-only (AGENTS.md): the banner explains why a
-  // mutation is refused instead of being queued.
-  const offline = useOfflineStatus();
+  // mutation is refused instead of being queued. The signal is Worker
+  // reachability, so a machine with no network but a live loopback Worker keeps
+  // its write path.
+  const workerUnreachable = useWorkerReachability();
 
   return (
     <ChildProgressProvider>
@@ -361,7 +363,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
 
         {/* Center: chat (or Roles/Graphs settings view) */}
         <div className="workspace-content" inert={isMobile && sidebarOpen}>
-          <OfflineBanner offline={offline} />
+          <OfflineBanner workerUnreachable={workerUnreachable} />
           {view === "chat" ? (
             <>
               {/* Top bar */}

@@ -22,23 +22,67 @@ export class WorkerGenerationChangedError extends Error {
   }
 }
 
-export class WorkerOfflineError extends Error {
+export class WorkerUnreachableError extends Error {
   constructor() {
-    super("You are offline. Ennote is read-only until the connection returns.");
-    this.name = "WorkerOfflineError";
+    super("The Worker is unreachable. Ennote is read-only until it returns.");
+    this.name = "WorkerUnreachableError";
   }
 }
 
-// Offline App state is read-only (AGENTS.md): a mutation is rejected before it
-// reaches the network and is never queued for replay, so a refactor cannot turn
-// the missing queue into an implicit one. Reads stay ungated — the loopback
-// Worker keeps serving the localhost/LAN Web with no network at all.
+/** Whether the last Worker exchange actually reached the process. */
+export type WorkerReachability = "unknown" | "reachable" | "unreachable";
+
+let workerReachability: WorkerReachability = "unknown";
+const reachabilityListeners = new Set<() => void>();
+
+export function getWorkerReachability(): WorkerReachability {
+  return workerReachability;
+}
+
+export function subscribeWorkerReachability(listener: () => void): () => void {
+  reachabilityListeners.add(listener);
+  return () => reachabilityListeners.delete(listener);
+}
+
+function setWorkerReachability(next: WorkerReachability): void {
+  if (workerReachability === next) return;
+  workerReachability = next;
+  for (const listener of reachabilityListeners) listener();
+}
+
+// probeWorkerReachability asks the Worker, through the gate, whether it answers.
+// The browser's online flag is only a hint to call this: Ennote's authority is a
+// loopback process, and navigator.onLine reports the state of the internet,
+// which is a different question. A machine with no network can still serve and
+// mutate its own Worker, and a gate that answers 401/428 is still up.
+export async function probeWorkerReachability(): Promise<boolean> {
+  try {
+    await fetch(workerAPIPath("/v1/health/ready"), { method: "GET", cache: "no-store" });
+    setWorkerReachability("reachable");
+    return true;
+  } catch {
+    setWorkerReachability("unreachable");
+    return false;
+  }
+}
+
+// Offline App state is read-only (AGENTS.md): once the Worker is known to be
+// unreachable, a mutation is refused before it reaches the network and is never
+// queued for replay, so a refactor cannot turn the missing queue into an
+// implicit one. The signal is the Worker's reachability, not navigator.onLine:
+// reads and writes both stay open while the local process answers.
+//
+// Reachability is written only by probeWorkerReachability, never inferred from an
+// individual request. A single failed GET does not prove the process is gone —
+// it is just as likely to be one unavailable resource — and treating it as proof
+// would refuse unrelated writes. Asking the Worker is the only evidence that
+// answers the question.
 const READ_ONLY_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
-function assertNotOfflineMutation(init?: RequestInit): void {
-  if (typeof navigator === "undefined" || navigator.onLine !== false) return;
+function assertWorkerReachableMutation(init?: RequestInit): void {
+  if (workerReachability !== "unreachable") return;
   if (READ_ONLY_METHODS.has((init?.method ?? "GET").toUpperCase())) return;
-  throw new WorkerOfflineError();
+  throw new WorkerUnreachableError();
 }
 
 export function workerAPIPath(path: string): string {
@@ -46,7 +90,7 @@ export function workerAPIPath(path: string): string {
 }
 
 export async function apiResponse(path: string, init?: RequestInit): Promise<Response> {
-  assertNotOfflineMutation(init);
+  assertWorkerReachableMutation(init);
   const requestGeneration = workerGeneration;
   const response = await fetch(workerAPIPath(path), init);
   acceptWorkerGeneration(response, requestGeneration);

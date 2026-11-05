@@ -56,23 +56,62 @@ describe("worker API response formats", () => {
     await expect(apiFetch("/v1/projects")).resolves.toEqual({ ok: true });
   });
 
-  it("rejects a mutation before it reaches the network while offline", async () => {
-    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ data: { ok: true } }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
+  it("refuses a mutation once a probe finds the Worker unreachable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
     }));
-    vi.stubGlobal("fetch", fetchSpy);
-    vi.stubGlobal("navigator", { onLine: false });
-    const { apiFetch, WorkerOfflineError } = await import("@/lib/worker-api.client");
+    const { apiFetch, WorkerUnreachableError, probeWorkerReachability } = await import("@/lib/worker-api.client");
+
+    await expect(probeWorkerReachability()).resolves.toBe(false);
 
     // Offline App state is read-only: the mutation never leaves the client and is
     // never queued for replay.
+    const fetchSpy = vi.mocked(fetch);
+    const callsBefore = fetchSpy.mock.calls.length;
     await expect(apiFetch("/v1/projects", { method: "POST", body: "{}" }))
-      .rejects.toBeInstanceOf(WorkerOfflineError);
-    expect(fetchSpy).not.toHaveBeenCalled();
+      .rejects.toBeInstanceOf(WorkerUnreachableError);
+    expect(fetchSpy).toHaveBeenCalledTimes(callsBefore);
+  });
 
-    // Reads stay ungated so a loopback Worker keeps serving the local Web.
-    await expect(apiFetch("/v1/projects")).resolves.toEqual({ ok: true });
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  it("keeps the write path open while the Worker answers, even with the browser offline", async () => {
+    // A local-first machine with no network still owns a live loopback Worker.
+    // navigator.onLine reports the internet, which is a different question, so
+    // it must not be what refuses a mutation.
+    vi.stubGlobal("navigator", { onLine: false });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: { ok: true } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })));
+    const { apiFetch, probeWorkerReachability } = await import("@/lib/worker-api.client");
+
+    await expect(probeWorkerReachability()).resolves.toBe(true);
+    await expect(apiFetch("/v1/projects", { method: "POST", body: "{}" })).resolves.toEqual({ ok: true });
+  });
+
+  it("does not treat an HTTP error status as unreachable", async () => {
+    // 500, 404 and 428 all mean something answered the socket.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: { message: "nope" } }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    })));
+    const { apiFetch, probeWorkerReachability, getWorkerReachability } = await import("@/lib/worker-api.client");
+
+    await expect(probeWorkerReachability()).resolves.toBe(true);
+    await expect(apiFetch("/v1/projects")).rejects.toThrow("nope");
+    expect(getWorkerReachability()).toBe("reachable");
+  });
+
+  it("reports a recovered Worker after a failed probe", async () => {
+    const { probeWorkerReachability, getWorkerReachability } = await import("@/lib/worker-api.client");
+
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
+    await expect(probeWorkerReachability()).resolves.toBe(false);
+    expect(getWorkerReachability()).toBe("unreachable");
+
+    // Any HTTP answer proves the process is up, including one that is still
+    // waiting for first-run password setup.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 428 })));
+    await expect(probeWorkerReachability()).resolves.toBe(true);
+    expect(getWorkerReachability()).toBe("reachable");
   });
 });

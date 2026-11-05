@@ -4,13 +4,14 @@ import { describe, expect, it } from "vitest";
 import { OfflineBanner } from "@/components/OfflineBanner";
 
 describe("offline read-only banner", () => {
-  it("announces read-only state while the browser is offline", () => {
-    const html = renderToStaticMarkup(<OfflineBanner offline />);
+  it("announces read-only state while the Worker is unreachable", () => {
+    const html = renderToStaticMarkup(<OfflineBanner workerUnreachable />);
     expect(html).toContain('role="status"');
-    expect(html).toContain("Offline: Ennote is read-only until the connection returns.");
+    expect(html).toContain("Worker unreachable");
+    expect(html).toContain("read-only until it returns");
   });
 
-  it("renders nothing while online", () => {
-    expect(renderToStaticMarkup(<OfflineBanner offline={false} />)).toBe("");
+  it("renders nothing while the Worker answers", () => {
+    expect(renderToStaticMarkup(<OfflineBanner workerUnreachable={false} />)).toBe("");
   });
 });
