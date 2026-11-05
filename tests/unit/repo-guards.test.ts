@@ -204,3 +204,31 @@ describe("file-size guard", () => {
     expect(result.stderr).toContain("recorded in RECORDED_CEILINGS but not found");
   });
 });
+
+describe("error-code inventory", () => {
+  it("matches the sources", () => {
+    const result = spawnSync(process.execPath, [resolve(root, "scripts/generate-error-codes.mjs"), "--check"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("Error-code inventory is current");
+  });
+
+  it("fails when a new code is emitted without regenerating the list", () => {
+    const repository = temporaryGitRepository();
+    mkdirSync(join(repository, "ennoworker", "internal", "api"), { recursive: true });
+    mkdirSync(join(repository, "contracts"), { recursive: true });
+    writeFileSync(join(repository, "contracts", "error-codes.txt"), "# stale\n");
+    writeFileSync(join(repository, "ennoworker/internal/api/x.go"),
+      'package api\n\nfunc a() { writeError(w, r, http.StatusBadRequest, "brand_new_code", "m", true) }\n');
+
+    const result = spawnSync(process.execPath, [resolve(root, "scripts/generate-error-codes.mjs"), "--check"], {
+      cwd: repository,
+      encoding: "utf8",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("out of date");
+  });
+});

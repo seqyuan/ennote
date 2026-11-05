@@ -64,6 +64,7 @@ jobs:
       - run: npm ci
       - run: npm run generate:api
       - run: git diff --exit-code lib/worker-api.gen.ts
+      - run: npm run check:error-codes
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run check:file-sizes
