@@ -190,6 +190,50 @@ try {
     throw new Error("ennogate did not reconnect to the authenticated surviving ennoworker");
   }
 
+  // Offline install: with an unreachable release host the CLI must start from a
+  // build already on disk and say which one it used. Only testable when this
+  // run has pre-built binaries to seed the cache with (same inputs as above).
+  if (smokeWorkerDir) {
+    const platformSuffix = `${process.platform}-${process.arch}`;
+    const cachedVersion = "0.0.1";
+    const offlineHome = resolve(temporary, "offline-home");
+    await mkdir(resolve(offlineHome, "bin"), { recursive: true });
+    for (const name of ["ennogate", "ennoworker"]) {
+      const source = resolve(smokeWorkerDir, `${name}-${platformSuffix}`);
+      const destination = resolve(offlineHome, "bin", `${name}-${cachedVersion}-${platformSuffix}`);
+      await copyFile(source, destination);
+      await chmod(destination, 0o700);
+    }
+
+    const offlinePort = await freePort();
+    const offline = cli(["start", "--port", String(offlinePort), "--hostname", "127.0.0.1", "--json"], {
+      env: { ENNOTE_HOME: offlineHome, ENNOTE_RELEASES_BASE: "https://127.0.0.1:1" },
+    });
+    const offlineLog = await readFile(resolve(offlineHome, "logs", "ennote.log"), "utf8");
+    if (!offlineLog.includes(`warning: failed to install Ennote ${expectedVersion}`)) {
+      throw new Error(`offline install did not record the download failure: ${offlineLog}`);
+    }
+    if (!offlineLog.includes(`using cached ${cachedVersion}`)) {
+      throw new Error(`offline install did not warn about the cached fallback: ${offlineLog}`);
+    }
+    const offlineHealth = await request(`http://127.0.0.1:${offlinePort}`, "/api/health");
+    if (offlineHealth.response.status !== 200) {
+      throw new Error("cached-binary fallback did not start a healthy gate");
+    }
+    // The state file is the machine-readable half: it must name the build that
+    // is actually serving, not the version the CLI wanted.
+    const offlineState = JSON.parse(await readFile(resolve(offlineHome, "ennote-state.json"), "utf8"));
+    if (offlineState.binaryVersion !== cachedVersion || offlineState.binaryFallback !== true) {
+      throw new Error(`state did not record the cached build: ${JSON.stringify(offlineState)}`);
+    }
+    const offlineStatus = parseLastJSON(cli(["status", "--json"], { env: { ENNOTE_HOME: offlineHome } }).stdout);
+    if (offlineStatus.binaryVersion !== cachedVersion || offlineStatus.binaryFallback !== true) {
+      throw new Error(`status did not report the cached build: ${JSON.stringify(offlineStatus)}`);
+    }
+    cli(["stop", "--json"], { env: { ENNOTE_HOME: offlineHome } });
+    await waitForDead(offlineState.pid);
+  }
+
   const conflictHome = resolve(temporary, "conflict-home");
   const blocker = createServer();
   await new Promise((resolveListen, reject) => {

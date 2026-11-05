@@ -18,7 +18,18 @@ const START_TIMEOUT_MS = 45_000;
 const STOP_TIMEOUT_MS = 15_000;
 const PACK_INSPECT_TIMEOUT_MS = 15_000;
 const PACK_REQUEST_TIMEOUT_MS = 15_000;
-const GITHUB_RELEASES_BASE = "https://github.com/seqyuan/ennote/releases/download";
+const DEFAULT_RELEASES_BASE = "https://github.com/seqyuan/ennote/releases/download";
+
+// releasesBase honours ENNOTE_RELEASES_BASE so a mirror (or an air-gapped
+// install serving the release assets locally) can be used instead of GitHub.
+// The value is read at call time, not import time, so a wrapper script that
+// sets it still affects this process. HTTPS is enforced by requireHTTPS.
+function releasesBase() {
+  const override = String(process.env.ENNOTE_RELEASES_BASE ?? "").trim();
+  return override === "" ? DEFAULT_RELEASES_BASE : override.replace(/\/+$/, "");
+}
+
+const BINARY_NAMES = ["ennogate", "ennoworker"];
 
 function platformSuffix(platform = os.platform(), arch = os.arch()) {
   if (!new Set(["linux", "darwin"]).has(platform)) {
@@ -99,6 +110,53 @@ function removeFile(file) {
   try { fs.unlinkSync(file); } catch (error) {
     if (error?.code !== "ENOENT") throw error;
   }
+}
+
+// compareVersions orders dotted numeric versions. A pre-release suffix sorts
+// before the release it belongs to, so 0.5.0-rc1 < 0.5.0.
+function compareVersions(left, right) {
+  const parse = (value) => {
+    const [core, ...pre] = String(value).split("-");
+    return { parts: core.split(".").map((part) => Number.parseInt(part, 10) || 0), pre: pre.join("-") };
+  };
+  const a = parse(left);
+  const b = parse(right);
+  const length = Math.max(a.parts.length, b.parts.length);
+  for (let index = 0; index < length; index += 1) {
+    const difference = (a.parts[index] ?? 0) - (b.parts[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  if (a.pre === b.pre) return 0;
+  if (a.pre === "") return 1;
+  if (b.pre === "") return -1;
+  return a.pre < b.pre ? -1 : 1;
+}
+
+// cachedBinaryVersions lists the versions that already have BOTH binaries for
+// this platform, newest first. A version with only one binary is an abandoned
+// partial download and must not be offered as a fallback. Selection is explicit
+// rather than readdir order, which is filesystem-defined.
+function cachedBinaryVersions(home, suffix) {
+  const binDir = runtimeBinDir(home);
+  let entries;
+  try {
+    entries = fs.readdirSync(binDir);
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+  const versions = new Set();
+  for (const entry of entries) {
+    for (const name of BINARY_NAMES) {
+      const postfix = `-${suffix}`;
+      if (!entry.startsWith(`${name}-`) || !entry.endsWith(postfix)) continue;
+      const version = entry.slice(name.length + 1, entry.length - postfix.length);
+      if (version !== "") versions.add(version);
+    }
+  }
+  return [...versions]
+    .filter((version) => BINARY_NAMES.every((name) => fs.existsSync(path.join(binDir, `${name}-${version}-${suffix}`))))
+    .sort((a, b) => compareVersions(b, a));
 }
 
 function isPidAlive(pid) {
@@ -260,33 +318,56 @@ function downloadText(url) {
   });
 }
 
-async function ensureBinaries(home, pkg, log, platform = os.platform(), arch = os.arch()) {
+async function ensureBinaries(home, pkg, log, platform = os.platform(), arch = os.arch(), download = {}) {
   const suffix = platformSuffix(platform, arch);
   const version = pkg.version;
   const binDir = runtimeBinDir(home);
   ensureDirectory(binDir);
-  const gatePath = path.join(binDir, `ennogate-${version}-${suffix}`);
-  const workerPath = path.join(binDir, `ennoworker-${version}-${suffix}`);
-  const needed = [];
-  if (!fs.existsSync(gatePath)) needed.push({ name: "ennogate", path: gatePath });
-  if (!fs.existsSync(workerPath)) needed.push({ name: "ennoworker", path: workerPath });
-  if (needed.length === 0) return;
-  log(`Downloading ${needed.length} binary(s) for ${suffix}...`);
-  const sumsUrl = `${GITHUB_RELEASES_BASE}/v${version}/SHA256SUMS`;
-  const sumsText = await downloadText(sumsUrl);
-  for (const { name, path: dest } of needed) {
-    const filename = `${name}-${suffix}`;
-    const expected = parseSHA256SUMS(sumsText, filename);
-    const url = `${GITHUB_RELEASES_BASE}/v${version}/${filename}`;
-    await downloadFile(url, dest);
-    try {
-      verifyFileSHA256(dest, expected);
-    } catch (error) {
-      try { fs.unlinkSync(dest); } catch {}
-      throw error;
+  const binaryPath = (name, at) => path.join(binDir, `${name}-${at}-${suffix}`);
+  const missing = BINARY_NAMES.filter((name) => !fs.existsSync(binaryPath(name, version)));
+  if (missing.length === 0) return { version, fallback: false };
+
+  const base = releasesBase();
+  const fetchText = download.downloadText ?? downloadText;
+  const fetchFile = download.downloadFile ?? downloadFile;
+  const sumsUrl = `${base}/v${version}/SHA256SUMS`;
+  log(`Downloading ${missing.length} binary(s) for ${suffix}...`);
+  try {
+    const sumsText = await fetchText(sumsUrl);
+    for (const name of missing) {
+      const filename = `${name}-${suffix}`;
+      const dest = binaryPath(name, version);
+      const expected = parseSHA256SUMS(sumsText, filename);
+      try {
+        await fetchFile(`${base}/v${version}/${filename}`, dest);
+        verifyFileSHA256(dest, expected);
+      } catch (error) {
+        // Never leave a partial or unverified binary behind: it would look like
+        // a usable cache entry to the next run.
+        removeFile(dest);
+        throw error;
+      }
     }
+    return { version, fallback: false };
+  } catch (error) {
+    // Downloading needs GitHub. A local-first runtime should still start from a
+    // binary that is already on disk rather than fail on a network the user may
+    // not have, so an older cached version is better than no server.
+    const fallback = cachedBinaryVersions(home, suffix)[0];
+    if (!fallback) {
+      throw new Error(
+        `failed to install Ennote ${version} binaries: ${error.message}; ` +
+        `attempted ${sumsUrl} and found no complete cached build under ${binDir} for ${suffix}. ` +
+        `Install the release assets manually or set ENNOTE_RELEASES_BASE to a mirror.`,
+      );
+    }
+    log(
+      `warning: failed to install Ennote ${version} binaries (${error.message}); ` +
+      `using cached ${fallback} for ${suffix} instead. ` +
+      `The Worker is older than the CLI's expected ${version}; re-run with network access to update.`,
+    );
+    return { version: fallback, fallback: true };
   }
-  log("Binaries ready.");
 }
 
 async function startService(options) {
@@ -304,8 +385,8 @@ async function startService(options) {
   if (!await canBind(port, hostname)) throw new Error(`Port ${port} is already in use on ${hostname}`);
 
   const pkg = JSON.parse(fs.readFileSync(path.join(packageDir, "package.json"), "utf8"));
-  await ensureBinaries(home, pkg, log);
-  const runtime = runtimePaths(packageDir, home, pkg.version);
+  const binaries = await ensureBinaries(home, pkg, log);
+  const runtime = runtimePaths(packageDir, home, binaries.version);
   validateRuntime(runtime);
   ensureDirectory(home);
   const output = fs.openSync(files.log, "a", 0o600);
@@ -332,9 +413,14 @@ async function startService(options) {
     port: String(port),
     hostname,
     url,
+    // Which build is actually serving: an offline start can run a cached
+    // version older than this CLI, and that has to be recoverable after the
+    // fact rather than only visible in one warning line.
+    binaryVersion: binaries.version,
+    binaryFallback: binaries.fallback,
     startedAt: new Date().toISOString(),
   });
-  log(`starting ennogate pid=${child.pid} url=${url}`);
+  log(`starting ennogate pid=${child.pid} url=${url} bin=${binaries.version}${binaries.fallback ? " (cached fallback)" : ""}`);
 
   const deadline = Date.now() + START_TIMEOUT_MS;
   while (Date.now() < deadline) {
@@ -376,7 +462,14 @@ async function serviceStatus(home) {
     return { running: false, stale: Boolean(state) };
   }
   const healthy = await healthCheck(state.url);
-  return { running: healthy, healthy, pid: state.pid, url: state.url, port: state.port };
+  return {
+    running: healthy,
+    healthy,
+    pid: state.pid,
+    url: state.url,
+    port: state.port,
+    ...(state.binaryVersion ? { binaryVersion: state.binaryVersion, binaryFallback: Boolean(state.binaryFallback) } : {}),
+  };
 }
 
 function isLoopbackHostname(hostname) {
@@ -877,6 +970,9 @@ module.exports = {
   parseSHA256SUMS,
   fileSHA256,
   verifyFileSHA256,
+  compareVersions,
+  cachedBinaryVersions,
+  releasesBase,
   ensureBinaries,
   startService,
   stopService,
