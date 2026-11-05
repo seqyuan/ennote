@@ -332,18 +332,14 @@ func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.Ag
 	toolPolicyID := requestedConfig.ToolPolicyProfileID
 	if frozenRole != nil {
 		ceiling := roleDefinition.PermissionCeiling
-		ceilingRank, ok := permissionModeRank(ceiling)
-		if !ok {
-			return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
-				errors.New("invalid Role permission ceiling"))
-		}
 		if run.ParentRunID != "" {
 			parentMode, err := parentFrozenToolPolicyModeTx(ctx, tx, run.ParentRunID)
 			if err != nil {
 				return nil, err
 			}
-			if parentRank, parentOK := permissionModeRank(parentMode); parentOK && parentRank < ceilingRank {
-				ceiling = parentMode
+			ceiling, err = resolveChildPermissionCeiling(parentMode, ceiling)
+			if err != nil {
+				return nil, err
 			}
 		}
 		switch ceiling {
@@ -545,10 +541,9 @@ func (r *RunRepo) fileRuntimeCandidates(ctx context.Context, ids []string) ([]do
 	return candidates, nil
 }
 
-// permissionModeRank orders the selectable permission modes from strictest to
-// loosest. Modes outside that set (allow_existing_behavior, restricted) are
-// deployment policies with no comparable ceiling, so ok is false and they never
-// tighten or loosen another Run's mode.
+// permissionModeRank orders the three selectable builtin modes from strictest
+// (0) to loosest. The two deployment modes are deliberately absent: they are not
+// expressible as a builtin profile, so a child cannot be pinned to them.
 func permissionModeRank(mode domain.PermissionMode) (rank int, ok bool) {
 	switch mode {
 	case domain.PermissionDiscuss:
@@ -560,6 +555,38 @@ func permissionModeRank(mode domain.PermissionMode) (rank int, ok bool) {
 	default:
 		return 0, false
 	}
+}
+
+// deploymentModeAllowExistingBehavior is the loosest tool policy the Worker can
+// hold: it permits every executable, so it can never tighten a child.
+const deploymentModeAllowExistingBehavior = domain.PermissionMode("allow_existing_behavior")
+
+// resolveChildPermissionCeiling returns the mode a delegated child freezes: the
+// stricter of the parent's mode and the Role's ceiling. It fails closed rather
+// than leaving the child loose whenever an answer cannot be proven.
+//
+// restricted is the strictest deployment mode, but a child can only be pinned to
+// a builtin profile, so the strictest builtin (discuss) is the tightest ceiling
+// available. An unrecognized mode (an older frozen snapshot, a mode this build
+// does not know) is treated the same way: the child must not inherit the looser
+// Role ceiling just because the parent's mode could not be ranked.
+func resolveChildPermissionCeiling(parentMode, roleCeiling domain.PermissionMode) (domain.PermissionMode, error) {
+	ceilingRank, ok := permissionModeRank(roleCeiling)
+	if !ok {
+		return "", domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
+			errors.New("invalid Role permission ceiling"))
+	}
+	if parentMode == deploymentModeAllowExistingBehavior {
+		return roleCeiling, nil
+	}
+	parentRank, known := permissionModeRank(parentMode)
+	if !known {
+		return domain.PermissionDiscuss, nil
+	}
+	if parentRank < ceilingRank {
+		return parentMode, nil
+	}
+	return roleCeiling, nil
 }
 
 // parentFrozenToolPolicyModeTx reads the tool policy mode frozen on a child
