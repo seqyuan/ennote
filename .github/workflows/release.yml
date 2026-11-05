@@ -76,6 +76,7 @@ jobs:
           npm run typecheck
           npm test
           npm run test:go
+          npm run check:error-codes
 
       - name: Build Frontend
         run: npm run build:web
