@@ -1,9 +1,5 @@
-import fs from "node:fs";
-import path from "node:path";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { components, operations } from "@/lib/worker-api.gen";
-
-const root = path.resolve(import.meta.dirname, "../..");
 
 type InspectRequest = components["schemas"]["PackInspectRequest"];
 type InspectResult = components["schemas"]["PackInspectResult"];
@@ -38,20 +34,10 @@ describe("Agent Pack inspect contract", () => {
     expect(request.source.path).toBe("/tmp/cell-qc.enpack");
   });
 
-  it("keeps the generated client in step with the OpenAPI contract", () => {
-    const generated = fs.readFileSync(path.join(root, "lib/worker-api.gen.ts"), "utf8");
-    expect(generated).toContain('"/v1/packs/inspect"');
-    expect(generated).toContain("inspectPack: {");
-    expect(generated).toContain("PackInspectRequest: {");
-    expect(generated).toContain("PackInspectResult: {");
-    expect(generated).toContain("PackCapabilityEnvelope: {");
-    expect(generated).toContain("PackMCP: {");
-    expect(generated).toContain("requiresMcp: string[];");
-
-    const contract = fs.readFileSync(path.join(root, "contracts/openapi.yaml"), "utf8");
-    expect(contract).toContain("/v1/packs/inspect:");
-    expect(contract).toContain("operationId: inspectPack");
-  });
+  // The generated file is not asserted as text here: ci.yml regenerates it and
+  // fails on any diff, and the expectTypeOf block above already fails to compile
+  // if the contract loses an operation or a field. String matching the generated
+  // file would only prove the generator ran.
 });
 
 describe("Agent Pack install contract", () => {
@@ -105,27 +91,7 @@ describe("Agent Pack install contract", () => {
       .toEqualTypeOf<components["schemas"]["PackStateSummary"][]>();
   });
 
-  it("keeps the generated client in step with the install contract", () => {
-    const generated = fs.readFileSync(path.join(root, "lib/worker-api.gen.ts"), "utf8");
-    expect(generated).toContain('"/v1/packs/install"');
-    expect(generated).toContain('"/v1/packs"');
-    expect(generated).toContain('"/v1/packs/{publisher}/{name}"');
-    expect(generated).toContain("installPack: {");
-    expect(generated).toContain("listPacks: {");
-    expect(generated).toContain("removePack: {");
-    expect(generated).toContain("PackInstallRequest: {");
-    expect(generated).toContain("PackRenames: {");
-    expect(generated).toContain("PackInstallPlan: {");
-    expect(generated).toContain("PackAction: {");
-    expect(generated).toContain("PackIssue: {");
-    expect(generated).toContain("PackState: {");
-    expect(generated).toContain("PackStateSummary: {");
-
-    const contract = fs.readFileSync(path.join(root, "contracts/openapi.yaml"), "utf8");
-    expect(contract).toContain("/v1/packs/install:");
-    expect(contract).toContain("operationId: installPack");
-    expect(contract).toContain("operationId: listPacks");
-    expect(contract).toContain("operationId: removePack");
-    expect(contract).toContain("/v1/packs/{publisher}/{name}:");
-  });
+  // See the note above: the contract-to-client drift is ci.yml's
+  // `generate:api` + `git diff --exit-code`, and the type assertions are the
+  // contract-level expectations.
 });
