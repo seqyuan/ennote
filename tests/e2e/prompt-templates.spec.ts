@@ -82,6 +82,31 @@ async function mockBackend(page: Page) {
       return fulfill(route, {});
     }
 
+    // Turn submission is not what these tests are about, so fulfil it: the
+    // composer only clears the draft once the Worker accepts the turn. Letting
+    // this fall through to route.abort() would exercise the failed-submit path
+    // instead, which restores the draft on purpose (see
+    // tests/e2e/submit-failure.spec.ts) and makes "textarea cleared" a race.
+    if (method === "POST" && path === `/v1/sessions/${session.id}/invocations`) {
+      return fulfill(route, {
+        turnId: "prompts-turn",
+        userMessageId: "prompts-user",
+        existing: false,
+        run: {
+          id: "prompts-run", sessionId: session.id, runKind: "agent", attempt: 1, status: "queued",
+          commitFormatVersion: 2, executionDepth: 0, publishMode: "public_final",
+          speakerSnapshot: { kind: "host", handle: "host", displayName: "Host" },
+          contextSnapshot: {}, requestedConfig: {}, effectiveConfig: {},
+          createdAt: "2026-08-03T00:00:00Z",
+        },
+      });
+    }
+    // The submitted run's stream ends immediately so no reconnect timer outlives
+    // the assertion.
+    if (path === "/v1/runs/prompts-run/events") {
+      return route.fulfill({ status: 200, contentType: "text/event-stream", body: 'data: {"type":"run_succeeded","payload":{}}\n\n' });
+    }
+
     return route.abort();
   });
 }
