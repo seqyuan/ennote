@@ -15,6 +15,11 @@ jobs:
     environment: npm-publish
     permissions:
       contents: write
+      # Keyless Sigstore attestation: the release assets are signed with the
+      # workflow identity, so a downloader can verify what produced them without
+      # the project holding a signing key.
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -112,7 +117,9 @@ jobs:
           if npm view "$ENNOTE_NPM_PACKAGE@${{ steps.pkg.outputs.version }}" version >/dev/null 2>&1; then
             echo "Package $ENNOTE_NPM_PACKAGE@${{ steps.pkg.outputs.version }} already published, nothing to do."
           else
-            npm publish --access public
+            # --provenance has npm attach a Sigstore attestation linking this
+            # tarball to the workflow run and commit that produced it.
+            npm publish --access public --provenance
           fi
           # Accounts with 2FA may leave the publish staged instead of live.
           # If the verification step below fails, approve the staged release
@@ -128,6 +135,19 @@ jobs:
             echo "::error::npm publish did not make ${{ steps.pkg.outputs.version }} visible. The release is probably staged (2FA): run 'npm stage list' and 'npm stage approve <id>', then re-run this workflow."
             exit 1
           fi
+
+      # Provenance for the artifacts users actually run: the published tarball and
+      # every worker binary. `SHA256SUMS` proves the bytes did not change in
+      # transit but says nothing about who built them or from which commit, which
+      # is the gap this closes. Verify with:
+      #   gh attestation verify <file> --repo seqyuan/ennote
+      - name: Attest Release Provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            worker/ennogate-*
+            worker/ennoworker-*
+            worker/SHA256SUMS
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
