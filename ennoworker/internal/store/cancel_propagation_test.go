@@ -118,3 +118,42 @@ func TestParentCancelPropagatesToChildrenAndGroup(t *testing.T) {
 	assert.Equal(t, 1, childCancelEvents)
 	assert.Equal(t, 1, parentCancelEvents)
 }
+
+// TestCancelIsAtomicAcrossParentAndChildren pins the single-transaction rule: the
+// children and the parent are one settlement. Before, children were committed
+// first and the parent terminalized in a second transaction, so a parent that
+// could not transition left every child cancelled while it kept its own status —
+// a state only the startup recovery could untangle.
+func TestCancelIsAtomicAcrossParentAndChildren(t *testing.T) {
+	runs, _, _, childID := setupParentWithChild(t)
+	ctx := context.Background()
+	parentID := runsMustGetParentID(t, runs, childID)
+
+	// A parent that already terminalized cannot transition to cancelled. Reach it
+	// with raw SQL so the test does not depend on the repo allowing it.
+	_, err := runs.DB.Exec(`UPDATE agent_runs SET status='succeeded', finished_at='2026-01-01T00:00:00Z' WHERE id=?`, parentID)
+	require.NoError(t, err)
+
+	require.Error(t, runs.Cancel(ctx, parentID), "a succeeded parent cannot be cancelled")
+
+	var childStatus, parentStatus string
+	require.NoError(t, runs.DB.QueryRow(`SELECT status FROM agent_runs WHERE id=?`, childID).Scan(&childStatus))
+	require.NoError(t, runs.DB.QueryRow(`SELECT status FROM agent_runs WHERE id=?`, parentID).Scan(&parentStatus))
+	assert.Equal(t, "queued", childStatus, "the child must not be settled when the parent half fails")
+	assert.Equal(t, "succeeded", parentStatus)
+
+	var childEvents int
+	require.NoError(t, runs.DB.QueryRow(`SELECT COUNT(*) FROM run_events WHERE run_id=? AND event_type='run_cancelled'`, childID).Scan(&childEvents))
+	assert.Zero(t, childEvents, "no child cancellation event may survive the rollback")
+
+	// The same parent still settles as expected once it is in a cancellable
+	// state, so the guard above did not just disable propagation.
+	_, err = runs.DB.Exec(`UPDATE agent_runs SET status='running', finished_at=NULL WHERE id=?`, parentID)
+	require.NoError(t, err)
+	require.NoError(t, runs.Cancel(ctx, parentID))
+
+	require.NoError(t, runs.DB.QueryRow(`SELECT status FROM agent_runs WHERE id=?`, childID).Scan(&childStatus))
+	require.NoError(t, runs.DB.QueryRow(`SELECT status FROM agent_runs WHERE id=?`, parentID).Scan(&parentStatus))
+	assert.Equal(t, "cancelled", childStatus)
+	assert.Equal(t, "cancelled", parentStatus)
+}

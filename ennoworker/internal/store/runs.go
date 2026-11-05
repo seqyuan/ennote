@@ -856,13 +856,24 @@ func (r *RunRepo) Cancel(ctx context.Context, runID string) error {
 		  AND status IN ('queued','running','awaiting_authorization')`, now, runID); err != nil {
 		return err
 	}
+	// The cancelled Run terminalizes in this same transaction. Committing the
+	// children first and the parent second left a window where a failure in the
+	// second transaction cancelled every child while the parent kept running or
+	// queued; both halves are one settlement, so they commit or roll back as one.
+	parentEvents, err := r.transitionTx(ctx, tx, runID, domain.RunCancelled, "run_cancelled", nil, nil)
+	if err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
 	if r.Publisher != nil {
-		r.Publisher.Publish(childEvents...)
+		events := make([]domain.RunEvent, 0, len(childEvents)+len(parentEvents))
+		events = append(events, childEvents...)
+		events = append(events, parentEvents...)
+		r.Publisher.Publish(events...)
 	}
-	return r.transition(ctx, runID, domain.RunCancelled, "run_cancelled", nil, nil)
+	return nil
 }
 
 func (r *RunRepo) Interrupt(ctx context.Context, runID, message string) error {
@@ -1000,19 +1011,37 @@ func (r *RunRepo) transition(ctx context.Context, runID string, target domain.Ru
 	}
 	defer tx.Rollback()
 
-	current, turnID, err := loadRunStateTx(ctx, tx, runID)
+	events, err := r.transitionTx(ctx, tx, runID, target, eventType, errorCode, errorMessage)
 	if err != nil {
 		return err
 	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit run transition: %w", err)
+	}
+	if r.Publisher != nil && len(events) > 0 {
+		r.Publisher.Publish(events...)
+	}
+	return nil
+}
+
+// transitionTx applies one Run status transition and its events inside the
+// caller's transaction, returning the events that were appended. The caller owns
+// commit and publication: Cancel settles children and the parent in one
+// transaction, so the parent cannot terminalize separately from its children.
+func (r *RunRepo) transitionTx(ctx context.Context, tx *sql.Tx, runID string, target domain.RunStatus, eventType string, errorCode, errorMessage *string) ([]domain.RunEvent, error) {
+	current, turnID, err := loadRunStateTx(ctx, tx, runID)
+	if err != nil {
+		return nil, err
+	}
 	if current == target {
-		return nil
+		return nil, nil
 	}
 	if !domain.CanTransitionRun(current, target) {
-		return fmt.Errorf("%w: %s -> %s", ErrInvalidRunState, current, target)
+		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidRunState, current, target)
 	}
 	if target == domain.RunSucceeded {
 		if err := requireNoOwnedChildrenTx(ctx, tx, runID); err != nil {
-			return fmt.Errorf("parent cannot succeed with owned children: %w", err)
+			return nil, fmt.Errorf("parent cannot succeed with owned children: %w", err)
 		}
 	}
 
@@ -1024,7 +1053,7 @@ func (r *RunRepo) transition(ctx context.Context, runID string, target domain.Ru
 		err = writeRunStateTx(ctx, tx, runID, turnID, target, errorCode, errorMessage, timestamp)
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	statusEvent := runStatusEvent(eventType, target, errorCode, errorMessage)
 
@@ -1044,17 +1073,7 @@ func (r *RunRepo) transition(ctx context.Context, runID string, target domain.Ru
 	} else {
 		pendingEvents = append(callEvents, statusEvent)
 	}
-	committedEvents, err := appendEventsTx(ctx, tx, runID, pendingEvents...)
-	if err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit run transition: %w", err)
-	}
-	if r.Publisher != nil {
-		r.Publisher.Publish(committedEvents...)
-	}
-	return nil
+	return appendEventsTx(ctx, tx, runID, pendingEvents...)
 }
 
 // loadRunStateTx reads the durable status and owning turn of a Run. Callers
