@@ -1,17 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
-import type { components } from "@/lib/worker-api.gen";
+import {
+  planHandleRefresh,
+  type BackgroundDelivery,
+  type DelegationCompletion,
+  type DelegationHandle,
+} from "@/lib/delegation-delivery";
 
-type DelegationHandle = components["schemas"]["DelegationHandle"];
-type DelegationCompletion = components["schemas"]["DelegationCompletion"];
 type HandlePage = { items: DelegationHandle[]; nextCursor?: string };
 
-export type BackgroundDelivery = {
-  handle: DelegationHandle;
-  completion?: DelegationCompletion;
-};
+export type { BackgroundDelivery };
 
 /** Row cache tagged with the session it belongs to, so a session switch can
  *  never read the previous session's completions. */
@@ -38,6 +38,11 @@ export function useDelegationDelivery(sessionId: string | undefined): {
 } {
   const [cache, setCache] = useState<DeliveryCache>(emptyCache);
   const [refreshing, setRefreshing] = useState(false);
+  // The poll loop reads the cache it is about to replace; a ref keeps that read
+  // off the effect's dependency list (a cache dependency would restart the timer
+  // on every tick).
+  const cacheRef = useRef<DeliveryCache>(emptyCache);
+  useEffect(() => { cacheRef.current = cache; }, [cache]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -55,11 +60,13 @@ export function useDelegationDelivery(sessionId: string | undefined): {
         );
         if (disposed || controller.signal.aborted) return;
         // Build the listing from scratch: handles the Worker no longer returns
-        // are pruned instead of lingering as stale rows.
-        const listed: Record<string, BackgroundDelivery> = {};
-        // Poll each handle's latest completion in parallel.
-        await Promise.all(page.items.map(async handle => {
-          if (handle.sessionId && handle.sessionId !== scope) return;
+        // are pruned instead of lingering as stale rows. Rows the previous tick
+        // already answered are reused, so a steady state costs one request.
+        const known = cacheRef.current.session === scope ? cacheRef.current.rows : {};
+        const plan = planHandleRefresh(known, scope, page.items);
+        const listed = plan.rows;
+        // Only the handles that actually moved need their completion fetched.
+        await Promise.all(plan.toFetch.map(async handle => {
           try {
             const detail = await apiFetch<{ handle: DelegationHandle; completion?: DelegationCompletion }>(
               `/v1/delegation-handles/${encodeURIComponent(handle.id)}`,
@@ -77,10 +84,10 @@ export function useDelegationDelivery(sessionId: string | undefined): {
         setCache(previous => {
           const rows: Record<string, BackgroundDelivery> = {};
           for (const [id, row] of Object.entries(listed)) {
-            const known = previous.rows[id];
+            const previousRow = previous.rows[id];
             // A failed detail fetch must not erase a completion already seen
             // for this session; anything else is taken from the fresh listing.
-            rows[id] = !row.completion && known?.handle.sessionId === scope ? known : row;
+            rows[id] = !row.completion && previousRow?.handle.sessionId === scope ? previousRow : row;
           }
           return { session: scope, rows };
         });
