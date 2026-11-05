@@ -66,7 +66,7 @@ jobs:
       - run: git diff --exit-code lib/worker-api.gen.ts
       - run: npm run typecheck
       - run: npm run lint
-      - run: npm run check:appshell-size
+      - run: npm run check:file-sizes
 
   js-test:
     runs-on: ubuntu-latest

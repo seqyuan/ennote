@@ -168,3 +168,39 @@ describe("Conventional Commit guard", () => {
     }
   });
 });
+
+describe("file-size guard", () => {
+  it("passes on this tree", () => {
+    const result = runGuard("check-file-sizes.mjs", []);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("File-size guard passed");
+  });
+
+  it("fails when a component outgrows its layer budget", () => {
+    const repository = temporaryGitRepository();
+    // One line over the 500-line component budget, and no recorded ceiling.
+    writeFileSync(join(repository, "package.json"), JSON.stringify({ name: "guard-fixture" }));
+    mkdirSync(join(repository, "components"), { recursive: true });
+    writeFileSync(join(repository, "components", "Big.tsx"), "x\n".repeat(501));
+
+    const result = runGuard("check-file-sizes.mjs", [], repository);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("components/Big.tsx: 501 lines exceeds the 500-line budget");
+  });
+
+  it("fails when a recorded ceiling is exceeded or goes stale", () => {
+    const repository = temporaryGitRepository();
+    writeFileSync(join(repository, "package.json"), JSON.stringify({ name: "guard-fixture" }));
+    mkdirSync(join(repository, "lib"), { recursive: true });
+    // A generated file carries no budget: this one would be over if it did.
+    writeFileSync(join(repository, "lib", "worker-api.gen.ts"), "x\n".repeat(5000));
+
+    const result = runGuard("check-file-sizes.mjs", [], repository);
+
+    // Nothing to police in this fixture, but the recorded ceilings must not point
+    // at files that do not exist: that is how a ratchet silently stops ratcheting.
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("recorded in RECORDED_CEILINGS but not found");
+  });
+});
