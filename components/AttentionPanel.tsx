@@ -51,7 +51,7 @@ export function AttentionPanel({ projectId, onNavigate }: {
 
   return <div className="attention-panel" ref={containerRef}>
     <button type="button" className="attention-bell"
-      aria-label={t("conversation.attention.aria").replace("{count}", String(pendingCount))}
+      aria-label={t("conversation.attention.aria", { count: String(pendingCount) })}
       title={t("conversation.attention.title")} onClick={() => setOpen(value => !value)}>
       <Bell size={15} aria-hidden="true" />
       {pendingCount > 0 && <span className="attention-badge">{pendingCount > 99 ? "99+" : pendingCount}</span>}
@@ -59,7 +59,7 @@ export function AttentionPanel({ projectId, onNavigate }: {
     {open && <div className="attention-popover" role="dialog" aria-label={t("conversation.attention.title")}>
       <div className="attention-popover-header">
         <strong>{t("conversation.attention.title")}</strong>
-        <span>{t("conversation.attention.pending").replace("{count}", String(pendingCount))}</span>
+        <span>{t("conversation.attention.pending", { count: String(pendingCount) })}</span>
       </div>
       <div className="attention-list" role="list">
         {actionFirst.length === 0 && <div className="attention-empty">{t("conversation.attention.empty")}</div>}

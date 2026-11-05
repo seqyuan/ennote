@@ -2,6 +2,7 @@
 
 import { Bot, CircleAlert, CircleCheck, Clock3 } from "lucide-react";
 import { useT } from "@/components/LocaleProvider";
+import type { Translator } from "@/lib/messages";
 import type { components } from "@/lib/worker-api.gen";
 
 type DelegationCompletion = components["schemas"]["DelegationCompletion"];
@@ -27,7 +28,7 @@ export function DelegationCompletionRow({ completion }: { completion: Delegation
   return <div className="delivery-row" data-delivery-status={status} role="listitem">
     <span className="delivery-icon">{icon}</span>
     <span className="delivery-identity">
-      <strong>{t("delegation.completion").replace("{generation}", String(completion.generation ?? ""))}</strong>
+      <strong>{t("delegation.completion", { generation: String(completion.generation ?? "") })}</strong>
       <span>{labeled(t, "delegation.handle", status)}</span>
     </span>
     <span className="delivery-summary"><Bot size={11} aria-hidden="true" />{boundedResult(completion.result)}</span>
@@ -37,7 +38,7 @@ export function DelegationCompletionRow({ completion }: { completion: Delegation
 // Translate a delegation enum value that may not have copy yet: an unknown
 // value is humanized rather than echoing the raw wire code. Shared with the
 // strip (which imports this module, so the helper lives here).
-export function labeled(t: (key: string) => string, prefix: string, value: string): string {
+export function labeled(t: Translator, prefix: string, value: string): string {
   const key = `${prefix}.${value}`;
   const text = t(key);
   return text === key ? value.replaceAll("_", " ") : text;

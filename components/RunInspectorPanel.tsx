@@ -13,6 +13,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, FileClock } from "lucide-react";
 import { useT } from "@/components/LocaleProvider";
+import type { Translator } from "@/lib/messages";
 import { formatBytes, shortDigest } from "@/lib/run-inspection";
 import { transcriptEntries, transcriptSummary } from "@/lib/run-transcript";
 import type { RunMCPFrozen } from "@/hooks/useRunMCP";
@@ -53,7 +54,7 @@ export function RunInspectorBody({ runId, composition, mcp, transcript, loading,
   transcript?: TranscriptSection | null;
   loading: boolean;
   error: string | null;
-  t: (key: string) => string;
+  t: Translator;
 }) {
   const [promptOpen, setPromptOpen] = useState(false);
 
@@ -76,7 +77,7 @@ export function RunInspectorBody({ runId, composition, mcp, transcript, loading,
       <div className={styles.heading}>
         {t("inspector.composition")}
         <span className={styles.headingCount}>
-          {t("inspector.sections").replace("{count}", String(sections.length))}
+          {t("inspector.sections", { count: String(sections.length) })}
         </span>
       </div>
       <div className={styles.group}>
@@ -158,7 +159,7 @@ function SectionRow({ section }: { section: PromptSection }) {
   </div>;
 }
 
-function MCPServerRow({ server, t }: { server: RunMCPServerSnapshot; t: (key: string) => string }) {
+function MCPServerRow({ server, t }: { server: RunMCPServerSnapshot; t: Translator }) {
   const unavailable = server.unavailableReason !== "";
   return <div data-mcp-server={server.bindingId} data-unavailable={unavailable || undefined} className={styles.mcpRow}>
     <div className={styles.mcpHead}>
@@ -168,7 +169,7 @@ function MCPServerRow({ server, t }: { server: RunMCPServerSnapshot; t: (key: st
       </span>
       {server.required && <span className={styles.badge}>{t("inspector.mcpRequired")}</span>}
       <span className={styles.mcpTools}>
-        {t("inspector.mcpTools").replace("{count}", String((server.tools ?? []).length))}
+        {t("inspector.mcpTools", { count: String((server.tools ?? []).length) })}
       </span>
     </div>
     {unavailable && <div className={styles.mcpUnavailable}>
@@ -192,7 +193,7 @@ function MCPServerRow({ server, t }: { server: RunMCPServerSnapshot; t: (key: st
   </div>;
 }
 
-function TranscriptRow({ message, t }: { message: RunMessagePage["messages"][number]; t: (key: string) => string }) {
+function TranscriptRow({ message, t }: { message: RunMessagePage["messages"][number]; t: Translator }) {
   const entries = transcriptEntries(message.content);
   const summary = transcriptSummary(message.content);
   return <details data-transcript-ordinal={message.ordinal} className={styles.transcriptRow}>
@@ -214,17 +215,17 @@ function TranscriptRow({ message, t }: { message: RunMessagePage["messages"][num
   </details>;
 }
 
-function TranscriptEntryView({ entry, t }: { entry: ReturnType<typeof transcriptEntries>[number]; t: (key: string) => string }) {
+function TranscriptEntryView({ entry, t }: { entry: ReturnType<typeof transcriptEntries>[number]; t: Translator }) {
   if (entry.kind === "text") return <div className={styles.entryPre}>{entry.text}</div>;
   if (entry.kind === "thinking") return <div>
     <div className={`${styles.muted} ${styles.entryLabel}`}>{t("inspector.transcriptThinking")}</div>
     <div className={styles.entryPre}>{entry.text}</div>
   </div>;
   if (entry.kind === "image") return <div className={styles.muted}>
-    {t("inspector.transcriptImage").replace("{width}", String(entry.width)).replace("{height}", String(entry.height))}
+    {t("inspector.transcriptImage", { width: String(entry.width), height: String(entry.height) })}
   </div>;
   if (entry.kind === "unknown") return <div className={styles.muted}>
-    {t("inspector.transcriptUnknown").replace("{type}", entry.type)}
+    {t("inspector.transcriptUnknown", { type: entry.type })}
   </div>;
   if (entry.kind === "tool_call") return <details>
     <summary className={`${styles.muted} ${styles.entrySummary}`}>{`${t("inspector.transcriptCall")} ${entry.name}`}</summary>

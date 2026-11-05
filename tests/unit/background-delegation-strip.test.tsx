@@ -5,7 +5,7 @@ import type { BackgroundDelivery } from "@/hooks/useDelegationDelivery";
 import { translate } from "@/lib/messages";
 import type { components } from "@/lib/worker-api.gen";
 
-const t = (key: string) => translate("en", key);
+const t = (key: string, params?: Record<string, string | number>) => translate("en", key, params);
 
 type DelegationHandle = components["schemas"]["DelegationHandle"];
 type DelegationCompletion = components["schemas"]["DelegationCompletion"];
@@ -67,7 +67,7 @@ describe("BackgroundDelegationStrip", () => {
     );
     expect(html).toContain('aria-expanded="false"');
     expect(html).not.toContain("delivery-list");
-    expect(html).toContain(t("conversation.delegation.active").replace("{count}", "1"));
+    expect(html).toContain(t("conversation.delegation.active", { count: "1" }));
   });
 
   it("keeps the toggle outside the live region and announces the summary", () => {

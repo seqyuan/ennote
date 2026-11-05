@@ -3,6 +3,7 @@
 import { Check, Copy, GitFork } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { useT } from "@/components/LocaleProvider";
+import type { Translator } from "@/lib/messages";
 import { formatMessageClock } from "@/lib/message-chrome";
 import { formatLatencySeconds, formatTokensPerSecond } from "@/lib/stats-format";
 
@@ -29,7 +30,7 @@ function fill(template: string, vars: Record<string, string>): string {
 }
 
 /** Whole-seconds run duration ("1s" / "2m03s"), localized through the locale seat. */
-function formatRunDuration(ms: number, t: (key: string) => string): string {
+function formatRunDuration(ms: number, t: Translator): string {
   const total = Math.max(0, Math.floor(ms / 1000));
   const minutes = Math.floor(total / 60);
   const seconds = total % 60;

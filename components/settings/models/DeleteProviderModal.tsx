@@ -20,10 +20,10 @@ export function DeleteProviderModal({ open, providerName, busy, failure, onCance
   const t = useT();
   useOverlayLayer(open, onCancel, { dismissOnEscape: !busy });
   if (!open) return null;
-  const title = t("settings.models.deleteTitle").replace("{provider}", providerName);
-  const description = t("settings.models.deleteDescriptionWithCredential").replace("{provider}", providerName);
-  const confirm = t("settings.models.deleteConfirm").replace("{provider}", providerName);
-  const deleting = t("settings.models.deleting").replace("{provider}", providerName);
+  const title = t("settings.models.deleteTitle", { provider: providerName });
+  const description = t("settings.models.deleteDescriptionWithCredential", { provider: providerName });
+  const confirm = t("settings.models.deleteConfirm", { provider: providerName });
+  const deleting = t("settings.models.deleting", { provider: providerName });
   return (
     <div className="settings-overlay" role="dialog" aria-modal="true" aria-label={title}>
       <div className="project-create-dialog">

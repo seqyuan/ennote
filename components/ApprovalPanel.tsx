@@ -30,7 +30,7 @@ function StandingCheckbox({ item, checked, onChange }: {
   return <label className="standing-remember">
     <input type="checkbox" checked={checked}
       onChange={() => onChange(item.callIndex)} />
-    {t("conversation.approval.remember").replace("{scope}", item.standingScope.display)}
+    {t("conversation.approval.remember", { scope: item.standingScope.display })}
   </label>;
 }
 
@@ -96,9 +96,10 @@ export function ApprovalPanel({ approval, resolving, decide }: ApprovalPanelProp
     decide("rejected", []);
   }, [decide]);
 
-  const batchLabel = (approval.items.length === 1 ? t("conversation.approval.batchOne") : t("conversation.approval.batchMany"))
-    .replace("{iteration}", String(approval.iteration))
-    .replace("{count}", String(approval.items.length));
+  const batchLabel = t(
+    approval.items.length === 1 ? "conversation.approval.batchOne" : "conversation.approval.batchMany",
+    { iteration: approval.iteration, count: approval.items.length },
+  );
   return <section className="approval-panel" aria-label={t("conversation.approval.panelAria")}>
     <div className="approval-heading">
       <div>

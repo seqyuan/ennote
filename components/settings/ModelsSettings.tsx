@@ -83,7 +83,7 @@ export function ModelsSettings({ providers, models, refresh, setError }: {
       <p>{t("settings.models.intro")}</p></header>
     {savedName !== null && (
       <p className="settings-models-saved" role="status" aria-live="polite">
-        {t("settings.models.savedProvider").replace("{provider}", savedName)}
+        {t("settings.models.savedProvider", { provider: savedName })}
       </p>
     )}
     <ul className="settings-models-rows">
@@ -123,7 +123,7 @@ export function ModelsSettings({ providers, models, refresh, setError }: {
                 <button
                   type="button"
                   className="settings-models-btn"
-                  aria-label={t("settings.models.editProvider").replace("{provider}", provider.name)}
+                  aria-label={t("settings.models.editProvider", { provider: provider.name })}
                   onClick={() => {
                     setSavedName(null);
                     setDeclaring(false);
@@ -137,7 +137,7 @@ export function ModelsSettings({ providers, models, refresh, setError }: {
                   <button
                     type="button"
                     className="settings-models-btn settings-models-danger"
-                    aria-label={t("settings.models.removeProvider").replace("{provider}", provider.name)}
+                    aria-label={t("settings.models.removeProvider", { provider: provider.name })}
                     onClick={() => {
                       setSavedName(null);
                       setDeleteFailure(undefined);

@@ -8,6 +8,7 @@ import {
 import { ArtifactView } from "@/components/ArtifactView";
 import { useT } from "@/components/LocaleProvider";
 import { NestedActivityPanel } from "@/components/NestedActivityPanel";
+import type { Translator } from "@/lib/messages";
 import type { ToolActivity } from "@/lib/chat-messages";
 import {
   boundedToolOutput, defaultToolExpanded, redactToolArguments, summarizeToolCall,
@@ -50,7 +51,7 @@ function DelegationTaskList({ arguments: rawArguments }: { arguments?: unknown }
     {tasks.map((task, index) => <div className="delegation-task" key={`${task.name}-${index}`} role="listitem">
       <span className="delegation-task-name">{task.name || "(task)"}</span>
       {task.role && <span className="delegation-task-role">@{task.role}</span>}
-      {task.depends.length > 0 && <span className="delegation-task-depends">{t("conversation.tool.after").replace("{names}", task.depends.join(", "))}</span>}
+      {task.depends.length > 0 && <span className="delegation-task-depends">{t("conversation.tool.after", { names: task.depends.join(", ") })}</span>}
     </div>)}
   </div>;
 }
@@ -131,7 +132,7 @@ function stateIcon(state: ToolActivity["state"]) {
   return <CircleAlert {...props} />;
 }
 
-function stateLabel(state: ToolActivity["state"], t: (key: string) => string): string {
+function stateLabel(state: ToolActivity["state"], t: Translator): string {
   if (state === "completed") return t("conversation.tool.state.done");
   if (state === "pending") return t("conversation.tool.state.pending");
   if (state === "running") return t("conversation.tool.state.running");

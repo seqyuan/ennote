@@ -204,7 +204,7 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
                 </button>
               )}
             </label>
-            {visibleTabs.length === 0 && <div className="settings-dialog-empty">{t("settings.search.empty").replace("{query}", query.trim())}</div>}
+            {visibleTabs.length === 0 && <div className="settings-dialog-empty">{t("settings.search.empty", { query: query.trim() })}</div>}
             {visibleTabs.map((tab, index) => {
               const active = activeTab === tab.id;
               return (

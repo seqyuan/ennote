@@ -82,9 +82,10 @@ export function ContextMeter({ contextUsage, initialOpen = false }: {
   const percent = Math.min(100, Math.round(contextUsage.projectedTokens / contextUsage.contextWindow * 100));
   const pressure = percent >= 95 ? "is-critical" : percent >= 85 ? "is-high" : "";
   const reading = `${percent}%`;
-  const aria = t("context.aria"); // "{percent} of context used" / "上下文已用 {percent}"
+  // The template is split around the reading so the number can be highlighted:
+  // READING_SLOT stands in for {percent} before the split.
+  const aria = t("context.aria", { percent: READING_SLOT });
   const [headBefore = "", headAfter = ""] = aria
-    .replace("{percent}", READING_SLOT)
     .split(READING_SLOT)
     .map((part) => part.trim());
   const categories = contextUsage.categories ?? [];
@@ -121,10 +122,10 @@ export function ContextMeter({ contextUsage, initialOpen = false }: {
       <button
         type="button"
         className="context-meter-trigger"
-        aria-label={aria.replace("{percent}", reading)}
+        aria-label={t("context.aria", { percent: reading })}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title={aria.replace("{percent}", reading)}
+        title={t("context.aria", { percent: reading })}
         onClick={() => setOpen((value) => !value)}
       >
         <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true">

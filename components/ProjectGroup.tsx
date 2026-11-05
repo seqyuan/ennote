@@ -211,7 +211,7 @@ function ProjectDeleteDialog({ projectName, onCancel, onConfirm }: {
   return (
     <div className="sb-dialog-overlay" onPointerDown={(e) => { if (e.target === e.currentTarget && !busy) onCancel(); }}>
       <div className="sb-dialog" role="dialog" aria-modal="true" aria-label={t("sidebar.deleteProject")}>
-        <h3>{t("sidebar.deleteProjectTitle").replace("{name}", projectName)}</h3>
+        <h3>{t("sidebar.deleteProjectTitle", { name: projectName })}</h3>
         <p>{t("sidebar.deleteProjectBody")}</p>
         {error && <div className="sb-dialog-error" role="alert">{error}</div>}
         <div className="sb-dialog-actions">

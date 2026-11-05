@@ -175,7 +175,7 @@ function CompactionPolicyEditor({ policies, models, onCreate, onDefault }: {
               onChange={(event) => updateOverride(index, { tailMaxTokens: event.target.value === "" ? undefined : Number(event.target.value) })} />
             <input type="number" step="1" min="1" placeholder="Summary output" value={row.summaryMaxOutputTokens ?? ""}
               onChange={(event) => updateOverride(index, { summaryMaxOutputTokens: event.target.value === "" ? undefined : Number(event.target.value) })} />
-            <button type="button" className="secondary-btn" onClick={() => removeOverride(index)} aria-label={t("settings.context.removeOverride").replace("{index}", String(index + 1))}><X size={12} aria-hidden="true" /></button>
+            <button type="button" className="secondary-btn" onClick={() => removeOverride(index)} aria-label={t("settings.context.removeOverride", { index: String(index + 1) })}><X size={12} aria-hidden="true" /></button>
           </div>
         ))}
         <button type="button" className="secondary-btn" onClick={addOverride}>+ Add override</button>

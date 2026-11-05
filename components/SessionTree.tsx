@@ -3,6 +3,7 @@
 import { Archive, MoreHorizontal, Pencil, RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
+import type { Translator } from "@/lib/messages";
 import { isBlankSession } from "@/lib/session-blank";
 import type { Session } from "@/components/settings/types";
 import type { SessionLifecycleView } from "@/hooks/useProjectSessions";
@@ -50,7 +51,7 @@ function wouldCreateCycle(sessionId: string, parentId: string, nodes: Map<string
 }
 
 /** Compact relative time, dsh-style ("now"/"5min" in en, "刚刚"/"5分钟" in zh). */
-export function formatRelativeTime(updatedAt: string, t: (key: string) => string): string {
+export function formatRelativeTime(updatedAt: string, t: Translator): string {
   const MIN = 60_000;
   const HOUR = 3_600_000;
   const DAY = 86_400_000;

@@ -2,13 +2,14 @@
 
 import { CircleAlert, MessageSquareMore, ShieldCheck, X } from "lucide-react";
 import { useT } from "@/components/LocaleProvider";
+import type { Translator } from "@/lib/messages";
 import type { components } from "@/lib/worker-api.gen";
 
 type AttentionItem = components["schemas"]["AttentionItem"];
 
 type AttentionDisplay = { kind?: string; generation?: number; summary?: string; questionCount?: number };
 
-function displayLabel(item: AttentionItem, t: (key: string) => string): string {
+function displayLabel(item: AttentionItem, t: Translator): string {
   const display = item.display as AttentionDisplay | undefined;
   switch (item.kind) {
     case "approval_required":
@@ -17,7 +18,7 @@ function displayLabel(item: AttentionItem, t: (key: string) => string): string {
       if (display?.kind === "question") {
         const count = display.questionCount ?? 0;
         const key = count === 1 ? "conversation.attention.questionOne" : "conversation.attention.questionMany";
-        return t(key).replace("{count}", String(count));
+        return t(key, { count });
       }
       return t("conversation.attention.needsInput");
     case "delegation_completed":
@@ -28,7 +29,7 @@ function displayLabel(item: AttentionItem, t: (key: string) => string): string {
   return t("conversation.attention.title");
 }
 
-function actionLabel(actionKind: string | undefined, t: (key: string) => string): string {
+function actionLabel(actionKind: string | undefined, t: Translator): string {
   switch (actionKind) {
     case "answer_question": return t("conversation.attention.actionAnswerQuestion");
     case "tool_approval": return t("conversation.attention.actionToolApproval");

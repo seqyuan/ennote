@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { applyLocaleAttribute, readLocale, writeLocale, type Locale } from "@/lib/locale";
-import { translate } from "@/lib/messages";
+import { translate, type MessageParams, type Translator } from "@/lib/messages";
 
 interface LocaleContextValue {
   locale: Locale;
@@ -34,7 +34,7 @@ export function useLocale(): LocaleContextValue {
 }
 
 /** Convenience translator bound to the active locale. */
-export function useT(): (key: string) => string {
+export function useT(): Translator {
   const { locale } = useLocale();
-  return (key: string) => translate(locale, key);
+  return useCallback((key: string, params?: MessageParams) => translate(locale, key, params), [locale]);
 }

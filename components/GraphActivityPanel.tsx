@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useT } from "@/components/LocaleProvider";
+import type { Translator } from "@/lib/messages";
 import { apiFetch } from "@/lib/worker-api.client";
 import { ChevronRight, Workflow } from "lucide-react";
 import styles from "./GraphActivityPanel.module.css";
@@ -12,7 +13,7 @@ type RunAgentFlowNode = components["schemas"]["RunAgentFlowNode"];
 
 const pollIntervalMs = 1500;
 
-function catalogLabel(t: (key: string) => string, prefix: string, value: string | undefined): string {
+function catalogLabel(t: Translator, prefix: string, value: string | undefined): string {
   if (!value) return "";
   const key = `${prefix}.${value}`;
   const text = t(key);
@@ -99,7 +100,7 @@ export function GraphActivityPanel({ sessionId }: {
         </span>
         {runningCount > 0 && (
           <span className={styles.running}>
-            {t("graph.running").replace("{count}", String(runningCount))}
+            {t("graph.running", { count: String(runningCount) })}
           </span>
         )}
       </div>
@@ -139,7 +140,7 @@ function RunCard({ run, nodes, expanded, onToggle, nodesLoading, t }: {
   expanded: boolean;
   onToggle: () => void;
   nodesLoading: boolean;
-  t: (key: string) => string;
+  t: Translator;
 }) {
   const state = run.state;
   const nodeCount = nodes.length;
@@ -161,15 +162,15 @@ function RunCard({ run, nodes, expanded, onToggle, nodesLoading, t }: {
           {run.inputs?.name ? String(run.inputs.name) : t("graph.unnamed")}
         </span>
         <span className={styles.cardSummary}>
-          {nodeCount > 0 ? t("graph.tasks").replace("{done}", String(done)).replace("{total}", String(nodeCount)) : flowLabel}
+          {nodeCount > 0 ? t("graph.tasks", { done: String(done), total: String(nodeCount) }) : flowLabel}
         </span>
       </button>
 
       {expanded && (
         <div className={styles.details}>
           <div className={styles.meta}>
-            <span>{t("graph.stateLabel").replace("{state}", flowLabel)}</span>
-            {run.totalTokensUsed ? <span>{t("graph.tokens").replace("{count}", String(run.totalTokensUsed))}</span> : null}
+            <span>{t("graph.stateLabel", { state: flowLabel })}</span>
+            {run.totalTokensUsed ? <span>{t("graph.tokens", { count: String(run.totalTokensUsed) })}</span> : null}
             {run.createdAt ? <span>{formatTime(run.createdAt, t)}</span> : null}
           </div>
           {nodesLoading ? (
@@ -197,12 +198,12 @@ function RunCard({ run, nodes, expanded, onToggle, nodesLoading, t }: {
   );
 }
 
-function formatTime(value: string, t: (key: string) => string): string {
+function formatTime(value: string, t: Translator): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   const now = new Date();
   const minutes = Math.floor((now.getTime() - date.getTime()) / 60000);
   if (minutes < 1) return t("graph.justNow");
-  if (minutes < 60) return t("graph.minutesAgo").replace("{count}", String(minutes));
+  if (minutes < 60) return t("graph.minutesAgo", { count: String(minutes) });
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }

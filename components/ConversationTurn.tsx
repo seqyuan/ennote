@@ -88,18 +88,18 @@ const ToolBatch = memo(function ToolBatch({ sessionId, batch, isLast, approval, 
     ?? batch.activities[batch.activities.length - 1];
   const now = current
     ? (current.state === "running" || current.state === "pending"
-      ? t("conversation.toolBatch.running").replace("{tool}", current.toolName)
+      ? t("conversation.toolBatch.running", { tool: current.toolName })
       : current.toolName)
     : "";
 
   return <section className="tool-batch" data-open={expanded || undefined}
-    aria-label={(count === 1 ? t("conversation.toolBatch.ariaOne") : t("conversation.toolBatch.ariaMany")).replace("{count}", String(count))}>
+    aria-label={t(count === 1 ? "conversation.toolBatch.ariaOne" : "conversation.toolBatch.ariaMany", { count })}>
     <button type="button" className="tool-batch-summary" aria-expanded={expanded} aria-controls={bodyId}
       onClick={() => setOverride(!expanded)}>
       <ChevronRight size={14} className="tool-batch-chevron" aria-hidden="true" />
-      <span className="tool-batch-title">{count === 1 ? t("conversation.toolBatch.titleOne") : t("conversation.toolBatch.titleMany").replace("{count}", String(count))}</span>
+      <span className="tool-batch-title">{count === 1 ? t("conversation.toolBatch.titleOne") : t("conversation.toolBatch.titleMany", { count: String(count) })}</span>
       {now && <span className="tool-batch-now">{now}</span>}
-      {failed > 0 && <span className="tool-batch-failed">{t("conversation.toolBatch.failed").replace("{count}", String(failed))}</span>}
+      {failed > 0 && <span className="tool-batch-failed">{t("conversation.toolBatch.failed", { count: String(failed) })}</span>}
     </button>
     <div id={bodyId} className="tool-batch-body" hidden={!expanded}>
       <div className="tool-activity-list">{batch.activities.map(activity =>
@@ -123,9 +123,9 @@ export function PendingApprovalBatch({ approval, resolving, decide, answering, a
   }
   if (!decide) return null;
   const count = approval.items.length;
-  return <section className="tool-batch pending-tool-batch" aria-label={(count === 1 ? t("conversation.toolBatch.ariaOne") : t("conversation.toolBatch.ariaMany")).replace("{count}", String(count))}>
+  return <section className="tool-batch pending-tool-batch" aria-label={t(count === 1 ? "conversation.toolBatch.ariaOne" : "conversation.toolBatch.ariaMany", { count })}>
     <div className="tool-batch-heading"><Wrench size={14} aria-hidden="true" />
-      <span>{count === 1 ? t("conversation.toolBatch.pendingOne") : t("conversation.toolBatch.pendingMany").replace("{count}", String(count))}</span>
+      <span>{count === 1 ? t("conversation.toolBatch.pendingOne") : t("conversation.toolBatch.pendingMany", { count: String(count) })}</span>
     </div>
     <ApprovalPanel approval={approval} resolving={resolving ?? null} decide={decide} />
   </section>;

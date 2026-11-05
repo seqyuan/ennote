@@ -99,7 +99,7 @@ export function ChatRail({
 
   if (turns.length < 2) return null;
 
-  const labelFor = (turn: RailTurn) => turn.text || t("conversation.rail.turn").replace("{index}", String(turn.index + 1));
+  const labelFor = (turn: RailTurn) => turn.text || t("conversation.rail.turn", { index: String(turn.index + 1) });
 
   return (
     <nav className={styles.rail} aria-label={t("conversation.rail.aria")}>
@@ -116,7 +116,7 @@ export function ChatRail({
             style={{ top: `${top}%` }}
             data-active={active || undefined}
             aria-current={active ? "true" : undefined}
-            aria-label={t("conversation.rail.goTo").replace("{index}", String(turn.index + 1)).replace("{label}", label)}
+            aria-label={t("conversation.rail.goTo", { index: String(turn.index + 1), label: label })}
             onClick={() => scrollToTurn(turn)}
             onMouseEnter={() => setHovered(turn.index)}
             onMouseLeave={() => setHovered((current) => current === turn.index ? null : current)}

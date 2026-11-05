@@ -29,7 +29,7 @@ export function DelegationStrip({ deliveries, refreshing }: {
   const open = !state.collapsed;
   const active = deliveries.filter(delivery => delivery.handle.status === "active");
   const summary = active.length
-    ? t("conversation.delegation.active").replace("{count}", String(active.length))
+    ? t("conversation.delegation.active", { count: String(active.length) })
     : t("conversation.delegation.settled");
   return <div className="background-delegation-strip" aria-label={t("conversation.delegation.background")}>
     <button type="button" className="background-delegation-header" aria-expanded={open} aria-controls={listId} onClick={() => setState(value => ({ ...value, collapsed: !value.collapsed }))}>

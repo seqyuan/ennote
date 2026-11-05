@@ -12,6 +12,7 @@ import { CompactionPromptBar } from "@/components/CompactionPromptBar";
 import { ConversationTimeline } from "@/components/ConversationTimeline";
 import { useT } from "@/components/LocaleProvider";
 import type { BranchView, ChatActions, ComposerView, HistoryView, RunView } from "@/hooks/useChatController";
+import type { Translator } from "@/lib/messages";
 import type { components } from "@/lib/worker-api.gen";
 import { useProjectSelector } from "@/hooks/useProjectSelector";
 import { useTextSelection } from "@/hooks/useTextSelection";
@@ -171,7 +172,7 @@ export function ChatWindow({
     {run.recovery && <div className={`recovery-bar ${run.recovery.retryable ? "is-retryable" : "is-blocked"}`} data-testid="run-recovery">
       <span><strong>{run.recovery.run.status === "interrupted" ? t("conversation.chat.runInterrupted") : t("conversation.chat.runFailed")}</strong>
         {run.recovery.retryable
-          ? t("conversation.chat.attemptRetryable").replace("{attempt}", String(run.recovery.run.attempt))
+          ? t("conversation.chat.attemptRetryable", { attempt: String(run.recovery.run.attempt) })
           : recoveryMessage(run.recovery.blockedReason, t)}</span>
       {run.recovery.retryable && <button type="button" onClick={run.retryRun} disabled={run.retrying || Boolean(run.activeRun)}>
         {run.retrying ? t("conversation.chat.retrying") : t("conversation.chat.retry")}
@@ -186,7 +187,7 @@ export function ChatWindow({
           </button>
         </div>}
         {history.loading && <div className="history-state">{t("conversation.chat.loading")}</div>}
-        {history.error && <div className="history-state history-state-error">{t("conversation.chat.historyUnavailable").replace("{message}", history.error)}</div>}
+        {history.error && <div className="history-state history-state-error">{t("conversation.chat.historyUnavailable", { message: history.error })}</div>}
         {!history.loading && history.messages.length === 0 && !history.error && !run.pendingApproval && <div className="history-empty">
           <strong>{t("conversation.chat.newConversation")}</strong><span>{t("conversation.chat.startHint")}</span>
         </div>}
@@ -282,7 +283,7 @@ export function ChatWindow({
   </main>;
 }
 
-function recoveryMessage(reason: RunRecovery["blockedReason"] | undefined, t: (key: string) => string): string {
+function recoveryMessage(reason: RunRecovery["blockedReason"] | undefined, t: Translator): string {
   switch (reason) {
     case "side_effect_boundary": return t("conversation.chat.recovery.sideEffect");
     case "projected_output": return t("conversation.chat.recovery.projectedOutput");

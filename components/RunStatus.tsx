@@ -46,7 +46,7 @@ export function RunStatus({
     </span>
     {(elapsed !== null || showMetrics) && <span className="run-status-metrics" aria-hidden="true">
       {elapsed !== null ? formatElapsed(elapsed) : ""}
-      {cacheReadTokens > 0 ? `  ${t("run.status.cache").replace("{count}", formatTokenCount(cacheReadTokens))}` : ""}
+      {cacheReadTokens > 0 ? `  ${t("run.status.cache", { count: formatTokenCount(cacheReadTokens) })}` : ""}
       {(inputTokens > 0 || outputTokens > 0) ? `  ↑${formatTokenCount(inputTokens)} ↓${formatTokenCount(outputTokens)}` : ""}
     </span>}
   </div>;

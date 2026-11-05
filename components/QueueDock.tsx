@@ -40,7 +40,7 @@ export function QueueDock({
       >
         <ListPlus size={14} aria-hidden="true" />
         <span className="queue-dock-title">
-          {t("composer.queue.count").replace("{count}", String(items.length))}
+          {t("composer.queue.count", { count: String(items.length) })}
         </span>
         <span className="queue-dock-chevron" aria-hidden="true">
           {expanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}

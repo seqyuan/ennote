@@ -1,3 +1,5 @@
+import type { Translator } from "@/lib/messages";
+
 // Run status values compared by the session hooks are stable codes. Dynamic
 // facts (tool name, delay, model) ride in a detail field. Rendering translates
 // the code; it does not match English sentences.
@@ -57,7 +59,7 @@ export function decodeRunStatus(status: string): { code: string; detail: string 
   return { code: status.slice(0, index), detail: status.slice(index + SEP.length) };
 }
 
-export function runStatusText(status: string, t: (key: string) => string): string {
+export function runStatusText(status: string, t: Translator): string {
   const { code, detail } = decodeRunStatus(status);
   const key = STATUS_KEYS[code];
   // Unmapped codes still carry a detail: show the detail, never the encoded

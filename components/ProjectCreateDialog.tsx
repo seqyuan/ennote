@@ -279,7 +279,7 @@ export function ProjectCreateDialog({ busy, onCreate, onClose }: {
         <div className="project-picker-nested-overlay" onPointerDown={(event) => { if (event.target === event.currentTarget && !creatingFolder) setFolderDraft(null); }}>
           <div className="project-picker-create-dialog" role="dialog" aria-modal="true" aria-labelledby="project-folder-title">
             <h3 id="project-folder-title">{t("directory.newFolder")}</h3>
-            <p>{t("directory.createIn").replace("{name}", targetName)}</p>
+            <p>{t("directory.createIn", { name: targetName })}</p>
             <input
               value={folderDraft}
               aria-label={t("directory.folderName")}
