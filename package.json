@@ -2,6 +2,14 @@
   "name": "@seqyuan/ennote",
   "version": "0.6.0",
   "description": "Auditable local agent runtime built around Agent Flow",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/seqyuan/ennote.git"
+  },
+  "homepage": "https://github.com/seqyuan/ennote#readme",
+  "bugs": {
+    "url": "https://github.com/seqyuan/ennote/issues"
+  },
   "keywords": [
     "agent",
     "agent-flow",
