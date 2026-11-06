@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/seqyuan/ennote/ennoworker/internal/proc"
 	"os/exec"
 	"strings"
 	"time"
@@ -241,7 +242,7 @@ func (c *CheckTaskRunner) ExecuteCheck(ctx context.Context, command string, time
 	cmd.Stderr = &stderr
 	stdout.limit = maxBytes
 	stderr.limit = maxBytes
-	runErr := runProcessGroup(runCtx, cmd)
+	runErr := proc.RunGroup(runCtx, cmd)
 	exitCode := 0
 	if runErr != nil {
 		var exitErr *exec.ExitError

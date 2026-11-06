@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/seqyuan/ennote/ennoworker/internal/proc"
 	"strings"
 	"time"
 
@@ -79,7 +80,7 @@ func (t *ExecTool) execute(ctx context.Context, call domain.ToolCall, sink domai
 	}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	runErr := runProcessGroup(runCtx, cmd)
+	runErr := proc.RunGroup(runCtx, cmd)
 	references, notices, artifactErr := collectOutputArtifacts(context.WithoutCancel(ctx), t.Artifacts, call.ID, stdout, stderr)
 	content := formatCommandOutput(stdout.String(), stderr.String())
 	for _, notice := range notices {

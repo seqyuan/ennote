@@ -1,6 +1,6 @@
 //go:build linux || darwin
 
-package store
+package proc
 
 import (
 	"context"
@@ -11,9 +11,16 @@ import (
 	"time"
 )
 
-// runProcessGroup starts cmd in its own process group and waits, terminating
-// the whole group on context cancellation (bounded wall timeout).
-func runProcessGroup(ctx context.Context, cmd *exec.Cmd) error {
+// RunGroup starts cmd in its own process group and waits for it, terminating the
+// whole group on context cancellation: SIGTERM first, then SIGKILL after a bounded
+// grace period, so a child that spawns helpers cannot outlive the Run that started
+// it.
+//
+// This lived in two packages as byte-identical copies plus two divergent
+// non-unix variants; the non-unix copy that kept the timeout distinction is the
+// one promoted here, because "timed out" and "cancelled" are different answers for
+// a Run and losing one of them silently is how a deadline becomes a cancellation.
+func RunGroup(ctx context.Context, cmd *exec.Cmd) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		return err

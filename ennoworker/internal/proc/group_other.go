@@ -1,18 +1,17 @@
-//go:build linux || darwin
+//go:build !linux && !darwin
 
-package tools
+package proc
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"os/exec"
-	"syscall"
-	"time"
 )
 
-func runProcessGroup(ctx context.Context, cmd *exec.Cmd) error {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+// RunGroup has no process group to signal on this platform, so it kills the one
+// child it started. See the unix variant for the contract it keeps.
+func RunGroup(ctx context.Context, cmd *exec.Cmd) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -22,13 +21,8 @@ func runProcessGroup(ctx context.Context, cmd *exec.Cmd) error {
 	case err := <-done:
 		return err
 	case <-ctx.Done():
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-		select {
-		case <-done:
-		case <-time.After(500 * time.Millisecond):
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			<-done
-		}
+		_ = cmd.Process.Kill()
+		<-done
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return fmt.Errorf("command timed out: %w", ctx.Err())
 		}
