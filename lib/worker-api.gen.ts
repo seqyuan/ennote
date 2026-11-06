@@ -4226,8 +4226,10 @@ export interface components {
         /**
          * @description The message_committed variant of the durable session feed. Unlike every
          *     other durable frame it omits eventId/seq (the SSE `id:` line carries the
-         *     cursor) and adds the committed seq range so the client can re-sync one
-         *     page of the timeline without refetching the session.
+         *     cursor) and adds firstSeq/lastSeq, the MIN/MAX seq of the messages this
+         *     run has committed so far. That is the run's span, not the range this frame
+         *     added, so it locates the run in the timeline rather than describing a
+         *     delta: a client that wants the rows still reads the message page.
          */
         SessionMessageCommittedFrame: {
             /** @constant */

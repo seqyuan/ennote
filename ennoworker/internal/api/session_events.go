@@ -124,8 +124,10 @@ func (s *Server) streamSessionEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // sessionEventFrame renders one whitelisted durable event. message_committed
-// additionally carries the committed messages' seq range so the client can
-// re-sync without re-pulling the whole page.
+// additionally carries the MIN/MAX seq of the messages the run has committed, so
+// the client can place the run in the timeline. It is not a delta: both bounds
+// stay the run's span as more of it commits, and the rows are still read from the
+// message page.
 func (s *Server) sessionEventFrame(ctx context.Context, event domain.RunEvent) ([]byte, error) {
 	if event.EventType == "message_committed" {
 		var first, last int64
