@@ -132,10 +132,25 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if ! npm view "$ENNOTE_NPM_PACKAGE@${{ steps.pkg.outputs.version }}" version; then
-            echo "::error::npm publish did not make ${{ steps.pkg.outputs.version }} visible. The release is probably staged (2FA): run 'npm stage list' and 'npm stage approve <id>', then re-run this workflow."
-            exit 1
-          fi
+          # The registry accepts a publish into an asynchronous processing queue
+          # ("your package is being processed and may take a few minutes") and the
+          # version appears later — v0.6.0 took about two minutes. A single check
+          # raced that window and failed a release whose publish had succeeded, so
+          # poll instead of guessing.
+          for attempt in $(seq 1 40); do
+            if npm view "$ENNOTE_NPM_PACKAGE@${{ steps.pkg.outputs.version }}" version >/dev/null 2>&1; then
+              echo "$ENNOTE_NPM_PACKAGE@${{ steps.pkg.outputs.version }} is live"
+              exit 0
+            fi
+            echo "not visible yet (attempt ${attempt}/40), waiting 15s"
+            sleep 15
+          done
+          echo "::error::${{ steps.pkg.outputs.version }} is still not visible after 10 minutes."
+          echo "If the publish is waiting for approval (2FA or staged publishing), run"
+          echo "  npm stage list && npm stage approve <id>"
+          echo "from a machine with the publisher's credentials, then re-run this job."
+          npm view "$ENNOTE_NPM_PACKAGE@${{ steps.pkg.outputs.version }}" --json || true
+          exit 1
 
       # Provenance for the artifacts users actually run: the published tarball and
       # every worker binary. `SHA256SUMS` proves the bytes did not change in
