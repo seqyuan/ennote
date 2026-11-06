@@ -38,6 +38,7 @@ nav:
   - index.md
   - concepts.md
   - permissions.md
+  - mcp.md
   - lan-security.md
   - troubleshooting.md
 
@@ -68,6 +69,7 @@ plugins:
             index.md: 快速开始
             concepts.md: 概念模型
             permissions.md: 模型与权限
+            mcp.md: MCP
             lan-security.md: 局域网与安全
             troubleshooting.md: 排障
         - locale: en
@@ -77,6 +79,7 @@ plugins:
             index.md: Getting started
             concepts.md: Concepts
             permissions.md: Models and permissions
+            mcp.md: MCP
             lan-security.md: LAN and security
             troubleshooting.md: Troubleshooting
 
