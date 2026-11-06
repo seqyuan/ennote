@@ -49,6 +49,17 @@ function snapshot(activeRunId: string): unknown {
   };
 }
 
+/** Every projection field populated, so a partial clear cannot pass. */
+function populatedSnapshot(activeRunId: string): unknown {
+  return {
+    activeRun: { id: activeRunId, sessionId: "s1", status: "running" },
+    pendingApproval: { id: "approval-1", runId: activeRunId, toolName: "bash", arguments: {} },
+    queuedInputs: [{ id: "q1", runId: activeRunId, kind: "follow_up", text: "later", status: "queued" }],
+    checkpoints: [],
+    delegationActive: true,
+  };
+}
+
 describe("SessionStore residency (phase A)", () => {
   beforeEach(() => {
     apiFetch.mockReset();
@@ -193,6 +204,147 @@ describe("SessionStore change feed (phase C)", () => {
     await vi.waitFor(() => expect(messageCalls()).toBe(before + 1));
 
     expect(store.getSnapshot().lastSeq).toBe(2);
+  });
+
+  it("collapses a burst of commits into one window refresh", async () => {
+    // The Authority emits one commit per run, in the same transaction as the
+    // terminal frame. This covers the shape the stream contract also allows and
+    // the Authority does not currently produce: several commits, no terminal
+    // frame. Each one used to issue a pair of requests that aborted the previous
+    // pair, and the projection is snapshot-driven, so the burst only has to mark
+    // the window dirty once.
+    vi.useFakeTimers();
+    try {
+      const registry = createSessionRegistry();
+      const store = registry.getStore("s1");
+      await store.ensureLoaded("b1");
+      const before = messageCalls();
+
+      for (const seq of [2, 3, 4, 5, 6]) {
+        streamOnEvent.handler!({ id: String(seq), data: { type: "message_committed", runId: "run-1", firstSeq: seq, lastSeq: seq } });
+      }
+      await vi.advanceTimersByTimeAsync(500);
+      expect(messageCalls()).toBe(before + 1);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(messageCalls()).toBe(before + 1);
+      expect(store.getSnapshot().lastSeq).toBe(6);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refreshes immediately when a terminal frame arrives mid-burst", async () => {
+    vi.useFakeTimers();
+    try {
+      const registry = createSessionRegistry();
+      const store = registry.getStore("s1");
+      await store.ensureLoaded("b1");
+      const before = messageCalls();
+
+      streamOnEvent.handler!({ data: { type: "message_committed", runId: "run-1", firstSeq: 2, lastSeq: 2 } });
+      streamOnEvent.handler!({ data: { type: "run_succeeded", runId: "run-1" } });
+      await vi.advanceTimersByTimeAsync(0);
+
+      // No waiting for the debounce: the boundary refresh takes the pending one.
+      expect(messageCalls()).toBe(before + 1);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(messageCalls()).toBe(before + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops the projection when the change feed is paused", async () => {
+    // A store with no socket cannot see a run finish or an approval resolve, so
+    // a session switched back to must not paint a finished run as running.
+    const registry = createSessionRegistry();
+    const store = registry.getStore("s1");
+    await store.ensureLoaded("b1");
+    streamOnEvent.handler!({ data: { type: "subscribed", instanceId: "w1", lastSeq: 3, snapshot: populatedSnapshot("run-1") } });
+    expect(store.getSnapshot().activeRun?.id).toBe("run-1");
+    expect(store.getSnapshot().pendingApproval?.id).toBe("approval-1");
+    expect(store.getSnapshot().queuedInputs).toHaveLength(1);
+    expect(store.getSnapshot().delegationActive).toBe(true);
+
+    store.pauseStream();
+
+    expect(store.getSnapshot().activeRun).toBeNull();
+    expect(store.getSnapshot().pendingApproval).toBeNull();
+    expect(store.getSnapshot().queuedInputs).toEqual([]);
+    expect(store.getSnapshot().delegationActive).toBe(false);
+    expect(store.getSnapshot().lastSeq).toBe(3);
+
+    // Reopening is a cache hit for the history window, but the projection stays
+    // empty until the reopened stream sends its authoritative snapshot.
+    await store.ensureLoaded("b1");
+    expect(messageCalls()).toBe(1);
+    expect(store.getSnapshot().activeRun).toBeNull();
+
+    streamOnEvent.handler!({ data: { type: "subscribed", instanceId: "w1", lastSeq: 4, snapshot: snapshot("run-2") } });
+    expect(store.getSnapshot().activeRun?.id).toBe("run-2");
+  });
+
+  it("does not fire a deferred refresh after the stream is paused", async () => {
+    // The timer is cancelled on pause; the intent is not. Nothing should be read
+    // on behalf of a session nobody is watching.
+    vi.useFakeTimers();
+    try {
+      const registry = createSessionRegistry();
+      const store = registry.getStore("s1");
+      await store.ensureLoaded("b1");
+      const before = messageCalls();
+
+      streamOnEvent.handler!({ data: { type: "message_committed", runId: "run-1", firstSeq: 2, lastSeq: 2 } });
+      store.pauseStream();
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(messageCalls()).toBe(before);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reads the window on reopen when a pause interrupted a read", async () => {
+    // The commit frame advanced eventCursor, so it will not replay. If the intent
+    // is dropped with the timer, those rows never appear in the timeline.
+    vi.useFakeTimers();
+    try {
+      const registry = createSessionRegistry();
+      const store = registry.getStore("s1");
+      await store.ensureLoaded("b1");
+      const before = messageCalls();
+
+      streamOnEvent.handler!({ data: { type: "message_committed", runId: "run-1", firstSeq: 2, lastSeq: 2 } });
+      store.pauseStream();
+      await store.ensureLoaded("b1");
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(messageCalls()).toBe(before + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("re-arms after a terminal frame instead of swallowing the next commit", async () => {
+    vi.useFakeTimers();
+    try {
+      const registry = createSessionRegistry();
+      const store = registry.getStore("s1");
+      await store.ensureLoaded("b1");
+      const before = messageCalls();
+
+      streamOnEvent.handler!({ data: { type: "run_succeeded", runId: "run-1" } });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(messageCalls()).toBe(before + 1);
+
+      streamOnEvent.handler!({ data: { type: "message_committed", runId: "run-2", firstSeq: 3, lastSeq: 3 } });
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(messageCalls()).toBe(before + 2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("leaves generation recovery to the page reload", async () => {

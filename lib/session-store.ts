@@ -7,6 +7,7 @@ import {
   type ContextCheckpoint,
   type TurnMessage,
 } from "@/lib/chat-messages";
+import { WindowRefresh } from "@/lib/session-window-refresh";
 import { apiEventStream, apiFetch, type WorkerSSEEvent } from "@/lib/worker-api.client";
 
 type ContextCompaction = components["schemas"]["ContextCompaction"];
@@ -85,9 +86,11 @@ export class SessionStore {
   private requestController: AbortController | null = null;
 
   // Session change-feed projection (phase C): the authoritative transient state
-  // pushed by the worker snapshot frames. Off-screen stores keep consuming this
-  // through their own SSE connection, which is what enables multi-session
-  // parallel push.
+  // pushed by the worker snapshot frames. Only the visible session holds a
+  // socket (pauseStream drops it to stay inside the browser's per-origin
+  // connection budget), so this projection is worth exactly as much as the
+  // stream that feeds it: it is cleared on pause and rebuilt from the
+  // `subscribed` frame the next stream sends.
   private activeRun: AgentRun | null = null;
   private pendingApproval: ToolApprovalRequest | null = null;
   private queuedInputs: QueuedInput[] = [];
@@ -102,6 +105,7 @@ export class SessionStore {
   private eventCursor: string | undefined;
   private streamPaused = false;
   private disposed = false;
+  private readonly windowRefresh = new WindowRefresh(() => this.refreshLatest());
 
   private listeners = new Set<Listener>();
   private snapshot: SessionStoreSnapshot | null = null;
@@ -141,7 +145,13 @@ export class SessionStore {
   ensureLoaded = (branchId: string | undefined): Promise<void> => {
     this.requestedBranchId = branchId;
     this.openStream();
-    if (this.loaded && this.dataBranchId === branchId) return Promise.resolve();
+    if (this.loaded && this.dataBranchId === branchId) {
+      // The window is resident, but a pause may have interrupted a read that the
+      // change feed already told us about. Those events are behind eventCursor
+      // and never replay, so this is the only place that can still honour them.
+      if (this.windowRefresh.takeInterruptedRead()) return this.refreshLatest();
+      return Promise.resolve();
+    }
     this.resetForBranch();
     return this.loadInitial(branchId);
   };
@@ -188,6 +198,7 @@ export class SessionStore {
   };
 
   refreshLatest = async (): Promise<void> => {
+    if (this.disposed) return;
     this.requestVersion += 1;
     const version = this.requestVersion;
     this.requestController?.abort();
@@ -217,6 +228,10 @@ export class SessionStore {
       }
       this.dataBranchId = this.requestedBranchId;
       this.loaded = true;
+      // refreshLatest aborts the controller loadInitial was using, so its
+      // finally skips clearing this. Without it a refresh that lands during a
+      // branch switch leaves the store loading forever.
+      this.loading = false;
       this.transient = [];
       this.error = null;
     } catch (cause) {
@@ -277,8 +292,23 @@ export class SessionStore {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
     this.reconnectAttempt = 0;
+    // Cancels the timer, not the intent: the reopened session still reads the
+    // rows it was told about but never fetched (see ensureLoaded).
+    this.windowRefresh.cancelPending();
     this.streamController?.abort();
     this.streamController = null;
+    // A store with no socket cannot observe a run starting, finishing or an
+    // approval resolving. Keeping the last snapshot would let a session that is
+    // switched back paint a finished run as running, and let the run stream
+    // reopen for a run that is already over. Drop it here; the `subscribed` frame
+    // of the reopened stream restores it before any other frame.
+    //
+    // The cost is the mirror image of the bug: between reopening and that frame
+    // the App reads the projection as "idle", so a run that is still going looks
+    // finished for a moment. The streamed tail (transient) is kept deliberately —
+    // it is what the user was reading — and a submit during that window is
+    // refused by the Worker and restored to the composer.
+    this.clearProjection();
     if (this.streamOpen) {
       this.streamOpen = false;
       this.notify();
@@ -291,6 +321,7 @@ export class SessionStore {
     this.streamController?.abort();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
+    this.windowRefresh.replaceWindow();
     this.listeners.clear();
   };
 
@@ -351,7 +382,7 @@ export class SessionStore {
       case "message_committed": {
         const frame = data as Extract<SessionStreamFrame, { type: "message_committed" }>;
         this.lastSeq = Math.max(this.lastSeq, frame.lastSeq ?? 0);
-        void this.refreshLatest();
+        if (!this.disposed) this.windowRefresh.markDirty();
         break;
       }
       case "run_succeeded":
@@ -360,13 +391,31 @@ export class SessionStore {
       case "run_interrupted":
       case "context_compaction_completed":
       case "run_context_compaction_completed":
-        void this.refreshLatest();
+        // A terminal frame is the boundary the window must be exact at, so it
+        // takes the read the commit frames deferred.
+        if (!this.disposed) this.windowRefresh.flush();
         break;
       default:
         // approval_requested/resolved, input_queued/injected: the snapshot
         // frame carries the authoritative projection.
         break;
     }
+  }
+
+  /**
+   * Drops the pushed projection, not the window and not the streamed tail: the
+   * history stays (it is not what went stale) and transient stays (it is what the
+   * user was reading). Only the state the closed socket can no longer keep true
+   * goes away.
+   */
+  private clearProjection(): void {
+    if (this.activeRun === null && this.pendingApproval === null
+      && this.queuedInputs.length === 0 && !this.delegationActive) return;
+    this.activeRun = null;
+    this.pendingApproval = null;
+    this.queuedInputs = [];
+    this.delegationActive = false;
+    this.notify();
   }
 
   private applySnapshot(snapshot?: SessionRunSnapshot): void {
@@ -409,6 +458,9 @@ export class SessionStore {
     this.requestVersion += 1;
     this.requestController?.abort();
     this.requestController = new AbortController();
+    // The pending read belongs to the window that is being replaced, and
+    // loadInitial reads the replacement in full.
+    this.windowRefresh.replaceWindow();
     this.dataBranchId = undefined;
     this.loaded = false;
     this.canonical = [];
