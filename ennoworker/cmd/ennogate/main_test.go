@@ -454,3 +454,130 @@ func TestGateHostAllowlist(t *testing.T) {
 		})
 	}
 }
+
+// TestProxyFailureCarriesNoWorkerIdentity pins the other half of the client's
+// offline contract. X-Ennote-Worker-Instance is the only evidence that the Worker
+// process itself answered, so a page the gate writes on its own must not carry
+// it: if some future middleware stamped the header on every gate response, the
+// App could never tell a missing Worker from a degraded one and would sit
+// writable against a process that is gone.
+func TestProxyFailureCarriesNoWorkerIdentity(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(home, "config"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config", "auth.json"), []byte(`{"hash":"x"}`), 0o600))
+
+	// A port nothing listens on: the reverse proxy cannot reach the Worker and
+	// writes its own 502.
+	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	deadURL := dead.URL
+	dead.Close()
+
+	gate := &Gate{HomeDir: home, StaticDir: t.TempDir(), Port: "45131", WorkerURL: deadURL, Token: "worker-token"}
+	handler := gate.handler()
+
+	token := "session-token"
+	storeSession(token)
+
+	request := gateRequest(http.MethodGet, "/api/worker/v1/health/live", "", "", "127.0.0.1:9")
+	request.AddCookie(&http.Cookie{Name: gate.cookieName(), Value: token})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusBadGateway, response.Code, response.Body.String())
+	assert.Empty(t, response.Header().Get("X-Ennote-Worker-Instance"))
+}
+
+// TestUnauthenticatedBodyIsBoundedBeforeItIsBuffered covers the only routes a
+// caller without a session can use to make the gate read a body it chooses the
+// size of. The point is not the status code alone: it is that an unbounded body
+// is refused before it is pulled into memory, so the test counts what the handler
+// actually read instead of trusting the size of a string it built itself.
+func TestUnauthenticatedBodyIsBoundedBeforeItIsBuffered(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(home, "config"), 0o700))
+	gate := &Gate{HomeDir: home, StaticDir: t.TempDir(), Port: "45131"}
+	handler := gate.handler()
+
+	const bodySize = 1 << 20 // 16x the cap: a handler that read it all would show it.
+	for _, target := range []string{"/api/auth/login", "/api/auth/setup"} {
+		// A valid JSON prefix that never closes: the decoder keeps consuming while
+		// it looks for the end of the string, which is the shape a body cap has to
+		// stop. Padding that is already invalid JSON would be rejected at byte one
+		// and prove nothing about the cap.
+		body := &countingBody{remaining: bodySize, prefix: []byte(`{"password":"`)}
+		// httptest.NewRequest only derives ContentLength for a few reader types,
+		// so this arrives without one: MaxBytesReader has to stop it while it is
+		// being read, not before.
+		request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:45131"+target, body)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Origin", "http://127.0.0.1:45131")
+		request.RemoteAddr = "127.0.0.1:9"
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+
+		assert.Equal(t, http.StatusRequestEntityTooLarge, response.Code, target)
+		assert.LessOrEqual(t, body.read, maxAuthBodyBytes+4096,
+			"%s read %d bytes of a %d byte body", target, body.read, bodySize)
+	}
+
+	// A declared length is refused without reading anything at all.
+	declared := strings.NewReader(`{"password":"` + strings.Repeat("a", int(maxAuthBodyBytes)) + `"}`)
+	declaredRequest := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:45131/api/auth/login", declared)
+	declaredRequest.Header.Set("Content-Type", "application/json")
+	declaredRequest.Header.Set("Origin", "http://127.0.0.1:45131")
+	declaredRequest.RemoteAddr = "127.0.0.1:9"
+	declaredResponse := httptest.NewRecorder()
+	handler.ServeHTTP(declaredResponse, declaredRequest)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, declaredResponse.Code)
+
+	// Malformed JSON is a bad request, not an oversized one.
+	malformed := gateRequest(http.MethodPost, "/api/auth/setup", "{", "http://127.0.0.1:45131", "127.0.0.1:9")
+	malformedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(malformedResponse, malformed)
+	assert.Equal(t, http.StatusBadRequest, malformedResponse.Code)
+
+	// bcrypt refuses anything past 72 bytes. That is the caller's mistake, so it
+	// has to read as one instead of surfacing as a 500 from the hasher.
+	long := gateRequest(http.MethodPost, "/api/auth/setup", `{"password":"`+strings.Repeat("a", 80)+`"}`,
+		"http://127.0.0.1:45131", "127.0.0.1:9")
+	longResponse := httptest.NewRecorder()
+	handler.ServeHTTP(longResponse, long)
+	assert.Equal(t, http.StatusBadRequest, longResponse.Code)
+
+	// A readable body still reaches the handler: setup is loopback-only and the
+	// password it accepts has to get through the same path.
+	setup := gateRequest(http.MethodPost, "/api/auth/setup", `{"password":"test-password"}`, "http://127.0.0.1:45131", "127.0.0.1:9")
+	setupResponse := httptest.NewRecorder()
+	handler.ServeHTTP(setupResponse, setup)
+	require.Equal(t, http.StatusOK, setupResponse.Code, setupResponse.Body.String())
+}
+
+// countingBody yields a body of variable content and records how much a handler
+// actually pulled, which is the property a body cap is supposed to provide.
+type countingBody struct {
+	remaining int
+	prefix    []byte
+	read      int64
+}
+
+func (b *countingBody) Read(p []byte) (int, error) {
+	if len(b.prefix) > 0 {
+		n := copy(p, b.prefix)
+		b.prefix = b.prefix[n:]
+		b.read += int64(n)
+		return n, nil
+	}
+	if b.remaining == 0 {
+		return 0, io.EOF
+	}
+	n := len(p)
+	if n > b.remaining {
+		n = b.remaining
+	}
+	for i := 0; i < n; i++ {
+		p[i] = 'a'
+	}
+	b.remaining -= n
+	b.read += int64(n)
+	return n, nil
+}

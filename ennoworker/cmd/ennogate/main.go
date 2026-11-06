@@ -501,7 +501,7 @@ func (g *Gate) handler() http.Handler {
 		files.ServeHTTP(w, r)
 	})))
 
-	return g.hostGuard(g.csrfMiddleware(mux))
+	return g.hostGuard(g.csrfMiddleware(g.bodyLimit(mux)))
 }
 
 // hostGuard is the outermost layer: it rejects requests whose Host header cannot
@@ -658,8 +658,7 @@ func (g *Gate) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct{ Password string }
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid request"})
+	if !decodeAuthBody(w, r, &input) {
 		return
 	}
 	authFile := filepath.Join(g.HomeDir, "config", "auth.json")
@@ -723,8 +722,11 @@ func (g *Gate) setupPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct{ Password string }
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || len(input.Password) < minPasswordLength {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "password must be at least 8 characters"})
+	if !decodeAuthBody(w, r, &input) {
+		return
+	}
+	if len(input.Password) < minPasswordLength || len(input.Password) > maxPasswordLength {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "password must be between 8 and 72 bytes"})
 		return
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
@@ -789,9 +791,52 @@ func (g *Gate) csrfMiddleware(next http.Handler) http.Handler {
 
 const (
 	minPasswordLength    = 8
+	maxPasswordLength    = 72 // bcrypt refuses anything longer; report it as a bad request, not a 500
 	defaultLoginFailures = 5
 	defaultLoginLockout  = 15 * time.Minute
+
+	// A password is a few bytes. The cap exists so a body is refused before it is
+	// buffered, not to bound a legitimate request.
+	maxAuthBodyBytes int64 = 64 << 10
 )
+
+// bodyLimit caps the request bodies the gate reads for itself, for every route
+// except the Worker proxy: proxied bodies are streamed to ennoworker, which owns
+// its own limits, and capping them here would truncate an upload mid-stream.
+// Putting it at the routing layer rather than in each handler means a gate route
+// added later is bounded by default instead of by whether its author remembered.
+func (g *Gate) bodyLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/api/worker/") {
+			r.Body = http.MaxBytesReader(w, r.Body, maxAuthBodyBytes)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// decodeAuthBody reports the failure itself, so login and first-run setup cannot
+// drift apart on the status they answer an oversized or malformed body with. The
+// cap itself comes from bodyLimit; this only turns the overflow into an answer.
+// It is deliberately looser than internal/api's decodeJSONWithLimit: the gate
+// reads one known field and does not need unknown-field or multi-value rejection.
+func decodeAuthBody(w http.ResponseWriter, r *http.Request, target any) bool {
+	// A declared length is refused before a single byte is read. A reader that
+	// lies low is still caught by MaxBytesReader while it is being decoded.
+	if r.ContentLength > maxAuthBodyBytes {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "request body too large"})
+		return false
+	}
+	if err := json.NewDecoder(r.Body).Decode(target); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "request body too large"})
+			return false
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid request"})
+		return false
+	}
+	return true
+}
 
 type loginRecord struct {
 	count       int
