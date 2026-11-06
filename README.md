@@ -6,6 +6,8 @@ Ennote 把长任务编排成可恢复的 Agent Flow：Task 图、Role 绑定、�
 checkpoint 和恢复状态都持久化在本地 SQLite 中。它不依赖账号或云端即可启动、
 计算和保存结果；生信是参考工作流，而不是平台承诺。
 
+**使用文档：<https://seqyuan.github.io/ennote/>**（[English](https://seqyuan.github.io/ennote/en/)）
+
 ## 核心特点
 
 ### Agent Flow

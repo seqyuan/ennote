@@ -26,7 +26,9 @@ const eslintConfig = [
     },
   },
   {
-    ignores: ["ennoworker/**", "playwright-report/**", "test-results/**"],
+    // _site is the MkDocs output produced by `mkdocs build` (pages.yml); it
+    // ships vendored theme JavaScript that the source rules do not apply to.
+    ignores: ["ennoworker/**", "playwright-report/**", "test-results/**", "_site/**", "out/**", ".next/**"],
   },
 ];
 

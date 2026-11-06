@@ -140,6 +140,18 @@ jobs:
   # binaries are local-only. .gitignore cannot stop `git add -f`, so the tracked
   # set is asserted. Also checks that package.json and package-lock.json agree on
   # the version, because release.yml only compares the tag against package.json.
+  docs-site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --quiet -r mkdocs-requirements.txt
+      # Same command as pages.yml, so a broken link fails the pull request
+      # instead of the deploy.
+      - run: mkdocs build --strict
+
   guard-repo-hygiene:
     runs-on: ubuntu-latest
     steps:

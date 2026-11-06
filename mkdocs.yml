@@ -1,0 +1,89 @@
+# Ennote 文档站配置（mkdocs-material）
+# 源码在 manual/（/docs/ 是本仓库的本地设计目录，按 AGENTS.md 不提交），
+# 构建输出 _site/，由 .github/workflows/pages.yml 发布到 GitHub Pages。
+site_name: Ennote
+site_description: 本地优先、可审计的 agent 运行时
+site_url: https://seqyuan.github.io/ennote/
+repo_url: https://github.com/seqyuan/ennote
+repo_name: seqyuan/ennote
+edit_uri: edit/main/manual/
+
+docs_dir: manual
+site_dir: _site
+
+theme:
+  name: material
+  language: zh
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: 切换到深色模式
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: 切换到浅色模式
+  features:
+    - navigation.top
+    - navigation.tracking
+    - content.code.copy
+    - search.highlight
+    - toc.follow
+
+nav:
+  - index.md
+  - concepts.md
+  - permissions.md
+  - lan-security.md
+  - troubleshooting.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - i18n:
+      docs_structure: folder
+      fallback_to_default: true
+      reconfigure_material: true
+      reconfigure_search: true
+      languages:
+        - locale: zh
+          default: true
+          name: 中文
+          build: true
+          nav_translations:
+            index.md: 快速开始
+            concepts.md: 概念模型
+            permissions.md: 模型与权限
+            lan-security.md: 局域网与安全
+            troubleshooting.md: 排障
+        - locale: en
+          name: English
+          build: true
+          nav_translations:
+            index.md: Getting started
+            concepts.md: Concepts
+            permissions.md: Models and permissions
+            lan-security.md: LAN and security
+            troubleshooting.md: Troubleshooting
+
+extra:
+  generator: false
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/seqyuan/ennote
+
+copyright: Ennote · MIT
