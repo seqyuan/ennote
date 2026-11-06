@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"github.com/google/uuid"
 	"io"
 	"net/http"
@@ -771,6 +772,64 @@ func TestSessionSearchArchiveRestoreAPI(t *testing.T) {
 	busyResponse := request(t, handler, http.MethodPost, "/v1/sessions/"+busy.ID+"/archive", map[string]any{}, true)
 	assert.Equal(t, http.StatusConflict, busyResponse.Code)
 	assert.Contains(t, busyResponse.Body.String(), `"code":"session_busy"`)
+}
+
+// failingEnqueueController refuses the first run it is offered and schedules the
+// rest, so the test can ask what the *next* submit sees.
+type failingEnqueueController struct {
+	fakeController
+	attempted []string
+}
+
+func (f *failingEnqueueController) Enqueue(ctx context.Context, runID string) error {
+	f.attempted = append(f.attempted, runID)
+	if len(f.attempted) == 1 {
+		return errors.New("scheduler unavailable")
+	}
+	return f.fakeController.Enqueue(ctx, runID)
+}
+
+func TestSubmitTurnSettlesTheRunWhenEnqueueFails(t *testing.T) {
+	controller := &failingEnqueueController{}
+	server, handler := setupServer(t, controller)
+	project := request(t, handler, http.MethodPost, "/v1/projects", map[string]any{"name": "P", "hostPath": t.TempDir()}, true)
+	var created struct {
+		Project domain.Project `json:"project"`
+	}
+	decodeData(t, project, &created)
+	sessionResponse := request(t, handler, http.MethodPost, "/v1/projects/"+created.Project.ID+"/sessions", map[string]any{"title": "S"}, true)
+	var session domain.Session
+	decodeData(t, sessionResponse, &session)
+
+	turnReq := httptest.NewRequest(http.MethodPost, "/v1/sessions/"+session.ID+"/turns", strings.NewReader(`{"text":"start"}`))
+	turnReq.Header.Set("Authorization", "Bearer test-token")
+	turnReq.Header.Set("Content-Type", "application/json")
+	turnReq.Header.Set("Idempotency-Key", "turn-1")
+	turnResponse := httptest.NewRecorder()
+	handler.ServeHTTP(turnResponse, turnReq)
+	require.Equal(t, http.StatusInternalServerError, turnResponse.Code, turnResponse.Body.String())
+	assert.Contains(t, turnResponse.Body.String(), "run_enqueue_failed")
+
+	// The Run the client never got to see must not stay in `queued`: nothing
+	// retries it, and a queued Run blocks the session's next submit. The response
+	// never carried its id, so read it from the session database the Worker
+	// actually writes runs to.
+	require.Len(t, controller.attempted, 1)
+	sessionDB, err := server.SessionStores.OpenSession(context.Background(), session.ID)
+	require.NoError(t, err)
+	var status string
+	require.NoError(t, sessionDB.QueryRow(
+		`SELECT status FROM agent_runs WHERE id = ?`, controller.attempted[0]).Scan(&status))
+	assert.Equal(t, string(domain.RunCancelled), status)
+
+	// The session is still usable.
+	next := httptest.NewRequest(http.MethodPost, "/v1/sessions/"+session.ID+"/turns", strings.NewReader(`{"text":"again"}`))
+	next.Header.Set("Authorization", "Bearer test-token")
+	next.Header.Set("Content-Type", "application/json")
+	next.Header.Set("Idempotency-Key", "turn-2")
+	nextResponse := httptest.NewRecorder()
+	handler.ServeHTTP(nextResponse, next)
+	require.Equal(t, http.StatusAccepted, nextResponse.Code, nextResponse.Body.String())
 }
 
 func TestSubmitTurnQueueSteerAndCancel(t *testing.T) {

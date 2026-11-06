@@ -45,6 +45,34 @@ type ProjectionController interface {
 	DrainSession(context.Context, string, int) (int, error)
 }
 
+// failEnqueue settles a Run whose scheduling failed. No RunController wired today
+// can fail — Coordinator.Enqueue returns nil for every run it accepts — so this is
+// the defensive half of the interface, kept because the alternative is a silent
+// `_ =`. If it ever fires, the Run must not stay in `queued`: the client of a
+// submit gets an error and its next attempt carries a new Idempotency-Key, so
+// nothing retries the Run, and a `queued` Run blocks the session's next submit.
+//
+// The settlement deliberately does not borrow the request context: it has to
+// outlive the disconnect that may have caused the error. An approval action is a
+// different shape and does not come through here — the approval is already durable
+// and the action is retryable, so it reports the failure and lets the retry settle
+// the Run.
+func (s *Server) failEnqueue(runID string, cause error) {
+	// Cancel, not Fail: the state machine only lets a queued Run reach running,
+	// cancelled or interrupted (domain.CanTransitionRun), and this Run never
+	// started. Cancelling terminalises it, which is what matters — a Run left in
+	// `queued` is what blocks the session's next submit. The reason travels in the
+	// log rather than in the Run, because Cancelled carries no error code; giving
+	// a never-scheduled Run a terminal failure state is a domain decision, not one
+	// to take here.
+	if err := s.Runs.Cancel(context.Background(), runID); err != nil {
+		slog.Error("enqueue failure could not be settled",
+			"run_id", runID, "enqueue_error", cause, "settle_error", err)
+		return
+	}
+	slog.Warn("run enqueue failed and the run was cancelled", "run_id", runID, "error", cause)
+}
+
 func (s *Server) enqueueChildRuns(ctx context.Context, children []*domain.AgentRun) error {
 	if s.Control == nil {
 		return nil
@@ -1228,7 +1256,7 @@ func (s *Server) submitTurn(w http.ResponseWriter, r *http.Request) {
 	}
 	if !submission.Existing && s.Control != nil {
 		if err := s.Control.Enqueue(context.Background(), submission.Run.ID); err != nil {
-			_ = s.Runs.Fail(context.Background(), submission.Run.ID, "run_enqueue_failed", err.Error())
+			s.failEnqueue(submission.Run.ID, err)
 			writeError(w, r, http.StatusInternalServerError, "run_enqueue_failed", "run could not be scheduled", true)
 			return
 		}
@@ -1312,7 +1340,7 @@ func (s *Server) submitInvocation(w http.ResponseWriter, r *http.Request) {
 	}
 	if !submission.Existing && s.Control != nil {
 		if err := s.Control.Enqueue(context.Background(), submission.Run.ID); err != nil {
-			_ = s.Runs.Fail(context.Background(), submission.Run.ID, "run_enqueue_failed", err.Error())
+			s.failEnqueue(submission.Run.ID, err)
 			writeError(w, r, http.StatusInternalServerError, "run_enqueue_failed", "run could not be scheduled", true)
 			return
 		}
@@ -1353,7 +1381,7 @@ func (s *Server) createCompaction(w http.ResponseWriter, r *http.Request) {
 	}
 	if !submission.Existing && s.Control != nil {
 		if err := s.Control.Enqueue(context.Background(), submission.RunID); err != nil {
-			_ = s.Runs.Fail(context.Background(), submission.RunID, "run_enqueue_failed", err.Error())
+			s.failEnqueue(submission.RunID, err)
 			writeError(w, r, http.StatusInternalServerError, "run_enqueue_failed", "compaction could not be scheduled", true)
 			return
 		}
@@ -1415,7 +1443,7 @@ func (s *Server) retryRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if !submission.Existing && s.Control != nil {
 		if err := s.Control.Enqueue(context.Background(), submission.Run.ID); err != nil {
-			_ = s.Runs.Fail(context.Background(), submission.Run.ID, "run_enqueue_failed", err.Error())
+			s.failEnqueue(submission.Run.ID, err)
 			writeError(w, r, http.StatusInternalServerError, "run_enqueue_failed", "retry could not be scheduled", true)
 			return
 		}
