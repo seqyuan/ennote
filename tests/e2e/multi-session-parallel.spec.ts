@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { openSession, tryFulfillBlankSessionCreate } from "./harness";
+import { openSession, tryFulfillHarnessRoutes } from "./harness";
 import { subscribedFrame } from "./session-feed";
 
 const project = { id: "ms-project", name: "Multi-session workspace", description: "", status: "active",
@@ -38,7 +38,7 @@ test("two sessions keep independent resident stores when switching between them"
 
   await page.route("**/api/worker/v1/**", async route => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
-    if (await tryFulfillBlankSessionCreate(route)) return;
+    if (await tryFulfillHarnessRoutes(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/policy-profiles" || path === "/v1/model-profiles" || path === "/v1/provider-profiles") return fulfill(route, []);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [sessionA, sessionB]);
@@ -94,7 +94,7 @@ test("an off-screen session converges to a later snapshot and refreshed history 
 
   await page.route("**/api/worker/v1/**", async route => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
-    if (await tryFulfillBlankSessionCreate(route)) return;
+    if (await tryFulfillHarnessRoutes(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/policy-profiles" || path === "/v1/model-profiles" || path === "/v1/provider-profiles") return fulfill(route, []);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [sessionA, sessionB]);

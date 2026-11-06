@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { openSession, tryFulfillBlankSessionCreate } from "./harness";
+import { openSession, tryFulfillHarnessRoutes } from "./harness";
 
 const now = "2026-07-28T00:00:00Z";
 const project = { id: "inspect-project", name: "Inspect project", description: "", status: "active", createdAt: now, updatedAt: now };
@@ -78,7 +78,7 @@ async function mockInspector(page: Page, options: { recorded?: boolean } = {}) {
   await page.route("**/api/worker/v1/**", async route => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
-    if (await tryFulfillBlankSessionCreate(route)) return;
+    if (await tryFulfillHarnessRoutes(route)) return;
     let data: unknown;
     if (path === "/v1/projects") data = [project];
     else if (path === "/v1/provider-profiles") data = [provider];

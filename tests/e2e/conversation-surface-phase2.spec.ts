@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { selectProject, tryFulfillBlankSessionCreate } from "./harness";
+import { selectProject, tryFulfillHarnessRoutes } from "./harness";
 // A configured provider suppresses the first-run Models settings auto-open.
 const settingsProvider = { id: "settings-provider", name: "Provider", providerType: "openai-compatible", baseUrl: "https://example.test", credentialConfigured: true, status: "active", createdAt: "2026-07-30T00:00:00Z", updatedAt: "2026-07-30T00:00:00Z" };
 
@@ -22,7 +22,7 @@ async function mockPhase2(page: Page) {
   await page.route("**/api/worker/v1/**", async route => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
-    if (await tryFulfillBlankSessionCreate(route)) return;
+    if (await tryFulfillHarnessRoutes(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/provider-profiles") return fulfill(route, [settingsProvider]);
     if (path === "/v1/model-profiles") return fulfill(route, []);

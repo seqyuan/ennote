@@ -380,6 +380,43 @@ func TestRuntimeIdentityRequiresWorkerAuthentication(t *testing.T) {
 	assert.True(t, data.Degraded)
 }
 
+// TestWorkerInstanceHeaderSurvivesRejectionAndDegradation pins the cross-process
+// invariant the browser's offline contract rests on. The client decides "the
+// Worker answered" by X-Ennote-Worker-Instance and never by the status code,
+// because ennogate's reverse proxy answers 502 without the header when it cannot
+// reach the process, while the Worker answers 503 with it when a projection is
+// unavailable. Both are 5xx and they mean opposite things. Dropping the header
+// from any answer — a degraded readiness probe, or the auth rejection — would
+// silently turn every App into permanent read-only.
+func TestWorkerInstanceHeaderSurvivesRejectionAndDegradation(t *testing.T) {
+	server, handler := setupServer(t, nil)
+	server.InstanceID = "runtime-instance"
+
+	ready := request(t, handler, http.MethodGet, "/v1/health/ready", nil, false)
+	require.Equal(t, http.StatusOK, ready.Code, ready.Body.String())
+	assert.Equal(t, "runtime-instance", ready.Header().Get("X-Ennote-Worker-Instance"))
+
+	// Liveness is the answer the App probes: it must carry the identity too, and
+	// unlike readiness it never waits on a database.
+	live := request(t, handler, http.MethodGet, "/v1/health/live", nil, false)
+	require.Equal(t, http.StatusOK, live.Code, live.Body.String())
+	assert.Equal(t, "runtime-instance", live.Header().Get("X-Ennote-Worker-Instance"))
+
+	// A rejection is the one answer a client can receive before it knows anything
+	// about the Worker, so it carries the identity too. Health is exempt from the
+	// token check; every other path is not.
+	rejected := request(t, handler, http.MethodGet, "/v1/runtime", nil, false)
+	require.Equal(t, http.StatusUnauthorized, rejected.Code)
+	assert.Equal(t, "runtime-instance", rejected.Header().Get("X-Ennote-Worker-Instance"))
+
+	// Degraded readiness: the Worker is alive with no catalog projection, which
+	// the client must read as reachable.
+	server.CatalogDB = nil
+	degraded := request(t, handler, http.MethodGet, "/v1/health/ready", nil, false)
+	require.Equal(t, http.StatusServiceUnavailable, degraded.Code, degraded.Body.String())
+	assert.Equal(t, "runtime-instance", degraded.Header().Get("X-Ennote-Worker-Instance"))
+}
+
 func TestProviderDoctorAPIUsesExplicitModelWithoutRunPersistence(t *testing.T) {
 	server, handler := setupServer(t, nil)
 	doctor := &fakeDiagnoser{diagnostic: domain.ProviderDiagnostic{

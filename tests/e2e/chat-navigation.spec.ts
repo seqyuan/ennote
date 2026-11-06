@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { openSession, tryFulfillBlankSessionCreate } from "./harness";
+import { openSession, tryFulfillHarnessRoutes } from "./harness";
 import { subscribedFrame } from "./session-feed";
 
 const project = { id: "rail-project", name: "Rail workspace", description: "", status: "active",
@@ -35,7 +35,7 @@ async function mockRail(page: Page) {
   await page.route("**/api/worker/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
-    if (await tryFulfillBlankSessionCreate(route)) return;
+    if (await tryFulfillHarnessRoutes(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/provider-profiles" || path === "/v1/model-profiles") return fulfill(route, []);
     if (path === "/v1/policy-profiles") return fulfill(route, policies);

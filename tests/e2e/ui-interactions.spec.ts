@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { openSession, tryFulfillBlankSessionCreate } from "./harness";
+import { openSession, tryFulfillHarnessRoutes } from "./harness";
 
 const project = { id: "ui-project", name: "UI review", description: "", status: "active",
   createdAt: "2026-08-06T00:00:00Z", updatedAt: "2026-08-06T00:00:00Z" };
@@ -24,7 +24,7 @@ test("manual compaction uses an inline prompt bar and submits the focus instruct
   await page.route("**/api/worker/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
-    if (await tryFulfillBlankSessionCreate(route)) return;
+    if (await tryFulfillHarnessRoutes(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/policy-profiles") return fulfill(route, []);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
@@ -87,7 +87,7 @@ test("creating a project uses a dialog instead of native prompts", async ({ page
   await page.route("**/api/worker/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
-    if (await tryFulfillBlankSessionCreate(route)) return;
+    if (await tryFulfillHarnessRoutes(route)) return;
     if (path === "/v1/host/directories") {
       return fulfill(route, homeListing);
     }

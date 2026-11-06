@@ -14,9 +14,21 @@ paths:
     get:
       security: []
       operationId: getLiveness
+      # X-Ennote-Worker-Instance is the client's "did the Worker itself answer?"
+      # signal, and this is the endpoint the App probes for its offline read-only
+      # state. The header is on every response the Worker produces (including the
+      # 401 a rejected request gets) and absent from the 502 ennogate's reverse
+      # proxy writes when it cannot reach the Worker, so it — never the status
+      # code — separates "the Worker is gone" from "something answered instead".
+      # AGENTS.md makes this file authoritative for Worker business APIs, so an
+      # invariant the client keys off belongs here.
       responses:
         "200":
           description: Process is alive
+          headers:
+            X-Ennote-Worker-Instance:
+              description: Identity of the Worker process that answered
+              schema: { type: string }
           content:
             application/json:
               schema:
@@ -25,15 +37,29 @@ paths:
     get:
       security: []
       operationId: getReadiness
+      # The same header on the degraded answer: the Worker is alive with no
+      # projection, which the client must read as reachable rather than gone.
       responses:
         "200":
           description: Worker is ready
+          headers:
+            X-Ennote-Worker-Instance:
+              description: Identity of the Worker process that answered
+              schema: { type: string }
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthEnvelope"
         "503":
-          $ref: "#/components/responses/Error"
+          description: Worker is running but its projections are unavailable
+          headers:
+            X-Ennote-Worker-Instance:
+              description: Identity of the Worker process that answered
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   /v1/runtime:
     get:
       operationId: getRuntimeInfo

@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { tryFulfillBlankSessionCreate } from "./harness";
+import { tryFulfillHarnessRoutes } from "./harness";
 
 const project = { id: "overlay-project", name: "Overlay project", description: "", status: "active", createdAt: "2026-07-30T00:00:00Z", updatedAt: "2026-07-30T00:00:00Z" };
 const workspace = { id: "workspace", projectId: project.id, kind: "local", hostPath: "/tmp/overlay-project", virtualPath: "/workspace", status: "active", pathFingerprint: "fingerprint", createdAt: "2026-07-30T00:00:00Z" };
@@ -13,7 +13,7 @@ async function mockBase(page: Page) {
   await page.route("**/api/worker/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
-    if (await tryFulfillBlankSessionCreate(route)) return;
+    if (await tryFulfillHarnessRoutes(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/provider-profiles") return fulfill(route, [provider]);
     if (path === "/v1/model-profiles") return fulfill(route, []);

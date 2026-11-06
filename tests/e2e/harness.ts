@@ -18,14 +18,35 @@ function blankSession(projectId: string) {
 }
 
 /**
- * Startup auto-connect POSTs a blank session when the project has no unused
- * blank. Specs that return a session *list* for both GET and POST make that
- * call throw "Failed to create session". Handle POST (and later fetches of
- * the created row) here; leave GET list to the spec.
+ * Routes every spec has to answer for the App to behave as it does against a
+ * real Worker. Call it first in an api/worker route handler and return when it
+ * reports handled; anything it declines is the subject under test.
+ *
+ * Two things live here:
+ *
+ * - The liveness probe. The App asks `/v1/health/live` whether the Worker is
+ *   there and reads the answer from X-Ennote-Worker-Instance. A handler that
+ *   ends in `route.abort()` would turn that probe into a network failure and put
+ *   the App into read-only for the rest of the test, so the harness answers it
+ *   the way a real Worker does. offline-read-only.spec.ts is the one spec that
+ *   intercepts this path itself, on purpose.
+ * - Startup auto-connect, which POSTs a blank session when the project has no
+ *   unused blank. Specs that return a session *list* for both GET and POST make
+ *   that call throw "Failed to create session". Handle POST (and later fetches
+ *   of the created row) here; leave GET list to the spec.
  */
-export async function tryFulfillBlankSessionCreate(route: Route): Promise<boolean> {
+export async function tryFulfillHarnessRoutes(route: Route): Promise<boolean> {
   const method = route.request().method();
   const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+  if (path === "/v1/health/live") {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "X-Ennote-Worker-Instance": "e2e-worker" },
+      body: JSON.stringify({ data: { status: "live" } }),
+    });
+    return true;
+  }
   const create = path.match(/^\/v1\/projects\/([^/]+)\/sessions$/);
   if (method === "POST" && create) {
     await fulfill(route, blankSession(create[1]), 201);

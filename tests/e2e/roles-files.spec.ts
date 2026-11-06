@@ -1,5 +1,5 @@
 import { expect, test, type Route } from "@playwright/test";
-import { tryFulfillBlankSessionCreate } from "./harness";
+import { tryFulfillHarnessRoutes } from "./harness";
 
 const now = "2026-08-08T00:00:00Z";
 const provider = { id: "provider", name: "anthropic", providerType: "openai-compatible", baseUrl: "https://example.test", apiKey: "test", status: "active", createdAt: now, updatedAt: now };
@@ -20,7 +20,7 @@ test("external Role file changes fail closed and expose Reload and Diff", async 
   let diskChanged = false;
   await page.route("**/api/worker/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
-    if (await tryFulfillBlankSessionCreate(route)) return;
+    if (await tryFulfillHarnessRoutes(route)) return;
     if (path === "/v1/projects") return fulfill(route, []);
     if (path === "/v1/provider-profiles") return fulfill(route, [provider]);
     if (path === "/v1/model-profiles") return fulfill(route, [model]);

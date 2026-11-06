@@ -4423,6 +4423,8 @@ export interface operations {
             /** @description Process is alive */
             200: {
                 headers: {
+                    /** @description Identity of the Worker process that answered */
+                    "X-Ennote-Worker-Instance"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -4443,13 +4445,25 @@ export interface operations {
             /** @description Worker is ready */
             200: {
                 headers: {
+                    /** @description Identity of the Worker process that answered */
+                    "X-Ennote-Worker-Instance"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["HealthEnvelope"];
                 };
             };
-            503: components["responses"]["Error"];
+            /** @description Worker is running but its projections are unavailable */
+            503: {
+                headers: {
+                    /** @description Identity of the Worker process that answered */
+                    "X-Ennote-Worker-Instance"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
         };
     };
     getRuntimeInfo: {

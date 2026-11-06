@@ -1,5 +1,5 @@
 import { expect, test, type Route } from "@playwright/test";
-import { openSession, tryFulfillBlankSessionCreate } from "./harness";
+import { openSession, tryFulfillHarnessRoutes } from "./harness";
 import { subscribedFrame } from "./session-feed";
 
 const project = { id: "queue-project", name: "Queue workspace", description: "", status: "active",
@@ -25,7 +25,7 @@ test("queued follow-ups can be edited, removed, or steered immediately", async (
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
     const method = route.request().method();
-    if (await tryFulfillBlankSessionCreate(route)) return;
+    if (await tryFulfillHarnessRoutes(route)) return;
     if (path === "/v1/projects") return fulfill(route, [project]);
     if (path === "/v1/provider-profiles" || path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
