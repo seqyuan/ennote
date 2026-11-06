@@ -40,6 +40,7 @@ nav:
   - agent-flow.md
   - permissions.md
   - mcp.md
+  - skills.md
   - lan-security.md
   - troubleshooting.md
 
@@ -72,6 +73,7 @@ plugins:
             agent-flow.md: Agent Flow 编排
             permissions.md: 模型与权限
             mcp.md: MCP
+            skills.md: 技能
             lan-security.md: 局域网与安全
             troubleshooting.md: 排障
         - locale: en
@@ -83,6 +85,7 @@ plugins:
             agent-flow.md: Agent Flow orchestration
             permissions.md: Models and permissions
             mcp.md: MCP
+            skills.md: Skills
             lan-security.md: LAN and security
             troubleshooting.md: Troubleshooting
 
