@@ -72,10 +72,38 @@ constraints, not a replacement for the local roadmap or detailed design plans.
   `ennoworker/ennogate`, `ennoworker/ennoworker` are gitignored and produced at
   release time.
 - Releases: bump `version` in `package.json` (and `package-lock.json` via
-  `npm install --package-lock-only`), commit as
+  `npm install --package-lock-only`) plus `info.version` in
+  `contracts/openapi.yaml`, commit as
   `chore: bump version to X.Y.Z (<short summary>)`, and create an annotated tag
   `vX.Y.Z` with a one-line summary. Verify with
   `npm run lint && npm run typecheck && npm test && npm run test:go && npm run build`
   before tagging; run `npm run test:e2e` when the change touches rendering or
   session behavior. `npm run release:prepare` builds the distributable worker
   binaries.
+- A tag must be an ancestor of `origin/main` before it is pushed; `release.yml`
+  refuses to publish otherwise. Push `main` first, then the tag.
+- Do not move or reuse a published tag unless its release produced nothing — no
+  npm version, no GitHub Release, no attestation. Otherwise cut a new version.
+  Re-pushing a moved tag needs `--force`, and anyone who already fetched it keeps
+  a stale copy.
+
+## Release Pipeline
+
+- `npm publish` is asynchronous. The registry accepts the upload, answers that the
+  package is being processed, and makes the version visible minutes later. Any
+  step that verifies a publish must poll with a bounded timeout. A single check
+  races the registry and fails a release whose publish already succeeded.
+- Keep the publish step idempotent (skip a version that already exists). It is
+  what lets a failed job be re-run to finish the steps that follow it —
+  attestation and the GitHub Release.
+- `npm publish --provenance` requires `repository.url` in `package.json` to match
+  the GitHub repository the workflow runs in, or the registry rejects the upload
+  with `E422` after signing has already succeeded. Keep
+  `repository`/`homepage`/`bugs` populated.
+- Release artifacts are attested: `actions/attest-build-provenance` covers the
+  worker binaries and `SHA256SUMS`, npm provenance covers the tarball. Verify a
+  downloaded artifact against the repository before trusting it. Do not weaken
+  these steps to make a release go through.
+- A pipeline message that names a cause must derive it from observed state. A
+  diagnostic that guesses — "probably staged 2FA" — sends the maintainer down the
+  wrong path. Print the registry's answer and what was actually attempted.
