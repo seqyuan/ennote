@@ -245,3 +245,16 @@ func singleDecision(t *testing.T, policy *BuiltinToolPolicy, toolName string) To
 	require.Len(t, decisions, 1)
 	return decisions[0]
 }
+
+// TestAllowsToolRefusesAnUnreadablePolicy pins the direction of the fallback. The
+// execution path refuses to build a policy from bytes it cannot parse
+// (NewBuiltinToolPolicy), so the prompt-building path must not answer "allow" for
+// the same bytes: two answers about one frozen snapshot is how a permission
+// question becomes unanswerable.
+func TestAllowsToolRefusesAnUnreadablePolicy(t *testing.T) {
+	assert.False(t, AllowsTool(json.RawMessage(`{"allowedTools":`), "read"))
+	assert.False(t, AllowsTool(json.RawMessage(`not json`), "bash"))
+	// Empty is the same answer as unparseable: NewBuiltinToolPolicy refuses it
+	// too, so "no bytes" is not a policy that permits everything.
+	assert.False(t, AllowsTool(nil, "read"))
+}

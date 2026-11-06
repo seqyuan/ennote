@@ -228,12 +228,14 @@ func denyDecision(code, reason string) ToolDecision {
 // AllowsTool checks whether a tool name is statically allowed by the frozen
 // tool policy config. An empty AllowedTools list means all tools are allowed.
 func AllowsTool(configJSON json.RawMessage, toolName string) bool {
-	if len(configJSON) == 0 {
-		return true
-	}
 	var config domain.ToolPolicyConfig
 	if err := json.Unmarshal(configJSON, &config); err != nil {
-		return true // fail open for unparseable config
+		// A policy these bytes cannot express is not permission to allow, empty
+		// bytes included. The execution path refuses to build a policy from the
+		// same input (NewBuiltinToolPolicy errors on both), and answering "allow"
+		// here would only make the two disagree about what the frozen snapshot
+		// says.
+		return false
 	}
 	return allowsToolName(config, toolName)
 }
