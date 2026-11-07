@@ -1,44 +1,15 @@
+import type { components } from "@/lib/worker-api.gen";
 import type { ModelProfile, ProviderProfile } from "@/components/settings/types";
 
-export type ThinkingEffort = "default" | "low" | "medium" | "high";
-
-export interface GraphTask {
-  name: string;
-  role?: string;
-  model?: string;
-  thinking?: ThinkingEffort;
-  skills?: string[];
-  goal: string;
-  writes?: string[];
-  budget?: { tokens?: number };
-}
-
-export interface GraphDocument {
-  schemaVersion: number;
-  id: string;
-  name: string;
-  description?: string;
-  tasks: Record<string, GraphTask>;
-  graph: Record<string, string[]>;
-}
-
-export interface GraphSummary {
-  id: string;
-  name: string;
-  path: string;
-  digest?: string;
-  error?: string;
-  latestVersion?: number;
-}
-
-export interface GraphDetail {
-  id: string;
-  name: string;
-  path: string;
-  digest: string;
-  latestVersion: number;
-  document: GraphDocument;
-}
+// The Graph surface reads the contract's own types. It used to restate them, and
+// the copies had already drifted: `GraphSummary.latestVersion` was optional here
+// while the Worker always answers it, so `tsc` could not flag a reader that
+// assumed the field might be missing.
+export type ThinkingEffort = components["schemas"]["ThinkingEffort"];
+export type GraphTask = components["schemas"]["GraphTask"];
+export type GraphDocument = components["schemas"]["GraphDocument"];
+export type GraphSummary = components["schemas"]["GraphSummary"];
+export type GraphDetail = components["schemas"]["GraphDetail"];
 
 export interface ModelOption {
   ref: string;
