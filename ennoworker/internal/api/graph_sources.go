@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
+	"github.com/seqyuan/ennote/ennoworker/internal/store"
 )
 
 type globalGraphSummary struct {
@@ -117,7 +119,7 @@ func (s *Server) publishGlobalGraph(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusUnprocessableEntity, "graph_publish_failed", "Graph requires at least one Task before publication", false)
 		return
 	}
-	if err := s.validateGraphFileResources(r, document); err != nil {
+	if err := s.validateGraphPublish(r, document); err != nil {
 		writeError(w, r, http.StatusUnprocessableEntity, "graph_publish_failed", err.Error(), false)
 		return
 	}
@@ -174,8 +176,32 @@ func (s *Server) runGlobalGraph(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusCreated, run)
 }
 
-func (s *Server) validateGraphFileResources(r *http.Request, document *graphsource.Document) error {
+// validateGraphPublish is the Graph authoring format's share of Flow publish
+// validation. A Graph is a draft (it runs straight from its revision, with no
+// project binding and a synthetic budget), so it cannot adopt the Flow checks
+// that need a frozen role, a declared budget or an enabled binding. What it can
+// share are the checks whose failure would otherwise only surface when the Run
+// freezes: unresolved references and writes scopes the scheduler cannot parse.
+// Both fail closed at Run start today, so rejecting them at publish only moves
+// the error earlier; it never rejects a Graph that could have run.
+func (s *Server) validateGraphPublish(r *http.Request, document *graphsource.Document) error {
+	// Skill resolution goes through the same resolver Flow publish uses, so
+	// local/<id> and global/<id> mean one thing across both formats.
+	resolver := store.NewFlowValidator(store.FlowPublishOptions{
+		FlowID: document.ID, Sources: s.GlobalSources, Models: s.Models, SkillCatalog: s.SkillCatalog,
+	}).Resolver
+
 	for taskID, task := range document.Tasks {
+		for _, scope := range task.Writes {
+			if err := agentflow.ValidateWritesScope(scope); err != nil {
+				return fmt.Errorf("Task %q writes scope %q: %w", taskID, scope, err)
+			}
+		}
+		for _, skill := range task.Skills {
+			if !resolver.KnownSkill(r.Context(), skill) {
+				return fmt.Errorf("Task %q references unknown skill %q", taskID, skill)
+			}
+		}
 		if task.Model != "" && s.Models != nil {
 			if _, err := s.Models.ResolvePortableRef(r.Context(), task.Model); err != nil {
 				return fmt.Errorf("Task %q: %w", taskID, err)

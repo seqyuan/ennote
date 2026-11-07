@@ -118,3 +118,51 @@ func TestGlobalGraphMutationRejectsUnknownDependencyWithoutWriting(t *testing.T)
 	assert.Equal(t, created.Digest, current.Digest)
 	assert.Empty(t, current.Document.Tasks)
 }
+
+// A Graph is a draft format, but publishing one must not be a way around the
+// checks Flow publish already performs: an unresolved Skill reference or a writes
+// scope the scheduler cannot parse fails the Run at freeze time, so the draft is
+// rejected at publish instead of at the moment someone starts it.
+func TestGlobalGraphPublishRejectsUnresolvedSkillAndBadWritesScope(t *testing.T) {
+	server, handler, _ := setupGlobalGraphServer(t)
+	server.SkillCatalog = func() map[string]string { return map[string]string{"bio-workspace": "digest"} }
+
+	response := request(t, handler, http.MethodPost, "/v1/graphs", map[string]any{"id": "qc", "name": "QC"}, true)
+	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+	var created globalGraphDetail
+	decodeData(t, response, &created)
+
+	putTask := func(task map[string]any) globalGraphDetail {
+		t.Helper()
+		response = request(t, handler, http.MethodPatch, "/v1/graphs/qc",
+			map[string]any{"expectedDigest": created.Digest, "task": map[string]any{"id": "align", "value": task}}, true)
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		var updated globalGraphDetail
+		decodeData(t, response, &updated)
+		created = updated
+		return updated
+	}
+
+	putTask(map[string]any{
+		"name": "Align", "model": "anthropic/claude-sonnet-4", "goal": "Align reads",
+		"skills": []string{"global/missing-skill"},
+	})
+	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
+	assert.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "unknown skill")
+
+	putTask(map[string]any{
+		"name": "Align", "model": "anthropic/claude-sonnet-4", "goal": "Align reads",
+		"skills": []string{"global/bio-workspace"}, "writes": []string{"../escape.md"},
+	})
+	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
+	assert.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "writes scope")
+
+	putTask(map[string]any{
+		"name": "Align", "model": "anthropic/claude-sonnet-4", "goal": "Align reads",
+		"skills": []string{"global/bio-workspace"}, "writes": []string{"qc/**"},
+	})
+	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
+	assert.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+}

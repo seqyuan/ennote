@@ -119,11 +119,11 @@ func TestDisjointWritersOptInValidation(t *testing.T) {
 func TestWritesGlobValidation(t *testing.T) {
 	bad := []string{"/workspace/x.md", "../escape.md", "a/../b.md", "", "a;rm -rf"}
 	for _, scope := range bad {
-		require.Error(t, validateWritesGlob(scope), scope)
+		require.Error(t, ValidateWritesScope(scope), scope)
 	}
 	good := []string{".docs/plan/a1.md", "design/**", "src/*.go", "generated/"}
 	for _, scope := range good {
-		require.NoError(t, validateWritesGlob(scope), scope)
+		require.NoError(t, ValidateWritesScope(scope), scope)
 	}
 }
 

@@ -206,7 +206,7 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 			// regardless of the flow flag (catches typos early).
 			if !readOnly {
 				for _, w := range task.Writes {
-					if err := validateWritesGlob(w); err != nil {
+					if err := ValidateWritesScope(w); err != nil {
 						add(v.fail("writes_glob_invalid",
 							fmt.Sprintf("task %q writes scope %q: %v", name, w, err),
 							field+".writes"))
@@ -509,9 +509,13 @@ func roleAllToolsReadOnly(ctx context.Context, resolver Resolver, roleDef domain
 	return true
 }
 
-// validateWritesGlob checks a single writes-scope glob: relative path, no
+// ValidateWritesScope checks a single writes-scope glob: relative path, no
 // traversal, no leading slash, and only glob metacharacters we understand.
-func validateWritesGlob(scope string) error {
+//
+// It is exported because the Graph authoring format declares the same field and
+// publishes through a different validator; both surfaces must reject the same
+// scopes rather than each inventing its own rules.
+func ValidateWritesScope(scope string) error {
 	scope = strings.TrimSpace(scope)
 	if scope == "" {
 		return errors.New("empty scope")
