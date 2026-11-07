@@ -32,6 +32,22 @@ type globalGraphDetail struct {
 	Document      *graphsource.Document `json:"document"`
 }
 
+// errGraphValidationUnavailable reports that the publish could not be validated
+// because a dependency the Worker needs is missing, which is a 503 and not the
+// author's 422.
+var errGraphValidationUnavailable = errors.New("graph validation is unavailable")
+
+// graphHasSkillRefs reports whether any Task declares a Skill, which is what makes
+// the Skill catalog a required dependency of the publish.
+func graphHasSkillRefs(document *graphsource.Document) bool {
+	for _, task := range document.Tasks {
+		if len(task.Skills) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) sourceStore(w http.ResponseWriter, r *http.Request) *globalsource.Store {
 	if s.GlobalSources == nil {
 		writeError(w, r, http.StatusServiceUnavailable, "global_sources_unavailable", "global source store is unavailable", true)
@@ -120,6 +136,10 @@ func (s *Server) publishGlobalGraph(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.validateGraphPublish(r, document); err != nil {
+		if errors.Is(err, errGraphValidationUnavailable) {
+			writeError(w, r, http.StatusServiceUnavailable, "graph_validation_unavailable", err.Error(), true)
+			return
+		}
 		writeError(w, r, http.StatusUnprocessableEntity, "graph_publish_failed", err.Error(), false)
 		return
 	}
@@ -179,12 +199,25 @@ func (s *Server) runGlobalGraph(w http.ResponseWriter, r *http.Request) {
 // validateGraphPublish is the Graph authoring format's share of Flow publish
 // validation. A Graph is a draft (it runs straight from its revision, with no
 // project binding and a synthetic budget), so it cannot adopt the Flow checks
-// that need a frozen role, a declared budget or an enabled binding. What it can
-// share are the checks whose failure would otherwise only surface when the Run
-// freezes: unresolved references and writes scopes the scheduler cannot parse.
-// Both fail closed at Run start today, so rejecting them at publish only moves
-// the error earlier; it never rejects a Graph that could have run.
+// that need a frozen role, a declared budget or an enabled binding. Two checks
+// do carry over, and they are not the same kind of check:
+//
+//   - An unresolved Skill reference already fails the Run when it freezes
+//     (graphrun.resolveTaskRole), so rejecting it at publish only moves an
+//     existing failure earlier. It cannot reject a Graph that would have run.
+//   - A writes scope is scheduling-only: the planner reads it as a literal
+//     prefix and nothing enforces it at Run time, so a scope the parser cannot
+//     read is not a Run-time failure today. Rejecting it at publish is a
+//     deliberate tightening — it catches a typo at the moment the author can fix
+//     it, at the cost of refusing a Graph that would technically have run.
 func (s *Server) validateGraphPublish(r *http.Request, document *graphsource.Document) error {
+	// Resolving Skills needs the live catalog; Flow publish answers 503 for the same
+	// missing dependency (flow_validation_unavailable) instead of reporting it as a
+	// node-level unknown Skill.
+	if s.SkillCatalog == nil && graphHasSkillRefs(document) {
+		return fmt.Errorf("%w: the Skill catalog is missing, so Skill references cannot be resolved",
+			errGraphValidationUnavailable)
+	}
 	// Skill resolution goes through the same resolver Flow publish uses, so
 	// local/<id> and global/<id> mean one thing across both formats.
 	resolver := store.NewFlowValidator(store.FlowPublishOptions{

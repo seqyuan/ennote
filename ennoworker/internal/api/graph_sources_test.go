@@ -166,3 +166,29 @@ func TestGlobalGraphPublishRejectsUnresolvedSkillAndBadWritesScope(t *testing.T)
 	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
 	assert.Equal(t, http.StatusCreated, response.Code, response.Body.String())
 }
+
+// A Worker without a Skill catalog cannot decide whether a Skill reference is
+// real. That is the Worker's missing dependency, not the author's mistake, so it
+// must answer 503 like Flow publish does rather than 422 "unknown skill".
+func TestGlobalGraphPublishReportsMissingSkillCatalogAsUnavailable(t *testing.T) {
+	server, handler, _ := setupGlobalGraphServer(t)
+	require.Nil(t, server.SkillCatalog)
+
+	response := request(t, handler, http.MethodPost, "/v1/graphs", map[string]any{"id": "qc", "name": "QC"}, true)
+	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+	var created globalGraphDetail
+	decodeData(t, response, &created)
+
+	response = request(t, handler, http.MethodPatch, "/v1/graphs/qc", map[string]any{
+		"expectedDigest": created.Digest,
+		"task": map[string]any{"id": "align", "value": map[string]any{
+			"name": "Align", "model": "anthropic/claude-sonnet-4", "goal": "Align reads",
+			"skills": []string{"global/bio-workspace"},
+		}},
+	}, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+
+	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
+	assert.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "graph_validation_unavailable")
+}

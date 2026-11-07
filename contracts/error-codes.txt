@@ -4,7 +4,7 @@
 # ErrorCode constants, and literal envelope codes. Do not edit by hand: run
 # `npm run generate:error-codes` and commit the diff, which makes a vocabulary
 # change visible in review instead of at runtime.
-# 249 codes.
+# 250 codes.
 active_runs_unavailable
 approval_checkpoint_invalid
 approval_conflict
@@ -89,6 +89,7 @@ graph_run_not_active
 graph_run_not_found
 graph_run_resume_failed
 graph_runner_unavailable
+graph_validation_unavailable
 history_lookup_forbidden
 history_lookup_out_of_range
 host_directory_create_failed
