@@ -41,6 +41,26 @@ func (w *memoryWriter) Append(_ context.Context, runID string, pending ...domain
 	return appended, nil
 }
 
+// payloads returns the JSON payloads of every event of one type, in order, so a
+// test can assert what a run event actually carried rather than that it was
+// emitted at all.
+func (w *memoryWriter) payloads(eventType string) []map[string]any {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var result []map[string]any
+	for _, event := range w.events {
+		if event.EventType != eventType {
+			continue
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(event.Payload, &decoded); err != nil {
+			continue
+		}
+		result = append(result, decoded)
+	}
+	return result
+}
+
 func (w *memoryWriter) types() []string {
 	w.mu.Lock()
 	defer w.mu.Unlock()

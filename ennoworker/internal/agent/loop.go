@@ -198,12 +198,13 @@ func (l *Loop) Run(ctx context.Context, input RunInput) (RunResult, error) {
 		l.TodoStore.Set(input.Resume.Todos)
 	}
 	if input.Resume == nil {
-		initialSteering, err = l.drainQueuedInputs(ctx, input.RunID, domain.QueuedInputSteer, steeringMode)
-		if err != nil {
-			return runResult(messages, generated, final, 0), classifyAgentError(err)
+		drainedSteering, drainErr := l.drainQueuedInputs(ctx, input.RunID, domain.QueuedInputSteer, steeringMode)
+		if drainErr != nil {
+			return runResult(messages, generated, final, 0), classifyAgentError(drainErr)
 		}
-		messages = append(messages, initialSteering...)
-		generated = append(generated, initialSteering...)
+		steeringMessages := queuedInputMessages(drainedSteering)
+		messages = append(messages, steeringMessages...)
+		generated = append(generated, steeringMessages...)
 	} else {
 		resume := input.Resume
 		if resume.Version < 1 || resume.Version > ResumeStateVersion || resume.Iteration < 1 ||
@@ -622,8 +623,8 @@ func (l *Loop) finishCompletedIteration(ctx context.Context, input RunInput, ite
 		return messages, generated, TurnPlan{}, false, classifyAgentError(err)
 	}
 	if len(steering) > 0 {
-		messages = append(messages, steering...)
-		generated = append(generated, steering...)
+		messages = append(messages, queuedInputMessages(steering)...)
+		generated = append(generated, queuedInputMessages(steering)...)
 	}
 	turnContext := TurnContext{RunID: input.RunID, Iteration: iteration,
 		Messages: append([]domain.ChatMessage(nil), messages...), Completion: completion,
@@ -649,14 +650,18 @@ func (l *Loop) finishCompletedIteration(ctx context.Context, input RunInput, ite
 		}
 		if len(followUps) > 0 {
 			for index, followUp := range followUps {
+				// queueItemId names the input the Worker actually drained. A client
+				// that keeps an optimistic copy of its own queue cannot infer that
+				// from position once another tab, or a reload, has queued something
+				// older; without the id it would hide the wrong row.
 				if eventErr := l.appendEvent(ctx, input.RunID, "follow_up_consumed", map[string]any{
-					"seq": index + 1, "text": followUp.Content,
+					"seq": index + 1, "queueItemId": followUp.ID, "text": followUp.Text,
 				}); eventErr != nil {
 					return messages, generated, TurnPlan{}, false, eventErr
 				}
 			}
-			messages = append(messages, followUps...)
-			generated = append(generated, followUps...)
+			messages = append(messages, queuedInputMessages(followUps)...)
+			generated = append(generated, queuedInputMessages(followUps)...)
 			turnContext.Messages = append([]domain.ChatMessage(nil), messages...)
 			turnContext.EstimatedTokens = EstimateTokens(messages)
 			continueTurn = true
@@ -911,22 +916,26 @@ func (l *Loop) streamWithRetry(ctx context.Context, input RunInput, iteration in
 	}
 }
 
-func (l *Loop) drainQueuedInputs(ctx context.Context, runID string, kind domain.QueuedInputKind, mode domain.QueueMode) ([]domain.ChatMessage, error) {
+// drainQueuedInputs returns the drained inputs rather than their messages: the
+// event that reports a consumption has to name the input it consumed
+// (queueItemId), and a position is not a name — another tab, or a reload, can have
+// queued something older.
+func (l *Loop) drainQueuedInputs(ctx context.Context, runID string, kind domain.QueuedInputKind, mode domain.QueueMode) ([]domain.QueuedInput, error) {
 	if l.QueuedInputs == nil {
 		return nil, nil
 	}
-	items, err := l.QueuedInputs.Drain(ctx, runID, kind, mode)
-	if err != nil {
-		return nil, err
-	}
-	messages := make([]domain.ChatMessage, 0, len(items))
-	for _, item := range items {
+	return l.QueuedInputs.Drain(ctx, runID, kind, mode)
+}
+
+func queuedInputMessages(inputs []domain.QueuedInput) []domain.ChatMessage {
+	messages := make([]domain.ChatMessage, 0, len(inputs))
+	for _, input := range inputs {
 		messages = append(messages, domain.ChatMessage{
 			Role:    domain.RoleUser,
-			Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: item.Text}},
+			Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: input.Text}},
 		})
 	}
-	return messages, nil
+	return messages
 }
 
 func queueModeOrDefault(mode domain.QueueMode) domain.QueueMode {

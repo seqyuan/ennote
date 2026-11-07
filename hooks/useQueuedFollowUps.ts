@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { components } from "@/lib/worker-api.gen";
 
 type QueuedInput = components["schemas"]["QueuedInput"];
@@ -53,33 +53,22 @@ export function mergeQueuedFollowUps(
 export function useQueuedFollowUps(queuedInputs: QueuedInput[]) {
   const [optimistic, setOptimistic] = useState<QueuedRow[]>([]);
   const [settled, setSettled] = useState<Set<string>>(() => new Set());
-  // A mirror the stream callbacks can read. They run outside render and must not
-  // take the optimistic list in their identity, or the run stream would restart
-  // on every queue change.
-  const optimisticRef = useRef<QueuedRow[]>([]);
-
-  useEffect(() => {
-    optimisticRef.current = optimistic;
-  }, [optimistic]);
-
   /** A follow-up this tab just queued, before the snapshot echoes it. */
   const queue = useCallback((row: QueuedRow) => {
     setOptimistic(current => [...current, row]);
   }, []);
 
   /**
-   * The Worker consumed the oldest queued input. It is gone from the queue even if
-   * the snapshot still lists it, so settle its id before it can be drawn again.
+   * The Worker consumed or cancelled one queued input. Its id is settled so the
+   * row disappears from both halves of the list, even if the snapshot still
+   * carries it for another frame.
+   *
+   * The id comes from the run event (queueItemId). It is not inferred from
+   * position: the message the Worker drained need not be the newest row this tab
+   * is showing, because another tab or a reload can have queued an older one.
    */
-  const consumeOldest = useCallback(() => {
-    const head = optimisticRef.current[0];
-    if (!head) return;
-    setSettled(ids => new Set(ids).add(head.id));
-    setOptimistic(current => (current.length === 0 ? current : current.slice(1)));
-  }, []);
-
-  /** One queued input was cancelled; hide it until the snapshot drops it too. */
-  const cancel = useCallback((id: string) => {
+  const settle = useCallback((id: string) => {
+    if (!id) return;
     setSettled(ids => new Set(ids).add(id));
     setOptimistic(current => current.filter(item => item.id !== id));
   }, []);
@@ -94,5 +83,5 @@ export function useQueuedFollowUps(queuedInputs: QueuedInput[]) {
     [queuedInputs, optimistic, settled],
   );
 
-  return { rows, queue, consumeOldest, cancel, reset };
+  return { rows, queue, settle, reset };
 }

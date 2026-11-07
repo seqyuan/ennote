@@ -29,7 +29,7 @@ func (q *scriptedQueue) Drain(_ context.Context, runID string, kind domain.Queue
 			if q.order != nil {
 				*q.order = append(*q.order, "steer")
 			}
-			return []domain.QueuedInput{{RunID: runID, Kind: kind, Text: "change direction"}}, nil
+			return []domain.QueuedInput{{ID: "queue-item-steer", RunID: runID, Kind: kind, Text: "change direction"}}, nil
 		}
 		return nil, nil
 	}
@@ -38,7 +38,7 @@ func (q *scriptedQueue) Drain(_ context.Context, runID string, kind domain.Queue
 		if q.order != nil {
 			*q.order = append(*q.order, "follow_up")
 		}
-		return []domain.QueuedInput{{RunID: runID, Kind: kind, Text: "also summarize"}}, nil
+		return []domain.QueuedInput{{ID: "queue-item-follow", RunID: runID, Kind: kind, Text: "also summarize"}}, nil
 	}
 	return nil, nil
 }
@@ -91,4 +91,11 @@ func TestFollowUpRunsOnlyAfterAgentWouldOtherwiseStop(t *testing.T) {
 	assert.GreaterOrEqual(t, queue.steerCalls, 2)
 	assert.Equal(t, 2, queue.followCalls)
 	assert.Contains(t, events.types(), "follow_up_consumed")
+	// The event names the input it consumed. A position would be wrong for a
+	// client that keeps its own optimistic queue: another tab, or a reload, can
+	// have queued something older than the row that client is showing.
+	consumed := events.payloads("follow_up_consumed")
+	require.NotEmpty(t, consumed)
+	assert.Equal(t, "queue-item-follow", consumed[0]["queueItemId"])
+	assert.Equal(t, "also summarize", consumed[0]["text"])
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useT } from "@/components/LocaleProvider";
 import type { AgentRun, ApprovalDecision, QuestionAnswer, ToolApprovalRequest } from "@/lib/approval";
@@ -61,8 +61,8 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
   const [streamNonce, setStreamNonce] = useState(0);
   // The composer dock's queue: authoritative from the snapshot, optimistic for the
   // frame the tab is ahead of it.
-  const { rows: pendingFollowUps, queue: queueFollowUp, consumeOldest: consumeFollowUp, cancel: cancelQueuedFollowUp,
-    reset: resetFollowUps } = useQueuedFollowUps(queuedInputs);
+  const { rows: pendingFollowUps, queue: queueFollowUp, settle: settleFollowUp, reset: resetFollowUps } =
+    useQueuedFollowUps(queuedInputs);
 
   useEffect(() => { currentSession.current = sessionId; }, [sessionId]);
 
@@ -91,13 +91,13 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
           requested: () => {}, // approval projection is snapshot-authoritative
           resolved: () => {},
           delegated: () => {}, // delegationActive is carried by the snapshot
-          followUpConsumed: () => {
+          followUpConsumed: (id) => {
             if (generation.current !== version) return;
-            consumeFollowUp();
+            settleFollowUp(id);
           },
-          inputCancelled: (id) => {
+          inputCancelled: (id: string) => {
             if (generation.current !== version) return;
-            cancelQueuedFollowUp(id);
+            settleFollowUp(id);
           },
         }, streamState, cursor);
       }
@@ -123,7 +123,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
         }, 1600);
       }
     }
-  }, [refreshLatest, refreshSession, upsertMessage, pendingApproval, resetFollowUps]);
+  }, [refreshLatest, refreshSession, upsertMessage, pendingApproval, resetFollowUps, settleFollowUp]);
 
   // watchRun starts streaming a freshly submitted/retried run immediately, so
   // the UI gets fast feedback before the snapshot catches up (≈250ms).
@@ -265,20 +265,20 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
       if (!runEnded) setError(message);
       return { queued: false, runEnded };
     }
-  }, [activeRun, pendingApproval, t]);
+  }, [activeRun, pendingApproval, queueFollowUp, t]);
 
   const cancelFollowUp = useCallback(async (id: string): Promise<boolean> => {
     const run = activeRun;
     if (!run) return false;
     try {
       await apiFetch(`/v1/runs/${encodeURIComponent(run.id)}/inputs/${encodeURIComponent(id)}`, { method: "DELETE" });
-      cancelQueuedFollowUp(id);
+      settleFollowUp(id);
       return true;
     } catch (err) {
       setError(errorMessage(err, "Failed to cancel the queued message"));
       return false;
     }
-  }, [activeRun]);
+  }, [activeRun, settleFollowUp]);
 
   const answerQuestion = useCallback(async (answers: QuestionAnswer[]) => {
     const approval = pendingApproval;
@@ -427,7 +427,7 @@ export async function streamAgentEvents(
     requested: () => void;
     resolved: () => void;
     delegated: () => void;
-    followUpConsumed: () => void;
+    followUpConsumed: (id: string) => void;
     inputCancelled: (id: string) => void;
   },
   state: AgentStreamState,
@@ -666,7 +666,14 @@ export async function streamAgentEvents(
           case "vision_fallback_completed": setStatus(encodeRunStatus("image_ready")); break;
           case "approval_requested": setStatus(encodeRunStatus("waiting_approval")); approval.requested(); break;
           case "approval_resolved": setStatus(encodeRunStatus("resuming")); approval.resolved(); break;
-          case "follow_up_consumed": approval.followUpConsumed(); break;
+          case "follow_up_consumed": {
+            // queueItemId is what the Worker actually drained. A client that keeps
+            // an optimistic queue cannot infer it from position when another tab
+            // queued an older input; without it, let the snapshot drop the row.
+            const queueItemId = String(payload.queueItemId ?? "");
+            if (queueItemId) approval.followUpConsumed(queueItemId);
+            break;
+          }
           case "input_cancelled": {
             const queueItemId = String(payload.queueItemId ?? "");
             if (queueItemId) approval.inputCancelled(queueItemId);

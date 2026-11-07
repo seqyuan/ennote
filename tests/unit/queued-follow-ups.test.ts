@@ -41,6 +41,14 @@ describe("mergeQueuedFollowUps", () => {
     expect(rows).toEqual([]);
   });
 
+  it("settles the id the Worker named, not the row this tab happens to show first", () => {
+    // Another tab queued "b" before this one queued "c"; the Worker drains "b".
+    // Settling position would have hidden "a" and left "b" visible.
+    const optimistic: QueuedRow[] = [{ id: "c", text: "third" }];
+    const rows = mergeQueuedFollowUps([input("a", "first"), input("b", "second")], optimistic, new Set(["b"]));
+    expect(rows.map((row) => row.id)).toEqual(["a", "c"]);
+  });
+
   it("leaves steers out: they are queued, but not editable dock rows", () => {
     const rows = mergeQueuedFollowUps([input("a", "steer me", "steer"), input("b", "follow up")], [], new Set());
     expect(rows.map((row) => row.id)).toEqual(["b"]);

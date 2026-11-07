@@ -54,13 +54,13 @@ test("queues a follow-up while a run is active and clears it once consumed", asy
         await firstStreamHeld;
         return route.fulfill({ status: 200, contentType: "text/event-stream", body: [
           `event: live\ndata: {"type":"text_delta","payload":{"iteration":1,"text":"working"}}\n\n`,
-          `data: {"type":"follow_up_consumed","payload":{"seq":1}}\n\n`,
+          `data: {"type":"follow_up_consumed","payload":{"seq":1,"queueItemId":"q1"}}\n\n`,
         ].join("") });
       }
       if (!sentConsumed) {
         sentConsumed = true;
         return route.fulfill({ status: 200, contentType: "text/event-stream",
-          body: `data: {"type":"follow_up_consumed","payload":{"seq":1}}\n\n` });
+          body: `data: {"type":"follow_up_consumed","payload":{"seq":1,"queueItemId":"q1"}}\n\n` });
       }
       runFinished = true;
       return route.fulfill({ status: 200, contentType: "text/event-stream",
