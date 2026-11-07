@@ -120,9 +120,17 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-wake:
 		case ev := <-liveCh:
-			// A lone live event arrived outside the batch drain; write it now.
-			_ = writeLiveFrame(w, ev)
-			flusher.Flush()
+			// Buffer it and go round again rather than writing it out of order: the
+			// next pass writes the durable frames first and this delta after, which is
+			// the same order as the batch path. Live and durable have no global order,
+			// so the client tolerates a late delta — but adding avoidable reordering
+			// here just makes that harder to reason about.
+			//
+			// The buffer cannot grow past its capacity: step 3 clears it on the way in,
+			// and step 1 bounds the drain that fills it.
+			if len(liveBuf) < cap(liveBuf) {
+				liveBuf = append(liveBuf, ev)
+			}
 		case <-poll.C:
 		case <-heartbeat.C:
 			if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {

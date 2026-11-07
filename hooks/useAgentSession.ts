@@ -10,7 +10,7 @@ import { runFailureMessage, errorMessage } from "@/lib/provider-errors";
 import { registerChildProgress } from "@/hooks/useChildProgress";
 import { apiFetch, apiResponse } from "@/lib/worker-api.client";
 import { RUN_STATUS_RECONNECTING, decodeRunStatus, encodeRunStatus } from "@/lib/run-status-copy";
-import { toolCallIdOf } from "@/lib/tool-identity";
+import { toolCallIdOf, toolOutputDeltaOf } from "@/lib/tool-identity";
 
 interface UseAgentSessionInput {
   sessionId: string | null;
@@ -163,6 +163,11 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
       if (activeRun.id !== streamedRunId.current) watchRun(activeRun);
     } else if (streamedRunId.current) {
       streamController.current?.abort();
+      // A cancelled or interrupted run never yields a terminal frame here, so this
+      // is the only place its stream state — which holds the accumulated preview
+      // text — would be released.
+      streamStates.current.delete(streamedRunId.current);
+      streamCursors.current.delete(streamedRunId.current);
       streamedRunId.current = null;
       resetLiveState();
     }
@@ -339,6 +344,14 @@ export interface AgentStreamState {
   toolDeltas: Map<string, { id: string; name: string; argumentsFragment: string }>;
   toolOutputs: Map<string, { text: string; name: string }>;
   usageByIteration: Map<number, RunUsage>;
+  /**
+   * Calls whose durable result has already arrived. The live stream and the durable
+   * stream are ordered independently — the run stream writes durable frames before
+   * the live deltas it buffered in the same pass — so a delta for a finished call can
+   * arrive afterwards. Rendering it would flip the card back to running and overwrite
+   * the result the user just saw.
+   */
+  finishedTools: Set<string>;
 }
 
 export function newAgentStreamState(): AgentStreamState {
@@ -347,6 +360,7 @@ export function newAgentStreamState(): AgentStreamState {
     toolDeltas: new Map(),
     toolOutputs: new Map(),
     usageByIteration: new Map(),
+    finishedTools: new Set(),
   };
 }
 
@@ -536,6 +550,10 @@ export async function streamAgentEvents(
           case "output_truncated": setStatus(encodeRunStatus(Number(payload.partialToolCallCount ?? 0) > 0 ? "recovering_tool" : "output_truncated")); break;
           case "tool_call_delta": {
             if (!wasLive) break; // legacy durable deltas ignored
+            // Streaming arguments for a call that already finished: same reason as
+            // for output, and it would downgrade the card to "pending".
+            const streamingID = payload.id ? String(payload.id) : "";
+            if (streamingID && state.finishedTools.has(streamingID)) break;
             const key = `${iteration}:${payload.index ?? 0}`;
             const partial = toolDeltas.get(key) ?? { id: "", name: "tool", argumentsFragment: "" };
             if (payload.id) partial.id = String(payload.id);
@@ -563,11 +581,21 @@ export async function streamAgentEvents(
           case "tool_output_delta": {
             // Live tool stdout/stderr streaming: accumulate per call so text appends.
             if (!wasLive) break;
-            const callID = toolCallIdOf(payload);
-            const stream = String(payload.stream ?? "stdout");
-            const text = String(payload.text ?? "");
-            const entry = toolOutputs.get(callID) ?? { text: "", name: String(payload.toolName ?? "tool") };
-            if (payload.toolName) entry.name = String(payload.toolName);
+            // The contract's shape, enforced here: a producer that renames a field or
+            // drops the identity must not draw output on the wrong card.
+            const delta = toolOutputDeltaOf(payload);
+            if (!delta) break;
+            const callID = delta.toolCallId;
+            // The durable result is authoritative and already on screen. A delta
+            // that overtakes it is stale output, not newer output.
+            if (state.finishedTools.has(callID)) break;
+            const stream = delta.stream;
+            const text = delta.text;
+            // The name is only known when a payload carries one. Leaving it empty
+            // and omitting the property keeps whatever tool_call_started set, where
+            // sending a placeholder would overwrite it — upsertMessage merges.
+            const entry = toolOutputs.get(callID) ?? { text: "", name: "" };
+            if (delta.toolName) entry.name = delta.toolName;
             if (stream === "stderr") entry.text += `[stderr] ${text}`;
             else entry.text += text;
             toolOutputs.set(callID, entry);
@@ -576,7 +604,7 @@ export async function streamAgentEvents(
               role: "tool",
               kind: "tool",
               toolCallId: callID,
-              toolName: entry.name,
+              ...(entry.name ? { toolName: entry.name } : {}),
               text: entry.text,
               isError: false,
               toolState: "running",
@@ -584,25 +612,37 @@ export async function streamAgentEvents(
             });
             break;
           }
-          case "tool_call_started":
-            setStatus(encodeRunStatus("running_tool", String(payload.toolName ?? "tool"))); upsertTool(payload, "running", "Running"); break;
+          case "tool_call_started": {
+            // A started event re-opens the call: an id can be reused after a failure,
+            // and the second attempt's preview starts empty.
+            const startedID = toolCallIdOf(payload);
+            state.finishedTools.delete(startedID);
+            state.toolOutputs.delete(startedID);
+            setStatus(encodeRunStatus("running_tool", String(payload.toolName ?? "tool"))); upsertTool(payload, "running", "Running");
+            break;
+          }
           case "tool_call_completed": {
             setStatus("");
             if (payload.toolName === "delegate_tasks" || payload.toolName === "delegate_roles") approval.delegated();
             const callID = toolCallIdOf(payload);
             toolOutputs.delete(callID); // final result replaces the live preview
+            state.finishedTools.add(callID);
             upsertTool(payload, payload.isError ? "failed" : "completed", "No output");
             break;
           }
           case "tool_call_failed": {
             const callID = toolCallIdOf(payload);
             toolOutputs.delete(callID);
+            state.finishedTools.add(callID);
             upsertTool(payload, "failed", "Tool call failed.");
             break;
           }
           case "tool_policy_denied":
           case "tool_policy_terminated":
           case "tool_call_skipped":
+            // Terminal for the call like a completion: a later delta would flip the
+            // card back to running.
+            state.finishedTools.add(toolCallIdOf(payload));
             upsertTool(payload, String(payload.reason ?? "").includes("approval_rejected") ? "rejected" : "failed", "Tool call skipped."); break;
           case "model_route_selected": setStatus(encodeRunStatus("using_model", String(payload.apiModel ?? "selected model"))); break;
           case "vision_fallback_started": setStatus(encodeRunStatus("describing_image")); break;

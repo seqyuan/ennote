@@ -387,6 +387,14 @@ export function applyTransient(
       if (existing) {
         if (message.arguments) existing.arguments = message.arguments;
         if (message.runId) existing.runId = message.runId;
+        // A live delta can reach the card before the durable event that carries the
+        // real name, so the name has to be able to arrive late. The risk class
+        // follows it: a preview labelled "tool" would otherwise keep the risk of a
+        // generic tool for a shell command.
+        if (message.toolName && existing.toolName !== message.toolName) {
+          existing.toolName = message.toolName;
+          existing.riskClass = classifyDisplayRisk(message.toolName);
+        }
         existing.result = message.toolState === "running" ? existing.result : {
           content: message.text, isError: Boolean(message.isError), artifacts: [],
         };

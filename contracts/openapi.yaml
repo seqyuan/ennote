@@ -4443,8 +4443,9 @@ components:
       description: |
         One live delta as written on GET /v1/runs/{runID}/events with an
         `event: live` field and no `id:` line, so it never advances the durable
-        cursor. The payload shape is decided by `type` and is deliberately open
-        here.
+        cursor. The payload shape is decided by `type`: a tool_output_delta carries
+        ToolOutputDeltaPayload, and the rest are open because their producers are
+        still free to grow them.
       required: [runId, type, liveSeq, payload, createdAt]
       properties:
         runId: { type: string }
@@ -4461,6 +4462,23 @@ components:
       oneOf:
         - $ref: "#/components/schemas/RunEvent"
         - $ref: "#/components/schemas/RunLiveEventFrame"
+    ToolOutputDeltaPayload:
+      type: object
+      additionalProperties: false
+      description: |
+        The payload of a tool_output_delta frame. It repeats the identity the
+        durable tool_call_started/completed events carry, because the client keys a
+        tool's preview card off (toolCallId, stream) and a payload holding only text
+        would put every delta in the run on one card.
+      required: [toolCallId, stream, text]
+      properties:
+        toolCallId: { type: string }
+        toolName: { type: string }
+        stream:
+          type: string
+          description: Which of the call's output streams this chunk belongs to.
+          enum: [stdout, stderr, progress]
+        text: { type: string }
     RunMessage:
       type: object
       additionalProperties: false

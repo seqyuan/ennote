@@ -199,6 +199,28 @@ describe("split projection (projectBase + applyTransient)", () => {
     }
   });
 
+  it("lets the real tool name arrive after the preview card exists", () => {
+    // A live delta can create the card before the durable event that names the
+    // tool, so the name has to be updatable later — otherwise every streamed call
+    // stays labelled "tool" for the rest of its life.
+    const base = projectBase([], []);
+    const preview = applyTransient(base, [
+      { id: "run-1-tool-c2", role: "tool", kind: "tool", toolCallId: "c2", text: "out", toolState: "running" as const },
+    ]);
+    const named = applyTransient(base, [
+      { id: "run-1-tool-c2", role: "tool", kind: "tool", toolCallId: "c2", text: "out", toolState: "running" as const },
+      { id: "run-1-tool-c2-named", role: "tool", kind: "tool", toolCallId: "c2", toolName: "bash", text: "out", toolState: "running" as const },
+    ]);
+
+    // The name drives a display badge, not just a label: a card that stays "tool"
+    // shows the risk of a generic tool for a shell command.
+    const names = (nodes: ReturnType<typeof applyTransient>) => JSON.stringify(nodes);
+    expect(names(preview)).toContain('"toolName":"tool"');
+    expect(names(named)).toContain('"toolName":"bash"');
+    expect(names(named)).not.toContain('"toolName":"tool"');
+    expect(names(named)).not.toContain('"riskClass":"sensitive"');
+  });
+
   const twoTurns = (): CanonicalMessage[] => [
     message("m1", "user", "First"),
     message("m2", "assistant", "First reply"),

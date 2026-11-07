@@ -25,16 +25,25 @@ func receive(t *testing.T, live <-chan domain.LiveRunEvent) domain.LiveRunEvent 
 	}
 }
 
-// livePayloadText decodes the text out of a coalesced payload. The wrapper shape
-// is the writer's own; what this file is about is that the bytes inside it survive
-// and stay parseable.
+// livePayloadBody is the payload the client reads: the identity the preview card is
+// keyed off, plus the escaped text.
+type livePayloadBody struct {
+	ToolCallID string `json:"toolCallId"`
+	ToolName   string `json:"toolName"`
+	Stream     string `json:"stream"`
+	Text       string `json:"text"`
+}
+
+func decodeLivePayload(t *testing.T, payload []byte) livePayloadBody {
+	t.Helper()
+	var decoded livePayloadBody
+	require.NoError(t, json.Unmarshal(payload, &decoded), string(payload))
+	return decoded
+}
+
 func livePayloadText(t *testing.T, payload []byte) string {
 	t.Helper()
-	var decoded struct {
-		Text string `json:"text"`
-	}
-	require.NoError(t, json.Unmarshal(payload, &decoded), string(payload))
-	return decoded.Text
+	return decodeLivePayload(t, payload).Text
 }
 
 func TestRawJSONStringEscapesEveryControlCharacter(t *testing.T) {
@@ -56,7 +65,7 @@ func TestRawJSONStringEscapesEveryControlCharacter(t *testing.T) {
 	)
 
 	for _, input := range inputs {
-		encoded := rawJSONString(input)
+		encoded := livePayload("call-1:stdout", "bash", []byte(input))
 		require.True(t, json.Valid(encoded), "%q produced unparseable JSON: %s", input, encoded)
 
 		assert.Equal(t, input, livePayloadText(t, encoded), "%q did not survive the round trip", input)
@@ -71,7 +80,7 @@ func TestRawJSONStringReplacesUndecodableBytes(t *testing.T) {
 	// reader guessing.
 	invalid := []byte{'a', 0xff, 'b', 0xed, 0xa0, 0x80, 'c'}
 
-	encoded := rawJSONString(string(invalid))
+	encoded := livePayload("call-1:stdout", "bash", invalid)
 	require.True(t, json.Valid(encoded), string(encoded))
 	// 0xff is one bad byte; ed a0 80 is a surrogate encoded as UTF-8, which the
 	// decoder rejects byte by byte.
@@ -82,7 +91,7 @@ func TestLiveCoalescerBatchesWithinTheWindow(t *testing.T) {
 	hub := NewHub()
 	live, unsubscribe := hub.SubscribeLive("run-1", 16)
 	defer unsubscribe()
-	coalescer := NewLiveCoalescer("run-1", hub)
+	coalescer := NewLiveCoalescer("run-1", hub, "bash")
 
 	coalescer.Push("call-1:stdout", []byte("a"), time.Now())
 	coalescer.Push("call-1:stdout", []byte("b"), time.Now())
@@ -90,7 +99,20 @@ func TestLiveCoalescerBatchesWithinTheWindow(t *testing.T) {
 	// Reading the single event is the assertion: if each push had flushed on its
 	// own, the first event would carry "a" alone.
 	event := receive(t, live)
-	assert.Equal(t, "ab", livePayloadText(t, event.Payload))
+	payload := decodeLivePayload(t, event.Payload)
+	assert.Equal(t, "ab", payload.Text)
+	// The identity travels with the text: the client keys the preview card off the
+	// same (toolCallId, stream) pair the durable tool_call_* events use, so a
+	// payload without it puts every delta in the run on one card.
+	assert.Equal(t, "call-1", payload.ToolCallID)
+	assert.Equal(t, "bash", payload.ToolName)
+	assert.Equal(t, "stdout", payload.Stream)
+	// The exact spelling matters: the client reads this with JSON.parse, which is
+	// case-sensitive, while a Go struct decodes "toolCallID" just as happily. Pin
+	// the keys themselves, not only the values.
+	var keys map[string]any
+	require.NoError(t, json.Unmarshal(event.Payload, &keys))
+	assert.ElementsMatch(t, []string{"toolCallId", "toolName", "stream", "text"}, keysOf(keys))
 	assert.Equal(t, "call-1:stdout", event.StreamID)
 	assert.Equal(t, "run-1", event.RunID)
 	assert.Equal(t, domain.LiveToolOutputDelta, event.Type)
@@ -106,7 +128,7 @@ func TestLiveCoalescerKeepsStreamsApart(t *testing.T) {
 	hub := NewHub()
 	live, unsubscribe := hub.SubscribeLive("run-1", 16)
 	defer unsubscribe()
-	coalescer := NewLiveCoalescer("run-1", hub)
+	coalescer := NewLiveCoalescer("run-1", hub, "bash")
 
 	coalescer.Push("call-1:stdout", []byte("out"), time.Now())
 	coalescer.Push("call-1:stderr", []byte("err"), time.Now())
@@ -125,7 +147,7 @@ func TestLiveCoalescerFlushesAtTheByteThreshold(t *testing.T) {
 	hub := NewHub()
 	live, unsubscribe := hub.SubscribeLive("run-1", 4)
 	defer unsubscribe()
-	coalescer := NewLiveCoalescer("run-1", hub)
+	coalescer := NewLiveCoalescer("run-1", hub, "bash")
 
 	// A chatty tool must not wait for the window: 32 KiB is the flush trigger.
 	coalescer.Push("call-1:stdout", []byte(strings.Repeat("x", liveCoalesceBytes)), time.Now())
@@ -138,7 +160,7 @@ func TestLiveCoalescerCloseDrainsAndStops(t *testing.T) {
 	hub := NewHub()
 	live, unsubscribe := hub.SubscribeLive("run-1", 8)
 	defer unsubscribe()
-	coalescer := NewLiveCoalescer("run-1", hub)
+	coalescer := NewLiveCoalescer("run-1", hub, "bash")
 
 	coalescer.Push("call-1:stdout", []byte("buffered"), time.Now())
 	coalescer.Close()
@@ -262,4 +284,41 @@ func receiveDurable(t *testing.T, durable <-chan domain.RunEvent) domain.RunEven
 		t.Fatal("no durable event was published")
 		return domain.RunEvent{}
 	}
+}
+
+func TestSplitStreamIDKeepsTheStreamNameLast(t *testing.T) {
+	// A tool call id comes from the provider and could contain a colon; the stream
+	// name is ours and never does, so the split is on the last one.
+	toolCallID, stream := splitStreamID("call:1:stderr")
+	assert.Equal(t, "call:1", toolCallID)
+	assert.Equal(t, "stderr", stream)
+
+	toolCallID, stream = splitStreamID("call-1")
+	assert.Equal(t, "call-1", toolCallID)
+	assert.Equal(t, "stdout", stream, "a stream without a name is stdout")
+
+	// An empty stream name violates the payload contract's enum, and the client drops
+	// a frame that does not match it — so the fallback belongs here, on the producing
+	// side, where it can still be corrected.
+	toolCallID, stream = splitStreamID("call-1:")
+	assert.Equal(t, "call-1", toolCallID)
+	assert.Equal(t, "stdout", stream)
+}
+
+func TestLivePayloadEscapesTheIdentityToo(t *testing.T) {
+	// The tool call id is provider-supplied and the tool name is configuration, so
+	// neither may be trusted to be quote-free.
+	payload := decodeLivePayload(t, livePayload(`call"1:stdout`, "we\"ird\n", []byte("text")))
+
+	assert.Equal(t, `call"1`, payload.ToolCallID)
+	assert.Equal(t, "we\"ird\n", payload.ToolName)
+	assert.Equal(t, "stdout", payload.Stream)
+}
+
+func keysOf(values map[string]any) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	return keys
 }

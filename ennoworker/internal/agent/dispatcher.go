@@ -847,8 +847,10 @@ func (l *Loop) executeToolAttempts(ctx context.Context, runID string, call domai
 				if streaming, ok := l.Tools.(domain.StreamingToolRunner); ok {
 					sink := &liveToolSink{
 						// Scope the coalescer to the RUN so SSE subscribers keyed by
-						// runID receive the live deltas.
-						coalescer: events.NewLiveCoalescer(runID, l.Hub),
+						// runID receive the live deltas, and carry the tool name into
+						// them: the durable tool_call_* events are the only other
+						// place the client learns it.
+						coalescer: events.NewLiveCoalescer(runID, l.Hub, call.Name),
 					}
 					defer sink.coalescer.Close()
 					result, execErr = streaming.ExecuteStreaming(ctx, call, sink)

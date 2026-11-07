@@ -57,20 +57,27 @@ func (w *Writer) PublishLive(event domain.LiveRunEvent) {
 // that at most one event per stream is published within a window (100ms or 32KB
 // threshold), preventing event storms on chatty tools.
 type LiveCoalescer struct {
-	runID   string
-	hub     *Hub
-	streams map[string]*coalesceBuf
-	mu      sync.Mutex
-	closed  bool
+	runID    string
+	hub      *Hub
+	toolName string
+	streams  map[string]*coalesceBuf
+	mu       sync.Mutex
+	closed   bool
 }
 
-// NewLiveCoalescer creates a coalescer scoped to a single run. Call FlushAll
-// when the run ends to drain remaining buffered output.
-func NewLiveCoalescer(runID string, hub *Hub) *LiveCoalescer {
+// NewLiveCoalescer creates a coalescer scoped to a single run. Call Close when the
+// run ends to drain remaining buffered output.
+//
+// toolName is carried into every payload because the live delta is a *different*
+// event from the durable tool_call_started/completed pair, and the client keys one
+// card off both. Without it the preview card keeps whatever name it was given, and
+// the durable events are the only ones that know the real one.
+func NewLiveCoalescer(runID string, hub *Hub, toolName string) *LiveCoalescer {
 	return &LiveCoalescer{
-		runID:   runID,
-		hub:     hub,
-		streams: make(map[string]*coalesceBuf),
+		runID:    runID,
+		hub:      hub,
+		toolName: toolName,
+		streams:  make(map[string]*coalesceBuf),
 	}
 }
 
@@ -84,7 +91,10 @@ func (c *LiveCoalescer) Push(streamID string, data []byte, now time.Time) {
 	}
 	buf := c.streams[streamID]
 	if buf == nil {
-		buf = &coalesceBuf{streamID: streamID, runID: c.runID, hub: c.hub, seqBase: time.Now().UnixNano()}
+		buf = &coalesceBuf{
+			streamID: streamID, runID: c.runID, hub: c.hub,
+			toolName: c.toolName, seqBase: time.Now().UnixNano(),
+		}
 		c.streams[streamID] = buf
 	}
 	c.mu.Unlock()
@@ -110,6 +120,7 @@ type coalesceBuf struct {
 	streamID string
 	runID    string
 	hub      *Hub
+	toolName string
 	seqBase  int64
 	mu       sync.Mutex
 	data     []byte
@@ -153,7 +164,7 @@ func (b *coalesceBuf) flush() {
 		Type:      domain.LiveToolOutputDelta,
 		StreamID:  b.streamID,
 		LiveSeq:   b.seqBase + b.seq,
-		Payload:   rawJSONString(string(b.data)),
+		Payload:   livePayload(b.streamID, b.toolName, b.data),
 		CreatedAt: time.Now(),
 	}
 	b.seq++
@@ -162,18 +173,53 @@ func (b *coalesceBuf) flush() {
 	b.hub.PublishLive(event)
 }
 
-// rawJSONString wraps a string as a raw JSON value (valid JSON string).
+// livePayload wraps one coalesced chunk for the client.
+//
+// The identity travels with the text. The client keys a tool's preview card off
+// (toolCallId, stream) — the same key the durable tool_call_* events use — so a
+// payload carrying only text would land every delta in the run on one card named
+// after the fallback. It is not the coalescer's business to know what a tool is,
+// but it is the payload builder's business to preserve the identity it was given.
+func livePayload(streamID, toolName string, data []byte) []byte {
+	toolCallID, stream := splitStreamID(streamID)
+
+	var encoded strings.Builder
+	encoded.Grow(len(data) + len(toolName) + len(streamID) + 64)
+	encoded.WriteString(`{"toolCallId":`)
+	writeJSONString(&encoded, toolCallID)
+	encoded.WriteString(`,"toolName":`)
+	writeJSONString(&encoded, toolName)
+	encoded.WriteString(`,"stream":`)
+	writeJSONString(&encoded, stream)
+	encoded.WriteString(`,"text":`)
+	writeJSONString(&encoded, string(data))
+	encoded.WriteString(`}`)
+	return []byte(encoded.String())
+}
+
+// splitStreamID reads "{toolCallId}:{stream}". The split is on the last colon
+// because the stream name is ours and never contains one, while a tool call id
+// comes from the provider and might.
+func splitStreamID(streamID string) (toolCallID, stream string) {
+	if index := strings.LastIndexByte(streamID, ':'); index >= 0 {
+		if stream = streamID[index+1:]; stream != "" {
+			return streamID[:index], stream
+		}
+		return streamID[:index], "stdout"
+	}
+	return streamID, "stdout"
+}
+
+// writeJSONString appends s as a JSON string literal.
 //
 // Manual encoding keeps encoding/json off the per-delta path. Every control
 // character has to be escaped, not just the whitespace ones: tool output carries
 // ANSI escapes and raw bytes, and one unescaped \x1b makes the whole frame
-// unparseable — which the client discards, so the live stream silently stops
-// showing that command's output.
-func rawJSONString(s string) []byte {
+// unparseable — the run stream parses frames with a bare JSON.parse, so that throws
+// out of the read loop instead of skipping one event.
+func writeJSONString(encoded *strings.Builder, s string) {
 	const hex = "0123456789abcdef"
-	var encoded strings.Builder
-	encoded.Grow(len(s) + 16)
-	encoded.WriteString(`{"text":"`)
+	encoded.WriteByte('"')
 	for _, r := range s {
 		switch r {
 		case '"':
@@ -199,6 +245,5 @@ func rawJSONString(s string) []byte {
 			encoded.WriteRune(r)
 		}
 	}
-	encoded.WriteString(`"}`)
-	return []byte(encoded.String())
+	encoded.WriteByte('"')
 }
