@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -162,26 +163,42 @@ func (b *coalesceBuf) flush() {
 }
 
 // rawJSONString wraps a string as a raw JSON value (valid JSON string).
+//
+// Manual encoding keeps encoding/json off the per-delta path. Every control
+// character has to be escaped, not just the whitespace ones: tool output carries
+// ANSI escapes and raw bytes, and one unescaped \x1b makes the whole frame
+// unparseable — which the client discards, so the live stream silently stops
+// showing that command's output.
 func rawJSONString(s string) []byte {
-	// Manual JSON encoding to avoid importing encoding/json for each delta.
-	// The writer owns the payload shape: a simple {"text": "..."} object.
-	quoted := `"`
+	const hex = "0123456789abcdef"
+	var encoded strings.Builder
+	encoded.Grow(len(s) + 16)
+	encoded.WriteString(`{"text":"`)
 	for _, r := range s {
 		switch r {
 		case '"':
-			quoted += `\"`
+			encoded.WriteString(`\"`)
 		case '\\':
-			quoted += `\\`
+			encoded.WriteString(`\\`)
 		case '\n':
-			quoted += `\n`
+			encoded.WriteString(`\n`)
 		case '\r':
-			quoted += `\r`
+			encoded.WriteString(`\r`)
 		case '\t':
-			quoted += `\t`
+			encoded.WriteString(`\t`)
 		default:
-			quoted += string(r)
+			if r < 0x20 {
+				// Everything else below the space is not legal raw inside a JSON
+				// string. \u00XX is always four hex digits here, so write them out
+				// rather than paying for a format call per character.
+				encoded.WriteString(`\u00`)
+				encoded.WriteByte(hex[r>>4])
+				encoded.WriteByte(hex[r&0xf])
+				continue
+			}
+			encoded.WriteRune(r)
 		}
 	}
-	quoted += `"`
-	return []byte(`{"text":` + quoted + `}`)
+	encoded.WriteString(`"}`)
+	return []byte(encoded.String())
 }
