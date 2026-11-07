@@ -6,10 +6,15 @@ import (
 	"sync"
 )
 
-// projectActiveRunWorkers bounds how many Session databases one poll opens at a
-// time. Run state lives in each Session's own SQLite file, so a project-wide
-// answer is inherently a fan-out over Sessions; the concurrency cap keeps that
-// fan-out from becoming a burst of simultaneous opens.
+// projectActiveRunWorkers bounds how many Session reads run at a time. Run state
+// lives in each Session's own SQLite file, so a project-wide answer is inherently
+// a fan-out over Sessions.
+//
+// What this does not do: ListByProject already resolves every Session (and opens
+// the cold ones, which the manager serializes behind its own lock), so the fan-out
+// here bounds the per-Session queries, not the opens. A project whose Sessions have
+// never been opened pays that cost inside one request; that is the price of
+// answering from the authority instead of maintaining a second index of it.
 const projectActiveRunWorkers = 8
 
 // projectActiveRuns is the project-wide answer the sidebar needs: which Sessions

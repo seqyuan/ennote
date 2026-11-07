@@ -1658,6 +1658,8 @@ paths:
                   - type: object
                     properties:
                       data: { $ref: "#/components/schemas/ProjectActiveRuns" }
+        "500": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /v1/sessions/{sessionID}:
     parameters:
       - $ref: "#/components/parameters/SessionID"

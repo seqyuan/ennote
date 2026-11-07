@@ -6611,6 +6611,8 @@ export interface operations {
                     };
                 };
             };
+            500: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
     getSession: {
