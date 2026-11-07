@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { mergeQueuedFollowUps, type QueuedRow } from "@/hooks/useQueuedFollowUps";
+import {
+  emptyQueuedFollowUps, mergeQueuedFollowUps, queuedFollowUpReducer, type QueuedRow,
+} from "@/hooks/useQueuedFollowUps";
 import type { components } from "@/lib/worker-api.gen";
 
 type QueuedInput = components["schemas"]["QueuedInput"];
@@ -58,5 +60,46 @@ describe("mergeQueuedFollowUps", () => {
     const optimistic: QueuedRow[] = [{ id: "a", text: "typed locally" }];
     const rows = mergeQueuedFollowUps([input("a", "normalised by the Worker")], optimistic, new Set());
     expect(rows[0].text).toBe("normalised by the Worker");
+  });
+});
+
+describe("queuedFollowUpReducer", () => {
+  // The dock renders snapshot rows first and optimistic rows last, so "the first
+  // row" and "the row the Worker drained" are different rows as soon as another
+  // tab has queued something older. These cases pin the id-based rule: they fail
+  // against any implementation that settles by position.
+  const snapshot = [input("a", "queued by another tab"), input("b", "second")];
+
+  it("settles the id the Worker named while a snapshot row is ahead of it", () => {
+    const state = queuedFollowUpReducer(emptyQueuedFollowUps, {
+      type: "queue", row: { id: "c", text: "queued here" },
+    });
+    const settled = queuedFollowUpReducer(state, { type: "settle", id: "b" });
+    expect(mergeQueuedFollowUps(snapshot, settled.optimistic, settled.settled).map((row) => row.id))
+      .toEqual(["a", "c"]);
+  });
+
+  it("leaves the queue alone when an older Worker names no id", () => {
+    const state = queuedFollowUpReducer(emptyQueuedFollowUps, {
+      type: "queue", row: { id: "c", text: "queued here" },
+    });
+    const settled = queuedFollowUpReducer(state, { type: "settle", id: "" });
+    expect(settled).toBe(state);
+  });
+
+  it("drops a settled id from both halves", () => {
+    let state = queuedFollowUpReducer(emptyQueuedFollowUps, { type: "queue", row: { id: "c", text: "here" } });
+    state = queuedFollowUpReducer(state, { type: "settle", id: "c" });
+    expect(state.optimistic).toEqual([]);
+    expect(mergeQueuedFollowUps([input("c", "here")], state.optimistic, state.settled)).toEqual([]);
+  });
+
+  it("reset clears the optimistic tail and every settled id", () => {
+    let state = queuedFollowUpReducer(emptyQueuedFollowUps, { type: "queue", row: { id: "c", text: "here" } });
+    state = queuedFollowUpReducer(state, { type: "settle", id: "a" });
+    state = queuedFollowUpReducer(state, { type: "reset" });
+    expect(state).toEqual(emptyQueuedFollowUps);
+    expect(mergeQueuedFollowUps(snapshot, state.optimistic, state.settled).map((row) => row.id))
+      .toEqual(["a", "b"]);
   });
 });

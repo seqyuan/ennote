@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useReducer } from "react";
 import type { components } from "@/lib/worker-api.gen";
 
 type QueuedInput = components["schemas"]["QueuedInput"];
@@ -9,6 +9,51 @@ type QueuedInput = components["schemas"]["QueuedInput"];
 export interface QueuedRow {
   id: string;
   text: string;
+}
+
+/**
+ * What this tab knows about the queue that the snapshot does not: the follow-ups
+ * it queued a frame ago, and the ids it has already seen settled.
+ */
+export interface QueuedFollowUpState {
+  optimistic: QueuedRow[];
+  settled: ReadonlySet<string>;
+}
+
+export type QueuedFollowUpAction =
+  | { type: "queue"; row: QueuedRow }
+  | { type: "settle"; id: string }
+  | { type: "reset" };
+
+export const emptyQueuedFollowUps: QueuedFollowUpState = { optimistic: [], settled: new Set() };
+
+/**
+ * The queue's local bookkeeping, as a pure reducer.
+ *
+ * `settle` takes an id and nothing else on purpose: the Worker names the input it
+ * drained (queueItemId), and a position would be wrong as soon as another tab, or
+ * a reload, has queued an older one. Keeping that rule in a reducer is what makes
+ * it testable without a DOM.
+ */
+export function queuedFollowUpReducer(
+  state: QueuedFollowUpState,
+  action: QueuedFollowUpAction,
+): QueuedFollowUpState {
+  switch (action.type) {
+    case "queue":
+      return { ...state, optimistic: [...state.optimistic, action.row] };
+    case "settle": {
+      // An older Worker sends no id; the snapshot still drops the row, so there is
+      // nothing to settle and nothing to guess.
+      if (!action.id) return state;
+      const settled = new Set(state.settled);
+      settled.add(action.id);
+      const optimistic = state.optimistic.filter((row) => row.id !== action.id);
+      return { optimistic, settled };
+    }
+    case "reset":
+      return emptyQueuedFollowUps;
+  }
 }
 
 /**
@@ -51,36 +96,23 @@ export function mergeQueuedFollowUps(
  * the gap between the click and the snapshot.
  */
 export function useQueuedFollowUps(queuedInputs: QueuedInput[]) {
-  const [optimistic, setOptimistic] = useState<QueuedRow[]>([]);
-  const [settled, setSettled] = useState<Set<string>>(() => new Set());
+  const [state, dispatch] = useReducer(queuedFollowUpReducer, emptyQueuedFollowUps);
+
   /** A follow-up this tab just queued, before the snapshot echoes it. */
-  const queue = useCallback((row: QueuedRow) => {
-    setOptimistic(current => [...current, row]);
-  }, []);
+  const queue = useCallback((row: QueuedRow) => dispatch({ type: "queue", row }), []);
 
   /**
    * The Worker consumed or cancelled one queued input. Its id is settled so the
    * row disappears from both halves of the list, even if the snapshot still
    * carries it for another frame.
-   *
-   * The id comes from the run event (queueItemId). It is not inferred from
-   * position: the message the Worker drained need not be the newest row this tab
-   * is showing, because another tab or a reload can have queued an older one.
    */
-  const settle = useCallback((id: string) => {
-    if (!id) return;
-    setSettled(ids => new Set(ids).add(id));
-    setOptimistic(current => current.filter(item => item.id !== id));
-  }, []);
+  const settle = useCallback((id: string) => dispatch({ type: "settle", id }), []);
 
-  const reset = useCallback(() => {
-    setSettled(new Set());
-    setOptimistic([]);
-  }, []);
+  const reset = useCallback(() => dispatch({ type: "reset" }), []);
 
   const rows = useMemo(
-    () => mergeQueuedFollowUps(queuedInputs, optimistic, settled),
-    [queuedInputs, optimistic, settled],
+    () => mergeQueuedFollowUps(queuedInputs, state.optimistic, state.settled),
+    [queuedInputs, state.optimistic, state.settled],
   );
 
   return { rows, queue, settle, reset };
