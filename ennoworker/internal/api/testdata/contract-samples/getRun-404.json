@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "session_resource_not_found",
+    "message": "Session resource not found",
+    "requestId": "00000000000000000000000000000003",
+    "retryable": false
+  }
+}

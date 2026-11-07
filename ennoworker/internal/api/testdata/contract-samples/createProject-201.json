@@ -1,0 +1,22 @@
+{
+  "data": {
+    "project": {
+      "createdAt": "2026-01-01T00:00:01Z",
+      "description": "samples",
+      "id": "00000000-0000-0000-0000-000000000002",
+      "name": "contract",
+      "status": "active",
+      "updatedAt": "2026-01-01T00:00:01Z"
+    },
+    "workspace": {
+      "createdAt": "2026-01-01T00:00:01Z",
+      "hostPath": "<temp-path>",
+      "id": "00000000-0000-0000-0000-000000000003",
+      "kind": "local",
+      "pathFingerprint": "0000000000000002",
+      "projectId": "00000000-0000-0000-0000-000000000002",
+      "status": "active",
+      "virtualPath": "/workspace"
+    }
+  }
+}

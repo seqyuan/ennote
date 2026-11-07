@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "unauthorized",
+    "message": "worker authentication failed",
+    "requestId": "00000000000000000000000000000001",
+    "retryable": false
+  }
+}

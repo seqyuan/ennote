@@ -37,7 +37,14 @@ const contractOpenAPIPath = "../../../contracts/openapi.yaml"
 // when the only change is the contract itself. CI's matrix includes a -count=1
 // leg, which bypasses the cache; run this with -count=1 after editing the YAML.
 func TestRouterCoversTheContractPaths(t *testing.T) {
-	served := routerContractOperations(t)
+	// The router side carries no operationId; only the method sets are compared.
+	served := make(map[string]map[string]string)
+	for path, methods := range routerContractOperations(t) {
+		served[path] = make(map[string]string, len(methods))
+		for method := range methods {
+			served[path][method] = ""
+		}
+	}
 	declared := contractOperations(t)
 
 	// A parser regression that returned nothing would make both diffs empty and
@@ -76,9 +83,9 @@ components:
       type: object
 `)
 
-	assert.Equal(t, map[string]map[string]struct{}{
-		"/v1/one": {"get": {}},
-		"/v1/two": {"get": {}, "delete": {}},
+	assert.Equal(t, map[string]map[string]string{
+		"/v1/one": {"get": "getOne"},
+		"/v1/two": {"get": "getTwo", "delete": "deleteTwo"},
 	}, operations)
 }
 
@@ -95,8 +102,8 @@ func TestContractOperationsKeepsMethodsFromCollidingPaths(t *testing.T) {
       operationId: postAnother
 `)
 
-	assert.Equal(t, map[string]map[string]struct{}{
-		"/v1/skills/remove/{param}": {"get": {}, "post": {}},
+	assert.Equal(t, map[string]map[string]string{
+		"/v1/skills/remove/{param}": {"get": "getOne", "post": "postAnother"},
 	}, operations)
 }
 
@@ -178,19 +185,23 @@ var httpMethods = map[string]struct{}{
 // `components:` — is invisible here, which is exactly the drift this test must
 // fail on: openapi-typescript ignores it too, so the generated types would be
 // missing the operation.
-func contractOperations(t *testing.T) map[string]map[string]struct{} {
+// contractOperations is path → method → operationId. The parity test compares the
+// method sets; the contract-sample test uses the operationId to name a sample, so
+// the two cannot disagree about which operation a route belongs to.
+func contractOperations(t *testing.T) map[string]map[string]string {
 	t.Helper()
 	contents, err := os.ReadFile(contractOpenAPIPath)
 	require.NoError(t, err)
 	return parseContractOperations(t, string(contents))
 }
 
-func parseContractOperations(t *testing.T, contents string) map[string]map[string]struct{} {
+func parseContractOperations(t *testing.T, contents string) map[string]map[string]string {
 	t.Helper()
 
-	operations := make(map[string]map[string]struct{})
+	operations := make(map[string]map[string]string)
 	inPaths := false
-	current := ""
+	currentPath := ""
+	currentMethod := ""
 	for _, line := range strings.Split(contents, "\n") {
 		if !inPaths {
 			inPaths = line == "paths:"
@@ -206,7 +217,11 @@ func parseContractOperations(t *testing.T, contents string) map[string]map[strin
 			continue
 		}
 		if strings.HasPrefix(line, "     ") {
-			// Under an operation: parameters, responses, security.
+			// Under an operation: parameters, responses, security, and the
+			// operationId this parser exists to hand out.
+			if operationID, found := strings.CutPrefix(trimmed, "operationId: "); found && currentMethod != "" {
+				operations[currentPath][currentMethod] = operationID
+			}
 			continue
 		}
 		if strings.HasPrefix(line, "    ") {
@@ -215,8 +230,9 @@ func parseContractOperations(t *testing.T, contents string) map[string]map[strin
 			if _, isMethod := httpMethods[strings.ToLower(key)]; !isMethod {
 				continue
 			}
-			require.NotEmpty(t, current, "operation %q appears before any path", key)
-			operations[current][strings.ToLower(key)] = struct{}{}
+			require.NotEmpty(t, currentPath, "operation %q appears before any path", key)
+			currentMethod = strings.ToLower(key)
+			operations[currentPath][currentMethod] = ""
 			continue
 		}
 		if strings.HasPrefix(line, "   ") {
@@ -225,9 +241,10 @@ func parseContractOperations(t *testing.T, contents string) map[string]map[strin
 		key, ok := strings.CutSuffix(strings.TrimPrefix(line, "  "), ":")
 		require.True(t, ok && strings.HasPrefix(key, "/"),
 			"unexpected line in the contract paths block: %q", line)
-		current = normalizeContractPath(key)
-		if operations[current] == nil {
-			operations[current] = make(map[string]struct{})
+		currentPath = normalizeContractPath(key)
+		currentMethod = ""
+		if operations[currentPath] == nil {
+			operations[currentPath] = make(map[string]string)
 		}
 	}
 	return operations
@@ -238,15 +255,15 @@ func parseContractOperations(t *testing.T, contents string) map[string]map[strin
 // proves the generated types match the YAML, and the path comparison ignored
 // methods, so a handler registered under a second verb on a declared path was
 // invisible to both.
-func missingFromContract(served, declared map[string]map[string]struct{}) []string {
+func missingFromContract(served, declared map[string]map[string]string) []string {
 	return sortedOperationDifference(served, declared)
 }
 
-func missingFromRouter(served, declared map[string]map[string]struct{}) []string {
+func missingFromRouter(served, declared map[string]map[string]string) []string {
 	return sortedOperationDifference(declared, served)
 }
 
-func sortedOperationDifference(left, right map[string]map[string]struct{}) []string {
+func sortedOperationDifference(left, right map[string]map[string]string) []string {
 	var difference []string
 	for path, methods := range left {
 		for method := range methods {

@@ -1,0 +1,30 @@
+{
+  "data": {
+    "activeLeafMessageId": "00000000-0000-0000-0000-000000000006",
+    "hasMore": false,
+    "messages": [
+      {
+        "addresseeKind": "host",
+        "createdAt": "2026-01-01T00:00:03Z",
+        "id": "00000000-0000-0000-0000-000000000006",
+        "originatedAt": "2026-01-01T00:00:03Z",
+        "parts": [
+          {
+            "text": "hello",
+            "type": "text"
+          }
+        ],
+        "role": "user",
+        "seq": 1,
+        "sessionId": "00000000-0000-0000-0000-000000000005",
+        "speakerKind": "user",
+        "speakerSnapshot": {
+          "displayName": "You",
+          "kind": "user"
+        },
+        "status": "complete",
+        "visibility": "public"
+      }
+    ]
+  }
+}

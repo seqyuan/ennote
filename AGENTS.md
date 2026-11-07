@@ -36,6 +36,11 @@ constraints, not a replacement for the local roadmap or detailed design plans.
 ## Contracts and Cloud Boundary
 
 - `contracts/openapi.yaml` remains authoritative for Worker business APIs.
+  Changing a sampled response shape means updating the handler's sample
+  (`ENNOTE_UPDATE_CONTRACT_SAMPLES=1 go test ./internal/api/ -run TestContractSamples`)
+  and then `npm run generate:contract-samples`; the sample is what `tsc` checks
+  the handler's JSON against, so skipping either step leaves the contract
+  unverified for that operation.
 - EnnoCloud may own account/control and Relay envelope contracts, but Relay
   payloads must remain encrypted and opaque to cloud services.
 - Do not import EnnoCloud persistence models into Worker Store/domain code or

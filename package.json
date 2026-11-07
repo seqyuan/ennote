@@ -47,6 +47,8 @@
     "check:commit-message": "node scripts/check-commit-message.mjs",
     "generate:api": "openapi-typescript contracts/openapi.yaml -o lib/worker-api.gen.ts",
     "generate:error-codes": "node scripts/generate-error-codes.mjs",
+    "generate:contract-samples": "node scripts/generate-contract-samples.mjs",
+    "check:contract-samples": "node scripts/generate-contract-samples.mjs --check",
     "check:error-codes": "node scripts/generate-error-codes.mjs --check",
     "release:build-worker": "node scripts/build-workers.mjs",
     "release:prepare": "npm run build:web && npm run release:build-worker && npm run pack:check",

@@ -65,6 +65,10 @@ jobs:
       - run: npm run generate:api
       - run: git diff --exit-code lib/worker-api.gen.ts
       - run: npm run check:error-codes
+      # The response shapes the Worker actually answers, checked against the
+      # contract's declared types. The Go half (TestContractSamples) fails when a
+      # handler's shape moves; this half fails when the assertion file is stale.
+      - run: npm run check:contract-samples
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run check:file-sizes
