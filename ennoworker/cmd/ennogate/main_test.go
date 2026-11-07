@@ -475,8 +475,12 @@ func TestProxyFailureCarriesNoWorkerIdentity(t *testing.T) {
 	gate := &Gate{HomeDir: home, StaticDir: t.TempDir(), Port: "45131", WorkerURL: deadURL, Token: "worker-token"}
 	handler := gate.handler()
 
-	token := "session-token"
-	storeSession(token)
+	token := strings.Repeat("ab", 32) // the shape generateToken produces
+	passwordHash, configured, err := gate.authHash()
+	require.NoError(t, err)
+	require.True(t, configured)
+	sessions := gate.boundSessions(passwordHash)
+	require.NoError(t, sessions.issue(token))
 
 	request := gateRequest(http.MethodGet, "/api/worker/v1/health/live", "", "", "127.0.0.1:9")
 	request.AddCookie(&http.Cookie{Name: gate.cookieName(), Value: token})

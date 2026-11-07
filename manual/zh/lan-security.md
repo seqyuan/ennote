@@ -56,6 +56,11 @@ ennote start
 - Provider 的 API Key 存在 `~/.ennote/config/`，文件权限 `0600`，不会出现在日志里
 - 本机界面密码用 bcrypt 存储
 - 会话 cookie 在 TLS 下带 `Secure`
+- 登录会话存在 `~/.ennote/config/sessions-<端口>.json`（`0600`），重启 gate 不用重新登录；
+  文件里只有以密码哈希为密钥的 HMAC 摘要，没有可直接重放的 token
+- 换密码会让所有浏览器掉登录：`ennote passwd`、`ennote passwd --reset` 与手工删掉 `auth.json`
+  都一样。即使重设成同一个密码也会掉（bcrypt 每次用新 salt）。
+  已经建立的长连接（SSE 事件流）不会被中断，直到它自己断开
 - 所有抓取外部 URL 的工具都会拒绝私有网段、链路本地地址与云元数据地址
 
 ## 文件与产物

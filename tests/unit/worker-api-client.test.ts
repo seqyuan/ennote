@@ -215,10 +215,10 @@ describe("worker API response formats", () => {
   });
 
   it("does not let a gate rejection resurrect an established unreachable verdict", async () => {
-    // The Worker is gone, so the App is read-only. Then the gate restarts: its
-    // in-memory session store is empty, so the probe now gets a headerless 401.
-    // That answer carries no information about the Worker and must not put the
-    // App back into a writable state.
+    // The Worker is gone, so the App is read-only. Then the probe gets a
+    // headerless 401 — an expired session, a restart the cookie did not survive,
+    // whatever produced it. That answer carries no information about the Worker
+    // and must not put the App back into a writable state.
     const { apiFetch, WorkerUnreachableError, probeWorkerReachability, getWorkerReachability } =
       await import("@/lib/worker-api.client");
 

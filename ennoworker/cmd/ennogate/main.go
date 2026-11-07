@@ -3,8 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -446,23 +444,13 @@ type Gate struct {
 	proxy        *httputil.ReverseProxy
 	proxyReady   bool
 	logins       loginLimiter
+	sessionsOnce sync.Once
+	sessions     *gateSessions
 }
 
 type contextKey struct{ name string }
 
 var authKey = contextKey{"authenticated"}
-
-func (g *Gate) cookieName() string {
-	return fmt.Sprintf("ennote_session_%s", g.Port)
-}
-
-func (g *Gate) setSessionCookie(w http.ResponseWriter, token string, maxAge int) {
-	http.SetCookie(w, &http.Cookie{
-		Name: g.cookieName(), Value: token, Path: "/",
-		HttpOnly: true, Secure: g.SecureCookie, SameSite: http.SameSiteLaxMode,
-		MaxAge: maxAge,
-	})
-}
 
 func (g *Gate) handler() http.Handler {
 	mux := http.NewServeMux()
@@ -556,9 +544,13 @@ func (g *Gate) accessURL() string {
 
 func (g *Gate) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		authFile := filepath.Join(g.HomeDir, "config", "auth.json")
-		_, statErr := os.Stat(authFile)
-		if errors.Is(statErr, os.ErrNotExist) {
+		passwordHash, configured, authErr := g.authHash()
+		if authErr != nil {
+			slog.Error("gate auth state unavailable", "error", authErr)
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "authentication state is unavailable"})
+			return
+		}
+		if !configured {
 			if isAPI(r) {
 				writeJSON(w, http.StatusPreconditionRequired, map[string]any{
 					"error": map[string]string{"code": "setup_required", "message": "password setup is required"},
@@ -568,12 +560,9 @@ func (g *Gate) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			http.Redirect(w, r, "/setup", http.StatusSeeOther)
 			return
 		}
-		if statErr != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "authentication state is unavailable"})
-			return
-		}
+		sessions := g.boundSessions(passwordHash)
 		cookie, err := r.Cookie(g.cookieName())
-		if err != nil || !validateSession(cookie.Value) {
+		if err != nil || !sessions.valid(cookie.Value) {
 			if isAPI(r) {
 				writeJSON(w, http.StatusUnauthorized, map[string]any{
 					"error": map[string]string{"code": "unauthorized", "message": "login required"},
@@ -588,14 +577,15 @@ func (g *Gate) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (g *Gate) authPage(w http.ResponseWriter, r *http.Request) {
-	authFile := filepath.Join(g.HomeDir, "config", "auth.json")
-	_, statErr := os.Stat(authFile)
-	configured := statErr == nil
-	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+	passwordHash, configured, authErr := g.authHash()
+	if authErr != nil {
+		// The only way back is to fix or remove config/auth.json, so say so in the
+		// log rather than serving a bare 500 with nothing behind it.
+		slog.Error("gate auth state unavailable", "error", authErr)
 		http.Error(w, "authentication state is unavailable", http.StatusInternalServerError)
 		return
 	}
-	if cookie, err := r.Cookie(g.cookieName()); err == nil && validateSession(cookie.Value) {
+	if cookie, err := r.Cookie(g.cookieName()); err == nil && configured && g.boundSessions(passwordHash).valid(cookie.Value) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
@@ -661,15 +651,17 @@ func (g *Gate) login(w http.ResponseWriter, r *http.Request) {
 	if !decodeAuthBody(w, r, &input) {
 		return
 	}
-	authFile := filepath.Join(g.HomeDir, "config", "auth.json")
-	data, err := os.ReadFile(authFile)
-	if err != nil {
+	passwordHash, configured, authErr := g.authHash()
+	if authErr != nil {
+		slog.Error("gate auth state unavailable", "error", authErr)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "authentication state is unavailable"})
+		return
+	}
+	if !configured {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "no password set"})
 		return
 	}
-	var stored struct{ Hash string }
-	json.Unmarshal(data, &stored)
-	if bcrypt.CompareHashAndPassword([]byte(stored.Hash), []byte(input.Password)) != nil {
+	if bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(input.Password)) != nil {
 		g.logins.fail(ip, g.now(), g.lockout(), g.maxFailures())
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "wrong password"})
 		return
@@ -680,26 +672,54 @@ func (g *Gate) login(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to create login session"})
 		return
 	}
-	storeSession(token)
-	g.setSessionCookie(w, token, 86400*7)
+	sessions := g.boundSessions(passwordHash)
+	// Signing in again retires whatever session this browser was carrying: the
+	// digest set otherwise grows one entry per login for seven days, with nothing
+	// that ever collects them.
+	if previous, cookieErr := r.Cookie(g.cookieName()); cookieErr == nil {
+		if revokeErr := sessions.revoke(previous.Value); revokeErr != nil {
+			slog.Error("gate could not retire the previous session", "error", revokeErr)
+		}
+	}
+	if err := sessions.issue(token); err != nil {
+		slog.Error("gate could not record the session", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to create login session"})
+		return
+	}
+	g.setSessionCookie(w, token, int(sessionTTL.Seconds()))
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
 func (g *Gate) logout(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie(g.cookieName()); err == nil {
-		sessionStore.Delete(cookie.Value)
+	if cookie, err := r.Cookie(g.cookieName()); err == nil && cookie.Value != "" {
+		// Logging out has to end the session, not just forget it in this browser:
+		// the token on disk stays valid until it expires.
+		passwordHash, configured, authErr := g.authHash()
+		switch {
+		case authErr != nil:
+			slog.Error("gate could not read its auth state to revoke the session", "error", authErr)
+		case !configured:
+		default:
+			if revokeErr := g.boundSessions(passwordHash).revoke(cookie.Value); revokeErr != nil {
+				slog.Error("gate could not revoke the session", "error", revokeErr)
+			}
+		}
 	}
 	g.setSessionCookie(w, "", -1)
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
 func (g *Gate) authStatus(w http.ResponseWriter, r *http.Request) {
-	authFile := filepath.Join(g.HomeDir, "config", "auth.json")
-	_, err := os.Stat(authFile)
-	requiresPassword := err == nil
+	passwordHash, configured, authErr := g.authHash()
+	if authErr != nil {
+		slog.Error("gate auth state unavailable", "error", authErr)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "authentication state is unavailable"})
+		return
+	}
+	requiresPassword := configured
 	authenticated := false
-	if cookie, err := r.Cookie(g.cookieName()); err == nil {
-		authenticated = validateSession(cookie.Value)
+	if cookie, err := r.Cookie(g.cookieName()); err == nil && configured {
+		authenticated = g.boundSessions(passwordHash).valid(cookie.Value)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"requiresPassword": requiresPassword,
@@ -747,6 +767,11 @@ func (g *Gate) setupPassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to save password"})
 		return
 	}
+	// A new password is a new session epoch. Setting one after deleting auth.json
+	// is the only way to reset a forgotten password, and it must not leave the old
+	// password's sessions working.
+	slog.Info("gate password set; previous sessions invalidated",
+		"sessions", g.boundSessions(string(hash)).count())
 	writeJSON(w, http.StatusOK, map[string]any{"status": "password set"})
 }
 
@@ -947,30 +972,6 @@ func (l *loginLimiter) success(ip string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	delete(l.failed, ip)
-}
-
-func generateToken() (string, error) {
-	value := make([]byte, 32)
-	if _, err := rand.Read(value); err != nil {
-		return "", fmt.Errorf("generate secure token: %w", err)
-	}
-	return hex.EncodeToString(value), nil
-}
-
-var sessionStore sync.Map
-
-func storeSession(token string) { sessionStore.Store(token, time.Now().Add(7*24*time.Hour)) }
-func validateSession(token string) bool {
-	v, ok := sessionStore.Load(token)
-	if !ok {
-		return false
-	}
-	expires := v.(time.Time)
-	if time.Now().After(expires) {
-		sessionStore.Delete(token)
-		return false
-	}
-	return true
 }
 
 func isAPI(r *http.Request) bool {

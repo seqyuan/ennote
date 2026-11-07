@@ -58,6 +58,13 @@ ennote start
 - Provider API keys live under `~/.ennote/config/` with mode `0600` and never reach the logs
 - The local UI password is stored with bcrypt
 - Session cookies carry `Secure` under TLS
+- Login sessions live in `~/.ennote/config/sessions-<port>.json` (mode `0600`), so restarting the gate
+  does not log you out. The file holds HMAC digests keyed by the password hash, never a replayable
+  token
+- Changing the password logs every browser out: `ennote passwd`, `ennote passwd --reset` and deleting
+  `auth.json` by hand all do it, and so does setting the same password again (bcrypt uses a new salt
+  each time). A long-lived connection that is already open — an SSE event stream — keeps running
+  until it closes
 - Every tool that fetches an external URL refuses private ranges, link-local addresses and cloud
   metadata endpoints
 

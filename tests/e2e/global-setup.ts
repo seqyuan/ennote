@@ -22,9 +22,11 @@ async function disableDevIndicator(baseURL: string) {
  * password exists, login screen after). Most specs mock the worker API but
  * still navigate through "/", so every context needs a valid session cookie.
  * Seed a password if needed, log in against the running gate, and persist the
- * session cookie as a Playwright storageState for all tests. The gate's
- * session store is in-memory, so this must run against the same gate process
- * that serves the tests.
+ * session cookie as a Playwright storageState for all tests.
+ *
+ * The gate persists sessions, so a session seeded here keeps working across a
+ * gate restart. The seeding still has to run against the gate that serves the
+ * tests: it is the login that mints the cookie, not a shared secret.
  */
 const STORAGE_PATH = ".auth/ennote-auth.json";
 const PASSWORD = process.env.ENNOTE_E2E_PASSWORD ?? "preview1234";
