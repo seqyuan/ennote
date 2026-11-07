@@ -222,6 +222,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("PUT /v1/projects/{projectID}/graph-bindings/{graphID}", s.putProjectGraphBinding)
 	mux.HandleFunc("DELETE /v1/projects/{projectID}/graph-bindings/{graphID}", s.deleteProjectGraphBinding)
 	mux.HandleFunc("GET /v1/projects/{projectID}/sessions", s.listSessions)
+	mux.HandleFunc("GET /v1/projects/{projectID}/active-runs", s.listProjectActiveRuns)
 	mux.HandleFunc("POST /v1/projects/{projectID}/sessions", s.createSession)
 	mux.HandleFunc("POST /v1/projects/{projectID}/attachments/images", s.uploadImage)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}", s.getSession)

@@ -56,6 +56,7 @@ var serverSurface = map[string][]string{
 	"host_directories.go":       {"HostHome"},
 	"mcp.go":                    {"MCP", "Projects"},
 	"packs_install.go":          {"Packs"},
+	"project_active_runs.go":    {"Runs", "SessionStores"},
 	"project_graph_bindings.go": {"GlobalSources", "Projects"},
 	"prompt_templates.go":       {"Prompts"},
 	"provider_doctor.go":        {"Doctor"},

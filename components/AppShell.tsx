@@ -141,7 +141,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
   });
 
   const runningSessionIds = useRunningSessionIds(
-    sidebarGroups.groups.flatMap((group) => group.sessions.map((session) => session.id)),
+    sidebarGroups.groups.flatMap((group) => [group.projectId]),
     chat.run.activeRun ? selectedSession : null,
   );
 

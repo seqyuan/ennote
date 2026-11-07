@@ -4,7 +4,8 @@
 # ErrorCode constants, and literal envelope codes. Do not edit by hand: run
 # `npm run generate:error-codes` and commit the diff, which makes a vocabulary
 # change visible in review instead of at runtime.
-# 248 codes.
+# 249 codes.
+active_runs_unavailable
 approval_checkpoint_invalid
 approval_conflict
 approval_id_required

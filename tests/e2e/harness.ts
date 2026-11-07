@@ -52,6 +52,13 @@ export async function tryFulfillHarnessRoutes(route: Route): Promise<boolean> {
     await fulfill(route, blankSession(create[1]), 201);
     return true;
   }
+  // The sidebar asks once per Project which Sessions own an active Run. Nothing is
+  // running in a mocked spec unless the spec says so, and the selected Session's
+  // marker does not depend on this answer.
+  if (/^\/v1\/projects\/[^/]+\/active-runs$/.test(path)) {
+    await fulfill(route, { sessionIds: [] });
+    return true;
+  }
   const detail = path.match(/^\/v1\/sessions\/(e2e-blank-[^/]+)(\/.*)?$/);
   if (!detail) return false;
   const projectId = detail[1].slice("e2e-blank-".length);

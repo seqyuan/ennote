@@ -1,39 +1,60 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { ActiveRunState } from "@/lib/approval";
 import { apiFetch } from "@/lib/worker-api.client";
 
-export function useRunningSessionIds(sessionIds: string[], activeSessionId?: string | null) {
+interface ProjectActiveRuns {
+  sessionIds: string[];
+}
+
+const REFRESH_INTERVAL_MS = 15_000;
+
+/**
+ * The Sessions that currently own an active Run, for the sidebar's running
+ * marker.
+ *
+ * One poll per Project: a Session's Run state lives in that Session's database,
+ * so asking per Session turned a sidebar of N Sessions into N requests every
+ * interval. The Worker answers the whole Project in one response
+ * (GET /v1/projects/{id}/active-runs) over the same predicate the per-Session
+ * endpoint uses.
+ *
+ * The selected Session is added locally while its own run is live, so the marker
+ * does not wait for the next poll.
+ */
+export function useRunningSessionIds(projectIds: string[], activeSessionId?: string | null) {
   const [discovered, setDiscovered] = useState<Set<string>>(new Set());
-  const requestKey = [...new Set(sessionIds)].sort().join("\u0000");
-  const stableIds = useMemo(() => requestKey ? requestKey.split("\u0000") : [], [requestKey]);
+  const requestKey = [...new Set(projectIds)].sort().join("\u0000");
 
   useEffect(() => {
     if (!requestKey) return;
+    const ids = requestKey.split("\u0000");
     const controller = new AbortController();
     const refresh = async () => {
-      const results = await Promise.all(stableIds.slice(0, 50).map(async (sessionId) => {
+      const answers = await Promise.all(ids.map(async (projectId) => {
         try {
-          const state = await apiFetch<ActiveRunState | null>(`/v1/sessions/${encodeURIComponent(sessionId)}/active-run`, { signal: controller.signal });
-          return state ? sessionId : null;
+          const answer = await apiFetch<ProjectActiveRuns>(
+            `/v1/projects/${encodeURIComponent(projectId)}/active-runs`, { signal: controller.signal });
+          return answer?.sessionIds ?? [];
         } catch {
-          return null;
+          return [];
         }
       }));
-      if (!controller.signal.aborted) setDiscovered(new Set(results.filter((value): value is string => Boolean(value))));
+      if (!controller.signal.aborted) setDiscovered(new Set(answers.flat()));
     };
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 15_000);
+    const timer = window.setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
     return () => {
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [requestKey, stableIds]);
+  }, [requestKey]);
 
   return useMemo(() => {
-    const result = new Set(discovered);
+    // A poll for a previous Project set may still be in flight; its answers are
+    // ignored rather than briefly marking the wrong rows as running.
+    const result = new Set(requestKey ? discovered : []);
     if (activeSessionId) result.add(activeSessionId);
     return result;
-  }, [activeSessionId, discovered]);
+  }, [activeSessionId, discovered, requestKey]);
 }

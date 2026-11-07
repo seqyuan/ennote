@@ -1638,6 +1638,26 @@ paths:
                       data: { $ref: "#/components/schemas/Session" }
         "400":
           $ref: "#/components/responses/Error"
+  /v1/projects/{projectID}/active-runs:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: listProjectActiveRuns
+      description: |
+        Sessions of the Project that currently own an active Run (queued, running,
+        waiting for approval or children). A coarse read for clients that have not
+        opened every Session; the per-Session change feed stays authoritative.
+      responses:
+        "200":
+          description: Sessions with an active Run, sorted by Session id
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ProjectActiveRuns" }
   /v1/sessions/{sessionID}:
     parameters:
       - $ref: "#/components/parameters/SessionID"
@@ -6110,6 +6130,14 @@ components:
       properties:
         run: { $ref: "#/components/schemas/AgentRun" }
         pendingApproval: { $ref: "#/components/schemas/ToolApprovalRequest" }
+    ProjectActiveRuns:
+      type: object
+      additionalProperties: false
+      required: [sessionIds]
+      properties:
+        sessionIds:
+          type: array
+          items: { type: string }
     SessionRunSnapshot:
       type: object
       description: Authoritative transient-state projection pushed on the session change feed

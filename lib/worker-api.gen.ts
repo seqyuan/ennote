@@ -1096,6 +1096,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/projects/{projectID}/active-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * @description Sessions of the Project that currently own an active Run (queued, running,
+         *     waiting for approval or children). A coarse read for clients that have not
+         *     opened every Session; the per-Session change feed stays authoritative.
+         */
+        get: operations["listProjectActiveRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sessions/{sessionID}": {
         parameters: {
             query?: never;
@@ -4212,6 +4235,9 @@ export interface components {
             run: components["schemas"]["AgentRun"];
             pendingApproval?: components["schemas"]["ToolApprovalRequest"];
         };
+        ProjectActiveRuns: {
+            sessionIds: string[];
+        };
         /** @description Authoritative transient-state projection pushed on the session change feed */
         SessionRunSnapshot: {
             activeRun?: components["schemas"]["AgentRun"];
@@ -6561,6 +6587,30 @@ export interface operations {
                 };
             };
             400: components["responses"]["Error"];
+        };
+    };
+    listProjectActiveRuns: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sessions with an active Run, sorted by Session id */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ProjectActiveRuns"];
+                    };
+                };
+            };
         };
     };
     getSession: {
