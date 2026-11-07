@@ -188,6 +188,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * @description Validates the draft and writes one immutable revision. Validation covers
+         *     the references a Graph Run would otherwise only fail on when it freezes
+         *     (model and Role resolution, Skill resolution) plus writes scopes the
+         *     scheduler cannot parse. A Graph is a draft format: it carries no budget
+         *     and needs no project binding, so it does not run the Agent Flow validator.
+         */
         post: operations["publishGraph"];
         delete?: never;
         options?: never;
@@ -4847,7 +4854,9 @@ export interface operations {
                     };
                 };
             };
+            404: components["responses"]["Error"];
             422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
     listGraphVersions: {

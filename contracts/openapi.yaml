@@ -281,6 +281,12 @@ paths:
       - { name: graphID, in: path, required: true, schema: { type: string } }
     post:
       operationId: publishGraph
+      description: |
+        Validates the draft and writes one immutable revision. Validation covers
+        the references a Graph Run would otherwise only fail on when it freezes
+        (model and Role resolution, Skill resolution) plus writes scopes the
+        scheduler cannot parse. A Graph is a draft format: it carries no budget
+        and needs no project binding, so it does not run the Agent Flow validator.
       responses:
         "201":
           description: Immutable Graph version published
@@ -291,7 +297,9 @@ paths:
                   - $ref: "#/components/schemas/Envelope"
                   - type: object
                     properties: { data: { $ref: "#/components/schemas/AgentFlowVersion" } }
+        "404": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /v1/graphs/{graphID}/versions:
     parameters:
       - { name: graphID, in: path, required: true, schema: { type: string } }
