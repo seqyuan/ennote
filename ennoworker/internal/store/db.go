@@ -17,6 +17,13 @@ func Open(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
 
+	// `_busy_timeout` is not a parameter modernc reads — it only understands
+	// `_pragma`, `_time_format`, `_time_integer_format`, `_txlock` and `_inttotime` —
+	// so as written it does nothing and a second connection on this file gets
+	// SQLITE_BUSY immediately instead of waiting. Setting it for real means
+	// `_pragma=busy_timeout(5000)`, which changes how contention behaves and is a
+	// separate change; noted here so the DSN is not read as evidence that a busy
+	// handler is installed.
 	db, err := sql.Open("sqlite", dbPath+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_busy_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)

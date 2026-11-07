@@ -100,6 +100,9 @@ func resolveGenerationItemStatesTx(ctx context.Context, tx *sql.Tx, groupID stri
 			if !ok {
 				return nil, fmt.Errorf("item %s has no selected attempt in generation %d", state.item.ID, generation)
 			}
+			// Reading another table while this one's rows are open is safe here and
+			// only here: a transaction owns its connection, so this does not wait for
+			// the pool. Turning it into a write would be SQLITE_LOCKED, not a wait.
 			var selectedItemID, selectedResult string
 			if err := tx.QueryRowContext(ctx, `SELECT item_id,child_run_id,status,
 				COALESCE(result_digest,''),COALESCE(result_json,''),generation
