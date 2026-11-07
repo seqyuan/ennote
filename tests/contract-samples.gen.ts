@@ -68,6 +68,24 @@ export const createGlobalRole201: WorkerOperationResponse<"createGlobalRole", 20
   }
 };
 
+/** createGraph answering 201. */
+export const createGraph201: WorkerOperationResponse<"createGraph", 201> = {
+  "data": {
+    "digest": "sha256:8a41fdf05eb99737cb3f5e13b8160011d82a9fa08b0966761a892cf4fe3268b4",
+    "document": {
+      "graph": {},
+      "id": "qc",
+      "name": "QC",
+      "schemaVersion": 1,
+      "tasks": {}
+    },
+    "id": "qc",
+    "latestVersion": 0,
+    "name": "QC",
+    "path": "<temp-path>"
+  }
+};
+
 /** createProject answering 201. */
 export const createProject201: WorkerOperationResponse<"createProject", 201> = {
   "data": {
@@ -280,7 +298,15 @@ export const listGlobalRoles200: WorkerOperationResponse<"listGlobalRoles", 200>
 
 /** listGraphs answering 200. */
 export const listGraphs200: WorkerOperationResponse<"listGraphs", 200> = {
-  "data": []
+  "data": [
+    {
+      "digest": "sha256:8a41fdf05eb99737cb3f5e13b8160011d82a9fa08b0966761a892cf4fe3268b4",
+      "id": "qc",
+      "latestVersion": 0,
+      "name": "QC",
+      "path": "<temp-path>"
+    }
+  ]
 };
 
 /** listProjectActiveRuns answering 200. */

@@ -472,6 +472,12 @@ func TestContractSamples(t *testing.T) {
 		values: map[string]string{"roleID": "reviewer"}, status: http.StatusOK,
 	})
 	samples.record(contractSampleRequest{
+		method: http.MethodPost, route: "/v1/graphs", auth: true,
+		body: map[string]any{"id": "qc", "name": "QC"}, status: http.StatusCreated,
+	})
+	// Recorded after the create: an empty array would validate no element type, so
+	// the summary shape would stay unverified in the one sample that shows it.
+	samples.record(contractSampleRequest{
 		method: http.MethodGet, route: "/v1/graphs", auth: true, status: http.StatusOK,
 	})
 	createdSession := samples.record(contractSampleRequest{
