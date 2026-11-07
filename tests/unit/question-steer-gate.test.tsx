@@ -37,6 +37,7 @@ function capture(pendingApproval: ToolApprovalRequest | null) {
       refreshSession: async () => null,
       activeRun: run,
       pendingApproval,
+      queuedInputs: [],
     });
     return null;
   }

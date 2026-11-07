@@ -65,6 +65,7 @@ export function useChatController(deps: ChatControllerDeps) {
     upsertMessage: messagesData.upsertTransient, refreshLatest: messagesData.refreshLatest,
     refreshSession: refreshSelectedSession,
     activeRun: messagesData.activeRun, pendingApproval: messagesData.pendingApproval,
+    queuedInputs: messagesData.queuedInputs,
   });
   const recoveryData = useRunRecovery(selectedSession, activeBranchId, agent.activeRunID);
   const sessionStats = useSessionStats(selectedSession, agent.activeRunID);

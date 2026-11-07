@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useT } from "@/components/LocaleProvider";
 import type { AgentRun, ApprovalDecision, QuestionAnswer, ToolApprovalRequest } from "@/lib/approval";
@@ -9,8 +9,12 @@ import type { TurnMessage } from "@/lib/chat-messages";
 import { runFailureMessage, errorMessage } from "@/lib/provider-errors";
 import { registerChildProgress } from "@/hooks/useChildProgress";
 import { apiFetch, apiResponse } from "@/lib/worker-api.client";
+import type { components } from "@/lib/worker-api.gen";
 import { RUN_STATUS_RECONNECTING, decodeRunStatus, encodeRunStatus } from "@/lib/run-status-copy";
 import { toolCallIdOf, toolOutputDeltaOf } from "@/lib/tool-identity";
+import { useQueuedFollowUps } from "@/hooks/useQueuedFollowUps";
+
+type QueuedInput = components["schemas"]["QueuedInput"];
 
 interface UseAgentSessionInput {
   sessionId: string | null;
@@ -23,6 +27,10 @@ interface UseAgentSessionInput {
   // snapshot (fed by the session change feed), replacing /active-run polling.
   activeRun: AgentRun | null;
   pendingApproval: ToolApprovalRequest | null;
+  // The queued-input projection of the same snapshot. It is the durable list; the
+  // hook only adds the entries it has just created and hides the ones it has just
+  // cancelled, so a reload or a second tab shows the same queue.
+  queuedInputs: QueuedInput[];
 }
 
 function genId(): string {
@@ -31,7 +39,7 @@ function genId(): string {
 }
 
 export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMessage, refreshLatest, refreshSession,
-  activeRun, pendingApproval }: UseAgentSessionInput) {
+  activeRun, pendingApproval, queuedInputs }: UseAgentSessionInput) {
   const t = useT();
   const [resolvingApproval, setResolvingApproval] = useState<ApprovalDecision | null>(null);
   const [answeringQuestion, setAnsweringQuestion] = useState(false);
@@ -39,7 +47,6 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
   const [usage, setUsage] = useState<RunUsage | null>(null);
   const [contextUsage, setContextUsage] = useState<SessionContextUsage | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pendingFollowUps, setPendingFollowUps] = useState<{ id: string; text: string }[]>([]);
   const streamController = useRef<AbortController | null>(null);
   const decisionController = useRef<AbortController | null>(null);
   const generation = useRef(0);
@@ -52,6 +59,10 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
   const streamStates = useRef<Map<string, AgentStreamState>>(new Map());
   const streamCursors = useRef<Map<string, { value?: string }>>(new Map());
   const [streamNonce, setStreamNonce] = useState(0);
+  // The composer dock's queue: authoritative from the snapshot, optimistic for the
+  // frame the tab is ahead of it.
+  const { rows: pendingFollowUps, queue: queueFollowUp, consumeOldest: consumeFollowUp, cancel: cancelQueuedFollowUp,
+    reset: resetFollowUps } = useQueuedFollowUps(queuedInputs);
 
   useEffect(() => { currentSession.current = sessionId; }, [sessionId]);
 
@@ -80,8 +91,14 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
           requested: () => {}, // approval projection is snapshot-authoritative
           resolved: () => {},
           delegated: () => {}, // delegationActive is carried by the snapshot
-          followUpConsumed: () => { if (generation.current === version) setPendingFollowUps(current => current.slice(1)); },
-          inputCancelled: (id) => { if (generation.current === version) setPendingFollowUps(current => current.filter(item => item.id !== id)); },
+          followUpConsumed: () => {
+            if (generation.current !== version) return;
+            consumeFollowUp();
+          },
+          inputCancelled: (id) => {
+            if (generation.current !== version) return;
+            cancelQueuedFollowUp(id);
+          },
         }, streamState, cursor);
       }
     } catch (err) {
@@ -97,7 +114,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
         streamCursors.current.delete(run.id);
       }
       if (terminal && !signal.aborted && generation.current === version && currentSession.current === selected) {
-        setPendingFollowUps([]);
+        resetFollowUps();
         streamController.current = null;
         await refreshSession().catch(() => null);
         await refreshLatest();
@@ -106,7 +123,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
         }, 1600);
       }
     }
-  }, [refreshLatest, refreshSession, upsertMessage, pendingApproval]);
+  }, [refreshLatest, refreshSession, upsertMessage, pendingApproval, resetFollowUps]);
 
   // watchRun starts streaming a freshly submitted/retried run immediately, so
   // the UI gets fast feedback before the snapshot catches up (≈250ms).
@@ -128,8 +145,8 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
     setUsage(null);
     setContextUsage(null);
     setError(null);
-    setPendingFollowUps([]);
-  }, []);
+    resetFollowUps();
+  }, [resetFollowUps]);
 
   // Reset on session/branch switch (declared before the streaming effect so it
   // aborts the previous session's run stream first).
@@ -238,7 +255,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
     try {
       const item = await apiFetch<{ id: string; text: string }>(`/v1/runs/${encodeURIComponent(run.id)}/inputs`, { method: "POST",
         body: JSON.stringify({ kind: "follow_up", text, clientRequestId: genId() }) });
-      setPendingFollowUps(current => [...current, { id: item.id, text: item.text || text }]);
+      queueFollowUp({ id: item.id, text: item.text || text });
       return { queued: true, runEnded: false };
     } catch (err) {
       // The run ended between render and submit: the caller can fall back to a
@@ -255,7 +272,7 @@ export function useAgentSession({ sessionId, lineageId, appendMessage, upsertMes
     if (!run) return false;
     try {
       await apiFetch(`/v1/runs/${encodeURIComponent(run.id)}/inputs/${encodeURIComponent(id)}`, { method: "DELETE" });
-      setPendingFollowUps(current => current.filter(item => item.id !== id));
+      cancelQueuedFollowUp(id);
       return true;
     } catch (err) {
       setError(errorMessage(err, "Failed to cancel the queued message"));
