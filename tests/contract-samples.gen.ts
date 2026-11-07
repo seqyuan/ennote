@@ -11,6 +11,63 @@
 
 import type { WorkerOperationResponse } from "@/lib/contract-samples";
 
+/** createGlobalRole answering 201. */
+export const createGlobalRole201: WorkerOperationResponse<"createGlobalRole", 201> = {
+  "data": {
+    "digest": "sha256:684b6f74a10205543d577f85a4bc64d0d11b1de7d5fdaf092929b064e9ddeb34",
+    "document": {
+      "allowedTools": [],
+      "authority": "read_only",
+      "color": "blue",
+      "context": {
+        "allowedModes": [
+          "room"
+        ],
+        "defaultMode": "room",
+        "ownExecutionContinuity": "none"
+      },
+      "delegation": {
+        "admission": "deny",
+        "allowedCallerKinds": [
+          "host"
+        ],
+        "allowedStrategies": [
+          "single"
+        ],
+        "budgetCeiling": {
+          "maxCostUsdMicros": 0,
+          "maxModelCalls": 4,
+          "maxOutputTokens": 4000,
+          "maxToolCalls": 16,
+          "maxTotalTokens": 20000,
+          "maxWallTimeMs": 120000
+        },
+        "maxConcurrentInstances": 1,
+        "maxInvocationsPerParentRun": 1
+      },
+      "description": "reviews",
+      "handle": "reviewer",
+      "icon": "user",
+      "maxLoopIterations": 8,
+      "model": {
+        "fallbacks": [],
+        "ref": "anthropic/claude-sonnet-4",
+        "thinkingEffort": "default"
+      },
+      "name": "Reviewer",
+      "outputContract": "text-v1",
+      "permissionCeiling": "ask",
+      "positioning": "review",
+      "prompt": "You review a diff and report what is wrong with it.",
+      "schemaVersion": 1,
+      "skills": []
+    },
+    "id": "reviewer",
+    "name": "Reviewer",
+    "path": "<temp-path>"
+  }
+};
+
 /** createProject answering 201. */
 export const createProject201: WorkerOperationResponse<"createProject", 201> = {
   "data": {
@@ -46,6 +103,63 @@ export const createSession201: WorkerOperationResponse<"createSession", 201> = {
     "status": "active",
     "title": "contract",
     "updatedAt": "2026-01-01T00:00:02Z"
+  }
+};
+
+/** getGlobalRole answering 200. */
+export const getGlobalRole200: WorkerOperationResponse<"getGlobalRole", 200> = {
+  "data": {
+    "digest": "sha256:684b6f74a10205543d577f85a4bc64d0d11b1de7d5fdaf092929b064e9ddeb34",
+    "document": {
+      "allowedTools": [],
+      "authority": "read_only",
+      "color": "blue",
+      "context": {
+        "allowedModes": [
+          "room"
+        ],
+        "defaultMode": "room",
+        "ownExecutionContinuity": "none"
+      },
+      "delegation": {
+        "admission": "deny",
+        "allowedCallerKinds": [
+          "host"
+        ],
+        "allowedStrategies": [
+          "single"
+        ],
+        "budgetCeiling": {
+          "maxCostUsdMicros": 0,
+          "maxModelCalls": 4,
+          "maxOutputTokens": 4000,
+          "maxToolCalls": 16,
+          "maxTotalTokens": 20000,
+          "maxWallTimeMs": 120000
+        },
+        "maxConcurrentInstances": 1,
+        "maxInvocationsPerParentRun": 1
+      },
+      "description": "reviews",
+      "handle": "reviewer",
+      "icon": "user",
+      "maxLoopIterations": 8,
+      "model": {
+        "fallbacks": [],
+        "ref": "anthropic/claude-sonnet-4",
+        "thinkingEffort": "default"
+      },
+      "name": "Reviewer",
+      "outputContract": "text-v1",
+      "permissionCeiling": "ask",
+      "positioning": "review",
+      "prompt": "You review a diff and report what is wrong with it.",
+      "schemaVersion": 1,
+      "skills": []
+    },
+    "id": "reviewer",
+    "name": "Reviewer",
+    "path": "<temp-path>"
   }
 };
 
@@ -120,9 +234,62 @@ export const getRuntimeInfo401: WorkerOperationResponse<"getRuntimeInfo", 401> =
   }
 };
 
+/** getSessionActiveRun answering 200. */
+export const getSessionActiveRun200: WorkerOperationResponse<"getSessionActiveRun", 200> = {
+  "data": {
+    "run": {
+      "attempt": 1,
+      "baseMessageId": "00000000-0000-0000-0000-000000000006",
+      "commitFormatVersion": 1,
+      "contextSnapshot": {},
+      "createdAt": "2026-01-01T00:00:03Z",
+      "effectiveConfig": {},
+      "executionDepth": 0,
+      "id": "00000000-0000-0000-0000-000000000007",
+      "publishMode": "public_final",
+      "requestedConfig": {},
+      "rootRunId": "00000000-0000-0000-0000-000000000007",
+      "runKind": "agent",
+      "sessionId": "00000000-0000-0000-0000-000000000005",
+      "speakerSnapshot": {
+        "displayName": "Host",
+        "kind": "host"
+      },
+      "status": "queued",
+      "turnId": "00000000-0000-0000-0000-000000000008"
+    }
+  }
+};
+
 /** listContextCompactions answering 200. */
 export const listContextCompactions200: WorkerOperationResponse<"listContextCompactions", 200> = {
   "data": []
+};
+
+/** listGlobalRoles answering 200. */
+export const listGlobalRoles200: WorkerOperationResponse<"listGlobalRoles", 200> = {
+  "data": [
+    {
+      "digest": "sha256:684b6f74a10205543d577f85a4bc64d0d11b1de7d5fdaf092929b064e9ddeb34",
+      "id": "reviewer",
+      "name": "Reviewer",
+      "path": "<temp-path>"
+    }
+  ]
+};
+
+/** listGraphs answering 200. */
+export const listGraphs200: WorkerOperationResponse<"listGraphs", 200> = {
+  "data": []
+};
+
+/** listProjectActiveRuns answering 200. */
+export const listProjectActiveRuns200: WorkerOperationResponse<"listProjectActiveRuns", 200> = {
+  "data": {
+    "sessionIds": [
+      "00000000-0000-0000-0000-000000000005"
+    ]
+  }
 };
 
 /** listProjects answering 200. */

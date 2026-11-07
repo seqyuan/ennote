@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/stretchr/testify/require"
 )
 
@@ -389,6 +390,10 @@ func TestContractSamples(t *testing.T) {
 	// diff on every run.
 	hostPath := t.TempDir()
 
+	// The Authoring surface (Roles, Graphs) reads the file-native source store, so
+	// the fixture needs one before those routes can answer at all.
+	server.GlobalSources = &globalsource.Store{HomeDir: t.TempDir()}
+
 	samples := &contractSamples{
 		t:          t,
 		handler:    handler,
@@ -425,6 +430,49 @@ func TestContractSamples(t *testing.T) {
 	samples.record(contractSampleRequest{
 		method: http.MethodGet, route: "/v1/projects/{projectID}/sessions", auth: true,
 		values: projectRoute, status: http.StatusOK,
+	})
+
+	// Authoring surfaces: a Portable Role document and the Graph draft it can be
+	// referenced from. Both are the largest hand-shaped JSON the Worker answers
+	// outside chat, and neither had a sample.
+	roleDocument := map[string]any{
+		"schemaVersion": 1, "handle": "reviewer", "name": "Reviewer",
+		"description": "reviews", "positioning": "review", "icon": "user", "color": "blue",
+		"model": map[string]any{
+			"ref": "anthropic/claude-sonnet-4", "thinkingEffort": "default", "fallbacks": []string{},
+		},
+		"skills":            []any{},
+		"authority":         "read_only",
+		"permissionCeiling": "ask",
+		"allowedTools":      []string{},
+		"context": map[string]any{
+			"defaultMode": "room", "allowedModes": []string{"room"}, "ownExecutionContinuity": "none",
+		},
+		"delegation": map[string]any{
+			"admission": "deny", "allowedCallerKinds": []string{"host"},
+			"allowedStrategies": []string{"single"}, "maxInvocationsPerParentRun": 1,
+			"maxConcurrentInstances": 1,
+			"budgetCeiling": map[string]any{
+				"maxModelCalls": 4, "maxToolCalls": 16, "maxTotalTokens": 20000,
+				"maxOutputTokens": 4000, "maxCostUsdMicros": 0, "maxWallTimeMs": 120000,
+			},
+		},
+		"outputContract": "text-v1", "maxLoopIterations": 8,
+		"prompt": "You review a diff and report what is wrong with it.",
+	}
+	samples.record(contractSampleRequest{
+		method: http.MethodPost, route: "/v1/global-roles", auth: true,
+		body: map[string]any{"document": roleDocument}, status: http.StatusCreated,
+	})
+	samples.record(contractSampleRequest{
+		method: http.MethodGet, route: "/v1/global-roles", auth: true, status: http.StatusOK,
+	})
+	samples.record(contractSampleRequest{
+		method: http.MethodGet, route: "/v1/global-roles/{roleID}", auth: true,
+		values: map[string]string{"roleID": "reviewer"}, status: http.StatusOK,
+	})
+	samples.record(contractSampleRequest{
+		method: http.MethodGet, route: "/v1/graphs", auth: true, status: http.StatusOK,
 	})
 	createdSession := samples.record(contractSampleRequest{
 		method: http.MethodPost, route: "/v1/projects/{projectID}/sessions", auth: true,
@@ -464,6 +512,16 @@ func TestContractSamples(t *testing.T) {
 		method: http.MethodGet, route: "/v1/runs/{runID}", auth: true,
 		values: map[string]string{"runID": "00000000-0000-0000-0000-000000000000"},
 		status: http.StatusNotFound,
+	})
+	// Recorded after the turn: the submitted Run is queued, so both answers carry a
+	// real element rather than an empty array that validates nothing.
+	samples.record(contractSampleRequest{
+		method: http.MethodGet, route: "/v1/sessions/{sessionID}/active-run", auth: true,
+		values: sessionRoute, status: http.StatusOK,
+	})
+	samples.record(contractSampleRequest{
+		method: http.MethodGet, route: "/v1/projects/{projectID}/active-runs", auth: true,
+		values: projectRoute, status: http.StatusOK,
 	})
 
 	if os.Getenv(contractSampleUpdateEnv) != "1" {

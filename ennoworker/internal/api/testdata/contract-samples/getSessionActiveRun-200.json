@@ -1,0 +1,25 @@
+{
+  "data": {
+    "run": {
+      "attempt": 1,
+      "baseMessageId": "00000000-0000-0000-0000-000000000006",
+      "commitFormatVersion": 1,
+      "contextSnapshot": {},
+      "createdAt": "2026-01-01T00:00:03Z",
+      "effectiveConfig": {},
+      "executionDepth": 0,
+      "id": "00000000-0000-0000-0000-000000000007",
+      "publishMode": "public_final",
+      "requestedConfig": {},
+      "rootRunId": "00000000-0000-0000-0000-000000000007",
+      "runKind": "agent",
+      "sessionId": "00000000-0000-0000-0000-000000000005",
+      "speakerSnapshot": {
+        "displayName": "Host",
+        "kind": "host"
+      },
+      "status": "queued",
+      "turnId": "00000000-0000-0000-0000-000000000008"
+    }
+  }
+}
