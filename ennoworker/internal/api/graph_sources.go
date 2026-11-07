@@ -37,12 +37,15 @@ type globalGraphDetail struct {
 // author's 422.
 var errGraphValidationUnavailable = errors.New("graph validation is unavailable")
 
-// graphHasSkillRefs reports whether any Task declares a Skill, which is what makes
-// the Skill catalog a required dependency of the publish.
-func graphHasSkillRefs(document *graphsource.Document) bool {
+// graphNeedsSkillCatalog reports whether any Task references a global Skill, which
+// is the only case that resolves through the live catalog. A local/<id> Skill is
+// read from the Graph's own directory, so a missing catalog cannot invalidate it.
+func graphNeedsSkillCatalog(document *graphsource.Document) bool {
 	for _, task := range document.Tasks {
-		if len(task.Skills) > 0 {
-			return true
+		for _, skill := range task.Skills {
+			if strings.HasPrefix(skill, "global/") {
+				return true
+			}
 		}
 	}
 	return false
@@ -214,7 +217,7 @@ func (s *Server) validateGraphPublish(r *http.Request, document *graphsource.Doc
 	// Resolving Skills needs the live catalog; Flow publish answers 503 for the same
 	// missing dependency (flow_validation_unavailable) instead of reporting it as a
 	// node-level unknown Skill.
-	if s.SkillCatalog == nil && graphHasSkillRefs(document) {
+	if s.SkillCatalog == nil && graphNeedsSkillCatalog(document) {
 		return fmt.Errorf("%w: the Skill catalog is missing, so Skill references cannot be resolved",
 			errGraphValidationUnavailable)
 	}

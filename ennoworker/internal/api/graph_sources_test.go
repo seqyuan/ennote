@@ -187,8 +187,26 @@ func TestGlobalGraphPublishReportsMissingSkillCatalogAsUnavailable(t *testing.T)
 		}},
 	}, true)
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	decodeData(t, response, &created)
 
 	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
 	assert.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
 	assert.Contains(t, response.Body.String(), "graph_validation_unavailable")
+
+	// A local/<id> Skill is read from the Graph's own directory, so the missing
+	// catalog says nothing about it: the publish is judged on the document, not on
+	// a dependency this reference never needed.
+	response = request(t, handler, http.MethodPatch, "/v1/graphs/qc", map[string]any{
+		"expectedDigest": created.Digest,
+		"task": map[string]any{"id": "align", "value": map[string]any{
+			"name": "Align", "model": "anthropic/claude-sonnet-4", "goal": "Align reads",
+			"skills": []string{"local/missing-local-skill"},
+		}},
+	}, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+
+	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
+	assert.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "unknown skill")
+	assert.NotContains(t, response.Body.String(), "graph_validation_unavailable")
 }
