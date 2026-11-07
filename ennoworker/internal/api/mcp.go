@@ -43,8 +43,6 @@ type MCPDiscovery struct {
 	Handshake mcpclient.ServerHandshake
 }
 
-func (s *Server) mcp() *MCPServer { return s.MCP }
-
 // --- Profile library ---
 
 func (s *Server) listMCPServerProfiles(w http.ResponseWriter, r *http.Request) {

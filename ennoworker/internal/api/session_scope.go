@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -144,12 +143,4 @@ func (s *Server) withSessionDB(db *sql.DB, sessionID string) *Server {
 		clone.MCP = &mcp
 	}
 	return &clone
-}
-
-func (s *Server) sessionDBForResource(ctx context.Context, kind, id string) (*sql.DB, error) {
-	if s.SessionStores == nil {
-		return s.DB, nil
-	}
-	db, _, err := s.SessionStores.OpenByResource(ctx, kind, id)
-	return db, err
 }

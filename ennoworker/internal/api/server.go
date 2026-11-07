@@ -109,7 +109,6 @@ type Server struct {
 	Projects            *store.ProjectRepo
 	Providers           *store.ProviderRepo
 	Models              *store.ModelRepo
-	RoleDiscovery       *store.RoleDiscovery
 	Doctor              ProviderDiagnoser
 	Policies            *store.PolicyRepo
 	Artifacts           *artifacts.Service
