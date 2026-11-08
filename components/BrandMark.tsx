@@ -1,5 +1,5 @@
 /**
- * Ennote brand mark. One SVG source for the sidebar and the empty hero; do not
+ * Ennote brand mark. One SVG source for the sidebar and the welcome stage; do not
  * render a text glyph as the logo (font fallback changes its shape and weight).
  */
 export function BrandMark({ size = 24 }: { size?: number }) {

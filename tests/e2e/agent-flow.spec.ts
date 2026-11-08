@@ -118,7 +118,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     await expect(page.getByRole("tab", { name: "RNA-seq" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Add Graph" })).toBeVisible();
     // The sidebar now stays mounted next to the settings view, so scope the
-    // no-empty-hero check to the editor region (the sidebar's project
+    // no-welcome-stage check to the editor region (the sidebar's project
     // selector legitimately shows its empty state when no project is set).
     await expect(page.locator(".settings-view").getByText("Select project", { exact: false })).toHaveCount(0);
     const task = page.locator('[data-task-id="align_1"]');

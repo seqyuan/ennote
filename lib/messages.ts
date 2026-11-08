@@ -85,7 +85,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "composer.placeholderCompacting": "Context compaction in progress",
     "composer.placeholderSteer": "Steer the agent… (Enter)",
     "composer.placeholderNoSession": "Choose a workspace to start",
-    "composer.placeholderHero": "Describe what you want to build… / commands, @ files or sessions",
+    "composer.placeholderWelcome": "Describe what you want to build… / commands, @ files or sessions",
     "composer.placeholderDefault": "Type a message…",
     "composer.answerQuestionFirst": "Answer the question above before sending another message",
     "run.status.waitingAnswer": "Waiting for your answer",
@@ -302,8 +302,8 @@ export const messages: Record<Locale, Record<string, string>> = {
     "empty.session.hint": "or choose an existing session on the left",
     "empty.noModel": "No model configured — open Settings to add a provider and model.",
 
-    "hero.headline": "Into the Unknown",
-    "hero.preview": "Preview",
+    "welcome.headline": "Into the Unknown",
+    "welcome.preview": "Preview",
 
     "settings.models.title": "Models",
     "settings.models.intro": "Enter your API keys to use models from the following providers.",
@@ -590,7 +590,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "composer.placeholderCompacting": "正在压缩上下文",
     "composer.placeholderSteer": "引导 Agent…（回车）",
     "composer.placeholderNoSession": "选择一个工作区开始",
-    "composer.placeholderHero": "描述你想要构建的内容… / 调用指令 @ 文件或对话",
+    "composer.placeholderWelcome": "描述你想要构建的内容… / 调用指令 @ 文件或对话",
     "composer.placeholderDefault": "输入消息…",
     "composer.answerQuestionFirst": "请先回答上方的问题，再发送新消息",
     "run.status.waitingAnswer": "等待你的回答",
@@ -804,8 +804,8 @@ export const messages: Record<Locale, Record<string, string>> = {
     "empty.session.hint": "或从左侧选择已有会话",
     "empty.noModel": "尚未配置模型 — 打开设置添加 provider 和模型。",
 
-    "hero.headline": "探索未至之境",
-    "hero.preview": "预览版",
+    "welcome.headline": "探索未至之境",
+    "welcome.preview": "预览版",
 
     "settings.models.title": "模型",
     "settings.models.intro": "填入各提供方的 API 密钥即可使用其模型。",

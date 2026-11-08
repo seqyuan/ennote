@@ -101,9 +101,9 @@ interface ComposerProps {
   compactSession: () => void;
   /** No workspace: the dashed card opens the project picker (dsh inert). */
   inert?: boolean;
-  /** Centered empty-conversation layout (dsh hero / blank session). */
-  hero?: boolean;
-  /** No session selected: the inert composer requests a project (hero picker). */
+  /** Centered empty-conversation layout (dsh welcome stage / blank session). */
+  welcome?: boolean;
+  /** No session selected: the inert composer requests a project (welcome picker). */
   onRequestProject?: () => void;
   // Prompt templates + @addressing panel.
   promptTemplates: { name: string; description: string; argumentHint: string; source: string; editable: boolean }[];
@@ -129,7 +129,7 @@ export function Composer({
   pendingFollowUps,
   promptTemplates, showPromptPanel, onPromptSelect, onPromptPanelClose, expanding, expandDiag,
   panelRoles, panelFlows, onRoleSelect, onFlowSelect, contextUsage, stats, focusNonce,
-  onRequestProject, inert = false, hero = false,
+  onRequestProject, inert = false, welcome = false,
 }: ComposerProps) {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const form = useRef<HTMLFormElement>(null);
@@ -392,7 +392,7 @@ export function Composer({
             rows={1}
             readOnly={inert}
             disabled={compacting}
-            placeholder={compacting ? t("composer.placeholderCompacting") : questionPending ? t("composer.answerQuestionFirst") : activeRun ? t("composer.placeholderSteer") : inert ? t("composer.placeholderNoSession") : hero ? t("composer.placeholderHero") : t("composer.placeholderDefault")}
+            placeholder={compacting ? t("composer.placeholderCompacting") : questionPending ? t("composer.answerQuestionFirst") : activeRun ? t("composer.placeholderSteer") : inert ? t("composer.placeholderNoSession") : welcome ? t("composer.placeholderWelcome") : t("composer.placeholderDefault")}
             aria-label={activeRun ? t("composer.steerAria") : t("composer.messageAria")}
           />
           <input

@@ -5,14 +5,14 @@ import { useT } from "@/components/LocaleProvider";
 import { BrandMark } from "@/components/BrandMark";
 
 /**
- * Soft blue ellipse behind the centered composer (dsh HeroGlow / figma
- * 313:14109). Positioned by `.composer-hero-glow` on the hero stack so it
+ * Soft blue ellipse behind the centered composer (dsh WelcomeGlow / figma
+ * 313:14109). Positioned by `.composer-welcome-glow` on the welcome stack so it
  * sits on the input card, not the headline.
  */
-export function HeroGlow() {
+export function WelcomeGlow() {
   const glowFilterId = `empty-glow-${useId().replace(/:/g, "")}`;
   return (
-    <svg className="composer-hero-glow" viewBox="0 0 1051 468" fill="none" aria-hidden="true">
+    <svg className="composer-welcome-glow" viewBox="0 0 1051 468" fill="none" aria-hidden="true">
       <defs>
         <filter
           id={glowFilterId}
@@ -36,11 +36,11 @@ export function HeroGlow() {
 }
 
 /**
- * Hero chrome above the centered composer (dsh HeroShell): brand mark +
+ * Welcome chrome above the centered composer (dsh WelcomeStage): brand mark +
  * headline + preview badge. The workspace chip and input card sit below
  * this row, not in the transcript.
  */
-export function EmptyHero(props: {
+export function WelcomeStage(props: {
   hasModel: boolean;
   onOpenSettings: () => void;
 }) {
@@ -48,13 +48,13 @@ export function EmptyHero(props: {
   const t = useT();
 
   return (
-    <div className="empty-hero" data-testid="empty-hero">
-      <div className="empty-hero-headline">
-        <span className="empty-hero-mark" aria-hidden="true"><BrandMark size={28} /></span>
-        <h1 className="empty-hero-title">{t("hero.headline")}</h1>
-        <span className="empty-hero-preview">{t("hero.preview")}</span>
+    <div className="welcome-stage" data-testid="welcome-stage">
+      <div className="welcome-stage-headline">
+        <span className="welcome-stage-mark" aria-hidden="true"><BrandMark size={28} /></span>
+        <h1 className="welcome-stage-title">{t("welcome.headline")}</h1>
+        <span className="welcome-stage-preview">{t("welcome.preview")}</span>
         {!hasModel && (
-          <button type="button" className="empty-hero-settings" onClick={() => onOpenSettings()}>
+          <button type="button" className="welcome-stage-settings" onClick={() => onOpenSettings()}>
             {t("empty.noModel")}
           </button>
         )}

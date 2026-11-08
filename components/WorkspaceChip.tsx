@@ -6,14 +6,14 @@ import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { ProjectMenu, type SidebarProject } from "./ProjectMenu";
 
 /**
- * Workspace switch chip for the chat hero, mirroring the DeepSeek Harness
- * conversation hero: the chip rides directly above the composer card, at its
+ * Workspace switch chip for the welcome stage, mirroring the DeepSeek Harness
+ * welcome stage: the chip rides directly above the composer card, at its
  * top-left — never the floating top-left corner of the chat area. It carries
  * the only project affordance of the empty state: picking opens the shared
  * project menu with the add entry pinned at the bottom; with no projects at
  * all the chip opens the create flow directly.
  */
-export function HeroProjectChip(props: {
+export function WorkspaceChip(props: {
   projects: SidebarProject[];
   selectedProject: string | null;
   pinnedProjectIds: string[];
@@ -31,10 +31,10 @@ export function HeroProjectChip(props: {
   const selectedName = selectedProject ? projects.find((p) => p.id === selectedProject)?.name ?? null : null;
 
   return (
-    <div ref={rootRef} className="hero-project-chip-wrap">
+    <div ref={rootRef} className="workspace-chip-wrap">
       <button
         type="button"
-        className="hero-project-chip"
+        className="workspace-chip"
         onClick={onRequestProject}
         title={selectedName ?? t("empty.project.choose")}
         aria-label={selectedName ? `${selectedName} · ${t("sidebar.selectProject")}` : t("sidebar.selectProjectEllipsis")}
@@ -50,10 +50,10 @@ export function HeroProjectChip(props: {
             <path d="M1.5 5A1.5 1.5 0 0 1 3 3.5h3l1.2 1.5H13A1.5 1.5 0 0 1 14.5 6.5L13.6 11A1.5 1.5 0 0 1 12.1 12.5H3A1.5 1.5 0 0 1 1.5 11V5Z" />
           </svg>
         )}
-        <span className="hero-chip-label">
+        <span className="workspace-chip-label">
           {selectedName ?? t("empty.project.choose")}
         </span>
-        <svg className="hero-chip-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <svg className="workspace-chip-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M3 4.5L6 7.5L9 4.5" />
         </svg>
       </button>
@@ -68,7 +68,7 @@ export function HeroProjectChip(props: {
             close();
             onSwitchProject(projectId);
           }}
-          className="hero-project-menu"
+          className="workspace-chip-menu"
         />
       )}
     </div>

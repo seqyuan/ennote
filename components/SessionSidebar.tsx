@@ -49,7 +49,7 @@ interface SessionSidebarProps {
   runningSessionIds?: Set<string>;
   /** Toggle the sidebar column (desktop collapse/expand). */
   onToggleSidebar: () => void;
-  /** Project selector control (owned by AppShell so the empty hero can open it). */
+  /** Project selector control (owned by AppShell so the welcome stage can open it). */
   projectSelector: ReturnType<typeof useProjectSelector>;
   /** Main-area view; Roles/Graphs items switch it without leaving the shell. */
   view: WorkspaceView;

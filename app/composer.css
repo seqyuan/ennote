@@ -27,7 +27,7 @@
   box-sizing: border-box;
   background: transparent;
 }
-.chat-area[data-phase="hero"] .composer-shell {
+.chat-area[data-phase="welcome"] .composer-shell {
   padding: 0 16px;
 }
 .composer {
@@ -46,7 +46,7 @@
   box-sizing: border-box;
   position: relative;
   /* Local stacking inside the composer seat; raises the focused card above its
-     own hero glow. Global surfaces use --layer-* tokens. */
+     own welcome glow. Global surfaces use --layer-* tokens. */
   z-index: 20;
   display: flex;
   flex-direction: column;
@@ -250,7 +250,7 @@ html.dark .composer-editor.composer-no-session::after {
   line-height: inherit;
   caret-color: var(--cmp-brand);
 }
-.chat-area[data-phase="hero"] .composer textarea {
+.chat-area[data-phase="welcome"] .composer textarea {
   min-height: 52px;
 }
 .composer textarea::placeholder { color: var(--cmp-text-tertiary); }
@@ -889,7 +889,7 @@ html.dark .composer-editor.composer-no-session::after {
   color: var(--danger);
 }
 
-/* ---- Hero stack: headline + workspace chip + card, centered (dsh composerHero) ---- */
+/* ---- Welcome stack: headline + workspace chip + card, centered (dsh composerWelcome) ---- */
 .composer-seat {
   display: flex;
   flex: none;
@@ -908,7 +908,7 @@ html.dark .composer-editor.composer-no-session::after {
   flex-direction: column;
   gap: 6px;
 }
-.composer-stack.composer-hero {
+.composer-stack.composer-welcome {
   position: relative;
   align-self: center;
   gap: 8px;
@@ -916,12 +916,12 @@ html.dark .composer-editor.composer-no-session::after {
   width: min(984px, 100%);
   z-index: 1;
 }
-.chat-area[data-phase="hero"] .composer-seat {
+.chat-area[data-phase="welcome"] .composer-seat {
   flex: 1;
   min-height: 0;
   justify-content: center;
 }
-.composer-hero-glow {
+.composer-welcome-glow {
   position: absolute;
   left: 50%;
   bottom: 92px;
@@ -932,7 +932,7 @@ html.dark .composer-editor.composer-no-session::after {
   pointer-events: none;
 }
 
-.empty-hero {
+.welcome-stage {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -941,7 +941,7 @@ html.dark .composer-editor.composer-no-session::after {
   padding: 0 16px;
   box-sizing: border-box;
 }
-.empty-hero-headline {
+.welcome-stage-headline {
   display: grid;
   grid-template-columns: 34px auto auto;
   column-gap: 10px;
@@ -952,7 +952,7 @@ html.dark .composer-editor.composer-no-session::after {
   font-weight: 500;
   color: var(--cmp-text-primary);
 }
-.empty-hero-mark {
+.welcome-stage-mark {
   grid-row: 1;
   grid-column: 1;
   display: inline-flex;
@@ -963,17 +963,17 @@ html.dark .composer-editor.composer-no-session::after {
   color: var(--accent);
   transform-origin: 50% 60%;
 }
-@keyframes hero-fish-swim {
+@keyframes welcome-fish-swim {
   0%, 100% { transform: translate(0, 0) rotate(0deg); }
   35% { transform: translate(-1px, -1px) rotate(-5deg); }
   70% { transform: translate(1px, 0) rotate(3deg); }
 }
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {
-  .empty-hero-mark:hover {
-    animation: hero-fish-swim 700ms ease-in-out;
+  .welcome-stage-mark:hover {
+    animation: welcome-fish-swim 700ms ease-in-out;
   }
 }
-.empty-hero-title {
+.welcome-stage-title {
   grid-row: 1;
   grid-column: 2;
   margin: 0;
@@ -981,7 +981,7 @@ html.dark .composer-editor.composer-no-session::after {
   line-height: 32px;
   font-weight: 500;
 }
-.empty-hero-preview {
+.welcome-stage-preview {
   grid-row: 1;
   grid-column: 3;
   align-self: start;
@@ -998,7 +998,7 @@ html.dark .composer-editor.composer-no-session::after {
   font-weight: 500;
   white-space: nowrap;
 }
-.empty-hero-settings {
+.welcome-stage-settings {
   grid-column: 1 / -1;
   justify-self: center;
   margin-top: 8px;
@@ -1011,7 +1011,7 @@ html.dark .composer-editor.composer-no-session::after {
   cursor: pointer;
 }
 
-.hero-workspace-row {
+.welcome-workspace-row {
   display: flex;
   flex-shrink: 0;
   align-items: center;
@@ -1019,15 +1019,15 @@ html.dark .composer-editor.composer-no-session::after {
   margin: 4px 0 0;
   padding: 0 0 0 20px;
   box-sizing: border-box;
-  /* Local: hero chip sits inside the composer stage. */
+  /* Local: welcome chip sits inside the composer stage. */
   z-index: 10;
 }
-.hero-project-chip-wrap {
+.workspace-chip-wrap {
   position: relative;
   /* Local: same composer stage as the chip. */
   z-index: 10;
 }
-.hero-project-chip {
+.workspace-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -1043,19 +1043,19 @@ html.dark .composer-editor.composer-no-session::after {
   font-weight: 500;
   cursor: pointer;
 }
-.hero-project-chip:hover,
-.hero-project-chip[aria-expanded="true"] {
+.workspace-chip:hover,
+.workspace-chip[aria-expanded="true"] {
   background: var(--cmp-hover);
 }
-.hero-project-chip svg {
+.workspace-chip svg {
   flex: none;
 }
-.hero-project-chip .hero-chip-label {
+.workspace-chip .workspace-chip-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.hero-project-chip .hero-chip-chevron {
+.workspace-chip .workspace-chip-chevron {
   flex: none;
   color: var(--cmp-text-tertiary);
 }

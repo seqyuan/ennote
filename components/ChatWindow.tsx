@@ -5,8 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatRail } from "@/components/ChatRail";
 import { SelectionActions } from "@/components/SelectionActions";
 import { Composer } from "@/components/Composer";
-import { EmptyHero, HeroGlow } from "@/components/EmptyHero";
-import { HeroProjectChip } from "@/components/HeroProjectChip";
+import { WelcomeStage, WelcomeGlow } from "@/components/WelcomeStage";
+import { WorkspaceChip } from "@/components/WorkspaceChip";
 import { BackgroundDelegationStrip } from "@/components/BackgroundDelegationStrip";
 import { CompactionPromptBar } from "@/components/CompactionPromptBar";
 import { ConversationTimeline } from "@/components/ConversationTimeline";
@@ -55,9 +55,9 @@ export function ChatWindow({
   const [atBottom, setAtBottom] = useState(true);
   const [hasNew, setHasNew] = useState(false);
   const [focusNonce, setFocusNonce] = useState(0);
-  // Hero project chip + composer share one dropdown control; both live in the
+  // Welcome chip + composer share one dropdown control; both live in the
   // middle channel so the sidebar keeps its own independent selector.
-  const heroProject = useProjectSelector();
+  const welcomeProject = useProjectSelector();
   const waiting = run.activeRunStatus === "waiting_for_approval" ||
     run.activeRunStatus === "waiting_delegation_admission" || Boolean(run.pendingApproval);
   const waitingForQuestion = run.pendingApproval?.kind === "question";
@@ -65,15 +65,15 @@ export function ChatWindow({
 
   // Requesting a project from the empty state: with no projects yet the chip
   // and the inert composer go straight to the create dialog (dsh add-only);
-  // otherwise they toggle the shared menu anchored under the hero chip.
+  // otherwise they toggle the shared menu anchored under the welcome chip.
   const requestProject = useCallback(() => {
     if (projects.length === 0) {
       onNewProject();
       return;
     }
-    if (heroProject.open) heroProject.close();
-    else heroProject.openDropdown();
-  }, [heroProject, onNewProject, projects.length]);
+    if (welcomeProject.open) welcomeProject.close();
+    else welcomeProject.openDropdown();
+  }, [welcomeProject, onNewProject, projects.length]);
 
   useEffect(() => {
     const container = messagesRef.current;
@@ -115,9 +115,9 @@ export function ChatWindow({
     && history.messages.length === 0
     && !run.activeRun
     && !run.pendingApproval;
-  const isHero = !history.sessionId || isBlank;
+  const isWelcome = !history.sessionId || isBlank;
   const inert = !selectedProject;
-  const textSelection = useTextSelection(messagesRef, { enabled: !isHero });
+  const textSelection = useTextSelection(messagesRef, { enabled: !isWelcome });
   const { clear: clearSelection } = textSelection;
 
   const quoteSelection = useCallback((text: string) => {
@@ -149,7 +149,7 @@ export function ChatWindow({
     container.addEventListener("scroll", onScroll, { passive: true });
     onScroll();
     return () => container.removeEventListener("scroll", onScroll);
-  }, [history.sessionId, isHero]);
+  }, [history.sessionId, isWelcome]);
 
   useEffect(() => {
     const count = history.messages.length;
@@ -166,7 +166,7 @@ export function ChatWindow({
     setHasNew(false);
   }, []);
 
-  return <main className="chat-area" data-phase={isHero ? "hero" : "active"}>
+  return <main className="chat-area" data-phase={isWelcome ? "welcome" : "active"}>
     {error && <div className="error-bar" role="alert"><span>{error}</span>
       <button onClick={clearError} aria-label={t("conversation.chat.dismissError")}><X size={15} aria-hidden="true" /></button></div>}
     {run.recovery && <div className={`recovery-bar ${run.recovery.retryable ? "is-retryable" : "is-blocked"}`} data-testid="run-recovery">
@@ -178,7 +178,7 @@ export function ChatWindow({
         {run.retrying ? t("conversation.chat.retrying") : t("conversation.chat.retry")}
       </button>}
     </div>}
-    {!isHero && <div className="chat-scroll-region">
+    {!isWelcome && <div className="chat-scroll-region">
     <div className="messages" ref={messagesRef} data-testid="chat-messages">
       <div className="conversation-viewport">
         {history.hasMore && <div className="history-control">
@@ -220,7 +220,7 @@ export function ChatWindow({
       </button>
     )}
     </div>}
-    {!isHero && textSelection.selection && (
+    {!isWelcome && textSelection.selection && (
       <SelectionActions
         selection={textSelection.selection}
         onQuote={quoteSelection}
@@ -228,8 +228,8 @@ export function ChatWindow({
         onDismiss={clearSelection}
       />
     )}
-    {!isHero && <BackgroundDelegationStrip sessionId={history.sessionId ?? undefined} />}
-    {!isHero && composer.compaction.open && (
+    {!isWelcome && <BackgroundDelegationStrip sessionId={history.sessionId ?? undefined} />}
+    {!isWelcome && composer.compaction.open && (
       <CompactionPromptBar
         value={composer.compaction.instructions}
         onChange={composer.compaction.setInstructions}
@@ -239,31 +239,31 @@ export function ChatWindow({
       />
     )}
     <div className="composer-seat">
-      <div className={isHero ? "composer-stack composer-hero" : "composer-stack"}>
-        {isHero && <HeroGlow />}
-        {isHero && (
-          <EmptyHero
+      <div className={isWelcome ? "composer-stack composer-welcome" : "composer-stack"}>
+        {isWelcome && <WelcomeGlow />}
+        {isWelcome && (
+          <WelcomeStage
             hasModel={hasModel}
             onOpenSettings={onOpenSettings}
           />
         )}
-        {isHero && (
-          <div className="hero-workspace-row">
-            <HeroProjectChip
+        {isWelcome && (
+          <div className="welcome-workspace-row">
+            <WorkspaceChip
               projects={projects}
               selectedProject={selectedProject}
               pinnedProjectIds={pinnedProjectIds}
               togglePinProject={togglePinProject}
               onRequestProject={requestProject}
               onSwitchProject={onSwitchProject}
-              projectSelector={heroProject}
+              projectSelector={welcomeProject}
             />
           </div>
         )}
         <Composer selectedSession={history.sessionId} activeLeafMessageId={history.activeLeafMessageId} input={composer.input} setInput={composer.setInput}
           focusNonce={focusNonce}
           activeRun={Boolean(run.activeRun)} questionPending={Boolean(waitingForQuestion)} compacting={run.compacting} hasPendingImage={Boolean(composer.pendingImage)} reconnecting={reconnecting}
-          inert={inert} hero={isHero}
+          inert={inert} welcome={isWelcome}
           onRequestProject={requestProject}
           permissionMode={composer.displayedPermissionMode} permissionReady={composer.permissionReady} setPermissionMode={composer.setPermissionMode}
           models={composer.models} providers={composer.providers} selectedModelId={composer.selectedModelId} setSelectedModelId={composer.setSelectedModelId}

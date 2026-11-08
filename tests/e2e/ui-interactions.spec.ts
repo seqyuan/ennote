@@ -210,5 +210,5 @@ test("adding a project tolerates a null session list from the worker", async ({ 
   await expect(page.locator(".sidebar-project-selector > button")).toContainText("seqyuan");
   await expect(page.getByText("No sessions yet.")).toBeVisible();
   await expect(page.getByText("This page couldn\u2019t load")).not.toBeVisible();
-  await expect(page.locator(".empty-hero")).toBeVisible();
+  await expect(page.locator(".welcome-stage")).toBeVisible();
 });
