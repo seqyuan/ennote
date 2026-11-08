@@ -13,7 +13,7 @@ function hostStep(modelName?: string, displayName?: string): AssistantStep {
 }
 
 function heroStep(partial: Partial<NonNullable<AssistantStep["speaker"]>>): AssistantStep {
-  return { kind: "assistant", id: "a-role", blocks: [{ kind: "text", text: "reply" }], speaker: { kind: "role", ...partial } };
+  return { kind: "assistant", id: "a-role", blocks: [{ kind: "text", text: "reply" }], speaker: { kind: "hero", ...partial } };
 }
 
 describe("AssistantMessage speaker attribution rendering", () => {

@@ -4312,6 +4312,8 @@ export interface components {
             userMessageId: string;
             run: components["schemas"]["AgentRun"];
             existing: boolean;
+            /** @description The Skills this turn carries, so a replay of the same idempotency key with a different selection is visible to the caller instead of silently answered with the first choice. */
+            skills?: string[];
         };
         CompactionSubmission: {
             runId: string;

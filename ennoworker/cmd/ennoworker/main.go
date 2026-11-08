@@ -1689,15 +1689,17 @@ func (e *agentExecutor) heroPreloadSegments(hero *domain.FrozenHeroExecution) ([
 			continue
 		}
 		if !ok {
-			return nil, fmt.Errorf("hero preload skill %q for hero %s@%d is unavailable: the Role revision pinned "+
-				"its content (%s) but the current Skill catalog no longer contains it. Restore the Skill or publish "+
-				"a new Role revision", id, hero.Handle, hero.Version, digest)
+			return nil, domain.NewCodedError(domain.ErrorSkillNotFound,
+				fmt.Errorf("hero preload skill %q for hero %s@%d is unavailable: the Hero revision pinned "+
+					"its content (%s) but the current Skill catalog no longer contains it. Restore the Skill or publish "+
+					"a new Hero revision", id, hero.Handle, hero.Version, digest))
 		}
 		if digest != skill.ContentHash {
-			return nil, fmt.Errorf("hero preload skill %q for hero %s@%d does not match its frozen content digest "+
-				"(frozen %s, on-disk %s): the Skill changed after this Role revision was published, so the Run "+
-				"refuses to execute unpinned content. Restore the frozen Skill content or publish a new Role revision",
-				id, hero.Handle, hero.Version, digest, skill.ContentHash)
+			return nil, domain.NewCodedError(domain.ErrorSkillNotFound,
+				fmt.Errorf("hero preload skill %q for hero %s@%d does not match its frozen content digest "+
+					"(frozen %s, on-disk %s): the Skill changed after this Hero revision was published, so the Run "+
+					"refuses to execute unpinned content. Restore the frozen Skill content or publish a new Hero revision",
+					id, hero.Handle, hero.Version, digest, skill.ContentHash))
 		}
 		segments = append(segments, systemprompt.SkillSegment(id, skill.PromptText, source))
 	}
@@ -1748,16 +1750,18 @@ func (e *agentExecutor) taskPreloadSegments(hero *domain.FrozenHeroExecution, fr
 		id := strings.TrimSpace(ref.ID)
 		skill, ok := loaded[id]
 		if !ok {
-			return nil, fmt.Errorf("task skill %q for %s is unavailable", id, source)
+			return nil, domain.NewCodedError(domain.ErrorSkillNotFound,
+				fmt.Errorf("task skill %q for %s is unavailable", id, source))
 		}
 		// Verify the pinned content before any de-duplication: even when the
 		// Role already preloads this Skill, the task froze a specific body and
 		// a changed catalog must not slip through another path.
 		if ref.Digest != "" && ref.Digest != skill.ContentHash {
-			return nil, fmt.Errorf("task skill %q for %s does not match its frozen content digest "+
-				"(frozen %s, on-disk %s): the Skill changed after this flow task was frozen, so the Run "+
-				"refuses to execute unpinned content. Restore the frozen Skill content or publish a new flow revision",
-				id, source, ref.Digest, skill.ContentHash)
+			return nil, domain.NewCodedError(domain.ErrorSkillNotFound,
+				fmt.Errorf("task skill %q for %s does not match its frozen content digest "+
+					"(frozen %s, on-disk %s): the Skill changed after this flow task was frozen, so the Run "+
+					"refuses to execute unpinned content. Restore the frozen Skill content or publish a new flow revision",
+					id, source, ref.Digest, skill.ContentHash))
 		}
 		if _, duplicate := seen[id]; duplicate {
 			continue

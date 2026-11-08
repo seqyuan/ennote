@@ -26,7 +26,7 @@ export function shortDigest(digest: string, length = 12): string {
  * Section kinds in composition order as a stable list, so a reader can scan a
  * Run's composition without re-deriving precedence from the data.
  */
-export const PROMPT_SECTION_KINDS = ["base", "role", "context", "skills_catalog", "skill_preload"] as const;
+export const PROMPT_SECTION_KINDS = ["base", "hero", "context", "skills_catalog", "skill_preload"] as const;
 
 /** Human byte size for a section or prompt: exact for small, coarse above a KiB. */
 export function formatBytes(bytes: number): string {

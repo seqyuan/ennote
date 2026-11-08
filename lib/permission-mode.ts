@@ -47,7 +47,7 @@ export function frozenPermissionMode(
   profiles: PermissionPolicyProfile[],
 ): PermissionMode | undefined {
   const effective = asRecord(run?.effectiveConfig);
-  const ceiling = asRecord(effective?.role)?.permissionCeiling;
+  const ceiling = asRecord(effective?.hero)?.permissionCeiling;
   if (isPermissionMode(ceiling)) return ceiling;
   const frozenToolPolicyID = asRecord(effective?.toolPolicy)?.id;
   const requestedToolPolicyID = asRecord(run?.requestedConfig)?.toolPolicyProfileId;

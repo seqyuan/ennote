@@ -385,6 +385,9 @@ func (r *RunRepo) submitTurn(ctx context.Context, input domain.SubmitTurnInput, 
 			SpeakerSnapshot: speakerSnapshot, ContextSnapshot: json.RawMessage(`{}`),
 			RequestedConfig: requestedConfig, EffectiveConfig: json.RawMessage(`{}`), CreatedAt: timestamp,
 		},
+		// Echo the selection on the fresh answer too: a client that compares a
+		// replay against its original request needs the same field on both.
+		Skills: input.Skills.IDs(),
 	}, nil
 }
 

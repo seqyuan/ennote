@@ -50,7 +50,7 @@ func (s *Server) resolveSessionSkills(_ context.Context, ids []string) (domain.F
 			continue
 		}
 		if len(refs) == maxSelectedSkills {
-			return nil, domain.NewCodedError(domain.ErrorSkillNotFound,
+			return nil, domain.NewCodedError(domain.ErrorTooManySkills,
 				fmt.Errorf("a turn may select at most %d skills", maxSelectedSkills))
 		}
 		seen[id] = true

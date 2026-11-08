@@ -6240,6 +6240,12 @@ components:
         userMessageId: { type: string }
         run: { $ref: "#/components/schemas/AgentRun" }
         existing: { type: boolean }
+        skills:
+          type: array
+          description: >-
+            The Skills this turn carries, so a replay of the same idempotency key with a different
+            selection is visible to the caller instead of silently answered with the first choice.
+          items: { type: string }
     CompactionSubmission:
       type: object
       required: [runId, compactionId, status, existing]

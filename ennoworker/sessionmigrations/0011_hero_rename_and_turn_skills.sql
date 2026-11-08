@@ -12,6 +12,11 @@
 --
 -- Message rows keep their own `role` column (system / user / assistant / tool):
 -- that is the chat wire vocabulary, not the executor.
+--
+-- This file is not idempotent on its own: a database that already carries the
+-- hero columns fails at the first RENAME. That is safe because each migration
+-- runs in its own transaction and is recorded once, so it is never replayed --
+-- do not copy the pattern into a script that runs outside sqlmigrations.Apply.
 ALTER TABLE room_member_instances RENAME COLUMN role_id TO hero_id;
 ALTER TABLE room_member_instances RENAME COLUMN role_version_id TO hero_version_id;
 ALTER TABLE delegation_items RENAME COLUMN role_version_id TO hero_version_id;
@@ -37,6 +42,14 @@ BEGIN
 END;
 
 DROP TRIGGER IF EXISTS messages_attribution_validate_update;
+
+-- The schema moves before the data does: rows written before this migration
+-- carry the old attribution value, and the contract no longer accepts it. The
+-- UPDATE trigger is dropped above for exactly this statement; recreating it below
+-- is what keeps the window closed.
+UPDATE messages SET speaker_kind = 'hero' WHERE speaker_kind = 'role';
+UPDATE messages SET addressee_kind = 'hero' WHERE addressee_kind = 'role';
+
 CREATE TRIGGER messages_attribution_validate_update
 BEFORE UPDATE OF speaker_kind, visibility, addressee_kind ON messages
 WHEN NEW.speaker_kind NOT IN ('user', 'host', 'hero', 'workflow', 'room', 'system')

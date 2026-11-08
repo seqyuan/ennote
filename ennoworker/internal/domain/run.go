@@ -294,7 +294,9 @@ const (
 	ErrorInvocationTargetInvalid        ErrorCode = "invocation_target_invalid"
 	// ErrorSkillNotFound refuses a turn that names a Skill the catalog cannot
 	// resolve: the frozen prompt must never claim provenance it cannot prove.
-	ErrorSkillNotFound                   ErrorCode = "skill_not_found"
+	ErrorSkillNotFound ErrorCode = "skill_not_found"
+	// ErrorTooManySkills refuses a selection larger than one prompt should carry.
+	ErrorTooManySkills                   ErrorCode = "too_many_skills"
 	ErrorIncompleteTerminalContract      ErrorCode = "incomplete_terminal_contract"
 	ErrorDelegationBudgetExceeded        ErrorCode = "delegation_budget_exceeded"
 	ErrorDelegationNotAuthorized         ErrorCode = "delegation_not_authorized"

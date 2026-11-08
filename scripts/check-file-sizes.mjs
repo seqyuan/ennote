@@ -58,7 +58,7 @@ export const RECORDED_CEILINGS = {
   "ennoworker/internal/skills/snapshot.go": 800,
   "ennoworker/internal/skillsmgmt/exec.go": 560,
   "ennoworker/internal/skillsmgmt/service.go": 560,
-  "ennoworker/internal/api/server.go": 1725, // turn `skills` decode + replay fast path + error mapping
+  "ennoworker/internal/api/server.go": 1735, // turn `skills` decode + replay fast path + target-kind guard
   "ennoworker/internal/agentflow/orchestrator.go": 1570,
   "ennoworker/internal/packinstall/plan.go": 1300,
   "ennoworker/internal/agent/loop.go": 1320,

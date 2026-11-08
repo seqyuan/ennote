@@ -21,7 +21,7 @@ interface AssistantMessageProps {
 }
 
 export const AssistantMessage = memo(function AssistantMessage({ step, activeLeafMessageId, branchDisabled, createBranch, metrics, isFirst = true, isFinal = true }: AssistantMessageProps) {
-  const heroSpeaker = step.speaker?.kind === "role";
+  const heroSpeaker = step.speaker?.kind === "hero";
   const label = step.speaker?.handle ? `@${step.speaker.handle}` : (step.speaker?.displayName || "Host");
   const modelName = step.speaker?.modelName;
   const copyText = step.blocks.filter(block => block.kind === "text").map(block => block.text).join("\n\n");

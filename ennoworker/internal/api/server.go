@@ -1329,6 +1329,14 @@ func (s *Server) submitInvocation(w http.ResponseWriter, r *http.Request) {
 	for _, skill := range input.Skills {
 		skillIDs = append(skillIDs, skill.ID)
 	}
+	// A target kind the Worker does not serve is a broken request whether or not
+	// an earlier turn exists, so it is refused before the replay lookup.
+	switch input.Target.Kind {
+	case domain.InvocationTargetHost, domain.InvocationTargetHero:
+	default:
+		writeError(w, r, http.StatusBadRequest, string(domain.ErrorInvocationTargetInvalid), "unsupported invocation target", false)
+		return
+	}
 	// A replay must answer with the turn it already created, even when the
 	// catalog has moved on since: validation is for new work, not for retries.
 	if existing, err := s.Runs.FindSubmission(r.Context(), r.PathValue("sessionID"), requestID); err != nil {
@@ -1587,6 +1595,8 @@ func (s *Server) writeStoreError(w http.ResponseWriter, r *http.Request, err err
 		writeError(w, r, http.StatusBadRequest, string(domain.ErrorInvocationTargetInvalid), err.Error(), false)
 	case domain.ErrorCodeOf(err) == domain.ErrorSkillNotFound:
 		writeError(w, r, http.StatusBadRequest, string(domain.ErrorSkillNotFound), err.Error(), false)
+	case domain.ErrorCodeOf(err) == domain.ErrorTooManySkills:
+		writeError(w, r, http.StatusBadRequest, string(domain.ErrorTooManySkills), err.Error(), false)
 	case domain.ErrorCodeOf(err) == domain.ErrorCommitFormatNotEnabled:
 		writeError(w, r, http.StatusConflict, string(domain.ErrorCommitFormatNotEnabled), err.Error(), false)
 	case errors.Is(err, store.ErrRunNotActive), errors.Is(err, store.ErrRunAwaitingQuestion), errors.Is(err, store.ErrInvalidRunState):
