@@ -3915,6 +3915,10 @@ export interface components {
             };
             skillId: string;
             relPath: string;
+            /** @description Whether some Hero loads this Skill already */
+            heroBound: boolean;
+            /** @description Hero handles that load this Skill */
+            boundBy: string[];
             install?: components["schemas"]["SkillInstallInfo"];
         };
         SkillCreateResult: {

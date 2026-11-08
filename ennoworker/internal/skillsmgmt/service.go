@@ -46,6 +46,12 @@ type AnnotatedSkill struct {
 	SkillID                string       `json:"skillId"`
 	RelPath                string       `json:"relPath"`
 	Install                *InstallInfo `json:"install,omitempty"`
+	// HeroBound reports whether some Hero loads this Skill already, and BoundBy
+	// names those Heroes. The composer's picker offers global Skills only, so a
+	// bound Skill has to be explainable as "it arrived with a Hero" rather than
+	// look missing.
+	HeroBound bool     `json:"heroBound"`
+	BoundBy   []string `json:"boundBy"`
 }
 
 // Diagnostic mirrors the catalog diagnostic shape.

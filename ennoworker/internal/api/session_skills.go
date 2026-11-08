@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
@@ -47,4 +48,42 @@ func (s *Server) validateSessionSkills(ctx context.Context, ids []string) error 
 		}
 	}
 	return nil
+}
+
+// skillHeroBindings indexes which Heroes load each Skill, so the skill list can
+// say "this one already arrives with a Hero" instead of leaving a user hunting
+// for a Skill the picker deliberately does not offer.
+//
+// It is built from the Hero sources once per request: an N+1 over Hero
+// documents on a list endpoint is not affordable, and the picker needs the
+// answer for every row.
+func (s *Server) skillHeroBindings() map[string][]string {
+	bindings := map[string][]string{}
+	if s.GlobalSources == nil {
+		return bindings
+	}
+	entries, err := s.GlobalSources.ListHeroes()
+	if err != nil {
+		return bindings
+	}
+	for _, entry := range entries {
+		if entry.Error != "" || entry.Document == nil {
+			continue
+		}
+		handle := entry.Document.Handle
+		if handle == "" {
+			handle = entry.ID
+		}
+		for _, binding := range entry.Document.Skills {
+			id := strings.TrimSpace(binding.ID)
+			if id == "" {
+				continue
+			}
+			bindings[id] = append(bindings[id], handle)
+		}
+	}
+	for id := range bindings {
+		sort.Strings(bindings[id])
+	}
+	return bindings
 }

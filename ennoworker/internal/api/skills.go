@@ -71,6 +71,12 @@ func (s *Server) listSkills(w http.ResponseWriter, r *http.Request) {
 	if projectID != "" && s.Trust != nil {
 		result.ProjectResourcesLoaded = s.skillsTrusted(w, r, projectID)
 	}
+	bindings := s.skillHeroBindings()
+	for index := range result.Skills {
+		handles := bindings[result.Skills[index].SkillID]
+		result.Skills[index].BoundBy = handles
+		result.Skills[index].HeroBound = len(handles) > 0
+	}
 	writeData(w, http.StatusOK, result)
 }
 

@@ -5610,7 +5610,7 @@ components:
     AnnotatedSkill:
       type: object
       additionalProperties: false
-      required: [name, description, filePath, baseDir, disableModelInvocation, sourceInfo, skillId, relPath]
+      required: [name, description, filePath, baseDir, disableModelInvocation, sourceInfo, skillId, relPath, heroBound, boundBy]
       properties:
         name: { type: string }
         description: { type: string }
@@ -5625,6 +5625,11 @@ components:
             scope: { type: string }
         skillId: { type: string }
         relPath: { type: string }
+        heroBound: { type: boolean, description: Whether some Hero loads this Skill already }
+        boundBy:
+          type: array
+          items: { type: string }
+          description: Hero handles that load this Skill
         install: { $ref: "#/components/schemas/SkillInstallInfo" }
     SkillCreateResult:
       type: object
