@@ -159,6 +159,10 @@ type EffectiveRunConfig struct {
 	ToolPolicyHooks   []ProjectToolPolicyHook    `json:"toolPolicyHooks,omitempty"`
 	WorkspaceSecurity *WorkspaceSecuritySnapshot `json:"workspaceSecurity,omitempty"`
 	Hero              *FrozenHeroExecution       `json:"hero,omitempty"`
+	// SelectedSkills are the global Skills the user attached to this turn. The
+	// Hero's preload bindings live in Hero.FrozenSkills; this list is disjoint
+	// from them by construction, so the prompt order needs no precedence rule.
+	SelectedSkills FrozenSkillRefs `json:"selectedSkills,omitempty"`
 	// Delegation is the frozen root budget policy snapshot for a top-level Host
 	// Run. Children inherit the root policy fact but cannot replace it.
 	Delegation *DelegationPolicySnapshot `json:"delegation,omitempty"`
@@ -243,51 +247,54 @@ type RunOutput struct {
 type ErrorCode string
 
 const (
-	ErrorProviderUnavailable             ErrorCode = "provider_unavailable"
-	ErrorProviderConfigurationInvalid    ErrorCode = "provider_configuration_invalid"
-	ErrorProviderCredentialUnavailable   ErrorCode = "provider_credential_unavailable"
-	ErrorProviderAuthentication          ErrorCode = "provider_authentication_failed"
-	ErrorProviderModelNotFound           ErrorCode = "provider_model_not_found"
-	ErrorProviderRateLimited             ErrorCode = "provider_rate_limited"
-	ErrorProviderTimeout                 ErrorCode = "provider_request_timeout"
-	ErrorProviderRequestRejected         ErrorCode = "provider_request_rejected"
-	ErrorModelStreamInterrupted          ErrorCode = "model_stream_interrupted"
-	ErrorModelOutputTruncated            ErrorCode = "model_output_truncated"
-	ErrorModelProtocol                   ErrorCode = "model_protocol_error"
-	ErrorEventPersistence                ErrorCode = "event_persistence_failed"
-	ErrorToolBatchFailed                 ErrorCode = "tool_batch_failed"
-	ErrorStuckToolLoop                   ErrorCode = "stuck_tool_loop"
-	ErrorMaxIterations                   ErrorCode = "max_iterations_exceeded"
-	ErrorRunCancelled                    ErrorCode = "run_cancelled"
-	ErrorToolPolicyFailed                ErrorCode = "tool_policy_failed"
-	ErrorToolPolicyTerminated            ErrorCode = "tool_policy_terminated"
-	ErrorTurnPolicyFailed                ErrorCode = "turn_policy_failed"
-	ErrorModelRouteFailed                ErrorCode = "model_route_failed"
-	ErrorVisionUnsupported               ErrorCode = "vision_unsupported"
-	ErrorVisionFallbackFailed            ErrorCode = "vision_fallback_failed"
-	ErrorImageInvalid                    ErrorCode = "image_invalid"
-	ErrorSessionBusy                     ErrorCode = "session_busy"
-	ErrorSessionCompacting               ErrorCode = "session_compacting"
-	ErrorCompactionNotAllowed            ErrorCode = "compaction_not_allowed"
-	ErrorCompactionNothingToCompact      ErrorCode = "compaction_nothing_to_compact"
-	ErrorCompactionModelUnavailable      ErrorCode = "compaction_model_unavailable"
-	ErrorCompactionConfigInvalid         ErrorCode = "compaction_config_invalid"
-	ErrorCompactionInputTooLarge         ErrorCode = "compaction_input_too_large"
-	ErrorContextTurnTooLarge             ErrorCode = "context_turn_too_large"
-	ErrorCompactionProviderFailed        ErrorCode = "compaction_provider_failed"
-	ErrorCompactionOutputInvalid         ErrorCode = "compaction_output_invalid"
-	ErrorCompactionCheckpointInvalid     ErrorCode = "compaction_checkpoint_invalid"
-	ErrorCompactionCancelled             ErrorCode = "compaction_cancelled"
-	ErrorContextCompactionRequired       ErrorCode = "context_compaction_required"
-	ErrorContextOverflow                 ErrorCode = "context_overflow"
-	ErrorContextOverflowAfterCompaction  ErrorCode = "context_overflow_after_compaction"
-	ErrorContextOverflowInRun            ErrorCode = "context_overflow_in_run"
-	ErrorHistoryLookupForbidden          ErrorCode = "history_lookup_forbidden"
-	ErrorHistoryLookupOutOfRange         ErrorCode = "history_lookup_out_of_range"
-	ErrorApprovalCheckpointInvalid       ErrorCode = "approval_checkpoint_invalid"
-	ErrorCommitFormatNotEnabled          ErrorCode = "commit_format_not_enabled"
-	ErrorContextProjectionNotEnabled     ErrorCode = "context_projection_not_enabled"
-	ErrorInvocationTargetInvalid         ErrorCode = "invocation_target_invalid"
+	ErrorProviderUnavailable            ErrorCode = "provider_unavailable"
+	ErrorProviderConfigurationInvalid   ErrorCode = "provider_configuration_invalid"
+	ErrorProviderCredentialUnavailable  ErrorCode = "provider_credential_unavailable"
+	ErrorProviderAuthentication         ErrorCode = "provider_authentication_failed"
+	ErrorProviderModelNotFound          ErrorCode = "provider_model_not_found"
+	ErrorProviderRateLimited            ErrorCode = "provider_rate_limited"
+	ErrorProviderTimeout                ErrorCode = "provider_request_timeout"
+	ErrorProviderRequestRejected        ErrorCode = "provider_request_rejected"
+	ErrorModelStreamInterrupted         ErrorCode = "model_stream_interrupted"
+	ErrorModelOutputTruncated           ErrorCode = "model_output_truncated"
+	ErrorModelProtocol                  ErrorCode = "model_protocol_error"
+	ErrorEventPersistence               ErrorCode = "event_persistence_failed"
+	ErrorToolBatchFailed                ErrorCode = "tool_batch_failed"
+	ErrorStuckToolLoop                  ErrorCode = "stuck_tool_loop"
+	ErrorMaxIterations                  ErrorCode = "max_iterations_exceeded"
+	ErrorRunCancelled                   ErrorCode = "run_cancelled"
+	ErrorToolPolicyFailed               ErrorCode = "tool_policy_failed"
+	ErrorToolPolicyTerminated           ErrorCode = "tool_policy_terminated"
+	ErrorTurnPolicyFailed               ErrorCode = "turn_policy_failed"
+	ErrorModelRouteFailed               ErrorCode = "model_route_failed"
+	ErrorVisionUnsupported              ErrorCode = "vision_unsupported"
+	ErrorVisionFallbackFailed           ErrorCode = "vision_fallback_failed"
+	ErrorImageInvalid                   ErrorCode = "image_invalid"
+	ErrorSessionBusy                    ErrorCode = "session_busy"
+	ErrorSessionCompacting              ErrorCode = "session_compacting"
+	ErrorCompactionNotAllowed           ErrorCode = "compaction_not_allowed"
+	ErrorCompactionNothingToCompact     ErrorCode = "compaction_nothing_to_compact"
+	ErrorCompactionModelUnavailable     ErrorCode = "compaction_model_unavailable"
+	ErrorCompactionConfigInvalid        ErrorCode = "compaction_config_invalid"
+	ErrorCompactionInputTooLarge        ErrorCode = "compaction_input_too_large"
+	ErrorContextTurnTooLarge            ErrorCode = "context_turn_too_large"
+	ErrorCompactionProviderFailed       ErrorCode = "compaction_provider_failed"
+	ErrorCompactionOutputInvalid        ErrorCode = "compaction_output_invalid"
+	ErrorCompactionCheckpointInvalid    ErrorCode = "compaction_checkpoint_invalid"
+	ErrorCompactionCancelled            ErrorCode = "compaction_cancelled"
+	ErrorContextCompactionRequired      ErrorCode = "context_compaction_required"
+	ErrorContextOverflow                ErrorCode = "context_overflow"
+	ErrorContextOverflowAfterCompaction ErrorCode = "context_overflow_after_compaction"
+	ErrorContextOverflowInRun           ErrorCode = "context_overflow_in_run"
+	ErrorHistoryLookupForbidden         ErrorCode = "history_lookup_forbidden"
+	ErrorHistoryLookupOutOfRange        ErrorCode = "history_lookup_out_of_range"
+	ErrorApprovalCheckpointInvalid      ErrorCode = "approval_checkpoint_invalid"
+	ErrorCommitFormatNotEnabled         ErrorCode = "commit_format_not_enabled"
+	ErrorContextProjectionNotEnabled    ErrorCode = "context_projection_not_enabled"
+	ErrorInvocationTargetInvalid        ErrorCode = "invocation_target_invalid"
+	// ErrorSkillNotFound refuses a turn that names a Skill the catalog cannot
+	// resolve: the frozen prompt must never claim provenance it cannot prove.
+	ErrorSkillNotFound                   ErrorCode = "skill_not_found"
 	ErrorIncompleteTerminalContract      ErrorCode = "incomplete_terminal_contract"
 	ErrorDelegationBudgetExceeded        ErrorCode = "delegation_budget_exceeded"
 	ErrorDelegationNotAuthorized         ErrorCode = "delegation_not_authorized"
@@ -580,6 +587,10 @@ type SubmitTurnInput struct {
 	Text            string
 	Parts           []ContentBlock
 	RequestedConfig json.RawMessage
+	// Skills are the global Skills the user attached to this turn. They are
+	// frozen into the Run as SelectedSkills, alongside — never instead of — the
+	// Hero's own preload bindings.
+	Skills []string
 }
 
 type SubmitInvocationInput struct {
@@ -590,6 +601,9 @@ type SubmitInvocationInput struct {
 	Parts           []ContentBlock
 	Target          HeroInvocationTarget
 	RequestedConfig json.RawMessage
+	// Skills are the global Skills the user attached to this turn. See
+	// SubmitTurnInput.Skills.
+	Skills []string
 }
 
 type TurnSubmission struct {

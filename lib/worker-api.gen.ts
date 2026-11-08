@@ -3990,7 +3990,7 @@ export interface components {
             /** @description Always false in S1; inspect never verifies signatures */
             signed: boolean;
             flows: components["schemas"]["PackFlow"][];
-            heroes: components["schemas"]["PackHero"][];
+            heroes: components["schemas"]["PackRole"][];
             skills: components["schemas"]["PackSkill"][];
             /** @description External MCP profile references; S1 never resolves or executes them */
             mcp: components["schemas"]["PackMCP"][];
@@ -4041,7 +4041,7 @@ export interface components {
             pathDigest: string;
             sourceDigest: string;
         };
-        PackHero: {
+        PackRole: {
             handle: string;
             path: string;
             /** @enum {string} */
@@ -4090,7 +4090,7 @@ export interface components {
         PackModelRequirements: {
             capabilities: string[];
             minContextWindow: number;
-            perHero: {
+            perRole: {
                 [key: string]: string[];
             };
         };
@@ -7196,6 +7196,10 @@ export interface operations {
                     baseMessageId?: string;
                     target: components["schemas"]["InvocationTarget"];
                     config?: components["schemas"]["RunConfigOverride"];
+                    /** @description Global Skills the user attached to this turn. Frozen alongside the Hero's own preload bindings. */
+                    skills?: {
+                        id: string;
+                    }[];
                 } | unknown | unknown;
             };
         };

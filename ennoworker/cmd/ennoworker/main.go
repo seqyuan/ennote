@@ -512,6 +512,12 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 			return domain.RunOutput{}, heroSkillsErr
 		}
 		segments = append(segments, heroSegments...)
+		selectedSegments, selectedErr := agent.SelectedSkillSegments(resolved.Effective.SelectedSkills,
+			skills.Discover(e.skillsDir, e.builtinDir))
+		if selectedErr != nil {
+			return domain.RunOutput{}, selectedErr
+		}
+		segments = append(segments, selectedSegments...)
 		segments = append(segments, taskSegments...)
 		systemPrompt, systemPromptSections = systemprompt.Compose(segments)
 		// Freeze what the model is about to be given before the first Provider

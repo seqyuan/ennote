@@ -642,7 +642,8 @@ CREATE TABLE "turns" (
     target_version_id            TEXT,
     target_participant_instance_id TEXT REFERENCES room_member_instances(id),
     context_mode                 TEXT NOT NULL DEFAULT 'room',
-    reply_to_json                TEXT NOT NULL DEFAULT '[]'
+    reply_to_json                TEXT NOT NULL DEFAULT '[]',
+    skills_json                  TEXT NOT NULL DEFAULT '[]'
 );
 CREATE TABLE usage_records (
     id          TEXT PRIMARY KEY,

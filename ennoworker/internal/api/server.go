@@ -1295,7 +1295,10 @@ func (s *Server) submitInvocation(w http.ResponseWriter, r *http.Request) {
 		} `json:"content"`
 		BaseMessageID string          `json:"baseMessageId"`
 		Config        json.RawMessage `json:"config"`
-		Target        struct {
+		Skills        []struct {
+			ID string `json:"id"`
+		} `json:"skills"`
+		Target struct {
 			Kind        domain.InvocationTargetKind  `json:"kind"`
 			ObjectID    string                       `json:"objectId"`
 			VersionID   string                       `json:"versionId"`
@@ -1322,6 +1325,14 @@ func (s *Server) submitInvocation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	selectedSkills := make([]string, 0, len(input.Skills))
+	for _, skill := range input.Skills {
+		selectedSkills = append(selectedSkills, skill.ID)
+	}
+	if err := s.validateSessionSkills(r.Context(), selectedSkills); err != nil {
+		s.writeStoreError(w, r, err)
+		return
+	}
 	if s.PromptGate != nil {
 		outcome := s.PromptGate.CheckPrompt(r.Context(), r.PathValue("sessionID"), input.Text, parts)
 		if outcome.Error != nil {
@@ -1338,12 +1349,12 @@ func (s *Server) submitInvocation(w http.ResponseWriter, r *http.Request) {
 	case domain.InvocationTargetHost:
 		submission, err = s.Runs.SubmitTurn(r.Context(), domain.SubmitTurnInput{
 			SessionID: r.PathValue("sessionID"), ClientRequestID: requestID, BaseMessageID: input.BaseMessageID,
-			Text: input.Text, Parts: parts, RequestedConfig: input.Config,
+			Text: input.Text, Parts: parts, RequestedConfig: input.Config, Skills: selectedSkills,
 		})
 	case domain.InvocationTargetHero:
 		submission, err = s.Runs.SubmitInvocation(r.Context(), domain.SubmitInvocationInput{
 			SessionID: r.PathValue("sessionID"), ClientRequestID: requestID, BaseMessageID: input.BaseMessageID,
-			Text: input.Text, Parts: parts, RequestedConfig: input.Config,
+			Text: input.Text, Parts: parts, RequestedConfig: input.Config, Skills: selectedSkills,
 			Target: domain.HeroInvocationTarget{Kind: input.Target.Kind, ObjectID: input.Target.ObjectID,
 				VersionID: input.Target.VersionID, ContextMode: input.Target.ContextMode, ReplyTo: input.Target.ReplyTo},
 		})
@@ -1563,6 +1574,8 @@ func (s *Server) writeStoreError(w http.ResponseWriter, r *http.Request, err err
 		writeError(w, r, http.StatusConflict, string(domain.ErrorCompactionCheckpointInvalid), err.Error(), false)
 	case domain.ErrorCodeOf(err) == domain.ErrorInvocationTargetInvalid:
 		writeError(w, r, http.StatusBadRequest, string(domain.ErrorInvocationTargetInvalid), err.Error(), false)
+	case domain.ErrorCodeOf(err) == domain.ErrorSkillNotFound:
+		writeError(w, r, http.StatusBadRequest, string(domain.ErrorSkillNotFound), err.Error(), false)
 	case domain.ErrorCodeOf(err) == domain.ErrorCommitFormatNotEnabled:
 		writeError(w, r, http.StatusConflict, string(domain.ErrorCommitFormatNotEnabled), err.Error(), false)
 	case errors.Is(err, store.ErrRunNotActive), errors.Is(err, store.ErrRunAwaitingQuestion), errors.Is(err, store.ErrInvalidRunState):

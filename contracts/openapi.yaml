@@ -2158,6 +2158,15 @@ paths:
                 baseMessageId: { type: string }
                 target: { $ref: "#/components/schemas/InvocationTarget" }
                 config: { $ref: "#/components/schemas/RunConfigOverride" }
+                skills:
+                  type: array
+                  description: Global Skills the user attached to this turn. Frozen alongside the Hero's own preload bindings.
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [id]
+                    properties:
+                      id: { type: string, minLength: 1 }
       responses:
         "202":
           description: Invocation accepted
@@ -4631,7 +4640,7 @@ components:
           properties:
             # task_only is required for a Hero to run as a delegated child, and
             # reply enables reply_to addressing; both are part of the frozen
-            # RoleContextPolicy vocabulary and must be authorable here.
+            # HeroContextPolicy vocabulary and must be authorable here.
             defaultMode: { type: string, enum: [room, reply, fresh, task_only] }
             allowedModes: { type: array, uniqueItems: true, items: { type: string, enum: [room, reply, fresh, task_only] } }
             ownExecutionContinuity: { type: string, enum: [none] }
@@ -4809,10 +4818,10 @@ components:
         modelProfileId: { type: string }
         messages: { type: array, items: { $ref: "#/components/schemas/GraphBuilderMessage" } }
         proposal: { $ref: "#/components/schemas/GraphBuilderProposal" }
-    RoleScope:
+    HeroScope:
       type: string
       enum: [builtin, global, project, flow]
-    RoleModelBinding:
+    HeroModelBinding:
       type: object
       additionalProperties: false
       required: [mode, thinkingEffort, fallbackModelProfileIds, overridableFields]
@@ -4822,7 +4831,7 @@ components:
         thinkingEffort: { $ref: "#/components/schemas/ThinkingEffort" }
         fallbackModelProfileIds: { type: array, uniqueItems: true, items: { type: string } }
         overridableFields: { type: array, uniqueItems: true, items: { type: string } }
-    RoleSkillEntry:
+    HeroSkillEntry:
       type: object
       additionalProperties: false
       required: [skillId, mode]
@@ -4851,7 +4860,7 @@ components:
         maxOutputTokens: { type: integer, format: int64, minimum: 0 }
         maxCostUsdMicros: { type: integer, format: int64, minimum: 0 }
         maxWallTimeMs: { type: integer, format: int64, minimum: 0 }
-    RoleDelegationPolicy:
+    HeroDelegationPolicy:
       type: object
       additionalProperties: false
       required: [admission, allowedCallerKinds, allowedStrategies, maxInvocationsPerParentRun, maxConcurrentInstances, budgetCeiling]
@@ -4868,7 +4877,7 @@ components:
         maxInvocationsPerParentRun: { type: integer, minimum: 0 }
         maxConcurrentInstances: { type: integer, minimum: 0 }
         budgetCeiling: { $ref: "#/components/schemas/DelegationBudgetCeiling" }
-    RoleContextPolicy:
+    HeroContextPolicy:
       type: object
       additionalProperties: false
       required: [defaultMode, allowedModes, ownExecutionContinuity]
@@ -4880,7 +4889,7 @@ components:
           uniqueItems: true
           items: { type: string, enum: [room, reply, fresh, task_only] }
         ownExecutionContinuity: { type: string, enum: [none] }
-    RoleDefinition:
+    HeroDefinition:
       type: object
       additionalProperties: false
       required: [schemaVersion, heroPrompt, modelBinding, skills, authority, permissionCeiling, allowedTools,
@@ -4888,21 +4897,21 @@ components:
       properties:
         schemaVersion: { type: integer, enum: [1] }
         heroPrompt: { type: string, minLength: 1, maxLength: 65536 }
-        modelBinding: { $ref: "#/components/schemas/RoleModelBinding" }
+        modelBinding: { $ref: "#/components/schemas/HeroModelBinding" }
         skills:
           type: object
           additionalProperties: false
           required: [entries]
           properties:
-            entries: { type: array, items: { $ref: "#/components/schemas/RoleSkillEntry" } }
+            entries: { type: array, items: { $ref: "#/components/schemas/HeroSkillEntry" } }
         authority: { type: string, enum: [read_only, mutation] }
         permissionCeiling: { type: string, enum: [discuss, ask, auto] }
         allowedTools: { type: array, uniqueItems: true, items: { type: string } }
-        contextPolicy: { $ref: "#/components/schemas/RoleContextPolicy" }
-        delegationPolicy: { $ref: "#/components/schemas/RoleDelegationPolicy" }
+        contextPolicy: { $ref: "#/components/schemas/HeroContextPolicy" }
+        delegationPolicy: { $ref: "#/components/schemas/HeroDelegationPolicy" }
         outputContract: { type: string, minLength: 1 }
         maxLoopIterations: { type: integer, minimum: 1, maximum: 64 }
-    RoleSummary:
+    HeroSummary:
       type: object
       additionalProperties: false
       required: [id, handle, name, description, positioning, icon, color, scope, status, sourceKind, updatedAt]
@@ -4914,7 +4923,7 @@ components:
         positioning: { type: string }
         icon: { type: string }
         color: { type: string }
-        scope: { $ref: "#/components/schemas/RoleScope" }
+        scope: { $ref: "#/components/schemas/HeroScope" }
         projectId: { type: string }
         flowId: { type: string }
         status: { type: string, enum: [active, archived] }
@@ -4926,18 +4935,18 @@ components:
     HeroIdentity:
       unevaluatedProperties: false
       allOf:
-        - $ref: "#/components/schemas/RoleSummary"
+        - $ref: "#/components/schemas/HeroSummary"
         - type: object
           required: [draft, draftRevision, delegationEnabled, delegationRevocationEpoch, createdAt]
           properties:
             sourceDigest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
-            draft: { $ref: "#/components/schemas/RoleDefinition" }
+            draft: { $ref: "#/components/schemas/HeroDefinition" }
             draftRevision: { type: integer, minimum: 0 }
             delegationEnabled: { type: boolean }
             delegationRevocationEpoch: { type: integer, minimum: 0 }
             delegationDisabledAt: { type: string, format: date-time }
             createdAt: { type: string, format: date-time }
-    RoleVersion:
+    HeroVersion:
       type: object
       additionalProperties: false
       required: [id, heroId, version, definition, configDigest, status, createdAt]
@@ -4945,18 +4954,18 @@ components:
         id: { type: string }
         heroId: { type: string }
         version: { type: integer, minimum: 1 }
-        definition: { $ref: "#/components/schemas/RoleDefinition" }
+        definition: { $ref: "#/components/schemas/HeroDefinition" }
         configDigest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
         status: { type: string, enum: [published] }
         createdAt: { type: string, format: date-time }
-    RoleCatalogPage:
+    HeroCatalogPage:
       type: object
       additionalProperties: false
       required: [items, nextCursor]
       properties:
-        items: { type: array, items: { $ref: "#/components/schemas/RoleSummary" } }
+        items: { type: array, items: { $ref: "#/components/schemas/HeroSummary" } }
         nextCursor: { type: string }
-    RoleValidationDiagnostic:
+    HeroValidationDiagnostic:
       type: object
       additionalProperties: false
       required: [level, code, message]
@@ -4965,15 +4974,15 @@ components:
         code: { type: string }
         message: { type: string }
         field: { type: string }
-    RoleValidationResult:
+    HeroValidationResult:
       type: object
       additionalProperties: false
       required: [valid, diagnostics]
       properties:
         valid: { type: boolean }
-        diagnostics: { type: array, items: { $ref: "#/components/schemas/RoleValidationDiagnostic" } }
+        diagnostics: { type: array, items: { $ref: "#/components/schemas/HeroValidationDiagnostic" } }
         configDigest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
-    RoleCandidate:
+    HeroCandidate:
       type: object
       additionalProperties: false
       required: [handle, name, description, sourceKind, sourceLocator, alreadyPublished, updateAvailable, diagnostics]
@@ -4985,22 +4994,22 @@ components:
         sourceLocator: { type: string, description: Informational Worker-resolved source path; never accepted from clients }
         sourceDigest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
         configDigest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
-        definition: { $ref: "#/components/schemas/RoleDefinition" }
+        definition: { $ref: "#/components/schemas/HeroDefinition" }
         alreadyPublished: { type: boolean }
         heroId: { type: string }
         publishedVersionId: { type: string }
         publishedVersion: { type: integer, minimum: 1 }
         updateAvailable: { type: boolean }
         parseError: { type: string }
-        diagnostics: { type: array, items: { $ref: "#/components/schemas/RoleValidationDiagnostic" } }
-    MaterializedRoleCandidate:
+        diagnostics: { type: array, items: { $ref: "#/components/schemas/HeroValidationDiagnostic" } }
+    MaterializedHeroCandidate:
       type: object
       additionalProperties: false
       required: [hero, version]
       properties:
         hero: { $ref: "#/components/schemas/HeroIdentity" }
-        version: { $ref: "#/components/schemas/RoleVersion" }
-    CreateRoleInput:
+        version: { $ref: "#/components/schemas/HeroVersion" }
+    CreateHeroInput:
       type: object
       additionalProperties: false
       required: [handle, name, scope, definition]
@@ -5011,11 +5020,11 @@ components:
         positioning: { type: string }
         icon: { type: string }
         color: { type: string }
-        scope: { $ref: "#/components/schemas/RoleScope" }
+        scope: { $ref: "#/components/schemas/HeroScope" }
         projectId: { type: string }
         flowId: { type: string }
-        definition: { $ref: "#/components/schemas/RoleDefinition" }
-    UpdateRoleDraftInput:
+        definition: { $ref: "#/components/schemas/HeroDefinition" }
+    UpdateHeroDraftInput:
       type: object
       additionalProperties: false
       required: [expectedRevision, definition]
@@ -5027,7 +5036,7 @@ components:
         positioning: { type: string }
         icon: { type: string }
         color: { type: string }
-        definition: { $ref: "#/components/schemas/RoleDefinition" }
+        definition: { $ref: "#/components/schemas/HeroDefinition" }
     SystemPromptMetadata:
       type: object
       additionalProperties: false
@@ -6056,7 +6065,7 @@ components:
           items: { $ref: "#/components/schemas/PackFlowState" }
         heroes:
           type: array
-          items: { $ref: "#/components/schemas/PackRoleState" }
+          items: { $ref: "#/components/schemas/PackHeroState" }
         skills:
           type: array
           items: { $ref: "#/components/schemas/PackSkillState" }
@@ -6076,7 +6085,7 @@ components:
           type: string
           nullable: true
           description: Always null in S2a; publishing is a separate user action
-    PackRoleState:
+    PackHeroState:
       type: object
       additionalProperties: false
       required: [packHandle, scope, storeId, digest]

@@ -25,6 +25,72 @@ func loadTurnTargetKind(ctx context.Context, tx *sql.Tx, turnID string) (string,
 	return kind, nil
 }
 
+// loadTurnSkills reads the global Skills the user attached to the turn.
+// A missing turn or an empty list means "none": only a malformed blob is an
+// error, and even then the freeze refuses rather than silently dropping a
+// selection the user made.
+func loadTurnSkills(ctx context.Context, tx *sql.Tx, turnID string) ([]string, error) {
+	if strings.TrimSpace(turnID) == "" {
+		// Delegated children and Flow task Runs have no turn of their own; their
+		// Skills arrive as task bindings, not as a user selection.
+		return nil, nil
+	}
+	var encoded string
+	if err := tx.QueryRowContext(ctx, `SELECT skills_json FROM turns WHERE id=?`, turnID).Scan(&encoded); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("load turn skills: %w", err)
+	}
+	if strings.TrimSpace(encoded) == "" || strings.TrimSpace(encoded) == "null" {
+		return nil, nil
+	}
+	var ids []string
+	if err := json.Unmarshal([]byte(encoded), &ids); err != nil {
+		return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
+			fmt.Errorf("decode turn skills: %w", err))
+	}
+	return ids, nil
+}
+
+// freezeSelectedSkills pins the global Skills the user attached to the turn.
+// They are disjoint from the Hero's preload bindings: a Hero preload wins on an
+// id collision, because it is already pinned by a published revision and the
+// selected copy would only restate the same digest.
+func (r *RunRepo) freezeSelectedSkills(hero *domain.FrozenHeroExecution, ids []string) (domain.FrozenSkillRefs, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	catalog := r.skillDigests()
+	refs := make(domain.FrozenSkillRefs, 0, len(ids))
+	seen := map[string]bool{}
+	if hero != nil {
+		for _, id := range hero.FrozenSkills.IDs() {
+			seen[id] = true
+		}
+	}
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		digest := ""
+		if catalog != nil {
+			digest = strings.TrimSpace(catalog[id])
+		}
+		if digest == "" {
+			return nil, domain.NewCodedError(domain.ErrorSkillNotFound,
+				fmt.Errorf("selected skill %q is missing from the Skill catalog or has no content digest", id))
+		}
+		refs = append(refs, domain.FrozenSkillRef{ID: id, Digest: digest})
+	}
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	return domain.NormalizeFrozenSkills(refs)
+}
+
 // skillDigests returns the Skill digest catalog to use for one freeze: the
 // live resolver when configured, otherwise the static startup map. It never
 // panics on a nil resolver or nil map; a nil result is the legacy/fixture path
@@ -266,6 +332,14 @@ func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.Ag
 	if err := r.freezeHeroPreloadSkills(frozenHero); err != nil {
 		return nil, err
 	}
+	turnSkills, err := loadTurnSkills(ctx, tx, run.TurnID)
+	if err != nil {
+		return nil, err
+	}
+	selectedSkills, err := r.freezeSelectedSkills(frozenHero, turnSkills)
+	if err != nil {
+		return nil, err
+	}
 	if frozenHero == nil && sessionAgentID.Valid {
 		return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
 			fmt.Errorf("managed agent profile %s is unsupported by the V2 file store", sessionAgentID.String))
@@ -438,6 +512,7 @@ func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.Ag
 			AllowAutoRoute: frozenHero == nil && (requestedConfig.AllowAutoRoute || (turnConfig.Mode == "context_upgrade" && requestedConfig.ModelProfileID == ""))},
 		ToolPolicy: toolPolicy, TurnPolicy: turnPolicy, VisionPolicy: visionPolicy,
 		CompactionPolicy: compactionPolicy, CompactionRuntime: compactionRuntime, Hero: frozenHero,
+		SelectedSkills: selectedSkills,
 	}
 	if run.ParentRunID == "" && run.RunKind == domain.RunKindAgent {
 		snapshot, err := freezeFileDelegationPolicyTx(ctx, tx, policies, run.ID)

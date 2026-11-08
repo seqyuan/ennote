@@ -69,7 +69,7 @@ func (r *RunRepo) SubmitInvocation(ctx context.Context, input domain.SubmitInvoc
 	}
 	return r.submitTurn(ctx, domain.SubmitTurnInput{
 		SessionID: input.SessionID, ClientRequestID: input.ClientRequestID, BaseMessageID: input.BaseMessageID,
-		Text: input.Text, Parts: input.Parts, RequestedConfig: input.RequestedConfig,
+		Text: input.Text, Parts: input.Parts, RequestedConfig: input.RequestedConfig, Skills: input.Skills,
 	}, &input.Target)
 }
 
@@ -324,15 +324,19 @@ func (r *RunRepo) submitTurn(ctx context.Context, input domain.SubmitTurnInput, 
 			return nil, fmt.Errorf("link image artifact: %w", err)
 		}
 	}
+	skillsJSON, err := encodeTurnSkills(input.Skills)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO turns
 		 (id, session_id, client_request_id, user_message_id, base_message_id, status,
 		 input_message_id, input_kind, target_kind, target_object_id, target_version_id,
-		 target_participant_instance_id, context_mode, reply_to_json, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, 'pending', ?, 'user_message', ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 target_participant_instance_id, context_mode, reply_to_json, skills_json, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, 'pending', ?, 'user_message', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		turnID, input.SessionID, input.ClientRequestID, messageID, nullableStr(baseMessageID), messageID,
 		targetKind, nullableStr(targetObjectID), nullableStr(targetVersionID), nullableStr(participantInstanceID), contextMode,
-		string(replyTo), timestamp.Format(time.RFC3339Nano), timestamp.Format(time.RFC3339Nano),
+		string(replyTo), skillsJSON, timestamp.Format(time.RFC3339Nano), timestamp.Format(time.RFC3339Nano),
 	); err != nil {
 		return nil, fmt.Errorf("insert turn: %w", err)
 	}
@@ -1514,4 +1518,25 @@ func turnStatusForRun(status domain.RunStatus) domain.TurnStatus {
 	default:
 		return domain.TurnPending
 	}
+}
+
+// encodeTurnSkills stores the turn's Skill selection in a stable order so the
+// turn row and the frozen config agree on what the user attached. A blank entry
+// is a client bug, not a Skill, so it is dropped rather than pinned.
+func encodeTurnSkills(ids []string) (string, error) {
+	unique := make([]string, 0, len(ids))
+	seen := map[string]bool{}
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		unique = append(unique, id)
+	}
+	encoded, err := json.Marshal(unique)
+	if err != nil {
+		return "", fmt.Errorf("encode turn skills: %w", err)
+	}
+	return string(encoded), nil
 }
