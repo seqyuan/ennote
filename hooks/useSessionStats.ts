@@ -5,8 +5,8 @@ import { apiFetch } from "@/lib/worker-api.client";
 import type { SessionStats } from "@/hooks/chat-controller-types";
 
 /**
- * Loads the Worker-computed aggregate session statistics for the composer
- * StatsLine. Re-fetches on session switch and whenever the active run id
+ * Loads the Worker-computed aggregate session statistics for the context
+ * meter's panel. Re-fetches on session switch and whenever the active run id
  * changes (so a finished run's figures land without waiting for the next
  * navigation). The Worker computes these from durable model_calls/tool_calls,
  * so paging and compaction cannot change them.

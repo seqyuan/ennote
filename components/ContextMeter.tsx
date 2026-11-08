@@ -8,11 +8,15 @@
  * projectedTokens), matching dsh's "renders nothing until a provider reports
  * both pressure and a route capacity". Clicking the ring opens the 264px
  * breakdown panel (percent + ~used/capacity + a stacked system/tools/messages
- * bar + legend rows).
+ * bar + legend rows), whose footer carries the session aggregates that used to
+ * sit in their own strip under the composer. Without a projection but with
+ * figures to show, the panel opens from a neutral icon instead of an empty ring.
  */
 import { useEffect, useRef, useState } from "react";
+import { Activity } from "lucide-react";
 import { useT } from "@/components/LocaleProvider";
-import type { SessionContextUsage } from "@/hooks/chat-controller-types";
+import { ContextStats, sessionStatLines } from "@/components/ContextStats";
+import type { SessionContextUsage, SessionStats } from "@/hooks/chat-controller-types";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { formatTokens } from "@/lib/stats-format";
 
@@ -46,8 +50,11 @@ interface MeterRow {
   tokens: number;
 }
 
-export function ContextMeter({ contextUsage, initialOpen = false }: {
+export function ContextMeter({ contextUsage, stats = null, initialOpen = false }: {
   contextUsage: SessionContextUsage | null;
+  /** Session aggregates, shown in the same panel: the composer no longer prints
+   * a separate stats strip. */
+  stats?: SessionStats | null;
   /** Render the breakdown open on first paint (tests and deep links). */
   initialOpen?: boolean;
 }) {
@@ -57,7 +64,8 @@ export function ContextMeter({ contextUsage, initialOpen = false }: {
 
   // A model switch (or run end) can drop the projection while this component
   // stays mounted; close a now-unavailable panel instead of preserving stale UI.
-  const available = contextUsage !== null;
+  const hasWindow = contextUsage !== null && contextUsage.contextWindow > 0;
+  const available = hasWindow || sessionStatLines(stats, t).length > 0;
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- a model switch can drop the projection; withdraw the stale panel
     if (!available && open) setOpen(false);
@@ -76,8 +84,33 @@ export function ContextMeter({ contextUsage, initialOpen = false }: {
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [available, open]);
 
-  if (contextUsage === null) return null;
-  if (contextUsage.contextWindow <= 0) return null;
+  if (!available) return null;
+
+  // Without a projection the ring has nothing to fill, and a 0% ring would claim
+  // an empty budget the Worker never reported. The panel still opens for the
+  // session figures, so the trigger falls back to a neutral icon.
+  if (contextUsage === null || contextUsage.contextWindow <= 0) {
+    return (
+      <span ref={rootRef} className="context-meter">
+        <button
+          type="button"
+          className="context-meter-trigger"
+          aria-label={t("stats.section")}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          title={t("stats.section")}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <Activity size={14} aria-hidden="true" />
+        </button>
+        {open && (
+          <div className="context-meter-panel" role="dialog" aria-label={t("stats.section")}>
+            <ContextStats stats={stats} />
+          </div>
+        )}
+      </span>
+    );
+  }
 
   const percent = Math.min(100, Math.round(contextUsage.projectedTokens / contextUsage.contextWindow * 100));
   const pressure = percent >= 95 ? "is-critical" : percent >= 85 ? "is-high" : "";
@@ -176,6 +209,7 @@ export function ContextMeter({ contextUsage, initialOpen = false }: {
               </div>
             ))}
           </dl>
+          <ContextStats stats={stats} />
         </div>
       )}
     </span>

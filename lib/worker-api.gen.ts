@@ -6772,7 +6772,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Aggregate session statistics for the composer StatsLine */
+            /** @description Aggregate session statistics for the context meter panel */
             200: {
                 headers: {
                     [name: string]: unknown;

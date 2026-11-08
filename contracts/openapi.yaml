@@ -1780,7 +1780,7 @@ paths:
       operationId: getSessionStats
       responses:
         "200":
-          description: Aggregate session statistics for the composer StatsLine
+          description: Aggregate session statistics for the context meter panel
           content:
             application/json:
               schema:

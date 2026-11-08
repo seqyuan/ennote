@@ -1,4 +1,4 @@
-/** Shared compact formatting for the composer StatsLine and ContextMeter,
+/** Shared compact formatting for the context meter panel's session figures,
  *  matching deepseek-harness's StatsLine helpers. */
 
 /** 517 / 12.2K / 517K / 1.2M (one decimal under three digits). */

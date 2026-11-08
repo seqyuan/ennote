@@ -9,7 +9,6 @@ import { RoleTargetPicker } from "@/components/RoleTargetPicker";
 import { PermissionChip } from "@/components/PermissionChip";
 import { ModelSelect } from "@/components/ModelSelect";
 import { ContextMeter } from "@/components/ContextMeter";
-import { StatsLine } from "@/components/StatsLine";
 import type { ModelProfile, ProviderProfile, RoleSummary } from "@/components/settings/types";
 import type { SessionContextUsage, SessionStats } from "@/hooks/chat-controller-types";
 import { artifactPreviewURL } from "@/lib/artifacts";
@@ -376,7 +375,7 @@ export function Composer({
               setThinkingEffort={setThinkingEffort}
               disabled={!selectedSession || activeRun || models.length === 0 || Boolean(selectedRoleId)}
             />
-            <ContextMeter contextUsage={contextUsage} />
+            <ContextMeter contextUsage={contextUsage} stats={stats} />
           </div>
           {configOpen && (
             <div className="composer-config-panel" role="dialog" aria-label={t("composer.attachMenu")}>
@@ -480,18 +479,6 @@ export function Composer({
           </div>
         </div>
       </form>
-      <StatsLine stats={stats} />
-      {!inert && (
-        <div className="composer-hint-row" aria-hidden="true">
-          <span>{t("composer.hint.enter")}</span>
-          <span>·</span>
-          <span>{t("composer.hint.newline")}</span>
-          <span>·</span>
-          <span>{t("composer.hint.resize")}</span>
-          <span>·</span>
-          <span>{t("composer.dropFiles")}</span>
-        </div>
-      )}
       <div className="composer-status-line">
         {!permissionReady && selectedSession && !selectedRoleId && <span className="composer-config-hint is-danger">{t("composer.policyUnavailable")}</span>}
         {expanding && <span className="composer-status" aria-live="polite">{t("composer.expanding")}</span>}

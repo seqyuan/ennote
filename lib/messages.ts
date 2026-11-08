@@ -70,8 +70,6 @@ export const messages: Record<Locale, Record<string, string>> = {
     "time.years": "y",
 
     "composer.dropFiles": "Drop images or text files",
-    "composer.hint.enter": "Enter to send",
-    "composer.hint.newline": "Shift+Enter for a newline",
     "composer.hint.resize": "Drag the top edge to resize",
     "composer.hint.resizeAria": "Resize message input",
     "composer.attachedFiles": "Attached files",
@@ -254,6 +252,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "inspector.catalog.materialized": "materialized",
     "inspector.catalog.disabled": "skipped, read denied by the frozen tool policy",
 
+    "stats.section": "Session figures",
     "stats.counts": "{turns} turns · {steps} steps",
     "stats.llm": "LLM {duration}",
     "stats.toolCall": "Tool call {duration}",
@@ -571,8 +570,6 @@ export const messages: Record<Locale, Record<string, string>> = {
     "time.years": "年",
 
     "composer.dropFiles": "拖放图片或文本文件",
-    "composer.hint.enter": "Enter 发送",
-    "composer.hint.newline": "Shift+Enter 换行",
     "composer.hint.resize": "拖拽上边缘调整高度",
     "composer.hint.resizeAria": "调整输入框高度",
     "composer.attachedFiles": "已附加文件",
@@ -752,6 +749,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "inspector.catalog.materialized": "已物化",
     "inspector.catalog.disabled": "已跳过（冻结的工具策略禁止 read）",
 
+    "stats.section": "会话统计",
     "stats.counts": "{turns} 轮 · {steps} 步",
     "stats.llm": "LLM {duration}",
     "stats.toolCall": "工具调用 {duration}",
