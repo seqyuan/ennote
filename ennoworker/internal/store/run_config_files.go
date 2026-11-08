@@ -29,7 +29,7 @@ func loadTurnTargetKind(ctx context.Context, tx *sql.Tx, turnID string) (string,
 // A missing turn or an empty list means "none": only a malformed blob is an
 // error, and even then the freeze refuses rather than silently dropping a
 // selection the user made.
-func loadTurnSkills(ctx context.Context, tx *sql.Tx, turnID string) ([]string, error) {
+func loadTurnSkills(ctx context.Context, tx *sql.Tx, turnID string) (domain.FrozenSkillRefs, error) {
 	if strings.TrimSpace(turnID) == "" {
 		// Delegated children and Flow task Runs have no turn of their own; their
 		// Skills arrive as task bindings, not as a user selection.
@@ -45,45 +45,53 @@ func loadTurnSkills(ctx context.Context, tx *sql.Tx, turnID string) ([]string, e
 	if strings.TrimSpace(encoded) == "" || strings.TrimSpace(encoded) == "null" {
 		return nil, nil
 	}
+	var refs domain.FrozenSkillRefs
+	if err := json.Unmarshal([]byte(encoded), &refs); err == nil {
+		return refs, nil
+	}
+	// A bare id array predates the digest capture; treat it as unpinned rather
+	// than refusing a turn that was already accepted.
 	var ids []string
 	if err := json.Unmarshal([]byte(encoded), &ids); err != nil {
 		return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
 			fmt.Errorf("decode turn skills: %w", err))
 	}
-	return ids, nil
+	refs = make(domain.FrozenSkillRefs, 0, len(ids))
+	for _, id := range ids {
+		refs = append(refs, domain.FrozenSkillRef{ID: id})
+	}
+	return refs, nil
 }
 
 // freezeSelectedSkills pins the global Skills the user attached to the turn.
 // They are disjoint from the Hero's preload bindings: a Hero preload wins on an
 // id collision, because it is already pinned by a published revision and the
 // selected copy would only restate the same digest.
-func (r *RunRepo) freezeSelectedSkills(hero *domain.FrozenHeroExecution, ids []string) (domain.FrozenSkillRefs, error) {
-	if len(ids) == 0 {
+func (r *RunRepo) freezeSelectedSkills(hero *domain.FrozenHeroExecution, selected domain.FrozenSkillRefs) (domain.FrozenSkillRefs, error) {
+	if len(selected) == 0 {
 		return nil, nil
 	}
-	catalog := r.skillDigests()
-	refs := make(domain.FrozenSkillRefs, 0, len(ids))
+	refs := make(domain.FrozenSkillRefs, 0, len(selected))
 	seen := map[string]bool{}
 	if hero != nil {
 		for _, id := range hero.FrozenSkills.IDs() {
 			seen[id] = true
 		}
 	}
-	for _, id := range ids {
-		id = strings.TrimSpace(id)
+	for _, ref := range selected {
+		id := strings.TrimSpace(ref.ID)
 		if id == "" || seen[id] {
 			continue
 		}
 		seen[id] = true
-		digest := ""
-		if catalog != nil {
-			digest = strings.TrimSpace(catalog[id])
-		}
-		if digest == "" {
+		// The digest comes from the turn, not from the live catalog: it is the
+		// body the user was shown when they picked the Skill. Re-reading here
+		// would silently swap in an edit made while the turn waited.
+		if strings.TrimSpace(ref.Digest) == "" && r.skillDigests() != nil {
 			return nil, domain.NewCodedError(domain.ErrorSkillNotFound,
-				fmt.Errorf("selected skill %q is missing from the Skill catalog or has no content digest", id))
+				fmt.Errorf("selected skill %q carries no content digest", id))
 		}
-		refs = append(refs, domain.FrozenSkillRef{ID: id, Digest: digest})
+		refs = append(refs, domain.FrozenSkillRef{ID: id, Digest: strings.TrimSpace(ref.Digest)})
 	}
 	if len(refs) == 0 {
 		return nil, nil

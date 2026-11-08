@@ -9,54 +9,75 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 )
 
-// validateSessionSkills checks the Skills a client attached to one turn against
-// the live catalog.
+// maxSelectedSkills bounds one turn's selection. Each selected Skill injects a
+// whole body into the system prompt, so an unbounded list is an unbounded prompt.
+const maxSelectedSkills = 64
+
+// resolveSessionSkills pins the Skills a client attached to one turn.
 //
-// Two rules, both about honesty rather than permission:
+// The digest is captured here, at submit time, rather than at freeze time. That
+// is the difference between "the body you picked" and "whatever is on disk when
+// the run finally starts": an edit in between must fail the Run, not silently
+// replace the instructions the user chose.
 //
-//   - An id the catalog does not know is refused. A turn that claims to load a
-//     Skill it cannot name would freeze a prompt whose provenance is a guess.
-//   - A Skill marked `disable-model-invocation` is accepted. That marker exists
-//     precisely to withhold the Skill from the model's own reach; a user picking
-//     it in the composer is the explicit invocation it reserves.
-//
-// An empty list is not an error: most turns carry no Skills.
-func (s *Server) validateSessionSkills(ctx context.Context, ids []string) error {
+// An id the digest catalog does not know is refused. The catalog is the same
+// source the config freeze pins from, so validation and execution cannot
+// disagree about which Skills exist.
+func (s *Server) resolveSessionSkills(_ context.Context, ids []string) (domain.FrozenSkillRefs, error) {
 	if len(ids) == 0 {
-		return nil
+		return nil, nil
 	}
-	if s.Skills == nil {
-		return domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
-			fmt.Errorf("skills are not configured on this Worker"))
+	var catalog map[string]string
+	if s.SkillCatalog != nil {
+		catalog = s.SkillCatalog()
 	}
-	result, err := s.Skills.List("")
-	if err != nil {
-		return fmt.Errorf("load skill catalog: %w", err)
+	var known map[string]bool
+	if catalog == nil && s.Skills != nil {
+		result, err := s.Skills.List("")
+		if err != nil {
+			return nil, fmt.Errorf("load skill catalog: %w", err)
+		}
+		known = make(map[string]bool, len(result.Skills))
+		for _, skill := range result.Skills {
+			known[skill.SkillID] = true
+		}
 	}
-	known := make(map[string]bool, len(result.Skills))
-	for _, skill := range result.Skills {
-		known[skill.SkillID] = true
-	}
+	refs := make(domain.FrozenSkillRefs, 0, len(ids))
+	seen := map[string]bool{}
 	for _, id := range ids {
 		id = strings.TrimSpace(id)
-		if id == "" {
+		if id == "" || seen[id] {
 			continue
 		}
-		if !known[id] {
-			return domain.NewCodedError(domain.ErrorSkillNotFound,
+		if len(refs) == maxSelectedSkills {
+			return nil, domain.NewCodedError(domain.ErrorSkillNotFound,
+				fmt.Errorf("a turn may select at most %d skills", maxSelectedSkills))
+		}
+		seen[id] = true
+		digest := ""
+		if catalog != nil {
+			digest = strings.TrimSpace(catalog[id])
+			if digest == "" {
+				return nil, domain.NewCodedError(domain.ErrorSkillNotFound,
+					fmt.Errorf("skill %q is not in the catalog", id))
+			}
+		} else if known != nil && !known[id] {
+			return nil, domain.NewCodedError(domain.ErrorSkillNotFound,
 				fmt.Errorf("skill %q is not in the catalog", id))
 		}
+		refs = append(refs, domain.FrozenSkillRef{ID: id, Digest: digest})
 	}
-	return nil
+	return refs, nil
 }
 
 // skillHeroBindings indexes which Heroes load each Skill, so the skill list can
 // say "this one already arrives with a Hero" instead of leaving a user hunting
 // for a Skill the picker deliberately does not offer.
 //
-// It is built from the Hero sources once per request: an N+1 over Hero
-// documents on a list endpoint is not affordable, and the picker needs the
-// answer for every row.
+// It is built from the hero sources once per request: an N+1 over Hero documents
+// on a list endpoint is not affordable, and the picker needs the answer for every
+// row. Only Worker-global Heroes are indexed today; project- and flow-scoped
+// Heroes have no Skill bindings the picker could surface anyway.
 func (s *Server) skillHeroBindings() map[string][]string {
 	bindings := map[string][]string{}
 	if s.GlobalSources == nil {

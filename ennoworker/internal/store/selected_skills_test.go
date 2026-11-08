@@ -17,7 +17,9 @@ func TestFreezeSelectedSkillsMergesAfterHeroPreload(t *testing.T) {
 		FrozenSkills: domain.FrozenSkillRefs{{ID: "report", Digest: "d-report"}},
 	}
 
-	refs, err := repo.freezeSelectedSkills(hero, []string{"cell-qc", "report", "cell-qc"})
+	refs, err := repo.freezeSelectedSkills(hero, domain.FrozenSkillRefs{
+		{ID: "cell-qc", Digest: "d-cell"}, {ID: "report", Digest: "d-report"}, {ID: "cell-qc", Digest: "d-cell"},
+	})
 	require.NoError(t, err)
 	require.Len(t, refs, 1, "report is already carried by the Hero; cell-qc appears once")
 	assert.Equal(t, "cell-qc", refs[0].ID)
@@ -26,7 +28,7 @@ func TestFreezeSelectedSkillsMergesAfterHeroPreload(t *testing.T) {
 
 func TestFreezeSelectedSkillsRefusesACatalogMiss(t *testing.T) {
 	repo := &RunRepo{SkillDigests: map[string]string{"cell-qc": "d-cell"}}
-	_, err := repo.freezeSelectedSkills(nil, []string{"cell-qc", "ghost"})
+	_, err := repo.freezeSelectedSkills(nil, domain.FrozenSkillRefs{{ID: "cell-qc", Digest: "d-cell"}, {ID: "ghost"}})
 	require.Error(t, err)
 	assert.Equal(t, domain.ErrorSkillNotFound, domain.ErrorCodeOf(err))
 }

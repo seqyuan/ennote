@@ -1405,11 +1405,12 @@ func findSubmissionTx(ctx context.Context, tx *sql.Tx, sessionID, requestID stri
 	if err != nil {
 		return nil, err
 	}
-	var messageID string
-	if err := tx.QueryRowContext(ctx, `SELECT user_message_id FROM turns WHERE id = ?`, run.TurnID).Scan(&messageID); err != nil {
+	var messageID, skillsJSON string
+	if err := tx.QueryRowContext(ctx, `SELECT user_message_id, skills_json FROM turns WHERE id = ?`, run.TurnID).Scan(&messageID, &skillsJSON); err != nil {
 		return nil, err
 	}
-	return &domain.TurnSubmission{TurnID: run.TurnID, UserMessageID: messageID, Run: run}, nil
+	return &domain.TurnSubmission{TurnID: run.TurnID, UserMessageID: messageID, Run: run,
+		Skills: decodeTurnSkillIDs(skillsJSON)}, nil
 }
 
 const runSelect = `SELECT agent_runs.id, agent_runs.turn_id, agent_runs.session_id, agent_runs.run_kind,
@@ -1520,23 +1521,56 @@ func turnStatusForRun(status domain.RunStatus) domain.TurnStatus {
 	}
 }
 
-// encodeTurnSkills stores the turn's Skill selection in a stable order so the
-// turn row and the frozen config agree on what the user attached. A blank entry
-// is a client bug, not a Skill, so it is dropped rather than pinned.
-func encodeTurnSkills(ids []string) (string, error) {
-	unique := make([]string, 0, len(ids))
-	seen := map[string]bool{}
-	for _, id := range ids {
-		id = strings.TrimSpace(id)
-		if id == "" || seen[id] {
-			continue
-		}
-		seen[id] = true
-		unique = append(unique, id)
+// encodeTurnSkills stores the turn's Skill selection in a stable order, digests
+// included, so the turn row and the frozen config agree on exactly which body
+// the user attached. A blank id is a client bug, not a Skill, so it is dropped.
+func encodeTurnSkills(refs domain.FrozenSkillRefs) (string, error) {
+	normalized, err := domain.NormalizeFrozenSkills(refs)
+	if err != nil {
+		return "", domain.NewCodedError(domain.ErrorSkillNotFound, err)
 	}
-	encoded, err := json.Marshal(unique)
+	if len(normalized) == 0 {
+		return "[]", nil
+	}
+	encoded, err := json.Marshal(normalized)
 	if err != nil {
 		return "", fmt.Errorf("encode turn skills: %w", err)
 	}
 	return string(encoded), nil
+}
+
+// decodeTurnSkillIDs reads the stored selection back for a replay response. A
+// malformed blob is reported as "no selection" here: the freeze is where a bad
+// row must fail, and a replay must not hide an already-accepted turn.
+func decodeTurnSkillIDs(encoded string) []string {
+	if strings.TrimSpace(encoded) == "" || strings.TrimSpace(encoded) == "[]" {
+		return nil
+	}
+	var refs domain.FrozenSkillRefs
+	if err := json.Unmarshal([]byte(encoded), &refs); err != nil {
+		var legacy []string
+		if legacyErr := json.Unmarshal([]byte(encoded), &legacy); legacyErr != nil {
+			return nil
+		}
+		return legacy
+	}
+	return refs.IDs()
+}
+
+// FindSubmission answers whether a client request id already produced a turn.
+//
+// The submit path needs this before it validates anything: a retry of an accepted
+// turn must answer with that turn even if a Skill it named has since been
+// removed from the catalog, because the decision to accept it was already made
+// and the Run may already be executing.
+func (r *RunRepo) FindSubmission(ctx context.Context, sessionID, clientRequestID string) (*domain.TurnSubmission, error) {
+	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(clientRequestID) == "" {
+		return nil, nil
+	}
+	tx, err := r.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("begin find submission: %w", err)
+	}
+	defer tx.Rollback()
+	return findSubmissionTx(ctx, tx, sessionID, clientRequestID)
 }

@@ -37,13 +37,15 @@ func SelectedSkillSegments(refs domain.FrozenSkillRefs, catalog []*skills.Loaded
 		}
 		skill, ok := loaded[id]
 		if !ok {
-			return nil, fmt.Errorf("selected skill %q is no longer in the catalog: restore it or send the turn again "+
-				"without it", id)
+			return nil, domain.NewCodedError(domain.ErrorSkillNotFound,
+				fmt.Errorf("selected skill %q is no longer in the catalog: restore it or send the turn again "+
+					"without it", id))
 		}
 		if ref.Pinned() && ref.Digest != skill.ContentHash {
-			return nil, fmt.Errorf("selected skill %q does not match its frozen content digest (frozen %s, on-disk %s): "+
-				"the Skill changed after this turn was submitted, so the Run refuses to execute unpinned content",
-				id, ref.Digest, skill.ContentHash)
+			return nil, domain.NewCodedError(domain.ErrorSkillNotFound,
+				fmt.Errorf("selected skill %q does not match its frozen content digest (frozen %s, on-disk %s): "+
+					"the Skill changed after this turn was submitted, so the Run refuses to execute unpinned content",
+					id, ref.Digest, skill.ContentHash))
 		}
 		segments = append(segments, systemprompt.SkillSegment(id, skill.PromptText, SelectedSkillSource))
 	}

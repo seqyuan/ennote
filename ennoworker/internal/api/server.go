@@ -1325,12 +1325,23 @@ func (s *Server) submitInvocation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	selectedSkills := make([]string, 0, len(input.Skills))
+	skillIDs := make([]string, 0, len(input.Skills))
 	for _, skill := range input.Skills {
-		selectedSkills = append(selectedSkills, skill.ID)
+		skillIDs = append(skillIDs, skill.ID)
 	}
-	if err := s.validateSessionSkills(r.Context(), selectedSkills); err != nil {
+	// A replay must answer with the turn it already created, even when the
+	// catalog has moved on since: validation is for new work, not for retries.
+	if existing, err := s.Runs.FindSubmission(r.Context(), r.PathValue("sessionID"), requestID); err != nil {
 		s.writeStoreError(w, r, err)
+		return
+	} else if existing != nil {
+		existing.Existing = true
+		writeData(w, http.StatusOK, existing)
+		return
+	}
+	selectedSkills, resolveErr := s.resolveSessionSkills(r.Context(), skillIDs)
+	if resolveErr != nil {
+		s.writeStoreError(w, r, resolveErr)
 		return
 	}
 	if s.PromptGate != nil {

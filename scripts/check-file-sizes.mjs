@@ -47,9 +47,9 @@ export const RECORDED_CEILINGS = {
   "ennoworker/cmd/ennoworker/main.go": 2200,
   "ennoworker/cmd/ennogate/main.go": 1050,
   "ennoworker/internal/store/delegation.go": 2650,
-  "ennoworker/internal/store/runs.go": 1550,
+  "ennoworker/internal/store/runs.go": 1580, // FindSubmission + turn Skills encode/decode
   "ennoworker/internal/store/approvals.go": 750,
-  "ennoworker/internal/store/run_config_files.go": 730, // turn Skills loader + freeze merge
+  "ennoworker/internal/store/run_config_files.go": 740, // turn Skills loader + freeze merge
   "ennoworker/internal/store/mcp_profiles.go": 700,
   "ennoworker/internal/store/agent_flow_runs.go": 680,
   "ennoworker/internal/store/delegation_retry.go": 650,
@@ -58,7 +58,7 @@ export const RECORDED_CEILINGS = {
   "ennoworker/internal/skills/snapshot.go": 800,
   "ennoworker/internal/skillsmgmt/exec.go": 560,
   "ennoworker/internal/skillsmgmt/service.go": 560,
-  "ennoworker/internal/api/server.go": 1710, // turn `skills` decode + validation + error mapping
+  "ennoworker/internal/api/server.go": 1725, // turn `skills` decode + replay fast path + error mapping
   "ennoworker/internal/agentflow/orchestrator.go": 1570,
   "ennoworker/internal/packinstall/plan.go": 1300,
   "ennoworker/internal/agent/loop.go": 1320,

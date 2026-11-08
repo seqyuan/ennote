@@ -587,10 +587,12 @@ type SubmitTurnInput struct {
 	Text            string
 	Parts           []ContentBlock
 	RequestedConfig json.RawMessage
-	// Skills are the global Skills the user attached to this turn. They are
-	// frozen into the Run as SelectedSkills, alongside — never instead of — the
-	// Hero's own preload bindings.
-	Skills []string
+	// Skills are the global Skills the user attached to this turn, already
+	// resolved against the catalog at submit time. Pinning the digest here — not
+	// at freeze time — is what makes "the body the user chose" the body the model
+	// reads: an edit between submit and execution fails the Run instead of
+	// silently replacing the instructions.
+	Skills FrozenSkillRefs
 }
 
 type SubmitInvocationInput struct {
@@ -603,7 +605,7 @@ type SubmitInvocationInput struct {
 	RequestedConfig json.RawMessage
 	// Skills are the global Skills the user attached to this turn. See
 	// SubmitTurnInput.Skills.
-	Skills []string
+	Skills FrozenSkillRefs
 }
 
 type TurnSubmission struct {
@@ -611,6 +613,10 @@ type TurnSubmission struct {
 	UserMessageID string   `json:"userMessageId"`
 	Run           AgentRun `json:"run"`
 	Existing      bool     `json:"existing"`
+	// Skills echoes what the turn carries. A replay of the same idempotency key
+	// with a different selection must be visible to the caller rather than
+	// silently answered with the first choice.
+	Skills []string `json:"skills,omitempty"`
 }
 
 type RetryBlockedReason string

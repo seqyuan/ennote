@@ -2160,7 +2160,10 @@ paths:
                 config: { $ref: "#/components/schemas/RunConfigOverride" }
                 skills:
                   type: array
-                  description: Global Skills the user attached to this turn. Frozen alongside the Hero's own preload bindings.
+                  maxItems: 64
+                  description: >-
+                    Global Skills the user attached to this turn, frozen alongside the Hero's own preload bindings.
+                    Global only: project-scope Skills are not selectable, because they do not exist outside a workspace.
                   items:
                     type: object
                     additionalProperties: false

@@ -66,7 +66,7 @@ var serverSurface = map[string][]string{
 	"run_messages.go":           {"DB"},
 	"run_prompt.go":             {"DB"},
 	"session_events.go":         {"Approvals", "Compactions", "DB", "Events", "InstanceID", "Queue", "Runs", "Sessions"},
-	"session_skills.go":         {"GlobalSources", "Skills"},
+	"session_skills.go":         {"GlobalSources", "SkillCatalog", "Skills"},
 	"session_scope.go": {
 		"Approvals", "Artifacts", "Attention", "Branches", "Compactions",
 		"DelegationApprovals", "Delegations", "Events", "MCP", "Messages", "Queue",

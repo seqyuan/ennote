@@ -7200,7 +7200,7 @@ export interface operations {
                     baseMessageId?: string;
                     target: components["schemas"]["InvocationTarget"];
                     config?: components["schemas"]["RunConfigOverride"];
-                    /** @description Global Skills the user attached to this turn. Frozen alongside the Hero's own preload bindings. */
+                    /** @description Global Skills the user attached to this turn, frozen alongside the Hero's own preload bindings. Global only: project-scope Skills are not selectable, because they do not exist outside a workspace. */
                     skills?: {
                         id: string;
                     }[];
