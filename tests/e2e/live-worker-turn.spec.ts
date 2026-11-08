@@ -1,7 +1,5 @@
+import { rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { expect, test, type APIRequestContext } from "@playwright/test";
 import { selectProject } from "./harness";
 
@@ -47,6 +45,9 @@ async function workerData<T>(request: APIRequestContext, origin: string, method:
 
 test("submit turn against the live worker streams the assistant reply", async ({ page, request }) => {
   const llm = await startFakeOpenAI();
+  // The workspace now lives inside the Worker's own root, so the run deletes what
+  // it created instead of leaving a directory behind in the operator's home.
+  let workspace: string | null = null;
   try {
     await page.goto("/");
     const origin = new URL(page.url()).origin;
@@ -60,7 +61,13 @@ test("submit turn against the live worker streams the assistant reply", async ({
       contextWindow: 8000, maxOutputTokens: 256, supportsToolUse: true,
       thinkingDialect: "none", supportedThinkingEfforts: ["default"], isDefault: true,
     });
-    const workspace = mkdtempSync(join(tmpdir(), "ennote-e2e-ws-"));
+    // Project creation shares the host picker's confinement, so the workspace has
+    // to live inside a root this Worker reports rather than in a bare mkdtemp():
+    // create it through the same endpoint the picker's "New folder" uses.
+    const listing = await workerData<{ roots: string[] }>(request, origin, "get", "/v1/host/directories");
+    workspace = (await workerData<{ path: string }>(request, origin, "post", "/v1/host/directories", {
+      path: listing.roots[0], name: `ennote-e2e-ws-${stamp}`,
+    })).path;
     const created = await workerData<{ project: { id: string; name: string } }>(request, origin, "post", "/v1/projects", {
       name: `Live worker ${stamp}`, hostPath: workspace,
     });
@@ -87,5 +94,6 @@ test("submit turn against the live worker streams the assistant reply", async ({
     await expect(page.getByText("pong from worker")).toBeVisible({ timeout: 30_000 });
   } finally {
     await llm.close();
+    if (workspace !== null) rmSync(workspace, { recursive: true, force: true });
   }
 });
