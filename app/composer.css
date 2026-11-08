@@ -773,8 +773,8 @@ html.dark .composer-editor.composer-no-session::after {
   bottom: calc(100% + 4px);
   z-index: 20;
   box-sizing: border-box;
-  min-width: 218px;
-  max-width: 360px;
+  min-width: 264px;
+  max-width: 340px;
   padding: 4px;
   display: flex;
   flex-direction: column;
@@ -810,9 +810,24 @@ html.dark .composer-editor.composer-no-session::after {
   height: 16px;
   color: var(--cmp-text-tertiary);
 }
-.permission-chip-option-label {
+/* Label over its one-line description: the three modes differ only in what
+   happens to a non-read-only tool, and a name alone does not say which. */
+.permission-chip-option-copy {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  gap: 1px;
   min-width: 0;
+}
+.permission-chip-option-label {
+  min-width: 0;
+}
+.permission-chip-option-desc {
+  color: var(--cmp-text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  line-height: 15px;
+  white-space: normal;
 }
 .permission-chip-check {
   display: grid;

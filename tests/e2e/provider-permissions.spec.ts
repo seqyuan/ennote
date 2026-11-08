@@ -47,7 +47,11 @@ test("each turn freezes the selected permission profile", async ({ page }) => {
   await page.getByText(session.title, { exact: true }).click();
 
   await page.getByRole("button", { name: /Permission mode/ }).click();
-  await expect(page.getByRole("menuitemradio", { name: "Discuss", exact: true })).toHaveAttribute("aria-checked", "true");
+  // The chip labels each mode by what happens to a non-read-only tool; the stored
+  // mode value stays `discuss`, which is what the frozen policy below pins.
+  await expect(page.getByRole("menuitemradio", { name: "Read-only", exact: true })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("menuitemradio", { name: "Read-only", exact: true }))
+    .toHaveAccessibleDescription(/Writing files, running commands/);
   await page.getByRole("menuitemradio", { name: "Ask", exact: true }).click();
   await page.getByRole("textbox", { name: "Message the agent" }).fill("run this turn");
   await page.getByRole("button", { name: "Send", exact: true }).click();

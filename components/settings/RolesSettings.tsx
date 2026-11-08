@@ -3,6 +3,7 @@
 import { ArrowLeft, Bot, Check, FileText, Loader2, Plus, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { modelOptions } from "@/components/graphs/types";
+import { useT } from "@/components/LocaleProvider";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import type { ModelProfile, ProviderProfile } from "@/components/settings/types";
 import { apiFetch } from "@/lib/worker-api.client";
@@ -16,6 +17,10 @@ type RoleContextMode = (typeof ROLE_CONTEXT_MODES)[number];
 const ROLE_CONTEXT_LABELS: Record<RoleContextMode, string> = {
   room: "Room", reply: "Reply", fresh: "Fresh", task_only: "Task only",
 };
+
+// A Role's permission ceiling is the same three modes a Run runs under, ordered
+// by strictness so the tightest option is the first one read.
+const PERMISSION_CEILINGS = ["discuss", "ask", "auto"] as const;
 
 interface RoleDocument {
   schemaVersion: number;
@@ -68,6 +73,7 @@ export function RolesSettings({ models, providers, setError }: {
   providers: ProviderProfile[];
   setError: (value: string | null) => void;
 }) {
+  const t = useT();
   const options = useMemo(() => modelOptions(models, providers), [models, providers]);
   const [roles, setRoles] = useState<RoleSummary[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -240,7 +246,9 @@ export function RolesSettings({ models, providers, setError }: {
             <section><h3>Runtime</h3><div className="global-role-grid">
               <label className="wide">Model<select value={detail.document.model.ref} onChange={(event) => updateAndSave((document) => ({ ...document, model: { ...document.model, ref: event.target.value } }))}>{options.map((option) => <option key={option.ref} value={option.ref}>{option.label} · {option.ref}</option>)}</select></label>
               <label>Thinking<select value={detail.document.model.thinkingEffort} onChange={(event) => updateAndSave((document) => ({ ...document, model: { ...document.model, thinkingEffort: event.target.value as ThinkingEffort } }))}>{(["default", "low", "medium", "high"] as const).map((effort) => <option key={effort}>{effort}</option>)}</select></label>
-              <label>Permission ceiling<select value={detail.document.permissionCeiling} onChange={(event) => updateAndSave((document) => ({ ...document, permissionCeiling: event.target.value as RoleDocument["permissionCeiling"] }))}><option value="discuss">Discuss</option><option value="auto">Auto</option><option value="ask">Ask</option></select></label>
+              {/* Ordered by strictness, and labelled with the same names the composer chip uses:
+                a Role's ceiling and a Run's mode are the same three values. */}
+              <label>Permission ceiling<select value={detail.document.permissionCeiling} onChange={(event) => updateAndSave((document) => ({ ...document, permissionCeiling: event.target.value as RoleDocument["permissionCeiling"] }))}>{PERMISSION_CEILINGS.map((mode) => <option key={mode} value={mode}>{t(`permission.${mode}`)}</option>)}</select></label>
               <label className="wide">Skills<input value={detail.document.skills.map((skill) => skill.id).join(", ")} onChange={(event) => updateLocal((document) => ({ ...document, skills: event.target.value.split(",").map((id) => id.trim()).filter(Boolean).map((id) => ({ id, mode: "available" as const })) }))} onBlur={() => void save(detail.document)} placeholder="report-writing, code-review" /></label>
             </div></section>
             <section><h3>Execution context</h3><div className="global-role-grid">

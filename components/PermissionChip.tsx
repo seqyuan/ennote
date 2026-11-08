@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useT } from "@/components/LocaleProvider";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
+import type { Translator } from "@/lib/messages";
 import type { PermissionMode } from "@/lib/permission-mode";
 
 const MODES: PermissionMode[] = ["discuss", "ask", "auto"];
@@ -36,8 +37,15 @@ function PermissionGlyph({ mode }: { mode: PermissionMode }) {
   );
 }
 
-function modeLabel(mode: PermissionMode): string {
-  return mode === "discuss" ? "Discuss" : mode === "ask" ? "Ask" : "Auto";
+/**
+ * Labels name what happens to a non-read-only tool — refused, asks you, or runs —
+ * because that is the only axis the three modes differ on. The stored mode values
+ * stay `discuss`/`ask`/`auto`: they are written into tool policies, Role
+ * permission ceilings, and frozen Run snapshots, so renaming them would be a
+ * compatibility break for a display problem.
+ */
+function modeLabel(mode: PermissionMode, t: Translator): string {
+  return t(`permission.${mode}`);
 }
 
 export function PermissionChip({
@@ -102,16 +110,16 @@ export function PermissionChip({
         ref={triggerRef}
         type="button"
         className="permission-chip-trigger"
-        aria-label={`${t("composer.permissionMode")}: ${modeLabel(permissionMode)}`}
+        aria-label={`${t("composer.permissionMode")}: ${modeLabel(permissionMode, t)}`}
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         aria-controls={menuOpen ? `${id}-menu` : undefined}
         disabled={locked}
-        title={frozen ? `${modeLabel(permissionMode)} ${t("composer.frozenForRun")}` : undefined}
+        title={frozen ? `${modeLabel(permissionMode, t)} ${t("composer.frozenForRun")}` : undefined}
         onClick={() => setOpen((value) => !value)}
       >
         <span className="permission-chip-icon" aria-hidden><PermissionGlyph mode={permissionMode} /></span>
-        <span className="permission-chip-label">{modeLabel(permissionMode)}</span>
+        <span className="permission-chip-label">{modeLabel(permissionMode, t)}</span>
         <svg className={menuOpen ? "permission-chip-chevron open" : "permission-chip-chevron"} width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M3.5 5.25L7 8.75L10.5 5.25" />
         </svg>
@@ -120,17 +128,26 @@ export function PermissionChip({
         <div ref={menuRef} id={`${id}-menu`} className="permission-chip-menu" role="menu" aria-label={t("composer.permissionMode")}>
           {MODES.map((mode) => {
             const selected = mode === permissionMode;
+            const descriptionID = `${id}-${mode}-description`;
             return (
               <button
                 key={mode}
                 type="button"
                 role="menuitemradio"
                 aria-checked={selected}
+                // The name is the label alone; the description carries the behaviour,
+                // so a screen reader announces "Read-only, checked, <what it does>"
+                // instead of one long run-on name.
+                aria-label={modeLabel(mode, t)}
+                aria-describedby={descriptionID}
                 className={selected ? "permission-chip-option selected" : "permission-chip-option"}
                 onClick={() => { setPermissionMode(mode); setOpen(false); triggerRef.current?.focus(); }}
               >
                 <span className="permission-chip-option-icon" aria-hidden><PermissionGlyph mode={mode} /></span>
-                <span className="permission-chip-option-label">{modeLabel(mode)}</span>
+                <span className="permission-chip-option-copy">
+                  <span className="permission-chip-option-label">{modeLabel(mode, t)}</span>
+                  <span className="permission-chip-option-desc" id={descriptionID}>{t(`permission.${mode}.description`)}</span>
+                </span>
                 <span className="permission-chip-check" aria-hidden>
                   {selected && (
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

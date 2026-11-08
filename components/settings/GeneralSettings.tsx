@@ -53,13 +53,14 @@ export function GeneralSettings() {
               type="button"
               className={`appearance-cube ${defaultPermission === permission ? "selected" : ""}`}
               aria-pressed={defaultPermission === permission}
+              title={t(`permission.${permission}.description`)}
               onClick={() => {
                 setDefaultPermission(permission);
                 writeDefaultPermissionMode(permission);
                 markSaved();
               }}
             >
-              <span>{permission === "discuss" ? "Discuss" : permission === "ask" ? "Ask" : "Auto"}</span>
+              <span>{t(`permission.${permission}`)}</span>
             </button>
           ))}
         </div>
