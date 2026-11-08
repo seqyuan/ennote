@@ -387,8 +387,9 @@ func TestContractSamples(t *testing.T) {
 	// and a sample has to be a legal answer.
 	server.InstanceID = "contract-sample"
 	// The workspace path is the fixture's, and its random directory name would
-	// diff on every run.
-	hostPath := t.TempDir()
+	// diff on every run. It lives inside the fixture's host root because project
+	// creation shares the host picker's confinement.
+	hostPath := hostWorkspace(t, server, "contract-workspace")
 
 	// The Authoring surface (Roles, Graphs) reads the file-native source store, so
 	// the fixture needs one before those routes can answer at all.

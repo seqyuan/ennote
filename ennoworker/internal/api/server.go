@@ -160,6 +160,10 @@ type Server struct {
 	CheckAllowlistAllowsAll bool
 	// HostHome confines GET/POST /v1/host/directories. Empty uses os.UserHomeDir.
 	HostHome string
+	// HostRoots are additional browsable roots beyond HostHome, from
+	// ENNOTE_HOST_ROOTS. Every host path the picker lists, creates, or turns into
+	// a project must resolve inside Home or one of these roots.
+	HostRoots []string
 }
 
 func (s *Server) Handler() http.Handler {
@@ -763,8 +767,21 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_project", "name and hostPath are required", false)
 		return
 	}
+	// The picker's confinement has to hold here too: a project's HostPath is the
+	// Workspace jail root, so accepting a path the picker refuses would make the
+	// browse restriction decorative for any caller that skips it.
+	roots, err := s.hostRoots()
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	hostPath, err := confineHostPaths(roots, expandHomePath(input.HostPath))
+	if err != nil {
+		writeHostDirectoryError(w, r, err)
+		return
+	}
 	project, workspace, err := s.Projects.CreateWithWorkspace(r.Context(), domain.CreateProjectInput{
-		Name: input.Name, Description: input.Description, HostPath: input.HostPath,
+		Name: input.Name, Description: input.Description, HostPath: hostPath,
 	})
 	if err != nil {
 		writeError(w, r, http.StatusBadRequest, "invalid_workspace", err.Error(), false)

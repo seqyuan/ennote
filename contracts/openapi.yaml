@@ -4113,11 +4113,16 @@ components:
         hidden: { type: boolean }
     HostDirectoryListing:
       type: object
-      required: [path, home, crumbs, entries, truncated]
+      required: [path, home, roots, crumbs, entries, truncated]
       additionalProperties: false
       properties:
         path: { type: string }
         home: { type: string }
+        roots:
+          type: array
+          minItems: 1
+          items: { type: string }
+          description: Every browsable root, home first, as configured by ENNOTE_HOST_ROOTS.
         crumbs:
           type: array
           items: { $ref: "#/components/schemas/HostDirectoryEntry" }

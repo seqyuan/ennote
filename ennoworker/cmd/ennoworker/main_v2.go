@@ -307,6 +307,7 @@ func run() error {
 		Trust:      trustStore, GlobalSources: globalSources,
 		GraphBuilder:   &graphbuilder.Service{Sources: globalSources, Completer: builderCompleter},
 		Packs:          packInstaller,
+		HostRoots:      cfg.HostRoots,
 		GraphRuns:      graphRuns,
 		FlowRuns:       graphRuns,
 		SkillCatalog:   skillCatalog,

@@ -287,6 +287,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "directory.loading": "Loading…",
     "directory.truncated": "Too many folders to list; only the beginning is shown.",
     "directory.showHidden": "Show hidden files",
+    "directory.roots": "Browse roots",
 
     "empty.project.title": "Choose a project to start",
     "empty.project.body": "Sessions, files, and runs are scoped per project. Choose or create a project from the top-left.",
@@ -784,6 +785,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "directory.loading": "加载中…",
     "directory.truncated": "文件夹过多，仅显示开头部分。",
     "directory.showHidden": "显示隐藏文件",
+    "directory.roots": "浏览根目录",
 
     "empty.project.title": "选择一个项目开始",
     "empty.project.body": "会话、文件和运行记录都按项目隔离。从左上角选择或新建项目。",

@@ -30,6 +30,17 @@ function visibleCrumbs(listing: DirectoryListing, homeLabel: string): DirectoryE
   ];
 }
 
+// rootLabel keeps a configured root legible in a chip: Home speaks for itself, every
+// other root goes by its last segment with the full path in the tooltip.
+function rootLabel(root: string, homeLabel: string, home: string): string {
+  return root === home ? homeLabel : basename(root);
+}
+
+function isWithinRoot(path: string | null, root: string, separator: "/" | "\\"): boolean {
+  if (!path) return false;
+  return path === root || path.startsWith(root.endsWith(separator) ? root : `${root}${separator}`);
+}
+
 function DirectoryColumn({
   listing, selectedPath, showHidden, disabled, onSelect,
 }: {
@@ -154,6 +165,10 @@ export function ProjectCreateDialog({ busy, onCreate, onClose }: {
   const targetPath = selected?.path ?? parent?.path ?? null;
   const targetName = targetPath ? basename(targetPath) : "";
   const crumbs = useMemo(() => parent ? visibleCrumbs(parent, t("directory.home")) : [], [parent, t]);
+  // roots is the Worker's allowed set, home first, from ENNOTE_HOST_ROOTS. One root
+  // is the common case and needs no switcher; an older Worker omits the field.
+  const roots = parent?.roots ?? [];
+  const separator = parent ? separatorFor(parent) : "/";
   const interactionLocked = busy || creatingFolder;
 
   // One Escape consumes one layer of state: folder draft, path draft, then the
@@ -168,7 +183,6 @@ export function ProjectCreateDialog({ busy, onCreate, onClose }: {
   const openPathEditor = () => {
     if (!parent || interactionLocked) return;
     const base = selected?.path ?? parent.path;
-    const separator = separatorFor(parent);
     setPathDraft(base.endsWith(separator) ? base : `${base}${separator}`);
   };
 
@@ -247,6 +261,22 @@ export function ProjectCreateDialog({ busy, onCreate, onClose }: {
               />
             )}
           </div>
+          {roots.length > 1 && (
+            <nav className="project-picker-roots" aria-label={t("directory.roots")}>
+              {roots.map((root) => (
+                <button
+                  key={root}
+                  type="button"
+                  className={`project-picker-root${isWithinRoot(parent?.path ?? null, root, separator) ? " active" : ""}`}
+                  title={root}
+                  disabled={interactionLocked}
+                  onClick={() => void land(root)}
+                >
+                  {rootLabel(root, t("directory.home"), parent?.home ?? "")}
+                </button>
+              ))}
+            </nav>
+          )}
         </header>
 
         <main className="project-picker-content">

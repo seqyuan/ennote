@@ -138,6 +138,18 @@ ENNOTE_TLS_CERT=/path/cert.pem ENNOTE_TLS_KEY=/path/key.pem ennogate
 
 未设置 `ENNOTE_GATE_ALLOWED_HOSTS` 时，主机名访问（包括 `myhost.local` 这类 mDNS 名）一律 403：攻击者可以让自己的域名解析到 127.0.0.1，但无法让浏览器在 `Host` 头里写入一个未经授权的主机名。
 
+### 工作区目录范围
+
+「新建工作区」的目录选择器只能浏览进程用户主目录，以及 `ENNOTE_HOST_ROOTS` 里显式列出的目录（按操作系统路径分隔符分隔，Unix 上是 `:`）。要访问挂在别处的数据盘，启动时声明它：
+
+```bash
+ENNOTE_HOST_ROOTS=/Volumes/data:/Volumes/project ennogate
+```
+
+每个条目必须是绝对路径，否则 Worker 拒绝启动；目录可以暂时不存在（例如稍后才挂载）。主目录始终可浏览，额外根只做扩展，不会替代它。选择器把这些根显示成一行可点击的切换条，路径栏里手输同样有效。
+
+`ENNOTE_HOST_ROOTS` 同时约束项目创建：`POST /v1/projects` 的 `hostPath` 必须落在主目录或某个已声明的根内，否则返回 `403 host_directory_forbidden`（相对路径返回 `400 invalid_host_directory`）。软链绕不过去：路径在 symlink 解析之后会再判一次，建在主目录里的 `~/data -> /Volumes/data` 依旧被拒，而且不会出现在目录列表里。可行的是 bind mount 或这里显式声明根。
+
 ## 目录
 
 ```

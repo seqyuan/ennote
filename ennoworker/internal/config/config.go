@@ -31,6 +31,11 @@ type Config struct {
 	SkillsDir string
 	// BuiltinSkillsDir is the built-in skills directory.
 	BuiltinSkillsDir string
+	// HostRoots are extra directories outside the process user's home that the
+	// host directory picker may browse and create projects in
+	// ($ENNOTE_HOST_ROOTS). Home is always browsable; the entries widen the
+	// confinement, they never replace it.
+	HostRoots []string
 }
 
 // Load reads configuration from environment variables, returning
@@ -75,7 +80,47 @@ func Load() (*Config, error) {
 		cfg.MaxConcurrentRuns = n
 	}
 
+	roots, err := hostRoots()
+	if err != nil {
+		return nil, err
+	}
+	cfg.HostRoots = roots
+
 	return cfg, nil
+}
+
+// hostRoots reads ENNOTE_HOST_ROOTS: operating-system path-list separated extra
+// roots for the host directory picker ("a:b" on Unix, "a;b" on Windows).
+//
+// An entry must be absolute. A relative entry would be resolved against the
+// Worker's working directory, so the same configuration would confine the picker
+// to a different root depending on how ennogate was started — the one failure mode
+// worth refusing at startup, because the confinement is the only thing between the
+// UI and the rest of the filesystem. Missing directories are accepted here: a
+// root can be a mount that appears later, and every request re-resolves it.
+func hostRoots() ([]string, error) {
+	raw := strings.TrimSpace(os.Getenv("ENNOTE_HOST_ROOTS"))
+	if raw == "" {
+		return nil, nil
+	}
+	roots := make([]string, 0, 4)
+	seen := map[string]bool{}
+	for _, entry := range filepath.SplitList(raw) {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if !filepath.IsAbs(entry) {
+			return nil, fmt.Errorf("ENNOTE_HOST_ROOTS entry %q must be an absolute path", entry)
+		}
+		cleaned := filepath.Clean(entry)
+		if seen[cleaned] {
+			continue
+		}
+		seen[cleaned] = true
+		roots = append(roots, cleaned)
+	}
+	return roots, nil
 }
 
 func sandboxMode() string {

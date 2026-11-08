@@ -129,6 +129,17 @@ func setupServer(t *testing.T, control RunController) (*Server, http.Handler) {
 	return server, server.Handler()
 }
 
+// hostWorkspace creates a project workspace directory inside the fixture's
+// allowed host root. Project creation shares the host picker's confinement, so a
+// bare t.TempDir() — which lives outside HostHome — is refused by design; a test
+// that needs a project passes this instead.
+func hostWorkspace(t *testing.T, server *Server, name string) string {
+	t.Helper()
+	path := filepath.Join(server.HostHome, name)
+	require.NoError(t, os.MkdirAll(path, 0o700))
+	return path
+}
+
 func request(t *testing.T, handler http.Handler, method, path string, body any, authenticated bool) *httptest.ResponseRecorder {
 	t.Helper()
 	var reader io.Reader
@@ -465,7 +476,7 @@ func apiRoleDefinition(modelID string) domain.RoleDefinition {
 }
 
 func TestProfileManagementAndSessionDefaultModel(t *testing.T) {
-	_, handler := setupServer(t, nil)
+	server, handler := setupServer(t, nil)
 	// Credential values are accepted on write and never returned.
 	createdProvider := request(t, handler, http.MethodPost, "/v1/provider-profiles", map[string]any{
 		"name": "DeepSeek", "providerType": "openai-compatible", "baseUrl": "https://api.deepseek.com", "apiKey": "sk-deepseek-1",
@@ -496,7 +507,7 @@ func TestProfileManagementAndSessionDefaultModel(t *testing.T) {
 	assert.True(t, models[0].IsDefault)
 
 	projectResponse := request(t, handler, http.MethodPost, "/v1/projects", map[string]any{
-		"name": "profiles", "hostPath": t.TempDir(),
+		"name": "profiles", "hostPath": hostWorkspace(t, server, "profiles"),
 	}, true)
 	var project struct {
 		Project domain.Project `json:"project"`
@@ -610,9 +621,9 @@ func TestBusinessAPIRequiresBearerToken(t *testing.T) {
 }
 
 func TestProjectAndSessionCRUD(t *testing.T) {
-	_, handler := setupServer(t, nil)
+	server, handler := setupServer(t, nil)
 	created := request(t, handler, http.MethodPost, "/v1/projects", map[string]any{
-		"name": "Lung", "description": "scRNA", "hostPath": t.TempDir(),
+		"name": "Lung", "description": "scRNA", "hostPath": hostWorkspace(t, server, "lung"),
 	}, true)
 	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
 	var result struct {
@@ -792,7 +803,7 @@ func (f *failingEnqueueController) Enqueue(ctx context.Context, runID string) er
 func TestSubmitTurnSettlesTheRunWhenEnqueueFails(t *testing.T) {
 	controller := &failingEnqueueController{}
 	server, handler := setupServer(t, controller)
-	project := request(t, handler, http.MethodPost, "/v1/projects", map[string]any{"name": "P", "hostPath": t.TempDir()}, true)
+	project := request(t, handler, http.MethodPost, "/v1/projects", map[string]any{"name": "P", "hostPath": hostWorkspace(t, server, "p")}, true)
 	var created struct {
 		Project domain.Project `json:"project"`
 	}
@@ -834,8 +845,8 @@ func TestSubmitTurnSettlesTheRunWhenEnqueueFails(t *testing.T) {
 
 func TestSubmitTurnQueueSteerAndCancel(t *testing.T) {
 	controller := &fakeController{}
-	_, handler := setupServer(t, controller)
-	project := request(t, handler, http.MethodPost, "/v1/projects", map[string]any{"name": "P", "hostPath": t.TempDir()}, true)
+	server, handler := setupServer(t, controller)
+	project := request(t, handler, http.MethodPost, "/v1/projects", map[string]any{"name": "P", "hostPath": hostWorkspace(t, server, "p")}, true)
 	var created struct {
 		Project domain.Project `json:"project"`
 	}

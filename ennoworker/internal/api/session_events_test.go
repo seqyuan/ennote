@@ -17,10 +17,10 @@ import (
 
 // seedSession creates a project and a session through the API, the way a client
 // does, and returns the session id.
-func seedSession(t *testing.T, handler http.Handler) string {
+func seedSession(t *testing.T, server *Server, handler http.Handler) string {
 	t.Helper()
 	project := request(t, handler, http.MethodPost, "/v1/projects",
-		map[string]any{"name": "events", "hostPath": t.TempDir()}, true)
+		map[string]any{"name": "events", "hostPath": hostWorkspace(t, server, "events")}, true)
 	var created struct {
 		Project domain.Project `json:"project"`
 	}
@@ -50,7 +50,7 @@ func TestSessionEventsAnswers503WhenItsDependenciesAreMissing(t *testing.T) {
 	// a process missing one of them has to say so instead of serving a feed that
 	// silently omits a category.
 	server, handler := setupServer(t, &fakeController{})
-	sessionID := seedSession(t, handler)
+	sessionID := seedSession(t, server, handler)
 	server.Queue = nil
 
 	response := request(t, handler, http.MethodGet, "/v1/sessions/"+sessionID+"/events", nil, true)
@@ -73,7 +73,7 @@ func TestSessionEventsRefusesAnUnknownSession(t *testing.T) {
 func TestSessionEventsStreamsTheSubscribedSnapshotFirst(t *testing.T) {
 	server, handler := setupServer(t, &fakeController{})
 	server.InstanceID = "stream-instance"
-	sessionID := seedSession(t, handler)
+	sessionID := seedSession(t, server, handler)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	recorder := newFlushingRecorder()
@@ -160,7 +160,7 @@ func TestSessionEventFrameCarriesTheCommittedSeqRange(t *testing.T) {
 	// client places the run in the timeline with firstSeq/lastSeq, and they are the
 	// run's span rather than a per-frame delta.
 	server, handler := setupServer(t, &fakeController{})
-	sessionID := seedSession(t, handler)
+	sessionID := seedSession(t, server, handler)
 
 	run := request(t, handler, http.MethodPost, "/v1/sessions/"+sessionID+"/turns",
 		map[string]any{"text": "hello"}, true)
@@ -208,7 +208,7 @@ func TestSessionEventFrameRendersEveryOtherEventPlainly(t *testing.T) {
 
 func TestSessionMessageSeqHighWaterIsZeroWithoutMessages(t *testing.T) {
 	server, handler := setupServer(t, &fakeController{})
-	sessionID := seedSession(t, handler)
+	sessionID := seedSession(t, server, handler)
 
 	high, err := server.sessionMessageSeqHighWater(context.Background(), sessionID)
 	require.NoError(t, err)
@@ -217,7 +217,7 @@ func TestSessionMessageSeqHighWaterIsZeroWithoutMessages(t *testing.T) {
 
 func TestBuildSessionSnapshotReportsNoActiveRunForAFreshSession(t *testing.T) {
 	server, handler := setupServer(t, &fakeController{})
-	sessionID := seedSession(t, handler)
+	sessionID := seedSession(t, server, handler)
 
 	snapshot, err := server.buildSessionSnapshot(context.Background(), sessionID)
 	require.NoError(t, err)

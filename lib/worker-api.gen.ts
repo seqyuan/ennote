@@ -2764,6 +2764,8 @@ export interface components {
         HostDirectoryListing: {
             path: string;
             home: string;
+            /** @description Every browsable root, home first, as configured by ENNOTE_HOST_ROOTS. */
+            roots: string[];
             crumbs: components["schemas"]["HostDirectoryEntry"][];
             entries: components["schemas"]["HostDirectoryEntry"][];
             truncated: boolean;

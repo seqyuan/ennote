@@ -36,12 +36,12 @@ func (s *Server) inspectPack(w http.ResponseWriter, r *http.Request) {
 			"source.kind must be \"path\"; S1 does not inspect URL or git sources", false)
 		return
 	}
-	home, err := s.hostHomeDir()
+	roots, err := s.hostRoots()
 	if err != nil {
 		writeInternal(w, r, err)
 		return
 	}
-	target, err := confineHostPath(home, body.Source.Path)
+	target, err := confineHostPaths(roots, body.Source.Path)
 	if err != nil {
 		writePackPathError(w, r, err)
 		return
@@ -67,7 +67,7 @@ func writePackPathError(w http.ResponseWriter, r *http.Request, err error) {
 			"source.path must be fully qualified", false)
 	case errors.Is(err, errHostDirectoryForbidden):
 		writeError(w, r, http.StatusForbidden, agentpack.CodePackPathForbidden,
-			"source.path must be inside the home directory", false)
+			"source.path must be inside the home directory or a configured host root", false)
 	default:
 		writeInternal(w, r, err)
 	}

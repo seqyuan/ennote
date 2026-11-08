@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,24 +19,28 @@ type hostDirectoryEntry struct {
 }
 
 type hostDirectoryListing struct {
-	Path      string               `json:"path"`
+	Path string `json:"path"`
+	// Home is the primary root: the directory the picker lands on when no path is
+	// requested. Roots is the full allowed set, Home first, so a client can offer
+	// the configured extra roots as jumps instead of making the user type them.
 	Home      string               `json:"home"`
+	Roots     []string             `json:"roots"`
 	Crumbs    []hostDirectoryEntry `json:"crumbs"`
 	Entries   []hostDirectoryEntry `json:"entries"`
 	Truncated bool                 `json:"truncated"`
 }
 
 func (s *Server) listHostDirectories(w http.ResponseWriter, r *http.Request) {
-	home, err := s.hostHomeDir()
+	roots, err := s.hostRoots()
 	if err != nil {
 		writeInternal(w, r, err)
 		return
 	}
 	target := strings.TrimSpace(r.URL.Query().Get("path"))
 	if target == "" {
-		target = home
+		target = roots[0]
 	}
-	confined, err := confineHostPath(home, target)
+	confined, err := confineHostPaths(roots, target)
 	if err != nil {
 		writeHostDirectoryError(w, r, err)
 		return
@@ -58,7 +63,7 @@ func (s *Server) listHostDirectories(w http.ResponseWriter, r *http.Request) {
 		if !isDirectory {
 			continue
 		}
-		if _, err := confineHostPath(home, child); err != nil {
+		if _, err := confineHostPaths(roots, child); err != nil {
 			continue
 		}
 		if len(directories) == hostDirectoryListingLimit {
@@ -74,12 +79,13 @@ func (s *Server) listHostDirectories(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeData(w, http.StatusOK, hostDirectoryListing{
-		Path: confined, Home: home, Crumbs: hostDirectoryCrumbs(home, confined), Entries: directories, Truncated: truncated,
+		Path: confined, Home: roots[0], Roots: roots,
+		Crumbs: hostDirectoryCrumbs(roots, confined), Entries: directories, Truncated: truncated,
 	})
 }
 
 func (s *Server) createHostDirectory(w http.ResponseWriter, r *http.Request) {
-	home, err := s.hostHomeDir()
+	roots, err := s.hostRoots()
 	if err != nil {
 		writeInternal(w, r, err)
 		return
@@ -91,7 +97,7 @@ func (s *Server) createHostDirectory(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	parent, err := confineHostPath(home, input.Path)
+	parent, err := confineHostPaths(roots, input.Path)
 	if err != nil {
 		writeHostDirectoryError(w, r, err)
 		return
@@ -102,7 +108,7 @@ func (s *Server) createHostDirectory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	target := filepath.Join(parent, name)
-	if _, err := confineHostPath(home, target); err != nil {
+	if _, err := confineHostPaths(roots, target); err != nil {
 		writeHostDirectoryError(w, r, err)
 		return
 	}
@@ -117,16 +123,48 @@ func (s *Server) createHostDirectory(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusCreated, map[string]string{"path": target})
 }
 
-func (s *Server) hostHomeDir() (string, error) {
+// hostRoots resolves the roots the host directory picker may browse: the primary
+// root (HostHome, or the process user's home when unset) followed by every
+// configured extra root. Roots nested inside an earlier root are dropped, so the
+// first entry is always the landing directory and a path has exactly one crumb
+// stop. A root that does not exist yet is kept in its canonical-parent form rather
+// than refused: it can be a mount that appears after the Worker started.
+func (s *Server) hostRoots() ([]string, error) {
 	home := strings.TrimSpace(s.HostHome)
 	if home == "" {
 		userHome, err := os.UserHomeDir()
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		home = userHome
 	}
-	absolute, err := filepath.Abs(home)
+	primary, err := canonicalHostRoot(home)
+	if err != nil {
+		return nil, err
+	}
+	roots := []string{primary}
+	for _, extra := range s.HostRoots {
+		extra = strings.TrimSpace(extra)
+		if extra == "" {
+			continue
+		}
+		canonical, err := canonicalHostRoot(extra)
+		if err != nil {
+			return nil, fmt.Errorf("resolve host root %q: %w", extra, err)
+		}
+		if pathInsideAny(roots, canonical) {
+			continue
+		}
+		roots = append(roots, canonical)
+	}
+	return roots, nil
+}
+
+// canonicalHostRoot resolves a root to an absolute, symlink-free directory. A
+// missing directory is canonicalized through its nearest existing parent so the
+// confinement check can still be evaluated for a path that has not been created.
+func canonicalHostRoot(root string) (string, error) {
+	absolute, err := filepath.Abs(root)
 	if err != nil {
 		return "", err
 	}
@@ -140,7 +178,10 @@ func (s *Server) hostHomeDir() (string, error) {
 	return filepath.Clean(canonical), nil
 }
 
-func confineHostPath(home, target string) (string, error) {
+// confineHostPaths resolves target against the allowed roots. It requires an
+// absolute path inside at least one root both before and after symlink resolution,
+// which is what stops `<root>/link -> /etc` from escaping the confinement.
+func confineHostPaths(roots []string, target string) (string, error) {
 	if strings.TrimSpace(target) == "" {
 		return "", errHostDirectoryRelative
 	}
@@ -148,7 +189,7 @@ func confineHostPath(home, target string) (string, error) {
 		return "", errHostDirectoryRelative
 	}
 	cleaned := filepath.Clean(target)
-	if !pathInsideHome(home, cleaned) {
+	if !pathInsideAny(roots, cleaned) {
 		return "", errHostDirectoryForbidden
 	}
 	resolved, err := filepath.EvalSymlinks(cleaned)
@@ -156,13 +197,13 @@ func confineHostPath(home, target string) (string, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			parent, parentErr := filepath.EvalSymlinks(filepath.Dir(cleaned))
 			if parentErr != nil {
-				if !pathInsideHome(home, filepath.Dir(cleaned)) {
+				if !pathInsideAny(roots, filepath.Dir(cleaned)) {
 					return "", errHostDirectoryForbidden
 				}
 				return cleaned, nil
 			}
 			joined := filepath.Join(parent, filepath.Base(cleaned))
-			if !pathInsideHome(home, joined) {
+			if !pathInsideAny(roots, joined) {
 				return "", errHostDirectoryForbidden
 			}
 			return joined, nil
@@ -170,23 +211,49 @@ func confineHostPath(home, target string) (string, error) {
 		return "", err
 	}
 	resolved = filepath.Clean(resolved)
-	if !pathInsideHome(home, resolved) {
+	if !pathInsideAny(roots, resolved) {
 		return "", errHostDirectoryForbidden
 	}
 	return resolved, nil
 }
 
-func pathInsideHome(home, path string) bool {
-	rel, err := filepath.Rel(home, path)
+func pathInsideAny(roots []string, path string) bool {
+	for _, root := range roots {
+		if pathInside(root, path) {
+			return true
+		}
+	}
+	return false
+}
+
+func pathInside(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		return false
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)))
 }
 
+// expandHomePath turns a leading "~" or "~/" into the process user's home so a
+// shell-style path is confined as the directory it actually names.
+func expandHomePath(path string) string {
+	path = strings.TrimSpace(path)
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	if path == "~" {
+		return home
+	}
+	return filepath.Join(home, path[2:])
+}
+
 var (
 	errHostDirectoryRelative  = errors.New("path must be fully qualified")
-	errHostDirectoryForbidden = errors.New("path must be inside the home directory")
+	errHostDirectoryForbidden = errors.New("path must be inside the home directory or a configured host root")
 )
 
 func writeHostDirectoryError(w http.ResponseWriter, r *http.Request, err error) {
@@ -201,21 +268,30 @@ func writeHostDirectoryError(w http.ResponseWriter, r *http.Request, err error) 
 	writeError(w, r, http.StatusBadRequest, "host_directory_unreadable", err.Error(), false)
 }
 
-func hostDirectoryCrumbs(home, target string) []hostDirectoryEntry {
+// hostDirectoryCrumbs walks from target up to the root that contains it. With
+// several roots the stop is the containing root, not necessarily Home: a path
+// under an extra root never produces crumbs above that root.
+func hostDirectoryCrumbs(roots []string, target string) []hostDirectoryEntry {
 	current := filepath.Clean(target)
-	home = filepath.Clean(home)
+	root := current
+	for _, candidate := range roots {
+		if pathInside(candidate, current) {
+			root = candidate
+			break
+		}
+	}
 	crumbs := make([]hostDirectoryEntry, 0, 8)
 	for {
 		name := filepath.Base(current)
-		if current == home {
-			name = home
+		if current == root {
+			name = root
 		}
 		crumbs = append(crumbs, hostDirectoryEntry{Name: name, Path: current, Hidden: false})
-		if current == home {
+		if current == root {
 			break
 		}
 		parent := filepath.Dir(current)
-		if parent == current || !pathInsideHome(home, parent) {
+		if parent == current || !pathInside(root, parent) {
 			break
 		}
 		current = parent

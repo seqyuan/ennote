@@ -137,3 +137,26 @@ func TestParseLogLevelAndLoadValidation(t *testing.T) {
 	_, err = config.Load()
 	require.ErrorContains(t, err, "invalid ENNOTE_LOG_LEVEL")
 }
+
+func TestLoadReadsHostRootsAsAPathList(t *testing.T) {
+	t.Setenv("ENNOTE_HOME", t.TempDir())
+	first := t.TempDir()
+	second := filepath.Join(t.TempDir(), "not-created-yet")
+	t.Setenv("ENNOTE_HOST_ROOTS", first+string(os.PathListSeparator)+" "+second+string(os.PathListSeparator)+first+string(os.PathListSeparator))
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	// Duplicates and blank entries collapse; a root that does not exist yet is kept
+	// because it can be a mount that appears after the Worker started.
+	assert.Equal(t, []string{first, second}, cfg.HostRoots)
+}
+
+func TestLoadRejectsRelativeHostRoots(t *testing.T) {
+	t.Setenv("ENNOTE_HOME", t.TempDir())
+	t.Setenv("ENNOTE_HOST_ROOTS", "relative/dir")
+
+	_, err := config.Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ENNOTE_HOST_ROOTS")
+	assert.Contains(t, err.Error(), "absolute")
+}

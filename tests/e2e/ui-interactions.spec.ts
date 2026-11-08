@@ -121,6 +121,52 @@ test("creating a project uses a dialog instead of native prompts", async ({ page
   await expect(page.locator(".sidebar-project-selector > button")).toContainText("seqyuan");
 });
 
+test("the directory dialog offers every configured host root", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  // Two roots: home plus a mount the operator declared with ENNOTE_HOST_ROOTS.
+  // The chips are the only way the picker can reach the second one without the
+  // user typing a path, so their labels and their jump have to work.
+  const listing = (path: string) => ({
+    path,
+    home: "/home/seqyuan",
+    roots: ["/home/seqyuan", "/Volumes/data"],
+    crumbs: path === "/home/seqyuan"
+      ? [{ name: "seqyuan", path: "/home/seqyuan", hidden: false }]
+      : [{ name: "/Volumes/data", path: "/Volumes/data", hidden: false }],
+    entries: [{ name: "scratch", path: `${path}/scratch`, hidden: false }],
+    truncated: false,
+  });
+  const opened: string[] = [];
+  await page.route("**/api/worker/v1/**", async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace("/api/worker", "");
+    if (path === "/v1/host/directories") {
+      const requested = url.searchParams.get("path") ?? "/home/seqyuan";
+      opened.push(requested);
+      return fulfill(route, listing(requested));
+    }
+    if (path === "/v1/projects") return fulfill(route, []);
+    return route.abort();
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Add workspace" }).click();
+  const dialog = page.getByRole("dialog", { name: "Select Workspace Directory" });
+  await expect(dialog).toBeVisible();
+  // The crumb bar also renders a "Home" button, so scope to the roots nav.
+  const roots = dialog.getByRole("navigation", { name: "Browse roots" });
+  await expect(roots.getByRole("button", { name: "Home" })).toHaveClass(/active/);
+
+  await roots.getByRole("button", { name: "data", exact: true }).click();
+  await expect.poll(() => opened.at(-1)).toBe("/Volumes/data");
+  await expect(roots.getByRole("button", { name: "data", exact: true })).toHaveClass(/active/);
+  await expect(roots.getByRole("button", { name: "Home" })).not.toHaveClass(/active/);
+  // The jump lands with nothing selected, so "Open" would open home; walking into
+  // the listed directory is what selects the new root's child.
+  await dialog.getByRole("button", { name: /scratch/ }).click();
+  await expect.poll(() => opened.at(-1)).toBe("/Volumes/data/scratch");
+});
+
 test("adding a project tolerates a null session list from the worker", async ({ page }) => {
   // Regression: the Worker's session list cache used to encode an empty list
   // as JSON null; the sidebar then crashed on .map(null) and the app fell

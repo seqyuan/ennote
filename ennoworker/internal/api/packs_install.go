@@ -45,12 +45,12 @@ func (s *Server) installPack(w http.ResponseWriter, r *http.Request) {
 			"source.kind must be \"path\"; S2a installs only local path sources", false)
 		return
 	}
-	home, err := s.hostHomeDir()
+	roots, err := s.hostRoots()
 	if err != nil {
 		writeInternal(w, r, err)
 		return
 	}
-	target, err := confineHostPath(home, body.Source.Path)
+	target, err := confineHostPaths(roots, body.Source.Path)
 	if err != nil {
 		writePackPathError(w, r, err)
 		return
