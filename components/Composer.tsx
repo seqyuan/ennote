@@ -337,7 +337,6 @@ export function Composer({
           role="separator"
           aria-orientation="horizontal"
           aria-label={t("composer.hint.resizeAria")}
-          title={t("composer.hint.resize")}
           tabIndex={0}
           onPointerDown={beginResize}
           onPointerMove={moveResize}
@@ -355,28 +354,6 @@ export function Composer({
           ref={configRef}
           onClick={() => { if (inert) onRequestProject?.(); }}
         >
-          <div className="composer-context-bar" aria-label={t("composer.runContext")}>
-            <RoleTargetPicker roles={roles} selectedRoleId={selectedRoleId} onSelect={setSelectedRoleId}
-              disabled={!selectedSession || activeRun || compacting} />
-            <PermissionChip
-              permissionMode={permissionMode}
-              permissionReady={permissionReady}
-              setPermissionMode={setPermissionMode}
-              disabled={!selectedSession || activeRun || compacting || Boolean(selectedRoleId)}
-              frozen={activeRun}
-            />
-            <span className="composer-context-spacer" aria-hidden="true" />
-            <ModelSelect
-              models={models}
-              providers={providers}
-              selectedModelId={selectedModelId}
-              setSelectedModelId={setSelectedModelId}
-              thinkingEffort={thinkingEffort}
-              setThinkingEffort={setThinkingEffort}
-              disabled={!selectedSession || activeRun || models.length === 0 || Boolean(selectedRoleId)}
-            />
-            <ContextMeter contextUsage={contextUsage} stats={stats} />
-          </div>
           {configOpen && (
             <div className="composer-config-panel" role="dialog" aria-label={t("composer.attachMenu")}>
               <div className="composer-config-row">
@@ -477,6 +454,31 @@ export function Composer({
               )}
             </div>
           </div>
+        </div>
+        {/* Outside the editor box on purpose: the run configuration belongs to the
+            composer, not inside its border. Keeping it after the editor also keeps
+            the tab order following the text area instead of preceding it. */}
+        <div className="composer-context-bar" aria-label={t("composer.runContext")}>
+          <RoleTargetPicker roles={roles} selectedRoleId={selectedRoleId} onSelect={setSelectedRoleId}
+            disabled={!selectedSession || activeRun || compacting} />
+          <PermissionChip
+            permissionMode={permissionMode}
+            permissionReady={permissionReady}
+            setPermissionMode={setPermissionMode}
+            disabled={!selectedSession || activeRun || compacting || Boolean(selectedRoleId)}
+            frozen={activeRun}
+          />
+          <span className="composer-context-spacer" aria-hidden="true" />
+          <ModelSelect
+            models={models}
+            providers={providers}
+            selectedModelId={selectedModelId}
+            setSelectedModelId={setSelectedModelId}
+            thinkingEffort={thinkingEffort}
+            setThinkingEffort={setThinkingEffort}
+            disabled={!selectedSession || activeRun || models.length === 0 || Boolean(selectedRoleId)}
+          />
+          <ContextMeter contextUsage={contextUsage} stats={stats} />
         </div>
       </form>
       <div className="composer-status-line">

@@ -97,14 +97,19 @@
   outline-offset: 1px;
 }
 
-/* One visible run configuration row: target, permission, model, context. */
+/* Run configuration, docked below the editor box: the border means the input, and
+   the role/permission/model controls are a separate shelf under it. */
 .composer-context-bar {
+  /* Above the editor (z-index 20) so the menus this bar opens paint over the box
+     instead of sliding behind it now that the bar is a sibling, not a child. */
+  position: relative;
+  z-index: var(--layer-popover);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   min-width: 0;
-  padding: 6px 10px 0;
+  padding: 4px 8px 0;
 }
 .composer-context-bar > * { flex: 0 0 auto; }
 .composer-context-bar .role-target-picker,

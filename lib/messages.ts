@@ -70,7 +70,6 @@ export const messages: Record<Locale, Record<string, string>> = {
     "time.years": "y",
 
     "composer.dropFiles": "Drop images or text files",
-    "composer.hint.resize": "Drag the top edge to resize",
     "composer.hint.resizeAria": "Resize message input",
     "composer.attachedFiles": "Attached files",
     "composer.removeImage": "Remove image",
@@ -570,7 +569,6 @@ export const messages: Record<Locale, Record<string, string>> = {
     "time.years": "年",
 
     "composer.dropFiles": "拖放图片或文本文件",
-    "composer.hint.resize": "拖拽上边缘调整高度",
     "composer.hint.resizeAria": "调整输入框高度",
     "composer.attachedFiles": "已附加文件",
     "composer.removeImage": "移除图片",
