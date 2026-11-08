@@ -205,14 +205,14 @@ func TestRetryIdempotencyAndConflicts(t *testing.T) {
 	assert.Equal(t, attemptsBefore, attemptsAfter)
 }
 
-func TestRetryRoleKillSwitchFailsClosed(t *testing.T) {
+func TestRetryHeroKillSwitchFailsClosed(t *testing.T) {
 	delegations, _, _, group, failedItemID := settleMixedGroup(t)
 	ctx := context.Background()
 
 	// V2 kill switch: the frozen Role meta is the only runtime authority for a
 	// retry. Simulate a revoked identity by clearing the item's frozen meta:
 	// retry must fail closed before creating any child.
-	_, err := delegations.DB.Exec(`UPDATE delegation_items SET role_meta_json='{}'
+	_, err := delegations.DB.Exec(`UPDATE delegation_items SET hero_meta_json='{}'
 		WHERE id=?`, failedItemID)
 	require.NoError(t, err)
 	_, children, _, err := delegations.RetryGeneration(ctx, group.ID, domain.RetryDelegationInput{
@@ -356,5 +356,5 @@ func TestRetryReusedUsageAndDigestAreExact(t *testing.T) {
 		WHERE item_id=? AND generation=0`, reused.ItemID).Scan(&attemptJSON))
 	var auth map[string]any
 	require.NoError(t, json.Unmarshal([]byte(attemptJSON), &auth))
-	assert.NotEmpty(t, auth["roleVersionId"])
+	assert.NotEmpty(t, auth["heroVersionId"])
 }

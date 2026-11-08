@@ -102,7 +102,7 @@ func (r *ReminderRegistry) Register(p ReminderProvider) {
 func (r *ReminderRegistry) Empty() bool { return r == nil || len(r.providers) == 0 }
 
 // Messages consults every provider in registration order and returns the
-// ephemeral reminder messages to inject this turn (one user-role message per
+// ephemeral reminder messages to inject this turn (one user-hero message per
 // provider that fires). Each body is independently wrapped with
 // WrapSystemReminder.
 func (r *ReminderRegistry) Messages(ctx context.Context, rc ReminderContext) []domain.ChatMessage {

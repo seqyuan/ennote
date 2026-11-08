@@ -34,51 +34,51 @@ func TestIsReadOnlySchedulingTool(t *testing.T) {
 	}
 }
 
-func TestRoleDefinitionIsReadOnly(t *testing.T) {
+func TestHeroDefinitionIsReadOnly(t *testing.T) {
 	cases := []struct {
 		name string
-		role RoleDefinition
+		hero HeroDefinition
 		want bool
 	}{
 		{
 			name: "read_only authority with read-only tools",
-			role: RoleDefinition{Authority: RoleAuthorityReadOnly,
+			hero: HeroDefinition{Authority: HeroAuthorityReadOnly,
 				AllowedTools: []string{"read", "ls", "grep", "find", "git_readonly", "ask_user"}},
 			want: true,
 		},
 		{
 			name: "read_only authority with no tools",
-			role: RoleDefinition{Authority: RoleAuthorityReadOnly},
+			hero: HeroDefinition{Authority: HeroAuthorityReadOnly},
 			want: true,
 		},
 		{
 			name: "read_only authority with an MCP tool",
-			role: RoleDefinition{Authority: RoleAuthorityReadOnly,
+			hero: HeroDefinition{Authority: HeroAuthorityReadOnly,
 				AllowedTools: []string{"read", "mcp__server__read"}},
 			want: false,
 		},
 		{
 			name: "read_only authority with an unknown tool",
-			role: RoleDefinition{Authority: RoleAuthorityReadOnly,
+			hero: HeroDefinition{Authority: HeroAuthorityReadOnly,
 				AllowedTools: []string{"read", "mystery_tool"}},
 			want: false,
 		},
 		{
 			name: "read_only authority with a mutating tool",
-			role: RoleDefinition{Authority: RoleAuthorityReadOnly,
+			hero: HeroDefinition{Authority: HeroAuthorityReadOnly,
 				AllowedTools: []string{"read", "write"}},
 			want: false,
 		},
 		{
 			name: "mutation authority with read-only tools",
-			role: RoleDefinition{Authority: RoleAuthorityMutation,
+			hero: HeroDefinition{Authority: HeroAuthorityMutation,
 				AllowedTools: []string{"read", "grep"}},
 			want: false,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, RoleDefinitionIsReadOnly(tc.role))
+			assert.Equal(t, tc.want, HeroDefinitionIsReadOnly(tc.hero))
 		})
 	}
 }

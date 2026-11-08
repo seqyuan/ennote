@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -53,35 +53,35 @@ func TestFlowPublishResolverToolReadOnlyMatrix(t *testing.T) {
 	}
 }
 
-// publishSchedulingRole publishes a file-native Role with an explicit authority
+// publishSchedulingHero publishes a file-native Role with an explicit authority
 // and tool allowlist so publish-time scheduling can be exercised end to end.
-func publishSchedulingRole(t *testing.T, stack *fileConfigStack, handle string,
-	authority rolesource.Authority, tools []string) {
+func publishSchedulingHero(t *testing.T, stack *fileConfigStack, handle string,
+	authority heroesource.Authority, tools []string) {
 	t.Helper()
-	document := &rolesource.Document{
+	document := &heroesource.Document{
 		SchemaVersion: 1, Handle: handle, Name: handle,
-		Description: "Scheduling fixture role", Positioning: "Scheduling fixture.",
+		Description: "Scheduling fixture hero", Positioning: "Scheduling fixture.",
 		Icon: "bot", Color: "neutral",
-		Model:  rolesource.ModelBinding{Ref: stack.DefaultRef, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills: []rolesource.SkillBinding{}, Authority: authority,
+		Model:  heroesource.ModelBinding{Ref: stack.DefaultRef, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills: []heroesource.SkillBinding{}, Authority: authority,
 		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: append([]string(nil), tools...),
-		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextRoom,
-			AllowedModes: []domain.RoleContextMode{domain.RoleContextRoom}, OwnExecutionContinuity: domain.RoleContinuityNone},
-		Delegation: rolesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+		Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextRoom,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextRoom}, OwnExecutionContinuity: domain.HeroContinuityNone},
+		Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
 			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single", "parallel"},
 			MaxInvocationsPerParentRun: 16, MaxConcurrentInstances: 16,
-			BudgetCeiling: rolesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
+			BudgetCeiling: heroesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
 				MaxTotalTokens: 200000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 1_800_000}},
 		OutputContract: "text-v1", MaxLoopIterations: 8, Prompt: "Execute one task in a flow.",
 	}
-	_, _, err := stack.Sources.CreateRole(document)
+	_, _, err := stack.Sources.CreateHero(document)
 	require.NoError(t, err)
-	_, err = stack.Sources.PublishRoleRevision(handle)
+	_, err = stack.Sources.PublishHeroRevision(handle)
 	require.NoError(t, err)
 }
 
-// fanOutFlow is a one-task fan_out flow over the given role pin.
-func fanOutFlow(id, roleRef string) *domain.FlowDefinition {
+// fanOutFlow is a one-task fan_out flow over the given hero pin.
+func fanOutFlow(id, heroRef string) *domain.FlowDefinition {
 	return &domain.FlowDefinition{
 		SchemaVersion: domain.FlowSchemaVersion,
 		ID:            id,
@@ -90,8 +90,8 @@ func fanOutFlow(id, roleRef string) *domain.FlowDefinition {
 		Budget:        domain.FlowBudget{MaxTotalTokens: 200000},
 		Tasks: map[string]domain.FlowTask{
 			"scan": {
-				Type:   domain.FlowTaskRole,
-				Role:   roleRef,
+				Type:   domain.FlowTaskHero,
+				Hero:   heroRef,
 				Goal:   "Scan {inputs.target}",
 				FanOut: &domain.FlowFanOut{Min: 1, Max: 4},
 			},
@@ -111,16 +111,16 @@ func fanOutFlow(id, roleRef string) *domain.FlowDefinition {
 func TestFlowPublishFanOutRequiresSharedReadOnlyClassifier(t *testing.T) {
 	ctx := context.Background()
 	stack := newFileConfigStack(t)
-	publishSchedulingRole(t, stack, "pure-reader", rolesource.AuthorityReadOnly,
+	publishSchedulingHero(t, stack, "pure-reader", heroesource.AuthorityReadOnly,
 		[]string{"read", "ls", "grep", "find", "git_readonly", "ask_user"})
-	publishSchedulingRole(t, stack, "mcp-reader", rolesource.AuthorityReadOnly,
+	publishSchedulingHero(t, stack, "mcp-reader", heroesource.AuthorityReadOnly,
 		[]string{"read", "mcp__server__read"})
 
 	validator := store.NewFlowValidator(store.FlowPublishOptions{
 		Sources: stack.Sources, Models: stack.ModelRepo, Skills: map[string]bool{},
 	})
 
-	// Regression guard: real read-only Roles keep their fan_out parallelism.
+	// Regression guard: real read-only Heroes keep their fan_out parallelism.
 	pure := validator.Validate(ctx, fanOutFlow("fanout-pure", "pure-reader@1"))
 	require.Empty(t, pure.Diagnostics, "read-only Role must stay fan_out-eligible")
 	assert.True(t, pure.Valid)
@@ -138,12 +138,12 @@ func TestFlowPublishFanOutRequiresSharedReadOnlyClassifier(t *testing.T) {
 // TestFlowFreezeSchedulingMatchesDomainClassifier proves the store freeze
 // helper the flow tests rely on reports the same class as production.
 func TestFlowFreezeSchedulingMatchesDomainClassifier(t *testing.T) {
-	readOnlyRole := domain.RoleDefinition{Authority: domain.RoleAuthorityReadOnly,
+	readOnlyHero := domain.HeroDefinition{Authority: domain.HeroAuthorityReadOnly,
 		AllowedTools: []string{"read", "ls", "grep", "find", "git_readonly"}}
-	assert.Equal(t, domain.RoleDefinitionIsReadOnly(readOnlyRole), testRoleDefinitionIsReadOnly(readOnlyRole))
+	assert.Equal(t, domain.HeroDefinitionIsReadOnly(readOnlyHero), testHeroDefinitionIsReadOnly(readOnlyHero))
 
-	mcpRole := domain.RoleDefinition{Authority: domain.RoleAuthorityReadOnly,
+	mcpHero := domain.HeroDefinition{Authority: domain.HeroAuthorityReadOnly,
 		AllowedTools: []string{"read", "mcp__server__read"}}
-	assert.False(t, testRoleDefinitionIsReadOnly(mcpRole))
-	assert.Equal(t, domain.RoleDefinitionIsReadOnly(mcpRole), testRoleDefinitionIsReadOnly(mcpRole))
+	assert.False(t, testHeroDefinitionIsReadOnly(mcpHero))
+	assert.Equal(t, domain.HeroDefinitionIsReadOnly(mcpHero), testHeroDefinitionIsReadOnly(mcpHero))
 }

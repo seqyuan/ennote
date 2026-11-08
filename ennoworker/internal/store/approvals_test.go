@@ -55,7 +55,7 @@ func TestDelegationApprovalUsesAdmissionStatusAndQueuesAfterDecision(t *testing.
 	runs, approvals, submission := setupApprovalRun(t)
 	items := []domain.ApprovalItem{{CallIndex: 0, ToolCallID: "delegate-call", ToolName: "delegate_tasks",
 		RiskClass: domain.RiskDelegation, ArgumentsPreview: "delegate to @workspace-explorer",
-		Delegations: []domain.DelegationApprovalPreview{{Name: "inspect", RoleHandle: "workspace-explorer",
+		Delegations: []domain.DelegationApprovalPreview{{Name: "inspect", HeroHandle: "workspace-explorer",
 			AssignmentPreview: "Inspect the workspace", Budget: domain.BudgetCeilingJSON{MaxModelCalls: 4, MaxToolCalls: 8}}}}}
 	request, err := approvals.Suspend(context.Background(), submission.Run.ID, 1, 1, "delegation-digest",
 		json.RawMessage(`{"version":1}`), items, nil)
@@ -68,7 +68,7 @@ func TestDelegationApprovalUsesAdmissionStatusAndQueuesAfterDecision(t *testing.
 	require.NoError(t, err)
 	require.NotNil(t, pending)
 	require.Len(t, pending.Items[0].Delegations, 1)
-	assert.Equal(t, "workspace-explorer", pending.Items[0].Delegations[0].RoleHandle)
+	assert.Equal(t, "workspace-explorer", pending.Items[0].Delegations[0].HeroHandle)
 
 	_, err = approvals.Decide(context.Background(), request.ID, domain.DecisionApproved, "admit", nil)
 	require.NoError(t, err)

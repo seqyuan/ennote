@@ -87,7 +87,7 @@ func TestGenerationAndAttemptJSONShape(t *testing.T) {
 	raw := `{
 		"id":"g1","groupId":"grp","generation":1,"kind":"retry","status":"queued",
 		"retrySelection":["item-a"],"reusedAttempts":[{"itemId":"item-b","attemptId":"att-2","generation":0,"childRunId":"c2","resultDigest":"sha256:aa"}],
-		"authorizationSnapshot":{"roleVersionIds":["v1"]},"budgetSnapshot":{"maxModelCalls":4},
+		"authorizationSnapshot":{"heroVersionIds":["v1"]},"budgetSnapshot":{"maxModelCalls":4},
 		"clientRequestId":"req-1","createdAt":"2026-08-04T00:00:00Z"
 	}`
 	var generation DelegationGeneration

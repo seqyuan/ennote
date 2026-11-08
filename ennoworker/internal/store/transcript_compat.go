@@ -157,7 +157,7 @@ func compareTranscripts(canonical, shadow []domain.RunMessage) error {
 	}
 	for index := range canonical {
 		if canonical[index].Role != shadow[index].Role || canonical[index].Ordinal != shadow[index].Ordinal {
-			return fmt.Errorf("transcript row %d role or ordinal differs", index)
+			return fmt.Errorf("transcript row %d hero or ordinal differs", index)
 		}
 		left, err := json.Marshal(canonical[index].Content)
 		if err != nil {

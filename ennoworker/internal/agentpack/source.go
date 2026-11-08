@@ -25,8 +25,8 @@ const (
 	MaxFileBytes = 8 << 20
 	// MaxFlowSourceBytes bounds one flow source document.
 	MaxFlowSourceBytes = 512 << 10
-	// MaxRoleSourceBytes bounds one role source document.
-	MaxRoleSourceBytes = 128 << 10
+	// MaxHeroSourceBytes bounds one hero source document.
+	MaxHeroSourceBytes = 128 << 10
 	// MaxDocumentBytes bounds one document echoed back by inspect.
 	MaxDocumentBytes = 256 << 10
 	// MaxDocumentsBytes bounds the total documents echoed back by inspect.

@@ -18,17 +18,17 @@ func branchFlowDef() *domain.FlowDefinition {
 		Outputs: map[string]domain.FlowPort{"report": {Type: domain.PortTypeString}},
 		Budget:  domain.FlowBudget{MaxTotalTokens: 100000},
 		Tasks: map[string]domain.FlowTask{
-			"producer": {Type: domain.FlowTaskRole, Role: "writer@1",
+			"producer": {Type: domain.FlowTaskHero, Hero: "writer@1",
 				Goal: "produce", Budget: &domain.FlowTaskBudget{Tokens: 1000}},
 			"gate": {Type: domain.FlowTaskCheck, Command: "echo ok", Depends: []string{"producer"},
 				Next: map[string]string{"pass": "passWork", "fail": "failWork"}},
-			"passWork": {Type: domain.FlowTaskRole, Role: "reader@1", Goal: "pass work", Depends: []string{"gate"},
+			"passWork": {Type: domain.FlowTaskHero, Hero: "reader@1", Goal: "pass work", Depends: []string{"gate"},
 				Budget: &domain.FlowTaskBudget{Tokens: 1000}},
-			"failWork": {Type: domain.FlowTaskRole, Role: "reader@1", Goal: "fail work", Depends: []string{"gate"},
+			"failWork": {Type: domain.FlowTaskHero, Hero: "reader@1", Goal: "fail work", Depends: []string{"gate"},
 				Budget: &domain.FlowTaskBudget{Tokens: 1000}},
-			"acceptPass": {Type: domain.FlowTaskRole, Depends: []string{"passWork"},
+			"acceptPass": {Type: domain.FlowTaskHero, Depends: []string{"passWork"},
 				Terminal: &domain.FlowTerminal{Status: "success", Output: "report"}},
-			"acceptFail": {Type: domain.FlowTaskRole, Depends: []string{"failWork"},
+			"acceptFail": {Type: domain.FlowTaskHero, Depends: []string{"failWork"},
 				Terminal: &domain.FlowTerminal{Status: "success", Output: "report"}},
 		},
 	}
@@ -133,13 +133,13 @@ func TestValidationBranchRouting(t *testing.T) {
 id: x
 budget: {max_total_tokens: 20000}
 tasks:
-  a: {role: writer@1, goal: "a", budget: {tokens: 100}}
+  a: {hero: writer@1, goal: "a", budget: {tokens: 100}}
   g:
     type: check
     command: "go test ./..."
     depends: [a]
     next: {pass: nope, fail: b}
-  b: {role: reader@1, goal: "b", depends: [g], budget: {tokens: 100}}
+  b: {hero: reader@1, goal: "b", depends: [g], budget: {tokens: 100}}
 `)
 	assert.False(t, result.Valid)
 	assert.True(t, hasCode(result, "next_target_unknown"))
@@ -149,13 +149,13 @@ tasks:
 id: x
 budget: {max_total_tokens: 20000}
 tasks:
-  a: {role: writer@1, goal: "a", budget: {tokens: 100}}
+  a: {hero: writer@1, goal: "a", budget: {tokens: 100}}
   g:
     type: check
     command: "go test ./..."
     depends: [a]
     next: {pass: a, fail: b}
-  b: {role: reader@1, goal: "b", depends: [g], budget: {tokens: 100}}
+  b: {hero: reader@1, goal: "b", depends: [g], budget: {tokens: 100}}
 `)
 	assert.False(t, result.Valid)
 	assert.True(t, hasCode(result, "next_target_not_downstream"))
@@ -165,13 +165,13 @@ tasks:
 id: x
 budget: {max_total_tokens: 20000}
 tasks:
-  a: {role: writer@1, goal: "a", budget: {tokens: 100}}
+  a: {hero: writer@1, goal: "a", budget: {tokens: 100}}
   g:
     type: check
     command: "go test ./..."
     depends: [a]
     next: {pass: b, fail: b}
-  b: {role: reader@1, goal: "b", depends: [g], budget: {tokens: 100}}
+  b: {hero: reader@1, goal: "b", depends: [g], budget: {tokens: 100}}
 `)
 	assert.False(t, result.Valid)
 	assert.True(t, hasCode(result, "next_target_same"))
@@ -181,7 +181,7 @@ tasks:
 id: x
 budget: {max_total_tokens: 30000}
 tasks:
-  a: {role: writer@1, goal: "a", budget: {tokens: 100}}
+  a: {hero: writer@1, goal: "a", budget: {tokens: 100}}
   g1:
     type: check
     command: "go test ./..."
@@ -192,8 +192,8 @@ tasks:
     command: "go test ./..."
     depends: [a]
     next: {pass: c, fail: b}
-  b: {role: reader@1, goal: "b", depends: [g1], budget: {tokens: 100}}
-  c: {role: reader@1, goal: "c", depends: [g1], budget: {tokens: 100}}
+  b: {hero: reader@1, goal: "b", depends: [g1], budget: {tokens: 100}}
+  c: {hero: reader@1, goal: "c", depends: [g1], budget: {tokens: 100}}
 `)
 	assert.False(t, result.Valid)
 	assert.True(t, hasCode(result, "next_target_conflict"))
@@ -203,14 +203,14 @@ tasks:
 id: x
 budget: {max_total_tokens: 20000}
 tasks:
-  a: {role: writer@1, goal: "a", budget: {tokens: 100}}
+  a: {hero: writer@1, goal: "a", budget: {tokens: 100}}
   g:
     type: check
     command: "go test ./..."
     depends: [a]
     next: {pass: p, fail: f}
-  p: {role: reader@1, goal: "p", depends: [g], budget: {tokens: 100}}
-  f: {role: reader@1, goal: "f", depends: [g], budget: {tokens: 100}}
+  p: {hero: reader@1, goal: "p", depends: [g], budget: {tokens: 100}}
+  f: {hero: reader@1, goal: "f", depends: [g], budget: {tokens: 100}}
 `)
 	assert.True(t, result.Valid, "%v", result.Diagnostics)
 }

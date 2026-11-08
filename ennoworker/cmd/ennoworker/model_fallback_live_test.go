@@ -42,8 +42,8 @@ func TestLiveModelFallbackFreezesCandidateSet(t *testing.T) {
 	require.NoError(t, err)
 
 	// ——— Role meta with a fallback binding ———
-	definition := fallbackRoleDefinitionJSON(stack.ModelID, fallback.ID)
-	meta, err := store.NewDelegationRoleMeta("fallback-reader-v1", []byte(definition))
+	definition := fallbackHeroDefinitionJSON(stack.ModelID, fallback.ID)
+	meta, err := store.NewDelegationHeroMeta("fallback-reader-v1", []byte(definition))
 	require.NoError(t, err)
 	meta.ObjectID = "fallback-reader"
 	meta.Handle = "fallback-reader"
@@ -54,7 +54,7 @@ func TestLiveModelFallbackFreezesCandidateSet(t *testing.T) {
 		Models: stack.ModelRepo, Policies: stack.Policies}
 	messageRepo := &store.MessageRepo{DB: db}
 
-	// ——— parent + delegated child with the fallback role ———
+	// ——— parent + delegated child with the fallback hero ———
 	parentSubmission, err := runRepo.SubmitTurn(ctx, domain.SubmitTurnInput{
 		SessionID: session.ID, ClientRequestID: "fallback-parent",
 		Text: "Parent inquiry", RequestedConfig: json.RawMessage(`{"maxIterations":1}`),
@@ -65,16 +65,16 @@ func TestLiveModelFallbackFreezesCandidateSet(t *testing.T) {
 	_, err = runRepo.ResolveAndFreezeConfig(ctx, parentRun)
 	require.NoError(t, err)
 
-	delegations := &store.DelegationRepo{DB: db, RoleSources: stack.Sources, Models: stack.ModelRepo, Policies: stack.Policies}
+	delegations := &store.DelegationRepo{DB: db, HeroSources: stack.Sources, Models: stack.ModelRepo, Policies: stack.Policies}
 	group, err := delegations.CreateGroup(ctx, store.CreateDelegationGroupInput{
 		ParentRunID: parentRun.ID, ParentToolCallID: "fallback", Strategy: domain.DelegationStrategySingle,
 		Items: []store.CreateDelegationItemInput{{
-			Name: "fallback-explore", RoleVersionID: "fallback-reader-v1",
+			Name: "fallback-explore", HeroVersionID: "fallback-reader-v1",
 			AssignmentJSON: json.RawMessage(`{"objective":"Inspect /workspace and report its contents in one sentence."}`),
 			OutputContract: "text-v1",
 			Budget: domain.BudgetCeilingJSON{MaxModelCalls: 6, MaxToolCalls: 8, MaxTotalTokens: 20000,
 				MaxOutputTokens: 2048, MaxWallTimeMS: 120000},
-			RoleMeta: meta,
+			HeroMeta: meta,
 		}},
 	})
 	require.NoError(t, err)
@@ -128,10 +128,10 @@ func TestLiveModelFallbackFreezesCandidateSet(t *testing.T) {
 	assert.Positive(t, usageCount)
 }
 
-// fallbackRoleDefinitionJSON builds a read-only Role definition bound to
+// fallbackHeroDefinitionJSON builds a read-only Role definition bound to
 // primaryModelID with fallbackModelID as a fallback candidate.
-func fallbackRoleDefinitionJSON(primaryModelID, fallbackModelID string) string {
-	return `{"schemaVersion":1,"rolePrompt":"You are a read-only workspace inspector. Use read, ls, grep, and find to answer the task. Be concise. End by calling submit_result with a structured result.","modelBinding":{"mode":"fixed","modelProfileId":` +
+func fallbackHeroDefinitionJSON(primaryModelID, fallbackModelID string) string {
+	return `{"schemaVersion":1,"heroPrompt":"You are a read-only workspace inspector. Use read, ls, grep, and find to answer the task. Be concise. End by calling submit_result with a structured result.","modelBinding":{"mode":"fixed","modelProfileId":` +
 		jsonQuote(primaryModelID) + `,"thinkingEffort":"default","fallbackModelProfileIds":[` +
 		jsonQuote(fallbackModelID) + `],"overridableFields":[]},"skills":{"entries":[]},"authority":"read_only","permissionCeiling":"discuss","allowedTools":["read","ls","grep","find"],"contextPolicy":{"defaultMode":"task_only","allowedModes":["task_only"],"ownExecutionContinuity":"none"},"delegationPolicy":{"admission":"auto_within_budget","allowedCallerKinds":["host"],"allowedStrategies":["single","parallel"],"maxInvocationsPerParentRun":16,"maxConcurrentInstances":16,"budgetCeiling":{"maxModelCalls":6,"maxToolCalls":8,"maxTotalTokens":20000,"maxOutputTokens":4000,"maxCostUsdMicros":0,"maxWallTimeMs":120000}},"outputContract":"text-v1","maxLoopIterations":8}`
 }

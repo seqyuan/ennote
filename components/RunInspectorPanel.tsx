@@ -6,7 +6,7 @@
  *
  * It renders the frozen composition the Worker recorded before the first
  * Provider request — never a re-derivation from current settings. That
- * distinction is the point: a Role version, a project instruction file, or a
+ * distinction is the point: a Hero version, a project instruction file, or a
  * preloaded Skill can change at any time, but what *this* Run saw cannot.
  */
 
@@ -27,7 +27,7 @@ type RunMCPServerSnapshot = components["schemas"]["RunMCPServerSnapshot"];
 
 const KIND_LABELS: Record<string, string> = {
   base: "Platform",
-  role: "Role",
+  hero: "Hero",
   context: "Project context",
   skills_catalog: "Skill catalog",
   skill_preload: "Preloaded skill",
@@ -199,7 +199,7 @@ function TranscriptRow({ message, t }: { message: RunMessagePage["messages"][num
   return <details data-transcript-ordinal={message.ordinal} className={styles.transcriptRow}>
     <summary className={styles.transcriptSummary}>
       <span className={`${styles.muted} ${styles.transcriptOrdinal}`}>{message.ordinal}</span>
-      <span className={styles.transcriptRole}>
+      <span className={styles.transcriptHero}>
         {ROLE_LABEL[message.role] ?? message.role}
       </span>
       {message.visibility === "private" && <span data-transcript-private className={styles.privateBadge}>

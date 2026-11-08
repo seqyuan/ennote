@@ -166,7 +166,7 @@ func AppendRunMessagesTx(ctx context.Context, tx *sql.Tx, runID string, format d
 	messages := make([]domain.RunMessage, 0, len(generated))
 	for ordinal, generatedMessage := range generated {
 		if !validRunMessageRole(generatedMessage.Role) {
-			return nil, "", fmt.Errorf("unsupported run transcript role %q", generatedMessage.Role)
+			return nil, "", fmt.Errorf("unsupported run transcript hero %q", generatedMessage.Role)
 		}
 		payload, err := json.Marshal(generatedMessage.Content)
 		if err != nil {
@@ -210,7 +210,7 @@ func AppendRunMessagesTx(ctx context.Context, tx *sql.Tx, runID string, format d
 }
 
 // compatibleRunMessageContentUpdate permits only the placeholder-to-folded
-// result upgrade. Tool IDs, names, roles, block kinds, and every other field
+// result upgrade. Tool IDs, names, heroes, block kinds, and every other field
 // remain immutable across parent resume.
 func compatibleRunMessageContentUpdate(existing, incoming []domain.ContentBlock) bool {
 	if len(existing) != len(incoming) {
@@ -239,7 +239,7 @@ func transcriptDigest(format domain.CommitFormatVersion, messages []domain.RunMe
 	for index, message := range messages {
 		if message.Ordinal != index || !validRunMessageRole(message.Role) {
 			return "", domain.NewCodedError(domain.ErrorTranscriptCorrupt,
-				fmt.Errorf("invalid transcript ordinal or role at %d", index))
+				fmt.Errorf("invalid transcript ordinal or hero at %d", index))
 		}
 		payload, err := json.Marshal(message.Content)
 		if err != nil {

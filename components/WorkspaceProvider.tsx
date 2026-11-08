@@ -47,7 +47,7 @@ export function useWorkspace(): WorkspaceValue {
 
 /**
  * WorkspaceProvider owns the cross-page project navigation state shared by the
- * chat shell (/), the Roles page (/roles), and the Graphs page (/graphs):
+ * chat shell (/), the Heroes page (/heroes), and the Graphs page (/graphs):
  * project catalog + selection, project creation dialog, settings dialog
  * visibility, and the pinned-project list (localStorage).
  *

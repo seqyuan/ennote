@@ -7,14 +7,14 @@ import (
 	"strings"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 )
 
 // Inspect reads a pack from a host path and reports its structure without
 // installing, executing, or trusting anything.
 //
 // The pipeline is: read payload (no extraction, no temp writes) -> parse
-// manifest strictly -> parse each flow/role/skill source -> check
+// manifest strictly -> parse each flow/hero/skill source -> check
 // cross-references -> compute digests -> collect warnings. Any failure is fatal:
 // inspect never returns a partial success.
 func Inspect(request Request) (*Result, error) {
@@ -47,9 +47,9 @@ func Inspect(request Request) (*Result, error) {
 	builder := &builder{
 		pkg:      pkg,
 		manifest: manifest,
-		roleSet:  map[string]bool{},
+		heroSet:  map[string]bool{},
 		skillIDs: map[string]bool{},
-		perRole:  map[string][]string{},
+		perHero:  map[string][]string{},
 	}
 	if err := builder.analyse(); err != nil {
 		return nil, err
@@ -71,17 +71,17 @@ type builder struct {
 	manifest *Manifest
 
 	flows  []FlowSummary
-	roles  []RoleSummary
+	heroes  []HeroSummary
 	skills []SkillSummary
-	// roleSet avoids a second pass over roles while checking references.
-	roleSet map[string]bool
+	// heroSet avoids a second pass over heroes while checking references.
+	heroSet map[string]bool
 	// skillIDs is the vendored skill id set.
 	skillIDs map[string]bool
-	// flowRoleRefs is the union of handles referenced by flow entries and by
-	// local/<handle> task role references.
-	flowRoleRefs map[string]bool
-	// perRole carries model requirement overrides keyed by role handle.
-	perRole map[string][]string
+	// flowHeroRefs is the union of handles referenced by flow entries and by
+	// local/<handle> task hero references.
+	flowHeroRefs map[string]bool
+	// perHero carries model requirement overrides keyed by hero handle.
+	perHero map[string][]string
 
 	checkCommands []string
 	writes        []string
@@ -93,13 +93,13 @@ type builder struct {
 }
 
 func (b *builder) analyse() error {
-	b.flowRoleRefs = map[string]bool{}
-	// Skills and roles are analysed first: flow task references are checked
+	b.flowHeroRefs = map[string]bool{}
+	// Skills and heroes are analysed first: flow task references are checked
 	// against the declared sets while the flow documents are parsed.
 	if err := b.analyseSkills(); err != nil {
 		return err
 	}
-	if err := b.analyseRoles(); err != nil {
+	if err := b.analyseHeroes(); err != nil {
 		return err
 	}
 	if err := b.analyseFlows(); err != nil {
@@ -127,11 +127,11 @@ func (b *builder) analyseFlows() error {
 			ID:         entry.ID,
 			Path:       path,
 			Format:     entry.Format,
-			Roles:      append([]string{}, entry.Roles...),
+			Heroes:      append([]string{}, entry.Heroes...),
 			PathDigest: fileDigest(file.Data),
 		}
-		for _, handle := range entry.Roles {
-			b.flowRoleRefs[handle] = true
+		for _, handle := range entry.Heroes {
+			b.flowHeroRefs[handle] = true
 		}
 		switch entry.Format {
 		case FlowFormatGraph:
@@ -172,7 +172,7 @@ func (b *builder) analyseGraphFlow(field string, summary *FlowSummary, file File
 	for _, name := range names {
 		task := document.Tasks[name]
 		taskField := field + ".tasks." + name
-		if err := b.checkScopedRoleRef(taskField+".role", task.Role); err != nil {
+		if err := b.checkScopedHeroRef(taskField+".hero", task.Hero); err != nil {
 			return err
 		}
 		for _, skill := range task.Skills {
@@ -215,11 +215,11 @@ func (b *builder) analyseAgentFlow(field string, summary *FlowSummary, file File
 			if command := strings.TrimSpace(task.Command); command != "" {
 				b.checkCommands = append(b.checkCommands, command)
 			}
-		case flowTaskRole:
+		case flowTaskHero:
 			if task.FanOut != nil {
 				summary.FanOutTasks++
 			}
-			if err := b.checkScopedRoleRef(taskField+".role", task.Role); err != nil {
+			if err := b.checkScopedHeroRef(taskField+".hero", task.Hero); err != nil {
 				return err
 			}
 		}
@@ -239,33 +239,33 @@ func (b *builder) analyseAgentFlow(field string, summary *FlowSummary, file File
 	return nil
 }
 
-func (b *builder) analyseRoles() error {
-	for index := range b.manifest.Roles {
-		entry := b.manifest.Roles[index]
-		field := "roles[" + strconv.Itoa(index) + "]"
-		file, path, err := b.requireFile(field+".path", entry.Path, MaxRoleSourceBytes)
+func (b *builder) analyseHeroes() error {
+	for index := range b.manifest.Heroes {
+		entry := b.manifest.Heroes[index]
+		field := "heroes[" + strconv.Itoa(index) + "]"
+		file, path, err := b.requireFile(field+".path", entry.Path, MaxHeroSourceBytes)
 		if err != nil {
 			return err
 		}
-		document, err := rolesource.Parse(file.Data)
+		document, err := heroesource.Parse(file.Data)
 		if err != nil {
-			return fieldError(CodePackRoleInvalid, field+".path",
+			return fieldError(CodePackHeroInvalid, field+".path",
 				"parse Role source %s: %v", path, err)
 		}
-		digest, err := rolesource.SourceDigest(document)
+		digest, err := heroesource.SourceDigest(document)
 		if err != nil {
-			return fieldError(CodePackRoleInvalid, field+".path",
+			return fieldError(CodePackHeroInvalid, field+".path",
 				"digest Role source %s: %v", path, err)
 		}
 		authority := string(document.Authority)
 		if authority == "" {
-			authority = string(rolesource.AuthorityReadOnly)
+			authority = string(heroesource.AuthorityReadOnly)
 		}
 		skills := make([]string, 0, len(document.Skills))
 		for _, skill := range document.Skills {
 			skills = append(skills, skill.ID)
 		}
-		b.roles = append(b.roles, RoleSummary{
+		b.heroes = append(b.heroes, HeroSummary{
 			Handle:            entry.Handle,
 			Path:              path,
 			Scope:             entry.Scope,
@@ -277,8 +277,8 @@ func (b *builder) analyseRoles() error {
 			PathDigest:        fileDigest(file.Data),
 			SourceDigest:      digest,
 		})
-		b.roleSet[entry.Handle] = true
-		b.addDocument(DocumentRole, entry.Handle, path, file.Data)
+		b.heroSet[entry.Handle] = true
+		b.addDocument(DocumentHero, entry.Handle, path, file.Data)
 	}
 	return nil
 }
@@ -371,46 +371,46 @@ func validateVendoredSkill(field, directory string, files []File) (*File, int64,
 }
 
 func (b *builder) checkCrossReferences() error {
-	// Flows may only reference roles the pack declares.
+	// Flows may only reference heroes the pack declares.
 	for index := range b.manifest.Flows {
-		for _, handle := range b.manifest.Flows[index].Roles {
-			if !b.roleSet[handle] {
-				return fieldError(CodePackRefUnknown, "flows["+strconv.Itoa(index)+"].roles",
-					"flow %q references undeclared role %q", b.manifest.Flows[index].ID, handle)
+		for _, handle := range b.manifest.Flows[index].Heroes {
+			if !b.heroSet[handle] {
+				return fieldError(CodePackRefUnknown, "flows["+strconv.Itoa(index)+"].heroes",
+					"flow %q references undeclared hero %q", b.manifest.Flows[index].ID, handle)
 			}
 		}
 	}
-	// A Role-only pack installs global Roles only: a flow-scoped Role would be
+	// A Role-only pack installs global Heroes only: a flow-scoped Role would be
 	// invisible to every flow.
 	if len(b.manifest.Flows) == 0 {
-		for index := range b.manifest.Roles {
-			if b.manifest.Roles[index].Scope != RoleScopeGlobal {
-				return fieldError(CodePackRoleInvalid, "roles["+strconv.Itoa(index)+"].scope",
-					"Role-only pack requires scope: global for role %q", b.manifest.Roles[index].Handle)
+		for index := range b.manifest.Heroes {
+			if b.manifest.Heroes[index].Scope != HeroScopeGlobal {
+				return fieldError(CodePackHeroInvalid, "heroes["+strconv.Itoa(index)+"].scope",
+					"Role-only pack requires scope: global for hero %q", b.manifest.Heroes[index].Handle)
 			}
 		}
 	}
 	// Every flow-scoped Role must be reachable from a flow.
-	for index := range b.manifest.Roles {
-		role := b.manifest.Roles[index]
-		if role.Scope == RoleScopeFlow && !b.flowRoleRefs[role.Handle] {
-			return fieldError(CodePackRoleUnreferenced, "roles["+strconv.Itoa(index)+"]",
-				"flow-scoped role %q is not referenced by any flow", role.Handle)
+	for index := range b.manifest.Heroes {
+		hero := b.manifest.Heroes[index]
+		if hero.Scope == HeroScopeFlow && !b.flowHeroRefs[hero.Handle] {
+			return fieldError(CodePackHeroUnreferenced, "heroes["+strconv.Itoa(index)+"]",
+				"flow-scoped hero %q is not referenced by any flow", hero.Handle)
 		}
 	}
-	// Model requirement overrides must name a declared role.
+	// Model requirement overrides must name a declared hero.
 	if b.manifest.ModelRequirements != nil {
-		handles := make([]string, 0, len(b.manifest.ModelRequirements.Roles))
-		for handle := range b.manifest.ModelRequirements.Roles {
+		handles := make([]string, 0, len(b.manifest.ModelRequirements.Heroes))
+		for handle := range b.manifest.ModelRequirements.Heroes {
 			handles = append(handles, handle)
 		}
 		sort.Strings(handles)
 		for _, handle := range handles {
-			if !b.roleSet[handle] {
-				return fieldError(CodePackRefUnknown, "model_requirements.roles."+handle,
-					"model requirements reference undeclared role %q", handle)
+			if !b.heroSet[handle] {
+				return fieldError(CodePackRefUnknown, "model_requirements.heroes."+handle,
+					"model requirements reference undeclared hero %q", handle)
 			}
-			b.perRole[handle] = sortedUnique(b.manifest.ModelRequirements.Roles[handle].Capabilities)
+			b.perHero[handle] = sortedUnique(b.manifest.ModelRequirements.Heroes[handle].Capabilities)
 		}
 	}
 	return nil
@@ -447,11 +447,11 @@ func (b *builder) collectWarnings() {
 	}
 	switch {
 	case len(b.manifest.Flows) == 0:
-		b.warn(WarningRoleOnlyPack, SeverityInfo,
-			"pack ships roles only; every role is installed as a Worker-global Role")
-	case len(b.manifest.Roles) == 0:
+		b.warn(WarningHeroOnlyPack, SeverityInfo,
+			"pack ships heroes only; every hero is installed as a Worker-global Role")
+	case len(b.manifest.Heroes) == 0:
 		b.warn(WarningFlowOnlyPack, SeverityInfo,
-			"pack ships flows only; every task role must resolve from the Worker's global Roles")
+			"pack ships flows only; every task hero must resolve from the Worker's global Heroes")
 	}
 	// MCP refs are external by definition in S1: report each one as information,
 	// never as an error, and never resolve or execute it. manifest.MCP is already
@@ -530,7 +530,7 @@ func (b *builder) result(source Source, includeDocuments bool) *Result {
 		Signature:          b.signature(),
 		Signed:             false,
 		Flows:              nonNilFlows(b.flows),
-		Roles:              nonNilRoles(b.roles),
+		Heroes:              nonNilHeroes(b.heroes),
 		Skills:             nonNilSkills(b.skills),
 		MCP:                nonNilMCP(b.manifest.MCP),
 		Requires:           append([]string{}, b.manifest.Requires...),
@@ -543,7 +543,7 @@ func (b *builder) result(source Source, includeDocuments bool) *Result {
 	}
 	if includeDocuments {
 		documents := append([]DocumentText{}, b.documents...)
-		// Documents are reported in review order (flows, roles, skills) rather
+		// Documents are reported in review order (flows, heroes, skills) rather
 		// than analysis order, then by ref for determinism.
 		sort.SliceStable(documents, func(i, j int) bool {
 			if documentRank(documents[i].Kind) == documentRank(documents[j].Kind) {
@@ -558,14 +558,14 @@ func (b *builder) result(source Source, includeDocuments bool) *Result {
 }
 
 func (b *builder) capabilityEnvelope() CapabilityEnvelope {
-	roles := make([]string, 0, len(b.roles))
+	heroes := make([]string, 0, len(b.heroes))
 	tools := make([]string, 0)
-	for _, role := range b.roles {
-		roles = append(roles, role.Handle)
-		tools = append(tools, role.AllowedTools...)
+	for _, hero := range b.heroes {
+		heroes = append(heroes, hero.Handle)
+		tools = append(tools, hero.AllowedTools...)
 	}
-	if b.perRole == nil {
-		b.perRole = map[string][]string{}
+	if b.perHero == nil {
+		b.perHero = map[string][]string{}
 	}
 	capabilities := []string{}
 	var minContextWindow int64
@@ -593,14 +593,14 @@ func (b *builder) capabilityEnvelope() CapabilityEnvelope {
 	}
 	return CapabilityEnvelope{
 		FlowCount:   len(b.flows),
-		RoleCount:   len(b.roles),
+		HeroCount:   len(b.heroes),
 		SkillCount:  len(b.skills),
 		TaskCount:   taskCount,
-		Roles:       sortedUnique(roles),
+		Heroes:       sortedUnique(heroes),
 		Skills:      sortedUnique(skillRefs),
 		RequiresMCP: sortedUnique(requiresMCP),
 		ModelRequirements: ModelEnvelope{
-			Capabilities: capabilities, MinContextWindow: minContextWindow, PerRole: b.perRole,
+			Capabilities: capabilities, MinContextWindow: minContextWindow, PerHero: b.perHero,
 		},
 		CheckCommands:      sortedUnique(b.checkCommands),
 		Tools:              sortedUnique(tools),
@@ -637,7 +637,7 @@ func documentRank(kind string) int {
 	switch kind {
 	case DocumentFlow:
 		return 0
-	case DocumentRole:
+	case DocumentHero:
 		return 1
 	default:
 		return 2
@@ -678,9 +678,9 @@ func nonNilFlows(values []FlowSummary) []FlowSummary {
 	return values
 }
 
-func nonNilRoles(values []RoleSummary) []RoleSummary {
+func nonNilHeroes(values []HeroSummary) []HeroSummary {
 	if values == nil {
-		return []RoleSummary{}
+		return []HeroSummary{}
 	}
 	return values
 }

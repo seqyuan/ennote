@@ -19,7 +19,7 @@ export function classifyDisplayRisk(toolName: string): DisplayRiskClass {
   if (writeTools.has(name)) return "local_write";
   if (shellTools.has(name)) return "shell";
   if (externalTools.has(name)) return "external";
-  if (name === "delegate_tasks" || name === "delegate_roles") return "delegation";
+  if (name === "delegate_tasks" || name === "delegate_heroes") return "delegation";
   return "sensitive";
 }
 
@@ -76,16 +76,16 @@ export function summarizeToolCall(toolName: string, rawArguments: unknown): Tool
       };
     }
     case "delegate_tasks":
-    case "delegate_roles": { // legacy alias stays readable in history
+    case "delegate_heroes": { // legacy alias stays readable in history
       const tasks = Array.isArray(args.tasks)
         ? args.tasks
         : (Array.isArray(args.delegations) ? args.delegations : []);
-      const roles = tasks.map(item => objectArguments(item))
-        .map(item => stringValue(item.role ?? item.roleHandle)).filter(Boolean);
+      const heroes = tasks.map(item => objectArguments(item))
+        .map(item => stringValue(item.role ?? item.heroHandle)).filter(Boolean);
       return {
         label: "Delegate tasks",
         target: tasks.length === 1 ? "1 task" : `${tasks.length} tasks`,
-        detail: roles.length ? roles.map(handle => `@${handle}`).join(", ") : undefined,
+        detail: heroes.length ? heroes.map(handle => `@${handle}`).join(", ") : undefined,
       };
     }
     case "todo": {

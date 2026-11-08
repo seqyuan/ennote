@@ -82,7 +82,7 @@ const ToolBatch = memo(function ToolBatch({ sessionId, batch, isLast, approval, 
   const failed = batch.activities.filter((activity) => activity.state === "failed" || activity.state === "rejected").length;
   const hasOutcome = failed > 0 || batch.activities.some((activity) =>
     (activity.result?.artifacts.length ?? 0) > 0 ||
-    activity.toolName === "delegate_tasks" || activity.toolName === "delegate_roles");
+    activity.toolName === "delegate_tasks" || activity.toolName === "delegate_heroes");
   const expanded = override ?? shouldExpandBatch({ isLast, hasActive, hasApproval: Boolean(approval), hasOutcome });
   const current = [...batch.activities].reverse().find((activity) => activity.state === "running" || activity.state === "pending")
     ?? batch.activities[batch.activities.length - 1];

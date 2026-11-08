@@ -48,10 +48,10 @@ func (p *ContextProjector) ProjectAndFreeze(ctx context.Context, run domain.Agen
 	if err != nil {
 		return ProjectedContext{}, fmt.Errorf("load invocation target: %w", err)
 	}
-	if targetKind != "host" && targetKind != "role" {
+	if targetKind != "host" && targetKind != "hero" {
 		return ProjectedContext{}, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("format 2 Run target is invalid"))
 	}
-	if targetKind == "role" && (targetObjectID == "" || targetVersionID == "" || participantInstanceID == "") {
+	if targetKind == "hero" && (targetObjectID == "" || targetVersionID == "" || participantInstanceID == "") {
 		return ProjectedContext{}, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("Role target identity is incomplete"))
 	}
 	if targetKind == "host" && (targetObjectID != "" || targetVersionID != "") {
@@ -66,7 +66,7 @@ func (p *ContextProjector) ProjectAndFreeze(ctx context.Context, run domain.Agen
 	if err != nil {
 		return ProjectedContext{}, fmt.Errorf("load canonical context lineage: %w", err)
 	}
-	if targetKind == "role" {
+	if targetKind == "hero" {
 		invited := false
 		for _, message := range lineage {
 			for _, part := range message.Parts {
@@ -184,11 +184,11 @@ func selectProjectedMessages(lineage []domain.Message, baseMessageID string, mod
 func projectMessageForTarget(message domain.Message, targetKind, targetObjectID string) domain.Message {
 	addressedToTarget := message.Role == string(domain.RoleUser) && message.AddresseeKind != nil &&
 		((*message.AddresseeKind == "host" && targetKind == "host") ||
-			(*message.AddresseeKind == "role" && targetKind == "role" && message.AddresseeObjectID != nil &&
+			(*message.AddresseeKind == "hero" && targetKind == "hero" && message.AddresseeObjectID != nil &&
 				*message.AddresseeObjectID == targetObjectID))
 	spokenByTarget := message.Role == string(domain.RoleAssistant) &&
 		((message.SpeakerKind == domain.SpeakerHost && targetKind == "host") ||
-			(message.SpeakerKind == domain.SpeakerRole && targetKind == "role" && message.SpeakerObjectID != nil &&
+			(message.SpeakerKind == domain.SpeakerHero && targetKind == "hero" && message.SpeakerObjectID != nil &&
 				*message.SpeakerObjectID == targetObjectID))
 	if addressedToTarget {
 		return message
@@ -218,7 +218,7 @@ func projectMessageForTarget(message domain.Message, targetKind, targetObjectID 
 	}
 	payload, _ := json.Marshal(struct {
 		Speaker      string `json:"speaker"`
-		OriginalRole string `json:"originalRole"`
+		OriginalHero string `json:"originalHero"`
 		Text         string `json:"text"`
 	}{label, message.Role, text})
 	message.Role = string(domain.RoleUser)

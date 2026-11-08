@@ -7,7 +7,7 @@ import (
 
 // Agent Flow (roadmap item 7, governing design 2026-08-05-agent-flow-design-v2.md).
 //
-// An Agent Flow is a declarative task DAG: each task = role@version + skills +
+// An Agent Flow is a declarative task DAG: each task = hero@version + skills +
 // goal + depends (+ optional budget/check/fan-out/terminal). The meta-Run is a
 // pure orchestration state machine that coordinates one child Run per task and
 // never calls a Provider itself.
@@ -67,9 +67,9 @@ func (s FlowNodeState) Terminal() bool {
 	}
 }
 
-// FlowTaskType distinguishes ordinary role tasks from deterministic check gates.
+// FlowTaskType distinguishes ordinary hero tasks from deterministic check gates.
 const (
-	FlowTaskRole  = "role"
+	FlowTaskHero  = "hero"
 	FlowTaskCheck = "check"
 )
 
@@ -123,7 +123,7 @@ type ConvergenceRule struct {
 
 // FlowTask is one task of a flow definition.
 type FlowTask struct {
-	Role     string            `json:"role,omitempty" yaml:"role,omitempty"`
+	Hero     string            `json:"hero,omitempty" yaml:"hero,omitempty"`
 	Skills   []string          `json:"skills,omitempty" yaml:"skills,omitempty"`
 	Goal     string            `json:"goal,omitempty" yaml:"goal,omitempty"`
 	Depends  []string          `json:"depends,omitempty" yaml:"depends,omitempty"`
@@ -253,7 +253,7 @@ type RunAgentFlowNode struct {
 	RunID         string `json:"runId"`
 	TaskIndex     int    `json:"taskIndex"`
 	Handle        string `json:"handle"`
-	RoleVersionID string `json:"roleVersionId,omitempty"`
+	HeroVersionID string `json:"heroVersionId,omitempty"`
 	// SkillDigests is the bare task Skill ID list. It is kept for the public
 	// Workers API shape (skillDigests: [id]); the digest-pinned view lives in
 	// FrozenSkills, decoded from the same column.
@@ -269,17 +269,17 @@ type RunAgentFlowNode struct {
 	ErrorCode   string     `json:"errorCode,omitempty"`
 	CreatedAt   time.Time  `json:"createdAt"`
 	FinishedAt  *time.Time `json:"finishedAt,omitempty"`
-	// ReadOnly is the frozen concurrency class: true = role cannot mutate the
+	// ReadOnly is the frozen concurrency class: true = hero cannot mutate the
 	// workspace (may run in parallel with other readers); false = writer
 	// (mutation lane, or disjoint-writes lane when the flow opts in).
 	ReadOnly bool `json:"readOnly,omitempty"`
 	// Writes are the frozen declared writes scopes (globs relative to
 	// /workspace); empty means "whole workspace" (exclusive lane).
 	Writes []string `json:"writes,omitempty"`
-	// RoleDefinitionJSON is the full resolved RoleDefinition frozen at Run
-	// start (global revision, graph-local role, or inline task role). It is
+	// HeroDefinitionJSON is the full resolved HeroDefinition frozen at Run
+	// start (global revision, graph-local hero, or inline task hero). It is
 	// used to materialize child Runs without re-reading mutable files.
-	RoleDefinitionJSON json.RawMessage `json:"roleDefinition,omitempty"`
+	HeroDefinitionJSON json.RawMessage `json:"heroDefinition,omitempty"`
 	// FrozenSkills carries the task-level additive Skills with the content
 	// digest frozen at Run start. It is internal (json:"-"): the public API
 	// keeps exposing the Skill ID list through SkillDigests.

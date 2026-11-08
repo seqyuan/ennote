@@ -10,19 +10,19 @@ import { apiFetch } from "@/lib/worker-api.client";
 
 type ThinkingEffort = "default" | "low" | "medium" | "high";
 
-// The frozen RoleContextPolicy vocabulary. task_only is required for a Role to
+// The frozen HeroContextPolicy vocabulary. task_only is required for a Hero to
 // run as a delegated child; reply enables reply_to addressing.
 const ROLE_CONTEXT_MODES = ["room", "reply", "fresh", "task_only"] as const;
-type RoleContextMode = (typeof ROLE_CONTEXT_MODES)[number];
-const ROLE_CONTEXT_LABELS: Record<RoleContextMode, string> = {
+type HeroContextMode = (typeof ROLE_CONTEXT_MODES)[number];
+const ROLE_CONTEXT_LABELS: Record<HeroContextMode, string> = {
   room: "Room", reply: "Reply", fresh: "Fresh", task_only: "Task only",
 };
 
-// A Role's permission ceiling is the same three modes a Run runs under, ordered
+// A Hero's permission ceiling is the same three modes a Run runs under, ordered
 // by strictness so the tightest option is the first one read.
 const PERMISSION_CEILINGS = ["discuss", "ask", "auto"] as const;
 
-interface RoleDocument {
+interface HeroDocument {
   schemaVersion: number;
   handle: string;
   name: string;
@@ -35,7 +35,7 @@ interface RoleDocument {
   authority: "read_only" | "write_workspace";
   permissionCeiling: "discuss" | "auto" | "ask";
   allowedTools: string[];
-  context: { defaultMode: RoleContextMode; allowedModes: RoleContextMode[]; ownExecutionContinuity: "none" };
+  context: { defaultMode: HeroContextMode; allowedModes: HeroContextMode[]; ownExecutionContinuity: "none" };
   delegation: {
     admission: "auto_within_budget" | "approval_required" | "deny";
     allowedCallerKinds: string[];
@@ -49,10 +49,10 @@ interface RoleDocument {
   prompt: string;
 }
 
-interface RoleSummary { id: string; name: string; path: string; digest?: string; error?: string }
-interface RoleDetail { id: string; name: string; path: string; digest: string; document: RoleDocument }
+interface HeroSummary { id: string; name: string; path: string; digest?: string; error?: string }
+interface HeroDetail { id: string; name: string; path: string; digest: string; document: HeroDocument }
 
-function defaultRole(handle: string, name: string, model: string): RoleDocument {
+function defaultHero(handle: string, name: string, model: string): HeroDocument {
   return {
     schemaVersion: 1, handle, name, description: "", positioning: "", icon: "bot", color: "neutral",
     model: { ref: model, thinkingEffort: "default", fallbacks: [] }, skills: [],
@@ -68,36 +68,36 @@ function defaultRole(handle: string, name: string, model: string): RoleDocument 
   };
 }
 
-export function RolesSettings({ models, providers, setError }: {
+export function HeroesSettings({ models, providers, setError }: {
   models: ModelProfile[];
   providers: ProviderProfile[];
   setError: (value: string | null) => void;
 }) {
   const t = useT();
   const options = useMemo(() => modelOptions(models, providers), [models, providers]);
-  const [roles, setRoles] = useState<RoleSummary[]>([]);
+  const [heroes, setHeroes] = useState<HeroSummary[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [detail, setDetail] = useState<RoleDetail | null>(null);
+  const [detail, setDetail] = useState<HeroDetail | null>(null);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState<"loading" | "saving" | "creating" | "publishing" | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
-  const [newRole, setNewRole] = useState({ id: "", name: "" });
+  const [newHero, setNewHero] = useState({ id: "", name: "" });
   const [conflict, setConflict] = useState(false);
-  const [diskDetail, setDiskDetail] = useState<RoleDetail | null>(null);
+  const [diskDetail, setDiskDetail] = useState<HeroDetail | null>(null);
 
   useOverlayLayer(diskDetail !== null, () => setDiskDetail(null));
 
   const refresh = useCallback(async () => {
-    const next = await apiFetch<RoleSummary[]>("/v1/global-roles");
-    setRoles(next);
+    const next = await apiFetch<HeroSummary[]>("/v1/global-heroes");
+    setHeroes(next);
     return next;
   }, []);
 
-  const openRole = useCallback(async (id: string) => {
+  const openHero = useCallback(async (id: string) => {
     setBusy("loading");
     setSelected(id);
     try {
-      setDetail(await apiFetch<RoleDetail>(`/v1/global-roles/${encodeURIComponent(id)}`));
+      setDetail(await apiFetch<HeroDetail>(`/v1/global-heroes/${encodeURIComponent(id)}`));
       setConflict(false);
       setDiskDetail(null);
       setError(null);
@@ -113,25 +113,25 @@ export function RolesSettings({ models, providers, setError }: {
     let cancelled = false;
     const timer = window.setTimeout(() => {
       void refresh().then((items) => {
-        const first = items.find((role) => !role.error);
-        if (!cancelled && first) void openRole(first.id);
+        const first = items.find((hero) => !hero.error);
+        if (!cancelled && first) void openHero(first.id);
       }).catch((reason: unknown) => { if (!cancelled) setError((reason as Error).message); });
     }, 0);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [openRole, refresh, setError]);
+  }, [openHero, refresh, setError]);
 
-  const createRole = async () => {
-    if (!options[0]) { setError("Create an active model before creating a Role."); return; }
-    const id = newRole.id.trim();
-    const name = newRole.name.trim();
+  const createHero = async () => {
+    if (!options[0]) { setError("Create an active model before creating a Hero."); return; }
+    const id = newHero.id.trim();
+    const name = newHero.name.trim();
     if (!id || !name) return;
     setBusy("creating");
     try {
-      const created = await apiFetch<RoleDetail>("/v1/global-roles", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ document: defaultRole(id, name, options[0].ref) }),
+      const created = await apiFetch<HeroDetail>("/v1/global-heroes", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ document: defaultHero(id, name, options[0].ref) }),
       });
       setCreateOpen(false);
-      setNewRole({ id: "", name: "" });
+      setNewHero({ id: "", name: "" });
       setDetail(created);
       setSelected(created.id);
       await refresh();
@@ -143,15 +143,15 @@ export function RolesSettings({ models, providers, setError }: {
     }
   };
 
-  const save = async (document: RoleDocument) => {
+  const save = async (document: HeroDocument) => {
     if (!detail || busy) return;
     setBusy("saving");
     try {
-      const updated = await apiFetch<RoleDetail>(`/v1/global-roles/${encodeURIComponent(detail.id)}`, {
+      const updated = await apiFetch<HeroDetail>(`/v1/global-heroes/${encodeURIComponent(detail.id)}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedDigest: detail.digest, document }),
       });
       setDetail(updated);
-      setRoles((current) => current.map((role) => role.id === updated.id ? { ...role, name: updated.name, digest: updated.digest, error: undefined } : role));
+      setHeroes((current) => current.map((hero) => hero.id === updated.id ? { ...hero, name: updated.name, digest: updated.digest, error: undefined } : hero));
       setConflict(false);
       setDiskDetail(null);
       setError(null);
@@ -166,7 +166,7 @@ export function RolesSettings({ models, providers, setError }: {
   const showDiff = async () => {
     if (!detail) return;
     try {
-      setDiskDetail(await apiFetch<RoleDetail>(`/v1/global-roles/${encodeURIComponent(detail.id)}`));
+      setDiskDetail(await apiFetch<HeroDetail>(`/v1/global-heroes/${encodeURIComponent(detail.id)}`));
     } catch (reason) {
       setError((reason as Error).message);
     }
@@ -176,7 +176,7 @@ export function RolesSettings({ models, providers, setError }: {
     if (!detail || busy) return;
     setBusy("publishing");
     try {
-      await apiFetch(`/v1/global-roles/${encodeURIComponent(detail.id)}/publish`, { method: "POST" });
+      await apiFetch(`/v1/global-heroes/${encodeURIComponent(detail.id)}/publish`, { method: "POST" });
       setError(null);
     } catch (reason) {
       setError((reason as Error).message);
@@ -185,17 +185,17 @@ export function RolesSettings({ models, providers, setError }: {
     }
   };
 
-  const updateLocal = (update: (document: RoleDocument) => RoleDocument) => {
+  const updateLocal = (update: (document: HeroDocument) => HeroDocument) => {
     if (!detail) return;
     setDetail({ ...detail, document: update(detail.document) });
   };
-  const updateAndSave = (update: (document: RoleDocument) => RoleDocument) => {
+  const updateAndSave = (update: (document: HeroDocument) => HeroDocument) => {
     if (!detail) return;
     const document = update(detail.document);
     setDetail({ ...detail, document });
     void save(document);
   };
-  const toggleContextMode = (mode: RoleContextMode, checked: boolean) => {
+  const toggleContextMode = (mode: HeroContextMode, checked: boolean) => {
     updateAndSave((document) => {
       const allowedModes = checked
         ? ROLE_CONTEXT_MODES.filter((candidate) => candidate === mode || document.context.allowedModes.includes(candidate))
@@ -207,66 +207,66 @@ export function RolesSettings({ models, providers, setError }: {
     });
   };
 
-  const visible = roles.filter((role) => `${role.name} ${role.id}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const visible = heroes.filter((hero) => `${hero.name} ${hero.id}`.toLowerCase().includes(query.trim().toLowerCase()));
 
   return (
-    <div className={`global-roles ${selected ? "has-selection" : ""}`}>
-      <aside className="global-roles-list">
-        <header><div><strong>Role catalog</strong><span>{roles.length} global Roles</span></div><button type="button" onClick={() => setCreateOpen((value) => !value)} aria-label="Add Role"><Plus size={18} /></button></header>
-        {createOpen && <div className="global-role-create"><input value={newRole.id} onChange={(event) => setNewRole((value) => ({ ...value, id: event.target.value }))} placeholder="role-id" /><input value={newRole.name} onChange={(event) => setNewRole((value) => ({ ...value, name: event.target.value }))} placeholder="Role name" /><button type="button" onClick={() => void createRole()} disabled={busy === "creating"}>{busy === "creating" ? "Creating…" : "Create"}</button></div>}
-        <label className="global-role-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search Roles" /></label>
-        <div role="listbox" aria-label="Global Roles">
-          {visible.map((role) => <button key={role.id} type="button" role="option" aria-selected={selected === role.id} onClick={() => void openRole(role.id)}><Bot size={17} /><span><strong>{role.name}</strong><code>{role.id}</code>{role.error && <small>{role.error}</small>}</span><FileText size={14} /></button>)}
-          {visible.length === 0 && <div className="roles-empty">No global Roles</div>}
+    <div className={`global-heroes ${selected ? "has-selection" : ""}`}>
+      <aside className="global-heroes-list">
+        <header><div><strong>Hero catalog</strong><span>{heroes.length} global Heroes</span></div><button type="button" onClick={() => setCreateOpen((value) => !value)} aria-label="Add Hero"><Plus size={18} /></button></header>
+        {createOpen && <div className="global-hero-create"><input value={newHero.id} onChange={(event) => setNewHero((value) => ({ ...value, id: event.target.value }))} placeholder="hero-id" /><input value={newHero.name} onChange={(event) => setNewHero((value) => ({ ...value, name: event.target.value }))} placeholder="Hero name" /><button type="button" onClick={() => void createHero()} disabled={busy === "creating"}>{busy === "creating" ? "Creating…" : "Create"}</button></div>}
+        <label className="global-hero-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search Heroes" /></label>
+        <div role="listbox" aria-label="Global Heroes">
+          {visible.map((hero) => <button key={hero.id} type="button" role="option" aria-selected={selected === hero.id} onClick={() => void openHero(hero.id)}><Bot size={17} /><span><strong>{hero.name}</strong><code>{hero.id}</code>{hero.error && <small>{hero.error}</small>}</span><FileText size={14} /></button>)}
+          {visible.length === 0 && <div className="heroes-empty">No global Heroes</div>}
         </div>
       </aside>
 
-      <section className="global-role-detail">
-        {!detail && busy === "loading" && <div className="roles-detail-empty"><Loader2 className="spin" size={18} /> Loading Role…</div>}
-        {!detail && busy !== "loading" && <div className="roles-detail-empty"><Bot size={26} /> Select or create a Role</div>}
+      <section className="global-hero-detail">
+        {!detail && busy === "loading" && <div className="heroes-detail-empty"><Loader2 className="spin" size={18} /> Loading Hero…</div>}
+        {!detail && busy !== "loading" && <div className="heroes-detail-empty"><Bot size={26} /> Select or create a Hero</div>}
         {detail && <>
-          <header className="global-role-commandbar">
-            <button type="button" className="global-role-back" onClick={() => { setSelected(null); setDetail(null); }}><ArrowLeft size={17} /> Roles</button>
+          <header className="global-hero-commandbar">
+            <button type="button" className="global-hero-back" onClick={() => { setSelected(null); setDetail(null); }}><ArrowLeft size={17} /> Heroes</button>
             <div><strong>{detail.document.name}</strong><code>{detail.path}</code></div>
-            <div className="global-role-command-actions">
+            <div className="global-hero-command-actions">
               {conflict ? <>
-                <span className="role-conflict-state">File changed on disk</span>
+                <span className="hero-conflict-state">File changed on disk</span>
                 <button type="button" onClick={() => void showDiff()}>Diff</button>
-                <button type="button" onClick={() => void openRole(detail.id)}>Reload</button>
+                <button type="button" onClick={() => void openHero(detail.id)}>Reload</button>
               </> : <span className={busy === "saving" ? "is-saving" : ""}>{busy === "saving" ? <><Loader2 className="spin" size={14} /> Saving</> : <><Check size={14} /> Saved</>}</span>}
               <button type="button" onClick={() => void publish()} disabled={Boolean(busy) || conflict}>{busy === "publishing" ? "Publishing…" : "Publish"}</button>
             </div>
           </header>
-          <div className="global-role-form">
-            <section><h3>Identity</h3><div className="global-role-grid">
+          <div className="global-hero-form">
+            <section><h3>Identity</h3><div className="global-hero-grid">
               <label>Name<input value={detail.document.name} onChange={(event) => updateLocal((document) => ({ ...document, name: event.target.value }))} onBlur={() => void save(detail.document)} /></label>
               <label>Handle<input value={detail.document.handle} disabled /></label>
               <label className="wide">Description<input value={detail.document.description} onChange={(event) => updateLocal((document) => ({ ...document, description: event.target.value }))} onBlur={() => void save(detail.document)} /></label>
             </div></section>
-            <section><h3>Runtime</h3><div className="global-role-grid">
+            <section><h3>Runtime</h3><div className="global-hero-grid">
               <label className="wide">Model<select value={detail.document.model.ref} onChange={(event) => updateAndSave((document) => ({ ...document, model: { ...document.model, ref: event.target.value } }))}>{options.map((option) => <option key={option.ref} value={option.ref}>{option.label} · {option.ref}</option>)}</select></label>
               <label>Thinking<select value={detail.document.model.thinkingEffort} onChange={(event) => updateAndSave((document) => ({ ...document, model: { ...document.model, thinkingEffort: event.target.value as ThinkingEffort } }))}>{(["default", "low", "medium", "high"] as const).map((effort) => <option key={effort}>{effort}</option>)}</select></label>
               {/* Ordered by strictness, and labelled with the same names the composer chip uses:
-                a Role's ceiling and a Run's mode are the same three values. */}
-              <label>Permission ceiling<select value={detail.document.permissionCeiling} onChange={(event) => updateAndSave((document) => ({ ...document, permissionCeiling: event.target.value as RoleDocument["permissionCeiling"] }))}>{PERMISSION_CEILINGS.map((mode) => <option key={mode} value={mode}>{t(`permission.${mode}`)}</option>)}</select></label>
+                a Hero's ceiling and a Run's mode are the same three values. */}
+              <label>Permission ceiling<select value={detail.document.permissionCeiling} onChange={(event) => updateAndSave((document) => ({ ...document, permissionCeiling: event.target.value as HeroDocument["permissionCeiling"] }))}>{PERMISSION_CEILINGS.map((mode) => <option key={mode} value={mode}>{t(`permission.${mode}`)}</option>)}</select></label>
               <label className="wide">Skills<input value={detail.document.skills.map((skill) => skill.id).join(", ")} onChange={(event) => updateLocal((document) => ({ ...document, skills: event.target.value.split(",").map((id) => id.trim()).filter(Boolean).map((id) => ({ id, mode: "available" as const })) }))} onBlur={() => void save(detail.document)} placeholder="report-writing, code-review" /></label>
             </div></section>
-            <section><h3>Execution context</h3><div className="global-role-grid">
-              <label>Default mode<select aria-label="Default context mode" value={detail.document.context.defaultMode} onChange={(event) => updateAndSave((document) => ({ ...document, context: { ...document.context, defaultMode: event.target.value as RoleContextMode } }))}>{detail.document.context.allowedModes.map((mode) => <option key={mode} value={mode}>{ROLE_CONTEXT_LABELS[mode]}</option>)}</select></label>
-              <div className="global-role-modes wide">
+            <section><h3>Execution context</h3><div className="global-hero-grid">
+              <label>Default mode<select aria-label="Default context mode" value={detail.document.context.defaultMode} onChange={(event) => updateAndSave((document) => ({ ...document, context: { ...document.context, defaultMode: event.target.value as HeroContextMode } }))}>{detail.document.context.allowedModes.map((mode) => <option key={mode} value={mode}>{ROLE_CONTEXT_LABELS[mode]}</option>)}</select></label>
+              <div className="global-hero-modes wide">
                 <span>Allowed modes</span>
                 <div role="group" aria-label="Allowed context modes">
                   {ROLE_CONTEXT_MODES.map((mode) => {
                     const checked = detail.document.context.allowedModes.includes(mode);
-                    return <label key={mode} className="global-role-mode"><input type="checkbox" checked={checked} disabled={checked && detail.document.context.allowedModes.length === 1} onChange={(event) => toggleContextMode(mode, event.target.checked)} />{ROLE_CONTEXT_LABELS[mode]}</label>;
+                    return <label key={mode} className="global-hero-mode"><input type="checkbox" checked={checked} disabled={checked && detail.document.context.allowedModes.length === 1} onChange={(event) => toggleContextMode(mode, event.target.checked)} />{ROLE_CONTEXT_LABELS[mode]}</label>;
                   })}
                 </div>
-                <p className="global-role-hint">Task only is required for Roles that run as delegated children. Reply enables addressing a specific message; Room shares the session lineage; Fresh starts from the addressed request.</p>
+                <p className="global-hero-hint">Task only is required for Heroes that run as delegated children. Reply enables addressing a specific message; Room shares the session lineage; Fresh starts from the addressed request.</p>
               </div>
             </div></section>
-            <section><h3>Role prompt</h3><label className="global-role-prompt"><textarea aria-label="Role prompt" value={detail.document.prompt} onChange={(event) => updateLocal((document) => ({ ...document, prompt: event.target.value }))} onBlur={() => void save(detail.document)} /></label></section>
+            <section><h3>Hero prompt</h3><label className="global-hero-prompt"><textarea aria-label="Hero prompt" value={detail.document.prompt} onChange={(event) => updateLocal((document) => ({ ...document, prompt: event.target.value }))} onBlur={() => void save(detail.document)} /></label></section>
           </div>
-          {diskDetail && <div className="role-conflict-dialog" role="dialog" aria-modal="true" aria-label="Role file diff">
+          {diskDetail && <div className="hero-conflict-dialog" role="dialog" aria-modal="true" aria-label="Hero file diff">
             <div><header><strong>Local edits</strong><button type="button" onClick={() => setDiskDetail(null)}>Close</button></header><pre>{JSON.stringify(detail.document, null, 2)}</pre></div>
             <div><header><strong>File on disk</strong></header><pre>{JSON.stringify(diskDetail.document, null, 2)}</pre></div>
           </div>}

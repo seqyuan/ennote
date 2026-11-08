@@ -20,7 +20,7 @@ import (
 func TestFlowPackInstallPublishBindFreeze(t *testing.T) {
 	f := newFixture(t)
 	f.service.CheckAllowlistAllowsAll = true
-	source := writePack(t, flowPackFiles(f, roleFile(t, f.modelID, "qc-reviewer", "QC Reviewer")))
+	source := writePack(t, flowPackFiles(f, heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer")))
 	_, err := f.service.Install(context.Background(), packinstall.Request{SourcePath: source})
 	require.NoError(t, err)
 
@@ -79,6 +79,6 @@ func TestFlowPackInstallPublishBindFreeze(t *testing.T) {
 	require.NotNil(t, gateNode)
 	require.NotNil(t, doneNode)
 	assert.True(t, reviewNode.ReadOnly)
-	assert.Empty(t, gateNode.RoleDefinitionJSON)
-	assert.Empty(t, doneNode.RoleDefinitionJSON)
+	assert.Empty(t, gateNode.HeroDefinitionJSON)
+	assert.Empty(t, doneNode.HeroDefinitionJSON)
 }

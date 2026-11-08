@@ -148,7 +148,7 @@ func SerializeRunCompactionSource(previousSummary string, messages []domain.Chat
 		output.WriteString("\n\n")
 	}
 	for index, message := range messages {
-		fmt.Fprintf(&output, "[%s run message ordinal=%d]\n", titleRole(string(message.Role)), index)
+		fmt.Fprintf(&output, "[%s run message ordinal=%d]\n", titleHero(string(message.Role)), index)
 		for _, block := range message.Content {
 			switch block.Kind {
 			case domain.ContentText:

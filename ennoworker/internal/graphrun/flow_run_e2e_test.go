@@ -218,7 +218,7 @@ func TestE2EFullFlowCheckFanOutTerminal(t *testing.T) {
 	assert.Len(t, byHandle["scan"].ChildRunIDs, 2)
 }
 
-func TestE2EWorkerRestartResumesRoleTask(t *testing.T) {
+func TestE2EWorkerRestartResumesHeroTask(t *testing.T) {
 	children := newE2EChildren(false)
 	flow := newE2EFlow(t, children, &e2eChecker{ask: false})
 	defer flow.cancel()

@@ -13,7 +13,7 @@ import (
 // accounting and are deliberately not folded into the parent.
 const (
 	ContextCategorySystem       = "system"
-	ContextCategoryRole         = "role"
+	ContextCategoryHero         = "hero"
 	ContextCategoryRules        = "rules"
 	ContextCategorySkills       = "skills"
 	ContextCategoryTools        = "tools"
@@ -69,7 +69,7 @@ func splitContextUsage(messages []domain.ChatMessage, tools []domain.ToolDefinit
 // contextCategories partitions the projected input across the seven ennote
 // categories. The identity is enforced by construction:
 //
-//	system + role + rules + skills + tools + reminders + conversation == projected
+//	system + hero + rules + skills + tools + reminders + conversation == projected
 //
 // Section bytes decide the split inside the system prompt; the last bucket
 // (system) absorbs the fixed estimate overhead and integer rounding.
@@ -97,7 +97,7 @@ func contextCategories(messages []domain.ChatMessage, tools []domain.ToolDefinit
 
 	weights := map[string]int{
 		ContextCategorySystem: 0,
-		ContextCategoryRole:   0,
+		ContextCategoryHero:   0,
 		ContextCategoryRules:  0,
 		ContextCategorySkills: 0,
 	}
@@ -108,13 +108,13 @@ func contextCategories(messages []domain.ChatMessage, tools []domain.ToolDefinit
 		}
 		weights[key] += section.Bytes
 	}
-	if weights[ContextCategorySystem] == 0 && weights[ContextCategoryRole] == 0 &&
+	if weights[ContextCategorySystem] == 0 && weights[ContextCategoryHero] == 0 &&
 		weights[ContextCategoryRules] == 0 && weights[ContextCategorySkills] == 0 {
 		weights[ContextCategorySystem] = 1
 	}
 	// System is last so it absorbs the fixed overhead and every rounding
 	// remainder; the other three are proportional to their frozen bytes.
-	order := []string{ContextCategoryRole, ContextCategoryRules, ContextCategorySkills, ContextCategorySystem}
+	order := []string{ContextCategoryHero, ContextCategoryRules, ContextCategorySkills, ContextCategorySystem}
 	totalWeight := 0
 	for _, key := range order {
 		totalWeight += weights[key]
@@ -139,7 +139,7 @@ func contextCategories(messages []domain.ChatMessage, tools []domain.ToolDefinit
 
 	return []domain.ContextCategory{
 		{Key: ContextCategorySystem, Tokens: allocated[ContextCategorySystem]},
-		{Key: ContextCategoryRole, Tokens: allocated[ContextCategoryRole]},
+		{Key: ContextCategoryHero, Tokens: allocated[ContextCategoryHero]},
 		{Key: ContextCategoryRules, Tokens: allocated[ContextCategoryRules]},
 		{Key: ContextCategorySkills, Tokens: allocated[ContextCategorySkills]},
 		{Key: ContextCategoryTools, Tokens: toolsTokens},
@@ -152,8 +152,8 @@ func categoryForSection(kind domain.PromptSectionKind) string {
 	switch kind {
 	case domain.PromptSectionBase:
 		return ContextCategorySystem
-	case domain.PromptSectionRole:
-		return ContextCategoryRole
+	case domain.PromptSectionHero:
+		return ContextCategoryHero
 	case domain.PromptSectionContext:
 		return ContextCategoryRules
 	case domain.PromptSectionSkillsCatalog, domain.PromptSectionSkillPreload:

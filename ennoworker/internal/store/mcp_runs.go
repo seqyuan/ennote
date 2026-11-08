@@ -152,7 +152,7 @@ func (r *MCPRunRepo) freezeServerTx(ctx context.Context, tx *sql.Tx, s RunMCPSer
 			s.ID, s.RunID, s.BindingID, s.BindingRevision, s.ProfileVersionID, s.ConfigDigest,
 			s.NegotiatedProtocol, s.ServerIdentityDigest, s.CatalogDigest, s.Required,
 			emptyAsNull(s.UnavailableReason), s.ConnectionGeneration,
-			s.Instructions, s.InstructionsDigest, roleTime(s.CreatedAt))
+			s.Instructions, s.InstructionsDigest, heroTime(s.CreatedAt))
 		return s.ID, err
 	}
 	_, err := r.DB.ExecContext(ctx, `INSERT INTO run_mcp_servers
@@ -163,7 +163,7 @@ func (r *MCPRunRepo) freezeServerTx(ctx context.Context, tx *sql.Tx, s RunMCPSer
 		s.ID, s.RunID, s.BindingID, s.BindingRevision, s.ProfileVersionID, s.ConfigDigest,
 		s.NegotiatedProtocol, s.ServerIdentityDigest, s.CatalogDigest, s.Required,
 		emptyAsNull(s.UnavailableReason), s.ConnectionGeneration,
-		s.Instructions, s.InstructionsDigest, roleTime(s.CreatedAt))
+		s.Instructions, s.InstructionsDigest, heroTime(s.CreatedAt))
 	if err != nil {
 		return "", fmt.Errorf("freeze mcp run server: %w", err)
 	}
@@ -380,7 +380,7 @@ func (r *MCPRunRepo) CreateRequest(ctx context.Context, req MCPRequestRecord) (s
 			    connection_generation=?, updated_at=?
 			WHERE id=?`,
 			string(req.Status), nullableString(&req.ResponseDigest), nullableString(&req.ErrorCode),
-			req.ConnectionGeneration, roleTime(req.UpdatedAt), req.ID)
+			req.ConnectionGeneration, heroTime(req.UpdatedAt), req.ID)
 		return req.ID, err
 	}
 	if err != sql.ErrNoRows {
@@ -392,7 +392,7 @@ func (r *MCPRunRepo) CreateRequest(ctx context.Context, req MCPRequestRecord) (s
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		req.ID, req.RunID, req.RunServerID, req.RunToolID, req.ToolCallID, req.ConnectionGeneration,
 		nullableString(&req.ProtocolRequestID), string(req.Status), req.RequestDigest,
-		nullableString(&req.ResponseDigest), nullableString(&req.ErrorCode), roleTime(req.CreatedAt), roleTime(req.UpdatedAt))
+		nullableString(&req.ResponseDigest), nullableString(&req.ErrorCode), heroTime(req.CreatedAt), heroTime(req.UpdatedAt))
 	if err != nil {
 		return "", fmt.Errorf("create mcp request: %w", err)
 	}
@@ -414,7 +414,7 @@ func (r *MCPRunRepo) UpdateRequestStatus(ctx context.Context, id string, status 
 	_, err := r.DB.ExecContext(ctx, `UPDATE mcp_requests
 		SET status=?, response_digest=COALESCE(?, response_digest), error_code=?, updated_at=?
 		WHERE id=?`,
-		string(status), nullableString(&responseDigest), nullableString(&errorCode), roleTime(time.Now().UTC()), id)
+		string(status), nullableString(&responseDigest), nullableString(&errorCode), heroTime(time.Now().UTC()), id)
 	return err
 }
 

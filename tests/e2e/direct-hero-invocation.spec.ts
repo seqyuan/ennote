@@ -28,7 +28,7 @@ function fulfill(route: Route, data: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ data }) });
 }
 
-async function mockDirectRole(page: Page, onInvocation: (body: Record<string, unknown>) => void) {
+async function mockDirectHero(page: Page, onInvocation: (body: Record<string, unknown>) => void) {
   await page.route("**/api/worker/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
     if (await tryFulfillHarnessRoutes(route)) return;
@@ -36,16 +36,16 @@ async function mockDirectRole(page: Page, onInvocation: (body: Record<string, un
     if (path === "/v1/provider-profiles") return fulfill(route, []);
     if (path === "/v1/model-profiles") return fulfill(route, [model]);
     if (path === "/v1/policy-profiles") return fulfill(route, policies);
-    if (path === "/v1/global-roles") {
-      return fulfill(route, [{ id: role.id, name: role.name, path: "/home/roles/security-reviewer/role.md", digest: `sha256:${"a".repeat(64)}` }]);
+    if (path === "/v1/global-heroes") {
+      return fulfill(route, [{ id: role.id, name: role.name, path: "/home/heroes/security-reviewer/role.md", digest: `sha256:${"a".repeat(64)}` }]);
     }
-    if (path === `/v1/global-roles/${role.id}`) {
+    if (path === `/v1/global-heroes/${role.id}`) {
       return fulfill(route, {
-        id: role.id, name: role.name, path: "/home/roles/security-reviewer/role.md", digest: `sha256:${"a".repeat(64)}`,
+        id: role.id, name: role.name, path: "/home/heroes/security-reviewer/role.md", digest: `sha256:${"a".repeat(64)}`,
         document: { handle: role.handle, name: role.name, description: role.description, positioning: role.positioning, icon: role.icon, color: role.color },
       });
     }
-    if (path === `/v1/global-roles/${role.id}/versions`) return fulfill(route, [{ version: 1, publishedAt: now }]);
+    if (path === `/v1/global-heroes/${role.id}/versions`) return fulfill(route, [{ version: 1, publishedAt: now }]);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
     if (path === `/v1/sessions/${session.id}`) return fulfill(route, session);
     if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, null);
@@ -67,10 +67,10 @@ async function mockDirectRole(page: Page, onInvocation: (body: Record<string, un
 }
 
 for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
-  test(`direct Role target is structured and attributed at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+  test(`direct Hero target is structured and attributed at ${viewport.width}x${viewport.height}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     let invocation: Record<string, unknown> | undefined;
-    await mockDirectRole(page, (body) => { invocation = body; });
+    await mockDirectHero(page, (body) => { invocation = body; });
     await openSession(page, { projectId: project.id, sessionId: session.id });
 
     await expect(page.getByText(`@${role.handle}`, { exact: true }).first()).toBeVisible();

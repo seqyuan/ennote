@@ -83,7 +83,7 @@ func TestAttentionProjectsDelegationApprovalAndCompletion(t *testing.T) {
 	// The display payload never leaks private material.
 	raw, err := json.Marshal(item)
 	require.NoError(t, err)
-	for _, forbidden := range []string{"rolePrompt", "credential", "apiKey", "transcript", "assignment"} {
+	for _, forbidden := range []string{"heroPrompt", "credential", "apiKey", "transcript", "assignment"} {
 		assert.NotContains(t, string(raw), forbidden)
 	}
 

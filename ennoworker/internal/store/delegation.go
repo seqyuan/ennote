@@ -26,7 +26,7 @@ var (
 	ErrDelegationBudgetReserved  = errors.New("delegation budget already reserved")
 	ErrDelegationNoOwnedChildren = errors.New("parent owns no non-terminal children")
 	ErrDelegationNotAuthorized   = errors.New("delegation is not authorized")
-	ErrDelegationRoleUnavailable = errors.New("delegation Role is unavailable")
+	ErrDelegationHeroUnavailable = errors.New("delegation Role is unavailable")
 	ErrDelegationAttemptNotFound = errors.New("delegation attempt not found")
 )
 
@@ -35,8 +35,8 @@ var (
 type attemptAuthorizationSnapshot struct {
 	ItemID         string `json:"itemId"`
 	Name           string `json:"name"`
-	RoleVersionID  string `json:"roleVersionId"`
-	RoleObjectID   string `json:"roleObjectId"`
+	HeroVersionID  string `json:"heroVersionId"`
+	HeroObjectID   string `json:"heroObjectId"`
 	Handle         string `json:"handle"`
 	DisplayName    string `json:"displayName"`
 	ConfigDigest   string `json:"configDigest"`
@@ -46,9 +46,9 @@ type attemptAuthorizationSnapshot struct {
 type DelegationRepo struct {
 	DB *sql.DB
 
-	// RoleSources and Models enable file-native Role resolution for delegation
-	// (V2). When RoleSources is nil, the legacy global SQL path is used.
-	RoleSources *globalsource.Store
+	// HeroSources and Models enable file-native Role resolution for delegation
+	// (V2). When HeroSources is nil, the legacy global SQL path is used.
+	HeroSources *globalsource.Store
 	Models      *ModelRepo
 	// Policies resolves the file-backed delegation policy for the root budget
 	// ledger (V2); nil keeps the legacy global policy SQL path.
@@ -57,7 +57,7 @@ type DelegationRepo struct {
 
 type CreateDelegationItemInput struct {
 	Name           string
-	RoleVersionID  string
+	HeroVersionID  string
 	AssignmentJSON json.RawMessage
 	OutputContract string
 	Budget         domain.BudgetCeilingJSON
@@ -74,10 +74,10 @@ type CreateDelegationItemInput struct {
 	// Empty means the item is an entry task. The topology is validated in
 	// createDelegationGroupTx (no dangling refs, no cycles, one entry minimum).
 	Depends []string
-	// RoleMeta freezes the full Role identity + definition at Run start. When
+	// HeroMeta freezes the full Role identity + definition at Run start. When
 	// present, delegation validation and child config resolution use the frozen
-	// copy and never touch global role SQL or mutable files.
-	RoleMeta *DelegationRoleMeta
+	// copy and never touch global hero SQL or mutable files.
+	HeroMeta *DelegationHeroMeta
 }
 
 type CreateDelegationGroupInput struct {
@@ -95,31 +95,31 @@ type CreateDelegationGroupInput struct {
 	AdmissionApproved bool
 }
 
-type DelegationRoleSnapshot struct {
-	RoleID            string
+type DelegationHeroSnapshot struct {
+	HeroID            string
 	VersionID         string
-	Scope             domain.RoleScope
+	Scope             domain.HeroScope
 	ProjectID         *string
-	Definition        domain.RoleDefinition
+	Definition        domain.HeroDefinition
 	DelegationEnabled bool
 }
 
-// ResolveRoleForDelegation resolves a handle inside the Session's project
-// boundary (V2 file-native). Project-scoped Roles override global/builtin
-// Roles with the same handle; Roles from other projects are never candidates.
-// The file-native resolver requires a wired RoleSources store; without one no
-// role is resolvable (the legacy global role SQL was removed).
-func (r *DelegationRepo) ResolveRoleForDelegation(ctx context.Context, sessionID, handle string) (*DelegationRoleSnapshot, error) {
-	if r.RoleSources == nil {
-		return nil, ErrDelegationRoleUnavailable
+// ResolveHeroForDelegation resolves a handle inside the Session's project
+// boundary (V2 file-native). Project-scoped Heroes override global/builtin
+// Heroes with the same handle; Heroes from other projects are never candidates.
+// The file-native resolver requires a wired HeroSources store; without one no
+// hero is resolvable (the legacy global hero SQL was removed).
+func (r *DelegationRepo) ResolveHeroForDelegation(ctx context.Context, sessionID, handle string) (*DelegationHeroSnapshot, error) {
+	if r.HeroSources == nil {
+		return nil, ErrDelegationHeroUnavailable
 	}
-	return r.resolveFileRoleForDelegation(ctx, sessionID, handle)
+	return r.resolveFileHeroForDelegation(ctx, sessionID, handle)
 }
 
 // DelegationToolCallApproved reports whether user approval covered this exact
 // Provider-visible delegate_tasks call. A previous approval for another call
 // or Run is never reusable. Both the current name and the legacy
-// delegate_roles alias are matched so approvals recorded before the rename
+// delegate_heroes alias are matched so approvals recorded before the rename
 // stay valid for resumed runs.
 func (r *DelegationRepo) DelegationToolCallApproved(ctx context.Context, runID, toolCallID string) (bool, error) {
 	rows, err := r.DB.QueryContext(ctx, `SELECT items_json FROM tool_approval_requests
@@ -231,7 +231,7 @@ func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 			return nil, nil, fmt.Errorf("decode parent speaker snapshot: %w", err)
 		}
 	}
-	if speaker.Kind == "role" {
+	if speaker.Kind == "hero" {
 		return nil, nil, fmt.Errorf("%w: V1 only permits Host callers", ErrDelegationNotAuthorized)
 	}
 
@@ -248,7 +248,7 @@ func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 		return nil, nil, fmt.Errorf("create delegation group: %w", err)
 	}
 	items := make([]domain.DelegationItem, 0, len(input.Items))
-	proposedByRole := make(map[string]int)
+	proposedByHero := make(map[string]int)
 	// Batch topology validation: every depends reference must name a sibling
 	// item, the dependency graph must be acyclic, and at least one entry task
 	// (indegree 0) must exist. Fail loud before any row is written.
@@ -260,10 +260,10 @@ func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 		if name == "" {
 			return nil, nil, fmt.Errorf("delegation item name is required")
 		}
-		if strings.TrimSpace(item.RoleVersionID) == "" {
+		if strings.TrimSpace(item.HeroVersionID) == "" {
 			return nil, nil, fmt.Errorf("delegation item %s requires a Role version", name)
 		}
-		if err := validateDelegationRoleTx(ctx, tx, input, &item, proposedByRole); err != nil {
+		if err := validateDelegationHeroTx(ctx, tx, input, &item, proposedByHero); err != nil {
 			return nil, nil, fmt.Errorf("delegation item %s: %w", name, err)
 		}
 		if len(item.AssignmentJSON) == 0 {
@@ -289,12 +289,12 @@ func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 			return nil, nil, err
 		}
 		itemID := uuid.NewString()
-		roleMetaJSON := []byte("{}")
-		if item.RoleMeta != nil {
-			if encoded, marshalErr := json.Marshal(item.RoleMeta); marshalErr != nil {
+		heroMetaJSON := []byte("{}")
+		if item.HeroMeta != nil {
+			if encoded, marshalErr := json.Marshal(item.HeroMeta); marshalErr != nil {
 				return nil, nil, marshalErr
 			} else {
-				roleMetaJSON = encoded
+				heroMetaJSON = encoded
 			}
 		}
 		dependsJSON := []byte("[]")
@@ -306,16 +306,16 @@ func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 			dependsJSON = encoded
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO delegation_items
-			(id,group_id,child_run_id,name,role_version_id,assignment_json,output_contract,budget_json,result_json,status,ordinal,depends_json,skills_json,created_at,role_meta_json)
+			(id,group_id,child_run_id,name,hero_version_id,assignment_json,output_contract,budget_json,result_json,status,ordinal,depends_json,skills_json,created_at,hero_meta_json)
 			VALUES(?,?,NULL,?,?,?,?,?,NULL,'pending',?,?,?,?,?)`,
-			itemID, groupID, name, item.RoleVersionID, string(item.AssignmentJSON),
+			itemID, groupID, name, item.HeroVersionID, string(item.AssignmentJSON),
 			outputContract, string(budgetJSON), ordinal, string(dependsJSON), string(skillsJSON),
-			timestamp, string(roleMetaJSON)); err != nil {
+			timestamp, string(heroMetaJSON)); err != nil {
 			return nil, nil, fmt.Errorf("create delegation item %s: %w", name, err)
 		}
 		items = append(items, domain.DelegationItem{
 			ID: itemID, GroupID: groupID, Name: name, Skills: taskSkills.IDs(),
-			Depends: append([]string(nil), item.Depends...), RoleVersionID: item.RoleVersionID,
+			Depends: append([]string(nil), item.Depends...), HeroVersionID: item.HeroVersionID,
 			AssignmentJSON: append(json.RawMessage(nil), item.AssignmentJSON...), OutputContract: outputContract,
 			BudgetJSON: budgetJSON, Status: domain.DelegationItemPending, Ordinal: ordinal, CreatedAt: now,
 		})
@@ -449,17 +449,17 @@ func validateTaskTopologyTx(items []CreateDelegationItemInput) error {
 	return nil
 }
 
-// validateDelegationRoleTx validates a delegation item's Role facts. V2
-// requires a frozen RoleMeta captured at Run start: the legacy global role SQL
-// path was removed, so items without RoleMeta are rejected. Admission checks
+// validateDelegationHeroTx validates a delegation item's Role facts. V2
+// requires a frozen HeroMeta captured at Run start: the legacy global hero SQL
+// path was removed, so items without HeroMeta are rejected. Admission checks
 // run against the frozen definition and invocation limits count prior
-// invocations by the frozen object id, never from global role tables.
-func validateDelegationRoleTx(ctx context.Context, tx *sql.Tx, input CreateDelegationGroupInput,
-	item *CreateDelegationItemInput, proposedByRole map[string]int) error {
-	if item.RoleMeta == nil {
+// invocations by the frozen object id, never from global hero tables.
+func validateDelegationHeroTx(ctx context.Context, tx *sql.Tx, input CreateDelegationGroupInput,
+	item *CreateDelegationItemInput, proposedByHero map[string]int) error {
+	if item.HeroMeta == nil {
 		return fmt.Errorf("%w: delegation items require a frozen Role meta", ErrDelegationNotAuthorized)
 	}
-	return validateFrozenDelegationRoleTx(ctx, tx, input, item, proposedByRole)
+	return validateFrozenDelegationHeroTx(ctx, tx, input, item, proposedByHero)
 }
 
 func validateDelegationBudget(request domain.BudgetCeilingJSON, ceiling domain.DelegationBudgetCeiling) error {
@@ -474,14 +474,14 @@ func validateDelegationBudget(request domain.BudgetCeilingJSON, ceiling domain.D
 	return nil
 }
 
-// validateFrozenDelegationRoleTx validates a delegation item whose Role facts
+// validateFrozenDelegationHeroTx validates a delegation item whose Role facts
 // were frozen at Run start (V2 file-native Graph Runs). It performs the same
-// admission checks as validateDelegationRoleTx against the frozen definition
-// and counts prior invocations by the frozen object id (substr on the role
-// version ref) so no global role SQL is required.
-func validateFrozenDelegationRoleTx(ctx context.Context, tx *sql.Tx, input CreateDelegationGroupInput,
-	item *CreateDelegationItemInput, proposedByRole map[string]int) error {
-	meta := item.RoleMeta
+// admission checks as validateDelegationHeroTx against the frozen definition
+// and counts prior invocations by the frozen object id (substr on the hero
+// version ref) so no global hero SQL is required.
+func validateFrozenDelegationHeroTx(ctx context.Context, tx *sql.Tx, input CreateDelegationGroupInput,
+	item *CreateDelegationItemInput, proposedByHero map[string]int) error {
+	meta := item.HeroMeta
 	definition := meta.Definition
 	callerAllowed := false
 	for _, caller := range definition.DelegationPolicy.AllowedCallerKinds {
@@ -508,11 +508,11 @@ func validateFrozenDelegationRoleTx(ctx context.Context, tx *sql.Tx, input Creat
 	if !strategyAllowed {
 		return fmt.Errorf("%w: Role does not allow %s strategy", ErrDelegationNotAuthorized, input.Strategy)
 	}
-	if definition.Authority == domain.RoleAuthorityMutation && input.Strategy != domain.DelegationStrategySingle {
-		return fmt.Errorf("%w: mutation Roles require the single mutation lane", ErrDelegationNotAuthorized)
+	if definition.Authority == domain.HeroAuthorityMutation && input.Strategy != domain.DelegationStrategySingle {
+		return fmt.Errorf("%w: mutation Heroes require the single mutation lane", ErrDelegationNotAuthorized)
 	}
-	if input.ExecutionMode == domain.DelegationExecutionBackground && definition.Authority == domain.RoleAuthorityMutation {
-		return fmt.Errorf("%w: mutation Roles cannot run in background mode", ErrDelegationNotAuthorized)
+	if input.ExecutionMode == domain.DelegationExecutionBackground && definition.Authority == domain.HeroAuthorityMutation {
+		return fmt.Errorf("%w: mutation Heroes cannot run in background mode", ErrDelegationNotAuthorized)
 	}
 	if item.OutputContract == "" {
 		item.OutputContract = definition.OutputContract
@@ -524,29 +524,29 @@ func validateFrozenDelegationRoleTx(ctx context.Context, tx *sql.Tx, input Creat
 		return fmt.Errorf("%w: %v", ErrDelegationNotAuthorized, err)
 	}
 
-	proposedByRole[meta.ObjectID]++
+	proposedByHero[meta.ObjectID]++
 	var priorInvocations int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM delegation_items i
 		JOIN delegation_groups g ON g.id=i.group_id
 		WHERE g.parent_run_id=? AND g.parent_tool_call_id<>?
-		  AND substr(i.role_version_id,1,instr(i.role_version_id,'@')-1)=?`,
+		  AND substr(i.hero_version_id,1,instr(i.hero_version_id,'@')-1)=?`,
 		input.ParentRunID, input.ParentToolCallID, meta.ObjectID).Scan(&priorInvocations); err != nil {
 		return err
 	}
 	if limit := definition.DelegationPolicy.MaxInvocationsPerParentRun; limit < 1 ||
-		priorInvocations+proposedByRole[meta.ObjectID] > limit {
+		priorInvocations+proposedByHero[meta.ObjectID] > limit {
 		return fmt.Errorf("%w: Role invocation limit exceeded", ErrDelegationNotAuthorized)
 	}
 	var activeInstances int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_runs ar
 		JOIN delegation_items i ON i.child_run_id=ar.id
-		WHERE substr(i.role_version_id,1,instr(i.role_version_id,'@')-1)=?
+		WHERE substr(i.hero_version_id,1,instr(i.hero_version_id,'@')-1)=?
 		  AND ar.status IN ('queued','running','waiting_for_approval','waiting_delegation_admission','waiting_children')`,
 		meta.ObjectID).Scan(&activeInstances); err != nil {
 		return err
 	}
 	if limit := definition.DelegationPolicy.MaxConcurrentInstances; limit < 1 ||
-		activeInstances+proposedByRole[meta.ObjectID] > limit {
+		activeInstances+proposedByHero[meta.ObjectID] > limit {
 		return fmt.Errorf("%w: Role concurrent instance limit exceeded", ErrDelegationNotAuthorized)
 	}
 	return nil
@@ -730,7 +730,7 @@ func (r *DelegationRepo) GroupForParentToolCall(ctx context.Context, parentRunID
 }
 
 func (r *DelegationRepo) ListItems(ctx context.Context, groupID string) ([]domain.DelegationItem, error) {
-	rows, err := r.DB.QueryContext(ctx, `SELECT id,group_id,child_run_id,name,role_version_id,assignment_json,
+	rows, err := r.DB.QueryContext(ctx, `SELECT id,group_id,child_run_id,name,hero_version_id,assignment_json,
 		output_contract,budget_json,result_json,status,ordinal,depends_json,skills_json,created_at
 		FROM delegation_items WHERE group_id=? ORDER BY ordinal`, groupID)
 	if err != nil {
@@ -783,7 +783,7 @@ func (r *DelegationRepo) ListActivity(ctx context.Context, parentRunID string) (
 		return nil, fmt.Errorf("parent run id is required")
 	}
 	// V2: the child's Role identity comes from the frozen speaker snapshot
-	// (or its RoleMeta), never from the removed global role SQL tables.
+	// (or its HeroMeta), never from the removed global hero SQL tables.
 	rows, err := r.DB.QueryContext(ctx, `SELECT
 		g.id,g.parent_tool_call_id,g.strategy,g.status,g.created_at,
 		i.id,COALESCE(i.child_run_id,''),i.name,i.status,COALESCE(i.result_json,''),i.created_at,
@@ -812,7 +812,7 @@ func (r *DelegationRepo) ListActivity(ctx context.Context, parentRunID string) (
 			&fallbackHandle, &fallbackName, &child.RunStatus, &speakerJSON, &child.ErrorCode, &child.ErrorMessage); err != nil {
 			return nil, err
 		}
-		child.RoleHandle, child.RoleDisplayName = fallbackHandle, fallbackName
+		child.HeroHandle, child.HeroDisplayName = fallbackHandle, fallbackName
 		if child.ItemStatus == domain.DelegationItemBlocked && child.ErrorMessage == "" {
 			// A blocked task never started: the terminal reason is always a
 			// prerequisite task that failed, cancelled, or was itself blocked.
@@ -829,10 +829,10 @@ func (r *DelegationRepo) ListActivity(ctx context.Context, parentRunID string) (
 				return nil, fmt.Errorf("decode child speaker snapshot for %s: %w", child.ChildRunID, err)
 			}
 			if speaker.Handle != "" {
-				child.RoleHandle = speaker.Handle
+				child.HeroHandle = speaker.Handle
 			}
 			if speaker.DisplayName != "" {
-				child.RoleDisplayName = speaker.DisplayName
+				child.HeroDisplayName = speaker.DisplayName
 			}
 		}
 		if resultJSON != "" {
@@ -874,7 +874,7 @@ func scanDelegationItems(rows *sql.Rows) ([]domain.DelegationItem, error) {
 		var item domain.DelegationItem
 		var childRun, assignment, budget, result, dependsJSON, skillsJSON sql.NullString
 		var createdAt string
-		if err := rows.Scan(&item.ID, &item.GroupID, &childRun, &item.Name, &item.RoleVersionID,
+		if err := rows.Scan(&item.ID, &item.GroupID, &childRun, &item.Name, &item.HeroVersionID,
 			&assignment, &item.OutputContract, &budget, &result, &item.Status, &item.Ordinal,
 			&dependsJSON, &skillsJSON, &createdAt); err != nil {
 			return nil, err
@@ -965,7 +965,7 @@ func createInitialGenerationTx(ctx context.Context, tx *sql.Tx, groupID, clientR
 	var budget domain.BudgetCeilingJSON
 	for _, item := range items {
 		selection = append(selection, map[string]string{
-			"itemId": item.ID, "roleVersionId": item.RoleVersionID,
+			"itemId": item.ID, "heroVersionId": item.HeroVersionID,
 		})
 		var ceiling domain.BudgetCeilingJSON
 		if len(item.BudgetJSON) > 0 {
@@ -1138,21 +1138,21 @@ func createChildRunTx(ctx context.Context, tx *sql.Tx, input CreateChildRunInput
 	var item struct {
 		GroupID        string
 		Name           string
-		RoleVersionID  string
+		HeroVersionID  string
 		AssignmentJSON string
 		OutputContract string
 		BudgetJSON     string
 		CurrentStatus  domain.DelegationItemStatus
-		RoleMetaJSON   string
+		HeroMetaJSON   string
 	}
-	itemQuery := `SELECT group_id,name,role_version_id,assignment_json,output_contract,budget_json,status,role_meta_json
+	itemQuery := `SELECT group_id,name,hero_version_id,assignment_json,output_contract,budget_json,status,hero_meta_json
 		FROM delegation_items WHERE id=?`
 	if input.Generation <= 0 {
 		itemQuery += ` AND child_run_id IS NULL`
 	}
 	if err := tx.QueryRowContext(ctx, itemQuery, input.ItemID).
-		Scan(&item.GroupID, &item.Name, &item.RoleVersionID, &item.AssignmentJSON, &item.OutputContract,
-			&item.BudgetJSON, &item.CurrentStatus, &item.RoleMetaJSON); err != nil {
+		Scan(&item.GroupID, &item.Name, &item.HeroVersionID, &item.AssignmentJSON, &item.OutputContract,
+			&item.BudgetJSON, &item.CurrentStatus, &item.HeroMetaJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("%w: item is not assignable", ErrDelegationItemNotFound)
 		}
@@ -1171,12 +1171,12 @@ func createChildRunTx(ctx context.Context, tx *sql.Tx, input CreateChildRunInput
 	}
 
 	var objectID, handle, displayName, configDigest string
-	if strings.TrimSpace(item.RoleMetaJSON) == "" || strings.TrimSpace(item.RoleMetaJSON) == "{}" {
+	if strings.TrimSpace(item.HeroMetaJSON) == "" || strings.TrimSpace(item.HeroMetaJSON) == "{}" {
 		return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
 			errors.New("child Run requires a frozen delegation Role meta"))
 	}
-	var meta DelegationRoleMeta
-	if err := json.Unmarshal([]byte(item.RoleMetaJSON), &meta); err != nil {
+	var meta DelegationHeroMeta
+	if err := json.Unmarshal([]byte(item.HeroMetaJSON), &meta); err != nil {
 		return nil, fmt.Errorf("decode frozen Role meta: %w", err)
 	}
 	objectID = meta.ObjectID
@@ -1184,7 +1184,7 @@ func createChildRunTx(ctx context.Context, tx *sql.Tx, input CreateChildRunInput
 	displayName = meta.DisplayName
 	configDigest = meta.ConfigDigest
 	speakerJSON, err := json.Marshal(map[string]string{
-		"kind": "role", "objectId": objectID, "versionId": item.RoleVersionID,
+		"kind": "hero", "objectId": objectID, "versionId": item.HeroVersionID,
 		"handle": handle, "displayName": displayName, "configDigest": configDigest,
 	})
 	if err != nil {
@@ -1237,8 +1237,8 @@ func createChildRunTx(ctx context.Context, tx *sql.Tx, input CreateChildRunInput
 	// attempt state machine, not just the substrate columns. Generation 0 keeps
 	// the original folding contract; later generations are explicit retries.
 	authSnapshot := attemptAuthorizationSnapshot{
-		ItemID: input.ItemID, Name: item.Name, RoleVersionID: item.RoleVersionID,
-		RoleObjectID: objectID, Handle: handle, DisplayName: displayName,
+		ItemID: input.ItemID, Name: item.Name, HeroVersionID: item.HeroVersionID,
+		HeroObjectID: objectID, Handle: handle, DisplayName: displayName,
 		ConfigDigest: configDigest, OutputContract: item.OutputContract,
 	}
 	authJSON, err := json.Marshal(authSnapshot)

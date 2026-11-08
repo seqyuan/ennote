@@ -172,7 +172,7 @@
   width: 22px;
   text-align: right;
 }
-.transcriptRole {
+.transcriptHero {
   flex-shrink: 0;
   color: var(--content-1);
   font-weight: 600;

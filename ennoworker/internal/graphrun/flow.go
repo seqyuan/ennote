@@ -14,7 +14,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 )
 
@@ -37,7 +37,7 @@ func (s *Service) StartFlow(ctx context.Context, projectID, flowID string, versi
 	if err != nil {
 		return nil, err
 	}
-	definition, roles, revision, err := s.Sources.ReadFlowRevision(flowID, revisionID)
+	definition, heroes, revision, err := s.Sources.ReadFlowRevision(flowID, revisionID)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +45,7 @@ func (s *Service) StartFlow(ctx context.Context, projectID, flowID string, versi
 	if err != nil {
 		return nil, err
 	}
-	freeze, err := s.freezeFlow(ctx, flowID, definition, roles)
+	freeze, err := s.freezeFlow(ctx, flowID, definition, heroes)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +118,7 @@ func revisionVersion(revisionID string) (int, error) {
 // graph freeze path (freezeTasks) is deliberately unchanged; this is the same
 // run_agent_flow_nodes contract with full-flow task types.
 func (s *Service) freezeFlow(ctx context.Context, flowID string, definition *domain.FlowDefinition,
-	bundledRoles map[string]*rolesource.Document) ([]store.FlowNodeFreeze, error) {
+	bundledHeroes map[string]*heroesource.Document) ([]store.FlowNodeFreeze, error) {
 	order, err := agentflow.TaskOrder(definition)
 	if err != nil {
 		return nil, err
@@ -152,14 +152,14 @@ func (s *Service) freezeFlow(ctx context.Context, flowID string, definition *dom
 			freeze = append(freeze, node)
 			continue
 		}
-		if task.Type != domain.FlowTaskRole {
+		if task.Type != domain.FlowTaskHero {
 			return nil, fmt.Errorf("Task %q: unsupported type %q", name, task.Type)
 		}
-		role, globalSkills, err := s.freezeFlowRole(ctx, flowID, name, task, bundledRoles, skillCatalog)
+		hero, globalSkills, err := s.freezeFlowHero(ctx, flowID, name, task, bundledHeroes, skillCatalog)
 		if err != nil {
 			return nil, fmt.Errorf("Task %q: %w", name, err)
 		}
-		readOnly := domain.RoleDefinitionIsReadOnly(role.Definition)
+		readOnly := domain.HeroDefinitionIsReadOnly(hero.Definition)
 		if task.FanOut != nil && !readOnly {
 			return nil, fmt.Errorf("flow_fan_out_not_read_only: Task %q fan_out requires a fully read-only Role", name)
 		}
@@ -167,16 +167,16 @@ func (s *Service) freezeFlow(ctx context.Context, flowID string, definition *dom
 		if err != nil {
 			return nil, fmt.Errorf("Task %q: %w", name, err)
 		}
-		switch role.Definition.DelegationPolicy.Admission {
+		switch hero.Definition.DelegationPolicy.Admission {
 		case domain.DelegationAutoWithinBudget:
 		case domain.DelegationDenied:
-			return nil, fmt.Errorf("Task %q: Role %s denies Host delegation", name, role.VersionID)
+			return nil, fmt.Errorf("Task %q: Role %s denies Host delegation", name, hero.VersionID)
 		case domain.DelegationApprovalRequired:
-			return nil, fmt.Errorf("Task %q: Role %s requires explicit delegation approval; Flow Runs only admit auto_within_budget Roles", name, role.VersionID)
+			return nil, fmt.Errorf("Task %q: Role %s requires explicit delegation approval; Flow Runs only admit auto_within_budget Heroes", name, hero.VersionID)
 		default:
-			return nil, fmt.Errorf("Task %q: Role %s has an invalid admission policy", name, role.VersionID)
+			return nil, fmt.Errorf("Task %q: Role %s has an invalid admission policy", name, hero.VersionID)
 		}
-		ceiling := role.Definition.DelegationPolicy.BudgetCeiling
+		ceiling := hero.Definition.DelegationPolicy.BudgetCeiling
 		if task.Budget != nil && task.Budget.Tokens > 0 {
 			if task.Budget.Tokens > ceiling.MaxTotalTokens {
 				return nil, fmt.Errorf("Task %q: budget tokens %d exceed the Role ceiling %d", name, task.Budget.Tokens, ceiling.MaxTotalTokens)
@@ -188,31 +188,31 @@ func (s *Service) freezeFlow(ctx context.Context, flowID string, definition *dom
 			MaxTotalTokens: ceiling.MaxTotalTokens, MaxOutputTokens: ceiling.MaxOutputTokens,
 			MaxCostMicros: ceiling.MaxCostUSDMicros, MaxWallTimeMS: ceiling.MaxWallTimeMS,
 		})
-		roleDefJSON, _ := json.Marshal(role.Definition)
-		node.RoleVersionID = role.VersionID
+		heroDefJSON, _ := json.Marshal(hero.Definition)
+		node.HeroVersionID = hero.VersionID
 		node.Skills = frozenSkills
 		node.BudgetJSON = budgetJSON
 		node.ReadOnly = readOnly
-		node.RoleDefinitionJSON = roleDefJSON
+		node.HeroDefinitionJSON = heroDefJSON
 		freeze = append(freeze, node)
 	}
 	return freeze, nil
 }
 
-func (s *Service) freezeFlowRole(ctx context.Context, flowID, taskID string, task domain.FlowTask,
-	bundled map[string]*rolesource.Document, skillCatalog map[string]string) (*frozenTaskRole, domain.FrozenSkillRefs, error) {
-	ref := strings.TrimSpace(task.Role)
+func (s *Service) freezeFlowHero(ctx context.Context, flowID, taskID string, task domain.FlowTask,
+	bundled map[string]*heroesource.Document, skillCatalog map[string]string) (*frozenTaskHero, domain.FrozenSkillRefs, error) {
+	ref := strings.TrimSpace(task.Hero)
 	if ref == "" {
-		return nil, nil, fmt.Errorf("role is required")
+		return nil, nil, fmt.Errorf("hero is required")
 	}
 	handle, versionText, hasVersion := strings.Cut(ref, "@")
 	handle = strings.TrimSpace(handle)
-	var document *rolesource.Document
+	var document *heroesource.Document
 	var versionID, digest string
 	switch {
 	case strings.HasPrefix(handle, "local/"):
 		if hasVersion {
-			return nil, nil, fmt.Errorf("flow_local_role_version_unsupported: Role %q cannot be version-pinned", ref)
+			return nil, nil, fmt.Errorf("flow_local_hero_version_unsupported: Role %q cannot be version-pinned", ref)
 		}
 		id := strings.TrimSpace(strings.TrimPrefix(handle, "local/"))
 		bundledDocument, ok := bundled[id]
@@ -220,11 +220,11 @@ func (s *Service) freezeFlowRole(ctx context.Context, flowID, taskID string, tas
 			return nil, nil, fmt.Errorf("flow-local Role %q is not present in the published revision bundle", id)
 		}
 		document = bundledDocument
-		digest, _ = rolesource.SourceDigest(document)
+		digest, _ = heroesource.SourceDigest(document)
 		versionID = "flow:" + flowID + "/" + id + "@" + digest
 	case strings.HasPrefix(handle, "global/"):
 		id := strings.TrimSpace(strings.TrimPrefix(handle, "global/"))
-		doc, revision, err := s.flowGlobalRole(id, versionText, hasVersion)
+		doc, revision, err := s.flowGlobalHero(id, versionText, hasVersion)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -233,18 +233,18 @@ func (s *Service) freezeFlowRole(ctx context.Context, flowID, taskID string, tas
 		if !hasVersion {
 			if bundledDocument, ok := bundled[handle]; ok {
 				document = bundledDocument
-				digest, _ = rolesource.SourceDigest(document)
+				digest, _ = heroesource.SourceDigest(document)
 				versionID = "flow:" + flowID + "/" + handle + "@" + digest
 				break
 			}
 		}
-		doc, revision, err := s.flowGlobalRole(handle, versionText, hasVersion)
+		doc, revision, err := s.flowGlobalHero(handle, versionText, hasVersion)
 		if err != nil {
 			return nil, nil, err
 		}
 		document, versionID, digest = doc, handle+"@"+revision.ID(), revision.Digest
 	}
-	definition, err := s.resolveLocalRole(ctx, flowID, document)
+	definition, err := s.resolveLocalHero(ctx, flowID, document)
 	if err != nil {
 		return nil, nil, fmt.Errorf("Role %q: %w", handle, err)
 	}
@@ -252,29 +252,29 @@ func (s *Service) freezeFlowRole(ctx context.Context, flowID, taskID string, tas
 	if err != nil {
 		return nil, nil, err
 	}
-	return &frozenTaskRole{
+	return &frozenTaskHero{
 		ObjectID: versionID, VersionID: versionID,
 		Handle: document.Handle, DisplayName: document.Name,
 		ConfigDigest: digest, Definition: *definition,
 	}, globalSkills, nil
 }
 
-func (s *Service) flowGlobalRole(handle, versionText string, hasVersion bool) (*rolesource.Document, *globalsource.Revision, error) {
+func (s *Service) flowGlobalHero(handle, versionText string, hasVersion bool) (*heroesource.Document, *globalsource.Revision, error) {
 	if !hasVersion {
-		document, revision, err := s.Sources.LatestRoleRevision(handle)
+		document, revision, err := s.Sources.LatestHeroRevision(handle)
 		if err != nil {
 			return nil, nil, fmt.Errorf("global Role %q: %w", handle, err)
 		}
 		return document, revision, nil
 	}
 	versionText = strings.TrimSpace(versionText)
-	revisions, err := s.Sources.ListRoleRevisions(handle)
+	revisions, err := s.Sources.ListHeroRevisions(handle)
 	if err != nil {
 		return nil, nil, err
 	}
 	for _, revision := range revisions {
 		if revision.ID() == versionText || strconv.Itoa(revision.Version) == versionText {
-			document, read, err := s.Sources.ReadRoleRevision(handle, revision.ID())
+			document, read, err := s.Sources.ReadHeroRevision(handle, revision.ID())
 			if err != nil {
 				return nil, nil, err
 			}
@@ -286,15 +286,15 @@ func (s *Service) flowGlobalRole(handle, versionText string, hasVersion bool) (*
 
 // applyFlowTaskSkills inlines local Skills (never widening the Role's tool
 // allowlist) and returns the content-pinned global Skill refs.
-func (s *Service) applyFlowTaskSkills(ctx context.Context, flowID string, definition *domain.RoleDefinition,
+func (s *Service) applyFlowTaskSkills(ctx context.Context, flowID string, definition *domain.HeroDefinition,
 	refs []string, skillCatalog map[string]string) (domain.FrozenSkillRefs, error) {
 	globalSkills := make(domain.FrozenSkillRefs, 0, len(refs))
 	for _, ref := range refs {
 		scope, id, scoped := strings.Cut(strings.TrimSpace(ref), "/")
 		if !scoped {
-			// Bare refs resolve flow-local first, exactly like task Roles.
+			// Bare refs resolve flow-local first, exactly like task Heroes.
 			if loaded, err := s.loadLocalSkill(flowID, id); err == nil {
-				definition.RolePrompt += "\n\n<graph_local_skill id=\"" + id + "\" digest=\"" + loaded.ContentHash + "\">\n" + loaded.PromptText + "\n</graph_local_skill>"
+				definition.HeroPrompt += "\n\n<graph_local_skill id=\"" + id + "\" digest=\"" + loaded.ContentHash + "\">\n" + loaded.PromptText + "\n</graph_local_skill>"
 				continue
 			}
 			scope, id = "global", ref
@@ -305,7 +305,7 @@ func (s *Service) applyFlowTaskSkills(ctx context.Context, flowID string, defini
 			if err != nil {
 				return nil, fmt.Errorf("local Skill %q: %w", id, err)
 			}
-			definition.RolePrompt += "\n\n<graph_local_skill id=\"" + id + "\" digest=\"" + loaded.ContentHash + "\">\n" + loaded.PromptText + "\n</graph_local_skill>"
+			definition.HeroPrompt += "\n\n<graph_local_skill id=\"" + id + "\" digest=\"" + loaded.ContentHash + "\">\n" + loaded.PromptText + "\n</graph_local_skill>"
 		case "global":
 			digest, ok := skillCatalog[id]
 			if !ok || digest == "" {

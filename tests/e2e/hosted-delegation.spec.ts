@@ -63,10 +63,10 @@ test("nested delegation activity polls child state and renders terminal result",
   let activityRequests = 0;
   const messages = [
     message("m1", undefined, "user", [{ type: "text", text: "Inspect the workspace with a delegated Role." }]),
-    message("m2", "m1", "assistant", [{ type: "tool_call", toolCall: { id: "delegate-call", name: "delegate_roles",
-      arguments: { delegations: [{ name: "inspect", roleHandle: "workspace-explorer", assignment: "Inspect files",
+    message("m2", "m1", "assistant", [{ type: "tool_call", toolCall: { id: "delegate-call", name: "delegate_heroes",
+      arguments: { delegations: [{ name: "inspect", heroHandle: "workspace-explorer", assignment: "Inspect files",
         budget: { maxModelCalls: 4, maxToolCalls: 8 } }] } } }], parentRun.id),
-    message("m3", "m2", "tool", [{ type: "tool_result", toolResult: { toolCallId: "delegate-call", toolName: "delegate_roles",
+    message("m3", "m2", "tool", [{ type: "tool_result", toolResult: { toolCallId: "delegate-call", toolName: "delegate_heroes",
       content: "{\"status\":\"settled\"}", isError: false } }], parentRun.id),
     message("m4", "m3", "assistant", [{ type: "text", text: "The workspace inspection is complete." }], parentRun.id),
   ];
@@ -82,8 +82,8 @@ test("nested delegation activity polls child state and renders terminal result",
       const completed = activityRequests > 1;
       return fulfill(route, { parentRunId: parentRun.id, groups: [{ id: "group", parentToolCallId: "delegate-call",
         strategy: "single", status: completed ? "settled" : "waiting_children", createdAt: "2026-08-04T00:00:02Z",
-        children: [{ itemId: "item", childRunId: "child", name: "inspect", roleHandle: "workspace-explorer",
-          roleDisplayName: "Workspace Explorer", itemStatus: completed ? "succeeded" : "running",
+        children: [{ itemId: "item", childRunId: "child", name: "inspect", heroHandle: "workspace-explorer",
+          heroDisplayName: "Workspace Explorer", itemStatus: completed ? "succeeded" : "running",
           runStatus: completed ? "succeeded" : "running", createdAt: "2026-08-04T00:00:02Z",
           ...(completed ? { result: { status: "completed", summary: "Workspace contains no files." } } : {}) }] }] });
     }
@@ -105,7 +105,7 @@ test("discovers a later child tool approval while the parent waits", async ({ pa
   let approved = false;
   const childApproval = { id: "child-approval", runId: "child-run", sessionId: session.id, iteration: 1,
     batchDigest: "child-digest", status: "pending", requestedAt: "2026-08-04T00:00:03Z",
-    attribution: { speakerKind: "role", handle: "workspace-explorer", displayName: "Workspace Explorer",
+    attribution: { speakerKind: "hero", handle: "workspace-explorer", displayName: "Workspace Explorer",
       permissionCeiling: "ask", authority: "read_only" },
     items: [{ callIndex: 0, toolCallId: "read-call", toolName: "write", riskClass: "local_write",
       argumentsPreview: "{\"path\":\"notes.txt\"}" }] };
@@ -149,8 +149,8 @@ test.describe("mobile admission approval", () => {
     let approved = false;
     const approval = { id: "approval", runId: parentRun.id, sessionId: session.id, iteration: 1, batchDigest: "digest",
       status: "pending", requestedAt: "2026-08-04T00:00:01Z", items: [{ callIndex: 0, toolCallId: "delegate-call",
-        toolName: "delegate_roles", riskClass: "delegation", argumentsPreview: "{}", delegations: [{ name: "inspect",
-          roleHandle: "workspace-explorer", assignmentPreview: "Inspect files without modifying them.", outputContract: "text-v1",
+        toolName: "delegate_heroes", riskClass: "delegation", argumentsPreview: "{}", delegations: [{ name: "inspect",
+          heroHandle: "workspace-explorer", assignmentPreview: "Inspect files without modifying them.", outputContract: "text-v1",
           budget: { maxModelCalls: 4, maxToolCalls: 8, maxTotalTokens: 20000, maxOutputTokens: 4000,
             maxCostUsdMicros: 100000, maxWallTimeMs: 120000 } }] }] };
     await page.route("**/api/worker/v1/**", async route => {
@@ -206,10 +206,10 @@ test("retries an eligible child and renders generation history", async ({ page }
     validActions: ["retry"] };
   const messages = [
     message("m1", undefined, "user", [{ type: "text", text: "Delegate a review." }]),
-    message("m2", "m1", "assistant", [{ type: "tool_call", toolCall: { id: "delegate-call", name: "delegate_roles",
-      arguments: { delegations: [{ name: "inspect", roleHandle: "workspace-explorer", assignment: "Review",
+    message("m2", "m1", "assistant", [{ type: "tool_call", toolCall: { id: "delegate-call", name: "delegate_heroes",
+      arguments: { delegations: [{ name: "inspect", heroHandle: "workspace-explorer", assignment: "Review",
         budget: { maxModelCalls: 4, maxToolCalls: 8 } }] } } }], parentRun.id),
-    message("m3", "m2", "tool", [{ type: "tool_result", toolResult: { toolCallId: "delegate-call", toolName: "delegate_roles",
+    message("m3", "m2", "tool", [{ type: "tool_result", toolResult: { toolCallId: "delegate-call", toolName: "delegate_heroes",
       content: "{\"status\":\"settled\"}", isError: false } }], parentRun.id),
     message("m4", "m3", "assistant", [{ type: "text", text: "Delegation settled." }], parentRun.id),
   ];
@@ -223,10 +223,10 @@ test("retries an eligible child and renders generation history", async ({ page }
     if (path === `/v1/runs/${parentRun.id}/children`) {
       return fulfill(route, { parentRunId: parentRun.id, groups: [{ id: groupID, parentToolCallId: "delegate-call",
         strategy: "parallel", status: "settled", createdAt: "2026-08-04T00:00:02Z",
-        children: [{ itemId: "item-ok", childRunId: "child-ok", name: "inspect", roleHandle: "workspace-explorer",
-          roleDisplayName: "Workspace Explorer", itemStatus: "succeeded", runStatus: "succeeded", createdAt: "2026-08-04T00:00:02Z" },
-          { itemId: "item-fail", childRunId: "child-fail", name: "review", roleHandle: "workspace-explorer",
-            roleDisplayName: "Workspace Explorer", itemStatus: "failed", runStatus: "failed", createdAt: "2026-08-04T00:00:02Z",
+        children: [{ itemId: "item-ok", childRunId: "child-ok", name: "inspect", heroHandle: "workspace-explorer",
+          heroDisplayName: "Workspace Explorer", itemStatus: "succeeded", runStatus: "succeeded", createdAt: "2026-08-04T00:00:02Z" },
+          { itemId: "item-fail", childRunId: "child-fail", name: "review", heroHandle: "workspace-explorer",
+            heroDisplayName: "Workspace Explorer", itemStatus: "failed", runStatus: "failed", createdAt: "2026-08-04T00:00:02Z",
             errorCode: "provider_unavailable", errorMessage: "review failed" }] }] });
     }
     if (path === `/v1/delegations/${groupID}`) return fulfill(route, inspection);
@@ -304,8 +304,8 @@ test("cancels an active delegation group when the action is valid", async ({ pag
   let cancelled = false;
   const messages = [
     message("m1", undefined, "user", [{ type: "text", text: "Delegate a long review." }]),
-    message("m2", "m1", "assistant", [{ type: "tool_call", toolCall: { id: "delegate-call", name: "delegate_roles",
-      arguments: { delegations: [{ name: "review", roleHandle: "workspace-explorer", assignment: "Review files" }] } } }], parentRun.id),
+    message("m2", "m1", "assistant", [{ type: "tool_call", toolCall: { id: "delegate-call", name: "delegate_heroes",
+      arguments: { delegations: [{ name: "review", heroHandle: "workspace-explorer", assignment: "Review files" }] } } }], parentRun.id),
   ];
   await page.route("**/api/worker/v1/**", async route => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
@@ -317,8 +317,8 @@ test("cancels an active delegation group when the action is valid", async ({ pag
     if (path === `/v1/runs/${parentRun.id}/children`) {
       return fulfill(route, { parentRunId: parentRun.id, groups: [{ id: groupID, parentToolCallId: "delegate-call",
         strategy: "single", status: cancelled ? "cancelled" : "waiting_children", createdAt: "2026-08-04T00:00:02Z",
-        children: [{ itemId: "item-cancel", childRunId: "child-cancel", name: "review", roleHandle: "workspace-explorer",
-          roleDisplayName: "Workspace Explorer", itemStatus: cancelled ? "cancelled" : "running",
+        children: [{ itemId: "item-cancel", childRunId: "child-cancel", name: "review", heroHandle: "workspace-explorer",
+          heroDisplayName: "Workspace Explorer", itemStatus: cancelled ? "cancelled" : "running",
           runStatus: cancelled ? "cancelled" : "running", createdAt: "2026-08-04T00:00:02Z" }] }] });
     }
     if (path === `/v1/delegations/${groupID}`) {

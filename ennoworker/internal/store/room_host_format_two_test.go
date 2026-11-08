@@ -10,11 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestFormatTwoHostTurnResolvesWithoutRoleTarget pins the regression where a
+// TestFormatTwoHostTurnResolvesWithoutHeroTarget pins the regression where a
 // speaker-ledger (format 2) Host turn failed config freeze with
 // invocation_target_invalid: the resolver unconditionally looked up a Role
 // target, even though a plain user message on a room lineage has none.
-func TestFormatTwoHostTurnResolvesWithoutRoleTarget(t *testing.T) {
+func TestFormatTwoHostTurnResolvesWithoutHeroTarget(t *testing.T) {
 	ctx := context.Background()
 	stack := newFileConfigStack(t)
 	db := store.SetupDB(t)
@@ -23,7 +23,7 @@ func TestFormatTwoHostTurnResolvesWithoutRoleTarget(t *testing.T) {
 	require.NoError(t, err)
 	session := sqlCreateSession(t, db, project.ID)
 	runs := &store.RunRepo{DB: db, Providers: stack.Providers, Models: stack.ModelRepo,
-		Policies: stack.Policies, RoleSources: stack.Sources}
+		Policies: stack.Policies, HeroSources: stack.Sources}
 	submission, err := runs.SubmitTurn(ctx, domain.SubmitTurnInput{
 		SessionID: session.ID, ClientRequestID: "room-host", Text: "hello"})
 	require.NoError(t, err)
@@ -35,6 +35,6 @@ func TestFormatTwoHostTurnResolvesWithoutRoleTarget(t *testing.T) {
 
 	resolved, err := runs.ResolveAndFreezeConfig(ctx, run)
 	require.NoError(t, err)
-	assert.Nil(t, resolved.Effective.Role)
+	assert.Nil(t, resolved.Effective.Hero)
 	assert.NotEmpty(t, resolved.Effective.InitialRuntime.ModelProfileID)
 }

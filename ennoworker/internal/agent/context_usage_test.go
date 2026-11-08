@@ -78,7 +78,7 @@ func TestSplitContextUsagePartitionsProjectedTokensExactly(t *testing.T) {
 	tools := []domain.ToolDefinition{{Name: "read", Description: "Read a file", Parameters: json.RawMessage(`{"type":"object"}`)}}
 	sections := []domain.PromptSection{
 		{ID: "base", Kind: domain.PromptSectionBase, Bytes: 20},
-		{ID: "role.definition", Kind: domain.PromptSectionRole, Bytes: 8},
+		{ID: "hero.definition", Kind: domain.PromptSectionHero, Bytes: 8},
 		{ID: "project.agents", Kind: domain.PromptSectionContext, Bytes: 4},
 		{ID: "skills.catalog", Kind: domain.PromptSectionSkillsCatalog, Bytes: 4},
 	}
@@ -96,7 +96,7 @@ func TestSplitContextUsagePartitionsProjectedTokensExactly(t *testing.T) {
 	}
 	assert.Equal(t, usage.ProjectedTokens, sum, "categories must partition projected tokens")
 	for _, key := range []string{
-		ContextCategorySystem, ContextCategoryRole, ContextCategoryRules, ContextCategorySkills,
+		ContextCategorySystem, ContextCategoryHero, ContextCategoryRules, ContextCategorySkills,
 		ContextCategoryTools, ContextCategoryReminders, ContextCategoryConversation,
 	} {
 		assert.True(t, seen[key], "missing category %s", key)

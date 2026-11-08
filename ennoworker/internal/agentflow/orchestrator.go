@@ -59,15 +59,15 @@ type NodeUpdate struct {
 // ChildSpec is one task's child Run request.
 type ChildSpec struct {
 	Handle        string
-	RoleVersionID string
+	HeroVersionID string
 	// Skills are the task-level additive preload Skills frozen on the flow
 	// node, including the content digest pinned at freeze time. They
 	// supplement, but never replace or widen, the Role policy.
 	Skills domain.FrozenSkillRefs
-	// RoleDefinitionJSON is the full resolved RoleDefinition frozen at Run
+	// HeroDefinitionJSON is the full resolved HeroDefinition frozen at Run
 	// start. It is passed to child Run materialization so delegation never
-	// re-reads mutable Role files or the removed global role SQL.
-	RoleDefinitionJSON json.RawMessage
+	// re-reads mutable Role files or the removed global hero SQL.
+	HeroDefinitionJSON json.RawMessage
 	Assignment         string
 	Budget             domain.BudgetCeilingJSON
 }
@@ -176,7 +176,7 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 	taskOutputs := map[string]json.RawMessage{}
 
 	// Parallel dispatch state: the active lane (reader/writer class) and the
-	// set of in-flight role children. Independent ready tasks of the same
+	// set of in-flight hero children. Independent ready tasks of the same
 	// class dispatch concurrently up to parallelism.max; readers and writers
 	// never share the workspace at the same time (mutation lane), and writers
 	// only parallelize against each other when the flow opts into disjoint
@@ -237,7 +237,7 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 		if converged {
 			continue // nodes changed by the back-edge reset; re-read them
 		}
-		ready := readyRoleTasks(nodes, completed, &def)
+		ready := readyHeroTasks(nodes, completed, &def)
 
 		// Check and fan_out tasks are blocking gates: checks may mutate the
 		// workspace (sandbox commands) and fan_out instances read it. They run
@@ -335,7 +335,7 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 				o.fail(ctx, runID, fmt.Sprintf("resolve goal for task %q: %v", node.Handle, err))
 				return
 			}
-			child, err := o.dispatchRoleChild(ctx, runID, state, node, task, goal)
+			child, err := o.dispatchHeroChild(ctx, runID, state, node, task, goal)
 			if err != nil {
 				return
 			}
@@ -372,11 +372,11 @@ func frozenSkillRefs(node *domain.RunAgentFlowNode) domain.FrozenSkillRefs {
 	return refs
 }
 
-// dispatchRoleChild claims one role task (CAS pending -> running), creates its
+// dispatchHeroChild claims one hero task (CAS pending -> running), creates its
 // child Run, records the child on the node, publishes the started event, and
-// enqueues the child. It never blocks: the caller batches role children and
+// enqueues the child. It never blocks: the caller batches hero children and
 // waits for any to settle via waitAndFoldAny.
-func (o *Orchestrator) dispatchRoleChild(ctx context.Context, runID string, flow *domain.RunAgentFlow,
+func (o *Orchestrator) dispatchHeroChild(ctx context.Context, runID string, flow *domain.RunAgentFlow,
 	node *domain.RunAgentFlowNode, task domain.FlowTask, goal string) (ChildInfo, error) {
 	budget := taskBudgetCeiling(node)
 	// Claim the node before dispatching (CAS pending -> running) so two
@@ -388,9 +388,9 @@ func (o *Orchestrator) dispatchRoleChild(ctx context.Context, runID string, flow
 		return ChildInfo{}, err
 	}
 	child, err := o.Children.CreateTaskChild(ctx, runID, flow.SessionID, ChildSpec{
-		Handle: node.Handle, RoleVersionID: node.RoleVersionID,
+		Handle: node.Handle, HeroVersionID: node.HeroVersionID,
 		Skills: frozenSkillRefs(node), Assignment: goal, Budget: budget,
-		RoleDefinitionJSON: node.RoleDefinitionJSON,
+		HeroDefinitionJSON: node.HeroDefinitionJSON,
 	})
 	if err != nil {
 		o.failTask(ctx, runID, node, err.Error())
@@ -418,11 +418,11 @@ func (o *Orchestrator) dispatchRoleChild(ctx context.Context, runID string, flow
 	return child, nil
 }
 
-// foldRoleChild settles one role child from an already-known terminal status:
+// foldHeroChild settles one hero child from an already-known terminal status:
 // budget accounting, over-budget termination, failure/cancel handling, and the
 // completed checkpoint + event. On failure it cancels every other in-flight
 // child so a parallel batch never leaks running children.
-func (o *Orchestrator) foldRoleChild(ctx context.Context, runID string, flow *domain.RunAgentFlow,
+func (o *Orchestrator) foldHeroChild(ctx context.Context, runID string, flow *domain.RunAgentFlow,
 	node *domain.RunAgentFlowNode, childID string, status domain.RunStatus,
 	result *domain.SubmitResult, remaining []inflightTask) error {
 	// Budget accounting: fold the child's actual usage into the flow ledger.
@@ -475,7 +475,7 @@ func (o *Orchestrator) foldRoleChild(ctx context.Context, runID string, flow *do
 	})
 }
 
-// waitAndFoldAny polls all in-flight role children and folds the first one
+// waitAndFoldAny polls all in-flight hero children and folds the first one
 // that settles, removing it from the set. The rest keep running; the caller
 // re-evaluates the ready set. On flow cancellation every in-flight child is
 // hard-cancelled and the caller's next loop iteration terminalizes the run.
@@ -511,7 +511,7 @@ func (o *Orchestrator) waitAndFoldAny(ctx context.Context, runID string, flow *d
 		*inFlight = append((*inFlight)[:settled], (*inFlight)[settled+1:]...)
 		result, _ := o.Children.ChildTerminalResult(ctx, task.childID)
 		status, _ := o.Children.ChildRunStatus(ctx, task.childID)
-		return o.foldRoleChild(ctx, runID, flow, task.node, task.childID, status, result, *inFlight)
+		return o.foldHeroChild(ctx, runID, flow, task.node, task.childID, status, result, *inFlight)
 	}
 }
 
@@ -669,10 +669,10 @@ func (o *Orchestrator) runFanOutTask(ctx context.Context, runID string, flow *do
 		}
 		child, err := o.Children.CreateTaskChild(ctx, runID, flow.SessionID, ChildSpec{
 			Handle:        fmt.Sprintf("%s-%d", node.Handle, i),
-			RoleVersionID: node.RoleVersionID,
+			HeroVersionID: node.HeroVersionID,
 			Skills:        frozenSkillRefs(node),
 			Assignment:    goal, Budget: budget,
-			RoleDefinitionJSON: node.RoleDefinitionJSON,
+			HeroDefinitionJSON: node.HeroDefinitionJSON,
 		})
 		if err != nil {
 			o.failTask(ctx, runID, node, "fan_out_child_create_failed")
@@ -879,7 +879,7 @@ func (o *Orchestrator) isCancelled(ctx context.Context, runID string) bool {
 }
 
 // Lane constants: the active ready-set concurrency class. Readers (read-only
-// Roles) run in parallel up to parallelism.max; writers take the mutation
+// Heroes) run in parallel up to parallelism.max; writers take the mutation
 // lane. The two classes never overlap: readers and writers are dispatched in
 // separate windows so a reader never sees a sibling writer's partial state.
 const (
@@ -888,19 +888,19 @@ const (
 	laneWriter = 1
 )
 
-// inflightTask is one dispatched role child awaiting settlement.
+// inflightTask is one dispatched hero child awaiting settlement.
 type inflightTask struct {
 	node    *domain.RunAgentFlowNode
 	childID string
 }
 
-// readyRoleTasks returns every dispatchable role/fan_out/check node: pending
+// readyHeroTasks returns every dispatchable hero/fan_out/check node: pending
 // or interrupted, not on an inactive check-gate branch, and with every
 // depends task completed (the ready set). Nodes are already ordered by task
 // index (ListNodes), which keeps dispatch deterministic and recovery
 // reproducible. Terminal tasks are excluded: they complete the flow instead
 // of dispatching a child.
-func readyRoleTasks(nodes []*domain.RunAgentFlowNode, completed map[string]*domain.RunAgentFlowNode,
+func readyHeroTasks(nodes []*domain.RunAgentFlowNode, completed map[string]*domain.RunAgentFlowNode,
 	def *domain.FlowDefinition) []*domain.RunAgentFlowNode {
 	byHandle := make(map[string]*domain.RunAgentFlowNode, len(nodes))
 	for i := range nodes {
@@ -978,7 +978,7 @@ func firstReadyClass(ready []*domain.RunAgentFlowNode) int {
 }
 
 // selectLaneBatch picks the dispatch batch for the active lane: up to
-// parallelism.max same-class role tasks. Writers stay exclusive unless the
+// parallelism.max same-class hero tasks. Writers stay exclusive unless the
 // flow opts into disjoint writes scopes; in that case the batch greedily adds
 // writers whose frozen Writes are pairwise disjoint with the batch and with
 // the in-flight writers. Returns the batch and whether any ready task belongs

@@ -2,7 +2,7 @@
 
 本地优先、可审计的 Agent 运行时，核心能力是 **Agent Flow**。
 
-Ennote 把长任务编排成可恢复的 Agent Flow：Task 图、Role 绑定、预算、审批、
+Ennote 把长任务编排成可恢复的 Agent Flow：Task 图、Hero 绑定、预算、审批、
 checkpoint 和恢复状态都持久化在本地 SQLite 中。它不依赖账号或云端即可启动、
 计算和保存结果；生信是参考工作流，而不是平台承诺。
 
@@ -19,7 +19,7 @@ checkpoint 和恢复状态都持久化在本地 SQLite 中。它不依赖账号�
 ### Agent Flow
 
 - 用 Task 图表达依赖、分支、收敛和只读 fan-out，而不是把复杂流程塞进一条提示词。
-- Agent Flow 是不可变版本；每次运行冻结 Role、Skill、模型和权限配置。
+- Agent Flow 是不可变版本；每次运行冻结 Hero、Skill、模型和权限配置。
 - 每个 Task 是独立子 Run，带自己的预算、审批和输出契约。
 - Task 的 `writes` 声明只影响调度（reader/writer lane 与 disjoint writers），**不是沙箱隔离边界**。
 - 串行执行、checkpoint 续跑、取消与恢复都已落地，并经过真实 Provider 验证。
@@ -41,7 +41,7 @@ checkpoint 和恢复状态都持久化在本地 SQLite 中。它不依赖账号�
 
 ### 可组合
 
-- 不可变 Role、Skills、MCP 工具、typed Artifact 和托管委托。
+- 不可变 Hero、Skills、MCP 工具、typed Artifact 和托管委托。
 - 生信示例（`skills/bio-workspace`）展示如何把本地数据、shell 工具和 Agent Flow 组合起来。
 
 ## 架构
@@ -54,7 +54,7 @@ Browser → ennogate (Go, :45131) → ennoworker (Go, :0, loopback)
            认证 / 代理 / 静态文件      SQLite / Agent Flow / 审批 / 工具 / Skill
 ```
 
-Worker 是 Project、Session、Message、Run、Attention、审批、Role/模型配置、
+Worker 是 Project、Session、Message、Run、Attention、审批、Hero/模型配置、
 Workspace、Artifact 和委托状态的唯一权威。Web UI 只是同一套 Worker API 的客户端。
 
 ## 快速开始
@@ -87,10 +87,10 @@ ennote start
 ennote pack inspect ~/Downloads/cell-qc.enpack      # 归档
 ennote pack inspect ~/src/cell-qc                  # 目录包（需含 pack.yaml）
 ennote pack inspect ~/Downloads/cell-qc.enpack --json      # 原始 inspect 结果
-ennote pack inspect ~/Downloads/cell-qc.enpack --documents # 附带 flow/role/skill 正文
+ennote pack inspect ~/Downloads/cell-qc.enpack --documents # 附带 flow/hero/skill 正文
 ```
 
-输出包含 `manifestDigest`（`pack.yaml` 原始字节）和 `packDigest`（排序后的 payload 行，排除顶层 `pack.sig`）、flow/role/skill 摘要、能力信封与 warnings。`format: flow` 与 `format: graph` 会如实标注，不会被悄悄降级。Worker 未启动时命令直接失败并提示 `ennote start`，不做离线降级。
+输出包含 `manifestDigest`（`pack.yaml` 原始字节）和 `packDigest`（排序后的 payload 行，排除顶层 `pack.sig`）、flow/hero/skill 摘要、能力信封与 warnings。`format: flow` 与 `format: graph` 会如实标注，不会被悄悄降级。Worker 未启动时命令直接失败并提示 `ennote start`，不做离线降级。
 
 ### 安装 / 列出 / 卸载 Agent Pack
 
@@ -102,10 +102,10 @@ ennote pack install ~/Downloads/cell-qc.enpack             # 正式安装（可�
 ennote pack install ~/src/cell-qc --as-flow qc-review=cell-qc-review
 ennote pack list                                          # 已安装 Pack 摘要
 ennote pack remove seqyuan/cell-qc-review                 # 卸载
-ennote pack remove seqyuan/cell-qc-review --force          # 覆盖本地编辑 / 共享 Role 的拒绝
+ennote pack remove seqyuan/cell-qc-review --force          # 覆盖本地编辑 / 共享 Hero 的拒绝
 ```
 
-安装支持三种形态：Role-only Pack（每个 Role 变成 Worker 全局 Role 并发布 revision）、`format: graph` Flow Pack（未发布 revision 的 Graph draft + 其私有 Role/Skill）、以及 `format: flow` Agent Flow Pack（未发布 revision 的完整 FlowDefinition draft + 其 flow-local Role/Skill；安装前用真实 `agentflow.Validator` 校验 check/fan-out/terminal/next，不会降级成 graph）。非空 `mcp`、非空 `requires` 仍会被明确拒绝并返回稳定错误码，不会降级安装。dry-run 恒返回计划（含 blockers），正式安装遇到 blocker/冲突返回 422。
+安装支持三种形态：Hero-only Pack（每个 Hero 变成 Worker 全局 Hero 并发布 revision）、`format: graph` Flow Pack（未发布 revision 的 Graph draft + 其私有 Hero/Skill）、以及 `format: flow` Agent Flow Pack（未发布 revision 的完整 FlowDefinition draft + 其 flow-local Hero/Skill；安装前用真实 `agentflow.Validator` 校验 check/fan-out/terminal/next，不会降级成 graph）。非空 `mcp`、非空 `requires` 仍会被明确拒绝并返回稳定错误码，不会降级安装。dry-run 恒返回计划（含 blockers），正式安装遇到 blocker/冲突返回 422。
 
 安装后的 source 默认不可运行：`format: graph` 需要发布 Graph revision；`format: flow` 需要 `POST /v1/flows/{id}/publish` 发布 revision，再由 Project GraphBinding 显式启用。安装器永远不会自动发布或自动启用。
 

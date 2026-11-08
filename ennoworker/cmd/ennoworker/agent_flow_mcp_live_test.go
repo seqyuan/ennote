@@ -19,7 +19,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/graphrun"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/mcpclient"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/runs"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/seqyuan/ennote/ennoworker/internal/workspace"
@@ -102,26 +102,26 @@ func TestLiveAgentFlowChildCallsMCP(t *testing.T) {
 	}
 
 	// ——— Role (auto ceiling so the MCP tool is allowed) ———
-	role := &rolesource.Document{
+	hero := &heroesource.Document{
 		SchemaVersion: 1, Handle: "mcp-caller", Name: "MCP Caller",
 		Description: "Calls the bound MCP echo tool.", Positioning: "Independent",
 		Icon: "bot", Color: "neutral",
-		Model:  rolesource.ModelBinding{Ref: stack.ModelID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills: []rolesource.SkillBinding{}, Authority: rolesource.AuthorityReadOnly,
+		Model:  heroesource.ModelBinding{Ref: stack.ModelID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills: []heroesource.SkillBinding{}, Authority: heroesource.AuthorityReadOnly,
 		PermissionCeiling: domain.PermissionAuto, AllowedTools: []string{"test__echo"},
-		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextTask,
-			AllowedModes: []domain.RoleContextMode{domain.RoleContextTask}, OwnExecutionContinuity: domain.RoleContinuityNone},
-		Delegation: rolesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+		Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextTask,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextTask}, OwnExecutionContinuity: domain.HeroContinuityNone},
+		Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
 			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
 			MaxInvocationsPerParentRun: 4, MaxConcurrentInstances: 4,
-			BudgetCeiling: rolesource.DelegationBudgetCeiling{MaxModelCalls: 8, MaxToolCalls: 16,
+			BudgetCeiling: heroesource.DelegationBudgetCeiling{MaxModelCalls: 8, MaxToolCalls: 16,
 				MaxTotalTokens: 40000, MaxOutputTokens: 4096, MaxCostUSDMicros: 0, MaxWallTimeMS: 180000}},
 		OutputContract: "text-v1", MaxLoopIterations: 8,
 		Prompt: "You are an MCP tool caller. Call test__echo with text \"hello\" and then call submit_result with a summary that includes the echoed value.",
 	}
-	_, _, err = stack.Sources.CreateRole(role)
+	_, _, err = stack.Sources.CreateHero(hero)
 	require.NoError(t, err)
-	_, err = stack.Sources.PublishRoleRevision(role.Handle)
+	_, err = stack.Sources.PublishHeroRevision(hero.Handle)
 	require.NoError(t, err)
 
 	// ——— Graph: one Role-backed Task ———
@@ -142,7 +142,7 @@ func TestLiveAgentFlowChildCallsMCP(t *testing.T) {
 	// ——— coordinator + executor router with MCP wired ———
 	hub := events.NewHub()
 	runTemplate := &store.RunRepo{Publisher: hub, Providers: stack.Providers, Models: stack.ModelRepo,
-		Policies: stack.Policies, RoleSources: stack.Sources}
+		Policies: stack.Policies, HeroSources: stack.Sources}
 	routedRuns := &store.RoutedRunRepo{Sessions: stack.Sessions, Template: runTemplate}
 	executorRouter := &sessionExecutorRouter{sessions: stack.Sessions}
 	executorRouter.build = func(db *sql.DB, sessionPath string) (*agentExecutor, error) {
@@ -157,7 +157,7 @@ func TestLiveAgentFlowChildCallsMCP(t *testing.T) {
 		sessionMCP.Runs = &store.MCPRunRepo{DB: db}
 		return &agentExecutor{
 			db: db, writer: writer, homeDir: t.TempDir(), runs: &store.RunRepo{DB: db, Publisher: hub,
-				Providers: stack.Providers, Models: stack.ModelRepo, Policies: stack.Policies, RoleSources: stack.Sources},
+				Providers: stack.Providers, Models: stack.ModelRepo, Policies: stack.Policies, HeroSources: stack.Sources},
 			calls: callRepo, sessionDB: &store.SessionRepo{DB: db}, msgRepo: &store.MessageRepo{DB: db},
 			projects:  &store.ProjectRepo{Files: stack.Projects},
 			skillRepo: &store.SkillSnapshotRepo{DB: db}, skillsDir: emptySkills,

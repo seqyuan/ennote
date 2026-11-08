@@ -41,34 +41,34 @@ budget:
   max_total_tokens: 200000
 tasks:
   a0:
-    role: flow-worker@1
+    hero: flow-worker@1
     goal: "Define exploration brief for {inputs.target}"
   a1:
-    role: flow-worker@1
+    hero: flow-worker@1
     goal: "Explore design option A1 for {inputs.target}; write .docs/plan/` + id + `-a1.md"
     depends: [a0]
   a2:
-    role: flow-worker@1
+    hero: flow-worker@1
     goal: "Explore design option A2 for {inputs.target}; write .docs/plan/` + id + `-a2.md"
     depends: [a0]
   a3:
-    role: flow-worker@1
+    hero: flow-worker@1
     goal: "Explore design option A3 for {inputs.target}; write .docs/plan/` + id + `-a3.md"
     depends: [a0]
   b1:
-    role: flow-worker@1
+    hero: flow-worker@1
     goal: "Synthesize {task.a1.output.proposal}, {task.a2.output.proposal}, {task.a3.output.proposal} into design B1; write .docs/plan/` + id + `-b1.md"
     depends: [a1, a2, a3]
   b2:
-    role: flow-worker@1
+    hero: flow-worker@1
     goal: "Synthesize {task.a1.output.proposal}, {task.a2.output.proposal}, {task.a3.output.proposal} into design B2; write .docs/plan/` + id + `-b2.md"
     depends: [a1, a2, a3]
   c1:
-    role: flow-worker@1
+    hero: flow-worker@1
     goal: "Consolidate {task.b1.output.proposal} and {task.b2.output.proposal} into one design C1; write .docs/plan/` + id + `-c1.md"
     depends: [b1, b2]
   d1:
-    role: flow-worker@1
+    hero: flow-worker@1
     goal: "Review C1 {task.c1.output.proposal}; produce final modified plan; write .docs/plan/` + id + `-final.md"
     depends: [c1]
   accept:
@@ -79,7 +79,7 @@ tasks:
 }
 
 func TestDesignGraphMultiTierSynthesis(t *testing.T) {
-	db, flowRuns, projectID, _, roleVersionID := setupFlowFixture(t)
+	db, flowRuns, projectID, _, heroVersionID := setupFlowFixture(t)
 	ctx := context.Background()
 
 	def, err := agentflow.ParseDefinition([]byte(designGraphYAML("design-synthesis")))
@@ -115,7 +115,7 @@ func TestDesignGraphMultiTierSynthesis(t *testing.T) {
 	require.NoError(t, err)
 	freeze, diagnostics, err := freezeFlowForTest(t, db, flowRuns, projectID, "", def, inputs)
 	require.NoError(t, err, diagnostics)
-	require.Len(t, freeze, 9) // a0,a1,a2,a3,b1,b2,c1,d1 role nodes + accept terminal node
+	require.Len(t, freeze, 9) // a0,a1,a2,a3,b1,b2,c1,d1 hero nodes + accept terminal node
 
 	session := sqlCreateSession(t, db, projectID)
 	run, err := flowRuns.CreateFlowRun(ctx, store.CreateFlowRunInput{
@@ -166,15 +166,15 @@ func TestDesignGraphMultiTierSynthesis(t *testing.T) {
 	// 3. Explore goals carry the file-write instructions verbatim.
 	assert.Contains(t, b[1], ".docs/plan/design-synthesis-a1.md")
 	assert.Contains(t, b[3], ".docs/plan/design-synthesis-a3.md")
-	// 4. Roles are frozen to the fixture role version for every role node.
+	// 4. Heroes are frozen to the fixture hero version for every hero node.
 	for _, node := range freeze {
 		if node.Handle == "accept" {
-			continue // terminal node has no RoleVersionID
+			continue // terminal node has no HeroVersionID
 		}
-		assert.Equal(t, roleVersionID, node.RoleVersionID)
+		assert.Equal(t, heroVersionID, node.HeroVersionID)
 	}
 
-	// 5. Checkpoints: every role node completed; terminal produced flow output.
+	// 5. Checkpoints: every hero node completed; terminal produced flow output.
 	nodes, err := flowRuns.ListNodes(ctx, run.RunID)
 	require.NoError(t, err)
 	byHandle := map[string]*domain.RunAgentFlowNode{}
@@ -186,7 +186,7 @@ func TestDesignGraphMultiTierSynthesis(t *testing.T) {
 		assert.NotEmpty(t, byHandle[handle].OutputRef, handle)
 	}
 	// Terminal gate resolves flow outputs; the accept node itself is not
-	// role-dispatched and stays pending.
+	// hero-dispatched and stays pending.
 	assert.Equal(t, domain.FlowNodePending, byHandle["accept"].TerminalState)
 }
 
@@ -220,12 +220,12 @@ func (c *counterStubChildren) CreateTaskChild(ctx context.Context, parentRunID, 
 		return info, err
 	}
 	_, err = c.db.ExecContext(ctx, `UPDATE delegation_item_attempts SET status='succeeded', finished_at=?
-		WHERE child_run_id=? AND status='queued'`, roleTimeNow(), info.RunID)
+		WHERE child_run_id=? AND status='queued'`, heroTimeNow(), info.RunID)
 	if err != nil {
 		return info, err
 	}
 	_, err = c.db.ExecContext(ctx, `UPDATE agent_runs SET status='succeeded', finished_at=?
-		WHERE id=? AND status IN ('queued','running')`, roleTimeNow(), info.RunID)
+		WHERE id=? AND status IN ('queued','running')`, heroTimeNow(), info.RunID)
 	return info, err
 }
 

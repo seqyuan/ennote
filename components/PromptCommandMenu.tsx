@@ -9,7 +9,7 @@ interface PromptTemplateItem {
   argumentHint: string;
 }
 
-export interface RoleMenuItem {
+export interface HeroMenuItem {
   id: string;
   handle: string;
   name: string;
@@ -24,16 +24,16 @@ export interface FlowMenuItem {
 
 interface PromptCommandMenuProps {
   templates: PromptTemplateItem[];
-  roles: RoleMenuItem[];
+  heroes: HeroMenuItem[];
   flows: FlowMenuItem[];
   input: string;
   onSelectTemplate: (name: string) => void;
-  onSelectRole: (roleId: string, handle: string) => void;
+  onSelectHero: (heroId: string, handle: string) => void;
   onSelectFlow: (name: string, version?: number) => void;
   onClose: () => void;
 }
 
-type Mode = "template" | "role" | "flow" | "all";
+type Mode = "template" | "hero" | "flow" | "all";
 
 interface MenuEntry {
   key: string;
@@ -45,7 +45,7 @@ interface MenuEntry {
 
 function activeMode(input: string): Mode | null {
   if (input.startsWith("/")) return "template";
-  if (input.startsWith("@role")) return "role";
+  if (input.startsWith("@hero") || input.startsWith("@role")) return "hero";
   if (input.startsWith("@graph")) return "flow";
   if (input.startsWith("@")) return "all";
   return null;
@@ -59,7 +59,7 @@ function tokenAfter(input: string, prefix: string): string {
 }
 
 export function PromptCommandMenu({
-  templates, roles, flows, input, onSelectTemplate, onSelectRole, onSelectFlow, onClose,
+  templates, heroes, flows, input, onSelectTemplate, onSelectHero, onSelectFlow, onClose,
 }: PromptCommandMenuProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
@@ -83,17 +83,17 @@ export function PromptCommandMenu({
         onPick: () => onSelectTemplate(tpl.name),
       }));
     }
-    if (mode === "role") {
-      const token = tokenAfter(input, "@role");
-      const filtered = roles
-        .filter((role) => !token || role.handle.toLowerCase().includes(token) ||
-          role.name.toLowerCase().includes(token));
-      return filtered.map((role) => ({
-        key: `r:${role.id}`,
-        label: `@role:${role.handle}`,
-        hint: role.name,
-        desc: role.description,
-        onPick: () => onSelectRole(role.id, role.handle),
+    if (mode === "hero") {
+      const token = tokenAfter(input, "@hero");
+      const filtered = heroes
+        .filter((hero) => !token || hero.handle.toLowerCase().includes(token) ||
+          hero.name.toLowerCase().includes(token));
+      return filtered.map((hero) => ({
+        key: `r:${hero.id}`,
+        label: `@hero:${hero.handle}`,
+        hint: hero.name,
+        desc: hero.description,
+        onPick: () => onSelectHero(hero.id, hero.handle),
       }));
     }
     if (mode === "flow") {
@@ -110,16 +110,16 @@ export function PromptCommandMenu({
     }
     if (mode === "all") {
       const token = input.slice(1).split(/\s/)[0].toLowerCase();
-      const filteredRoles = roles
-        .filter((role) => !token || role.handle.toLowerCase().includes(token) || role.name.toLowerCase().includes(token));
+      const filteredHeroes = heroes
+        .filter((hero) => !token || hero.handle.toLowerCase().includes(token) || hero.name.toLowerCase().includes(token));
       const filteredFlows = flows.filter((flow) => !token || flow.name.toLowerCase().includes(token));
       return [
-        ...filteredRoles.map((role) => ({
-          key: `r:${role.id}`,
-          label: `@role:${role.handle}`,
-          hint: role.name,
-          desc: role.description,
-          onPick: () => onSelectRole(role.id, role.handle),
+        ...filteredHeroes.map((hero) => ({
+          key: `r:${hero.id}`,
+          label: `@hero:${hero.handle}`,
+          hint: hero.name,
+          desc: hero.description,
+          onPick: () => onSelectHero(hero.id, hero.handle),
         })),
         ...filteredFlows.map((flow) => ({
           key: `f:${flow.name}`,
@@ -163,7 +163,7 @@ export function PromptCommandMenu({
   if (entries.length === 0 || !mode) return null;
 
   const ariaLabel = mode === "template" ? "Prompt templates"
-    : mode === "role" ? "Role targets" : "Graphs";
+    : mode === "hero" ? "Hero targets" : "Graphs";
 
   return (
     <div className="prompt-command-menu" role="listbox" aria-label={ariaLabel}>

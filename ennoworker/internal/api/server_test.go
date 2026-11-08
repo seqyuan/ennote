@@ -86,7 +86,7 @@ func setupServer(t *testing.T, control RunController) (*Server, http.Handler) {
 	require.NoError(t, err)
 	db, err := manager.OpenSession(context.Background(), session.ID)
 	require.NoError(t, err)
-	// Legacy repos that still consult global tables (SQL RoleRepo until B3d,
+	// Legacy repos that still consult global tables (SQL HeroRepo until B3d,
 	// MCP profiles) get their own fixture database.
 	fixDB, err := store.OpenMemory()
 	require.NoError(t, err)
@@ -102,7 +102,7 @@ func setupServer(t *testing.T, control RunController) (*Server, http.Handler) {
 	models := &store.ModelRepo{Files: modelFiles}
 	policyFiles := &fileconfig.PolicyStore{Path: filepath.Join(home, "config", "policies.json")}
 	policies := &store.PolicyRepo{Files: policyFiles}
-	roleFiles := &globalsource.Store{HomeDir: home}
+	heroFiles := &globalsource.Store{HomeDir: home}
 	server := &Server{
 		DB: db, Token: "test-token", Sandbox: "none", SessionStores: manager,
 		CatalogDB: fixDB, UsageDB: fixDB,
@@ -110,7 +110,7 @@ func setupServer(t *testing.T, control RunController) (*Server, http.Handler) {
 		Models: models, Policies: policies,
 		Artifacts: &artifacts.Service{DB: db, Root: t.TempDir()}, Sessions: &store.SessionRepo{Files: manager},
 		Branches: &store.BranchRepo{DB: db}, Messages: &store.MessageRepo{DB: db}, Compactions: &store.CompactionRepo{DB: db, Policies: policyFiles},
-		Approvals: &store.ApprovalRepo{DB: db}, Delegations: &store.DelegationRepo{DB: db, Policies: apiPolicyStore(t)}, Runs: &store.RunRepo{DB: db, Providers: providers, Models: models, Policies: policyFiles, RoleSources: roleFiles},
+		Approvals: &store.ApprovalRepo{DB: db}, Delegations: &store.DelegationRepo{DB: db, Policies: apiPolicyStore(t)}, Runs: &store.RunRepo{DB: db, Providers: providers, Models: models, Policies: policyFiles, HeroSources: heroFiles},
 		DelegationApprovals: &store.DelegationApprovalRepo{DB: db},
 		Queue:               &store.QueueRepo{DB: db}, Events: &store.EventRepo{DB: db},
 		Hub: hub, Control: control,
@@ -298,11 +298,11 @@ func TestActiveParentProjectsDepthOneChildApproval(t *testing.T) {
 	group, err := delegations.CreateGroup(ctx, store.CreateDelegationGroupInput{
 		ParentRunID: submission.Run.ID, ParentToolCallID: "delegate-call", Strategy: domain.DelegationStrategySingle,
 		Items: []store.CreateDelegationItemInput{{
-			Name: "inspect", RoleVersionID: "builtin-workspace-explorer-v3",
+			Name: "inspect", HeroVersionID: "builtin-workspace-explorer-v3",
 			AssignmentJSON: json.RawMessage(`{"task":"inspect"}`), OutputContract: "text-v1",
 			Budget: domain.BudgetCeilingJSON{MaxModelCalls: 4, MaxToolCalls: 8, MaxTotalTokens: 20000,
 				MaxOutputTokens: 4000, MaxWallTimeMS: 120000},
-			RoleMeta: apiRoleMetaFromDB(t, server.DB, "builtin-workspace-explorer-v3"),
+			HeroMeta: apiHeroMetaFromDB(t, server.DB, "builtin-workspace-explorer-v3"),
 		}},
 	})
 	require.NoError(t, err)
@@ -320,7 +320,7 @@ func TestActiveParentProjectsDepthOneChildApproval(t *testing.T) {
 	assert.Equal(t, "delegate-call", activity.Groups[0].ParentToolCallID)
 	require.Len(t, activity.Groups[0].Children, 1)
 	assert.Equal(t, child.ID, activity.Groups[0].Children[0].ChildRunID)
-	assert.Equal(t, "workspace-explorer", activity.Groups[0].Children[0].RoleHandle)
+	assert.Equal(t, "workspace-explorer", activity.Groups[0].Children[0].HeroHandle)
 	missingActivity := request(t, handler, http.MethodGet, "/v1/runs/missing/children", nil, true)
 	assert.Equal(t, http.StatusNotFound, missingActivity.Code)
 
@@ -457,16 +457,16 @@ func TestProviderDoctorAPIIsUnavailableWithoutService(t *testing.T) {
 	assert.Equal(t, http.StatusServiceUnavailable, response.Code)
 }
 
-func apiRoleDefinition(modelID string) domain.RoleDefinition {
-	return domain.RoleDefinition{
-		SchemaVersion: 1, RolePrompt: "Review evidence independently.",
-		ModelBinding: domain.RoleModelBinding{Mode: domain.RoleModelFixed, ModelProfileID: modelID,
+func apiHeroDefinition(modelID string) domain.HeroDefinition {
+	return domain.HeroDefinition{
+		SchemaVersion: 1, HeroPrompt: "Review evidence independently.",
+		ModelBinding: domain.HeroModelBinding{Mode: domain.HeroModelFixed, ModelProfileID: modelID,
 			ThinkingEffort: domain.ThinkingDefault, FallbackModelProfileIDs: []string{}, OverridableFields: []string{}},
-		Skills: domain.RoleSkills{Entries: []domain.RoleSkillEntry{}}, Authority: domain.RoleAuthorityReadOnly,
+		Skills: domain.HeroSkills{Entries: []domain.HeroSkillEntry{}}, Authority: domain.HeroAuthorityReadOnly,
 		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read"},
-		ContextPolicy: domain.RoleContextPolicy{DefaultMode: domain.RoleContextRoom,
-			AllowedModes: []domain.RoleContextMode{domain.RoleContextRoom}, OwnExecutionContinuity: domain.RoleContinuityNone},
-		DelegationPolicy: domain.RoleDelegationPolicy{Admission: domain.DelegationApprovalRequired,
+		ContextPolicy: domain.HeroContextPolicy{DefaultMode: domain.HeroContextRoom,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextRoom}, OwnExecutionContinuity: domain.HeroContinuityNone},
+		DelegationPolicy: domain.HeroDelegationPolicy{Admission: domain.DelegationApprovalRequired,
 			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
 			MaxInvocationsPerParentRun: 1, MaxConcurrentInstances: 1,
 			BudgetCeiling: domain.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
@@ -1224,7 +1224,7 @@ func TestUnknownJSONFieldIsRejected(t *testing.T) {
 	assert.Contains(t, response.Body.String(), "invalid_json")
 }
 
-func apiProjectRoleMarkdown(prompt string) string {
+func apiProjectHeroMarkdown(prompt string) string {
 	return `---
 schemaVersion: 1
 handle: project-reviewer
@@ -1280,7 +1280,7 @@ func bindAPISession(t *testing.T, server *Server, ctx context.Context, sessionID
 	require.NoError(t, err)
 	server.DB = db
 	server.Runs = &store.RunRepo{DB: db, Providers: server.Providers, Models: server.Models, Policies: &fileconfig.PolicyStore{},
-		RoleSources: &globalsource.Store{}}
+		HeroSources: &globalsource.Store{}}
 	server.Messages = &store.MessageRepo{DB: db}
 	server.Branches = &store.BranchRepo{DB: db}
 	server.Queue = &store.QueueRepo{DB: db}

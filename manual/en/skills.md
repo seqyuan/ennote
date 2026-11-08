@@ -113,11 +113,11 @@ PATCH /v1/skills/disabled/{relPath}
 A disabled skill never enters the catalogue, so the model will not read it. This is safer than
 deleting: the files stay, and re-enabling is one call.
 
-## Referencing skills from Roles and Flows
+## Referencing skills from Heroes and Flows
 
 | Where | Field | Meaning |
 |---|---|---|
-| Role | `skills.entries[]` | each `{ skillId, mode }`, with `mode` either `preload` or `available` |
+| Hero | `skills.entries[]` | each `{ skillId, mode }`, with `mode` either `preload` or `available` |
 | Flow task | `skills: [name, ...]` | skills available to that task's child Run |
 
 `preload` suits rules that must be read every time; `available` suits procedures the model should read
@@ -137,7 +137,7 @@ also keeps "which version of the skill produced this answer" answerable afterwar
 2. **Say what the skill is *not* for** — boundaries prevent misuse better than steps do
 3. **Use relative paths** for scripts and assets, never absolute ones
 4. **Keep permissions out of it** — a skill is not policy; whether a tool may run is decided by the
-   permission mode and the Role
+   permission mode and the Hero
 5. When it grows, split it into a `category.md` plus subdirectories so the model can narrow down
 
 ## Troubleshooting

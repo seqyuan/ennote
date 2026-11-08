@@ -282,7 +282,7 @@ func SerializeCompactionSource(previousSummary string, messages []domain.Message
 		output.WriteString("\n\n")
 	}
 	for _, message := range messages {
-		fmt.Fprintf(&output, "[%s message id=%s time=%s]\n", titleRole(message.Role), message.ID,
+		fmt.Fprintf(&output, "[%s message id=%s time=%s]\n", titleHero(message.Role), message.ID,
 			message.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"))
 		for _, block := range message.Parts {
 			switch block.Kind {
@@ -515,9 +515,9 @@ func clamp(value, minimum, maximum int) int {
 	return value
 }
 
-func titleRole(role string) string {
-	if role == "" {
+func titleHero(hero string) string {
+	if hero == "" {
 		return "Message"
 	}
-	return strings.ToUpper(role[:1]) + role[1:]
+	return strings.ToUpper(hero[:1]) + hero[1:]
 }

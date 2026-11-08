@@ -39,7 +39,7 @@ func TestApprovalRequestPreviewIsBounded(t *testing.T) {
 	raw, err := json.Marshal(approval)
 	require.NoError(t, err)
 	text := string(raw)
-	for _, forbidden := range []string{"rolePrompt", "systemPrompt", "apiKey", "credential", "transcript", "assignment"} {
+	for _, forbidden := range []string{"heroPrompt", "systemPrompt", "apiKey", "credential", "transcript", "assignment"} {
 		assert.NotContains(t, text, forbidden, "approval preview leaks %s", forbidden)
 	}
 	var items []map[string]any
@@ -138,14 +138,14 @@ func TestApprovalDecisionFirstWriterWinsAndConflicts(t *testing.T) {
 	assert.Equal(t, 1, cursor)
 }
 
-func TestApprovalFailsClosedOnRoleKillSwitch(t *testing.T) {
+func TestApprovalFailsClosedOnHeroKillSwitch(t *testing.T) {
 	delegations, approvals, _, _, approval := requestBudgetApproval(t)
 	ctx := context.Background()
 
 	// V2 kill switch: the frozen Role meta is the only authority. Simulate a
 	// revoked identity by clearing the item's frozen meta; Decide must fail
 	// closed and materialize nothing.
-	_, err := delegations.DB.Exec(`UPDATE delegation_items SET role_meta_json='{}'
+	_, err := delegations.DB.Exec(`UPDATE delegation_items SET hero_meta_json='{}'
 		WHERE group_id=(SELECT group_id FROM delegation_approval_requests WHERE id=?)`,
 		approval.ID)
 	require.NoError(t, err)

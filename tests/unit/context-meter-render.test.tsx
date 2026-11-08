@@ -28,7 +28,7 @@ describe("ContextMeter category rows", () => {
   it("renders the seven ennote categories when the Worker reports them", () => {
     const categories = [
       { key: "system", tokens: 4000 },
-      { key: "role", tokens: 3000 },
+      { key: "hero", tokens: 3000 },
       { key: "rules", tokens: 2000 },
       { key: "skills", tokens: 1000 },
       { key: "tools", tokens: 6000 },
@@ -36,10 +36,10 @@ describe("ContextMeter category rows", () => {
       { key: "conversation", tokens: 22000 },
     ];
     const html = renderToStaticMarkup(<ContextMeter contextUsage={usage({ categories, categoriesVersion: 1 })} initialOpen />);
-    for (const label of ["System prompt", "Role", "Project rules", "Skills", "Tools", "Reminders", "Conversation"]) {
+    for (const label of ["System prompt", "Hero", "Project rules", "Skills", "Tools", "Reminders", "Conversation"]) {
       expect(html).toContain(label);
     }
-    expect(html).toContain("cm-color-role");
+    expect(html).toContain("cm-color-hero");
     expect(html).toContain("cm-color-reminders");
   });
 

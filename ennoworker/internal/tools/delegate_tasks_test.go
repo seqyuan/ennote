@@ -37,7 +37,7 @@ func TestDelegateTasksToolRequiresProvider(t *testing.T) {
 	result, err := tool.Execute(context.Background(), domain.ToolCall{
 		ID:        "call-1",
 		Name:      "delegate_tasks",
-		Arguments: json.RawMessage(`{"tasks":[{"name":"r","role":"explorer","goal":"inspect","budget":{"maxModelCalls":4,"maxToolCalls":4}}]}`),
+		Arguments: json.RawMessage(`{"tasks":[{"name":"r","hero":"explorer","goal":"inspect","budget":{"maxModelCalls":4,"maxToolCalls":4}}]}`),
 	})
 	require.NoError(t, err)
 	assert.True(t, result.IsError, "missing provider should be an error result")
@@ -52,12 +52,12 @@ func TestDelegateTasksToolReturnsPlaceholderOnSuccess(t *testing.T) {
 		},
 	}
 	tool := &DelegateTasksTool{Provider: &mockDelegateTasksProvider{result: expected}}
-	ctx := context.WithValue(context.Background(), delegateRolesRunIDKey, "parent-1")
-	ctx = context.WithValue(ctx, delegateRolesSessionIDKey, "session-1")
+	ctx := context.WithValue(context.Background(), delegateHeroesRunIDKey, "parent-1")
+	ctx = context.WithValue(ctx, delegateHeroesSessionIDKey, "session-1")
 	result, err := tool.Execute(ctx, domain.ToolCall{
 		ID:   "call-1",
 		Name: "delegate_tasks",
-		Arguments: json.RawMessage(`{"tasks":[{"name":"explore","role":"workspace-explorer","goal":"List files",
+		Arguments: json.RawMessage(`{"tasks":[{"name":"explore","hero":"workspace-explorer","goal":"List files",
 			"skills":["workspace-nav"],"outputContract":"text-v1","budget":{"maxModelCalls":4,"maxToolCalls":4,"maxTotalTokens":16000}}]}`),
 	})
 	require.NoError(t, err)
@@ -70,26 +70,26 @@ func TestDelegateTasksToolReturnsPlaceholderOnSuccess(t *testing.T) {
 	assert.Equal(t, "child-1", parsed.Items[0].ChildRunID)
 }
 
-// The legacy delegate_roles argument shape (delegations + roleHandle/assignment)
+// The legacy delegate_heroes argument shape (delegations + heroHandle/assignment)
 // must keep resolving after the rename so replayed tool calls of resumed runs
 // work; the tool normalizes the legacy fields onto the unified TaskSpec.
-func TestDelegateTasksToolAcceptsLegacyDelegateRolesShape(t *testing.T) {
+func TestDelegateTasksToolAcceptsLegacyDelegateHeroesShape(t *testing.T) {
 	var captured []domain.TaskSpec
 	tool := &DelegateTasksTool{Provider: delegateTasksCaptureProvider{capture: &captured}}
-	ctx := context.WithValue(context.Background(), delegateRolesRunIDKey, "parent-1")
-	ctx = context.WithValue(ctx, delegateRolesSessionIDKey, "session-1")
+	ctx := context.WithValue(context.Background(), delegateHeroesRunIDKey, "parent-1")
+	ctx = context.WithValue(ctx, delegateHeroesSessionIDKey, "session-1")
 	result, err := tool.Execute(ctx, domain.ToolCall{
 		ID:   "call-1",
-		Name: "delegate_roles", // replayed persisted call under the old name
-		Arguments: json.RawMessage(`{"delegations":[{"name":"explore","roleHandle":"workspace-explorer",
+		Name: "delegate_heroes", // replayed persisted call under the old name
+		Arguments: json.RawMessage(`{"delegations":[{"name":"explore","heroHandle":"workspace-explorer",
 			"assignment":"List files","budget":{"maxModelCalls":4,"maxToolCalls":4}}]}`),
 	})
 	require.NoError(t, err)
 	assert.False(t, result.IsError)
 	require.Len(t, captured, 1)
-	assert.Equal(t, "workspace-explorer", captured[0].Role)
+	assert.Equal(t, "workspace-explorer", captured[0].Hero)
 	assert.Equal(t, "List files", captured[0].Goal)
-	assert.Empty(t, captured[0].RoleHandle, "legacy fields are normalized away")
+	assert.Empty(t, captured[0].HeroHandle, "legacy fields are normalized away")
 	assert.Empty(t, captured[0].Assignment)
 }
 

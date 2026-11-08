@@ -25,13 +25,13 @@ import (
 // Segment is one ordered unit of a composed system prompt.
 type Segment struct {
 	// ID is the stable section identifier readers see, e.g. "project.agents"
-	// or "role.definition".
+	// or "hero.definition".
 	ID string
 	// Kind classifies the contributing layer.
 	Kind domain.PromptSectionKind
 	// Source names the producer under the platform's
 	// (source, version, digest, risk) identity convention, e.g.
-	// "role:security-reviewer@3", "skills:catalog", "project:MEMORY.md".
+	// "hero:security-reviewer@3", "skills:catalog", "project:MEMORY.md".
 	Source string
 	// Text is the exact byte contribution, including its own separators.
 	Text string

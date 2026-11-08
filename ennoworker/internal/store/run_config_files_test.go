@@ -9,7 +9,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
@@ -71,7 +71,7 @@ func TestFileRunConfigFreezesWithoutCredential(t *testing.T) {
 	assert.NotContains(t, string(reloaded.Effective.InitialRuntime.APIKey), "sk-file-secret")
 }
 
-func TestFileRoleRevisionInvocationFreezesPublishedDefinition(t *testing.T) {
+func TestFileHeroRevisionInvocationFreezesPublishedDefinition(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
 	models := fileconfig.NewModelStore(
@@ -81,34 +81,34 @@ func TestFileRoleRevisionInvocationFreezesPublishedDefinition(t *testing.T) {
 	)
 	_, err := models.CreateProvider(ctx, fileconfig.CreateProviderInput{
 		Key: "provider", Name: "Provider", ProviderType: domain.ProviderOpenAICompatible,
-		BaseURL: "https://provider.test/v1", APIKey: "sk-role-secret",
+		BaseURL: "https://provider.test/v1", APIKey: "sk-hero-secret",
 	})
 	require.NoError(t, err)
 	model, err := models.CreateModel(ctx, fileconfig.CreateModelInput{
-		ProviderID: "provider", ModelName: "role-model", ContextWindow: 32768, MaxOutputTokens: 4096,
+		ProviderID: "provider", ModelName: "hero-model", ContextWindow: 32768, MaxOutputTokens: 4096,
 		SupportsToolUse: true, ThinkingDialect: domain.ThinkingDialectNone,
 		SupportedThinkingEfforts: []domain.ThinkingEffort{domain.ThinkingDefault}, IsDefault: true,
 	})
 	require.NoError(t, err)
 	sources := &globalsource.Store{HomeDir: home}
-	document := &rolesource.Document{
+	document := &heroesource.Document{
 		SchemaVersion: 1, Handle: "reviewer", Name: "Reviewer", Description: "Reviews output",
 		Positioning: "Independent", Icon: "bot", Color: "neutral",
-		Model:  rolesource.ModelBinding{Ref: model.ID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills: []rolesource.SkillBinding{}, Authority: rolesource.AuthorityReadOnly,
+		Model:  heroesource.ModelBinding{Ref: model.ID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills: []heroesource.SkillBinding{}, Authority: heroesource.AuthorityReadOnly,
 		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read", "grep"},
-		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextRoom,
-			AllowedModes: []domain.RoleContextMode{domain.RoleContextRoom}, OwnExecutionContinuity: domain.RoleContinuityNone},
-		Delegation: rolesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+		Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextRoom,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextRoom}, OwnExecutionContinuity: domain.HeroContinuityNone},
+		Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
 			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
 			MaxInvocationsPerParentRun: 2, MaxConcurrentInstances: 1,
-			BudgetCeiling: rolesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
+			BudgetCeiling: heroesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
 				MaxTotalTokens: 20000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 120000}},
 		OutputContract: "text-v1", MaxLoopIterations: 8, Prompt: "Use the published prompt.",
 	}
-	_, _, err = sources.CreateRole(document)
+	_, _, err = sources.CreateHero(document)
 	require.NoError(t, err)
-	revision, err := sources.PublishRoleRevision(document.Handle)
+	revision, err := sources.PublishHeroRevision(document.Handle)
 	require.NoError(t, err)
 
 	projects := &projectstore.Store{Root: filepath.Join(home, "projects")}
@@ -121,10 +121,10 @@ func TestFileRoleRevisionInvocationFreezesPublishedDefinition(t *testing.T) {
 	db, err := sessionManager.OpenSession(ctx, session.ID)
 	require.NoError(t, err)
 	runs := &store.RunRepo{DB: db, Providers: &store.ProviderRepo{Files: models}, Models: &store.ModelRepo{Files: models},
-		Policies: &fileconfig.PolicyStore{Path: filepath.Join(home, "config", "policies.json")}, RoleSources: sources}
+		Policies: &fileconfig.PolicyStore{Path: filepath.Join(home, "config", "policies.json")}, HeroSources: sources}
 	submission, err := runs.SubmitInvocation(ctx, domain.SubmitInvocationInput{
-		SessionID: session.ID, ClientRequestID: "role-request", Text: "review",
-		Target: domain.RoleInvocationTarget{Kind: domain.InvocationTargetRole, ObjectID: document.Handle,
+		SessionID: session.ID, ClientRequestID: "hero-request", Text: "review",
+		Target: domain.HeroInvocationTarget{Kind: domain.InvocationTargetHero, ObjectID: document.Handle,
 			VersionID: revision.ID(), ContextMode: domain.InvocationContextRoom},
 	})
 	require.NoError(t, err)
@@ -132,11 +132,11 @@ func TestFileRoleRevisionInvocationFreezesPublishedDefinition(t *testing.T) {
 	require.NoError(t, err)
 	resolved, err := runs.ResolveAndFreezeConfig(ctx, claimed)
 	require.NoError(t, err)
-	require.NotNil(t, resolved.Effective.Role)
-	assert.Equal(t, revision.ID(), resolved.Effective.Role.VersionID)
+	require.NotNil(t, resolved.Effective.Hero)
+	assert.Equal(t, revision.ID(), resolved.Effective.Hero.VersionID)
 	assert.Equal(t, "Use the published prompt.", resolved.SystemPrompt.AgentPrompt)
 	assert.Equal(t, model.ID, resolved.Model.ID)
-	assert.NotContains(t, string(claimed.EffectiveConfig), "sk-role-secret")
+	assert.NotContains(t, string(claimed.EffectiveConfig), "sk-hero-secret")
 	require.NoError(t, runs.FinalizeSuccess(ctx, claimed.ID, domain.RunOutput{Messages: []domain.ChatMessage{{
 		Role: domain.RoleAssistant, Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: "reviewed"}},
 	}}}))

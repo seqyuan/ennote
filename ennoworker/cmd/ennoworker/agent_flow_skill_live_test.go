@@ -15,7 +15,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphrun"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/runs"
 	"github.com/seqyuan/ennote/ennoworker/internal/skills"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
@@ -54,30 +54,30 @@ Your submit_result summary MUST begin with the exact token LIVE_SKILL_MARKER fol
 	require.Contains(t, globalSkills, "live-marker", "live-marker skill must be discovered")
 
 	// ——— file-native global Role (reader) carrying a preload Skill ———
-	role := &rolesource.Document{
+	hero := &heroesource.Document{
 		SchemaVersion: 1, Handle: "skill-reader", Name: "Skill Reader",
 		Description: "Read-only inspector with a preloaded marker Skill.", Positioning: "Independent",
 		Icon: "bot", Color: "neutral",
-		Model:             rolesource.ModelBinding{Ref: stack.ModelID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills:            []rolesource.SkillBinding{{ID: "live-marker", Mode: domain.RoleSkillPreload}},
-		Authority:         rolesource.AuthorityReadOnly,
+		Model:             heroesource.ModelBinding{Ref: stack.ModelID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills:            []heroesource.SkillBinding{{ID: "live-marker", Mode: domain.HeroSkillPreload}},
+		Authority:         heroesource.AuthorityReadOnly,
 		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read", "ls", "grep", "find"},
-		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextTask,
-			AllowedModes: []domain.RoleContextMode{domain.RoleContextTask}, OwnExecutionContinuity: domain.RoleContinuityNone},
-		Delegation: rolesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+		Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextTask,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextTask}, OwnExecutionContinuity: domain.HeroContinuityNone},
+		Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
 			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single", "parallel"},
 			MaxInvocationsPerParentRun: 16, MaxConcurrentInstances: 16,
-			BudgetCeiling: rolesource.DelegationBudgetCeiling{MaxModelCalls: 20, MaxToolCalls: 40,
+			BudgetCeiling: heroesource.DelegationBudgetCeiling{MaxModelCalls: 20, MaxToolCalls: 40,
 				MaxTotalTokens: 100000, MaxOutputTokens: 4096, MaxCostUSDMicros: 0, MaxWallTimeMS: 180000}},
 		OutputContract: "text-v1", MaxLoopIterations: 8,
 		Prompt: "You are a read-only workspace inspector. Use read, ls, grep, and find to answer the task. Be concise. End by calling submit_result with a structured result.",
 	}
-	_, _, err := stack.Sources.CreateRole(role)
+	_, _, err := stack.Sources.CreateHero(hero)
 	require.NoError(t, err)
-	_, err = stack.Sources.PublishRoleRevision(role.Handle)
+	_, err = stack.Sources.PublishHeroRevision(hero.Handle)
 	require.NoError(t, err)
 
-	// ——— file-native Graph: one role-backed Task (Skill preloaded via Role) ———
+	// ——— file-native Graph: one hero-backed Task (Skill preloaded via Role) ———
 	_, digest, err := stack.Sources.CreateGraph("skill-flow", "Skill Flow")
 	require.NoError(t, err)
 	_, _, err = stack.Sources.UpdateGraph("skill-flow", digest, func(d *graphsource.Document) error {
@@ -95,7 +95,7 @@ Your submit_result summary MUST begin with the exact token LIVE_SKILL_MARKER fol
 	// ——— coordinator + executor router ———
 	hub := events.NewHub()
 	runTemplate := &store.RunRepo{Publisher: hub, Providers: stack.Providers, Models: stack.ModelRepo,
-		Policies: stack.Policies, RoleSources: stack.Sources}
+		Policies: stack.Policies, HeroSources: stack.Sources}
 	routedRuns := &store.RoutedRunRepo{Sessions: stack.Sessions, Template: runTemplate}
 	executorRouter := &sessionExecutorRouter{sessions: stack.Sessions}
 	executorRouter.build = func(db *sql.DB, sessionPath string) (*agentExecutor, error) {
@@ -107,7 +107,7 @@ Your submit_result summary MUST begin with the exact token LIVE_SKILL_MARKER fol
 		}
 		return &agentExecutor{
 			db: db, writer: writer, homeDir: t.TempDir(), runs: &store.RunRepo{DB: db, Publisher: hub,
-				Providers: stack.Providers, Models: stack.ModelRepo, Policies: stack.Policies, RoleSources: stack.Sources},
+				Providers: stack.Providers, Models: stack.ModelRepo, Policies: stack.Policies, HeroSources: stack.Sources},
 			calls: callRepo, sessionDB: &store.SessionRepo{DB: db}, msgRepo: &store.MessageRepo{DB: db},
 			projects:  &store.ProjectRepo{Files: stack.Projects},
 			skillRepo: &store.SkillSnapshotRepo{DB: db}, skillsDir: skillsDir,
@@ -176,11 +176,11 @@ Your submit_result summary MUST begin with the exact token LIVE_SKILL_MARKER fol
 	require.Equal(t, domain.FlowStateCompleted, final.State, "flow must complete: %s", final.TerminalReason)
 
 	// ——— the Skill was frozen onto the child delegation item ———
-	var roleMetaJSON string
-	require.NoError(t, db.QueryRow(`SELECT COALESCE(i.role_meta_json, '{}') FROM delegation_items i
+	var heroMetaJSON string
+	require.NoError(t, db.QueryRow(`SELECT COALESCE(i.hero_meta_json, '{}') FROM delegation_items i
 		JOIN delegation_item_attempts a ON a.item_id=i.id
-		WHERE a.child_run_id IN (SELECT child_run_id FROM run_agent_flow_nodes WHERE run_id=?) LIMIT 1`, run.RunID).Scan(&roleMetaJSON))
-	assert.Contains(t, roleMetaJSON, "live-marker", "frozen Role meta must carry the preloaded Skill")
+		WHERE a.child_run_id IN (SELECT child_run_id FROM run_agent_flow_nodes WHERE run_id=?) LIMIT 1`, run.RunID).Scan(&heroMetaJSON))
+	assert.Contains(t, heroMetaJSON, "live-marker", "frozen Role meta must carry the preloaded Skill")
 
 	// ——— the Skill's prompt marker reached the submitted result ———
 	var resultJSON string

@@ -62,7 +62,7 @@ ennote start
 ~/.ennote/
   bin/                      下载的 Worker 二进制（按版本命名）
   config/                   模型、Provider 凭据、策略、MCP 配置（0600）
-  agents/roles/             角色定义
+  agents/heroes/             英雄定义
   agents/graphs/            图谱定义
   skills/                   技能
   projects/<project>/sessions/   每个 Session 一个 SQLite 数据库

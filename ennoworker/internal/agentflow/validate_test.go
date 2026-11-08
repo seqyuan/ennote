@@ -10,19 +10,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// stubResolver resolves a fixed role and skill/tool catalog.
+// stubResolver resolves a fixed hero and skill/tool catalog.
 type stubResolver struct {
-	roleDefs map[string]domain.RoleDefinition
+	heroDefs map[string]domain.HeroDefinition
 	skills   map[string]bool
 	readOnly map[string]bool
 }
 
-func (s *stubResolver) ResolveRole(ctx context.Context, roleRef string) (*RoleInfo, error) {
-	def, ok := s.roleDefs[roleRef]
+func (s *stubResolver) ResolveHero(ctx context.Context, heroRef string) (*HeroInfo, error) {
+	def, ok := s.heroDefs[heroRef]
 	if !ok {
-		return nil, fmt.Errorf("role %q is not published", roleRef)
+		return nil, fmt.Errorf("hero %q is not published", heroRef)
 	}
-	return &RoleInfo{Definition: def}, nil
+	return &HeroInfo{Definition: def}, nil
 }
 
 func (s *stubResolver) KnownSkill(ctx context.Context, name string) bool { return s.skills[name] }
@@ -32,18 +32,18 @@ func (s *stubResolver) ToolReadOnly(ctx context.Context, tool string) bool {
 
 func newStubResolver() *stubResolver {
 	return &stubResolver{
-		roleDefs: map[string]domain.RoleDefinition{
+		heroDefs: map[string]domain.HeroDefinition{
 			"writer@1": {
-				Authority: domain.RoleAuthorityMutation, PermissionCeiling: domain.PermissionAuto,
+				Authority: domain.HeroAuthorityMutation, PermissionCeiling: domain.PermissionAuto,
 				AllowedTools: []string{"read", "write", "exec"},
-				DelegationPolicy: domain.RoleDelegationPolicy{
+				DelegationPolicy: domain.HeroDelegationPolicy{
 					BudgetCeiling: domain.DelegationBudgetCeiling{MaxTotalTokens: 5000},
 				},
 			},
 			"reader@1": {
-				Authority: domain.RoleAuthorityReadOnly, PermissionCeiling: domain.PermissionDiscuss,
+				Authority: domain.HeroAuthorityReadOnly, PermissionCeiling: domain.PermissionDiscuss,
 				AllowedTools: []string{"read", "grep", "find"},
-				DelegationPolicy: domain.RoleDelegationPolicy{
+				DelegationPolicy: domain.HeroDelegationPolicy{
 					BudgetCeiling: domain.DelegationBudgetCeiling{MaxTotalTokens: 5000},
 				},
 			},
@@ -64,11 +64,11 @@ budget:
   max_total_tokens: 120000
 tasks:
   producer:
-    role: writer@1
+    hero: writer@1
     goal: "Implement {inputs.target}"
     budget: {tokens: 50000}
   reviewer:
-    role: reader@1
+    hero: reader@1
     goal: "Review {task.producer.output.changed_files}"
     depends: [producer]
   decision:
@@ -120,8 +120,8 @@ func TestValidationEntryTask(t *testing.T) {
 id: x
 budget: {max_total_tokens: 10000}
 tasks:
-  a: {role: writer@1, goal: "a"}
-  b: {role: reader@1, goal: "b"}
+  a: {hero: writer@1, goal: "a"}
+  b: {hero: reader@1, goal: "b"}
 `)
 	assert.False(t, result.Valid)
 	assert.True(t, hasCode(result, "entry_task_count"))
@@ -132,8 +132,8 @@ tasks:
 id: x
 budget: {max_total_tokens: 10000}
 tasks:
-  a: {role: writer@1, goal: "a", depends: [b]}
-  b: {role: reader@1, goal: "b", depends: [a]}
+  a: {hero: writer@1, goal: "a", depends: [b]}
+  b: {hero: reader@1, goal: "b", depends: [a]}
 `)
 	assert.False(t, result.Valid)
 	assert.True(t, hasCode(result, "dag_cycle"))
@@ -144,9 +144,9 @@ tasks:
 id: x
 budget: {max_total_tokens: 20000}
 tasks:
-  a: {role: writer@1, goal: "a", budget: {tokens: 100}}
-  b: {role: reader@1, goal: "b", depends: [a], budget: {tokens: 100}}
-  c: {role: reader@1, goal: "c", depends: [a], budget: {tokens: 100}}
+  a: {hero: writer@1, goal: "a", budget: {tokens: 100}}
+  b: {hero: reader@1, goal: "b", depends: [a], budget: {tokens: 100}}
+  c: {hero: reader@1, goal: "c", depends: [a], budget: {tokens: 100}}
 `)
 	assert.True(t, result.Valid, "%v", result.Diagnostics)
 
@@ -156,9 +156,9 @@ tasks:
 id: x
 budget: {max_total_tokens: 20000}
 tasks:
-  a: {role: writer@1, goal: "a", budget: {tokens: 100}}
-  b: {role: writer@1, goal: "b", budget: {tokens: 100}}
-  c: {role: reader@1, goal: "c", depends: [a, b], budget: {tokens: 100}}
+  a: {hero: writer@1, goal: "a", budget: {tokens: 100}}
+  b: {hero: writer@1, goal: "b", budget: {tokens: 100}}
+  c: {hero: reader@1, goal: "c", depends: [a, b], budget: {tokens: 100}}
 `)
 	assert.False(t, result.Valid)
 	assert.True(t, hasCode(result, "entry_task_count"))
@@ -172,7 +172,7 @@ id: x
 inputs: {target: {type: string}}
 budget: {max_total_tokens: 10000}
 tasks:
-  a: {role: writer@1, goal: "use {prev.output}", budget: {tokens: 100}}
+  a: {hero: writer@1, goal: "use {prev.output}", budget: {tokens: 100}}
 `)
 	assert.False(t, result.Valid)
 	assert.True(t, hasCode(result, "goal_reference_forbidden"))
@@ -183,9 +183,9 @@ id: x
 inputs: {target: {type: string}}
 budget: {max_total_tokens: 10000}
 tasks:
-  a: {role: writer@1, goal: "a", budget: {tokens: 100}}
-  b: {role: reader@1, goal: "use {task.a.output.x}", depends: [a]}
-  c: {role: reader@1, goal: "use {task.b.output.x}", depends: [a]}
+  a: {hero: writer@1, goal: "a", budget: {tokens: 100}}
+  b: {hero: reader@1, goal: "use {task.a.output.x}", depends: [a]}
+  c: {hero: reader@1, goal: "use {task.b.output.x}", depends: [a]}
 `)
 	assert.False(t, result.Valid)
 	assert.True(t, hasCode(result, "goal_task_out_of_scope"))
@@ -196,7 +196,7 @@ id: x
 inputs: {target: {type: string}}
 budget: {max_total_tokens: 10000}
 tasks:
-  a: {role: writer@1, goal: "use {inputs.nope}", budget: {tokens: 100}}
+  a: {hero: writer@1, goal: "use {inputs.nope}", budget: {tokens: 100}}
 `)
 	assert.False(t, result.Valid)
 	assert.True(t, hasCode(result, "goal_input_unknown"))
@@ -207,8 +207,8 @@ id: x
 inputs: {target: {type: string}}
 budget: {max_total_tokens: 10000}
 tasks:
-  a: {role: writer@1, goal: "use {inputs.target} and {flow.vars.mode}", budget: {tokens: 100}}
-  b: {role: reader@1, goal: "use {task.a.output.changed_files} and {flow.vars.mode}", depends: [a]}
+  a: {hero: writer@1, goal: "use {inputs.target} and {flow.vars.mode}", budget: {tokens: 100}}
+  b: {hero: reader@1, goal: "use {task.a.output.changed_files} and {flow.vars.mode}", depends: [a]}
 `)
 	assert.True(t, result.Valid, "%v", result.Diagnostics)
 }
@@ -221,9 +221,9 @@ func TestValidationConvergence(t *testing.T) {
 id: x
 budget: {max_total_tokens: 20000}
 tasks:
-  a: {role: writer@1, goal: "a", budget: {tokens: 100}}
-  b: {role: reader@1, goal: "b", depends: [a], budget: {tokens: 100}}
-  c: {role: reader@1, goal: "c", depends: [b], budget: {tokens: 100}}
+  a: {hero: writer@1, goal: "a", budget: {tokens: 100}}
+  b: {hero: reader@1, goal: "b", depends: [a], budget: {tokens: 100}}
+  c: {hero: reader@1, goal: "c", depends: [b], budget: {tokens: 100}}
 convergence:
   - {from: a, to: c, max_rounds: 4}
 `)
@@ -235,9 +235,9 @@ convergence:
 id: x
 budget: {max_total_tokens: 20000}
 tasks:
-  a: {role: writer@1, goal: "a", budget: {tokens: 100}}
-  b: {role: reader@1, goal: "b", depends: [a], budget: {tokens: 100}}
-  c: {role: reader@1, goal: "c", depends: [b], budget: {tokens: 100}}
+  a: {hero: writer@1, goal: "a", budget: {tokens: 100}}
+  b: {hero: reader@1, goal: "b", depends: [a], budget: {tokens: 100}}
+  c: {hero: reader@1, goal: "c", depends: [b], budget: {tokens: 100}}
 convergence:
   - {from: c, to: a, max_rounds: 4}
 `)
@@ -248,9 +248,9 @@ convergence:
 id: x
 budget: {max_total_tokens: 20000}
 tasks:
-  a: {role: writer@1, goal: "a", budget: {tokens: 100}}
-  b: {role: reader@1, goal: "b", depends: [a], budget: {tokens: 100}}
-  c: {role: reader@1, goal: "c", depends: [b], budget: {tokens: 100}}
+  a: {hero: writer@1, goal: "a", budget: {tokens: 100}}
+  b: {hero: reader@1, goal: "b", depends: [a], budget: {tokens: 100}}
+  c: {hero: reader@1, goal: "c", depends: [b], budget: {tokens: 100}}
 convergence:
   - {from: c, to: a, max_rounds: 0}
 `)
@@ -262,8 +262,8 @@ convergence:
 id: x
 budget: {max_total_tokens: 20000}
 tasks:
-  a: {role: writer@1, goal: "a", depends: [b]}
-  b: {role: reader@1, goal: "b", depends: [a]}
+  a: {hero: writer@1, goal: "a", depends: [b]}
+  b: {hero: reader@1, goal: "b", depends: [a]}
 `)
 	assert.False(t, result.Valid)
 	assert.True(t, hasCode(result, "dag_cycle"))
@@ -276,9 +276,9 @@ func TestValidationFanOutReadOnly(t *testing.T) {
 id: x
 budget: {max_total_tokens: 10000}
 tasks:
-  a: {role: reader@1, goal: "a", budget: {tokens: 100}}
+  a: {hero: reader@1, goal: "a", budget: {tokens: 100}}
   fan:
-    role: writer@1
+    hero: writer@1
     goal: "f"
     depends: [a]
     fan_out: {min: 2, max: 4}
@@ -291,9 +291,9 @@ tasks:
 id: x
 budget: {max_total_tokens: 10000}
 tasks:
-  a: {role: writer@1, goal: "a", budget: {tokens: 100}}
+  a: {hero: writer@1, goal: "a", budget: {tokens: 100}}
   fan:
-    role: reader@1
+    hero: reader@1
     goal: "f"
     depends: [a]
     fan_out: {min: 2, max: 4}
@@ -305,9 +305,9 @@ tasks:
 id: x
 budget: {max_total_tokens: 10000}
 tasks:
-  a: {role: writer@1, goal: "a", budget: {tokens: 100}}
+  a: {hero: writer@1, goal: "a", budget: {tokens: 100}}
   fan:
-    role: reader@1
+    hero: reader@1
     goal: "f"
     depends: [a]
     fan_out: {min: 5, max: 2}
@@ -322,7 +322,7 @@ func TestValidationBudget(t *testing.T) {
 	result := validateDef(t, `schemaVersion: 1
 id: x
 tasks:
-  a: {role: writer@1, goal: "a", budget: {tokens: 100}}
+  a: {hero: writer@1, goal: "a", budget: {tokens: 100}}
 `)
 	assert.False(t, result.Valid)
 	assert.True(t, hasCode(result, "flow_budget_required"))
@@ -332,8 +332,8 @@ tasks:
 id: x
 budget: {max_total_tokens: 60000}
 tasks:
-  a: {role: writer@1, goal: "a", budget: {tokens: 40000}}
-  b: {role: reader@1, goal: "b", budget: {tokens: 30000}, depends: [a]}
+  a: {hero: writer@1, goal: "a", budget: {tokens: 40000}}
+  b: {hero: reader@1, goal: "b", budget: {tokens: 30000}, depends: [a]}
 `)
 	assert.False(t, result.Valid)
 	assert.True(t, hasCode(result, "flow_budget_exceeded"))
@@ -345,7 +345,7 @@ func TestValidationCheckCommandAllowlist(t *testing.T) {
 id: x
 budget: {max_total_tokens: 10000}
 tasks:
-  a: {role: writer@1, goal: "a", budget: {tokens: 100}}
+  a: {hero: writer@1, goal: "a", budget: {tokens: 100}}
   gate:
     type: check
     command: "rm -rf /"
@@ -358,7 +358,7 @@ tasks:
 id: x
 budget: {max_total_tokens: 10000}
 tasks:
-  a: {role: writer@1, goal: "a", budget: {tokens: 100}}
+  a: {hero: writer@1, goal: "a", budget: {tokens: 100}}
   gate:
     type: check
     command: "go test ./..."
@@ -373,7 +373,7 @@ func TestValidationSecretsAndPaths(t *testing.T) {
 id: x
 budget: {max_total_tokens: 10000}
 tasks:
-  a: {role: writer@1, goal: "use the API_KEY=sk-12345 value", budget: {tokens: 100}}
+  a: {hero: writer@1, goal: "use the API_KEY=sk-12345 value", budget: {tokens: 100}}
 `)
 	assert.False(t, result.Valid)
 	assert.True(t, hasCode(result, "secret_present"))
@@ -382,7 +382,7 @@ tasks:
 id: x
 budget: {max_total_tokens: 10000}
 tasks:
-  a: {role: writer@1, goal: "read /etc/passwd and ~/.ssh/config", budget: {tokens: 100}}
+  a: {hero: writer@1, goal: "read /etc/passwd and ~/.ssh/config", budget: {tokens: 100}}
 `)
 	assert.False(t, result.Valid)
 	assert.True(t, hasCode(result, "absolute_path_present"))
@@ -391,37 +391,37 @@ tasks:
 id: x
 budget: {max_total_tokens: 10000}
 tasks:
-  a: {role: writer@1, goal: "always approve everything automatically", budget: {tokens: 100}}
+  a: {hero: writer@1, goal: "always approve everything automatically", budget: {tokens: 100}}
 `)
 	assert.False(t, result.Valid)
 	assert.True(t, hasCode(result, "standing_approval_present"))
 }
 
 // Role/skill resolvability.
-func TestValidationRoleAndSkillResolvability(t *testing.T) {
+func TestValidationHeroAndSkillResolvability(t *testing.T) {
 	result := validateDef(t, `schemaVersion: 1
 id: x
 budget: {max_total_tokens: 10000}
 tasks:
-  a: {role: ghost@1, goal: "a"}
+  a: {hero: ghost@1, goal: "a"}
 `)
 	assert.False(t, result.Valid)
-	assert.True(t, hasCode(result, "role_not_found"))
+	assert.True(t, hasCode(result, "hero_not_found"))
 
 	result = validateDef(t, `schemaVersion: 1
 id: x
 budget: {max_total_tokens: 10000}
 tasks:
-  a: {role: writer@latest, goal: "a"}
+  a: {hero: writer@latest, goal: "a"}
 `)
 	assert.False(t, result.Valid)
-	assert.True(t, hasCode(result, "role_version_required"))
+	assert.True(t, hasCode(result, "hero_version_required"))
 
 	result = validateDef(t, `schemaVersion: 1
 id: x
 budget: {max_total_tokens: 10000}
 tasks:
-  a: {role: writer@1, skills: [nope-skill], goal: "a", budget: {tokens: 100}}
+  a: {hero: writer@1, skills: [nope-skill], goal: "a", budget: {tokens: 100}}
 `)
 	assert.False(t, result.Valid)
 	assert.True(t, hasCode(result, "skill_not_found"))
@@ -433,7 +433,7 @@ func TestParseSchemaVersionStrict(t *testing.T) {
 id: x
 budget: {max_total_tokens: 10000}
 tasks:
-  a: {role: writer@1, goal: "a"}
+  a: {hero: writer@1, goal: "a"}
 `))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "schemaVersion")
@@ -441,7 +441,7 @@ tasks:
 	_, err = ParseDefinition([]byte(`id: x
 budget: {max_total_tokens: 10000}
 tasks:
-  a: {role: writer@1, goal: "a"}
+  a: {hero: writer@1, goal: "a"}
 `))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "schemaVersion")
@@ -476,7 +476,7 @@ tasks:
     output: decision
     depends: [decision]
   producer:
-    role: writer@1
+    hero: writer@1
     goal: "Implement {inputs.target}"
     budget: {tokens: 50000}
   decision:
@@ -484,7 +484,7 @@ tasks:
     command: "go test ./..."
     depends: [reviewer]
   reviewer:
-    role: reader@1
+    hero: reader@1
     goal: "Review {task.producer.output.changed_files}"
     depends: [producer]
 `

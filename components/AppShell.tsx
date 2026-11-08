@@ -45,8 +45,8 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
   const [selectedSession, setSelectedSessionState] = useState<string | null>(null);
   const selectedSessionRef = useRef<string | null>(null);
 
-  // Main-area view (chat / roles / graphs): switching swaps only the
-  // center+right region; the URL stays in sync (?view=roles) so deep links and
+  // Main-area view (chat / heroes / graphs): switching swaps only the
+  // center+right region; the URL stays in sync (?view=heroes) so deep links and
   // back/forward preserve the view.
   const [view, setView] = useState<WorkspaceView>(initialView ?? "chat");
   const changeView = useCallback((next: WorkspaceView) => {
@@ -59,7 +59,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
     const applyFromUrl = () => {
       if (typeof window === "undefined") return;
       const candidate = new URLSearchParams(window.location.search).get("view");
-      if (candidate === "roles" || candidate === "graphs" || candidate === "chat") {
+      if (candidate === "heroes" || candidate === "graphs" || candidate === "chat") {
         setView(candidate);
       }
     };
@@ -88,7 +88,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
 
   // Top bar
   const navigationTriggerRef = useRef<HTMLButtonElement>(null);
-  // Settings view's mobile menu button (no chat TopBar on Roles/Graphs views).
+  // Settings view's mobile menu button (no chat TopBar on Heroes/Graphs views).
   const settingsMenuTriggerRef = useRef<HTMLButtonElement>(null);
 
   const closeMobileNavigation = useCallback(() => {
@@ -361,7 +361,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
           />
         )}
 
-        {/* Center: chat (or Roles/Graphs settings view) */}
+        {/* Center: chat (or Heroes/Graphs settings view) */}
         <div className="workspace-content" inert={isMobile && sidebarOpen}>
           <OfflineBanner workerUnreachable={workerUnreachable} />
           {view === "chat" ? (

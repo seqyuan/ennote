@@ -53,7 +53,7 @@ func (c *CheckTaskRunner) CreateCheckApproval(ctx context.Context, runID string,
 	if exists > 0 {
 		return nil
 	}
-	now := roleTime(time.Now().UTC())
+	now := heroTime(time.Now().UTC())
 	_, err := c.DB.ExecContext(ctx, `INSERT INTO run_agent_flow_check_approvals
 		(run_id, task_index, command, status, requested_at)
 		VALUES (?, ?, ?, 'pending', ?)`, runID, taskIndex, command, now)
@@ -81,7 +81,7 @@ func (c *CheckTaskRunner) DecideCheckApproval(ctx context.Context, runID string,
 	if approved {
 		status = agentflow.CheckApprovalApproved
 	}
-	now := roleTime(time.Now().UTC())
+	now := heroTime(time.Now().UTC())
 	res, err := c.DB.ExecContext(ctx, `UPDATE run_agent_flow_check_approvals
 		SET status=?, decision_client_request_id=?, resolved_at=?
 		WHERE run_id=? AND task_index=? AND status='pending'`,

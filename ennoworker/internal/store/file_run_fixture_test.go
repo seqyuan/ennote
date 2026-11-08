@@ -68,8 +68,8 @@ func newFileConfigStack(t *testing.T) *fileConfigStack {
 // fileRunFixture is a fixture-DB (MigrateFixtureSchema) project + session with
 // a file-native RunRepo so effective-config freezing never touches the removed
 // global provider/model/policy SQL tables. The DB still carries the session
-// tables plus the fixture snapshot (settings, role tables) so delegation tests
-// can keep using raw SQL against the fixture role identity.
+// tables plus the fixture snapshot (settings, hero tables) so delegation tests
+// can keep using raw SQL against the fixture hero identity.
 type fileRunFixture struct {
 	Stack     *fileConfigStack
 	DB        *sql.DB
@@ -102,15 +102,15 @@ func newFileRunFixture(t *testing.T, requestID string) *fileRunFixture {
 	return &fileRunFixture{
 		Stack: stack, DB: db, ProjectID: project.ID, SessionID: session.ID,
 		Runs: &store.RunRepo{DB: db, Providers: stack.Providers, Models: stack.ModelRepo,
-			Policies: stack.Policies, RoleSources: stack.Sources},
+			Policies: stack.Policies, HeroSources: stack.Sources},
 		SessionDefaultModel: &stack.DefaultRef,
 	}
 }
 
 // Delegations returns a DelegationRepo over the fixture DB with the file-backed
-// policy + role sources wired (V2).
+// policy + hero sources wired (V2).
 func (f *fileRunFixture) Delegations() *store.DelegationRepo {
-	return &store.DelegationRepo{DB: f.DB, RoleSources: f.Stack.Sources,
+	return &store.DelegationRepo{DB: f.DB, HeroSources: f.Stack.Sources,
 		Models: f.Stack.ModelRepo, Policies: f.Stack.Policies}
 }
 
@@ -157,7 +157,7 @@ func newSessionstoreFileRunFixture(t *testing.T, title string) *sessionstoreFile
 	return &sessionstoreFileRunFixture{
 		Stack: stack, Projects: projects, Sessions: sessions, DB: db, Session: *session,
 		Runs: &store.RunRepo{DB: db, Providers: stack.Providers, Models: stack.ModelRepo,
-			Policies: stack.Policies, RoleSources: stack.Sources},
+			Policies: stack.Policies, HeroSources: stack.Sources},
 	}
 }
 

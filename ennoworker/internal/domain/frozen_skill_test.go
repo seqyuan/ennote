@@ -112,24 +112,24 @@ func TestFrozenSkillRefsExposeIDsAndDigests(t *testing.T) {
 	assert.Equal(t, []string{"a", "b"}, ids)
 }
 
-// A FrozenRoleExecution written before Role preload pinning has no
+// A FrozenHeroExecution written before Role preload pinning has no
 // frozenSkills field. It must keep decoding, with preload refs left unpinned so
 // the executor falls back to the current on-disk Skill body.
-func TestFrozenRoleExecutionKeepsLegacySnapshotsUnpinned(t *testing.T) {
-	legacy := []byte(`{"handle":"analyst","version":2,"skills":{"entries":[{"skillId":"role-skill","mode":"preload"}]}}`)
-	var role domain.FrozenRoleExecution
-	require.NoError(t, json.Unmarshal(legacy, &role))
-	assert.Empty(t, role.FrozenSkills)
-	require.Len(t, role.Skills.Entries, 1)
-	assert.Equal(t, "role-skill", role.Skills.Entries[0].SkillID)
+func TestFrozenHeroExecutionKeepsLegacySnapshotsUnpinned(t *testing.T) {
+	legacy := []byte(`{"handle":"analyst","version":2,"skills":{"entries":[{"skillId":"hero-skill","mode":"preload"}]}}`)
+	var hero domain.FrozenHeroExecution
+	require.NoError(t, json.Unmarshal(legacy, &hero))
+	assert.Empty(t, hero.FrozenSkills)
+	require.Len(t, hero.Skills.Entries, 1)
+	assert.Equal(t, "hero-skill", hero.Skills.Entries[0].SkillID)
 
 	// A newly frozen Role round trips its pinned refs.
-	role.FrozenSkills = domain.FrozenSkillRefs{{ID: "role-skill", Digest: "sha256:aaa"}}
-	encoded, err := json.Marshal(role)
+	hero.FrozenSkills = domain.FrozenSkillRefs{{ID: "hero-skill", Digest: "sha256:aaa"}}
+	encoded, err := json.Marshal(hero)
 	require.NoError(t, err)
-	assert.Contains(t, string(encoded), `"frozenSkills":[{"id":"role-skill","digest":"sha256:aaa"}]`)
+	assert.Contains(t, string(encoded), `"frozenSkills":[{"id":"hero-skill","digest":"sha256:aaa"}]`)
 
-	var decoded domain.FrozenRoleExecution
+	var decoded domain.FrozenHeroExecution
 	require.NoError(t, json.Unmarshal(encoded, &decoded))
-	assert.Equal(t, role.FrozenSkills, decoded.FrozenSkills)
+	assert.Equal(t, hero.FrozenSkills, decoded.FrozenSkills)
 }

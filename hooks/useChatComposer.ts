@@ -20,7 +20,7 @@ import { apiFetch } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
 import type { usePromptTemplates } from "@/hooks/usePromptTemplates";
 import type { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
-import { useRoleSelection } from "./useRoleSelection";
+import { useHeroSelection } from "./useHeroSelection";
 import { useAttachments } from "./useAttachments";
 import { usePromptExpansion } from "./usePromptExpansion";
 import type { ChatActions, ComposerView } from "./chat-controller-types";
@@ -102,7 +102,7 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
   const [compactionPrompt, setCompactionPrompt] = useState<{ open: boolean; instructions: string; busy: boolean }>({
     open: false, instructions: "", busy: false,
   });
-  const { roles, selectedRoleId, setSelectedRoleId } = useRoleSelection(selectedProject);
+  const { heroes, selectedHeroId, setSelectedHeroId } = useHeroSelection(selectedProject);
   const selectedSessionRef = useRef<string | null>(selectedSession);
 
   // Command expansion + panel (usePromptExpansion). Local aliases preserve every
@@ -112,7 +112,7 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
     flowCatalog, commandPanelOpen, promptPanelDismissed, setPromptPanelDismissed,
     expanding, expandDiag, setExpandDiag,
   } = usePromptExpansion({
-    selectedProject, selectedSession, input, promptCatalog, roles, setInput, setError: agent.setError,
+    selectedProject, selectedSession, input, promptCatalog, heroes, setInput, setError: agent.setError,
   });
 
   useEffect(() => {
@@ -186,11 +186,11 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
       const payload = image ? {
         content: [...(contextualText ? [{ type: "text", text: contextualText }] : []), { type: "image", artifactId: image.id }],
       } : { text: contextualText };
-      const selectedRole = roles.find((role) => role.id === selectedRoleId) ?? null;
+      const selectedHero = heroes.find((role) => role.id === selectedHeroId) ?? null;
       const endpoint = `/v1/sessions/${encodeURIComponent(sessionAtSend)}/invocations`;
-      const body = selectedRole && selectedRole.currentVersionId
-        ? { ...payload, target: { kind: "role", objectId: selectedRole.id,
-            versionId: selectedRole.currentVersionId, contextMode: "room" } }
+      const body = selectedHero && selectedHero.currentVersionId
+        ? { ...payload, target: { kind: "role", objectId: selectedHero.id,
+            versionId: selectedHero.currentVersionId, contextMode: "room" } }
         : { ...withRunConfig(payload, toolPolicyProfileId, selectedModelId, thinkingEffort), target: { kind: "host" } };
       const turn = await apiFetch<TurnSubmission>(endpoint, {
         method: "POST", headers: { "Idempotency-Key": genId() }, body: JSON.stringify(body),
@@ -211,7 +211,7 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
       }
     }
   }, [selectedSession, pendingImage, textAttachments, agent, selectedModelId,
-    selectedRoleId, roles, setInputVersioned, thinkingEffort, clearAttachments, restoreAttachments]);
+    selectedHeroId, heroes, setInputVersioned, thinkingEffort, clearAttachments, restoreAttachments]);
 
   // Graph invocation is global; the Worker derives Project and workspace from
   // the selected Session when it creates the Run.
@@ -264,7 +264,7 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
       return;
     }
 
-    if (!policyId && !selectedRoleId) {
+    if (!policyId && !selectedHeroId) {
       agent.setError(`The ${permissionMode} permission policy is unavailable.`);
       return;
     }
@@ -290,7 +290,7 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
 
     void sendTurn(input, policyId ?? "");
   }, [selectedSession, input, pendingImage, textAttachments.length, policyId, permissionMode,
-     agent, sendTurn, selectedProject, selectedRoleId, expandedVersion, draftVersion, invokeAgentFlow, expandDraftOrFallback, setExpandDiag]);
+     agent, sendTurn, selectedProject, selectedHeroId, expandedVersion, draftVersion, invokeAgentFlow, expandDraftOrFallback, setExpandDiag]);
 
   const steer = useCallback(async () => {
     if (!agent.activeRunID || !input.trim()) return;
@@ -419,9 +419,9 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
     setSelectedModelId: selectModel,
     thinkingEffort,
     setThinkingEffort,
-    roles,
-    selectedRoleId,
-    setSelectedRoleId,
+    heroes,
+    selectedHeroId,
+    setSelectedHeroId,
     permissionMode,
     displayedPermissionMode: displayedPermissionMode(),
     permissionReady: Boolean(policyId),
@@ -437,15 +437,15 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
     },
     promptPanel: {
       templates: promptCatalog.templates,
-      roles: roles.map((role) => ({ id: role.id, handle: role.handle, name: role.name, description: role.description })),
+      heroes: heroes.map((role) => ({ id: role.id, handle: role.handle, name: role.name, description: role.description })),
       flows: flowCatalog,
       show: commandPanelOpen && !promptPanelDismissed,
       onSelect: (name: string) => {
         setPromptPanelDismissed(false);
         setInputVersioned(`/${name} `);
       },
-      onRoleSelect: (roleId: string) => {
-        setSelectedRoleId(roleId);
+      onHeroSelect: (heroId: string) => {
+        setSelectedHeroId(heroId);
         setPromptPanelDismissed(true);
         setInputVersioned("");
       },

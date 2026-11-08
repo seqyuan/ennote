@@ -19,14 +19,14 @@ budget:
   max_total_tokens: 400000
 tasks:
   load:
-    role: qc-reviewer
+    hero: qc-reviewer
     goal: Load the samplesheet
   gate:
     type: check
     command: "test -s results/qc.csv"
     depends: [load]
   review:
-    role: qc-reviewer
+    hero: qc-reviewer
     goal: Review QC metrics
     depends: [gate]
     fan_out:
@@ -84,17 +84,17 @@ func TestInspectAgentFlowRejectsUnknownLocalSkillRef(t *testing.T) {
 	requireCode(t, err, CodePackRefUnknown)
 }
 
-func TestInspectGraphFlowWarnsAboutGlobalRoleRefs(t *testing.T) {
+func TestInspectGraphFlowWarnsAboutGlobalHeroRefs(t *testing.T) {
 	files := mixedPackFiles()
-	manifest := strings.Replace(mixedManifest, "roles: [qc-reviewer]", "roles: []", 1)
+	manifest := strings.Replace(mixedManifest, "heroes: [qc-reviewer]", "heroes: []", 1)
 	manifest = strings.Replace(manifest, "    scope: flow", "    scope: global", 1)
 	files[0] = entry{path: "pack.yaml", body: manifest}
 	files[2] = entry{path: "flows/qc-review/graph.yaml", body: strings.ReplaceAll(graphFlow, "local/qc-reviewer", "global/qc-reviewer")}
 	result := inspectFiles(t, files)
-	assert.Contains(t, warningCodes(result.Warnings), WarningFlowRefsGlobalRole)
+	assert.Contains(t, warningCodes(result.Warnings), WarningFlowRefsGlobalHero)
 }
 
-func TestInspectGraphFlowRejectsUnknownLocalRoleRef(t *testing.T) {
+func TestInspectGraphFlowRejectsUnknownLocalHeroRef(t *testing.T) {
 	files := mixedPackFiles()
 	files[2] = entry{path: "flows/qc-review/graph.yaml", body: strings.Replace(graphFlow, "local/qc-reviewer", "local/ghost", 1)}
 	_, err := Inspect(Request{Source: Source{Path: writeDirectoryPack(t, files)}})
@@ -118,8 +118,8 @@ skills:
 `
 
 func TestInspectFlowOnlyPack(t *testing.T) {
-	// No roles: the flow's bare handle resolves against the Worker's global
-	// Roles at freeze time, which is exactly what a Flow-only pack ships.
+	// No heroes: the flow's bare handle resolves against the Worker's global
+	// Heroes at freeze time, which is exactly what a Flow-only pack ships.
 	files := []entry{
 		{path: "pack.yaml", body: flowOnlyManifest},
 		{path: "flows/qc-review/flow.yaml", body: agentFlowSource},
@@ -127,21 +127,21 @@ func TestInspectFlowOnlyPack(t *testing.T) {
 		{path: "skills/cell-qc-tables/SKILL.md", body: "# Cell QC Tables\n"},
 	}
 	result := inspectFiles(t, files)
-	assert.Empty(t, result.Roles)
+	assert.Empty(t, result.Heroes)
 	assert.Contains(t, warningCodes(result.Warnings), WarningFlowOnlyPack)
-	assert.NotContains(t, warningCodes(result.Warnings), WarningRoleOnlyPack)
+	assert.NotContains(t, warningCodes(result.Warnings), WarningHeroOnlyPack)
 	require.Len(t, result.Flows, 1)
 	assert.Equal(t, FlowFormatFlow, result.Flows[0].Format)
 }
 
-func TestInspectRoleOnlyPack(t *testing.T) {
+func TestInspectHeroOnlyPack(t *testing.T) {
 	files := mixedPackFiles()
 	manifest := mixedManifest
 	manifest = strings.Replace(manifest, `flows:
   - id: qc-review
     path: flows/qc-review/graph.yaml
     format: graph
-    roles: [qc-reviewer]
+    heroes: [qc-reviewer]
 `, "", 1)
 	manifest = strings.Replace(manifest, "    scope: flow", "    scope: global", 1)
 	files[0] = entry{path: "pack.yaml", body: manifest}
@@ -149,53 +149,53 @@ func TestInspectRoleOnlyPack(t *testing.T) {
 
 	result := inspectFiles(t, files)
 	assert.Empty(t, result.Flows)
-	require.Len(t, result.Roles, 1)
-	assert.Equal(t, RoleScopeGlobal, result.Roles[0].Scope)
-	assert.Contains(t, warningCodes(result.Warnings), WarningRoleOnlyPack)
+	require.Len(t, result.Heroes, 1)
+	assert.Equal(t, HeroScopeGlobal, result.Heroes[0].Scope)
+	assert.Contains(t, warningCodes(result.Warnings), WarningHeroOnlyPack)
 	assert.NotContains(t, warningCodes(result.Warnings), WarningFlowOnlyPack)
 }
 
-func TestInspectRoleOnlyPackRejectsFlowScopedRole(t *testing.T) {
+func TestInspectHeroOnlyPackRejectsFlowScopedHero(t *testing.T) {
 	files := mixedPackFiles()
 	manifest := strings.Replace(mixedManifest, `flows:
   - id: qc-review
     path: flows/qc-review/graph.yaml
     format: graph
-    roles: [qc-reviewer]
+    heroes: [qc-reviewer]
 `, "", 1)
 	files[0] = entry{path: "pack.yaml", body: manifest}
 	_, err := Inspect(Request{Source: Source{Path: writeDirectoryPack(t, files)}})
-	requireCode(t, err, CodePackRoleInvalid)
+	requireCode(t, err, CodePackHeroInvalid)
 }
 
-func TestInspectRejectsUnreferencedFlowRole(t *testing.T) {
+func TestInspectRejectsUnreferencedFlowHero(t *testing.T) {
 	// report-writer is flow-scoped but neither a flow entry nor a flow task
 	// references it: the pack would install an unreachable Role.
-	manifest := strings.Replace(mixedManifest, `roles:
+	manifest := strings.Replace(mixedManifest, `heroes:
   - handle: qc-reviewer
-    path: roles/qc-reviewer/role.md
+    path: heroes/qc-reviewer/hero.md
     scope: flow
-`, `roles:
+`, `heroes:
   - handle: qc-reviewer
-    path: roles/qc-reviewer/role.md
+    path: heroes/qc-reviewer/hero.md
     scope: flow
   - handle: report-writer
-    path: roles/report-writer/role.md
+    path: heroes/report-writer/hero.md
     scope: flow
 `, 1)
 	files := mixedPackFiles()
 	files[0] = entry{path: "pack.yaml", body: manifest}
 	files = append(files, entry{
-		path: "roles/report-writer/role.md",
-		body: strings.Replace(reviewerRole, "handle: qc-reviewer", "handle: report-writer", 1),
+		path: "heroes/report-writer/hero.md",
+		body: strings.Replace(reviewerHero, "handle: qc-reviewer", "handle: report-writer", 1),
 	})
 	_, err := Inspect(Request{Source: Source{Path: writeDirectoryPack(t, files)}})
-	requireCode(t, err, CodePackRoleUnreferenced)
+	requireCode(t, err, CodePackHeroUnreferenced)
 }
 
-func TestInspectRejectsUndeclaredFlowRole(t *testing.T) {
+func TestInspectRejectsUndeclaredFlowHero(t *testing.T) {
 	files := mixedPackFiles()
-	files[0] = entry{path: "pack.yaml", body: strings.Replace(mixedManifest, "roles: [qc-reviewer]", "roles: [ghost]", 1)}
+	files[0] = entry{path: "pack.yaml", body: strings.Replace(mixedManifest, "heroes: [qc-reviewer]", "heroes: [ghost]", 1)}
 	_, err := Inspect(Request{Source: Source{Path: writeDirectoryPack(t, files)}})
 	requireCode(t, err, CodePackRefUnknown)
 }
@@ -214,12 +214,12 @@ id: seqyuan/empty
 name: Empty
 version: 1.0.0
 flows: []
-roles: []
+heroes: []
 `, code: CodePackEmpty},
-		"duplicate-flow": {manifest: strings.Replace(mixedManifest, "    roles: [qc-reviewer]\n", "    roles: [qc-reviewer]\n  - id: qc-review\n    path: flows/qc-review/graph.yaml\n    format: graph\n", 1),
+		"duplicate-flow": {manifest: strings.Replace(mixedManifest, "    heroes: [qc-reviewer]\n", "    heroes: [qc-reviewer]\n  - id: qc-review\n    path: flows/qc-review/graph.yaml\n    format: graph\n", 1),
 			code: CodePackDuplicateID},
-		"duplicate-role": {manifest: strings.Replace(mixedManifest, `skills:`, `  - handle: qc-reviewer
-    path: roles/qc-reviewer/role.md
+		"duplicate-hero": {manifest: strings.Replace(mixedManifest, `skills:`, `  - handle: qc-reviewer
+    path: heroes/qc-reviewer/hero.md
     scope: global
 skills:`, 1), code: CodePackDuplicateID},
 		"duplicate-skill": {manifest: strings.Replace(mixedManifest, "  - ref: bio-workspace@0.1.0", "  - id: cell-qc-tables\n    path: skills/cell-qc-tables/\n  - ref: bio-workspace@0.1.0", 1),
@@ -235,7 +235,7 @@ skills:`, 1), code: CodePackDuplicateID},
 		"signature-missing": {manifest: strings.Replace(mixedManifest, "requires: []", "requires: []\nsignature:\n  algorithm: ed25519\n  path: pack.sig\n", 1),
 			code: CodePackPathMissing},
 		"missing-readme": {manifest: strings.Replace(mixedManifest, "readme: README.md", "readme: MISSING.md", 1), code: CodePackPathMissing},
-		"model-req-role": {manifest: strings.Replace(mixedManifest, "    qc-reviewer:\n      capabilities: [tool_use, thinking]", "    ghost:\n      capabilities: [tool_use]", 1),
+		"model-req-hero": {manifest: strings.Replace(mixedManifest, "    qc-reviewer:\n      capabilities: [tool_use, thinking]", "    ghost:\n      capabilities: [tool_use]", 1),
 			code: CodePackRefUnknown},
 	}
 	for name, testCase := range cases {

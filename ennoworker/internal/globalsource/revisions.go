@@ -17,7 +17,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 )
 
 const revisionSchemaVersion = 1
@@ -30,7 +30,7 @@ type Revision struct {
 	SourceKind    string            `json:"sourceKind,omitempty"`
 	Version       int               `json:"version"`
 	Digest        string            `json:"digest"`
-	RoleDigests   map[string]string `json:"roleDigests,omitempty"`
+	HeroDigests   map[string]string `json:"heroDigests,omitempty"`
 	PublishedAt   time.Time         `json:"publishedAt"`
 }
 
@@ -55,17 +55,17 @@ func validSourceKind(kind string) bool {
 	}
 }
 
-func (s Store) PublishRoleRevision(id string) (*Revision, error) {
-	document, digest, err := s.ReadRole(id)
+func (s Store) PublishHeroRevision(id string) (*Revision, error) {
+	document, digest, err := s.ReadHero(id)
 	if err != nil {
 		return nil, err
 	}
-	contents, err := rolesource.Encode(document)
+	contents, err := heroesource.Encode(document)
 	if err != nil {
 		return nil, err
 	}
-	return publishRevision(filepath.Join(s.RolesDir(), id), id, "",
-		[]revisionFile{{Path: "role.md", Data: contents}}, digest, nil)
+	return publishRevision(filepath.Join(s.HeroesDir(), id), id, "",
+		[]revisionFile{{Path: "hero.md", Data: contents}}, digest, nil)
 }
 
 func (s Store) PublishGraphRevision(id string) (*Revision, error) {
@@ -82,7 +82,7 @@ func (s Store) PublishGraphRevision(id string) (*Revision, error) {
 }
 
 // PublishFlowRevision freezes the FlowDefinition AND every flow-local Role it
-// references into one immutable revision directory. Editing role.md after a
+// references into one immutable revision directory. Editing hero.md after a
 // publish therefore cannot change that revision; the next publish writes a new
 // revision (even when the definition digest is unchanged).
 func (s Store) PublishFlowRevision(id string) (*Revision, error) {
@@ -95,36 +95,36 @@ func (s Store) PublishFlowRevision(id string) (*Revision, error) {
 		return nil, err
 	}
 	files := []revisionFile{{Path: flowSourceName, Data: contents}}
-	roleDigests := map[string]string{}
-	handles, err := s.flowLocalRoleHandles(definition)
+	heroDigests := map[string]string{}
+	handles, err := s.flowLocalHeroHandles(definition)
 	if err != nil {
 		return nil, err
 	}
 	for _, handle := range handles {
-		document, roleDigest, err := s.ReadGraphRole(id, handle)
+		document, heroDigest, err := s.ReadGraphHero(id, handle)
 		if err != nil {
 			return nil, fmt.Errorf("flow-local Role %q: %w", handle, err)
 		}
-		encoded, err := rolesource.Encode(document)
+		encoded, err := heroesource.Encode(document)
 		if err != nil {
 			return nil, err
 		}
-		files = append(files, revisionFile{Path: filepath.Join("roles", handle, "role.md"), Data: encoded})
-		roleDigests[handle] = roleDigest
+		files = append(files, revisionFile{Path: filepath.Join("heroes", handle, "hero.md"), Data: encoded})
+		heroDigests[handle] = heroDigest
 	}
-	return publishRevision(filepath.Join(s.GraphsDir(), id), id, SourceKindFlow, files, digest, roleDigests)
+	return publishRevision(filepath.Join(s.GraphsDir(), id), id, SourceKindFlow, files, digest, heroDigests)
 }
 
-// flowLocalRoleHandles returns every flow-local Role a definition references: an
-// explicit local/<handle>, or a bare handle that exists below the flow's roles/
+// flowLocalHeroHandles returns every flow-local Role a definition references: an
+// explicit local/<handle>, or a bare handle that exists below the flow's heroes/
 // directory. Version-pinned and global/ references are never bundled.
-func (s Store) flowLocalRoleHandles(definition *domain.FlowDefinition) ([]string, error) {
+func (s Store) flowLocalHeroHandles(definition *domain.FlowDefinition) ([]string, error) {
 	seen := map[string]bool{}
 	for _, task := range definition.Tasks {
-		if task.Type != domain.FlowTaskRole {
+		if task.Type != domain.FlowTaskHero {
 			continue
 		}
-		ref := strings.TrimSpace(task.Role)
+		ref := strings.TrimSpace(task.Hero)
 		if ref == "" || strings.Contains(ref, "@") {
 			continue
 		}
@@ -135,7 +135,7 @@ func (s Store) flowLocalRoleHandles(definition *domain.FlowDefinition) ([]string
 		case strings.Contains(ref, "/"):
 			continue
 		default:
-			if _, _, err := s.ReadGraphRole(definition.ID, ref); err == nil {
+			if _, _, err := s.ReadGraphHero(definition.ID, ref); err == nil {
 				handle = ref
 			} else if !errors.Is(err, os.ErrNotExist) {
 				return nil, err
@@ -153,11 +153,11 @@ func (s Store) flowLocalRoleHandles(definition *domain.FlowDefinition) ([]string
 	return handles, nil
 }
 
-func (s Store) ListRoleRevisions(id string) ([]Revision, error) {
+func (s Store) ListHeroRevisions(id string) ([]Revision, error) {
 	if !objectIDPattern.MatchString(id) {
 		return nil, fmt.Errorf("invalid object id %q", id)
 	}
-	return listRevisions(filepath.Join(s.RolesDir(), id), id)
+	return listRevisions(filepath.Join(s.HeroesDir(), id), id)
 }
 
 func (s Store) ListGraphRevisions(id string) ([]Revision, error) {
@@ -182,12 +182,12 @@ func (s Store) ListFlowRevisions(id string) ([]Revision, error) {
 	return revisions, nil
 }
 
-// ReadRoleRevision loads and verifies one immutable Role revision.
-func (s Store) ReadRoleRevision(id, revisionID string) (*rolesource.Document, *Revision, error) {
+// ReadHeroRevision loads and verifies one immutable Role revision.
+func (s Store) ReadHeroRevision(id, revisionID string) (*heroesource.Document, *Revision, error) {
 	if !objectIDPattern.MatchString(id) || !revisionDirPattern.MatchString(revisionID) {
 		return nil, nil, fmt.Errorf("invalid Role revision %q/%q", id, revisionID)
 	}
-	revisions, err := s.ListRoleRevisions(id)
+	revisions, err := s.ListHeroRevisions(id)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -202,15 +202,15 @@ func (s Store) ReadRoleRevision(id, revisionID string) (*rolesource.Document, *R
 	if revision == nil {
 		return nil, nil, os.ErrNotExist
 	}
-	contents, err := readRegular(filepath.Join(s.RolesDir(), id, "revisions", revisionID, "role.md"))
+	contents, err := readRegular(filepath.Join(s.HeroesDir(), id, "revisions", revisionID, "hero.md"))
 	if err != nil {
 		return nil, nil, err
 	}
-	document, err := rolesource.Parse(contents)
+	document, err := heroesource.Parse(contents)
 	if err != nil {
 		return nil, nil, err
 	}
-	digest, err := rolesource.SourceDigest(document)
+	digest, err := heroesource.SourceDigest(document)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -267,7 +267,7 @@ func (s Store) ReadGraphRevision(id, revisionID string) (*graphsource.Document, 
 // ReadFlowRevision loads one immutable flow revision: the FlowDefinition, plus
 // the exact flow-local Role documents frozen with it. Both the definition digest
 // and every bundled Role digest are verified; any drift fails closed.
-func (s Store) ReadFlowRevision(id, revisionID string) (*domain.FlowDefinition, map[string]*rolesource.Document, *Revision, error) {
+func (s Store) ReadFlowRevision(id, revisionID string) (*domain.FlowDefinition, map[string]*heroesource.Document, *Revision, error) {
 	if !objectIDPattern.MatchString(id) || !revisionDirPattern.MatchString(revisionID) {
 		return nil, nil, nil, fmt.Errorf("invalid Flow revision %q/%q", id, revisionID)
 	}
@@ -302,55 +302,55 @@ func (s Store) ReadFlowRevision(id, revisionID string) (*domain.FlowDefinition, 
 	if definition.ID != id || digest != revision.Digest {
 		return nil, nil, nil, fmt.Errorf("Flow revision %s failed integrity validation", revisionID)
 	}
-	roles := make(map[string]*rolesource.Document, len(revision.RoleDigests))
-	for handle, expected := range revision.RoleDigests {
+	heroes := make(map[string]*heroesource.Document, len(revision.HeroDigests))
+	for handle, expected := range revision.HeroDigests {
 		if !objectIDPattern.MatchString(handle) {
 			return nil, nil, nil, fmt.Errorf("Flow revision %s has an invalid Role handle %q", revisionID, handle)
 		}
-		roleContents, err := readRegular(filepath.Join(revisionDir, "roles", handle, "role.md"))
+		heroContents, err := readRegular(filepath.Join(revisionDir, "heroes", handle, "hero.md"))
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("Flow revision %s Role %q: %w", revisionID, handle, err)
 		}
-		document, err := rolesource.Parse(roleContents)
+		document, err := heroesource.Parse(heroContents)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		roleDigest, err := rolesource.SourceDigest(document)
+		heroDigest, err := heroesource.SourceDigest(document)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		if document.Handle != handle || roleDigest != expected {
+		if document.Handle != handle || heroDigest != expected {
 			return nil, nil, nil, fmt.Errorf("Flow revision %s Role %q failed integrity validation", revisionID, handle)
 		}
-		roles[handle] = document
+		heroes[handle] = document
 	}
-	return definition, roles, revision, nil
+	return definition, heroes, revision, nil
 }
 
-// ResolvedRole is the Role a bare handle resolves to, plus its audit source
+// ResolvedHero is the Role a bare handle resolves to, plus its audit source
 // (design 六 P1). The source records which layer won the resolution; it is
-// "global" today because file-native V2 Roles are global-only, and will become
+// "global" today because file-native V2 Heroes are global-only, and will become
 // "project" when a project-scoped override layer is added.
-type ResolvedRole struct {
-	Document *rolesource.Document
+type ResolvedHero struct {
+	Document *heroesource.Document
 	Revision Revision
 	Source   string
 }
 
-// ResolveRole resolves a bare handle to its latest published revision with an
+// ResolveHero resolves a bare handle to its latest published revision with an
 // audit source. The result is the final effective Role for the handle — a
 // whole-layer value, never a field-level merge (D6).
-func (s Store) ResolveRole(handle string) (*ResolvedRole, error) {
-	document, revision, err := s.LatestRoleRevision(handle)
+func (s Store) ResolveHero(handle string) (*ResolvedHero, error) {
+	document, revision, err := s.LatestHeroRevision(handle)
 	if err != nil {
 		return nil, err
 	}
-	return &ResolvedRole{Document: document, Revision: *revision, Source: "global"}, nil
+	return &ResolvedHero{Document: document, Revision: *revision, Source: "global"}, nil
 }
 
-// LatestRoleRevision resolves the highest published Role revision.
-func (s Store) LatestRoleRevision(id string) (*rolesource.Document, *Revision, error) {
-	revisions, err := s.ListRoleRevisions(id)
+// LatestHeroRevision resolves the highest published Role revision.
+func (s Store) LatestHeroRevision(id string) (*heroesource.Document, *Revision, error) {
+	revisions, err := s.ListHeroRevisions(id)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -358,7 +358,7 @@ func (s Store) LatestRoleRevision(id string) (*rolesource.Document, *Revision, e
 		return nil, nil, os.ErrNotExist
 	}
 	latest := revisions[len(revisions)-1]
-	return s.ReadRoleRevision(id, latest.ID())
+	return s.ReadHeroRevision(id, latest.ID())
 }
 
 type revisionFile struct {
@@ -366,7 +366,7 @@ type revisionFile struct {
 	Data []byte
 }
 
-func publishRevision(objectDir, resourceID, sourceKind string, files []revisionFile, digest string, roleDigests map[string]string) (*Revision, error) {
+func publishRevision(objectDir, resourceID, sourceKind string, files []revisionFile, digest string, heroDigests map[string]string) (*Revision, error) {
 	if len(files) == 0 {
 		return nil, fmt.Errorf("revision source files are required")
 	}
@@ -384,7 +384,7 @@ func publishRevision(objectDir, resourceID, sourceKind string, files []revisionF
 	for index := range revisions {
 		if revisions[index].Digest == digest &&
 			normalizedSourceKind(revisions[index].SourceKind) == normalizedSourceKind(sourceKind) &&
-			sameRoleDigests(revisions[index].RoleDigests, roleDigests) {
+			sameHeroDigests(revisions[index].HeroDigests, heroDigests) {
 			copy := revisions[index]
 			return &copy, nil
 		}
@@ -399,7 +399,7 @@ func publishRevision(objectDir, resourceID, sourceKind string, files []revisionF
 		SourceKind:    sourceKind,
 		Version:       version,
 		Digest:        digest,
-		RoleDigests:   roleDigests,
+		HeroDigests:   heroDigests,
 		PublishedAt:   time.Now().UTC(),
 	}
 	temporaryDir, err := os.MkdirTemp(objectDir, ".revision-*")
@@ -448,7 +448,7 @@ func publishRevision(objectDir, resourceID, sourceKind string, files []revisionF
 	return &revision, nil
 }
 
-func sameRoleDigests(left, right map[string]string) bool {
+func sameHeroDigests(left, right map[string]string) bool {
 	if len(left) != len(right) {
 		return false
 	}
@@ -500,7 +500,7 @@ func listRevisions(objectDir, resourceID string) ([]Revision, error) {
 			!validSourceKind(revision.SourceKind) {
 			return nil, fmt.Errorf("revision %s metadata is invalid", entry.Name())
 		}
-		for handle, digest := range revision.RoleDigests {
+		for handle, digest := range revision.HeroDigests {
 			if !objectIDPattern.MatchString(handle) || !validDigest(digest) {
 				return nil, fmt.Errorf("revision %s metadata is invalid", entry.Name())
 			}

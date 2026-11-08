@@ -73,10 +73,10 @@ test("replies to a needs_input delegated task via the private dialog", async ({ 
     validActions: ["retry"] };
   const messages = [
     message("m1", undefined, "user", [{ type: "text", text: "Delegate an inspection." }]),
-    message("m2", "m1", "assistant", [{ type: "tool_call", toolCall: { id: "delegate-call", name: "delegate_roles",
-      arguments: { delegations: [{ name: "inspect", roleHandle: "workspace-explorer", assignment: "Inspect",
+    message("m2", "m1", "assistant", [{ type: "tool_call", toolCall: { id: "delegate-call", name: "delegate_heroes",
+      arguments: { delegations: [{ name: "inspect", heroHandle: "workspace-explorer", assignment: "Inspect",
         budget: { maxModelCalls: 4, maxToolCalls: 8 } }] } } }], parentRun.id),
-    message("m3", "m2", "tool", [{ type: "tool_result", toolResult: { toolCallId: "delegate-call", toolName: "delegate_roles",
+    message("m3", "m2", "tool", [{ type: "tool_result", toolResult: { toolCallId: "delegate-call", toolName: "delegate_heroes",
       content: "{\"status\":\"settled\"}", isError: false } }], parentRun.id),
     message("m4", "m3", "assistant", [{ type: "text", text: "Delegation settled." }], parentRun.id),
   ];
@@ -91,8 +91,8 @@ test("replies to a needs_input delegated task via the private dialog", async ({ 
     if (path === `/v1/runs/${parentRun.id}/children`) {
       return fulfill(route, { parentRunId: parentRun.id, groups: [{ id: groupID, parentToolCallId: "delegate-call",
         strategy: "single", status: "settled", createdAt: "2026-08-04T00:00:02Z",
-        children: [{ itemId: "item-ni", childRunId: "child-ni", name: "inspect", roleHandle: "workspace-explorer",
-          roleDisplayName: "Workspace Explorer", itemStatus: "succeeded", runStatus: "succeeded", createdAt: "2026-08-04T00:00:02Z",
+        children: [{ itemId: "item-ni", childRunId: "child-ni", name: "inspect", heroHandle: "workspace-explorer",
+          heroDisplayName: "Workspace Explorer", itemStatus: "succeeded", runStatus: "succeeded", createdAt: "2026-08-04T00:00:02Z",
           result: { status: "needs_input", summary: "Which files should I inspect?" } }] }] });
     }
     if (path === `/v1/delegations/${groupID}`) return fulfill(route, inspection);

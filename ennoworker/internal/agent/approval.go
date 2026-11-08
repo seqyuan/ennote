@@ -227,8 +227,8 @@ func (p *BuiltinToolPolicy) DelegationApprovalPreview(call domain.ToolCall) []do
 		}
 		previews = append(previews, domain.DelegationApprovalPreview{
 			Name:              spec.Name,
-			Role:              spec.Role,
-			RoleHandle:        spec.Role,
+			Hero:              spec.Hero,
+			HeroHandle:        spec.Hero,
 			GoalPreview:       truncateApprovalRunes(goal, delegationAssignmentPreviewLimit),
 			AssignmentPreview: truncateApprovalRunes(goal, delegationAssignmentPreviewLimit),
 			Skills:            spec.Skills,

@@ -43,7 +43,7 @@ func (t *CreateSkillTool) Definition() domain.ToolDefinition {
 		Name: "create_skill",
 		Description: "Create a new reusable Skill in the Ennote user skills root. " +
 			"Use this only when the user asks to turn a workflow into a Skill; the new Skill is " +
-			"available to Flows and Roles immediately without restarting the Worker.",
+			"available to Flows and Heroes immediately without restarting the Worker.",
 		Parameters: schema(`{"type":"object","properties":{` +
 			`"id":{"type":"string","pattern":"^[a-z][a-z0-9_-]{0,63}$"},` +
 			`"name":{"type":"string"},` +
@@ -67,7 +67,7 @@ func (t *CreateSkillTool) Execute(_ context.Context, call domain.ToolCall) (doma
 	if err != nil {
 		return errorResult(call, err), nil
 	}
-	content := fmt.Sprintf("Created skill %q at %s. It is available to Flows and Roles immediately; no Worker restart is required.", result.ID, result.Path)
+	content := fmt.Sprintf("Created skill %q at %s. It is available to Flows and Heroes immediately; no Worker restart is required.", result.ID, result.Path)
 	if result.Description != "" {
 		content += "\nDescription: " + result.Description
 	}

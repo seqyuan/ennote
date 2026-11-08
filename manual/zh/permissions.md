@@ -35,19 +35,19 @@ Ennote 不绑定任何一家模型服务：只要兼容 OpenAI 风格的接口�
 
 模式在输入框下方的运行配置条里随时可切；切换只影响之后的工具调用，不会重放已经发生的事。
 
-## Role 的权限天花板
+## Hero 的权限天花板
 
-委派给一个 Role（角色）时，子 Run 的权限取**两者中更严的那个**：
+委派给一个 Hero（英雄）时，子 Run 的权限取**两者中更严的那个**：
 
 ```
-子 Run 权限 = min(父 Run 当前模式, Role 声明的 permission ceiling)
+子 Run 权限 = min(父 Run 当前模式, Hero 声明的 permission ceiling)
 ```
 
-也就是说：父 Run 在逐项审批（`ask`）、Role 声明全部放行（`auto`），子 Run 仍然是 `ask`。
-反过来，Role 声明只读（`discuss`）时，即使在 `auto` 的父 Run 下，子 Run 也只有只读权限。
-Role 编辑器里的 Permission ceiling 下拉就是这三个值，按严格程度排列。
+也就是说：父 Run 在逐项审批（`ask`）、Hero 声明全部放行（`auto`），子 Run 仍然是 `ask`。
+反过来，Hero 声明只读（`discuss`）时，即使在 `auto` 的父 Run 下，子 Run 也只有只读权限。
+Hero 编辑器里的 Permission ceiling 下拉就是这三个值，按严格程度排列。
 
-对于无法折算成内建模式的情况（例如 Role 用的是受限策略），子 Run 会被钉到最严的内建模式，
+对于无法折算成内建模式的情况（例如 Hero 用的是受限策略），子 Run 会被钉到最严的内建模式，
 而不是继承宽松的那一侧 —— 权限比较不出来时，往严格的方向失败。
 
 ## 审批与委派准入

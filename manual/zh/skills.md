@@ -105,11 +105,11 @@ PATCH /v1/skills/disabled/{relPath}
 
 禁用的技能不出现在清单里，模型也就不会去读它。这比删掉更安全——文件还在，随时能开回来。
 
-## 在 Role 和 Flow 里引用
+## 在 Hero 和 Flow 里引用
 
 | 场合 | 字段 | 语义 |
 |---|---|---|
-| Role | `skills.entries[]` | 每项 `{ skillId, mode }`，`mode` 为 `preload`（预载入）或 `available`（按需读） |
+| Hero | `skills.entries[]` | 每项 `{ skillId, mode }`，`mode` 为 `preload`（预载入）或 `available`（按需读） |
 | Flow 的 Task | `skills: [name, ...]` | 该 Task 的子 Run 可用的技能 |
 
 `preload` 适合那些"每次都必须先读"的硬性约定；`available` 适合"相关时才看"的流程。
@@ -126,7 +126,7 @@ PATCH /v1/skills/disabled/{relPath}
 1. **description 写触发条件**，不要写营销话术 —— 模型靠它决定读不读
 2. **先写"不要用它做什么"** —— 边界比步骤更能减少误用
 3. **相对路径**引用脚本与素材，不要写绝对路径
-4. **别把权限写进技能** —— 技能不是策略，工具能不能用由权限模式与 Role 决定
+4. **别把权限写进技能** —— 技能不是策略，工具能不能用由权限模式与 Hero 决定
 5. 内容长了就分组，用 `category.md` + 子目录，让模型能逐层收敛
 
 ## 排障

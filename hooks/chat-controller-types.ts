@@ -1,5 +1,5 @@
 import type { PendingImage, TextAttachment } from "@/components/Composer";
-import type { ModelProfile, ProviderProfile, RoleSummary } from "@/components/settings/types";
+import type { ModelProfile, ProviderProfile, HeroSummary } from "@/components/settings/types";
 import type { ApprovalDecision, QuestionAnswer, ToolApprovalRequest } from "@/lib/approval";
 import type { ConversationNode } from "@/lib/chat-messages";
 import type { PermissionMode, ThinkingEffort } from "@/lib/permission-mode";
@@ -89,9 +89,9 @@ export type ComposerView = {
   setSelectedModelId: (modelId: string) => void;
   thinkingEffort: ThinkingEffort;
   setThinkingEffort: (effort: ThinkingEffort) => void;
-  roles: RoleSummary[];
-  selectedRoleId: string | null;
-  setSelectedRoleId: (roleId: string | null) => void;
+  heroes: HeroSummary[];
+  selectedHeroId: string | null;
+  setSelectedHeroId: (heroId: string | null) => void;
   permissionMode: PermissionMode;
   displayedPermissionMode: PermissionMode;
   permissionReady: boolean;
@@ -107,11 +107,11 @@ export type ComposerView = {
   };
   promptPanel: {
     templates: { name: string; description: string; argumentHint: string; source: string; editable: boolean }[];
-    roles: { id: string; handle: string; name: string; description?: string }[];
+    heroes: { id: string; handle: string; name: string; description?: string }[];
     flows: { name: string; version?: number }[];
     show: boolean;
     onSelect: (name: string) => void;
-    onRoleSelect: (roleId: string, handle: string) => void;
+    onHeroSelect: (heroId: string, handle: string) => void;
     onFlowSelect: (name: string, version?: number) => void;
     onClose: () => void;
     expanding: boolean;

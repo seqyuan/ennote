@@ -22,17 +22,17 @@ const SignatureName = "pack.sig"
 
 // Flow formats. format: flow is a full Agent Flow FlowDefinition (check tasks,
 // fan-out, terminal tasks, next routing); format: graph is the existing
-// graphsource.Document, which can only express role tasks.
+// graphsource.Document, which can only express hero tasks.
 const (
 	FlowFormatFlow  = "flow"
 	FlowFormatGraph = "graph"
 )
 
-// Role scopes. A flow-scoped role is visible only inside the pack's flows; a
-// global role is installed as an ordinary Worker-global Role.
+// Role scopes. A flow-scoped hero is visible only inside the pack's flows; a
+// global hero is installed as an ordinary Worker-global Role.
 const (
-	RoleScopeFlow   = "flow"
-	RoleScopeGlobal = "global"
+	HeroScopeFlow   = "flow"
+	HeroScopeGlobal = "global"
 )
 
 // Skill scopes. A flow-scoped vendored skill is installed below every flow that
@@ -55,7 +55,7 @@ var (
 	packIDPattern      = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}/[a-z0-9][a-z0-9._-]{0,63}$`)
 	packVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`)
 	flowIDPattern      = regexp.MustCompile(`^[a-z][a-z0-9-]{1,63}$`)
-	roleHandlePattern  = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,31}$`)
+	heroHandlePattern  = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,31}$`)
 	skillIDPattern     = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,63}$`)
 	externalSkillRef   = regexp.MustCompile(`^[^\s@]+@[^\s@]+$`)
 	packRequiresRef    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9._-]*(?:@[0-9A-Za-z.+-]+)?$`)
@@ -92,7 +92,7 @@ type Manifest struct {
 	ModelRequirements *ModelRequirements    `yaml:"model_requirements"`
 	Inputs            map[string]Input      `yaml:"inputs"`
 	Flows             []FlowEntry           `yaml:"flows"`
-	Roles             []RoleEntry           `yaml:"roles"`
+	Heroes             []HeroEntry           `yaml:"heroes"`
 	Skills            []SkillEntry          `yaml:"skills"`
 	MCP               []MCPEntry            `yaml:"mcp"`
 	Requires          []string              `yaml:"requires"`
@@ -104,7 +104,7 @@ type Manifest struct {
 // name concrete model ids; the reviewer maps capabilities onto local models.
 type ModelRequirements struct {
 	Defaults CapabilityRequirements            `yaml:"defaults"`
-	Roles    map[string]CapabilityRequirements `yaml:"roles"`
+	Heroes    map[string]CapabilityRequirements `yaml:"heroes"`
 }
 
 // CapabilityRequirements is one capability request.
@@ -125,11 +125,11 @@ type FlowEntry struct {
 	ID     string   `yaml:"id"`
 	Path   string   `yaml:"path"`
 	Format string   `yaml:"format"`
-	Roles  []string `yaml:"roles"`
+	Heroes  []string `yaml:"heroes"`
 }
 
-// RoleEntry declares one role shipped by the pack.
-type RoleEntry struct {
+// HeroEntry declares one hero shipped by the pack.
+type HeroEntry struct {
 	Handle string `yaml:"handle"`
 	Path   string `yaml:"path"`
 	Scope  string `yaml:"scope"`
@@ -253,35 +253,35 @@ func validateManifest(manifest *Manifest) error {
 			return fieldError(CodePackFlowInvalid, field+".format",
 				"unsupported flow format %q (supported: %s, %s)", flow.Format, FlowFormatFlow, FlowFormatGraph)
 		}
-		flow.Roles = sortedUniqueHandles(flow.Roles)
+		flow.Heroes = sortedUniqueHandles(flow.Heroes)
 	}
 
-	roleHandles := make(map[string]bool, len(manifest.Roles))
-	for index := range manifest.Roles {
-		role := &manifest.Roles[index]
-		field := fmt.Sprintf("roles[%d]", index)
-		role.Handle = strings.TrimSpace(role.Handle)
-		role.Path = strings.TrimSpace(role.Path)
-		role.Scope = strings.TrimSpace(role.Scope)
-		if !roleHandlePattern.MatchString(role.Handle) {
-			return fieldError(CodePackRoleInvalid, field+".handle",
-				"role handle %q must match %s", role.Handle, roleHandlePattern.String())
+	heroHandles := make(map[string]bool, len(manifest.Heroes))
+	for index := range manifest.Heroes {
+		hero := &manifest.Heroes[index]
+		field := fmt.Sprintf("heroes[%d]", index)
+		hero.Handle = strings.TrimSpace(hero.Handle)
+		hero.Path = strings.TrimSpace(hero.Path)
+		hero.Scope = strings.TrimSpace(hero.Scope)
+		if !heroHandlePattern.MatchString(hero.Handle) {
+			return fieldError(CodePackHeroInvalid, field+".handle",
+				"hero handle %q must match %s", hero.Handle, heroHandlePattern.String())
 		}
-		if roleHandles[role.Handle] {
-			return fieldError(CodePackDuplicateID, field+".handle", "duplicate role handle %q", role.Handle)
+		if heroHandles[hero.Handle] {
+			return fieldError(CodePackDuplicateID, field+".handle", "duplicate hero handle %q", hero.Handle)
 		}
-		roleHandles[role.Handle] = true
-		if role.Path == "" {
-			return fieldError(CodePackRoleInvalid, field+".path", "role path is required")
+		heroHandles[hero.Handle] = true
+		if hero.Path == "" {
+			return fieldError(CodePackHeroInvalid, field+".path", "hero path is required")
 		}
-		switch role.Scope {
-		case RoleScopeFlow, RoleScopeGlobal:
+		switch hero.Scope {
+		case HeroScopeFlow, HeroScopeGlobal:
 		case "":
-			return fieldError(CodePackRoleInvalid, field+".scope",
-				"role scope is required (%q or %q)", RoleScopeFlow, RoleScopeGlobal)
+			return fieldError(CodePackHeroInvalid, field+".scope",
+				"hero scope is required (%q or %q)", HeroScopeFlow, HeroScopeGlobal)
 		default:
-			return fieldError(CodePackRoleInvalid, field+".scope",
-				"unsupported role scope %q (supported: %s, %s)", role.Scope, RoleScopeFlow, RoleScopeGlobal)
+			return fieldError(CodePackHeroInvalid, field+".scope",
+				"unsupported hero scope %q (supported: %s, %s)", hero.Scope, HeroScopeFlow, HeroScopeGlobal)
 		}
 	}
 
@@ -358,8 +358,8 @@ func validateManifest(manifest *Manifest) error {
 		manifest.MCP = append(manifest.MCP, MCPEntry{Ref: ref})
 	}
 
-	if len(manifest.Flows) == 0 && len(manifest.Roles) == 0 {
-		return newError(CodePackEmpty, "pack must declare at least one flow or one role")
+	if len(manifest.Flows) == 0 && len(manifest.Heroes) == 0 {
+		return newError(CodePackEmpty, "pack must declare at least one flow or one hero")
 	}
 
 	for index := range manifest.Requires {
@@ -422,8 +422,8 @@ func validateModelRequirements(requirements *ModelRequirements) error {
 			return err
 		}
 	}
-	for handle, value := range requirements.Roles {
-		if err := validateCapabilities("model_requirements.roles."+handle, value.Capabilities); err != nil {
+	for handle, value := range requirements.Heroes {
+		if err := validateCapabilities("model_requirements.heroes."+handle, value.Capabilities); err != nil {
 			return err
 		}
 	}

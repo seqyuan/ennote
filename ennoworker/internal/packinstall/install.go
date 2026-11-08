@@ -17,11 +17,11 @@ import (
 // rollback knows how to re-read and verify it before deleting.
 const (
 	journalKindSkill        = "skill"
-	journalKindGraphRole    = "graph_role"
+	journalKindGraphHero    = "graph_hero"
 	journalKindGraph        = "graph"
 	journalKindFlow         = "flow"
-	journalKindRole         = "role"
-	journalKindRoleRevision = "role_revision"
+	journalKindHero         = "hero"
+	journalKindHeroRevision = "hero_revision"
 )
 
 // journalSchemaVersion is the staging journal schema.
@@ -133,7 +133,7 @@ func (s *Service) apply(plan *Plan, request Request, staging string, record *jou
 		InstallState:      InstallStateDraft,
 		Source:            SourceRef{Kind: "path", Path: strings.TrimSpace(request.SourcePath)},
 		Flows:             []FlowState{},
-		Roles:             []RoleState{},
+		Heroes:             []HeroState{},
 		Skills:            []SkillState{},
 		ExternalRefs:      install.externalRefs,
 		ModelRequirements: install.modelRequirements,
@@ -186,27 +186,27 @@ func (s *Service) apply(plan *Plan, request Request, staging string, record *jou
 			PackID: target.packID, StoreID: target.storeID, Scope: target.scope, ContentDigest: digest,
 		})
 	}
-	// 3. Graph-private Roles.
-	for _, target := range install.roles {
-		if target.scope != roleScopeFlow {
+	// 3. Graph-private Heroes.
+	for _, target := range install.heroes {
+		if target.scope != heroScopeFlow {
 			continue
 		}
 		if target.action == ActionExistsIdentical {
-			state.Roles = append(state.Roles, RoleState{
+			state.Heroes = append(state.Heroes, HeroState{
 				PackHandle: target.packHandle, Scope: target.scope, StoreID: target.storeID, Digest: target.digest,
 			})
 			continue
 		}
-		digest, err := s.Sources.CreateGraphRole(target.graphID, target.document)
+		digest, err := s.Sources.CreateGraphHero(target.graphID, target.document)
 		if err != nil {
 			return fmt.Errorf("install Graph-private Role %s: %w", target.storeID, err)
 		}
 		if err := s.record(staging, record, journalEntry{
-			Kind: journalKindGraphRole, StoreID: target.storeID, Digest: digest,
+			Kind: journalKindGraphHero, StoreID: target.storeID, Digest: digest,
 		}); err != nil {
 			return err
 		}
-		state.Roles = append(state.Roles, RoleState{
+		state.Heroes = append(state.Heroes, HeroState{
 			PackHandle: target.packHandle, Scope: target.scope, StoreID: target.storeID, Digest: digest,
 		})
 	}
@@ -249,47 +249,47 @@ func (s *Service) apply(plan *Plan, request Request, staging string, record *jou
 			PublishedRevision: revision,
 		})
 	}
-	// 5. Global Roles.
-	for _, target := range install.roles {
-		if target.scope != roleScopeGlobal {
+	// 5. Global Heroes.
+	for _, target := range install.heroes {
+		if target.scope != heroScopeGlobal {
 			continue
 		}
 		if target.action == ActionExistsIdentical {
-			state.Roles = append(state.Roles, RoleState{
+			state.Heroes = append(state.Heroes, HeroState{
 				PackHandle: target.packHandle, Scope: target.scope, StoreID: target.storeID, Digest: target.digest,
 			})
 			continue
 		}
-		_, digest, err := s.Sources.CreateRole(target.document)
+		_, digest, err := s.Sources.CreateHero(target.document)
 		if err != nil {
 			return fmt.Errorf("install Role %s: %w", target.storeID, err)
 		}
 		if err := s.record(staging, record, journalEntry{
-			Kind: journalKindRole, StoreID: target.storeID, Digest: digest,
+			Kind: journalKindHero, StoreID: target.storeID, Digest: digest,
 		}); err != nil {
 			return err
 		}
-		state.Roles = append(state.Roles, RoleState{
+		state.Heroes = append(state.Heroes, HeroState{
 			PackHandle: target.packHandle, Scope: target.scope, StoreID: target.storeID, Digest: digest,
 		})
 	}
 	// 6. Publish the global Role revisions. Publishing is digest-deduplicated, so
 	// a reinstall never appends a duplicate revision.
-	for index := range state.Roles {
-		installed := state.Roles[index]
-		if installed.Scope != roleScopeGlobal {
+	for index := range state.Heroes {
+		installed := state.Heroes[index]
+		if installed.Scope != heroScopeGlobal {
 			continue
 		}
-		revision, err := s.Sources.PublishRoleRevision(installed.StoreID)
+		revision, err := s.Sources.PublishHeroRevision(installed.StoreID)
 		if err != nil {
 			return fmt.Errorf("publish Role %s: %w", installed.StoreID, err)
 		}
 		if err := s.record(staging, record, journalEntry{
-			Kind: journalKindRoleRevision, StoreID: installed.StoreID, Digest: revision.Digest,
+			Kind: journalKindHeroRevision, StoreID: installed.StoreID, Digest: revision.Digest,
 		}); err != nil {
 			return err
 		}
-		state.Roles[index].Revision = revision.ID()
+		state.Heroes[index].Revision = revision.ID()
 	}
 	// 7. Provenance copy, then the commit point.
 	if err := s.writeManifestCopy(plan.Pack.ID, install.manifest); err != nil {
@@ -338,23 +338,23 @@ func (s *Service) rollback(record *journal) {
 			if _, digest, err := s.Sources.ReadFlow(entry.StoreID); err == nil && digest == entry.Digest {
 				_ = s.Sources.DeleteGraph(entry.StoreID)
 			}
-		case journalKindGraphRole:
+		case journalKindGraphHero:
 			graphID, handle, found := strings.Cut(entry.StoreID, "/")
 			if !found {
 				continue
 			}
-			if _, digest, err := s.Sources.ReadGraphRole(graphID, handle); err == nil && digest == entry.Digest {
-				_ = s.Sources.DeleteGraphRole(graphID, handle)
+			if _, digest, err := s.Sources.ReadGraphHero(graphID, handle); err == nil && digest == entry.Digest {
+				_ = s.Sources.DeleteGraphHero(graphID, handle)
 			}
-		case journalKindRole:
-			if _, digest, err := s.Sources.ReadRole(entry.StoreID); err == nil && digest == entry.Digest {
-				_ = s.Sources.DeleteRole(entry.StoreID)
+		case journalKindHero:
+			if _, digest, err := s.Sources.ReadHero(entry.StoreID); err == nil && digest == entry.Digest {
+				_ = s.Sources.DeleteHero(entry.StoreID)
 			}
 		case journalKindSkill:
 			if digest, err := skillsmgmt.ContentDigest(entry.Root, entry.StoreID); err == nil && digest == entry.Digest {
 				removeSkillDir(entry.Root, entry.StoreID)
 			}
-		case journalKindRoleRevision:
+		case journalKindHeroRevision:
 			// A Role revision is immutable and the revision sequence must stay
 			// contiguous; the owning Role directory entry above removes it whole.
 		}
@@ -372,14 +372,14 @@ func (s *Service) removeEmptyGraphDirs(record *journal) {
 		switch entry.Kind {
 		case journalKindGraph, journalKindFlow:
 			graphID = entry.StoreID
-		case journalKindGraphRole:
+		case journalKindGraphHero:
 			graphID, _, _ = strings.Cut(entry.StoreID, "/")
 		}
 		if graphID == "" {
 			continue
 		}
 		base := filepath.Join(s.Sources.GraphsDir(), graphID)
-		for _, child := range []string{"roles", "skills"} {
+		for _, child := range []string{"heroes", "skills"} {
 			_ = os.Remove(filepath.Join(base, child))
 		}
 		_ = os.Remove(base)

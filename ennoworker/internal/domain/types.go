@@ -45,7 +45,7 @@ type SpeakerKind string
 const (
 	SpeakerUser     SpeakerKind = "user"
 	SpeakerHost     SpeakerKind = "host"
-	SpeakerRole     SpeakerKind = "role"
+	SpeakerHero     SpeakerKind = "hero"
 	SpeakerWorkflow SpeakerKind = "workflow"
 	SpeakerRoom     SpeakerKind = "room"
 	SpeakerSystem   SpeakerKind = "system"

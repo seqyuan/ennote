@@ -1025,7 +1025,7 @@
     grid-template-columns: 1fr;
   }
 
-  /* Roles/Graphs pages: keep the back affordance touch-friendly. */
+  /* Heroes/Graphs pages: keep the back affordance touch-friendly. */
   .settings-view-back {
     min-height: 44px;
     min-width: 44px;

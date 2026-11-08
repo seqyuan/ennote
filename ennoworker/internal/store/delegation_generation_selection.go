@@ -49,7 +49,7 @@ func resolveGenerationItemStatesTx(ctx context.Context, tx *sql.Tx, groupID stri
 		reusedByItem[reference.ItemID] = reference
 	}
 
-	rows, err := tx.QueryContext(ctx, `SELECT i.id,i.name,i.role_version_id,i.assignment_json,
+	rows, err := tx.QueryContext(ctx, `SELECT i.id,i.name,i.hero_version_id,i.assignment_json,
 		i.output_contract,i.budget_json,COALESCE(i.result_json,''),i.status,i.ordinal,i.created_at,
 		COALESCE(i.depends_json,'[]'),COALESCE(i.skills_json,'[]'),
 		COALESCE(a.id,''),COALESCE(a.child_run_id,''),COALESCE(a.status,''),
@@ -67,7 +67,7 @@ func resolveGenerationItemStatesTx(ctx context.Context, tx *sql.Tx, groupID stri
 		var state itemState
 		var assignmentJSON, budgetJSON, itemResultJSON, itemStatus, createdAt, dependsJSON, skillsJSON string
 		var attemptStatus, attemptResultJSON string
-		if err := rows.Scan(&state.item.ID, &state.item.Name, &state.item.RoleVersionID,
+		if err := rows.Scan(&state.item.ID, &state.item.Name, &state.item.HeroVersionID,
 			&assignmentJSON, &state.item.OutputContract, &budgetJSON, &itemResultJSON,
 			&itemStatus, &state.item.Ordinal, &createdAt, &dependsJSON, &skillsJSON, &state.attemptID,
 			&state.attemptChild, &attemptStatus, &state.resultDigest,

@@ -3,25 +3,25 @@
 import { Bot, Check, ChevronDown, Search, UserRound } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
-import type { RoleSummary } from "@/components/settings/types";
+import type { HeroSummary } from "@/components/settings/types";
 
-export function RoleTargetPicker({ roles, selectedRoleId, disabled, onSelect }: {
-  roles: RoleSummary[];
-  selectedRoleId: string | null;
+export function HeroTargetPicker({ heroes, selectedHeroId, disabled, onSelect }: {
+  heroes: HeroSummary[];
+  selectedHeroId: string | null;
   disabled?: boolean;
-  onSelect: (roleId: string | null) => void;
+  onSelect: (heroId: string | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const root = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const selected = roles.find((role) => role.id === selectedRoleId) ?? null;
+  const selected = heroes.find((hero) => hero.id === selectedHeroId) ?? null;
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return roles;
-    return roles.filter((role) => [role.name, role.handle, role.positioning].some((value) => value.toLowerCase().includes(needle)));
-  }, [query, roles]);
+    if (!needle) return heroes;
+    return heroes.filter((hero) => [hero.name, hero.handle, hero.positioning].some((value) => value.toLowerCase().includes(needle)));
+  }, [query, heroes]);
 
   useOverlayLayer(open, () => setOpen(false));
 
@@ -34,8 +34,8 @@ export function RoleTargetPicker({ roles, selectedRoleId, disabled, onSelect }: 
     return () => document.removeEventListener("pointerdown", close);
   }, [open]);
 
-  function choose(roleId: string | null) {
-    onSelect(roleId);
+  function choose(heroId: string | null) {
+    onSelect(heroId);
     setOpen(false);
     setQuery("");
     triggerRef.current?.focus();
@@ -51,26 +51,26 @@ export function RoleTargetPicker({ roles, selectedRoleId, disabled, onSelect }: 
     options[next]?.focus();
   }
 
-  return <div className="role-target-picker" ref={root}>
-    <button ref={triggerRef} type="button" className="role-target-trigger" disabled={disabled} aria-haspopup="listbox" aria-expanded={open}
+  return <div className="hero-target-picker" ref={root}>
+    <button ref={triggerRef} type="button" className="hero-target-trigger" disabled={disabled} aria-haspopup="listbox" aria-expanded={open}
       onClick={() => setOpen((value) => !value)} title="Invocation target">
       {selected ? <Bot size={13} aria-hidden="true" /> : <UserRound size={13} aria-hidden="true" />}
       <span>{selected ? `@${selected.handle}` : "Host"}</span><ChevronDown size={12} aria-hidden="true" />
     </button>
-    {open && <div ref={menuRef} className="role-target-menu" onKeyDown={onMenuKeyDown}>
-      <label><Search size={13} aria-hidden="true" /><input autoFocus value={query} placeholder="Find a Role"
+    {open && <div ref={menuRef} className="hero-target-menu" onKeyDown={onMenuKeyDown}>
+      <label><Search size={13} aria-hidden="true" /><input autoFocus value={query} placeholder="Find a Hero"
         onChange={(event) => setQuery(event.target.value)} /></label>
       <div role="listbox" aria-label="Invocation target">
         <button type="button" role="option" aria-selected={!selected} onClick={() => choose(null)}>
           <UserRound size={14} /><span><strong>Host</strong><small>Default assistant</small></span>{!selected && <Check size={13} />}
         </button>
-        {visible.map((role) => <button type="button" role="option" aria-selected={role.id === selectedRoleId}
-          key={role.id} onClick={() => choose(role.id)}>
-          <span className="role-target-swatch" style={{ color: role.color }}><Bot size={14} /></span>
-          <span><strong>@{role.handle}</strong><small>{role.positioning || role.name}</small></span>
-          {role.id === selectedRoleId && <Check size={13} />}
+        {visible.map((hero) => <button type="button" role="option" aria-selected={hero.id === selectedHeroId}
+          key={hero.id} onClick={() => choose(hero.id)}>
+          <span className="hero-target-swatch" style={{ color: hero.color }}><Bot size={14} /></span>
+          <span><strong>@{hero.handle}</strong><small>{hero.positioning || hero.name}</small></span>
+          {hero.id === selectedHeroId && <Check size={13} />}
         </button>)}
-        {visible.length === 0 && <span className="role-target-empty">No matching Roles</span>}
+        {visible.length === 0 && <span className="hero-target-empty">No matching Heroes</span>}
       </div>
     </div>}
   </div>;

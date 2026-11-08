@@ -6,12 +6,12 @@ import (
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-const globalRoleFixture = `---
+const globalHeroFixture = `---
 schemaVersion: 1
 handle: researcher
 name: Researcher
@@ -50,37 +50,37 @@ maxLoopIterations: 8
 Gather evidence and distinguish it from assumptions.
 `
 
-func TestGlobalRoleCatalogCreateUpdateAndConflict(t *testing.T) {
+func TestGlobalHeroCatalogCreateUpdateAndConflict(t *testing.T) {
 	home := t.TempDir()
 	server := &Server{Token: "test-token", GlobalSources: &globalsource.Store{HomeDir: home}}
 	handler := server.Handler()
-	document, err := rolesource.Parse([]byte(globalRoleFixture))
+	document, err := heroesource.Parse([]byte(globalHeroFixture))
 	require.NoError(t, err)
 
-	response := request(t, handler, http.MethodPost, "/v1/global-roles", map[string]any{"document": document}, true)
+	response := request(t, handler, http.MethodPost, "/v1/global-heroes", map[string]any{"document": document}, true)
 	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
-	var created globalRoleDetail
+	var created globalHeroDetail
 	decodeData(t, response, &created)
 	assert.Equal(t, "researcher", created.ID)
 	assert.NotEmpty(t, created.Digest)
 
-	response = request(t, handler, http.MethodGet, "/v1/global-roles", nil, true)
+	response = request(t, handler, http.MethodGet, "/v1/global-heroes", nil, true)
 	require.Equal(t, http.StatusOK, response.Code)
-	var summaries []globalRoleSummary
+	var summaries []globalHeroSummary
 	decodeData(t, response, &summaries)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "Researcher", summaries[0].Name)
 
 	updatedDocument := *document
 	updatedDocument.Description = "Updated description"
-	response = request(t, handler, http.MethodPatch, "/v1/global-roles/researcher", map[string]any{"expectedDigest": created.Digest, "document": &updatedDocument}, true)
+	response = request(t, handler, http.MethodPatch, "/v1/global-heroes/researcher", map[string]any{"expectedDigest": created.Digest, "document": &updatedDocument}, true)
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	var updated globalRoleDetail
+	var updated globalHeroDetail
 	decodeData(t, response, &updated)
 	assert.NotEqual(t, created.Digest, updated.Digest)
 	assert.Equal(t, "Updated description", updated.Document.Description)
 
-	response = request(t, handler, http.MethodPatch, "/v1/global-roles/researcher", map[string]any{"expectedDigest": created.Digest, "document": &updatedDocument}, true)
+	response = request(t, handler, http.MethodPatch, "/v1/global-heroes/researcher", map[string]any{"expectedDigest": created.Digest, "document": &updatedDocument}, true)
 	assert.Equal(t, http.StatusConflict, response.Code)
 	assert.True(t, strings.Contains(response.Body.String(), "source_digest_conflict"))
 }

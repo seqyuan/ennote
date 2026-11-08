@@ -14,7 +14,7 @@ name: RNA-seq
 tasks:
   prepare_reference:
     name: Prepare reference
-    role: local/reference-preparer
+    hero: local/reference-preparer
     goal: |
       Prepare the genome index and annotation inputs.
   align_1:
@@ -61,13 +61,13 @@ func TestParseTaskFirstGraph(t *testing.T) {
 	document, err := Parse([]byte(validGraph))
 	require.NoError(t, err)
 	assert.Equal(t, "RNA-seq", document.Name)
-	assert.Equal(t, "local/reference-preparer", document.Tasks["prepare_reference"].Role)
+	assert.Equal(t, "local/reference-preparer", document.Tasks["prepare_reference"].Hero)
 	assert.Equal(t, "anthropic/claude-sonnet-4", document.Tasks["align_1"].Model)
 	assert.Equal(t, []string{"align_1", "align_2", "align_3"}, document.Graph["merge"])
 }
 
-func TestParseRejectsRoleAndInlineConfiguration(t *testing.T) {
-	input := strings.Replace(validGraph, "role: local/reference-preparer", "role: local/reference-preparer\n    model: anthropic/claude-sonnet-4", 1)
+func TestParseRejectsHeroAndInlineConfiguration(t *testing.T) {
+	input := strings.Replace(validGraph, "hero: local/reference-preparer", "hero: local/reference-preparer\n    model: anthropic/claude-sonnet-4", 1)
 	_, err := Parse([]byte(input))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot declare model, thinking, or skills")

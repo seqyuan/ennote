@@ -78,22 +78,22 @@ paths:
                   - type: object
                     properties: { data: { $ref: "#/components/schemas/RuntimeInfo" } }
         "401": { $ref: "#/components/responses/Error" }
-  /v1/global-roles:
+  /v1/global-heroes:
     get:
-      operationId: listGlobalRoles
-      summary: List Worker-global file-authored Roles
+      operationId: listGlobalHeroes
+      summary: List Worker-global file-authored Heroes
       responses:
         "200":
-          description: Global Role source summaries
+          description: Global Hero source summaries
           content:
             application/json:
               schema:
                 allOf:
                   - $ref: "#/components/schemas/Envelope"
                   - type: object
-                    properties: { data: { type: array, items: { $ref: "#/components/schemas/GlobalRoleSummary" } } }
+                    properties: { data: { type: array, items: { $ref: "#/components/schemas/GlobalHeroSummary" } } }
     post:
-      operationId: createGlobalRole
+      operationId: createGlobalHero
       requestBody:
         required: true
         content:
@@ -102,36 +102,36 @@ paths:
               type: object
               additionalProperties: false
               required: [document]
-              properties: { document: { $ref: "#/components/schemas/PortableRoleDocument" } }
+              properties: { document: { $ref: "#/components/schemas/PortableHeroDocument" } }
       responses:
         "201":
-          description: Global Role source created
+          description: Global Hero source created
           content:
             application/json:
               schema:
                 allOf:
                   - $ref: "#/components/schemas/Envelope"
                   - type: object
-                    properties: { data: { $ref: "#/components/schemas/GlobalRoleDetail" } }
+                    properties: { data: { $ref: "#/components/schemas/GlobalHeroDetail" } }
         "422": { $ref: "#/components/responses/Error" }
-  /v1/global-roles/{roleID}:
+  /v1/global-heroes/{heroID}:
     parameters:
-      - { name: roleID, in: path, required: true, schema: { type: string } }
+      - { name: heroID, in: path, required: true, schema: { type: string } }
     get:
-      operationId: getGlobalRole
+      operationId: getGlobalHero
       responses:
         "200":
-          description: Global Role source
+          description: Global Hero source
           content:
             application/json:
               schema:
                 allOf:
                   - $ref: "#/components/schemas/Envelope"
                   - type: object
-                    properties: { data: { $ref: "#/components/schemas/GlobalRoleDetail" } }
+                    properties: { data: { $ref: "#/components/schemas/GlobalHeroDetail" } }
         "404": { $ref: "#/components/responses/Error" }
     patch:
-      operationId: updateGlobalRole
+      operationId: updateGlobalHero
       requestBody:
         required: true
         content:
@@ -142,17 +142,17 @@ paths:
               required: [expectedDigest, document]
               properties:
                 expectedDigest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
-                document: { $ref: "#/components/schemas/PortableRoleDocument" }
+                document: { $ref: "#/components/schemas/PortableHeroDocument" }
       responses:
         "200":
-          description: Updated global Role source
+          description: Updated global Hero source
           content:
             application/json:
               schema:
                 allOf:
                   - $ref: "#/components/schemas/Envelope"
                   - type: object
-                    properties: { data: { $ref: "#/components/schemas/GlobalRoleDetail" } }
+                    properties: { data: { $ref: "#/components/schemas/GlobalHeroDetail" } }
         "409": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
   /v1/graphs:
@@ -228,26 +228,26 @@ paths:
                     properties: { data: { $ref: "#/components/schemas/GraphDetail" } }
         "409": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
-  /v1/global-roles/{roleID}/publish:
+  /v1/global-heroes/{heroID}/publish:
     parameters:
-      - { name: roleID, in: path, required: true, schema: { type: string } }
+      - { name: heroID, in: path, required: true, schema: { type: string } }
     post:
-      operationId: publishGlobalRole
+      operationId: publishGlobalHero
       responses:
         "201":
-          description: Global Role source published as an immutable runtime version
+          description: Global Hero source published as an immutable runtime version
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Envelope" }
         "422": { $ref: "#/components/responses/Error" }
-  /v1/global-roles/{roleID}/versions:
+  /v1/global-heroes/{heroID}/versions:
     parameters:
-      - { name: roleID, in: path, required: true, schema: { type: string } }
+      - { name: heroID, in: path, required: true, schema: { type: string } }
     get:
-      operationId: listGlobalRoleRevisions
+      operationId: listGlobalHeroRevisions
       responses:
         "200":
-          description: Immutable file-backed Role revisions
+          description: Immutable file-backed Hero revisions
           content:
             application/json:
               schema:
@@ -259,22 +259,22 @@ paths:
                         type: array
                         items: { $ref: "#/components/schemas/ImmutableFileRevision" }
         "404": { $ref: "#/components/responses/Error" }
-  /v1/global-roles/{roleID}/resolved:
+  /v1/global-heroes/{heroID}/resolved:
     parameters:
-      - { name: roleID, in: path, required: true, schema: { type: string } }
+      - { name: heroID, in: path, required: true, schema: { type: string } }
     get:
-      operationId: getResolvedGlobalRole
-      summary: Resolve a bare Role handle to its latest published revision with audit source
+      operationId: getResolvedGlobalHero
+      summary: Resolve a bare Hero handle to its latest published revision with audit source
       responses:
         "200":
-          description: Resolved effective Role
+          description: Resolved effective Hero
           content:
             application/json:
               schema:
                 allOf:
                   - $ref: "#/components/schemas/Envelope"
                   - type: object
-                    properties: { data: { $ref: "#/components/schemas/ResolvedGlobalRole" } }
+                    properties: { data: { $ref: "#/components/schemas/ResolvedGlobalHero" } }
         "404": { $ref: "#/components/responses/Error" }
   /v1/graphs/{graphID}/publish:
     parameters:
@@ -284,7 +284,7 @@ paths:
       description: |
         Validates the draft and writes one immutable revision. Validation covers
         the references a Graph Run would otherwise only fail on when it freezes
-        (model and Role resolution, Skill resolution) plus writes scopes the
+        (model and Hero resolution, Skill resolution) plus writes scopes the
         scheduler cannot parse. A Graph is a draft format: it carries no budget
         and needs no project binding, so it does not run the Agent Flow validator.
       responses:
@@ -389,9 +389,9 @@ paths:
       operationId: publishFlow
       summary: Validate and publish one immutable Flow revision
       description: |
-        Runs the real `agentflow.Validator` (roles, skills, check allowlist,
+        Runs the real `agentflow.Validator` (heroes, skills, check allowlist,
         fan-out read-only, budget, secrets) and then freezes the FlowDefinition
-        plus every flow-local Role into one immutable revision. Publishing never
+        plus every flow-local Hero into one immutable revision. Publishing never
         enables the flow; project binding is a separate explicit action.
       responses:
         "201":
@@ -2940,7 +2940,7 @@ paths:
       description: |
         Path-only and store-free. Reads a `.enpack` archive or a pack directory
         inside the Worker host home, validates `pack.yaml` strictly, and reports
-        payload digests, flows, roles, skills, the capability envelope, and
+        payload digests, flows, heroes, skills, the capability envelope, and
         warnings. It never installs, executes, verifies signatures, or writes to
         disk, so it works on a Worker whose stores are unavailable.
       requestBody:
@@ -2971,9 +2971,9 @@ paths:
       operationId: installPack
       summary: Plan or apply an Agent Pack install
       description: |
-        Installs Role-only packs, `format: graph` packs (an unpublished Graph
-        draft plus its Graph-private Roles and Skills), and `format: flow` packs
-        (an unpublished full Agent Flow draft plus bundled Roles/Skills). The
+        Installs Hero-only packs, `format: graph` packs (an unpublished Graph
+        draft plus its Graph-private Heroes and Skills), and `format: flow` packs
+        (an unpublished full Agent Flow draft plus bundled Heroes/Skills). The
         full-flow draft is validated by the real agentflow.Validator before any
         write. Non-empty `mcp` and `requires` are still refused with a stable
         blocker code instead of being downgraded.
@@ -3036,7 +3036,7 @@ paths:
       description: |
         Deletes every installed object this pack owns. Removal is refused while a
         non-terminal flow Run references an installed flow, while an installed
-        object was edited locally, or while a global Role is still referenced by
+        object was edited locally, or while a global Hero is still referenced by
         another Graph. `force=true` overrides the last two. A locally edited Skill
         is kept with a warning instead of being deleted.
       parameters:
@@ -3051,7 +3051,7 @@ paths:
         - name: force
           in: query
           required: false
-          description: Override locally edited objects and shared global Roles
+          description: Override locally edited objects and shared global Heroes
           schema: { type: boolean }
       responses:
         "204": { description: Pack removed }
@@ -3705,7 +3705,7 @@ components:
         runId: { type: string }
         taskIndex: { type: integer }
         handle: { type: string }
-        roleVersionId: { type: string }
+        heroVersionId: { type: string }
         skillDigests: { type: array, items: { type: string } }
         goalDigest: { type: string }
         goalText: { type: string }
@@ -3719,7 +3719,7 @@ components:
     FlowDependencyStatus:
       type: object
       properties:
-        kind: { type: string, enum: [role, skill] }
+        kind: { type: string, enum: [hero, skill] }
         name: { type: string }
         version: { type: integer }
         present: { type: boolean }
@@ -4056,24 +4056,24 @@ components:
     InvocationTarget:
       oneOf:
         - $ref: "#/components/schemas/HostInvocationTarget"
-        - $ref: "#/components/schemas/RoleInvocationTarget"
+        - $ref: "#/components/schemas/HeroInvocationTarget"
       discriminator:
         propertyName: kind
         mapping:
           host: "#/components/schemas/HostInvocationTarget"
-          role: "#/components/schemas/RoleInvocationTarget"
+          hero: "#/components/schemas/HeroInvocationTarget"
     HostInvocationTarget:
       type: object
       additionalProperties: false
       required: [kind]
       properties:
         kind: { type: string, const: host }
-    RoleInvocationTarget:
+    HeroInvocationTarget:
       type: object
       additionalProperties: false
       required: [kind, objectId, versionId, contextMode]
       properties:
-        kind: { type: string, const: role }
+        kind: { type: string, const: hero }
         objectId: { type: string }
         versionId: { type: string }
         contextMode: { type: string, enum: [room, fresh, reply_to] }
@@ -4147,7 +4147,7 @@ components:
       properties:
         key:
           type: string
-          description: Ennote-native context category key (version 1 defines system, role, rules, skills, tools, reminders, conversation).
+          description: Ennote-native context category key (version 1 defines system, hero, rules, skills, tools, reminders, conversation).
         tokens: { type: integer, minimum: 0 }
     SessionContextUsage:
       type: object
@@ -4248,7 +4248,7 @@ components:
       type: object
       additionalProperties: false
       properties:
-        kind: { type: string, enum: [user, host, role, workflow, room, system] }
+        kind: { type: string, enum: [user, host, hero, workflow, room, system] }
         objectId: { type: string }
         versionId: { type: string }
         handle: { type: string }
@@ -4270,12 +4270,12 @@ components:
         runId: { type: string }
         modelProfileId: { type: string }
         apiModel: { type: string }
-        speakerKind: { type: string, enum: [user, host, role, workflow, room, system] }
+        speakerKind: { type: string, enum: [user, host, hero, workflow, room, system] }
         speakerObjectId: { type: string }
         speakerVersionId: { type: string }
         participantInstanceId: { type: string }
         speakerSnapshot: { $ref: "#/components/schemas/SpeakerSnapshot" }
-        addresseeKind: { type: string, enum: [host, room, role, graph, workflow] }
+        addresseeKind: { type: string, enum: [host, room, hero, graph, workflow] }
         addresseeObjectId: { type: string }
         addresseeVersionId: { type: string }
         replyToMessageId: { type: string }
@@ -4578,11 +4578,11 @@ components:
         sourceKind: { type: string, enum: [graph, flow] }
         version: { type: integer, minimum: 1 }
         digest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
-        roleDigests:
+        heroDigests:
           type: object
           additionalProperties: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
         publishedAt: { type: string, format: date-time }
-    GlobalRoleSummary:
+    GlobalHeroSummary:
       type: object
       additionalProperties: false
       required: [id, name, path]
@@ -4592,7 +4592,7 @@ components:
         path: { type: string }
         digest: { type: string }
         error: { type: string }
-    PortableRoleDocument:
+    PortableHeroDocument:
       type: object
       additionalProperties: false
       required: [schemaVersion, handle, name, description, positioning, icon, color, model, skills, authority, permissionCeiling, allowedTools, context, delegation, outputContract, maxLoopIterations, prompt]
@@ -4629,7 +4629,7 @@ components:
           additionalProperties: false
           required: [defaultMode, allowedModes, ownExecutionContinuity]
           properties:
-            # task_only is required for a Role to run as a delegated child, and
+            # task_only is required for a Hero to run as a delegated child, and
             # reply enables reply_to addressing; both are part of the frozen
             # RoleContextPolicy vocabulary and must be authorable here.
             defaultMode: { type: string, enum: [room, reply, fresh, task_only] }
@@ -4659,31 +4659,31 @@ components:
         outputContract: { type: string }
         maxLoopIterations: { type: integer, minimum: 1 }
         prompt: { type: string, minLength: 1, maxLength: 65536 }
-    GlobalRoleDetail:
+    GlobalHeroDetail:
       allOf:
-        - $ref: "#/components/schemas/GlobalRoleSummary"
+        - $ref: "#/components/schemas/GlobalHeroSummary"
         - type: object
           required: [digest, document]
           properties:
             digest: { type: string }
-            document: { $ref: "#/components/schemas/PortableRoleDocument" }
-    ResolvedGlobalRole:
+            document: { $ref: "#/components/schemas/PortableHeroDocument" }
+    ResolvedGlobalHero:
       type: object
       additionalProperties: false
-      required: [roleId, source, revision, document]
+      required: [heroId, source, revision, document]
       properties:
-        roleId: { type: string }
+        heroId: { type: string }
         source: { type: string }
         revision: { $ref: "#/components/schemas/ImmutableFileRevision" }
-        document: { $ref: "#/components/schemas/PortableRoleDocument" }
+        document: { $ref: "#/components/schemas/PortableHeroDocument" }
     GraphTask:
       type: object
       additionalProperties: false
       required: [name, goal]
-      description: Role-backed Tasks declare role only; inline Tasks declare model with optional thinking and skills. The modes are mutually exclusive and enforced by the Worker.
+      description: Hero-backed Tasks declare a hero only; inline Tasks declare model with optional thinking and skills. The modes are mutually exclusive and enforced by the Worker.
       properties:
         name: { type: string, minLength: 1 }
-        role: { type: string, pattern: "^(local|global)/[a-z][a-z0-9_-]{1,63}$" }
+        hero: { type: string, pattern: "^(local|global)/[a-z][a-z0-9_-]{1,63}$" }
         model: { type: string, pattern: "^[^/]+/[^/]+$" }
         thinking: { $ref: "#/components/schemas/ThinkingEffort" }
         skills: { type: array, uniqueItems: true, items: { type: string, pattern: "^(local|global)/[a-z][a-z0-9_-]{1,63}$" } }
@@ -4883,11 +4883,11 @@ components:
     RoleDefinition:
       type: object
       additionalProperties: false
-      required: [schemaVersion, rolePrompt, modelBinding, skills, authority, permissionCeiling, allowedTools,
+      required: [schemaVersion, heroPrompt, modelBinding, skills, authority, permissionCeiling, allowedTools,
         contextPolicy, delegationPolicy, outputContract, maxLoopIterations]
       properties:
         schemaVersion: { type: integer, enum: [1] }
-        rolePrompt: { type: string, minLength: 1, maxLength: 65536 }
+        heroPrompt: { type: string, minLength: 1, maxLength: 65536 }
         modelBinding: { $ref: "#/components/schemas/RoleModelBinding" }
         skills:
           type: object
@@ -4923,7 +4923,7 @@ components:
         currentVersionId: { type: string }
         currentVersion: { type: integer, minimum: 1 }
         updatedAt: { type: string, format: date-time }
-    RoleIdentity:
+    HeroIdentity:
       unevaluatedProperties: false
       allOf:
         - $ref: "#/components/schemas/RoleSummary"
@@ -4940,10 +4940,10 @@ components:
     RoleVersion:
       type: object
       additionalProperties: false
-      required: [id, roleId, version, definition, configDigest, status, createdAt]
+      required: [id, heroId, version, definition, configDigest, status, createdAt]
       properties:
         id: { type: string }
-        roleId: { type: string }
+        heroId: { type: string }
         version: { type: integer, minimum: 1 }
         definition: { $ref: "#/components/schemas/RoleDefinition" }
         configDigest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
@@ -4987,7 +4987,7 @@ components:
         configDigest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
         definition: { $ref: "#/components/schemas/RoleDefinition" }
         alreadyPublished: { type: boolean }
-        roleId: { type: string }
+        heroId: { type: string }
         publishedVersionId: { type: string }
         publishedVersion: { type: integer, minimum: 1 }
         updateAvailable: { type: boolean }
@@ -4996,9 +4996,9 @@ components:
     MaterializedRoleCandidate:
       type: object
       additionalProperties: false
-      required: [role, version]
+      required: [hero, version]
       properties:
-        role: { $ref: "#/components/schemas/RoleIdentity" }
+        hero: { $ref: "#/components/schemas/HeroIdentity" }
         version: { $ref: "#/components/schemas/RoleVersion" }
     CreateRoleInput:
       type: object
@@ -5099,11 +5099,11 @@ components:
         id: { type: string }
         kind:
           type: string
-          enum: [base, role, context, skills_catalog, skill_preload]
-          description: "Contributing layer: platform-owned base/envelope, or an authored Role, project file, catalog, or Skill body."
+          enum: [base, hero, context, skills_catalog, skill_preload]
+          description: "Contributing layer: platform-owned base/envelope, or an authored Hero, project file, catalog, or Skill body."
         source:
           type: string
-          description: Producer under the (source, version, digest, risk) identity convention, e.g. "role:analyst@3".
+          description: Producer under the (source, version, digest, risk) identity convention, e.g. "hero:analyst@3".
         bytes: { type: integer, minimum: 0 }
         digest: { type: string, minLength: 1 }
         skillId:
@@ -5188,11 +5188,11 @@ components:
     DelegationApprovalPreview:
       type: object
       additionalProperties: false
-      required: [name, role, goalPreview, outputContract, budget]
+      required: [name, hero, goalPreview, outputContract, budget]
       properties:
         name: { type: string }
-        role: { type: string }
-        roleHandle: { type: string, description: legacy preview compat }
+        hero: { type: string }
+        heroHandle: { type: string, description: legacy preview compat }
         goalPreview: { type: string, maxLength: 240 }
         assignmentPreview: { type: string, maxLength: 240, description: legacy preview compat }
         skills:
@@ -5217,13 +5217,13 @@ components:
     DelegationChildActivity:
       type: object
       additionalProperties: false
-      required: [itemId, name, roleHandle, roleDisplayName, itemStatus, createdAt]
+      required: [itemId, name, heroHandle, heroDisplayName, itemStatus, createdAt]
       properties:
         itemId: { type: string }
         childRunId: { type: string }
         name: { type: string }
-        roleHandle: { type: string }
-        roleDisplayName: { type: string }
+        heroHandle: { type: string }
+        heroDisplayName: { type: string }
         itemStatus: { type: string, enum: [pending, running, blocked, succeeded, failed, cancelled, not_authorized] }
         runStatus: { type: string, enum: [queued, running, waiting_for_approval, waiting_delegation_admission, waiting_children, succeeded, failed, cancelled, interrupted] }
         result: { $ref: "#/components/schemas/DelegationTerminalResult" }
@@ -5493,7 +5493,7 @@ components:
       additionalProperties: false
       required: [speakerKind, displayName]
       properties:
-        speakerKind: { type: string, enum: [user, host, role, workflow, room, system] }
+        speakerKind: { type: string, enum: [user, host, hero, workflow, room, system] }
         objectId: { type: string }
         versionId: { type: string }
         handle: { type: string }
@@ -5682,7 +5682,7 @@ components:
         source: { $ref: "#/components/schemas/PackSource" }
         includeDocuments:
           type: boolean
-          description: Echo flow, role, and vendored skill source text (bounded); defaults to false
+          description: Echo flow, hero, and vendored skill source text (bounded); defaults to false
         expectedDigest:
           type: string
           description: Expected sha256 of the payload or the manifest; a mismatch fails the inspect
@@ -5709,7 +5709,7 @@ components:
         - signature
         - signed
         - flows
-        - roles
+        - heroes
         - skills
         - mcp
         - requires
@@ -5738,7 +5738,7 @@ components:
         flows:
           type: array
           items: { $ref: "#/components/schemas/PackFlow" }
-        roles:
+        heroes:
           type: array
           items: { $ref: "#/components/schemas/PackRole" }
         skills:
@@ -5797,17 +5797,17 @@ components:
     PackFlow:
       type: object
       additionalProperties: false
-      required: [id, path, format, taskCount, roles, checkTasks, fanOutTasks, maxTotalTokens, pathDigest, sourceDigest]
+      required: [id, path, format, taskCount, heroes, checkTasks, fanOutTasks, maxTotalTokens, pathDigest, sourceDigest]
       properties:
         id: { type: string }
         path: { type: string }
         format:
           type: string
           enum: [flow, graph]
-          description: "flow: full Agent Flow definition; graph: graphsource role-task document"
+          description: "flow: full Agent Flow definition; graph: graphsource hero-task document"
         taskCount: { type: integer }
         entryTask: { type: string }
-        roles:
+        heroes:
           type: array
           items: { type: string }
         checkTasks: { type: integer }
@@ -5864,13 +5864,13 @@ components:
     PackCapabilityEnvelope:
       type: object
       additionalProperties: false
-      required: [flowCount, roleCount, skillCount, taskCount, roles, skills, requiresMcp, modelRequirements, checkCommands, tools, writes, flowMaxTotalTokens]
+      required: [flowCount, heroCount, skillCount, taskCount, heroes, skills, requiresMcp, modelRequirements, checkCommands, tools, writes, flowMaxTotalTokens]
       properties:
         flowCount: { type: integer }
-        roleCount: { type: integer }
+        heroCount: { type: integer }
         skillCount: { type: integer }
         taskCount: { type: integer }
-        roles:
+        heroes:
           type: array
           items: { type: string }
         skills:
@@ -5926,7 +5926,7 @@ components:
       additionalProperties: false
       required: [kind, ref, path, bytes, content, truncated]
       properties:
-        kind: { type: string, enum: [flow, role, skill] }
+        kind: { type: string, enum: [flow, hero, skill] }
         ref: { type: string }
         path: { type: string }
         bytes: { type: integer }
@@ -5955,9 +5955,9 @@ components:
           type: object
           description: pack flow id -> installed Graph id
           additionalProperties: { type: string }
-        roles:
+        heroes:
           type: object
-          description: pack Role handle -> installed Role handle
+          description: pack Hero handle -> installed Hero handle
           additionalProperties: { type: string }
     PackInstallPlan:
       type: object
@@ -6006,7 +6006,7 @@ components:
       additionalProperties: false
       required: [kind, storeId, action]
       properties:
-        kind: { type: string, enum: [graph, flow, graph_role, role, role_revision, skill] }
+        kind: { type: string, enum: [graph, flow, graph_hero, hero, hero_revision, skill] }
         storeId:
           type: string
           description: Installed store id; a Graph-private object is "<flow>/<id>"
@@ -6033,7 +6033,7 @@ components:
         - installState
         - source
         - flows
-        - roles
+        - heroes
         - skills
         - externalRefs
         - modelRequirements
@@ -6054,7 +6054,7 @@ components:
         flows:
           type: array
           items: { $ref: "#/components/schemas/PackFlowState" }
-        roles:
+        heroes:
           type: array
           items: { $ref: "#/components/schemas/PackRoleState" }
         skills:
@@ -6085,11 +6085,11 @@ components:
         scope: { type: string, enum: [flow, global] }
         storeId:
           type: string
-          description: "\"<handle>\" for a global Role, \"<flow>/<handle>\" for a Graph-private Role"
+          description: "\"<handle>\" for a global Hero, \"<flow>/<handle>\" for a Graph-private Hero"
         digest: { type: string }
         revision:
           type: string
-          description: Published revision id; global Roles only
+          description: Published revision id; global Heroes only
     PackSkillState:
       type: object
       additionalProperties: false
@@ -6125,7 +6125,7 @@ components:
         - installState
         - source
         - flowCount
-        - roleCount
+        - heroCount
         - skillCount
         - externalRefs
       properties:
@@ -6136,7 +6136,7 @@ components:
         installState: { type: string, enum: [installed_draft] }
         source: { $ref: "#/components/schemas/PackSource" }
         flowCount: { type: integer }
-        roleCount: { type: integer }
+        heroCount: { type: integer }
         skillCount: { type: integer }
         externalRefs: { $ref: "#/components/schemas/PackExternalRefs" }
     ActiveRunState:

@@ -9,9 +9,9 @@ function fulfill(route: Route, data: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ data }) });
 }
 
-test("Graph-local Role reference is isolated and Role-backed Tasks cannot override runtime fields", async ({ page }) => {
+test("Graph-local Hero reference is isolated and Hero-backed Tasks cannot override runtime fields", async ({ page }) => {
   let patchedTask: Record<string, unknown> | undefined;
-  const roleTask = { name: "Review", role: "local/reviewer", goal: "Review outputs." };
+  const heroTask = { name: "Review", hero: "local/reviewer", goal: "Review outputs." };
   await page.route("**/api/worker/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
     if (await tryFulfillHarnessRoutes(route)) return;
@@ -20,7 +20,7 @@ test("Graph-local Role reference is isolated and Role-backed Tasks cannot overri
     if (path === "/v1/model-profiles") return fulfill(route, [model]);
     if (path === "/v1/policy-profiles") return fulfill(route, []);
     if (path === "/v1/graphs") return fulfill(route, [{ id: "review", name: "Review", path: "/home/graphs/review/graph.yaml", digest: "sha256:a", latestVersion: 0 }]);
-    if (path === "/v1/graphs/review" && route.request().method() === "GET") return fulfill(route, { id: "review", name: "Review", path: "/home/graphs/review/graph.yaml", digest: "sha256:a", latestVersion: 0, document: { schemaVersion: 1, id: "review", name: "Review", description: "", tasks: { review: roleTask }, graph: { review: [] } } });
+    if (path === "/v1/graphs/review" && route.request().method() === "GET") return fulfill(route, { id: "review", name: "Review", path: "/home/graphs/review/graph.yaml", digest: "sha256:a", latestVersion: 0, document: { schemaVersion: 1, id: "review", name: "Review", description: "", tasks: { review: heroTask }, graph: { review: [] } } });
     if (path === "/v1/graphs/review" && route.request().method() === "PATCH") {
       const body = route.request().postDataJSON();
       patchedTask = body.task.value;
@@ -34,8 +34,8 @@ test("Graph-local Role reference is isolated and Role-backed Tasks cannot overri
   await page.goto("/graphs");
   const task = page.locator('[data-task-id="review"]');
   await task.locator(".graph-task-summary").click();
-  await expect(task.getByRole("button", { name: "Use a Role" })).toHaveAttribute("aria-pressed", "true");
-  await expect(task.getByLabel("Role")).toHaveValue("local/reviewer");
+  await expect(task.getByRole("button", { name: "Use a Hero" })).toHaveAttribute("aria-pressed", "true");
+  await expect(task.getByLabel("Hero")).toHaveValue("local/reviewer");
   await expect(task.getByLabel("Model")).toHaveCount(0);
   await expect(task.getByLabel("Thinking")).toHaveCount(0);
   await expect(task.getByLabel("Skills")).toHaveCount(0);
@@ -43,5 +43,5 @@ test("Graph-local Role reference is isolated and Role-backed Tasks cannot overri
   await task.getByRole("button", { name: "Inline configuration" }).click();
   await expect.poll(() => patchedTask).toBeTruthy();
   expect(patchedTask).toMatchObject({ model: "anthropic/sonnet", thinking: "default", skills: [] });
-  expect(patchedTask).not.toHaveProperty("role");
+  expect(patchedTask).not.toHaveProperty("hero");
 });

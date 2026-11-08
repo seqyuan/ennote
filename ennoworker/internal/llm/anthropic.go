@@ -209,7 +209,7 @@ type anthropicTool struct {
 }
 
 // toAnthropicMessages translates domain chat messages into the Anthropic
-// Messages wire shape. The system role is folded into the top-level system
+// Messages wire shape. The system hero is folded into the top-level system
 // field; tool results become user messages carrying tool_result blocks.
 func toAnthropicMessages(messages []domain.ChatMessage) (string, []anthropicMessage, error) {
 	var system strings.Builder

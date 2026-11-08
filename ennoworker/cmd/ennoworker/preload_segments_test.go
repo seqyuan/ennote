@@ -22,19 +22,19 @@ func writePreloadSkill(t *testing.T, skillsDir, id, body string) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o600))
 }
 
-func TestRolePreloadSegmentsNameTheFrozenRoleVersion(t *testing.T) {
+func TestHeroPreloadSegmentsNameTheFrozenHeroVersion(t *testing.T) {
 	skillsDir := t.TempDir()
 	writePreloadSkill(t, skillsDir, "review-guard", "GUARD_BODY")
 
 	executor := &agentExecutor{skillsDir: skillsDir}
-	role := &domain.FrozenRoleExecution{
+	hero := &domain.FrozenHeroExecution{
 		Handle: "security-reviewer", Version: 4,
-		Skills: domain.RoleSkills{Entries: []domain.RoleSkillEntry{
-			{SkillID: "review-guard", Mode: domain.RoleSkillPreload},
+		Skills: domain.HeroSkills{Entries: []domain.HeroSkillEntry{
+			{SkillID: "review-guard", Mode: domain.HeroSkillPreload},
 		}},
 	}
 
-	segments, err := executor.rolePreloadSegments(role)
+	segments, err := executor.heroPreloadSegments(hero)
 	require.NoError(t, err)
 	require.Len(t, segments, 1)
 	assert.Equal(t, "skill.preload.review-guard", segments[0].ID)
@@ -42,28 +42,28 @@ func TestRolePreloadSegmentsNameTheFrozenRoleVersion(t *testing.T) {
 	assert.Equal(t, "review-guard", segments[0].SkillID)
 	// The inlined body is attributed to the exact frozen Role version that
 	// carried the preload binding, so a reader can trace it back.
-	assert.Equal(t, "role:security-reviewer@4", segments[0].Source)
+	assert.Equal(t, "hero:security-reviewer@4", segments[0].Source)
 	assert.Contains(t, segments[0].Text, "GUARD_BODY")
 }
 
-func TestRolePreloadSegmentsSkipAvailableAndMissingSkills(t *testing.T) {
+func TestHeroPreloadSegmentsSkipAvailableAndMissingSkills(t *testing.T) {
 	executor := &agentExecutor{}
-	segments, err := executor.rolePreloadSegments(nil)
+	segments, err := executor.heroPreloadSegments(nil)
 	require.NoError(t, err)
 	assert.Nil(t, segments)
 
-	available := &domain.FrozenRoleExecution{Skills: domain.RoleSkills{
-		Entries: []domain.RoleSkillEntry{{SkillID: "x", Mode: domain.RoleSkillAvailable}}}}
-	segments, err = executor.rolePreloadSegments(available)
+	available := &domain.FrozenHeroExecution{Skills: domain.HeroSkills{
+		Entries: []domain.HeroSkillEntry{{SkillID: "x", Mode: domain.HeroSkillAvailable}}}}
+	segments, err = executor.heroPreloadSegments(available)
 	require.NoError(t, err)
 	assert.Empty(t, segments)
 
 	// A legacy (unpinned) Skill that was frozen at publish time but has since
 	// left the on-disk catalog is skipped defensively rather than aborting the
 	// Run.
-	frozen := &domain.FrozenRoleExecution{Handle: "r", Version: 1, Skills: domain.RoleSkills{
-		Entries: []domain.RoleSkillEntry{{SkillID: "gone", Mode: domain.RoleSkillPreload}}}}
-	segments, err = executor.rolePreloadSegments(frozen)
+	frozen := &domain.FrozenHeroExecution{Handle: "r", Version: 1, Skills: domain.HeroSkills{
+		Entries: []domain.HeroSkillEntry{{SkillID: "gone", Mode: domain.HeroSkillPreload}}}}
+	segments, err = executor.heroPreloadSegments(frozen)
 	require.NoError(t, err)
 	assert.Empty(t, segments)
 }
@@ -129,32 +129,32 @@ func TestTaskPreloadSegmentsUseCurrentContentForLegacyUnpinnedRefs(t *testing.T)
 // A Role preload Skill frozen with a content digest is pinned: the on-disk
 // Skill must still hash to exactly that digest, or prompt composition fails
 // closed instead of silently changing a published Role's prompt.
-func TestRolePreloadSegmentsVerifyFrozenContentDigest(t *testing.T) {
+func TestHeroPreloadSegmentsVerifyFrozenContentDigest(t *testing.T) {
 	skillsDir := t.TempDir()
-	writePreloadSkill(t, skillsDir, "role-skill", "FROZEN_ROLE_BODY")
-	frozen, err := skills.Load(filepath.Join(skillsDir, "role-skill"))
+	writePreloadSkill(t, skillsDir, "hero-skill", "FROZEN_ROLE_BODY")
+	frozen, err := skills.Load(filepath.Join(skillsDir, "hero-skill"))
 	require.NoError(t, err)
 	require.NotEmpty(t, frozen.ContentHash)
 
 	executor := &agentExecutor{skillsDir: skillsDir}
-	role := &domain.FrozenRoleExecution{
+	hero := &domain.FrozenHeroExecution{
 		Handle: "analyst", Version: 2,
-		Skills: domain.RoleSkills{Entries: []domain.RoleSkillEntry{
-			{SkillID: "role-skill", Mode: domain.RoleSkillPreload},
+		Skills: domain.HeroSkills{Entries: []domain.HeroSkillEntry{
+			{SkillID: "hero-skill", Mode: domain.HeroSkillPreload},
 		}},
-		FrozenSkills: domain.FrozenSkillRefs{{ID: "role-skill", Digest: frozen.ContentHash}},
+		FrozenSkills: domain.FrozenSkillRefs{{ID: "hero-skill", Digest: frozen.ContentHash}},
 	}
-	segments, err := executor.rolePreloadSegments(role)
+	segments, err := executor.heroPreloadSegments(hero)
 	require.NoError(t, err, "unchanged content still composes")
 	require.Len(t, segments, 1)
 	assert.Contains(t, segments[0].Text, "FROZEN_ROLE_BODY")
 
 	// Editing the Skill after the Role was published must not silently change
 	// what the frozen Role injects into the model prompt.
-	writePreloadSkill(t, skillsDir, "role-skill", "EDITED_ROLE_BODY")
-	_, err = executor.rolePreloadSegments(role)
+	writePreloadSkill(t, skillsDir, "hero-skill", "EDITED_ROLE_BODY")
+	_, err = executor.heroPreloadSegments(hero)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "role-skill")
+	assert.Contains(t, err.Error(), "hero-skill")
 	assert.Contains(t, err.Error(), "analyst@2")
 	assert.Contains(t, err.Error(), "frozen content digest")
 	assert.Contains(t, err.Error(), frozen.ContentHash)
@@ -163,16 +163,16 @@ func TestRolePreloadSegmentsVerifyFrozenContentDigest(t *testing.T) {
 
 // A pinned preload Skill that disappeared from the catalog fails closed too: a
 // published Role cannot silently lose a prompt constraint.
-func TestRolePreloadSegmentsFailClosedOnMissingPinnedSkill(t *testing.T) {
+func TestHeroPreloadSegmentsFailClosedOnMissingPinnedSkill(t *testing.T) {
 	executor := &agentExecutor{}
-	role := &domain.FrozenRoleExecution{
+	hero := &domain.FrozenHeroExecution{
 		Handle: "analyst", Version: 3,
-		Skills: domain.RoleSkills{Entries: []domain.RoleSkillEntry{
-			{SkillID: "gone", Mode: domain.RoleSkillPreload},
+		Skills: domain.HeroSkills{Entries: []domain.HeroSkillEntry{
+			{SkillID: "gone", Mode: domain.HeroSkillPreload},
 		}},
 		FrozenSkills: domain.FrozenSkillRefs{{ID: "gone", Digest: "sha256:deadbeef"}},
 	}
-	_, err := executor.rolePreloadSegments(role)
+	_, err := executor.heroPreloadSegments(hero)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "gone")
 	assert.Contains(t, err.Error(), "analyst@3")
@@ -181,19 +181,19 @@ func TestRolePreloadSegmentsFailClosedOnMissingPinnedSkill(t *testing.T) {
 
 // Legacy Role snapshots carry no FrozenSkills. They keep the historical
 // behavior: the current on-disk body is used, and a missing Skill is skipped.
-func TestRolePreloadSegmentsUseCurrentContentForLegacyUnpinnedRole(t *testing.T) {
+func TestHeroPreloadSegmentsUseCurrentContentForLegacyUnpinnedHero(t *testing.T) {
 	skillsDir := t.TempDir()
-	writePreloadSkill(t, skillsDir, "role-skill", "CURRENT_ROLE_BODY")
+	writePreloadSkill(t, skillsDir, "hero-skill", "CURRENT_ROLE_BODY")
 
 	executor := &agentExecutor{skillsDir: skillsDir}
-	role := &domain.FrozenRoleExecution{
+	hero := &domain.FrozenHeroExecution{
 		Handle: "analyst", Version: 1,
-		Skills: domain.RoleSkills{Entries: []domain.RoleSkillEntry{
-			{SkillID: "role-skill", Mode: domain.RoleSkillPreload},
-			{SkillID: "gone", Mode: domain.RoleSkillPreload},
+		Skills: domain.HeroSkills{Entries: []domain.HeroSkillEntry{
+			{SkillID: "hero-skill", Mode: domain.HeroSkillPreload},
+			{SkillID: "gone", Mode: domain.HeroSkillPreload},
 		}},
 	}
-	segments, err := executor.rolePreloadSegments(role)
+	segments, err := executor.heroPreloadSegments(hero)
 	require.NoError(t, err)
 	require.Len(t, segments, 1, "the missing legacy Skill is skipped defensively")
 	assert.Contains(t, segments[0].Text, "CURRENT_ROLE_BODY")
@@ -203,40 +203,40 @@ func TestRolePreloadSegmentsUseCurrentContentForLegacyUnpinnedRole(t *testing.T)
 // composition must never change the prompt the model receives.
 func TestPreloadSegmentsComposeToTheStringAPI(t *testing.T) {
 	skillsDir := t.TempDir()
-	writePreloadSkill(t, skillsDir, "role-skill", "ROLE_BODY")
+	writePreloadSkill(t, skillsDir, "hero-skill", "ROLE_BODY")
 	writePreloadSkill(t, skillsDir, "task-skill", "TASK_BODY")
 
 	executor := &agentExecutor{skillsDir: skillsDir}
-	role := &domain.FrozenRoleExecution{Handle: "analyst", Version: 2, Skills: domain.RoleSkills{
-		Entries: []domain.RoleSkillEntry{{
-			SkillID: "role-skill", Mode: domain.RoleSkillPreload,
+	hero := &domain.FrozenHeroExecution{Handle: "analyst", Version: 2, Skills: domain.HeroSkills{
+		Entries: []domain.HeroSkillEntry{{
+			SkillID: "hero-skill", Mode: domain.HeroSkillPreload,
 		}},
 	}}
 
-	roleSegments, err := executor.rolePreloadSegments(role)
+	heroSegments, err := executor.heroPreloadSegments(hero)
 	require.NoError(t, err)
-	roleText, roleSections := systemprompt.Compose(roleSegments)
-	rolePrompt, err := executor.rolePreloadPrompt(role)
+	heroText, heroSections := systemprompt.Compose(heroSegments)
+	heroPrompt, err := executor.heroPreloadPrompt(hero)
 	require.NoError(t, err)
-	assert.Equal(t, rolePrompt, roleText)
-	require.Len(t, roleSections, 1)
-	assert.Contains(t, roleText, "ROLE_BODY")
+	assert.Equal(t, heroPrompt, heroText)
+	require.Len(t, heroSections, 1)
+	assert.Contains(t, heroText, "ROLE_BODY")
 
-	taskSegments, err := executor.taskPreloadSegments(role, domain.FrozenSkillRefs{
-		{ID: "role-skill"}, {ID: "task-skill"}, {ID: "task-skill"},
+	taskSegments, err := executor.taskPreloadSegments(hero, domain.FrozenSkillRefs{
+		{ID: "hero-skill"}, {ID: "task-skill"}, {ID: "task-skill"},
 	}, "task:r")
 	require.NoError(t, err)
 	taskText, taskSections := systemprompt.Compose(taskSegments)
-	assert.Equal(t, mustTaskPreloadPrompt(t, executor, role, domain.FrozenSkillRefs{
-		{ID: "role-skill"}, {ID: "task-skill"}, {ID: "task-skill"},
+	assert.Equal(t, mustTaskPreloadPrompt(t, executor, hero, domain.FrozenSkillRefs{
+		{ID: "hero-skill"}, {ID: "task-skill"}, {ID: "task-skill"},
 	}), taskText)
 	require.Len(t, taskSections, 1, "Role preloads are de-duplicated out of the task overlay")
 	assert.Equal(t, "task-skill", taskSections[0].SkillID)
 }
 
-func mustTaskPreloadPrompt(t *testing.T, executor *agentExecutor, role *domain.FrozenRoleExecution, refs domain.FrozenSkillRefs) string {
+func mustTaskPreloadPrompt(t *testing.T, executor *agentExecutor, hero *domain.FrozenHeroExecution, refs domain.FrozenSkillRefs) string {
 	t.Helper()
-	text, err := executor.taskPreloadPrompt(role, refs)
+	text, err := executor.taskPreloadPrompt(hero, refs)
 	require.NoError(t, err)
 	return text
 }

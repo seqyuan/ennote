@@ -41,7 +41,7 @@ func TestSessionGraphRunsLifecycle(t *testing.T) {
 
 	definitionJSON, _ := json.Marshal(&domain.FlowDefinition{
 		SchemaVersion: 1, ID: "pipeline", Budget: domain.FlowBudget{MaxTotalTokens: 1000},
-		Tasks: map[string]domain.FlowTask{"produce": {Type: domain.FlowTaskRole, Role: "r@1", Goal: "run"}},
+		Tasks: map[string]domain.FlowTask{"produce": {Type: domain.FlowTaskHero, Hero: "r@1", Goal: "run"}},
 	})
 	repo := &store.AgentFlowRunRepo{DB: sessionDB}
 	run, err := repo.CreateFlowRun(ctx, store.CreateFlowRunInput{
@@ -49,7 +49,7 @@ func TestSessionGraphRunsLifecycle(t *testing.T) {
 		DefinitionJSON: definitionJSON, ConfigDigest: "sha256:" + "a",
 		InputsJSON: json.RawMessage(`{"inputs":{},"vars":{}}`),
 	}, []store.FlowNodeFreeze{{
-		TaskIndex: 0, Handle: "produce", RoleVersionID: "r@v000001",
+		TaskIndex: 0, Handle: "produce", HeroVersionID: "r@v000001",
 		GoalDigest: "g", GoalText: "run", BudgetJSON: json.RawMessage(`{}`),
 	}})
 	require.NoError(t, err)

@@ -159,7 +159,7 @@
 .sidebar-new-session:hover:not(:disabled) { background: var(--sb-button-hover); }
 .sidebar-new-session:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* ---- Nav item (Roles / Graphs, below New Session) ---- */
+/* ---- Nav item (Heroes / Graphs, below New Session) ---- */
 .sidebar-nav {
   flex: none;
   display: flex;

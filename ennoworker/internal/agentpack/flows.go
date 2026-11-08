@@ -11,7 +11,7 @@ import (
 // Flow task types mirrored from the Agent Flow contract. They are re-declared
 // here so the pack validator reads the same vocabulary the runtime uses.
 const (
-	flowTaskRole  = domain.FlowTaskRole
+	flowTaskHero  = domain.FlowTaskHero
 	flowTaskCheck = domain.FlowTaskCheck
 )
 
@@ -23,7 +23,7 @@ func agentflowParse(data []byte) (*domain.FlowDefinition, error) {
 	}
 	// TopologicalOrder reports unknown dependencies and cycles. The full
 	// agentflow.Validator is intentionally NOT run: it needs a database-backed
-	// role/skill resolver, which a pure inspect must not depend on.
+	// hero/skill resolver, which a pure inspect must not depend on.
 	if _, err := agentflow.TopologicalOrder(definition.Tasks); err != nil {
 		return nil, err
 	}
@@ -82,7 +82,7 @@ func firstIndependentTask(tasks map[string]domain.FlowTask) string {
 
 // splitScopedRef splits a local/<handle> or global/<handle> reference and drops
 // an optional @version suffix. Bare handles report ok=false and pass through
-// unchecked: a bare handle is the Agent Flow spelling of a flow-local role that
+// unchecked: a bare handle is the Agent Flow spelling of a flow-local hero that
 // resolves flow > shared catalog at freeze time.
 func splitScopedRef(raw string) (scope, name string, ok bool) {
 	ref := strings.TrimSpace(raw)
@@ -102,31 +102,31 @@ func splitScopedRef(raw string) (scope, name string, ok bool) {
 	return scope, name, true
 }
 
-func (b *builder) checkScopedRoleRef(field, ref string) error {
+func (b *builder) checkScopedHeroRef(field, ref string) error {
 	scope, handle, scoped := splitScopedRef(ref)
 	if !scoped {
 		// A bare handle is the Agent Flow spelling that resolves flow-local
 		// first and then the shared catalog. When the pack declares that handle,
 		// treat the reference as local so a flow-scoped Role is not reported as
 		// unreferenced just because the task omitted the local/ prefix.
-		if handle != "" && b.roleSet[handle] {
-			b.flowRoleRefs[handle] = true
+		if handle != "" && b.heroSet[handle] {
+			b.flowHeroRefs[handle] = true
 			return nil
 		}
-		b.warn(WarningFlowRefsGlobalRole, SeverityWarning,
-			"task role "+strings.TrimSpace(ref)+" is not declared in the pack; it will resolve from the Worker-global catalog")
+		b.warn(WarningFlowRefsGlobalHero, SeverityWarning,
+			"task hero "+strings.TrimSpace(ref)+" is not declared in the pack; it will resolve from the Worker-global catalog")
 		return nil
 	}
 	if scope == "global" {
-		b.warn(WarningFlowRefsGlobalRole, SeverityWarning,
-			"task role "+strings.TrimSpace(ref)+" points at a Worker-global Role; a portable pack should vendor it as local/")
+		b.warn(WarningFlowRefsGlobalHero, SeverityWarning,
+			"task hero "+strings.TrimSpace(ref)+" points at a Worker-global Role; a portable pack should vendor it as local/")
 		return nil
 	}
-	if !b.roleSet[handle] {
+	if !b.heroSet[handle] {
 		return fieldError(CodePackRefUnknown, field,
-			"role reference %q does not match a declared pack role", strings.TrimSpace(ref))
+			"hero reference %q does not match a declared pack hero", strings.TrimSpace(ref))
 	}
-	b.flowRoleRefs[handle] = true
+	b.flowHeroRefs[handle] = true
 	return nil
 }
 

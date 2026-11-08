@@ -120,17 +120,17 @@ type FrozenRoutingConfig struct {
 	AllowAutoRoute bool                   `json:"allowAutoRoute"`
 }
 
-type FrozenRoleExecution struct {
+type FrozenHeroExecution struct {
 	ObjectID          string         `json:"objectId"`
 	VersionID         string         `json:"versionId"`
 	Version           int            `json:"version"`
 	Handle            string         `json:"handle"`
 	DisplayName       string         `json:"displayName"`
 	ConfigDigest      string         `json:"configDigest"`
-	Authority         RoleAuthority  `json:"authority"`
+	Authority         HeroAuthority  `json:"authority"`
 	PermissionCeiling PermissionMode `json:"permissionCeiling"`
 	AllowedTools      []string       `json:"allowedTools"`
-	Skills            RoleSkills     `json:"skills"`
+	Skills            HeroSkills     `json:"skills"`
 	// FrozenSkills pins the Role's preload Skills by content digest at config
 	// freeze time. It is a separate field so old run snapshots (which only have
 	// Skills) stay readable and unpinned; an empty ref digest also stays
@@ -158,7 +158,7 @@ type EffectiveRunConfig struct {
 	HookConfig        EffectiveHookConfig        `json:"hookConfig"`
 	ToolPolicyHooks   []ProjectToolPolicyHook    `json:"toolPolicyHooks,omitempty"`
 	WorkspaceSecurity *WorkspaceSecuritySnapshot `json:"workspaceSecurity,omitempty"`
-	Role              *FrozenRoleExecution       `json:"role,omitempty"`
+	Hero              *FrozenHeroExecution       `json:"hero,omitempty"`
 	// Delegation is the frozen root budget policy snapshot for a top-level Host
 	// Run. Children inherit the root policy fact but cannot replace it.
 	Delegation *DelegationPolicySnapshot `json:"delegation,omitempty"`
@@ -356,14 +356,14 @@ const (
 // precedence is the segment order frozen into the Run.
 //
 // The vocabulary follows the platform/authoring split of
-// docs/design-philosophy.md: a section the platform owns (base, role envelope)
+// docs/design-philosophy.md: a section the platform owns (base, hero envelope)
 // is closed, while a section that renders an authoring object (Role definition,
 // Skill body, project instruction file) is open but frozen at Run start.
 type PromptSectionKind string
 
 const (
 	PromptSectionBase          PromptSectionKind = "base"
-	PromptSectionRole          PromptSectionKind = "role"
+	PromptSectionHero          PromptSectionKind = "hero"
 	PromptSectionContext       PromptSectionKind = "context"
 	PromptSectionSkillsCatalog PromptSectionKind = "skills_catalog"
 	PromptSectionSkillPreload  PromptSectionKind = "skill_preload"
@@ -553,7 +553,7 @@ type InvocationTargetKind string
 
 const (
 	InvocationTargetHost InvocationTargetKind = "host"
-	InvocationTargetRole InvocationTargetKind = "role"
+	InvocationTargetHero InvocationTargetKind = "hero"
 )
 
 type InvocationContextMode string
@@ -565,7 +565,7 @@ const (
 	InvocationContextTask    InvocationContextMode = "task_only"
 )
 
-type RoleInvocationTarget struct {
+type HeroInvocationTarget struct {
 	Kind        InvocationTargetKind  `json:"kind"`
 	ObjectID    string                `json:"objectId"`
 	VersionID   string                `json:"versionId"`
@@ -588,7 +588,7 @@ type SubmitInvocationInput struct {
 	BaseMessageID   string
 	Text            string
 	Parts           []ContentBlock
-	Target          RoleInvocationTarget
+	Target          HeroInvocationTarget
 	RequestedConfig json.RawMessage
 }
 

@@ -12,7 +12,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/skills"
 )
 
@@ -69,33 +69,33 @@ type flowPublishResolver struct {
 	models       *ModelRepo
 }
 
-// ResolveRole resolves a task role reference at publish time. The semantics
+// ResolveHero resolves a task hero reference at publish time. The semantics
 // intentionally mirror graphrun freeze:
 //   - local/<handle>  -> the owning flow's Graph-private Role document;
 //   - global/<handle> -> latest (or an exact vNNNNNN / integer) published Role;
 //   - bare <handle>   -> flow-local first, then the shared catalog's latest;
 //   - handle@N        -> exact shared Role revision version N.
-func (f *flowPublishResolver) ResolveRole(ctx context.Context, roleRef string) (*agentflow.RoleInfo, error) {
-	ref := strings.TrimSpace(roleRef)
+func (f *flowPublishResolver) ResolveHero(ctx context.Context, heroRef string) (*agentflow.HeroInfo, error) {
+	ref := strings.TrimSpace(heroRef)
 	handle, versionText, hasVersion := strings.Cut(ref, "@")
 	handle = strings.TrimSpace(handle)
 	if handle == "" {
-		return nil, fmt.Errorf("role reference %q has an empty handle", roleRef)
+		return nil, fmt.Errorf("hero reference %q has an empty handle", heroRef)
 	}
 	if f.sources == nil || f.models == nil {
 		return nil, fmt.Errorf("file-native Role catalog is unavailable")
 	}
 	if strings.HasPrefix(handle, "local/") {
 		if hasVersion {
-			return nil, fmt.Errorf("flow-local role %q cannot be version-pinned", handle)
+			return nil, fmt.Errorf("flow-local hero %q cannot be version-pinned", handle)
 		}
 		id := strings.TrimSpace(strings.TrimPrefix(handle, "local/"))
 		if f.flowID == "" {
-			return nil, fmt.Errorf("flow-local role %q needs an owning flow", handle)
+			return nil, fmt.Errorf("flow-local hero %q needs an owning flow", handle)
 		}
-		document, _, err := f.sources.ReadGraphRole(f.flowID, id)
+		document, _, err := f.sources.ReadGraphHero(f.flowID, id)
 		if err != nil {
-			return nil, fmt.Errorf("flow-local role %q: %w", id, err)
+			return nil, fmt.Errorf("flow-local hero %q: %w", id, err)
 		}
 		return f.resolveDocument(ctx, document)
 	}
@@ -103,58 +103,58 @@ func (f *flowPublishResolver) ResolveRole(ctx context.Context, roleRef string) (
 	if strings.HasPrefix(handle, "global/") {
 		globalHandle = strings.TrimSpace(strings.TrimPrefix(handle, "global/"))
 		if globalHandle == "" {
-			return nil, fmt.Errorf("role reference %q has an empty handle", roleRef)
+			return nil, fmt.Errorf("hero reference %q has an empty handle", heroRef)
 		}
 	}
 	if !hasVersion && !strings.HasPrefix(handle, "global/") {
 		if f.flowID != "" {
-			document, _, err := f.sources.ReadGraphRole(f.flowID, handle)
+			document, _, err := f.sources.ReadGraphHero(f.flowID, handle)
 			switch {
 			case err == nil:
 				return f.resolveDocument(ctx, document)
 			case errors.Is(err, os.ErrNotExist):
 				// fall through to the shared catalog
 			default:
-				return nil, fmt.Errorf("flow-local role %q: %w", handle, err)
+				return nil, fmt.Errorf("flow-local hero %q: %w", handle, err)
 			}
 		}
 	}
 	if !hasVersion {
-		document, _, err := f.sources.LatestRoleRevision(globalHandle)
+		document, _, err := f.sources.LatestHeroRevision(globalHandle)
 		if err != nil {
-			return nil, fmt.Errorf("role %q is not published: %w", globalHandle, err)
+			return nil, fmt.Errorf("hero %q is not published: %w", globalHandle, err)
 		}
 		return f.resolveDocument(ctx, document)
 	}
 	versionText = strings.TrimSpace(versionText)
 	if versionText == "" {
-		return nil, fmt.Errorf("role reference %q must use handle@version", roleRef)
+		return nil, fmt.Errorf("hero reference %q must use handle@version", heroRef)
 	}
-	revisions, err := f.sources.ListRoleRevisions(globalHandle)
+	revisions, err := f.sources.ListHeroRevisions(globalHandle)
 	if err != nil {
-		return nil, fmt.Errorf("role %q revisions: %w", globalHandle, err)
+		return nil, fmt.Errorf("hero %q revisions: %w", globalHandle, err)
 	}
 	for _, revision := range revisions {
 		if revision.ID() == versionText || strconv.Itoa(revision.Version) == versionText {
-			document, _, err := f.sources.ReadRoleRevision(globalHandle, revision.ID())
+			document, _, err := f.sources.ReadHeroRevision(globalHandle, revision.ID())
 			if err != nil {
 				return nil, err
 			}
 			return f.resolveDocument(ctx, document)
 		}
 	}
-	return nil, fmt.Errorf("role %q has no published version %q", globalHandle, versionText)
+	return nil, fmt.Errorf("hero %q has no published version %q", globalHandle, versionText)
 }
 
-func (f *flowPublishResolver) resolveDocument(ctx context.Context, document *rolesource.Document) (*agentflow.RoleInfo, error) {
-	definition, diagnostics := (&RoleDiscovery{Models: f.models}).ResolveDocument(ctx, document)
+func (f *flowPublishResolver) resolveDocument(ctx context.Context, document *heroesource.Document) (*agentflow.HeroInfo, error) {
+	definition, diagnostics := (&HeroDiscovery{Models: f.models}).ResolveDocument(ctx, document)
 	if definition == nil {
 		if len(diagnostics) > 0 {
-			return nil, fmt.Errorf("role %q: %s", document.Handle, diagnostics[0].Message)
+			return nil, fmt.Errorf("hero %q: %s", document.Handle, diagnostics[0].Message)
 		}
-		return nil, fmt.Errorf("role %q failed to resolve", document.Handle)
+		return nil, fmt.Errorf("hero %q failed to resolve", document.Handle)
 	}
-	return &agentflow.RoleInfo{Definition: *definition}, nil
+	return &agentflow.HeroInfo{Definition: *definition}, nil
 }
 
 func (f *flowPublishResolver) KnownSkill(ctx context.Context, name string) bool {

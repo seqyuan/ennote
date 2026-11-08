@@ -2,7 +2,7 @@
 
 MCP（Model Context Protocol）服务器给模型额外的工具：数据库、内部 API、文件索引等等。
 
-Ennote 的 MCP 不是"全局一开就全都有"，而是一条 **Profile → Project 绑定 → Run 快照 → Role 取交集**
+Ennote 的 MCP 不是"全局一开就全都有"，而是一条 **Profile → Project 绑定 → Run 快照 → Hero 取交集**
 的链路。搞清楚这条链路，就不会出现"我明明配了，模型却看不到"的情况。
 
 ## 链路全貌
@@ -13,8 +13,8 @@ Profile（服务器身份 + 不可变连接版本）        ← Worker 级，或
 ProjectBinding（某个 Project 启用哪些工具）   ← 开关在这一层
    ↓ Run 冻结
 RunMCPServerSnapshot（本次 Run 的能力集）     ← 之后改 binding 不影响它
-   ↓ 委派给 Role 时再与 allowlist 取交集
-子 Run 可见工具 = 绑定已选工具 ∩ Role.allowedTools
+   ↓ 委派给 Hero 时再与 allowlist 取交集
+子 Run 可见工具 = 绑定已选工具 ∩ Hero.allowedTools
 ```
 
 ## 第一步：定义服务器（Profile）
@@ -95,12 +95,12 @@ Ennote 自己的密钥不会漏给子进程。
 
 暴露名是 `服务器 slug__工具名`（例如 `mydb__query`）。这个名字很重要 —— 在一处会用错：
 
-!!! warning "给 Role 写 allowedTools 要用暴露名"
-    Role 定义的 `allowedTools` 里必须写 **暴露名**，写远端原名 `query` 匹配不上，
+!!! warning "给 Hero 写 allowedTools 要用暴露名"
+    Hero 定义的 `allowedTools` 里必须写 **暴露名**，写远端原名 `query` 匹配不上，
     结果是子 Run 静默拿不到这个工具。
 
-    委派子 Run 的 MCP 工具 = 绑定已选工具 **∩** `Role.allowedTools`。
-    Host Run（直接对话，不经过 Role）不做这层过滤，拿到绑定的全部已选工具。
+    委派子 Run 的 MCP 工具 = 绑定已选工具 **∩** `Hero.allowedTools`。
+    Host Run（直接对话，不经过 Hero）不做这层过滤，拿到绑定的全部已选工具。
 
 工具的风险等级来自服务器声明（`readOnlyHint` 影响分类），因此**审批仍按你当前的权限模式执行**：
 逐项审批（`ask`）下，写类 MCP 工具会弹审批；只读（`discuss`）下会被拒绝。MCP 不是绕开审批的后门。
@@ -121,7 +121,7 @@ Ennote 自己的密钥不会漏给子进程。
 |---|---|
 | Run Inspector 里没有 MCP 区块 | 该 Project 没有 `desiredEnabled` 的绑定 |
 | 服务器出现但工具为空 | `selectedRemoteToolNames` 没勾选，或服务器 `unavailableReason` 非空 |
-| 子 Run 少了某个工具 | Role 的 `allowedTools` 写的是远端原名，或没写暴露名 |
+| 子 Run 少了某个工具 | Hero 的 `allowedTools` 写的是远端原名，或没写暴露名 |
 | Run 起不来，报 binding/profile unavailable | 标了 `required: true` 而服务器不可达 |
 | 连接报私有网段 | endpoint 是内网地址，需要显式网络策略 |
 | `credential resolver required for file:` | 用了 `file:`/`keyring:` 引用；改用 `env:` |

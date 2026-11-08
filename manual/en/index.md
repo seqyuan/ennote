@@ -64,7 +64,7 @@ protects the local UI; it is not a cloud account.
 ~/.ennote/
   bin/                      downloaded Worker binaries (per version)
   config/                   models, provider credentials, policies, MCP (0600)
-  agents/roles/             role definitions
+  agents/heroes/             hero definitions
   agents/graphs/            graph definitions
   skills/                   skills
   projects/<project>/sessions/   one SQLite database per Session

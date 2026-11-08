@@ -289,11 +289,11 @@ func threeTaskDef() *domain.FlowDefinition {
 		Outputs: map[string]domain.FlowPort{"report": {Type: domain.PortTypeString}},
 		Budget:  domain.FlowBudget{MaxTotalTokens: 100000},
 		Tasks: map[string]domain.FlowTask{
-			"producer": {Type: domain.FlowTaskRole, Role: "writer@1",
+			"producer": {Type: domain.FlowTaskHero, Hero: "writer@1",
 				Goal: "Implement {inputs.target} and {flow.vars.mode}", Budget: &domain.FlowTaskBudget{Tokens: 50000}},
-			"reviewer": {Type: domain.FlowTaskRole, Role: "reader@1",
+			"reviewer": {Type: domain.FlowTaskHero, Hero: "reader@1",
 				Goal: "Review {task.producer.output.changedFiles}", Depends: []string{"producer"}},
-			"accept": {Type: domain.FlowTaskRole, Depends: []string{"reviewer"},
+			"accept": {Type: domain.FlowTaskHero, Depends: []string{"reviewer"},
 				Terminal: &domain.FlowTerminal{Status: "success", Output: "report"}},
 		},
 	}
@@ -337,7 +337,7 @@ func TestOrchestratorSerialExecutionAndHandoff(t *testing.T) {
 	orch.Start(context.Background(), "flow-run-1")
 	state := waitTerminal(t, fake)
 	assert.Equal(t, domain.FlowStateCompleted, state)
-	require.Len(t, children.created, 2, "producer+reviewer are role tasks; accept is terminal")
+	require.Len(t, children.created, 2, "producer+reviewer are hero tasks; accept is terminal")
 	assert.Equal(t, "Implement src/main.go and fast", children.created[0].Assignment)
 	assert.Equal(t, domain.FrozenSkillRefs{{ID: "skill-go-dev", Digest: "sha256:frozen"}}, children.created[0].Skills,
 		"the frozen content digest must reach child materialization")

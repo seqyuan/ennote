@@ -140,7 +140,7 @@ func run() error {
 		return fmt.Errorf("collect Agent Pack staging directories: %w", err)
 	}
 	runTemplate := &store.RunRepo{Publisher: hub, Providers: providers, Models: models, Policies: policyFiles,
-		RoleSources: globalSources, SkillCatalog: skillCatalog}
+		HeroSources: globalSources, SkillCatalog: skillCatalog}
 	routedRuns := &store.RoutedRunRepo{Sessions: sessionManager, Template: runTemplate}
 
 	executorRouter := &sessionExecutorRouter{sessions: sessionManager}
@@ -293,7 +293,7 @@ func run() error {
 		Artifacts: &artifacts.Service{}, Sessions: sessions,
 		Branches: &store.BranchRepo{}, Messages: &store.MessageRepo{}, Compactions: &store.CompactionRepo{Publisher: hub, Policies: policyFiles},
 		Approvals: &store.ApprovalRepo{Publisher: hub}, StandingApprovals: &store.StandingApprovalRepo{},
-		Delegations:         &store.DelegationRepo{RoleSources: globalSources, Models: models, Policies: policyFiles},
+		Delegations:         &store.DelegationRepo{HeroSources: globalSources, Models: models, Policies: policyFiles},
 		DelegationApprovals: &store.DelegationApprovalRepo{Policies: policyFiles},
 		Attention:           &store.AttentionRepo{},
 		Runs:                runTemplate, Queue: &store.QueueRepo{}, Events: &store.EventRepo{},
@@ -382,7 +382,7 @@ func recoverV2Sessions(ctx context.Context, sessions *sessionstore.Manager, temp
 		if err != nil {
 			return fmt.Errorf("recover Session %s runs: %w", sessionID, err)
 		}
-		delegations := &store.DelegationRepo{DB: db, RoleSources: sources, Models: models, Policies: policyFiles}
+		delegations := &store.DelegationRepo{DB: db, HeroSources: sources, Models: models, Policies: policyFiles}
 		if _, err := delegations.ReapOrphans(ctx); err != nil {
 			return err
 		}
@@ -414,7 +414,7 @@ func recoverV2Sessions(ctx context.Context, sessions *sessionstore.Manager, temp
 // startFlowOrchestrator wires a per-Session agentflow.Orchestrator for one
 // frozen Graph Run and resumes it. The flow store resolves the frozen
 // execution plan from the owning Session database; child Runs materialize
-// from frozen delegation role meta and are enqueued through the coordinator.
+// from frozen delegation hero meta and are enqueued through the coordinator.
 // Recovery is idempotent: terminal runs are skipped and crashed nodes are
 // reconciled from child Run terminal facts.
 func startFlowOrchestrator(db *sql.DB, runID string,
@@ -455,7 +455,7 @@ func startFlowOrchestrator(db *sql.DB, runID string,
 	orchestrator := &agentflow.Orchestrator{
 		Store: &store.OrchestratorStore{Runs: &store.AgentFlowRunRepo{DB: db}},
 		Children: &store.OrchestratorChildren{
-			DB: db, Delegations: &store.DelegationRepo{DB: db, RoleSources: sources, Models: models, Policies: policyFiles},
+			DB: db, Delegations: &store.DelegationRepo{DB: db, HeroSources: sources, Models: models, Policies: policyFiles},
 			Policies: policyFiles,
 		},
 		Events:  &store.FlowEventSink{Writer: eventWriter},

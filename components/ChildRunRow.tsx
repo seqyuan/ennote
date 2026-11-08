@@ -30,7 +30,7 @@ export function ChildRunRow({ child, reused = false, activity, onRetry, onContin
     <span className="child-run-icon"><Bot size={14} aria-hidden="true" /></span>
     <span className="child-run-identity">
       <strong>{child.name}</strong>
-      <span>@{child.roleHandle}</span>
+      <span>@{child.heroHandle}</span>
       {reused && <span className="child-run-reused">Reused</span>}
     </span>
     <span className="child-run-actions">

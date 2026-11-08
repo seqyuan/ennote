@@ -1,44 +1,44 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useState } from "react";
-import type { RoleSummary } from "@/components/settings/types";
+import type { HeroSummary } from "@/components/settings/types";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
 
-type GlobalRoleSummary = components["schemas"]["GlobalRoleSummary"];
-type GlobalRoleDetail = components["schemas"]["GlobalRoleDetail"];
+type GlobalHeroSummary = components["schemas"]["GlobalHeroSummary"];
+type GlobalHeroDetail = components["schemas"]["GlobalHeroDetail"];
 type FileRevision = { version: number; publishedAt: string };
 
 /**
- * Role catalog + selection for the composer. Loads published global Roles.
+ * Role catalog + selection for the composer. Loads published global Heroes.
  * Selection does not survive a project switch (declarative, §4.1.3).
  */
-export function useRoleSelection(selectedProject: string | null): {
-  roles: RoleSummary[];
-  selectedRoleId: string | null;
-  setSelectedRoleId: (id: string | null) => void;
+export function useHeroSelection(selectedProject: string | null): {
+  heroes: HeroSummary[];
+  selectedHeroId: string | null;
+  setSelectedHeroId: (id: string | null) => void;
 } {
-  const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
-  const [roles, setRoles] = useState<RoleSummary[]>([]);
+  const [selectedHeroId, setSelectedHeroId] = useState<string | null>(null);
+  const [heroes, setHeroes] = useState<HeroSummary[]>([]);
 
   // Role selection does not survive a project switch (declarative, §4.1.3).
   useLayoutEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSelectedRoleId(null);
+    setSelectedHeroId(null);
   }, [selectedProject]);
 
   useEffect(() => {
     if (!selectedProject) return;
     let cancelled = false;
-    void apiFetch<GlobalRoleSummary[]>("/v1/global-roles")
+    void apiFetch<GlobalHeroSummary[]>("/v1/global-heroes")
       .then(async (catalog) => {
         // A malformed/empty payload must never take down the composer via
         // .filter on null; treat it as an empty catalog.
-        const resolved = await Promise.all((catalog ?? []).filter((entry) => !entry.error).map(async (entry): Promise<RoleSummary | null> => {
+        const resolved = await Promise.all((catalog ?? []).filter((entry) => !entry.error).map(async (entry): Promise<HeroSummary | null> => {
           try {
             const [detail, revisions] = await Promise.all([
-              apiFetch<GlobalRoleDetail>(`/v1/global-roles/${encodeURIComponent(entry.id)}`),
-              apiFetch<FileRevision[]>(`/v1/global-roles/${encodeURIComponent(entry.id)}/versions`),
+              apiFetch<GlobalHeroDetail>(`/v1/global-heroes/${encodeURIComponent(entry.id)}`),
+              apiFetch<FileRevision[]>(`/v1/global-heroes/${encodeURIComponent(entry.id)}/versions`),
             ]);
             const latest = revisions.at(-1);
             if (!latest) return null;
@@ -55,15 +55,15 @@ export function useRoleSelection(selectedProject: string | null): {
           }
         }));
         if (cancelled) return;
-        const published = resolved.filter((role): role is RoleSummary => role !== null);
-        setRoles(published);
-        setSelectedRoleId((current) => published.some((role) => role.id === current) ? current : null);
+        const published = resolved.filter((role): role is HeroSummary => role !== null);
+        setHeroes(published);
+        setSelectedHeroId((current) => published.some((role) => role.id === current) ? current : null);
       })
       .catch(() => {
-        if (!cancelled) setRoles([]);
+        if (!cancelled) setHeroes([]);
       });
     return () => { cancelled = true; };
   }, [selectedProject]);
 
-  return { roles, selectedRoleId, setSelectedRoleId };
+  return { heroes, selectedHeroId, setSelectedHeroId };
 }

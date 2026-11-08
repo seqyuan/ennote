@@ -114,12 +114,12 @@ func TestSecurityMatrixPrivacyBoundaries(t *testing.T) {
 	require.NoError(t, err)
 	raw, err := jsonMarshal(inspection)
 	require.NoError(t, err)
-	for _, forbidden := range []string{"transcript", "credential", "apiKey", "rolePrompt", "systemPrompt", "apiKey", "secret"} {
+	for _, forbidden := range []string{"transcript", "credential", "apiKey", "heroPrompt", "systemPrompt", "apiKey", "secret"} {
 		assert.NotContains(t, string(raw), forbidden)
 	}
 	rawApproval, err := jsonMarshal(approval)
 	require.NoError(t, err)
-	for _, forbidden := range []string{"transcript", "credential", "apiKey", "rolePrompt", "assignment"} {
+	for _, forbidden := range []string{"transcript", "credential", "apiKey", "heroPrompt", "assignment"} {
 		assert.NotContains(t, string(rawApproval), forbidden)
 	}
 }
@@ -131,7 +131,7 @@ func TestSecurityMatrixKillSwitchAndDepth(t *testing.T) {
 	// V2 kill switch: the frozen Role meta is the only runtime authority for a
 	// retry. Simulate a revoked identity by clearing the item's frozen meta;
 	// the retry is denied with zero child Provider calls (no child rows).
-	_, err := delegations.DB.Exec(`UPDATE delegation_items SET role_meta_json='{}'
+	_, err := delegations.DB.Exec(`UPDATE delegation_items SET hero_meta_json='{}'
 		WHERE id=?`, failedItemID)
 	require.NoError(t, err)
 	_, children, _, err := delegations.RetryGeneration(ctx, group.ID, domain.RetryDelegationInput{

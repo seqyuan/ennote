@@ -42,13 +42,13 @@ func TestGlobalCatalogDoesNotReadGraphPrivateResources(t *testing.T) {
 	store := Store{HomeDir: home}
 	_, _, err := store.CreateGraph("rna-seq", "RNA-seq")
 	require.NoError(t, err)
-	privateRole := filepath.Join(home, "agents", "graphs", "rna-seq", "roles", "private-role")
-	require.NoError(t, os.MkdirAll(privateRole, 0o700))
-	require.NoError(t, os.WriteFile(filepath.Join(privateRole, "role.md"), []byte("private secret that must not be parsed"), 0o600))
+	privateHero := filepath.Join(home, "agents", "graphs", "rna-seq", "heroes", "private-hero")
+	require.NoError(t, os.MkdirAll(privateHero, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(privateHero, "hero.md"), []byte("private secret that must not be parsed"), 0o600))
 
-	roles, err := store.ListRoles()
+	heroes, err := store.ListHeroes()
 	require.NoError(t, err)
-	assert.Empty(t, roles)
+	assert.Empty(t, heroes)
 	graphs, err := store.ListGraphs()
 	require.NoError(t, err)
 	require.Len(t, graphs, 1)
@@ -87,20 +87,20 @@ func TestStoreRejectsTraversalAndMismatchedDirectoryIdentity(t *testing.T) {
 	assert.Contains(t, err.Error(), "must match directory")
 }
 
-func TestStoreReportsCorruptRoleAndGraphAsEntryErrors(t *testing.T) {
+func TestStoreReportsCorruptHeroAndGraphAsEntryErrors(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
-	roleDir := filepath.Join(store.RolesDir(), "broken-role")
-	require.NoError(t, os.MkdirAll(roleDir, 0o700))
-	require.NoError(t, os.WriteFile(filepath.Join(roleDir, "role.md"), []byte("---\nnot: valid: yaml\n"), 0o600))
+	heroDir := filepath.Join(store.HeroesDir(), "broken-hero")
+	require.NoError(t, os.MkdirAll(heroDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(heroDir, "hero.md"), []byte("---\nnot: valid: yaml\n"), 0o600))
 	graphDir := filepath.Join(store.GraphsDir(), "broken-graph")
 	require.NoError(t, os.MkdirAll(graphDir, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(graphDir, "graph.yaml"), []byte("schemaVersion: 1\n"), 0o600))
 
-	roles, err := store.ListRoles()
+	heroes, err := store.ListHeroes()
 	require.NoError(t, err)
 	found := false
-	for _, entry := range roles {
-		if entry.ID == "broken-role" {
+	for _, entry := range heroes {
+		if entry.ID == "broken-hero" {
 			found = true
 			assert.NotEmpty(t, entry.Error)
 		}

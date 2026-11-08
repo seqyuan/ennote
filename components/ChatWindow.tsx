@@ -268,13 +268,13 @@ export function ChatWindow({
           permissionMode={composer.displayedPermissionMode} permissionReady={composer.permissionReady} setPermissionMode={composer.setPermissionMode}
           models={composer.models} providers={composer.providers} selectedModelId={composer.selectedModelId} setSelectedModelId={composer.setSelectedModelId}
           thinkingEffort={composer.thinkingEffort} setThinkingEffort={composer.setThinkingEffort}
-          roles={composer.roles} selectedRoleId={composer.selectedRoleId} setSelectedRoleId={composer.setSelectedRoleId}
+          heroes={composer.heroes} selectedHeroId={composer.selectedHeroId} setSelectedHeroId={composer.setSelectedHeroId}
           textAttachments={composer.textAttachments} removeTextAttachment={composer.removeTextAttachment}
           pendingImage={composer.pendingImage} clearPendingImage={composer.clearPendingImage}
           attachFiles={composer.attachFiles} uploadImage={composer.uploadImage} submit={actions.submit} steer={actions.steer} steerText={actions.steerText} followUp={actions.followUp} cancel={run.cancel} cancelFollowUp={run.cancelFollowUp} compactSession={composer.compactSession}
           pendingFollowUps={run.pendingFollowUps}
           promptTemplates={composer.promptPanel.templates} showPromptPanel={composer.promptPanel.show} onPromptSelect={composer.promptPanel.onSelect}
-          panelRoles={composer.promptPanel.roles} panelFlows={composer.promptPanel.flows} onRoleSelect={composer.promptPanel.onRoleSelect} onFlowSelect={composer.promptPanel.onFlowSelect}
+          panelHeroes={composer.promptPanel.heroes} panelFlows={composer.promptPanel.flows} onHeroSelect={composer.promptPanel.onHeroSelect} onFlowSelect={composer.promptPanel.onFlowSelect}
           onPromptPanelClose={composer.promptPanel.onClose}
           expanding={composer.promptPanel.expanding} expandDiag={composer.promptPanel.expandDiag}
           contextUsage={run.contextUsage} stats={run.stats} />

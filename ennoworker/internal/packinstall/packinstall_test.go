@@ -11,20 +11,20 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphrun"
 	"github.com/seqyuan/ennote/ennoworker/internal/packinstall"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/skills"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-const roleOnlyManifest = `schema_version: 1
+const heroOnlyManifest = `schema_version: 1
 id: seqyuan/report-writer
 name: Report Writer
 version: 1.0.0
-roles:
+heroes:
   - handle: report-writer
-    path: roles/report-writer/role.md
+    path: heroes/report-writer/hero.md
     scope: global
 `
 
@@ -41,13 +41,13 @@ flows:
   - id: qc-review
     path: flows/qc-review/graph.yaml
     format: graph
-    roles: [qc-reviewer]
-roles:
+    heroes: [qc-reviewer]
+heroes:
   - handle: qc-reviewer
-    path: roles/qc-reviewer/role.md
+    path: heroes/qc-reviewer/hero.md
     scope: flow
   - handle: report-writer
-    path: roles/report-writer/role.md
+    path: heroes/report-writer/hero.md
     scope: global
 skills:
   - id: cell-qc-tables
@@ -71,7 +71,7 @@ tasks:
     skills: [local/cell-qc-tables]
   review:
     name: Review
-    role: local/qc-reviewer
+    hero: local/qc-reviewer
     goal: Review QC metrics
     writes: [results/qc.csv]
 graph:
@@ -99,11 +99,11 @@ description: Shared notes
 Record shared notes.
 `
 
-func roleOnlyPack(t *testing.T, f *fixture) string {
+func heroOnlyPack(t *testing.T, f *fixture) string {
 	t.Helper()
 	return writePack(t, []packFile{
-		{path: "pack.yaml", body: roleOnlyManifest},
-		{path: "roles/report-writer/role.md", body: roleFile(t, f.modelID, "report-writer", "Report Writer")},
+		{path: "pack.yaml", body: heroOnlyManifest},
+		{path: "heroes/report-writer/hero.md", body: heroFile(t, f.modelID, "report-writer", "Report Writer")},
 	})
 }
 
@@ -111,14 +111,14 @@ func roleOnlyPack(t *testing.T, f *fixture) string {
 // a Worker-global Role plus a global Skill.
 func mixedPack(t *testing.T, f *fixture) string {
 	t.Helper()
-	flowRole := roleFile(t, f.modelID, "qc-reviewer", "QC Reviewer",
-		rolesource.SkillBinding{ID: "global/shared-notes", Mode: domain.RoleSkillPreload})
+	flowHero := heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer",
+		heroesource.SkillBinding{ID: "global/shared-notes", Mode: domain.HeroSkillPreload})
 	return writePack(t, []packFile{
 		{path: "pack.yaml", body: graphPackManifest},
 		{path: "README.md", body: "# Cell QC Review\n"},
 		{path: "flows/qc-review/graph.yaml", body: graphFlowSource},
-		{path: "roles/qc-reviewer/role.md", body: flowRole},
-		{path: "roles/report-writer/role.md", body: roleFile(t, f.modelID, "report-writer", "Report Writer")},
+		{path: "heroes/qc-reviewer/hero.md", body: flowHero},
+		{path: "heroes/report-writer/hero.md", body: heroFile(t, f.modelID, "report-writer", "Report Writer")},
 		{path: "skills/cell-qc-tables/skill.json", body: flowScopedSkillJSON},
 		{path: "skills/cell-qc-tables/SKILL.md", body: flowScopedSkillMD},
 		{path: "skills/shared-notes/skill.json", body: globalSkillJSON},
@@ -126,9 +126,9 @@ func mixedPack(t *testing.T, f *fixture) string {
 	})
 }
 
-func TestPlanRoleOnlyPack(t *testing.T) {
+func TestPlanHeroOnlyPack(t *testing.T) {
 	f := newFixture(t)
-	plan, err := f.service.Plan(context.Background(), packinstall.Request{SourcePath: roleOnlyPack(t, f)})
+	plan, err := f.service.Plan(context.Background(), packinstall.Request{SourcePath: heroOnlyPack(t, f)})
 	require.NoError(t, err)
 	require.NotNil(t, plan)
 
@@ -144,9 +144,9 @@ func TestPlanRoleOnlyPack(t *testing.T) {
 	assert.Nil(t, plan.State)
 
 	require.Len(t, plan.Actions, 2)
-	assert.Equal(t, packinstall.Action{Kind: packinstall.ActionKindRole, StoreID: "report-writer",
+	assert.Equal(t, packinstall.Action{Kind: packinstall.ActionKindHero, StoreID: "report-writer",
 		Action: packinstall.ActionCreate, Scope: "global"}, plan.Actions[0])
-	assert.Equal(t, packinstall.Action{Kind: packinstall.ActionKindRoleRevision, StoreID: "report-writer",
+	assert.Equal(t, packinstall.Action{Kind: packinstall.ActionKindHeroRevision, StoreID: "report-writer",
 		Action: packinstall.ActionPublish, Scope: "global"}, plan.Actions[1])
 }
 
@@ -163,9 +163,9 @@ func TestPlanGraphPackAndDryRunWritesNothing(t *testing.T) {
 	}
 	assert.Equal(t, []string{
 		"graph:qc-review:create",
-		"graph_role:qc-review/qc-reviewer:create",
-		"role:report-writer:create",
-		"role_revision:report-writer:publish",
+		"graph_hero:qc-review/qc-reviewer:create",
+		"hero:report-writer:create",
+		"hero_revision:report-writer:publish",
 		"skill:qc-review/cell-qc-tables:create",
 		"skill:shared-notes:create",
 	}, kinds)
@@ -200,9 +200,9 @@ func TestInstallGraphPackWritesDraftAndScopedObjects(t *testing.T) {
 	assert.Empty(t, revisions)
 
 	// Graph-private Role and Skill.
-	roleDoc, _, err := f.sources.ReadGraphRole("qc-review", "qc-reviewer")
+	heroDoc, _, err := f.sources.ReadGraphHero("qc-review", "qc-reviewer")
 	require.NoError(t, err)
-	assert.Equal(t, "qc-reviewer", roleDoc.Handle)
+	assert.Equal(t, "qc-reviewer", heroDoc.Handle)
 	loadedFlowSkill, err := skills.Load(f.graphSkillPath("qc-review", "cell-qc-tables"))
 	require.NoError(t, err)
 	assert.Equal(t, "cell-qc-tables", loadedFlowSkill.Manifest.ID)
@@ -210,13 +210,13 @@ func TestInstallGraphPackWritesDraftAndScopedObjects(t *testing.T) {
 
 	// Global Role with one published revision, and a global Skill under the user
 	// skills root.
-	globalRole, globalDigest, err := f.sources.ReadRole("report-writer")
+	globalHero, globalDigest, err := f.sources.ReadHero("report-writer")
 	require.NoError(t, err)
-	assert.Equal(t, "report-writer", globalRole.Handle)
-	roleRevisions, err := f.sources.ListRoleRevisions("report-writer")
+	assert.Equal(t, "report-writer", globalHero.Handle)
+	heroRevisions, err := f.sources.ListHeroRevisions("report-writer")
 	require.NoError(t, err)
-	require.Len(t, roleRevisions, 1)
-	assert.Equal(t, globalDigest, roleRevisions[0].Digest)
+	require.Len(t, heroRevisions, 1)
+	assert.Equal(t, globalDigest, heroRevisions[0].Digest)
 	loadedGlobalSkill, err := skills.Load(f.skillPath("shared-notes"))
 	require.NoError(t, err)
 	assert.Equal(t, "shared-notes", loadedGlobalSkill.Manifest.ID)
@@ -237,7 +237,7 @@ func TestInstallGraphPackWritesDraftAndScopedObjects(t *testing.T) {
 	assert.Equal(t, "qc-review", state.Flows[0].StoreID)
 	assert.Nil(t, state.Flows[0].PublishedRevision)
 	assert.Equal(t, "graph", state.Flows[0].Format)
-	require.Len(t, state.Roles, 2)
+	require.Len(t, state.Heroes, 2)
 	require.Len(t, state.Skills, 2)
 	assert.Empty(t, state.ExternalRefs.Skills)
 	assert.Empty(t, state.ExternalRefs.MCP)
@@ -278,7 +278,7 @@ func TestInstallReinstallIsNoop(t *testing.T) {
 		assert.Equal(t, packinstall.ActionExistsIdentical, action.Action, action.StoreID)
 	}
 	// The reinstall published no duplicate revision.
-	revisions, err := f.sources.ListRoleRevisions("report-writer")
+	revisions, err := f.sources.ListHeroRevisions("report-writer")
 	require.NoError(t, err)
 	assert.Len(t, revisions, 1)
 }
@@ -298,7 +298,7 @@ func TestInstallRollsBackWhenTheCommitPointFails(t *testing.T) {
 
 	for _, path := range []string{
 		f.graphPath("qc-review"),
-		f.rolePath("report-writer"),
+		f.heroPath("report-writer"),
 		f.skillPath("shared-notes"),
 		filepath.Join(f.home, "agents", "graphs", "qc-review"),
 	} {
@@ -322,14 +322,14 @@ budget:
   max_total_tokens: 20000
 tasks:
   load:
-    role: qc-reviewer
+    hero: qc-reviewer
     goal: Load the samplesheet
   gate:
     type: check
     command: "test -s results/qc.csv"
     depends: [load]
   review:
-    role: qc-reviewer
+    hero: qc-reviewer
     goal: Review QC metrics
     depends: [gate]
     fan_out: {min: 1, max: 4}
@@ -342,9 +342,9 @@ flows:
   - id: qc-review
     path: flows/qc-review/flow.yaml
     format: flow
-roles:
+heroes:
   - handle: qc-reviewer
-    path: roles/qc-reviewer/role.md
+    path: heroes/qc-reviewer/hero.md
     scope: global
 `
 	t.Run("flow format installs a draft", func(t *testing.T) {
@@ -353,7 +353,7 @@ roles:
 		source := writePack(t, []packFile{
 			{path: "pack.yaml", body: flowFormatManifest},
 			{path: "flows/qc-review/flow.yaml", body: agentFlowSource},
-			{path: "roles/qc-reviewer/role.md", body: roleFile(t, f.modelID, "qc-reviewer", "QC Reviewer")},
+			{path: "heroes/qc-reviewer/hero.md", body: heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer")},
 		})
 		plan, err := f.service.Plan(context.Background(), packinstall.Request{SourcePath: source})
 		require.NoError(t, err)
@@ -366,7 +366,7 @@ roles:
 		source = writePack(t, []packFile{
 			{path: "pack.yaml", body: flowFormatManifest},
 			{path: "flows/qc-review/flow.yaml", body: agentFlowSource},
-			{path: "roles/qc-reviewer/role.md", body: roleFile(t, f.modelID, "qc-reviewer", "QC Reviewer")},
+			{path: "heroes/qc-reviewer/hero.md", body: heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer")},
 		})
 		installed, err := f.service.Install(context.Background(), packinstall.Request{SourcePath: source})
 		require.NoError(t, err)
@@ -383,10 +383,10 @@ roles:
 
 	t.Run("mcp and dependency", func(t *testing.T) {
 		f := newFixture(t)
-		manifest := roleOnlyManifest + "mcp:\n  - ref: pubmed@^1\nrequires:\n  - seqyuan/other-pack@1.0.0\n"
+		manifest := heroOnlyManifest + "mcp:\n  - ref: pubmed@^1\nrequires:\n  - seqyuan/other-pack@1.0.0\n"
 		source := writePack(t, []packFile{
 			{path: "pack.yaml", body: manifest},
-			{path: "roles/report-writer/role.md", body: roleFile(t, f.modelID, "report-writer", "Report Writer")},
+			{path: "heroes/report-writer/hero.md", body: heroFile(t, f.modelID, "report-writer", "Report Writer")},
 		})
 		plan, err := f.service.Plan(context.Background(), packinstall.Request{SourcePath: source})
 		require.NoError(t, err)
@@ -396,13 +396,13 @@ roles:
 
 	t.Run("model unresolved", func(t *testing.T) {
 		f := newFixture(t)
-		document := roleDocument(f.modelID, "report-writer", "Report Writer")
+		document := heroDocument(f.modelID, "report-writer", "Report Writer")
 		document.Model.Ref = "provider/ghost-model"
-		encoded, err := rolesource.Encode(document)
+		encoded, err := heroesource.Encode(document)
 		require.NoError(t, err)
 		source := writePack(t, []packFile{
-			{path: "pack.yaml", body: roleOnlyManifest},
-			{path: "roles/report-writer/role.md", body: string(encoded)},
+			{path: "pack.yaml", body: heroOnlyManifest},
+			{path: "heroes/report-writer/hero.md", body: string(encoded)},
 		})
 		plan, err := f.service.Plan(context.Background(), packinstall.Request{SourcePath: source})
 		require.NoError(t, err)
@@ -412,10 +412,10 @@ roles:
 
 	t.Run("external skill unresolved", func(t *testing.T) {
 		f := newFixture(t)
-		manifest := strings.Replace(roleOnlyManifest, "roles:", "skills:\n  - ref: bio-workspace@0.1.0\nroles:", 1)
+		manifest := strings.Replace(heroOnlyManifest, "heroes:", "skills:\n  - ref: bio-workspace@0.1.0\nheroes:", 1)
 		source := writePack(t, []packFile{
 			{path: "pack.yaml", body: manifest},
-			{path: "roles/report-writer/role.md", body: roleFile(t, f.modelID, "report-writer", "Report Writer")},
+			{path: "heroes/report-writer/hero.md", body: heroFile(t, f.modelID, "report-writer", "Report Writer")},
 		})
 		plan, err := f.service.Plan(context.Background(), packinstall.Request{SourcePath: source})
 		require.NoError(t, err)
@@ -430,12 +430,12 @@ roles:
 		require.Empty(t, plan.Blockers)
 	})
 
-	t.Run("role preload local skill is rejected", func(t *testing.T) {
+	t.Run("hero preload local skill is rejected", func(t *testing.T) {
 		f := newFixture(t)
 		source := writePack(t, []packFile{
-			{path: "pack.yaml", body: roleOnlyManifest},
-			{path: "roles/report-writer/role.md", body: roleFile(t, f.modelID, "report-writer", "Report Writer",
-				rolesource.SkillBinding{ID: "local/cell-qc-tables", Mode: domain.RoleSkillPreload})},
+			{path: "pack.yaml", body: heroOnlyManifest},
+			{path: "heroes/report-writer/hero.md", body: heroFile(t, f.modelID, "report-writer", "Report Writer",
+				heroesource.SkillBinding{ID: "local/cell-qc-tables", Mode: domain.HeroSkillPreload})},
 		})
 		plan, err := f.service.Plan(context.Background(), packinstall.Request{SourcePath: source})
 		require.NoError(t, err)
@@ -443,12 +443,12 @@ roles:
 		assert.Contains(t, plan.Blockers[0].Message, "local/cell-qc-tables")
 	})
 
-	t.Run("role preload missing global skill is rejected", func(t *testing.T) {
+	t.Run("hero preload missing global skill is rejected", func(t *testing.T) {
 		f := newFixture(t)
 		source := writePack(t, []packFile{
-			{path: "pack.yaml", body: roleOnlyManifest},
-			{path: "roles/report-writer/role.md", body: roleFile(t, f.modelID, "report-writer", "Report Writer",
-				rolesource.SkillBinding{ID: "global/shared-notes", Mode: domain.RoleSkillPreload})},
+			{path: "pack.yaml", body: heroOnlyManifest},
+			{path: "heroes/report-writer/hero.md", body: heroFile(t, f.modelID, "report-writer", "Report Writer",
+				heroesource.SkillBinding{ID: "global/shared-notes", Mode: domain.HeroSkillPreload})},
 		})
 		plan, err := f.service.Plan(context.Background(), packinstall.Request{SourcePath: source})
 		require.NoError(t, err)
@@ -458,10 +458,10 @@ roles:
 
 	t.Run("skill not prompt only", func(t *testing.T) {
 		f := newFixture(t)
-		manifest := roleOnlyManifest + "skills:\n  - id: scripted\n    path: skills/scripted/\n"
+		manifest := heroOnlyManifest + "skills:\n  - id: scripted\n    path: skills/scripted/\n"
 		source := writePack(t, []packFile{
 			{path: "pack.yaml", body: manifest},
-			{path: "roles/report-writer/role.md", body: roleFile(t, f.modelID, "report-writer", "Report Writer")},
+			{path: "heroes/report-writer/hero.md", body: heroFile(t, f.modelID, "report-writer", "Report Writer")},
 			{path: "skills/scripted/skill.json", body: `{"id":"scripted","prompt":"SKILL.md"}`},
 			{path: "skills/scripted/SKILL.md", body: "Run the script.\n"},
 			{path: "skills/scripted/scripts/run.sh", body: "echo hi\n"},
@@ -499,8 +499,8 @@ func TestPlanConflictsAndVersionRules(t *testing.T) {
 		{path: "pack.yaml", body: newer},
 		{path: "README.md", body: "# Cell QC Review\n"},
 		{path: "flows/qc-review/graph.yaml", body: graphFlowSource},
-		{path: "roles/qc-reviewer/role.md", body: roleFile(t, f.modelID, "qc-reviewer", "QC Reviewer")},
-		{path: "roles/report-writer/role.md", body: roleFile(t, f.modelID, "report-writer", "Report Writer")},
+		{path: "heroes/qc-reviewer/hero.md", body: heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer")},
+		{path: "heroes/report-writer/hero.md", body: heroFile(t, f.modelID, "report-writer", "Report Writer")},
 		{path: "skills/cell-qc-tables/skill.json", body: flowScopedSkillJSON},
 		{path: "skills/cell-qc-tables/SKILL.md", body: flowScopedSkillMD},
 		{path: "skills/shared-notes/skill.json", body: globalSkillJSON},
@@ -516,8 +516,8 @@ func TestPlanConflictsAndVersionRules(t *testing.T) {
 		{path: "pack.yaml", body: edited},
 		{path: "README.md", body: "# Cell QC Review\n"},
 		{path: "flows/qc-review/graph.yaml", body: graphFlowSource},
-		{path: "roles/qc-reviewer/role.md", body: roleFile(t, f.modelID, "qc-reviewer", "QC Reviewer")},
-		{path: "roles/report-writer/role.md", body: roleFile(t, f.modelID, "report-writer", "Report Writer")},
+		{path: "heroes/qc-reviewer/hero.md", body: heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer")},
+		{path: "heroes/report-writer/hero.md", body: heroFile(t, f.modelID, "report-writer", "Report Writer")},
 		{path: "skills/cell-qc-tables/skill.json", body: flowScopedSkillJSON},
 		{path: "skills/cell-qc-tables/SKILL.md", body: flowScopedSkillMD},
 		{path: "skills/shared-notes/skill.json", body: globalSkillJSON},
@@ -544,11 +544,11 @@ func TestRenamesChangeInstalledStoreIDsOnly(t *testing.T) {
 	assert.Equal(t, "cell-qc-review", document.ID)
 	// In-pack references are not rewritten: the Graph still points at the pack
 	// handle, which is exactly why a rename warns.
-	assert.Equal(t, "local/qc-reviewer", document.Tasks["review"].Role)
-	roleDoc, _, err := f.sources.ReadGraphRole("cell-qc-review", "qc-reviewer")
+	assert.Equal(t, "local/qc-reviewer", document.Tasks["review"].Hero)
+	heroDoc, _, err := f.sources.ReadGraphHero("cell-qc-review", "qc-reviewer")
 	require.NoError(t, err)
-	assert.Equal(t, "qc-reviewer", roleDoc.Handle)
-	_, _, err = f.sources.ReadRole("report-writer")
+	assert.Equal(t, "qc-reviewer", heroDoc.Handle)
+	_, _, err = f.sources.ReadHero("report-writer")
 	require.NoError(t, err)
 	_, err = skills.Load(f.graphSkillPath("cell-qc-review", "cell-qc-tables"))
 	require.NoError(t, err)
@@ -563,38 +563,38 @@ func TestRenamesChangeInstalledStoreIDsOnly(t *testing.T) {
 	assert.Equal(t, "cell-qc-review", plan.State.Flows[0].StoreID)
 }
 
-func TestRoleOnlyPackAllowsRoleRename(t *testing.T) {
+func TestHeroOnlyPackAllowsHeroRename(t *testing.T) {
 	f := newFixture(t)
 	plan, err := f.service.Install(context.Background(), packinstall.Request{
-		SourcePath: roleOnlyPack(t, f),
-		Renames:    packinstall.Renames{Roles: map[string]string{"report-writer": "cell-report-writer"}},
+		SourcePath: heroOnlyPack(t, f),
+		Renames:    packinstall.Renames{Heroes: map[string]string{"report-writer": "cell-report-writer"}},
 	})
 	require.NoError(t, err)
 	require.Empty(t, plan.Blockers)
-	_, _, err = f.sources.ReadRole("cell-report-writer")
+	_, _, err = f.sources.ReadHero("cell-report-writer")
 	require.NoError(t, err)
-	_, _, err = f.sources.ReadRole("report-writer")
+	_, _, err = f.sources.ReadHero("report-writer")
 	assert.Error(t, err)
 }
 
 func TestRenamesRejectCollapsingStoreIDs(t *testing.T) {
 	f := newFixture(t)
-	// Two roles cannot land on one global handle.
-	manifest := roleOnlyManifest + `  - handle: report-reviewer
-    path: roles/report-reviewer/role.md
+	// Two heroes cannot land on one global handle.
+	manifest := heroOnlyManifest + `  - handle: report-reviewer
+    path: heroes/report-reviewer/hero.md
     scope: global
 `
 	source := writePack(t, []packFile{
 		{path: "pack.yaml", body: manifest},
-		{path: "roles/report-writer/role.md", body: roleFile(t, f.modelID, "report-writer", "Report Writer")},
-		{path: "roles/report-reviewer/role.md", body: roleFile(t, f.modelID, "report-reviewer", "Report Reviewer")},
+		{path: "heroes/report-writer/hero.md", body: heroFile(t, f.modelID, "report-writer", "Report Writer")},
+		{path: "heroes/report-reviewer/hero.md", body: heroFile(t, f.modelID, "report-reviewer", "Report Reviewer")},
 	})
 	plan, err := f.service.Plan(context.Background(), packinstall.Request{
 		SourcePath: source,
-		Renames:    packinstall.Renames{Roles: map[string]string{"report-reviewer": "report-writer"}},
+		Renames:    packinstall.Renames{Heroes: map[string]string{"report-reviewer": "report-writer"}},
 	})
 	require.NoError(t, err)
-	require.True(t, hasBlocker(plan, packinstall.CodeRoleHandleConflict), blockerCodes(plan))
+	require.True(t, hasBlocker(plan, packinstall.CodeHeroHandleConflict), blockerCodes(plan))
 	assert.Contains(t, plan.Blockers[0].Message, "both install as global Role")
 }
 
@@ -639,7 +639,7 @@ func TestRemoveRefusesActiveRunAndEditedFilesThenDeletes(t *testing.T) {
 	require.NoError(t, f.service.Remove(ctx, "seqyuan/cell-qc-review", true))
 	for _, path := range []string{
 		filepath.Join(f.home, "agents", "graphs", "qc-review"),
-		f.rolePath("report-writer"),
+		f.heroPath("report-writer"),
 		f.skillPath("shared-notes"),
 		f.statePath("seqyuan/cell-qc-review"),
 	} {
@@ -675,7 +675,7 @@ func TestListReportsStateOnly(t *testing.T) {
 
 	_, err = f.service.Install(ctx, packinstall.Request{SourcePath: mixedPack(t, f)})
 	require.NoError(t, err)
-	_, err = f.service.Install(ctx, packinstall.Request{SourcePath: roleOnlyPack(t, f)})
+	_, err = f.service.Install(ctx, packinstall.Request{SourcePath: heroOnlyPack(t, f)})
 	require.NoError(t, err)
 
 	summaries, err = f.service.List(ctx)
@@ -683,12 +683,12 @@ func TestListReportsStateOnly(t *testing.T) {
 	require.Len(t, summaries, 2)
 	assert.Equal(t, "seqyuan/cell-qc-review", summaries[0].Pack.ID)
 	assert.Equal(t, 1, summaries[0].FlowCount)
-	assert.Equal(t, 2, summaries[0].RoleCount)
+	assert.Equal(t, 2, summaries[0].HeroCount)
 	assert.Equal(t, 2, summaries[0].SkillCount)
 	assert.Equal(t, packinstall.InstallStateDraft, summaries[0].InstallState)
 	assert.Equal(t, "seqyuan/report-writer", summaries[1].Pack.ID)
 	assert.Equal(t, 0, summaries[1].FlowCount)
-	assert.Equal(t, 1, summaries[1].RoleCount)
+	assert.Equal(t, 1, summaries[1].HeroCount)
 
 	// Removing the state file is enough for List to forget the pack.
 	require.NoError(t, os.Remove(f.statePath("seqyuan/report-writer")))
@@ -715,6 +715,6 @@ func TestGCStagingRemovesLeftovers(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, entries)
 
-	_, err = f.service.Install(ctx, packinstall.Request{SourcePath: roleOnlyPack(t, f)})
+	_, err = f.service.Install(ctx, packinstall.Request{SourcePath: heroOnlyPack(t, f)})
 	require.NoError(t, err)
 }

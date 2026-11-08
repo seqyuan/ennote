@@ -16,7 +16,7 @@ describe("Agent Pack inspect contract", () => {
     expectTypeOf<InspectResult["signed"]>().toEqualTypeOf<boolean>();
     expectTypeOf<InspectResult["manifestDigest"]>().toEqualTypeOf<string>();
     expectTypeOf<InspectResult["flows"][number]["format"]>().toEqualTypeOf<"flow" | "graph">();
-    expectTypeOf<InspectResult["roles"][number]["scope"]>().toEqualTypeOf<"flow" | "global">();
+    expectTypeOf<InspectResult["heroes"][number]["scope"]>().toEqualTypeOf<"flow" | "global">();
     // A vendored skill declares where it installs; an external ref has no
     // install target and therefore omits scope.
     expectTypeOf<InspectResult["skills"][number]["scope"]>().toEqualTypeOf<
@@ -46,7 +46,7 @@ describe("Agent Pack install contract", () => {
       source: { kind: "path", path: "/home/me/sources/cell-qc" },
       expectedDigest: `sha256:${"a".repeat(64)}`,
       dryRun: true,
-      renames: { flows: { "qc-review": "cell-qc-review" }, roles: { "qc-reviewer": "cell-qc-reviewer" } },
+      renames: { flows: { "qc-review": "cell-qc-review" }, heroes: { "qc-reviewer": "cell-qc-reviewer" } },
     };
     expectTypeOf(request.source.kind).toEqualTypeOf<"path">();
     expectTypeOf<components["schemas"]["PackRenames"]["flows"]>().toEqualTypeOf<
@@ -67,7 +67,7 @@ describe("Agent Pack install contract", () => {
     expectTypeOf(plan.commitPoint).toEqualTypeOf<"state_file">();
     expectTypeOf(plan.willPublishFlowRevision).toEqualTypeOf<boolean>();
     expectTypeOf<components["schemas"]["PackAction"]["kind"]>().toEqualTypeOf<
-      "graph" | "flow" | "graph_role" | "role" | "role_revision" | "skill"
+      "graph" | "flow" | "graph_hero" | "hero" | "hero_revision" | "skill"
     >();
     expectTypeOf<components["schemas"]["PackAction"]["action"]>().toEqualTypeOf<
       "create" | "exists_identical" | "conflict" | "publish"

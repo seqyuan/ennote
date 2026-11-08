@@ -32,7 +32,7 @@ type RunRepo struct {
 	Providers   *ProviderRepo
 	Models      *ModelRepo
 	Policies    *fileconfig.PolicyStore
-	RoleSources *globalsource.Store
+	HeroSources *globalsource.Store
 	// SkillDigests is the optional Skill digest catalog observed at startup,
 	// mapping Skill ID to loader ContentHash. When non-nil, freezing a Role
 	// config pins every preload Skill to its digest so later on-disk edits fail
@@ -52,7 +52,7 @@ func (r *RunRepo) SubmitTurn(ctx context.Context, input domain.SubmitTurnInput) 
 }
 
 func (r *RunRepo) SubmitInvocation(ctx context.Context, input domain.SubmitInvocationInput) (*domain.TurnSubmission, error) {
-	if input.Target.Kind != domain.InvocationTargetRole || strings.TrimSpace(input.Target.ObjectID) == "" ||
+	if input.Target.Kind != domain.InvocationTargetHero || strings.TrimSpace(input.Target.ObjectID) == "" ||
 		strings.TrimSpace(input.Target.VersionID) == "" {
 		return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("a Role object and version are required"))
 	}
@@ -73,7 +73,7 @@ func (r *RunRepo) SubmitInvocation(ctx context.Context, input domain.SubmitInvoc
 	}, &input.Target)
 }
 
-func (r *RunRepo) submitTurn(ctx context.Context, input domain.SubmitTurnInput, target *domain.RoleInvocationTarget) (*domain.TurnSubmission, error) {
+func (r *RunRepo) submitTurn(ctx context.Context, input domain.SubmitTurnInput, target *domain.HeroInvocationTarget) (*domain.TurnSubmission, error) {
 	if strings.TrimSpace(input.ClientRequestID) == "" {
 		return nil, fmt.Errorf("client request id is required")
 	}
@@ -140,9 +140,9 @@ func (r *RunRepo) submitTurn(ctx context.Context, input domain.SubmitTurnInput, 
 	inviteParticipant := false
 	if target != nil {
 		var handle, name, icon, color, positioning, configDigest string
-		var definition domain.RoleDefinition
-		if r.RoleSources != nil {
-			resolved, err := r.resolveFileRole(ctx, target.ObjectID, target.VersionID)
+		var definition domain.HeroDefinition
+		if r.HeroSources != nil {
+			resolved, err := r.resolveFileHero(ctx, target.ObjectID, target.VersionID)
 			if err != nil {
 				return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, err)
 			}
@@ -157,7 +157,7 @@ func (r *RunRepo) submitTurn(ctx context.Context, input domain.SubmitTurnInput, 
 			var definitionJSON string
 			err := tx.QueryRowContext(ctx, `SELECT p.handle,p.name,p.icon,p.color,p.positioning,v.config_digest,v.definition_json
 				FROM agent_profiles p JOIN agent_profile_versions v ON v.id=p.current_version_id
-				WHERE p.id=? AND v.id=? AND p.object_kind='role' AND p.status='active' AND v.status='published'
+				WHERE p.id=? AND v.id=? AND p.object_kind='hero' AND p.status='active' AND v.status='published'
 				AND (p.project_id IS NULL OR p.project_id=?)`, target.ObjectID, target.VersionID, sessionProjectID).
 				Scan(&handle, &name, &icon, &color, &positioning, &configDigest, &definitionJSON)
 			if errors.Is(err, sql.ErrNoRows) {
@@ -173,14 +173,14 @@ func (r *RunRepo) submitTurn(ctx context.Context, input domain.SubmitTurnInput, 
 		contextAllowed := false
 		for _, allowed := range definition.ContextPolicy.AllowedModes {
 			contextAllowed = contextAllowed || string(allowed) == string(target.ContextMode) ||
-				(allowed == domain.RoleContextReply && target.ContextMode == domain.InvocationContextReplyTo)
+				(allowed == domain.HeroContextReply && target.ContextMode == domain.InvocationContextReplyTo)
 		}
 		if !contextAllowed {
 			return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
 				fmt.Errorf("Role does not allow %s context", target.ContextMode))
 		}
 		speakerSnapshot, err = json.Marshal(map[string]string{
-			"kind": "role", "objectId": target.ObjectID, "versionId": target.VersionID, "handle": handle,
+			"kind": "hero", "objectId": target.ObjectID, "versionId": target.VersionID, "handle": handle,
 			"displayName": name, "icon": icon, "color": color, "positioning": positioning, "configDigest": configDigest,
 		})
 		if err != nil {
@@ -193,10 +193,10 @@ func (r *RunRepo) submitTurn(ctx context.Context, input domain.SubmitTurnInput, 
 			}
 		}
 		commitFormat = domain.CommitFormatSpeakerV2
-		targetKind, targetObjectID, targetVersionID = "role", target.ObjectID, target.VersionID
+		targetKind, targetObjectID, targetVersionID = "hero", target.ObjectID, target.VersionID
 		contextMode = target.ContextMode
 		err = tx.QueryRowContext(ctx, `SELECT id FROM room_member_instances
-			WHERE session_id=? AND role_id=? AND role_version_id=?`, input.SessionID, target.ObjectID, target.VersionID).
+			WHERE session_id=? AND hero_id=? AND hero_version_id=?`, input.SessionID, target.ObjectID, target.VersionID).
 			Scan(&participantInstanceID)
 		if errors.Is(err, sql.ErrNoRows) {
 			participantInstanceID, createParticipant, inviteParticipant = uuid.NewString(), true, true
@@ -273,7 +273,7 @@ func (r *RunRepo) submitTurn(ctx context.Context, input domain.SubmitTurnInput, 
 	userParentMessageID := baseMessageID
 	if createParticipant {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO room_member_instances
-			(id,session_id,role_id,role_version_id,created_at) VALUES(?,?,?,?,?)`, participantInstanceID,
+			(id,session_id,hero_id,hero_version_id,created_at) VALUES(?,?,?,?,?)`, participantInstanceID,
 			input.SessionID, targetObjectID, targetVersionID, timestamp.Format(time.RFC3339Nano)); err != nil {
 			return nil, fmt.Errorf("create Role participant: %w", err)
 		}
@@ -535,7 +535,7 @@ func (r *RunRepo) FinalizeSuccess(ctx context.Context, runID string, output doma
 		return domain.NewCodedError(domain.ErrorCommitFormatNotEnabled,
 			fmt.Errorf("run %s uses unsupported commit format %d", runID, commitFormat))
 	}
-	if commitFormat == domain.CommitFormatSpeakerV2 && r.RoleSources == nil {
+	if commitFormat == domain.CommitFormatSpeakerV2 && r.HeroSources == nil {
 		var writerSetting string
 		if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='hosted_commit_format_version'`).Scan(&writerSetting); err != nil || writerSetting != "2" {
 			return domain.NewCodedError(domain.ErrorCommitFormatNotEnabled, fmt.Errorf("format 2 writer is not enabled"))
@@ -585,7 +585,7 @@ func (r *RunRepo) FinalizeSuccess(ctx context.Context, runID string, output doma
 			return err
 		}
 		speakerKind := targetKind
-		if speakerKind != string(domain.SpeakerRole) {
+		if speakerKind != string(domain.SpeakerHero) {
 			speakerKind = string(domain.SpeakerHost)
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO messages
@@ -609,7 +609,7 @@ func (r *RunRepo) FinalizeSuccess(ctx context.Context, runID string, output doma
 	} else {
 		for index, message := range output.Messages {
 			if message.Role != domain.RoleUser && message.Role != domain.RoleAssistant && message.Role != domain.RoleTool {
-				return fmt.Errorf("unsupported projected message role: %s", message.Role)
+				return fmt.Errorf("unsupported projected message hero: %s", message.Role)
 			}
 			messageID := uuid.NewString()
 			visibility := domain.VisibilityLegacyExecution

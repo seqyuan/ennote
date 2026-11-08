@@ -67,12 +67,12 @@ func TestComposeWithNoSegmentsYieldsEmptyPrompt(t *testing.T) {
 }
 
 func TestSkillSegmentWrapperIsStable(t *testing.T) {
-	segment := SkillSegment("reporting", "how to report", "role:analyst@2")
+	segment := SkillSegment("reporting", "how to report", "hero:analyst@2")
 
 	assert.Equal(t, "\n\n<preloaded_skill id=\"reporting\">\nhow to report\n</preloaded_skill>", segment.Text)
 	assert.Equal(t, domain.PromptSectionSkillPreload, segment.Kind)
 	assert.Equal(t, "reporting", segment.SkillID)
-	assert.Equal(t, "role:analyst@2", segment.Source)
+	assert.Equal(t, "hero:analyst@2", segment.Source)
 }
 
 func TestSectionsDigestIsEmptyForNoSections(t *testing.T) {
@@ -83,7 +83,7 @@ func TestSectionsDigestIsEmptyForNoSections(t *testing.T) {
 
 func TestSectionsDigestDetectsEveryIdentityChange(t *testing.T) {
 	base := []domain.PromptSection{{
-		ID: "role.definition", Kind: domain.PromptSectionRole, Source: "role:analyst@2", Bytes: 12, Digest: "abc",
+		ID: "hero.definition", Kind: domain.PromptSectionHero, Source: "hero:analyst@2", Bytes: 12, Digest: "abc",
 	}}
 	baseline, err := SectionsDigest(base)
 	require.NoError(t, err)
@@ -92,7 +92,7 @@ func TestSectionsDigestDetectsEveryIdentityChange(t *testing.T) {
 	mutations := map[string]func(sections []domain.PromptSection){
 		"id":      func(s []domain.PromptSection) { s[0].ID = "other" },
 		"kind":    func(s []domain.PromptSection) { s[0].Kind = domain.PromptSectionContext },
-		"source":  func(s []domain.PromptSection) { s[0].Source = "role:analyst@3" },
+		"source":  func(s []domain.PromptSection) { s[0].Source = "hero:analyst@3" },
 		"bytes":   func(s []domain.PromptSection) { s[0].Bytes = 13 },
 		"digest":  func(s []domain.PromptSection) { s[0].Digest = "abd" },
 		"skillId": func(s []domain.PromptSection) { s[0].SkillID = "reporting" },

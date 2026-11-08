@@ -13,7 +13,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphrun"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
@@ -64,26 +64,26 @@ func newFlowRunFixture(t *testing.T) *flowRunFixture {
 	}
 }
 
-func (f *flowRunFixture) localRole(t *testing.T, handle string, authority rolesource.Authority, tools []string, prompt string) *rolesource.Document {
+func (f *flowRunFixture) localHero(t *testing.T, handle string, authority heroesource.Authority, tools []string, prompt string) *heroesource.Document {
 	t.Helper()
-	return &rolesource.Document{
+	return &heroesource.Document{
 		SchemaVersion: 1, Handle: handle, Name: handle,
-		Model:  rolesource.ModelBinding{Ref: "provider/flow-model", ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills: []rolesource.SkillBinding{}, Authority: authority,
+		Model:  heroesource.ModelBinding{Ref: "provider/flow-model", ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills: []heroesource.SkillBinding{}, Authority: authority,
 		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: tools,
-		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextTask,
-			AllowedModes: []domain.RoleContextMode{domain.RoleContextTask}, OwnExecutionContinuity: domain.RoleContinuityNone},
-		Delegation: rolesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+		Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextTask,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextTask}, OwnExecutionContinuity: domain.HeroContinuityNone},
+		Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
 			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
 			MaxInvocationsPerParentRun: 8, MaxConcurrentInstances: 8,
-			BudgetCeiling: rolesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 16,
+			BudgetCeiling: heroesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 16,
 				MaxTotalTokens: 40000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 120000}},
 		OutputContract: "text-v1", MaxLoopIterations: 8, Prompt: prompt,
 	}
 }
 
 func (f *flowRunFixture) flow(id string, fanOut bool) *domain.FlowDefinition {
-	scan := domain.FlowTask{Type: domain.FlowTaskRole, Role: "local/reviewer",
+	scan := domain.FlowTask{Type: domain.FlowTaskHero, Hero: "local/reviewer",
 		Goal: "Scan the workspace", Depends: []string{"gate"}, Budget: &domain.FlowTaskBudget{Tokens: 1000}}
 	if fanOut {
 		scan.FanOut = &domain.FlowFanOut{Min: 2, Max: 2}
@@ -91,21 +91,21 @@ func (f *flowRunFixture) flow(id string, fanOut bool) *domain.FlowDefinition {
 	return &domain.FlowDefinition{
 		SchemaVersion: 1, ID: id, Budget: domain.FlowBudget{MaxTotalTokens: 100000},
 		Tasks: map[string]domain.FlowTask{
-			"review": {Type: domain.FlowTaskRole, Role: "local/reviewer", Goal: "Review the result",
+			"review": {Type: domain.FlowTaskHero, Hero: "local/reviewer", Goal: "Review the result",
 				Budget: &domain.FlowTaskBudget{Tokens: 1000}},
 			"gate": {Type: domain.FlowTaskCheck, Command: "test -f ready", Depends: []string{"review"}},
 			"scan": scan,
-			"done": {Type: domain.FlowTaskRole, Depends: []string{"scan"},
+			"done": {Type: domain.FlowTaskHero, Depends: []string{"scan"},
 				Terminal: &domain.FlowTerminal{Status: "success"}},
 		},
 	}
 }
 
-func (f *flowRunFixture) publish(t *testing.T, id string, fanOut bool, rolePrompt string) *globalsource.Revision {
+func (f *flowRunFixture) publish(t *testing.T, id string, fanOut bool, heroPrompt string) *globalsource.Revision {
 	t.Helper()
 	_, err := f.sources.CreateFlowFromDefinition(f.flow(id, fanOut))
 	require.NoError(t, err)
-	_, err = f.sources.CreateGraphRole(id, f.localRole(t, "reviewer", rolesource.AuthorityReadOnly, []string{"read", "grep"}, rolePrompt))
+	_, err = f.sources.CreateGraphHero(id, f.localHero(t, "reviewer", heroesource.AuthorityReadOnly, []string{"read", "grep"}, heroPrompt))
 	require.NoError(t, err)
 	revision, err := f.sources.PublishFlowRevision(id)
 	require.NoError(t, err)
@@ -152,27 +152,27 @@ func TestServiceFreezesFullFlowWithCheckFanOutTerminal(t *testing.T) {
 		byHandle[node.Handle] = node
 	}
 	require.Contains(t, byHandle, "gate")
-	assert.Empty(t, byHandle["gate"].RoleDefinitionJSON)
-	assert.Empty(t, byHandle["gate"].RoleVersionID)
-	assert.Empty(t, byHandle["done"].RoleDefinitionJSON)
+	assert.Empty(t, byHandle["gate"].HeroDefinitionJSON)
+	assert.Empty(t, byHandle["gate"].HeroVersionID)
+	assert.Empty(t, byHandle["done"].HeroDefinitionJSON)
 	assert.True(t, byHandle["done"].ReadOnly)
 	assert.True(t, byHandle["scan"].ReadOnly)
-	require.NotEmpty(t, byHandle["review"].RoleDefinitionJSON)
-	var reviewRole domain.RoleDefinition
-	require.NoError(t, json.Unmarshal(byHandle["review"].RoleDefinitionJSON, &reviewRole))
-	assert.Equal(t, "Use the published prompt.", reviewRole.RolePrompt)
-	assert.True(t, strings.HasPrefix(byHandle["review"].RoleVersionID, "flow:qc-flow/reviewer@sha256:"), byHandle["review"].RoleVersionID)
+	require.NotEmpty(t, byHandle["review"].HeroDefinitionJSON)
+	var reviewHero domain.HeroDefinition
+	require.NoError(t, json.Unmarshal(byHandle["review"].HeroDefinitionJSON, &reviewHero))
+	assert.Equal(t, "Use the published prompt.", reviewHero.HeroPrompt)
+	assert.True(t, strings.HasPrefix(byHandle["review"].HeroVersionID, "flow:qc-flow/reviewer@sha256:"), byHandle["review"].HeroVersionID)
 }
 
-func TestServiceFlowFreezeUsesPublishedRoleBundle(t *testing.T) {
+func TestServiceFlowFreezeUsesPublishedHeroBundle(t *testing.T) {
 	fixture := newFlowRunFixture(t)
 	revision := fixture.publish(t, "immutable-flow", false, "published prompt")
 	fixture.bind(t, "immutable-flow", revision.ID(), true)
 
 	// Editing the draft Role after publish must not change this revision.
-	encoded, err := rolesource.Encode(fixture.localRole(t, "reviewer", rolesource.AuthorityReadOnly, []string{"read"}, "edited prompt"))
+	encoded, err := heroesource.Encode(fixture.localHero(t, "reviewer", heroesource.AuthorityReadOnly, []string{"read"}, "edited prompt"))
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(fixture.sources.GraphsDir(), "immutable-flow", "roles", "reviewer", "role.md"), encoded, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(fixture.sources.GraphsDir(), "immutable-flow", "heroes", "reviewer", "hero.md"), encoded, 0o600))
 
 	service := &graphrun.Service{Sources: fixture.sources, Models: fixture.models, Sessions: fixture.sessions, Projects: fixture.projects}
 	run, err := service.StartFlow(context.Background(), fixture.projectID, "immutable-flow", 0, fixture.sessionID, nil, nil)
@@ -185,9 +185,9 @@ func TestServiceFlowFreezeUsesPublishedRoleBundle(t *testing.T) {
 		if node.Handle != "review" {
 			continue
 		}
-		var definition domain.RoleDefinition
-		require.NoError(t, json.Unmarshal(node.RoleDefinitionJSON, &definition))
-		assert.Equal(t, "published prompt", definition.RolePrompt)
+		var definition domain.HeroDefinition
+		require.NoError(t, json.Unmarshal(node.HeroDefinitionJSON, &definition))
+		assert.Equal(t, "published prompt", definition.HeroPrompt)
 	}
 }
 
@@ -216,11 +216,11 @@ func TestServiceStartFlowRequiresEnabledPinnedBinding(t *testing.T) {
 	assert.Contains(t, err.Error(), "flow_binding_revision_mismatch")
 }
 
-func TestServiceRejectsFanOutOnWriterRole(t *testing.T) {
+func TestServiceRejectsFanOutOnWriterHero(t *testing.T) {
 	fixture := newFlowRunFixture(t)
 	_, err := fixture.sources.CreateFlowFromDefinition(fixture.flow("writer-fan", true))
 	require.NoError(t, err)
-	_, err = fixture.sources.CreateGraphRole("writer-fan", fixture.localRole(t, "reviewer", rolesource.AuthorityWriteWorkspace, []string{"read", "write"}, "writer"))
+	_, err = fixture.sources.CreateGraphHero("writer-fan", fixture.localHero(t, "reviewer", heroesource.AuthorityWriteWorkspace, []string{"read", "write"}, "writer"))
 	require.NoError(t, err)
 	revision, err := fixture.sources.PublishFlowRevision("writer-fan")
 	require.NoError(t, err)

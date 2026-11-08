@@ -33,7 +33,7 @@ func TestChildRunCoexistsWithRunningParent(t *testing.T) {
 		 effective_config_json,speaker_snapshot_json,root_run_id,parent_run_id,execution_depth,publish_mode,
 		 commit_format_version,context_snapshot_json,created_at)
 		VALUES(?,NULL,?,'delegated_agent',?,1,'queued','{}','{}',
-		 '{"kind":"role","displayName":"Workspace Explorer"}',?,'`+submission.Run.ID+`',1,'private_to_parent',
+		 '{"kind":"hero","displayName":"Workspace Explorer"}',?,'`+submission.Run.ID+`',1,'private_to_parent',
 		 2,'{}',?)`,
 		childID, submission.Run.SessionID, submission.UserMessageID, submission.Run.ID, now)
 	require.NoError(t, err, "child Run must coexist with a running parent under migration 21")

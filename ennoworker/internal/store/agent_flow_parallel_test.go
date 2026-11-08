@@ -13,7 +13,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
 	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,43 +42,43 @@ func setupParallelFixture(t *testing.T) (db *sql.DB, projectID string, readerVer
 	})
 	require.NoError(t, err)
 
-	newRole := func(handle string, authority rolesource.Authority, tools []string) string {
-		document := &rolesource.Document{
+	newHero := func(handle string, authority heroesource.Authority, tools []string) string {
+		document := &heroesource.Document{
 			SchemaVersion: 1, Handle: handle, Name: handle, Description: handle,
 			Positioning: handle, Icon: "bot", Color: "neutral",
-			Model:  rolesource.ModelBinding{Ref: model.ID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-			Skills: []rolesource.SkillBinding{}, Authority: authority,
+			Model:  heroesource.ModelBinding{Ref: model.ID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+			Skills: []heroesource.SkillBinding{}, Authority: authority,
 			PermissionCeiling: domain.PermissionDiscuss,
 			AllowedTools:      tools,
-			Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextRoom,
-				AllowedModes: []domain.RoleContextMode{domain.RoleContextRoom}, OwnExecutionContinuity: domain.RoleContinuityNone},
-			Delegation: rolesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+			Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextRoom,
+				AllowedModes: []domain.HeroContextMode{domain.HeroContextRoom}, OwnExecutionContinuity: domain.HeroContinuityNone},
+			Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
 				AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single", "parallel"},
 				MaxInvocationsPerParentRun: 64, MaxConcurrentInstances: 64,
-				BudgetCeiling: rolesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
+				BudgetCeiling: heroesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
 					MaxTotalTokens: 200000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 1_800_000}},
 			OutputContract: "text-v1", MaxLoopIterations: 8, Prompt: "Execute one task.",
 		}
-		if authority == rolesource.AuthorityWriteWorkspace {
+		if authority == heroesource.AuthorityWriteWorkspace {
 			document.PermissionCeiling = domain.PermissionAuto
 		}
-		_, _, err := stack.Sources.CreateRole(document)
+		_, _, err := stack.Sources.CreateHero(document)
 		require.NoError(t, err)
-		_, err = stack.Sources.PublishRoleRevision(handle)
+		_, err = stack.Sources.PublishHeroRevision(handle)
 		require.NoError(t, err)
 		return handle + "@v000001"
 	}
-	readerID := newRole("par-reader", rolesource.AuthorityReadOnly, []string{"read", "grep"})
-	writerID := newRole("par-writer", rolesource.AuthorityWriteWorkspace, []string{"read", "grep", "write"})
+	readerID := newHero("par-reader", heroesource.AuthorityReadOnly, []string{"read", "grep"})
+	writerID := newHero("par-writer", heroesource.AuthorityWriteWorkspace, []string{"read", "grep", "write"})
 	testFlowSources, testFlowModels = stack.Sources, stack.ModelRepo
 	return db, project.ID, readerID, writerID
 }
 
 // parallelFlowYAML builds the A1-A3 design graph: a0 dispatcher (reader) ->
-// three independent explore tasks -> terminal. roleRef selects the task class
+// three independent explore tasks -> terminal. heroRef selects the task class
 // (reader/writer), writesBlock adds per-task writes declarations, and
 // parallelismBlock configures the flow-level parallelism section.
-func parallelFlowYAML(id, roleRef, parallelismBlock, writesBlock string) string {
+func parallelFlowYAML(id, heroRef, parallelismBlock, writesBlock string) string {
 	return `schemaVersion: 1
 id: ` + id + `
 inputs:
@@ -90,19 +90,19 @@ budget:
 ` + parallelismBlock + `
 tasks:
   a0:
-    role: par-reader@1
+    hero: par-reader@1
     goal: "Dispatch {inputs.target}"
   a1:
-    role: ` + roleRef + `@1
+    hero: ` + heroRef + `@1
     goal: "Explore option A1 for {inputs.target}"
     depends: [a0]
     ` + writesBlock + `
   a2:
-    role: ` + roleRef + `@1
+    hero: ` + heroRef + `@1
     goal: "Explore option A2 for {inputs.target}"
     depends: [a0]
   a3:
-    role: ` + roleRef + `@1
+    hero: ` + heroRef + `@1
     goal: "Explore option A3 for {inputs.target}"
     depends: [a0]
   accept:
@@ -154,7 +154,7 @@ func (c *controllableChildren) CreateTaskChild(ctx context.Context, parentRunID,
 	// per child (mirrors a real Run's run_budgets row).
 	if _, err := c.db.ExecContext(ctx, `INSERT INTO run_budgets
 		(run_id, consumed_tokens, reserved_at) VALUES (?, 1000, ?)
-		ON CONFLICT(run_id) DO UPDATE SET consumed_tokens=1000`, info.RunID, roleTimeNow()); err != nil {
+		ON CONFLICT(run_id) DO UPDATE SET consumed_tokens=1000`, info.RunID, heroTimeNow()); err != nil {
 		return info, err
 	}
 	c.mu.Lock()
@@ -196,11 +196,11 @@ func (c *controllableChildren) settle(ctx context.Context, info agentflow.ChildI
 		return err
 	}
 	if _, err := c.db.ExecContext(ctx, `UPDATE delegation_item_attempts SET status=?, finished_at=?
-		WHERE child_run_id=? AND status='queued'`, itemStatus, roleTimeNow(), info.RunID); err != nil {
+		WHERE child_run_id=? AND status='queued'`, itemStatus, heroTimeNow(), info.RunID); err != nil {
 		return err
 	}
 	if _, err := c.db.ExecContext(ctx, `UPDATE agent_runs SET status=?, finished_at=?
-		WHERE id=? AND status IN ('queued','running')`, runStatus, roleTimeNow(), info.RunID); err != nil {
+		WHERE id=? AND status IN ('queued','running')`, runStatus, heroTimeNow(), info.RunID); err != nil {
 		return err
 	}
 	c.mu.Lock()
@@ -322,12 +322,12 @@ func TestParallelReadySetDispatchReaders(t *testing.T) {
 	finalRun := waitFlowTerminal(t, flowRuns, run.RunID)
 	t.Logf("READERS final state=%s reason=%s", finalRun.State, finalRun.TerminalReason)
 	assert.Equal(t, domain.FlowStateCompleted, finalRun.State)
-	// Roles are frozen to the reader version for every role node.
+	// Heroes are frozen to the reader version for every hero node.
 	nodes, err := flowRuns.ListNodes(ctx, run.RunID)
 	require.NoError(t, err)
 	for _, n := range nodes {
-		if n.RoleVersionID != "" {
-			assert.Equal(t, readerID, n.RoleVersionID)
+		if n.HeroVersionID != "" {
+			assert.Equal(t, readerID, n.HeroVersionID)
 			assert.True(t, n.ReadOnly, n.Handle)
 		}
 	}
@@ -412,7 +412,7 @@ func TestParallelDisjointWriters(t *testing.T) {
 	require.NoError(t, err)
 	for _, n := range nodes {
 		if n.Handle == "a2" {
-			assert.Equal(t, writerID, n.RoleVersionID)
+			assert.Equal(t, writerID, n.HeroVersionID)
 			assert.False(t, n.ReadOnly)
 			assert.Equal(t, []string{".docs/plan/par-disjoint-a2.md"}, n.Writes)
 		}
@@ -554,7 +554,7 @@ func TestParallelRecoveryRedispatchesAllInFlight(t *testing.T) {
 	nodes, err := flowRuns.ListNodes(ctx, run.RunID)
 	require.NoError(t, err)
 	for _, n := range nodes {
-		if n.RoleVersionID != "" {
+		if n.HeroVersionID != "" {
 			assert.Equal(t, domain.FlowNodeCompleted, n.TerminalState, n.Handle)
 			assert.NotEmpty(t, n.OutputRef, n.Handle)
 		}

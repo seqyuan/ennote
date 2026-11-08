@@ -39,78 +39,78 @@ type stagedResolver struct {
 	planner *planner
 }
 
-func (r *stagedResolver) ResolveRole(ctx context.Context, roleRef string) (*agentflow.RoleInfo, error) {
-	ref := strings.TrimSpace(roleRef)
+func (r *stagedResolver) ResolveHero(ctx context.Context, heroRef string) (*agentflow.HeroInfo, error) {
+	ref := strings.TrimSpace(heroRef)
 	handle, versionText, hasVersion := strings.Cut(ref, "@")
 	handle = strings.TrimSpace(handle)
 	if handle == "" {
-		return nil, fmt.Errorf("role reference %q has an empty handle", roleRef)
+		return nil, fmt.Errorf("hero reference %q has an empty handle", heroRef)
 	}
 	scope, id, scoped := strings.Cut(handle, "/")
 	if !scoped {
 		id = handle
 	}
 	if scoped && scope != "local" && scope != "global" {
-		return nil, fmt.Errorf("role reference %q must use local/ or global/", roleRef)
+		return nil, fmt.Errorf("hero reference %q must use local/ or global/", heroRef)
 	}
 	if !hasVersion {
-		if document, declared := r.planner.roleDocs[id]; declared {
-			entry, _ := r.planner.roleEntry(id)
-			if scoped && scope == "local" && entry.Scope != agentpack.RoleScopeFlow {
+		if document, declared := r.planner.heroDocs[id]; declared {
+			entry, _ := r.planner.heroEntry(id)
+			if scoped && scope == "local" && entry.Scope != agentpack.HeroScopeFlow {
 				return nil, fmt.Errorf("local/%s is declared with scope: %s", id, entry.Scope)
 			}
-			if scoped && scope == "global" && entry.Scope != agentpack.RoleScopeGlobal {
+			if scoped && scope == "global" && entry.Scope != agentpack.HeroScopeGlobal {
 				return nil, fmt.Errorf("global/%s is declared with scope: %s", id, entry.Scope)
 			}
-			definition, diagnostics := (&store.RoleDiscovery{Models: r.planner.service.Models}).ResolveDocument(ctx, document)
+			definition, diagnostics := (&store.HeroDiscovery{Models: r.planner.service.Models}).ResolveDocument(ctx, document)
 			if definition == nil {
 				if len(diagnostics) > 0 {
-					return nil, fmt.Errorf("role %q: %s", id, diagnostics[0].Message)
+					return nil, fmt.Errorf("hero %q: %s", id, diagnostics[0].Message)
 				}
-				return nil, fmt.Errorf("role %q failed to resolve", id)
+				return nil, fmt.Errorf("hero %q failed to resolve", id)
 			}
-			return &agentflow.RoleInfo{Definition: *definition}, nil
+			return &agentflow.HeroInfo{Definition: *definition}, nil
 		}
 	}
 	if strings.HasPrefix(handle, "local/") {
-		return nil, fmt.Errorf("flow-local role %q is not declared by the pack", handle)
+		return nil, fmt.Errorf("flow-local hero %q is not declared by the pack", handle)
 	}
 	globalHandle := id
 	if hasVersion {
-		revisions, err := r.planner.service.Sources.ListRoleRevisions(globalHandle)
+		revisions, err := r.planner.service.Sources.ListHeroRevisions(globalHandle)
 		if err != nil {
 			return nil, err
 		}
 		for _, revision := range revisions {
 			if revision.ID() == strings.TrimSpace(versionText) || strconv.Itoa(revision.Version) == strings.TrimSpace(versionText) {
-				document, _, err := r.planner.service.Sources.ReadRoleRevision(globalHandle, revision.ID())
+				document, _, err := r.planner.service.Sources.ReadHeroRevision(globalHandle, revision.ID())
 				if err != nil {
 					return nil, err
 				}
-				definition, diagnostics := (&store.RoleDiscovery{Models: r.planner.service.Models}).ResolveDocument(ctx, document)
+				definition, diagnostics := (&store.HeroDiscovery{Models: r.planner.service.Models}).ResolveDocument(ctx, document)
 				if definition == nil {
 					if len(diagnostics) > 0 {
-						return nil, fmt.Errorf("role %q: %s", globalHandle, diagnostics[0].Message)
+						return nil, fmt.Errorf("hero %q: %s", globalHandle, diagnostics[0].Message)
 					}
-					return nil, fmt.Errorf("role %q failed to resolve", globalHandle)
+					return nil, fmt.Errorf("hero %q failed to resolve", globalHandle)
 				}
-				return &agentflow.RoleInfo{Definition: *definition}, nil
+				return &agentflow.HeroInfo{Definition: *definition}, nil
 			}
 		}
-		return nil, fmt.Errorf("role %q has no published version %q", globalHandle, versionText)
+		return nil, fmt.Errorf("hero %q has no published version %q", globalHandle, versionText)
 	}
-	document, _, err := r.planner.service.Sources.LatestRoleRevision(globalHandle)
+	document, _, err := r.planner.service.Sources.LatestHeroRevision(globalHandle)
 	if err != nil {
-		return nil, fmt.Errorf("role %q is not installed: %w", globalHandle, err)
+		return nil, fmt.Errorf("hero %q is not installed: %w", globalHandle, err)
 	}
-	definition, diagnostics := (&store.RoleDiscovery{Models: r.planner.service.Models}).ResolveDocument(ctx, document)
+	definition, diagnostics := (&store.HeroDiscovery{Models: r.planner.service.Models}).ResolveDocument(ctx, document)
 	if definition == nil {
 		if len(diagnostics) > 0 {
-			return nil, fmt.Errorf("role %q: %s", globalHandle, diagnostics[0].Message)
+			return nil, fmt.Errorf("hero %q: %s", globalHandle, diagnostics[0].Message)
 		}
-		return nil, fmt.Errorf("role %q failed to resolve", globalHandle)
+		return nil, fmt.Errorf("hero %q failed to resolve", globalHandle)
 	}
-	return &agentflow.RoleInfo{Definition: *definition}, nil
+	return &agentflow.HeroInfo{Definition: *definition}, nil
 }
 
 func (r *stagedResolver) KnownSkill(_ context.Context, name string) bool {

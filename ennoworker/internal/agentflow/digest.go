@@ -14,7 +14,7 @@ const configDigestSchemaTag = "agentflow-config-v1"
 
 // ConfigDigest computes the immutable version digest of a flow definition.
 // It commits the normalized definition JSON (schemaVersion + definition text,
-// including role references, skills, check commands, and the flow budget) with
+// including hero references, skills, check commands, and the flow budget) with
 // a schema tag. The digest is reproducible from the authoring YAML alone so
 // candidate discovery can reuse an existing immutable version for identical
 // project files.

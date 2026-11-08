@@ -17,9 +17,9 @@ const (
 const (
 	WarningUnsignedPack        = "unsigned_pack"
 	WarningSignatureUnverified = "signature_unverified"
-	WarningRoleOnlyPack        = "role_only_pack"
+	WarningHeroOnlyPack        = "hero_only_pack"
 	WarningFlowOnlyPack        = "flow_only_pack"
-	WarningFlowRefsGlobalRole  = "flow_refs_global_role"
+	WarningFlowRefsGlobalHero  = "flow_refs_global_hero"
 	WarningFlowRefsGlobalSkill = "flow_refs_global_skill"
 	WarningExternalSkillRef    = "external_skill_ref"
 	WarningExternalMCPRef      = "external_mcp_ref"
@@ -30,7 +30,7 @@ const (
 // Document kinds echoed back by includeDocuments.
 const (
 	DocumentFlow  = "flow"
-	DocumentRole  = "role"
+	DocumentHero  = "hero"
 	DocumentSkill = "skill"
 )
 
@@ -66,7 +66,7 @@ type Result struct {
 	Signature          Signature          `json:"signature"`
 	Signed             bool               `json:"signed"`
 	Flows              []FlowSummary      `json:"flows"`
-	Roles              []RoleSummary      `json:"roles"`
+	Heroes              []HeroSummary      `json:"heroes"`
 	Skills             []SkillSummary     `json:"skills"`
 	MCP                []MCPSummary       `json:"mcp"`
 	Requires           []string           `json:"requires"`
@@ -108,12 +108,12 @@ type FlowSummary struct {
 	Path string `json:"path"`
 	// Format is always reported: format: flow is a full Agent Flow definition
 	// (check tasks, fan-out, terminal, next routing) while format: graph is the
-	// legacy graphsource.Document that can only express role tasks. S1 never
+	// legacy graphsource.Document that can only express hero tasks. S1 never
 	// downgrades one into the other.
 	Format         string   `json:"format"`
 	TaskCount      int      `json:"taskCount"`
 	EntryTask      string   `json:"entryTask,omitempty"`
-	Roles          []string `json:"roles"`
+	Heroes          []string `json:"heroes"`
 	CheckTasks     int      `json:"checkTasks"`
 	FanOutTasks    int      `json:"fanOutTasks"`
 	MaxTotalTokens int64    `json:"maxTotalTokens"`
@@ -121,8 +121,8 @@ type FlowSummary struct {
 	SourceDigest   string   `json:"sourceDigest"`
 }
 
-// RoleSummary is the structural summary of one pack role.
-type RoleSummary struct {
+// HeroSummary is the structural summary of one pack hero.
+type HeroSummary struct {
 	Handle            string   `json:"handle"`
 	Path              string   `json:"path"`
 	Scope             string   `json:"scope"`
@@ -159,10 +159,10 @@ type MCPSummary struct {
 // and write, derived structurally from the manifest and flow sources.
 type CapabilityEnvelope struct {
 	FlowCount          int           `json:"flowCount"`
-	RoleCount          int           `json:"roleCount"`
+	HeroCount          int           `json:"heroCount"`
 	SkillCount         int           `json:"skillCount"`
 	TaskCount          int           `json:"taskCount"`
-	Roles              []string      `json:"roles"`
+	Heroes              []string      `json:"heroes"`
 	Skills             []string      `json:"skills"`
 	RequiresMCP        []string      `json:"requiresMcp"`
 	ModelRequirements  ModelEnvelope `json:"modelRequirements"`
@@ -176,7 +176,7 @@ type CapabilityEnvelope struct {
 type ModelEnvelope struct {
 	Capabilities     []string            `json:"capabilities"`
 	MinContextWindow int64               `json:"minContextWindow"`
-	PerRole          map[string][]string `json:"perRole"`
+	PerHero          map[string][]string `json:"perHero"`
 }
 
 // FileSummary is one payload file identity.

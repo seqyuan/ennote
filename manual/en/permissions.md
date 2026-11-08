@@ -39,17 +39,17 @@ parentheses is what the configuration stores.
 Switch it any time from the run-configuration row under the composer. Switching affects later tool
 calls; it never replays what already happened.
 
-## A Role's permission ceiling
+## A Hero's permission ceiling
 
-When work is delegated to a Role, the child Run gets **the stricter of the two**:
+When work is delegated to a Hero, the child Run gets **the stricter of the two**:
 
 ```
-child permission = min(parent Run's mode, the Role's permission ceiling)
+child permission = min(parent Run's mode, the Hero's permission ceiling)
 ```
 
-So a parent in Ask (`ask`) delegating to an Auto (`auto`) Role still runs at `ask`, and a Read-only
-(`discuss`) Role stays read-only even under an `auto` parent. The Permission ceiling dropdown in the
-Role editor is these same three values, ordered by strictness.
+So a parent in Ask (`ask`) delegating to an Auto (`auto`) Hero still runs at `ask`, and a Read-only
+(`discuss`) Hero stays read-only even under an `auto` parent. The Permission ceiling dropdown in the
+Hero editor is these same three values, ordered by strictness.
 
 When a mode cannot be expressed as a built-in profile (a restricted policy, or one this build does not
 know), the child is pinned to the strictest built-in mode rather than inheriting the looser side: when

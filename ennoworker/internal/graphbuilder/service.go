@@ -76,7 +76,7 @@ func (s *Service) GetThread(ctx context.Context, graphID string) (*Thread, error
 	}
 	thread := &Thread{GraphID: graphID, Messages: []Message{}}
 	_ = s.DB.QueryRowContext(ctx, `SELECT model_profile_id FROM graph_builder_threads WHERE graph_id=?`, graphID).Scan(&thread.ModelProfileID)
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,ordinal,role,content,created_at FROM graph_builder_messages WHERE graph_id=? ORDER BY ordinal`, graphID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,ordinal,hero,content,created_at FROM graph_builder_messages WHERE graph_id=? ORDER BY ordinal`, graphID)
 	if err != nil {
 		return nil, err
 	}
@@ -227,10 +227,10 @@ func cloneDocument(document *graphsource.Document) *graphsource.Document {
 	return &copy
 }
 
-func (s *Service) appendMessage(ctx context.Context, graphID, role, content string, created time.Time) error {
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO graph_builder_messages(id,graph_id,ordinal,role,content,created_at)
+func (s *Service) appendMessage(ctx context.Context, graphID, hero, content string, created time.Time) error {
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO graph_builder_messages(id,graph_id,ordinal,hero,content,created_at)
 		VALUES(?,?,COALESCE((SELECT MAX(ordinal)+1 FROM graph_builder_messages WHERE graph_id=?),1),?,?,?)`,
-		uuid.NewString(), graphID, graphID, role, content, created.Format(time.RFC3339Nano))
+		uuid.NewString(), graphID, graphID, hero, content, created.Format(time.RFC3339Nano))
 	return err
 }
 

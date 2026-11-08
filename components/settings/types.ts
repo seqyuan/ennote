@@ -6,7 +6,7 @@ export type DiscoveredModel = components["schemas"]["DiscoveredModel"];
 export type ModelProfile = components["schemas"]["ModelProfile"];
 export type PolicyProfile = components["schemas"]["PolicyProfile"];
 export type Session = components["schemas"]["Session"];
-export type RoleSummary = components["schemas"]["RoleSummary"];
+export type HeroSummary = components["schemas"]["HeroSummary"];
 export type MCPServerProfile = components["schemas"]["MCPServerProfile"];
 export type MCPServerProfileVersion = components["schemas"]["MCPServerProfileVersion"];
 

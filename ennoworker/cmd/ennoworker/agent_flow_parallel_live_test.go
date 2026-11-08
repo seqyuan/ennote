@@ -12,7 +12,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphrun"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/runs"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/seqyuan/ennote/ennoworker/internal/workspace"
@@ -25,7 +25,7 @@ import (
 //
 //	a0 (dispatcher, reader) runs first; a1/a2/a3 (three independent readers)
 //	dispatch concurrently once a0 completes; the flow converges when all four
-//	role tasks settle.
+//	hero tasks settle.
 //
 // It requires ENNOTE_LIVE_BASE_URL / ENNOTE_LIVE_API_KEY / ENNOTE_LIVE_MODEL
 // (same contract as the other live qualifications).
@@ -37,27 +37,27 @@ func TestLiveAgentFlowParallelConvergence(t *testing.T) {
 	project := stack.Project
 	session := stack.Session
 
-	// ——— file-native global Role (reader) ———
-	role := &rolesource.Document{
+	// ——— file-native global Hero (reader) ———
+	hero := &heroesource.Document{
 		SchemaVersion: 1, Handle: "par-reader", Name: "Parallel Reader",
 		Description: "Read-only workspace inspector.", Positioning: "Independent",
 		Icon: "bot", Color: "neutral",
-		Model:  rolesource.ModelBinding{Ref: stack.ModelID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills: []rolesource.SkillBinding{}, Authority: rolesource.AuthorityReadOnly,
+		Model:  heroesource.ModelBinding{Ref: stack.ModelID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills: []heroesource.SkillBinding{}, Authority: heroesource.AuthorityReadOnly,
 		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read", "ls", "grep", "find"},
-		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextTask,
-			AllowedModes: []domain.RoleContextMode{domain.RoleContextTask}, OwnExecutionContinuity: domain.RoleContinuityNone},
-		Delegation: rolesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+		Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextTask,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextTask}, OwnExecutionContinuity: domain.HeroContinuityNone},
+		Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
 			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single", "parallel"},
 			MaxInvocationsPerParentRun: 16, MaxConcurrentInstances: 16,
-			BudgetCeiling: rolesource.DelegationBudgetCeiling{MaxModelCalls: 8, MaxToolCalls: 16,
+			BudgetCeiling: heroesource.DelegationBudgetCeiling{MaxModelCalls: 8, MaxToolCalls: 16,
 				MaxTotalTokens: 40000, MaxOutputTokens: 4096, MaxCostUSDMicros: 0, MaxWallTimeMS: 180000}},
 		OutputContract: "text-v1", MaxLoopIterations: 8,
 		Prompt: "You are a read-only workspace inspector. Use read, ls, grep, and find to answer the task. Be concise. End by calling submit_result with a structured result.",
 	}
-	_, _, err := stack.Sources.CreateRole(role)
+	_, _, err := stack.Sources.CreateHero(hero)
 	require.NoError(t, err)
-	_, err = stack.Sources.PublishRoleRevision(role.Handle)
+	_, err = stack.Sources.PublishHeroRevision(hero.Handle)
 	require.NoError(t, err)
 
 	// ——— file-native Graph: a0 -> a1/a2/a3 (parallel readers) ———
@@ -65,10 +65,10 @@ func TestLiveAgentFlowParallelConvergence(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = stack.Sources.UpdateGraph("par-readers", digest, func(d *graphsource.Document) error {
 		d.Tasks = map[string]graphsource.Task{
-			"a0": {Name: "dispatcher", Role: "global/par-reader", Goal: "Inspect /workspace and report its top-level contents."},
-			"a1": {Name: "explore-a1", Role: "global/par-reader", Goal: "Inspect /workspace and report its top-level contents."},
-			"a2": {Name: "explore-a2", Role: "global/par-reader", Goal: "Inspect /workspace and report its top-level contents."},
-			"a3": {Name: "explore-a3", Role: "global/par-reader", Goal: "Inspect /workspace and report its top-level contents."},
+			"a0": {Name: "dispatcher", Hero: "global/par-reader", Goal: "Inspect /workspace and report its top-level contents."},
+			"a1": {Name: "explore-a1", Hero: "global/par-reader", Goal: "Inspect /workspace and report its top-level contents."},
+			"a2": {Name: "explore-a2", Hero: "global/par-reader", Goal: "Inspect /workspace and report its top-level contents."},
+			"a3": {Name: "explore-a3", Hero: "global/par-reader", Goal: "Inspect /workspace and report its top-level contents."},
 		}
 		d.Graph = map[string][]string{
 			"a0": {},
@@ -85,7 +85,7 @@ func TestLiveAgentFlowParallelConvergence(t *testing.T) {
 	// ——— coordinator + executor router ———
 	hub := events.NewHub()
 	runTemplate := &store.RunRepo{Publisher: hub, Providers: stack.Providers, Models: stack.ModelRepo,
-		Policies: stack.Policies, RoleSources: stack.Sources}
+		Policies: stack.Policies, HeroSources: stack.Sources}
 	routedRuns := &store.RoutedRunRepo{Sessions: stack.Sessions, Template: runTemplate}
 	executorRouter := &sessionExecutorRouter{sessions: stack.Sessions}
 	executorRouter.build = func(db *sql.DB, sessionPath string) (*agentExecutor, error) {
@@ -98,7 +98,7 @@ func TestLiveAgentFlowParallelConvergence(t *testing.T) {
 		emptySkills := t.TempDir()
 		return &agentExecutor{
 			db: db, writer: writer, homeDir: t.TempDir(), runs: &store.RunRepo{DB: db, Publisher: hub,
-				Providers: stack.Providers, Models: stack.ModelRepo, Policies: stack.Policies, RoleSources: stack.Sources},
+				Providers: stack.Providers, Models: stack.ModelRepo, Policies: stack.Policies, HeroSources: stack.Sources},
 			calls: callRepo, sessionDB: &store.SessionRepo{DB: db}, msgRepo: &store.MessageRepo{DB: db},
 			projects:  &store.ProjectRepo{Files: stack.Projects},
 			skillRepo: &store.SkillSnapshotRepo{DB: db}, skillsDir: emptySkills,
@@ -153,7 +153,7 @@ func TestLiveAgentFlowParallelConvergence(t *testing.T) {
 		}
 		assert.Equal(t, domain.FlowNodeCompleted, n.TerminalState, "node %s", n.Handle)
 	}
-	assert.Equal(t, 4, completed, "all four role tasks must complete")
+	assert.Equal(t, 4, completed, "all four hero tasks must complete")
 
 	// ——— usage recorded for the real Provider ———
 	var usageCount int

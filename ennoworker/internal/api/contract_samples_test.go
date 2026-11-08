@@ -391,7 +391,7 @@ func TestContractSamples(t *testing.T) {
 	// creation shares the host picker's confinement.
 	hostPath := hostWorkspace(t, server, "contract-workspace")
 
-	// The Authoring surface (Roles, Graphs) reads the file-native source store, so
+	// The Authoring surface (Heroes, Graphs) reads the file-native source store, so
 	// the fixture needs one before those routes can answer at all.
 	server.GlobalSources = &globalsource.Store{HomeDir: t.TempDir()}
 
@@ -436,7 +436,7 @@ func TestContractSamples(t *testing.T) {
 	// Authoring surfaces: a Portable Role document and the Graph draft it can be
 	// referenced from. Both are the largest hand-shaped JSON the Worker answers
 	// outside chat, and neither had a sample.
-	roleDocument := map[string]any{
+	heroDocument := map[string]any{
 		"schemaVersion": 1, "handle": "reviewer", "name": "Reviewer",
 		"description": "reviews", "positioning": "review", "icon": "user", "color": "blue",
 		"model": map[string]any{
@@ -462,15 +462,15 @@ func TestContractSamples(t *testing.T) {
 		"prompt": "You review a diff and report what is wrong with it.",
 	}
 	samples.record(contractSampleRequest{
-		method: http.MethodPost, route: "/v1/global-roles", auth: true,
-		body: map[string]any{"document": roleDocument}, status: http.StatusCreated,
+		method: http.MethodPost, route: "/v1/global-heroes", auth: true,
+		body: map[string]any{"document": heroDocument}, status: http.StatusCreated,
 	})
 	samples.record(contractSampleRequest{
-		method: http.MethodGet, route: "/v1/global-roles", auth: true, status: http.StatusOK,
+		method: http.MethodGet, route: "/v1/global-heroes", auth: true, status: http.StatusOK,
 	})
 	samples.record(contractSampleRequest{
-		method: http.MethodGet, route: "/v1/global-roles/{roleID}", auth: true,
-		values: map[string]string{"roleID": "reviewer"}, status: http.StatusOK,
+		method: http.MethodGet, route: "/v1/global-heroes/{heroID}", auth: true,
+		values: map[string]string{"heroID": "reviewer"}, status: http.StatusOK,
 	})
 	samples.record(contractSampleRequest{
 		method: http.MethodPost, route: "/v1/graphs", auth: true,

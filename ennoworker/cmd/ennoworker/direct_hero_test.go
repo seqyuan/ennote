@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRolePreloadPromptInjectsFrozenSkillPrompts(t *testing.T) {
+func TestHeroPreloadPromptInjectsFrozenSkillPrompts(t *testing.T) {
 	skillsDir := t.TempDir()
 	skillDir := filepath.Join(skillsDir, "review-guard")
 	require.NoError(t, os.MkdirAll(skillDir, 0o700))
@@ -22,35 +22,35 @@ func TestRolePreloadPromptInjectsFrozenSkillPrompts(t *testing.T) {
 		[]byte("REVIEW_GUARD_PRELOAD: only report evidence-backed conclusions."), 0o600))
 
 	executor := &agentExecutor{skillsDir: skillsDir}
-	role := &domain.FrozenRoleExecution{
-		Skills: domain.RoleSkills{Entries: []domain.RoleSkillEntry{
-			{SkillID: "review-guard", Mode: domain.RoleSkillPreload},
-			{SkillID: "missing-skill", Mode: domain.RoleSkillPreload},
+	hero := &domain.FrozenHeroExecution{
+		Skills: domain.HeroSkills{Entries: []domain.HeroSkillEntry{
+			{SkillID: "review-guard", Mode: domain.HeroSkillPreload},
+			{SkillID: "missing-skill", Mode: domain.HeroSkillPreload},
 		}},
 	}
-	fragment, err := executor.rolePreloadPrompt(role)
+	fragment, err := executor.heroPreloadPrompt(hero)
 	require.NoError(t, err)
 	assert.Contains(t, fragment, "<preloaded_skill id=\"review-guard\">")
 	assert.Contains(t, fragment, "REVIEW_GUARD_PRELOAD")
 	assert.NotContains(t, fragment, "missing-skill")
 }
 
-func TestRolePreloadPromptSkipsAvailableAndNoSkillRoles(t *testing.T) {
+func TestHeroPreloadPromptSkipsAvailableAndNoSkillHeroes(t *testing.T) {
 	executor := &agentExecutor{}
-	prompt, err := executor.rolePreloadPrompt(nil)
+	prompt, err := executor.heroPreloadPrompt(nil)
 	require.NoError(t, err)
 	assert.Empty(t, prompt)
-	available := &domain.FrozenRoleExecution{Skills: domain.RoleSkills{
-		Entries: []domain.RoleSkillEntry{{SkillID: "x", Mode: domain.RoleSkillAvailable}}}}
-	prompt, err = executor.rolePreloadPrompt(available)
+	available := &domain.FrozenHeroExecution{Skills: domain.HeroSkills{
+		Entries: []domain.HeroSkillEntry{{SkillID: "x", Mode: domain.HeroSkillAvailable}}}}
+	prompt, err = executor.heroPreloadPrompt(available)
 	require.NoError(t, err)
 	assert.Empty(t, prompt)
 }
 
-func TestTaskPreloadPromptAddsExplicitSkillsWithoutDuplicatingRolePreloads(t *testing.T) {
+func TestTaskPreloadPromptAddsExplicitSkillsWithoutDuplicatingHeroPreloads(t *testing.T) {
 	skillsDir := t.TempDir()
 	for id, body := range map[string]string{
-		"role-skill": "ROLE_SKILL_BODY",
+		"hero-skill": "ROLE_SKILL_BODY",
 		"task-skill": "TASK_SKILL_BODY",
 	} {
 		dir := filepath.Join(skillsDir, id)
@@ -60,23 +60,23 @@ func TestTaskPreloadPromptAddsExplicitSkillsWithoutDuplicatingRolePreloads(t *te
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o600))
 	}
 	executor := &agentExecutor{skillsDir: skillsDir}
-	role := &domain.FrozenRoleExecution{Skills: domain.RoleSkills{Entries: []domain.RoleSkillEntry{
-		{SkillID: "role-skill", Mode: domain.RoleSkillPreload},
+	hero := &domain.FrozenHeroExecution{Skills: domain.HeroSkills{Entries: []domain.HeroSkillEntry{
+		{SkillID: "hero-skill", Mode: domain.HeroSkillPreload},
 	}}}
 
-	fragment, err := executor.taskPreloadPrompt(role, domain.FrozenSkillRefs{
-		{ID: "role-skill"}, {ID: "task-skill"}, {ID: "task-skill"},
+	fragment, err := executor.taskPreloadPrompt(hero, domain.FrozenSkillRefs{
+		{ID: "hero-skill"}, {ID: "task-skill"}, {ID: "task-skill"},
 	})
 	require.NoError(t, err)
-	assert.NotContains(t, fragment, "ROLE_SKILL_BODY", "Role preloads are rendered by rolePreloadPrompt")
+	assert.NotContains(t, fragment, "ROLE_SKILL_BODY", "Role preloads are rendered by heroPreloadPrompt")
 	assert.Equal(t, 1, strings.Count(fragment, "TASK_SKILL_BODY"))
 
-	_, err = executor.taskPreloadPrompt(role, domain.FrozenSkillRefs{{ID: "missing-task-skill"}})
+	_, err = executor.taskPreloadPrompt(hero, domain.FrozenSkillRefs{{ID: "missing-task-skill"}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing-task-skill")
 }
 
-func TestRoleCatalogAcceptsSkillsWhenKnownCatalogIsWired(t *testing.T) {
+func TestHeroCatalogAcceptsSkillsWhenKnownCatalogIsWired(t *testing.T) {
 	// Regression: production wires KnownSkills from skills.Discover; without it
 	// every Skill reference fails with skill_catalog_unavailable.
 	skillsDir := t.TempDir()

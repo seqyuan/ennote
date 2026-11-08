@@ -11,8 +11,8 @@
 
 import type { WorkerOperationResponse } from "@/lib/contract-samples";
 
-/** createGlobalRole answering 201. */
-export const createGlobalRole201: WorkerOperationResponse<"createGlobalRole", 201> = {
+/** createGlobalHero answering 201. */
+export const createGlobalHero201: WorkerOperationResponse<"createGlobalHero", 201> = {
   "data": {
     "digest": "sha256:684b6f74a10205543d577f85a4bc64d0d11b1de7d5fdaf092929b064e9ddeb34",
     "document": {
@@ -124,8 +124,8 @@ export const createSession201: WorkerOperationResponse<"createSession", 201> = {
   }
 };
 
-/** getGlobalRole answering 200. */
-export const getGlobalRole200: WorkerOperationResponse<"getGlobalRole", 200> = {
+/** getGlobalHero answering 200. */
+export const getGlobalHero200: WorkerOperationResponse<"getGlobalHero", 200> = {
   "data": {
     "digest": "sha256:684b6f74a10205543d577f85a4bc64d0d11b1de7d5fdaf092929b064e9ddeb34",
     "document": {
@@ -284,8 +284,8 @@ export const listContextCompactions200: WorkerOperationResponse<"listContextComp
   "data": []
 };
 
-/** listGlobalRoles answering 200. */
-export const listGlobalRoles200: WorkerOperationResponse<"listGlobalRoles", 200> = {
+/** listGlobalHeroes answering 200. */
+export const listGlobalHeroes200: WorkerOperationResponse<"listGlobalHeroes", 200> = {
   "data": [
     {
       "digest": "sha256:684b6f74a10205543d577f85a4bc64d0d11b1de7d5fdaf092929b064e9ddeb34",

@@ -16,7 +16,7 @@ func TestAttemptImmutabilityTriggers(t *testing.T) {
 		VALUES('g',?,'tc','single','running',?)`,
 		submission.Run.ID, now)
 	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO delegation_items(id,group_id,name,role_version_id,assignment_json,status,ordinal,created_at)
+	_, err = db.Exec(`INSERT INTO delegation_items(id,group_id,name,hero_version_id,assignment_json,status,ordinal,created_at)
 		VALUES('i-ok','g','explore','builtin-workspace-explorer-v3','{}','running',0,?)`, now)
 	require.NoError(t, err)
 	_, err = db.Exec(`INSERT INTO delegation_item_attempts(id,item_id,generation,retry_of_attempt_id,child_run_id,

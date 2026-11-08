@@ -5,7 +5,7 @@
 //   - a Role-only pack: every Role is installed once as a Worker-global Role and
 //     published as an immutable Role revision; and
 //   - a pack Flow with format: graph: the flow becomes an ordinary file-native
-//     Graph draft (agents/graphs/<id>/graph.yaml) plus its Graph-private Roles
+//     Graph draft (agents/graphs/<id>/graph.yaml) plus its Graph-private Heroes
 //     and Skills.
 //
 // A full Agent Flow definition (format: flow) is refused: the Worker has no
@@ -44,8 +44,8 @@ const (
 	CodeVersionConflict = "pack_version_conflict"
 	// CodeFlowIDConflict reports an installed Graph id collision or a bad rename.
 	CodeFlowIDConflict = "pack_flow_id_conflict"
-	// CodeRoleHandleConflict reports a Role handle collision or a bad rename.
-	CodeRoleHandleConflict = "pack_role_handle_conflict"
+	// CodeHeroHandleConflict reports a Role handle collision or a bad rename.
+	CodeHeroHandleConflict = "pack_hero_handle_conflict"
 	// CodeSkillConflict reports a Skill id collision.
 	CodeSkillConflict = "pack_skill_conflict"
 	// CodeModelUnresolved reports a Role/Task model ref the catalog cannot resolve.

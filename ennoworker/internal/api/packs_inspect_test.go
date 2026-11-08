@@ -16,7 +16,7 @@ import (
 )
 
 // packFixtureFiles is the review fixture pack used by the API tests: one graph
-// flow, one flow-scoped role, one vendored skill, one external skill ref.
+// flow, one flow-scoped hero, one vendored skill, one external skill ref.
 func packFixtureFiles() map[string]string {
 	return map[string]string{
 		"pack.yaml": `schema_version: 1
@@ -31,10 +31,10 @@ flows:
   - id: qc-review
     path: flows/qc-review/graph.yaml
     format: graph
-    roles: [qc-reviewer]
-roles:
+    heroes: [qc-reviewer]
+heroes:
   - handle: qc-reviewer
-    path: roles/qc-reviewer/role.md
+    path: heroes/qc-reviewer/hero.md
     scope: flow
 skills:
   - id: cell-qc-tables
@@ -46,12 +46,12 @@ name: QC Review
 tasks:
   load:
     name: Load
-    role: local/qc-reviewer
+    hero: local/qc-reviewer
     goal: Load the samplesheet
 graph:
   load: []
 `,
-		"roles/qc-reviewer/role.md": `---
+		"heroes/qc-reviewer/hero.md": `---
 schemaVersion: 1
 handle: qc-reviewer
 name: QC Reviewer
@@ -244,20 +244,20 @@ func TestInspectPackArchiveWithExpectedDigest(t *testing.T) {
 	assert.Contains(t, mismatched.Body.String(), agentpack.CodePackDigestMismatch)
 }
 
-func TestInspectPackRoleOnlyAndFlowOnly(t *testing.T) {
+func TestInspectPackHeroOnlyAndFlowOnly(t *testing.T) {
 	server, handler := packServer(t)
 
-	roleOnly := map[string]string{
+	heroOnly := map[string]string{
 		"pack.yaml": `schema_version: 1
 id: seqyuan/reviewer
 name: Reviewer
 version: 0.1.0
-roles:
+heroes:
   - handle: reviewer
-    path: roles/reviewer/role.md
+    path: heroes/reviewer/hero.md
     scope: global
 `,
-		"roles/reviewer/role.md": `---
+		"heroes/reviewer/hero.md": `---
 schemaVersion: 1
 handle: reviewer
 name: Reviewer
@@ -268,14 +268,14 @@ authority: read_only
 Review the incoming artifact.
 `,
 	}
-	roleRoot := writePackFixture(t, filepath.Join(server.HostHome, "role-only"), roleOnly)
-	response := inspectRequest(t, handler, map[string]any{"source": map[string]any{"kind": "path", "path": roleRoot}})
+	heroRoot := writePackFixture(t, filepath.Join(server.HostHome, "hero-only"), heroOnly)
+	response := inspectRequest(t, handler, map[string]any{"source": map[string]any{"kind": "path", "path": heroRoot}})
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	var roleResult agentpack.Result
-	decodeData(t, response, &roleResult)
-	assert.Empty(t, roleResult.Flows)
-	require.Len(t, roleResult.Roles, 1)
-	assert.Equal(t, agentpack.RoleScopeGlobal, roleResult.Roles[0].Scope)
+	var heroResult agentpack.Result
+	decodeData(t, response, &heroResult)
+	assert.Empty(t, heroResult.Flows)
+	require.Len(t, heroResult.Heroes, 1)
+	assert.Equal(t, agentpack.HeroScopeGlobal, heroResult.Heroes[0].Scope)
 
 	flowOnly := map[string]string{
 		"pack.yaml": `schema_version: 1
@@ -293,7 +293,7 @@ budget:
   max_total_tokens: 1000
 tasks:
   load:
-    role: qc-reviewer
+    hero: qc-reviewer
     goal: Load the samplesheet
 `,
 	}
@@ -302,7 +302,7 @@ tasks:
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	var flowResult agentpack.Result
 	decodeData(t, response, &flowResult)
-	assert.Empty(t, flowResult.Roles)
+	assert.Empty(t, flowResult.Heroes)
 	require.Len(t, flowResult.Flows, 1)
 	assert.Equal(t, agentpack.FlowFormatFlow, flowResult.Flows[0].Format)
 	assert.Equal(t, int64(1000), flowResult.Flows[0].MaxTotalTokens)
@@ -311,7 +311,7 @@ tasks:
 func TestInspectPackValidationFailures(t *testing.T) {
 	server, handler := packServer(t)
 	schema2 := packFixtureFiles()
-	schema2["pack.yaml"] = "schema_version: 2\nid: seqyuan/cell-qc-review\nname: Cell QC\nversion: 1.0.0\nflows: []\nroles: []\n"
+	schema2["pack.yaml"] = "schema_version: 2\nid: seqyuan/cell-qc-review\nname: Cell QC\nversion: 1.0.0\nflows: []\nheroes: []\n"
 	root := writePackFixture(t, filepath.Join(server.HostHome, "schema-2"), schema2)
 	response := inspectRequest(t, handler, map[string]any{"source": map[string]any{"kind": "path", "path": root}})
 	assert.Equal(t, http.StatusUnprocessableEntity, response.Code)
@@ -357,19 +357,19 @@ func TestInspectPackDeclaresExternalMCPRefs(t *testing.T) {
 	assert.Equal(t, []string{"bio-tools@0.2.0", "pubmed@1"}, mixedResult.CapabilityEnvelope.RequiresMCP)
 	assert.Contains(t, response.Body.String(), agentpack.WarningExternalMCPRef)
 
-	roleOnly := map[string]string{
+	heroOnly := map[string]string{
 		"pack.yaml": `schema_version: 1
 id: seqyuan/reviewer
 name: Reviewer
 version: 0.1.0
-roles:
+heroes:
   - handle: reviewer
-    path: roles/reviewer/role.md
+    path: heroes/reviewer/hero.md
     scope: global
 mcp:
   - ref: pubmed@1
 `,
-		"roles/reviewer/role.md": `---
+		"heroes/reviewer/hero.md": `---
 schemaVersion: 1
 handle: reviewer
 name: Reviewer
@@ -380,13 +380,13 @@ authority: read_only
 Review the incoming artifact.
 `,
 	}
-	roleRoot := writePackFixture(t, filepath.Join(server.HostHome, "role-only-mcp"), roleOnly)
-	response = inspectRequest(t, handler, map[string]any{"source": map[string]any{"kind": "path", "path": roleRoot}})
+	heroRoot := writePackFixture(t, filepath.Join(server.HostHome, "hero-only-mcp"), heroOnly)
+	response = inspectRequest(t, handler, map[string]any{"source": map[string]any{"kind": "path", "path": heroRoot}})
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	var roleResult agentpack.Result
-	decodeData(t, response, &roleResult)
-	assert.Equal(t, []agentpack.MCPSummary{{Ref: "pubmed@1"}}, roleResult.MCP)
-	assert.Equal(t, []string{"pubmed@1"}, roleResult.CapabilityEnvelope.RequiresMCP)
+	var heroResult agentpack.Result
+	decodeData(t, response, &heroResult)
+	assert.Equal(t, []agentpack.MCPSummary{{Ref: "pubmed@1"}}, heroResult.MCP)
+	assert.Equal(t, []string{"pubmed@1"}, heroResult.CapabilityEnvelope.RequiresMCP)
 
 	// Inline MCP declarations are still rejected, not silently dropped.
 	inline := packFixtureFiles()

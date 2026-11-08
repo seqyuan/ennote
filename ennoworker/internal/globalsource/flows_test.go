@@ -7,23 +7,23 @@ import (
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func flowRoleDocument(handle, prompt string) *rolesource.Document {
-	return &rolesource.Document{
+func flowHeroDocument(handle, prompt string) *heroesource.Document {
+	return &heroesource.Document{
 		SchemaVersion: 1, Handle: handle, Name: handle,
-		Model:  rolesource.ModelBinding{Ref: "provider/model", ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills: []rolesource.SkillBinding{}, Authority: rolesource.AuthorityReadOnly,
+		Model:  heroesource.ModelBinding{Ref: "provider/model", ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills: []heroesource.SkillBinding{}, Authority: heroesource.AuthorityReadOnly,
 		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read"},
-		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextTask,
-			AllowedModes: []domain.RoleContextMode{domain.RoleContextTask}, OwnExecutionContinuity: domain.RoleContinuityNone},
-		Delegation: rolesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+		Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextTask,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextTask}, OwnExecutionContinuity: domain.HeroContinuityNone},
+		Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
 			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
 			MaxInvocationsPerParentRun: 2, MaxConcurrentInstances: 1,
-			BudgetCeiling: rolesource.DelegationBudgetCeiling{MaxModelCalls: 2, MaxToolCalls: 4,
+			BudgetCeiling: heroesource.DelegationBudgetCeiling{MaxModelCalls: 2, MaxToolCalls: 4,
 				MaxTotalTokens: 20000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 120000}},
 		OutputContract: "text-v1", MaxLoopIterations: 4, Prompt: prompt,
 	}
@@ -34,15 +34,15 @@ func flowDefinition(id string) *domain.FlowDefinition {
 		SchemaVersion: domain.FlowSchemaVersion, ID: id,
 		Budget: domain.FlowBudget{MaxTotalTokens: 100000},
 		Tasks: map[string]domain.FlowTask{
-			"review": {Type: domain.FlowTaskRole, Role: "local/reviewer", Goal: "Review the workspace"},
+			"review": {Type: domain.FlowTaskHero, Hero: "local/reviewer", Goal: "Review the workspace"},
 			"gate":   {Type: domain.FlowTaskCheck, Command: "test -f ready", Depends: []string{"review"}},
-			"done": {Type: domain.FlowTaskRole, Depends: []string{"gate"},
+			"done": {Type: domain.FlowTaskHero, Depends: []string{"gate"},
 				Terminal: &domain.FlowTerminal{Status: "success"}},
 		},
 	}
 }
 
-func TestFlowSourceRevisionsBundleLocalRolesImmutably(t *testing.T) {
+func TestFlowSourceRevisionsBundleLocalHeroesImmutably(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
 	definition := flowDefinition("qc-flow")
 	digest, err := store.CreateFlowFromDefinition(definition)
@@ -50,39 +50,39 @@ func TestFlowSourceRevisionsBundleLocalRolesImmutably(t *testing.T) {
 	require.True(t, len(digest) > len("sha256:"))
 	assert.Equal(t, "sha256:"+mustConfigDigest(t, definition), digest)
 
-	_, err = store.CreateGraphRole("qc-flow", flowRoleDocument("reviewer", "first prompt"))
+	_, err = store.CreateGraphHero("qc-flow", flowHeroDocument("reviewer", "first prompt"))
 	require.NoError(t, err)
 	first, err := store.PublishFlowRevision("qc-flow")
 	require.NoError(t, err)
 	assert.Equal(t, SourceKindFlow, first.SourceKind)
 	assert.Equal(t, digest, first.Digest)
-	require.Contains(t, first.RoleDigests, "reviewer")
+	require.Contains(t, first.HeroDigests, "reviewer")
 
-	revisionFlow, roles, read, err := store.ReadFlowRevision("qc-flow", first.ID())
+	revisionFlow, heroes, read, err := store.ReadFlowRevision("qc-flow", first.ID())
 	require.NoError(t, err)
 	assert.Equal(t, first, read)
-	assert.Equal(t, "first prompt", roles["reviewer"].Prompt)
+	assert.Equal(t, "first prompt", heroes["reviewer"].Prompt)
 	assert.Equal(t, domain.FlowTaskCheck, revisionFlow.Tasks["gate"].Type)
 
-	// Editing the draft role after publish must not change the published bundle.
-	encoded, err := rolesource.Encode(flowRoleDocument("reviewer", "second prompt"))
+	// Editing the draft hero after publish must not change the published bundle.
+	encoded, err := heroesource.Encode(flowHeroDocument("reviewer", "second prompt"))
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(store.GraphsDir(), "qc-flow", "roles", "reviewer", "role.md"), encoded, 0o600))
-	_, immutableRoles, _, err := store.ReadFlowRevision("qc-flow", first.ID())
+	require.NoError(t, os.WriteFile(filepath.Join(store.GraphsDir(), "qc-flow", "heroes", "reviewer", "hero.md"), encoded, 0o600))
+	_, immutableHeroes, _, err := store.ReadFlowRevision("qc-flow", first.ID())
 	require.NoError(t, err)
-	assert.Equal(t, "first prompt", immutableRoles["reviewer"].Prompt)
+	assert.Equal(t, "first prompt", immutableHeroes["reviewer"].Prompt)
 
-	// A role-only change still creates a new immutable revision; the definition
-	// digest is intentionally unchanged because it commits role references, not
-	// role bodies.
+	// A hero-only change still creates a new immutable revision; the definition
+	// digest is intentionally unchanged because it commits hero references, not
+	// hero bodies.
 	second, err := store.PublishFlowRevision("qc-flow")
 	require.NoError(t, err)
 	assert.Equal(t, "v000002", second.ID())
 	assert.Equal(t, first.Digest, second.Digest)
-	assert.NotEqual(t, first.RoleDigests["reviewer"], second.RoleDigests["reviewer"])
+	assert.NotEqual(t, first.HeroDigests["reviewer"], second.HeroDigests["reviewer"])
 
-	// Tampering with the bundled role fails closed.
-	path := filepath.Join(store.GraphsDir(), "qc-flow", "revisions", first.ID(), "roles", "reviewer", "role.md")
+	// Tampering with the bundled hero fails closed.
+	path := filepath.Join(store.GraphsDir(), "qc-flow", "revisions", first.ID(), "heroes", "reviewer", "hero.md")
 	require.NoError(t, os.WriteFile(path, []byte("tampered"), 0o600))
 	_, _, _, err = store.ReadFlowRevision("qc-flow", first.ID())
 	require.Error(t, err)

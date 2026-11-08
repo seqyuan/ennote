@@ -15,7 +15,7 @@ describe("tool presentation", () => {
     expect(classifyDisplayRisk("write")).toBe("local_write");
     expect(classifyDisplayRisk("bash")).toBe("shell");
     expect(classifyDisplayRisk("http_request")).toBe("external");
-    expect(classifyDisplayRisk("delegate_roles")).toBe("delegation");
+    expect(classifyDisplayRisk("delegate_heroes")).toBe("delegation");
     expect(classifyDisplayRisk("unregistered_tool")).toBe("sensitive");
   });
 
@@ -49,10 +49,10 @@ describe("tool presentation", () => {
     });
   });
 
-  it("still summarizes legacy delegate_roles calls", () => {
-    expect(summarizeToolCall("delegate_roles", { delegations: [
-      { roleHandle: "explorer", assignment: "Inspect files" },
-      { roleHandle: "reviewer", assignment: "Review findings" },
+  it("still summarizes legacy delegate_heroes calls", () => {
+    expect(summarizeToolCall("delegate_heroes", { delegations: [
+      { heroHandle: "explorer", assignment: "Inspect files" },
+      { heroHandle: "reviewer", assignment: "Review findings" },
     ] })).toEqual({
       label: "Delegate tasks", target: "2 tasks", detail: "@explorer, @reviewer",
     });

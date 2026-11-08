@@ -22,7 +22,7 @@ type packInstallRequest struct {
 // never rewritten, so a rename is a collision workaround, not a refactor.
 type packRenames struct {
 	Flows map[string]string `json:"flows"`
-	Roles map[string]string `json:"roles"`
+	Heroes map[string]string `json:"heroes"`
 }
 
 // installPack plans and (unless dryRun) applies one Agent Pack install.
@@ -61,7 +61,7 @@ func (s *Server) installPack(w http.ResponseWriter, r *http.Request) {
 		DryRun:         body.DryRun,
 	}
 	if body.Renames != nil {
-		request.Renames = packinstall.Renames{Flows: body.Renames.Flows, Roles: body.Renames.Roles}
+		request.Renames = packinstall.Renames{Flows: body.Renames.Flows, Heroes: body.Renames.Heroes}
 	}
 	plan, err := s.Packs.Install(r.Context(), request)
 	if err != nil {
@@ -90,7 +90,7 @@ func (s *Server) listPacks(w http.ResponseWriter, r *http.Request) {
 
 // removePack uninstalls one pack. Removal is a destructive operation already
 // guarded by the installer (active Runs, locally edited objects, shared global
-// Roles), so the API adds only the explicit --force override.
+// Heroes), so the API adds only the explicit --force override.
 func (s *Server) removePack(w http.ResponseWriter, r *http.Request) {
 	if s.Packs == nil {
 		writePackInstallUnavailable(w, r)

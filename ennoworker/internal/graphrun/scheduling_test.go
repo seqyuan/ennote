@@ -12,7 +12,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/graphrun"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
@@ -86,29 +86,29 @@ func TestServiceFreezeMatchesSharedReadOnlyClassifier(t *testing.T) {
 		if tc.tool != "read" {
 			allowed = append(allowed, tc.tool)
 		}
-		_, _, err = sources.CreateRole(&rolesource.Document{
+		_, _, err = sources.CreateHero(&heroesource.Document{
 			SchemaVersion: 1, Handle: handle, Name: handle,
-			Description: "Scheduling matrix role", Positioning: "Scheduling matrix.",
+			Description: "Scheduling matrix hero", Positioning: "Scheduling matrix.",
 			Icon: "bot", Color: "neutral",
-			Model:  rolesource.ModelBinding{Ref: model.ID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-			Skills: []rolesource.SkillBinding{}, Authority: rolesource.AuthorityReadOnly,
+			Model:  heroesource.ModelBinding{Ref: model.ID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+			Skills: []heroesource.SkillBinding{}, Authority: heroesource.AuthorityReadOnly,
 			PermissionCeiling: domain.PermissionDiscuss, AllowedTools: allowed,
-			Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextTask,
-				AllowedModes: []domain.RoleContextMode{domain.RoleContextTask}, OwnExecutionContinuity: domain.RoleContinuityNone},
-			Delegation: rolesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+			Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextTask,
+				AllowedModes: []domain.HeroContextMode{domain.HeroContextTask}, OwnExecutionContinuity: domain.HeroContinuityNone},
+			Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
 				AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
 				MaxInvocationsPerParentRun: 2, MaxConcurrentInstances: 1,
-				BudgetCeiling: rolesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
+				BudgetCeiling: heroesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
 					MaxTotalTokens: 200000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 120000}},
 			OutputContract: "text-v1", MaxLoopIterations: 8, Prompt: "Classify one tool.",
 		})
 		require.NoError(t, err)
-		_, err = sources.PublishRoleRevision(handle)
+		_, err = sources.PublishHeroRevision(handle)
 		require.NoError(t, err)
 
 		taskName := fmt.Sprintf("task_%02d", index)
 		tasks[taskName] = graphsource.Task{
-			Name: taskName, Role: "global/" + handle, Goal: "Classify " + tc.tool,
+			Name: taskName, Hero: "global/" + handle, Goal: "Classify " + tc.tool,
 		}
 		deps[taskName] = []string{}
 	}

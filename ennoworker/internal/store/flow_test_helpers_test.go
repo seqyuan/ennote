@@ -12,7 +12,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/require"
 )
@@ -37,25 +37,25 @@ func setupFlowFixture(t *testing.T) (*sql.DB, *store.AgentFlowRunRepo, string, s
 	})
 	require.NoError(t, err)
 	sources := stack.Sources
-	document := &rolesource.Document{
+	document := &heroesource.Document{
 		SchemaVersion: 1, Handle: "flow-worker", Name: "Flow Worker",
 		Description: "Flow task worker", Positioning: "Executes one task in a flow.",
 		Icon: "bot", Color: "neutral",
-		Model:  rolesource.ModelBinding{Ref: model.ID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills: []rolesource.SkillBinding{}, Authority: rolesource.AuthorityReadOnly,
+		Model:  heroesource.ModelBinding{Ref: model.ID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills: []heroesource.SkillBinding{}, Authority: heroesource.AuthorityReadOnly,
 		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read", "grep"},
-		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextRoom,
-			AllowedModes: []domain.RoleContextMode{domain.RoleContextRoom}, OwnExecutionContinuity: domain.RoleContinuityNone},
-		Delegation: rolesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+		Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextRoom,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextRoom}, OwnExecutionContinuity: domain.HeroContinuityNone},
+		Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
 			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single", "parallel"},
 			MaxInvocationsPerParentRun: 16, MaxConcurrentInstances: 16,
-			BudgetCeiling: rolesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
+			BudgetCeiling: heroesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
 				MaxTotalTokens: 200000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 1_800_000}},
 		OutputContract: "text-v1", MaxLoopIterations: 8, Prompt: "Execute one task in a flow.",
 	}
-	_, _, err = sources.CreateRole(document)
+	_, _, err = sources.CreateHero(document)
 	require.NoError(t, err)
-	_, err = sources.PublishRoleRevision(document.Handle)
+	_, err = sources.PublishHeroRevision(document.Handle)
 	require.NoError(t, err)
 	testFlowSources, testFlowModels = sources, stack.ModelRepo
 	return db,
@@ -94,12 +94,12 @@ budget:
   max_total_tokens: 200000
 tasks:
   producer:
-    role: flow-worker@1
+    hero: flow-worker@1
     skills: [go-dev]
     goal: "Implement {inputs.target}"
     budget: {tokens: 50000}
   reviewer:
-    role: flow-worker@1
+    hero: flow-worker@1
     goal: "Review {task.producer.output.changed_files}"
     depends: [producer]
   accept:
@@ -111,8 +111,8 @@ tasks:
 
 // freezeFlowForTest freezes a flow definition into per-task node snapshots,
 // mirroring the removed store.FreezeFlowDefinition (SQL flow freeze). It
-// resolves fixture-published roles via the snapshot role tables and carries
-// the full RoleDefinitionJSON so child materialization freezes RoleMeta. The
+// resolves fixture-published heroes via the snapshot hero tables and carries
+// the full HeroDefinitionJSON so child materialization freezes HeroMeta. The
 // fixture snapshot is test-only; production freezes via graphrun.Service.
 func freezeFlowForTest(t *testing.T, db *sql.DB, flowRuns *store.AgentFlowRunRepo,
 	projectID, flowID string, def *domain.FlowDefinition,
@@ -144,22 +144,22 @@ func freezeFlowForTest(t *testing.T, db *sql.DB, flowRuns *store.AgentFlowRunRep
 			freeze = append(freeze, node)
 			continue
 		}
-		if task.Type != domain.FlowTaskRole {
+		if task.Type != domain.FlowTaskHero {
 			add("task %q has unsupported type %q", name, task.Type)
 			continue
 		}
-		versionID, definitionJSON, err := resolveFlowRoleForTest(t, db, task.Role)
+		versionID, definitionJSON, err := resolveFlowHeroForTest(t, db, task.Hero)
 		if err != nil {
 			add("task %q: %v", name, err)
 			continue
 		}
-		var roleDef domain.RoleDefinition
-		if err := json.Unmarshal(definitionJSON, &roleDef); err != nil {
+		var heroDef domain.HeroDefinition
+		if err := json.Unmarshal(definitionJSON, &heroDef); err != nil {
 			add("task %q: decode Role definition: %v", name, err)
 			continue
 		}
-		if roleDef.DelegationPolicy.Admission != domain.DelegationAutoWithinBudget {
-			add("task %q: Role %s is not auto_within_budget", name, task.Role)
+		if heroDef.DelegationPolicy.Admission != domain.DelegationAutoWithinBudget {
+			add("task %q: Role %s is not auto_within_budget", name, task.Hero)
 			continue
 		}
 		// The test fixture has no on-disk Skill catalog, so frozen refs are
@@ -173,7 +173,7 @@ func freezeFlowForTest(t *testing.T, db *sql.DB, flowRuns *store.AgentFlowRunRep
 			}
 			frozenSkills = append(frozenSkills, domain.FrozenSkillRef{ID: id})
 		}
-		ceiling := roleDef.DelegationPolicy.BudgetCeiling
+		ceiling := heroDef.DelegationPolicy.BudgetCeiling
 		if task.Budget != nil && task.Budget.Tokens > 0 {
 			if task.Budget.Tokens > ceiling.MaxTotalTokens {
 				add("task %q: budget tokens %d exceed the Role ceiling %d", name, task.Budget.Tokens, ceiling.MaxTotalTokens)
@@ -186,13 +186,13 @@ func freezeFlowForTest(t *testing.T, db *sql.DB, flowRuns *store.AgentFlowRunRep
 			MaxTotalTokens: ceiling.MaxTotalTokens, MaxOutputTokens: ceiling.MaxOutputTokens,
 			MaxCostMicros: ceiling.MaxCostUSDMicros, MaxWallTimeMS: ceiling.MaxWallTimeMS,
 		})
-		roleDefJSON, _ := json.Marshal(roleDef)
-		node.RoleVersionID = versionID
+		heroDefJSON, _ := json.Marshal(heroDef)
+		node.HeroVersionID = versionID
 		node.Skills = frozenSkills
 		node.BudgetJSON = budgetJSON
-		node.ReadOnly = testRoleDefinitionIsReadOnly(roleDef)
+		node.ReadOnly = testHeroDefinitionIsReadOnly(heroDef)
 		node.Writes = append([]string(nil), task.Writes...)
-		node.RoleDefinitionJSON = roleDefJSON
+		node.HeroDefinitionJSON = heroDefJSON
 		freeze = append(freeze, node)
 	}
 	if len(diagnostics) > 0 {
@@ -206,28 +206,28 @@ func freezeFlowForTest(t *testing.T, db *sql.DB, flowRuns *store.AgentFlowRunRep
 var testFlowSources *globalsource.Store
 var testFlowModels *store.ModelRepo
 
-// resolveFlowRoleForTest resolves a file Role reference (handle@version) to
+// resolveFlowHeroForTest resolves a file Role reference (handle@version) to
 // its published file revision id + resolved definition JSON (V2).
-func resolveFlowRoleForTest(t *testing.T, _ *sql.DB, roleRef string) (string, json.RawMessage, error) {
+func resolveFlowHeroForTest(t *testing.T, _ *sql.DB, heroRef string) (string, json.RawMessage, error) {
 	t.Helper()
-	handle, _, _ := strings.Cut(strings.TrimSpace(roleRef), "@")
+	handle, _, _ := strings.Cut(strings.TrimSpace(heroRef), "@")
 	handle = strings.TrimSpace(handle)
 	if handle == "" {
-		return "", nil, fmt.Errorf("role reference %q has an empty handle", roleRef)
+		return "", nil, fmt.Errorf("hero reference %q has an empty handle", heroRef)
 	}
 	if testFlowSources == nil || testFlowModels == nil {
 		return "", nil, fmt.Errorf("flow Role source is unavailable")
 	}
-	document, revision, err := testFlowSources.ReadRoleRevision(handle, "v000001")
+	document, revision, err := testFlowSources.ReadHeroRevision(handle, "v000001")
 	if err != nil {
-		return "", nil, fmt.Errorf("role %q is not published: %w", handle, err)
+		return "", nil, fmt.Errorf("hero %q is not published: %w", handle, err)
 	}
-	definition, diagnostics := (&store.RoleDiscovery{Models: testFlowModels}).ResolveDocument(context.Background(), document)
+	definition, diagnostics := (&store.HeroDiscovery{Models: testFlowModels}).ResolveDocument(context.Background(), document)
 	if definition == nil {
 		if len(diagnostics) > 0 {
-			return "", nil, fmt.Errorf("resolve role %q: %s", handle, diagnostics[0].Message)
+			return "", nil, fmt.Errorf("resolve hero %q: %s", handle, diagnostics[0].Message)
 		}
-		return "", nil, fmt.Errorf("resolve role %q", handle)
+		return "", nil, fmt.Errorf("resolve hero %q", handle)
 	}
 	encoded, err := json.Marshal(definition)
 	if err != nil {
@@ -236,8 +236,8 @@ func resolveFlowRoleForTest(t *testing.T, _ *sql.DB, roleRef string) (string, js
 	return handle + "@" + revision.ID(), encoded, nil
 }
 
-// testRoleDefinitionIsReadOnly defers to the shared domain classifier so the
-// fixture-published roles cannot disagree with production scheduling.
-func testRoleDefinitionIsReadOnly(roleDef domain.RoleDefinition) bool {
-	return domain.RoleDefinitionIsReadOnly(roleDef)
+// testHeroDefinitionIsReadOnly defers to the shared domain classifier so the
+// fixture-published heroes cannot disagree with production scheduling.
+func testHeroDefinitionIsReadOnly(heroDef domain.HeroDefinition) bool {
+	return domain.HeroDefinitionIsReadOnly(heroDef)
 }

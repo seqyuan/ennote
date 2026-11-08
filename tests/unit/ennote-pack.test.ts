@@ -20,7 +20,7 @@ const launcher = require(path.join(root, "bin/ennote.js")) as {
   requestPackInspect(endpoint: Endpoint, target: string, options?: { documents?: boolean; timeoutMs?: number }): Promise<Record<string, unknown>>;
   formatPackSummary(data: Record<string, unknown>): string;
   requestJSON(endpoint: Endpoint, method: string, pathname: string, options?: { body?: unknown; action?: string; timeoutMs?: number }): Promise<unknown>;
-  requestPackInstall(endpoint: Endpoint, target: string, options?: { dryRun?: boolean; renames?: { flows?: Record<string, string>; roles?: Record<string, string> } }): Promise<Record<string, unknown>>;
+  requestPackInstall(endpoint: Endpoint, target: string, options?: { dryRun?: boolean; renames?: { flows?: Record<string, string>; heroes?: Record<string, string> } }): Promise<Record<string, unknown>>;
   parsePackRenames(entries: string[] | undefined, flag: string): Record<string, string>;
   parsePackID(value: string): string;
   formatPackInstallPlan(plan: Record<string, unknown>, options?: { dryRun?: boolean }): string;
@@ -83,15 +83,15 @@ const inspectResult = {
   packDigest: `sha256:${"b".repeat(64)}`,
   signature: { present: false, algorithm: null, path: null, verified: false },
   signed: false,
-  flows: [{ id: "qc-review", path: "flows/qc-review/graph.yaml", format: "graph", taskCount: 2, entryTask: "load", roles: ["qc-reviewer"], checkTasks: 0, fanOutTasks: 0, maxTotalTokens: 0, pathDigest: `sha256:${"c".repeat(64)}`, sourceDigest: `sha256:${"d".repeat(64)}` }],
-  roles: [{ handle: "qc-reviewer", path: "roles/qc-reviewer/role.md", scope: "flow", name: "QC Reviewer", authority: "read_only", permissionCeiling: "discuss", allowedTools: ["read"], skills: [], pathDigest: `sha256:${"e".repeat(64)}`, sourceDigest: `sha256:${"f".repeat(64)}` }],
+  flows: [{ id: "qc-review", path: "flows/qc-review/graph.yaml", format: "graph", taskCount: 2, entryTask: "load", heroes: ["qc-reviewer"], checkTasks: 0, fanOutTasks: 0, maxTotalTokens: 0, pathDigest: `sha256:${"c".repeat(64)}`, sourceDigest: `sha256:${"d".repeat(64)}` }],
+  heroes: [{ handle: "qc-reviewer", path: "heroes/qc-reviewer/role.md", scope: "flow", name: "QC Reviewer", authority: "read_only", permissionCeiling: "discuss", allowedTools: ["read"], skills: [], pathDigest: `sha256:${"e".repeat(64)}`, sourceDigest: `sha256:${"f".repeat(64)}` }],
   skills: [{ id: "cell-qc-tables", path: "skills/cell-qc-tables", kind: "vendored", pathDigest: `sha256:${"1".repeat(64)}`, promptBytes: 12 }],
   mcp: [{ ref: "pubmed@1" }],
   requires: [],
   capabilityEnvelope: {
-    flowCount: 1, roleCount: 1, skillCount: 1, taskCount: 2,
-    roles: ["qc-reviewer"], skills: ["cell-qc-tables"], requiresMcp: ["pubmed@1"],
-    modelRequirements: { capabilities: ["tool_use"], minContextWindow: 128000, perRole: {} },
+    flowCount: 1, heroCount: 1, skillCount: 1, taskCount: 2,
+    heroes: ["qc-reviewer"], skills: ["cell-qc-tables"], requiresMcp: ["pubmed@1"],
+    modelRequirements: { capabilities: ["tool_use"], minContextWindow: 128000, perHero: {} },
     checkCommands: [], tools: ["read"], writes: [], flowMaxTotalTokens: 0,
   },
   files: [{ path: "pack.yaml", bytes: 812, digest: `sha256:${"2".repeat(64)}` }],
@@ -243,7 +243,7 @@ const installPlan = {
   packDigest: `sha256:${"b".repeat(64)}`,
   actions: [
     { kind: "graph", storeId: "qc-review", action: "create" },
-    { kind: "graph_role", storeId: "qc-review/qc-reviewer", action: "create", scope: "flow" },
+    { kind: "graph_hero", storeId: "qc-review/qc-reviewer", action: "create", scope: "flow" },
     { kind: "skill", storeId: "cell-qc-tables", action: "create", scope: "global" },
   ],
   blockers: [],
@@ -260,10 +260,10 @@ const installPlan = {
     installState: "installed_draft",
     source: { kind: "path", path: "/home/me/sources/cell-qc" },
     flows: [{ packFlowId: "qc-review", storeId: "qc-review", format: "graph", sourceDigest: `sha256:${"c".repeat(64)}`, installedGraphDigest: `sha256:${"c".repeat(64)}`, publishedRevision: null }],
-    roles: [{ packHandle: "qc-reviewer", scope: "flow", storeId: "qc-review/qc-reviewer", digest: `sha256:${"d".repeat(64)}` }],
+    heroes: [{ packHandle: "qc-reviewer", scope: "flow", storeId: "qc-review/qc-reviewer", digest: `sha256:${"d".repeat(64)}` }],
     skills: [{ packId: "cell-qc-tables", storeId: "cell-qc-tables", scope: "global", contentDigest: `sha256:${"e".repeat(64)}` }],
     externalRefs: { skills: ["bio-workspace@0.1.0"], mcp: [] },
-    modelRequirements: { capabilities: ["tool_use"], minContextWindow: 128000, perRole: {} },
+    modelRequirements: { capabilities: ["tool_use"], minContextWindow: 128000, perHero: {} },
   },
 };
 
@@ -274,7 +274,7 @@ describe("ennote pack install", () => {
 
     const plan = await launcher.requestPackInstall(endpoint, "/home/me/sources/cell-qc", {
       dryRun: true,
-      renames: { flows: { "qc-review": "cell-qc-review" }, roles: { "qc-reviewer": "cell-qc-reviewer" } },
+      renames: { flows: { "qc-review": "cell-qc-review" }, heroes: { "qc-reviewer": "cell-qc-reviewer" } },
     });
     expect(plan).toEqual(installPlan);
 
@@ -286,7 +286,7 @@ describe("ennote pack install", () => {
     expect(JSON.parse(requests[0].body)).toEqual({
       source: { kind: "path", path: "/home/me/sources/cell-qc" },
       dryRun: true,
-      renames: { flows: { "qc-review": "cell-qc-review" }, roles: { "qc-reviewer": "cell-qc-reviewer" } },
+      renames: { flows: { "qc-review": "cell-qc-review" }, heroes: { "qc-reviewer": "cell-qc-reviewer" } },
     });
   });
 
@@ -294,7 +294,7 @@ describe("ennote pack install", () => {
     const { port, requests } = await startStubWorker(() => ({ status: 200, body: { data: installPlan } }));
     const endpoint = { url: `http://127.0.0.1:${port}`, token: "secret-token", pid: process.pid };
 
-    await launcher.requestPackInstall(endpoint, "/home/me/sources/cell-qc", { dryRun: false, renames: { flows: {}, roles: {} } });
+    await launcher.requestPackInstall(endpoint, "/home/me/sources/cell-qc", { dryRun: false, renames: { flows: {}, heroes: {} } });
     expect(JSON.parse(requests[0].body)).toEqual({
       source: { kind: "path", path: "/home/me/sources/cell-qc" },
       dryRun: false,
@@ -319,7 +319,7 @@ describe("ennote pack install", () => {
       installedAt: "2026-10-27T12:00:00Z",
       installState: "installed_draft",
       source: { kind: "path", path: "/home/me/sources/cell-qc" },
-      flowCount: 1, roleCount: 1, skillCount: 1,
+      flowCount: 1, heroCount: 1, skillCount: 1,
       externalRefs: { skills: [], mcp: [] },
     }];
     const { port, requests } = await startStubWorker(() => ({ status: 200, body: { data: summaries } }));
@@ -356,7 +356,7 @@ describe("ennote pack install", () => {
 
   it("parses old=new rename flags and rejects malformed ones", () => {
     expect(launcher.parsePackRenames([], "--as-flow")).toEqual({});
-    expect(launcher.parsePackRenames(undefined, "--as-role")).toEqual({});
+    expect(launcher.parsePackRenames(undefined, "--as-hero")).toEqual({});
     expect(launcher.parsePackRenames(["qc-review=cell-qc-review", "load=qc-load"], "--as-flow"))
       .toEqual({ "qc-review": "cell-qc-review", load: "qc-load" });
     expect(() => launcher.parsePackRenames(["qc-review"], "--as-flow")).toThrow(/expects old=new/);
@@ -377,8 +377,8 @@ describe("ennote pack install", () => {
     expect(summary).toContain("Dry run (nothing written): Cell QC Review (seqyuan/cell-qc-review@1.3.0)");
     expect(summary).toContain("Actions (3): 3 create");
     expect(summary).toContain("create graph qc-review");
-    expect(summary).toContain("create graph_role qc-review/qc-reviewer (flow)");
-    expect(summary).toContain("State:    installed_draft; flows 1, roles 1, skills 1");
+    expect(summary).toContain("create graph_hero qc-review/qc-reviewer (flow)");
+    expect(summary).toContain("State:    installed_draft; flows 1, heroes 1, skills 1");
     expect(summary).toContain("Disabled: qc-review (draft Graph, no published revision");
     expect(summary).toContain("Recorded (not installed): skills bio-workspace@0.1.0; mcp none");
     expect(summary).toContain("Blockers (0)");
@@ -400,12 +400,12 @@ describe("ennote pack install", () => {
     expect(launcher.formatPackList([])).toBe("No Agent Packs installed.");
     const summary = launcher.formatPackList([{
       pack: { id: "seqyuan/cell-qc-review", name: "Cell QC Review", version: "1.3.0" },
-      installState: "installed_draft", flowCount: 1, roleCount: 2, skillCount: 1,
+      installState: "installed_draft", flowCount: 1, heroCount: 2, skillCount: 1,
       installedAt: "2026-10-27T12:00:00Z",
     }]);
     expect(summary).toContain("Installed Agent Packs (1)");
     expect(summary).toContain("Cell QC Review (seqyuan/cell-qc-review@1.3.0) installed_draft");
-    expect(summary).toContain("flows 1, roles 2, skills 1");
+    expect(summary).toContain("flows 1, heroes 2, skills 1");
   });
 });
 
@@ -422,7 +422,7 @@ describe("ennote pack subcommands against a stub Worker", () => {
       process.execPath,
       [
         path.join(root, "bin/ennote.js"), "pack", "install", "./relative/cell-qc",
-        "--dry-run", "--json", "--as-flow", "qc-review=cell-qc-review", "--as-role", "qc-reviewer=cell-qc-reviewer",
+        "--dry-run", "--json", "--as-flow", "qc-review=cell-qc-review", "--as-hero", "qc-reviewer=cell-qc-reviewer",
       ],
       { encoding: "utf8", cwd: home, env: { ...process.env, ENNOTE_HOME: home } },
     );
@@ -436,13 +436,13 @@ describe("ennote pack subcommands against a stub Worker", () => {
     expect(body.dryRun).toBe(true);
     expect(body.renames).toEqual({
       flows: { "qc-review": "cell-qc-review" },
-      roles: { "qc-reviewer": "cell-qc-reviewer" },
+      heroes: { "qc-reviewer": "cell-qc-reviewer" },
     });
   });
 
   it("lists packs and removes one with --force", async () => {
     const home = temporaryHome();
-    const summaries = [{ pack: { id: "seqyuan/cell-qc-review", name: "Cell QC Review", version: "1.3.0" }, installState: "installed_draft", flowCount: 1, roleCount: 1, skillCount: 1, installedAt: "2026-10-27T12:00:00Z" }];
+    const summaries = [{ pack: { id: "seqyuan/cell-qc-review", name: "Cell QC Review", version: "1.3.0" }, installState: "installed_draft", flowCount: 1, heroCount: 1, skillCount: 1, installedAt: "2026-10-27T12:00:00Z" }];
     const { port, requests } = await startStubWorker((request) => {
       if (request.method === "DELETE") return { status: 204 };
       return { status: 200, body: { data: summaries } };

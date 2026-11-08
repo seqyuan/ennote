@@ -194,11 +194,11 @@ func setupDelegatedCoordinatorTree(t *testing.T, repo *store.RunRepo, requestID 
 	_, _, children, err := delegations.CreateGroupWithChildren(context.Background(), store.CreateDelegationGroupInput{
 		ParentRunID: submission.Run.ID, ParentToolCallID: "delegate-" + requestID,
 		Strategy: domain.DelegationStrategySingle,
-		Items: []store.CreateDelegationItemInput{{Name: "child", RoleVersionID: "builtin-workspace-explorer-v3",
+		Items: []store.CreateDelegationItemInput{{Name: "child", HeroVersionID: "builtin-workspace-explorer-v3",
 			AssignmentJSON: json.RawMessage(`{"task":"inspect"}`), OutputContract: "text-v1",
 			Budget: domain.BudgetCeilingJSON{MaxModelCalls: 4, MaxToolCalls: 8, MaxTotalTokens: 20000,
 				MaxOutputTokens: 4000, MaxWallTimeMS: 120000},
-			RoleMeta: coordinatorRoleMetaFromDB(t, repo.DB, "builtin-workspace-explorer-v3")}},
+			HeroMeta: coordinatorHeroMetaFromDB(t, repo.DB, "builtin-workspace-explorer-v3")}},
 	}, submission.Run.SessionID)
 	require.NoError(t, err)
 	require.Len(t, children, 1)
@@ -315,13 +315,13 @@ func TestCoordinatorCancellationIsIdempotent(t *testing.T) {
 	assert.Equal(t, domain.RunCancelled, run.Status)
 }
 
-// coordinatorRoleMetaFromDB freezes the builtin Workspace Explorer RoleMeta
-// without consulting global role SQL (V2).
-func coordinatorRoleMetaFromDB(t *testing.T, _ *sql.DB, _ string) *store.DelegationRoleMeta {
+// coordinatorHeroMetaFromDB freezes the builtin Workspace Explorer HeroMeta
+// without consulting global hero SQL (V2).
+func coordinatorHeroMetaFromDB(t *testing.T, _ *sql.DB, _ string) *store.DelegationHeroMeta {
 	t.Helper()
-	var definition domain.RoleDefinition
-	require.NoError(t, json.Unmarshal([]byte(coordinatorExplorerRoleDefinition), &definition))
-	return &store.DelegationRoleMeta{
+	var definition domain.HeroDefinition
+	require.NoError(t, json.Unmarshal([]byte(coordinatorExplorerHeroDefinition), &definition))
+	return &store.DelegationHeroMeta{
 		ObjectID: "builtin-workspace-explorer", VersionID: "builtin-workspace-explorer-v3",
 		Handle: "workspace-explorer", DisplayName: "Workspace Explorer",
 		ConfigDigest: "sha256:c7cf36749030bd0626c24eea7ea325c2b70be64bd2f623b3c94b5fc8b81aa38b",
@@ -329,7 +329,7 @@ func coordinatorRoleMetaFromDB(t *testing.T, _ *sql.DB, _ string) *store.Delegat
 	}
 }
 
-const coordinatorExplorerRoleDefinition = `{"schemaVersion":1,"rolePrompt":"You are the Workspace Explorer. Use read, ls, grep, and find to answer questions about workspace files.","modelBinding":{"mode":"inherit","modelProfileId":"provider/model","thinkingEffort":"default","fallbackModelProfileIds":[],"overridableFields":[]},"skills":{"entries":[]},"authority":"read_only","permissionCeiling":"discuss","allowedTools":["read","ls","grep","find","git_readonly"],"contextPolicy":{"defaultMode":"task_only","allowedModes":["task_only"],"ownExecutionContinuity":"none"},"delegationPolicy":{"admission":"auto_within_budget","allowedCallerKinds":["host"],"allowedStrategies":["single","parallel"],"maxInvocationsPerParentRun":16,"maxConcurrentInstances":16,"budgetCeiling":{"maxModelCalls":6,"maxToolCalls":8,"maxTotalTokens":20000,"maxOutputTokens":4000,"maxCostUsdMicros":100000,"maxWallTimeMs":120000}},"outputContract":"text-v1","maxLoopIterations":8}`
+const coordinatorExplorerHeroDefinition = `{"schemaVersion":1,"heroPrompt":"You are the Workspace Explorer. Use read, ls, grep, and find to answer questions about workspace files.","modelBinding":{"mode":"inherit","modelProfileId":"provider/model","thinkingEffort":"default","fallbackModelProfileIds":[],"overridableFields":[]},"skills":{"entries":[]},"authority":"read_only","permissionCeiling":"discuss","allowedTools":["read","ls","grep","find","git_readonly"],"contextPolicy":{"defaultMode":"task_only","allowedModes":["task_only"],"ownExecutionContinuity":"none"},"delegationPolicy":{"admission":"auto_within_budget","allowedCallerKinds":["host"],"allowedStrategies":["single","parallel"],"maxInvocationsPerParentRun":16,"maxConcurrentInstances":16,"budgetCeiling":{"maxModelCalls":6,"maxToolCalls":8,"maxTotalTokens":20000,"maxOutputTokens":4000,"maxCostUsdMicros":100000,"maxWallTimeMs":120000}},"outputContract":"text-v1","maxLoopIterations":8}`
 
 // newFileProjects returns a file-native ProjectRepo (V2).
 func newFileProjects(t *testing.T) *store.ProjectRepo {

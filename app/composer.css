@@ -112,7 +112,7 @@
   padding: 4px 8px 0;
 }
 .composer-context-bar > * { flex: 0 0 auto; }
-.composer-context-bar .role-target-picker,
+.composer-context-bar .hero-target-picker,
 .composer-context-bar .model-select { flex: 0 1 auto; min-width: 0; }
 .composer-context-spacer { flex: 1 1 6px; min-width: 2px; }
 
@@ -641,7 +641,7 @@ html.dark .composer-editor.composer-no-session::after {
   vertical-align: baseline;
 }
 .cm-color-system { --meter-tint: var(--data-cat-system); }
-.cm-color-role { --meter-tint: var(--data-cat-role); }
+.cm-color-hero { --meter-tint: var(--data-cat-hero); }
 .cm-color-rules { --meter-tint: var(--data-cat-rules); }
 .cm-color-skills { --meter-tint: var(--data-cat-skills); }
 .cm-color-tools { --meter-tint: var(--data-cat-tools); }

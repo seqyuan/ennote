@@ -198,7 +198,7 @@ export function AgentFlowSettings({ setError }: { setError: (value: string | nul
             </section>
 
             <section className="graph-dependencies-pane">
-              <div className="graph-section-heading"><div><span>Graph</span><p>Dependency orchestration. Role details stay inside Tasks.</p></div></div>
+              <div className="graph-section-heading"><div><span>Graph</span><p>Dependency orchestration. Hero details stay inside Tasks.</p></div></div>
               <GraphDependencies document={detail.document} busy={Boolean(busy)} onOpenTask={(id) => { setExpanded(id); setMobileView("tasks"); requestAnimationFrame(() => document.querySelector(`[data-task-id="${CSS.escape(id)}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" })); }} onChange={(taskId, depends) => void patchGraph({ dependencies: { taskId, depends } })} />
             </section>
 

@@ -12,7 +12,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/packinstall"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
@@ -74,16 +74,16 @@ func (f *fixture) graphPath(id string) string {
 	return filepath.Join(f.home, "agents", "graphs", id, "graph.yaml")
 }
 
-func (f *fixture) graphRolePath(graphID, handle string) string {
-	return filepath.Join(f.home, "agents", "graphs", graphID, "roles", handle, "role.md")
+func (f *fixture) graphHeroPath(graphID, handle string) string {
+	return filepath.Join(f.home, "agents", "graphs", graphID, "heroes", handle, "hero.md")
 }
 
 func (f *fixture) graphSkillPath(graphID, id string) string {
 	return filepath.Join(f.home, "agents", "graphs", graphID, "skills", id)
 }
 
-func (f *fixture) rolePath(handle string) string {
-	return filepath.Join(f.home, "agents", "roles", handle, "role.md")
+func (f *fixture) heroPath(handle string) string {
+	return filepath.Join(f.home, "agents", "heroes", handle, "hero.md")
 }
 
 func (f *fixture) skillPath(id string) string {
@@ -155,29 +155,29 @@ func cutPackID(packID string) (string, string, bool) {
 	return "", "", false
 }
 
-// roleDocument builds a valid Role source document under modelID.
-func roleDocument(modelID, handle, name string, skills ...rolesource.SkillBinding) *rolesource.Document {
-	return &rolesource.Document{
-		SchemaVersion: 1, Handle: handle, Name: name, Description: name + " role",
+// heroDocument builds a valid Role source document under modelID.
+func heroDocument(modelID, handle, name string, skills ...heroesource.SkillBinding) *heroesource.Document {
+	return &heroesource.Document{
+		SchemaVersion: 1, Handle: handle, Name: name, Description: name + " hero",
 		Positioning: "Independent", Icon: "bot", Color: "neutral",
-		Model:     rolesource.ModelBinding{Ref: modelID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills:    append([]rolesource.SkillBinding{}, skills...),
-		Authority: rolesource.AuthorityReadOnly, PermissionCeiling: domain.PermissionDiscuss,
+		Model:     heroesource.ModelBinding{Ref: modelID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills:    append([]heroesource.SkillBinding{}, skills...),
+		Authority: heroesource.AuthorityReadOnly, PermissionCeiling: domain.PermissionDiscuss,
 		AllowedTools: []string{"read", "grep"},
-		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextTask,
-			AllowedModes: []domain.RoleContextMode{domain.RoleContextTask}, OwnExecutionContinuity: domain.RoleContinuityNone},
-		Delegation: rolesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+		Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextTask,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextTask}, OwnExecutionContinuity: domain.HeroContinuityNone},
+		Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
 			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
 			MaxInvocationsPerParentRun: 4, MaxConcurrentInstances: 1,
-			BudgetCeiling: rolesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
+			BudgetCeiling: heroesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
 				MaxTotalTokens: 20000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 120000}},
 		OutputContract: "text-v1", MaxLoopIterations: 8, Prompt: "Follow the " + name + " instructions.",
 	}
 }
 
-func roleFile(t *testing.T, modelID, handle, name string, skills ...rolesource.SkillBinding) string {
+func heroFile(t *testing.T, modelID, handle, name string, skills ...heroesource.SkillBinding) string {
 	t.Helper()
-	encoded, err := rolesource.Encode(roleDocument(modelID, handle, name, skills...))
+	encoded, err := heroesource.Encode(heroDocument(modelID, handle, name, skills...))
 	require.NoError(t, err)
 	return string(encoded)
 }

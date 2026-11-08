@@ -300,14 +300,14 @@ func (r *MessageRepo) Page(ctx context.Context, sessionID, leafID, beforeMessage
 
 	newestFirst := make([]domain.Message, 0, limit+1)
 	for rows.Next() {
-		var id, rowSessionID, role, status, speakerKind, speakerSnapshot, visibility, createdAt string
+		var id, rowSessionID, hero, status, speakerKind, speakerSnapshot, visibility, createdAt string
 		var parentID, runID, speakerObjectID, speakerVersionID, participantInstanceID sql.NullString
 		var addresseeKind, addresseeObjectID, addresseeVersionID, replyToMessageID, originatedAt sql.NullString
 		var ordinal sql.NullInt64
 		var kind, payload sql.NullString
 		var effectiveConfig sql.NullString
 		var seq int64
-		if err := rows.Scan(&id, &rowSessionID, &parentID, &role, &status, &runID,
+		if err := rows.Scan(&id, &rowSessionID, &parentID, &hero, &status, &runID,
 			&speakerKind, &speakerObjectID, &speakerVersionID, &participantInstanceID, &speakerSnapshot,
 			&addresseeKind, &addresseeObjectID, &addresseeVersionID, &replyToMessageID, &visibility,
 			&originatedAt, &createdAt, &seq, &ordinal, &kind, &payload, &effectiveConfig); err != nil {
@@ -318,7 +318,7 @@ func (r *MessageRepo) Page(ctx context.Context, sessionID, leafID, beforeMessage
 			if parseErr != nil {
 				return page, fmt.Errorf("parse message timestamp: %w", parseErr)
 			}
-			message := domain.Message{ID: id, SessionID: rowSessionID, Role: role, Status: status,
+			message := domain.Message{ID: id, SessionID: rowSessionID, Role: hero, Status: status,
 				SpeakerKind: domain.SpeakerKind(speakerKind), SpeakerSnapshot: json.RawMessage(speakerSnapshot),
 				Visibility: domain.MessageVisibility(visibility), Parts: []domain.ContentBlock{}, CreatedAt: created, Seq: seq}
 			if effectiveConfig.Valid && effectiveConfig.String != "" {

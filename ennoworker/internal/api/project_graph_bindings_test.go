@@ -22,7 +22,7 @@ func TestProjectGraphBindingEnablesFlowRevision(t *testing.T) {
 		Name: "Project", HostPath: t.TempDir(),
 	})
 	require.NoError(t, err)
-	_, err = sources.CreateFlowFromDefinition(flowWithRole("review-flow"))
+	_, err = sources.CreateFlowFromDefinition(flowWithHero("review-flow"))
 	require.NoError(t, err)
 	revision, err := sources.PublishFlowRevision("review-flow")
 	require.NoError(t, err)

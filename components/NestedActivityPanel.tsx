@@ -156,7 +156,7 @@ export function NestedActivityPanel({ parentRunId, toolCallId }: { parentRunId: 
 
   return <details className="nested-activity" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>
-      <span><Users size={14} aria-hidden="true" /> Delegated roles</span>
+      <span><Users size={14} aria-hidden="true" /> Delegated heroes</span>
       <span>{children.length ? `${children.length} ${activeCount ? `· ${activeCount} active` : "· settled"}` : ""}</span>
     </summary>
     <div className="nested-activity-body">

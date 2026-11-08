@@ -14,7 +14,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/graphrun"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/skills"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
@@ -43,24 +43,24 @@ func TestServiceFreezesFileNativeGraphRun(t *testing.T) {
 	require.NoError(t, err)
 
 	sources := &globalsource.Store{HomeDir: home}
-	roleDoc := &rolesource.Document{
+	heroDoc := &heroesource.Document{
 		SchemaVersion: 1, Handle: "reviewer", Name: "Reviewer", Description: "Reviews output",
 		Positioning: "Independent", Icon: "bot", Color: "neutral",
-		Model:  rolesource.ModelBinding{Ref: model.ID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills: []rolesource.SkillBinding{}, Authority: rolesource.AuthorityReadOnly,
+		Model:  heroesource.ModelBinding{Ref: model.ID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills: []heroesource.SkillBinding{}, Authority: heroesource.AuthorityReadOnly,
 		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read", "grep"},
-		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextTask,
-			AllowedModes: []domain.RoleContextMode{domain.RoleContextTask}, OwnExecutionContinuity: domain.RoleContinuityNone},
-		Delegation: rolesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+		Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextTask,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextTask}, OwnExecutionContinuity: domain.HeroContinuityNone},
+		Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
 			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
 			MaxInvocationsPerParentRun: 2, MaxConcurrentInstances: 1,
-			BudgetCeiling: rolesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
+			BudgetCeiling: heroesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
 				MaxTotalTokens: 20000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 120000}},
 		OutputContract: "text-v1", MaxLoopIterations: 8, Prompt: "Use the published prompt.",
 	}
-	_, _, err = sources.CreateRole(roleDoc)
+	_, _, err = sources.CreateHero(heroDoc)
 	require.NoError(t, err)
-	roleRevision, err := sources.PublishRoleRevision(roleDoc.Handle)
+	heroRevision, err := sources.PublishHeroRevision(heroDoc.Handle)
 	require.NoError(t, err)
 
 	_, digest, err := sources.CreateGraph("pipeline", "Pipeline")
@@ -68,7 +68,7 @@ func TestServiceFreezesFileNativeGraphRun(t *testing.T) {
 	_, _, err = sources.UpdateGraph("pipeline", digest, func(document *graphsource.Document) error {
 		document.Tasks = map[string]graphsource.Task{
 			"produce": {Name: "Produce", Model: model.ID, Goal: "Produce an artifact listing for {inputs.target}", Budget: &graphsource.TaskBudget{Tokens: 1000}},
-			"review":  {Name: "Review", Role: "global/reviewer", Goal: "Review the produced artifact and submit a verdict"},
+			"review":  {Name: "Review", Hero: "global/reviewer", Goal: "Review the produced artifact and submit a verdict"},
 		}
 		document.Graph = map[string][]string{
 			"produce": {},
@@ -119,25 +119,25 @@ func TestServiceFreezesFileNativeGraphRun(t *testing.T) {
 	require.Contains(t, def.Tasks, "review")
 
 	// Every node froze its full Role definition (inline + global revision).
-	var handle, roleVersionID, roleDefJSON, skillJSON string
-	require.NoError(t, db.QueryRow(`SELECT handle, role_version_id, role_definition_json, skill_digests_json
+	var handle, heroVersionID, heroDefJSON, skillJSON string
+	require.NoError(t, db.QueryRow(`SELECT handle, hero_version_id, hero_definition_json, skill_digests_json
 		FROM run_agent_flow_nodes WHERE run_id=? AND task_index=0`, run.RunID).
-		Scan(&handle, &roleVersionID, &roleDefJSON, &skillJSON))
+		Scan(&handle, &heroVersionID, &heroDefJSON, &skillJSON))
 	assert.Equal(t, "produce", handle)
-	assert.Contains(t, roleVersionID, "inline:produce@")
-	var inlineDef domain.RoleDefinition
-	require.NoError(t, json.Unmarshal([]byte(roleDefJSON), &inlineDef))
+	assert.Contains(t, heroVersionID, "inline:produce@")
+	var inlineDef domain.HeroDefinition
+	require.NoError(t, json.Unmarshal([]byte(heroDefJSON), &inlineDef))
 	assert.Equal(t, model.ID, inlineDef.ModelBinding.ModelProfileID)
 	assert.Equal(t, `{"schemaVersion":2,"skills":[]}`, skillJSON)
 
-	require.NoError(t, db.QueryRow(`SELECT handle, role_version_id, role_definition_json FROM run_agent_flow_nodes
+	require.NoError(t, db.QueryRow(`SELECT handle, hero_version_id, hero_definition_json FROM run_agent_flow_nodes
 		WHERE run_id=? AND task_index=1`, run.RunID).
-		Scan(&handle, &roleVersionID, &roleDefJSON))
+		Scan(&handle, &heroVersionID, &heroDefJSON))
 	assert.Equal(t, "review", handle)
-	assert.Equal(t, "reviewer@"+roleRevision.ID(), roleVersionID)
-	var reviewDef domain.RoleDefinition
-	require.NoError(t, json.Unmarshal([]byte(roleDefJSON), &reviewDef))
-	assert.Equal(t, domain.RoleAuthorityReadOnly, reviewDef.Authority)
+	assert.Equal(t, "reviewer@"+heroRevision.ID(), heroVersionID)
+	var reviewDef domain.HeroDefinition
+	require.NoError(t, json.Unmarshal([]byte(heroDefJSON), &reviewDef))
+	assert.Equal(t, domain.HeroAuthorityReadOnly, reviewDef.Authority)
 
 	// The orchestrator flow store resolves the definition from the frozen row.
 	version, err := (&store.OrchestratorStore{Runs: &store.AgentFlowRunRepo{DB: db}}).
@@ -149,7 +149,7 @@ func TestServiceFreezesFileNativeGraphRun(t *testing.T) {
 	assert.Equal(t, run.ManifestDigest, manifest)
 }
 
-func TestServiceFreezesGraphLocalRole(t *testing.T) {
+func TestServiceFreezesGraphLocalHero(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
 	models := fileconfig.NewModelStore(
@@ -171,27 +171,27 @@ func TestServiceFreezesGraphLocalRole(t *testing.T) {
 	sources := &globalsource.Store{HomeDir: home}
 	_, _, err = sources.CreateGraph("pipeline", "Pipeline")
 	require.NoError(t, err)
-	localRole := &rolesource.Document{
+	localHero := &heroesource.Document{
 		SchemaVersion: 1, Handle: "local_reviewer", Name: "Local Reviewer",
 		Positioning: "Review", Icon: "bot", Color: "neutral",
-		Model:  rolesource.ModelBinding{Ref: model.ID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills: []rolesource.SkillBinding{}, Authority: rolesource.AuthorityReadOnly,
+		Model:  heroesource.ModelBinding{Ref: model.ID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills: []heroesource.SkillBinding{}, Authority: heroesource.AuthorityReadOnly,
 		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read", "grep"},
-		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextTask,
-			AllowedModes: []domain.RoleContextMode{domain.RoleContextTask}, OwnExecutionContinuity: domain.RoleContinuityNone},
-		Delegation: rolesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+		Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextTask,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextTask}, OwnExecutionContinuity: domain.HeroContinuityNone},
+		Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
 			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
 			MaxInvocationsPerParentRun: 4, MaxConcurrentInstances: 1,
-			BudgetCeiling: rolesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
+			BudgetCeiling: heroesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
 				MaxTotalTokens: 20000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 120000}},
 		OutputContract: "text-v1", MaxLoopIterations: 8, Prompt: "Local prompt.",
 	}
-	if err := os.MkdirAll(filepath.Join(home, "agents", "graphs", "pipeline", "roles", "local_reviewer"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, "agents", "graphs", "pipeline", "heroes", "local_reviewer"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	encoded, err := rolesource.Encode(localRole)
+	encoded, err := heroesource.Encode(localHero)
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(home, "agents", "graphs", "pipeline", "roles", "local_reviewer", "role.md"), encoded, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(home, "agents", "graphs", "pipeline", "heroes", "local_reviewer", "hero.md"), encoded, 0o600))
 
 	projects := &projectstore.Store{Root: filepath.Join(home, "projects")}
 	project, _, err := projects.CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: "Project", HostPath: t.TempDir()})
@@ -201,14 +201,14 @@ func TestServiceFreezesGraphLocalRole(t *testing.T) {
 	session, err := sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID, Title: "Session"})
 	require.NoError(t, err)
 
-	// Add a task referencing the graph-local role, then publish a revision.
+	// Add a task referencing the graph-local hero, then publish a revision.
 	current, _, err := sources.ReadGraph("pipeline")
 	require.NoError(t, err)
 	currentDigest, err := graphsource.SourceDigest(current)
 	require.NoError(t, err)
 	_, _, err = sources.UpdateGraph("pipeline", currentDigest, func(document *graphsource.Document) error {
 		document.Tasks = map[string]graphsource.Task{
-			"local_check": {Name: "Local Check", Role: "local/local_reviewer", Goal: "Verify locally"},
+			"local_check": {Name: "Local Check", Hero: "local/local_reviewer", Goal: "Verify locally"},
 		}
 		document.Graph = map[string][]string{"local_check": {}}
 		return nil
@@ -224,14 +224,14 @@ func TestServiceFreezesGraphLocalRole(t *testing.T) {
 
 	db, err := sessions.OpenSession(ctx, session.ID)
 	require.NoError(t, err)
-	var handle, roleVersionID, roleDefJSON string
-	require.NoError(t, db.QueryRow(`SELECT handle, role_version_id, role_definition_json FROM run_agent_flow_nodes
-		WHERE run_id=? AND task_index=0`, run.RunID).Scan(&handle, &roleVersionID, &roleDefJSON))
+	var handle, heroVersionID, heroDefJSON string
+	require.NoError(t, db.QueryRow(`SELECT handle, hero_version_id, hero_definition_json FROM run_agent_flow_nodes
+		WHERE run_id=? AND task_index=0`, run.RunID).Scan(&handle, &heroVersionID, &heroDefJSON))
 	assert.Equal(t, "local_check", handle)
-	assert.Contains(t, roleVersionID, "graph:pipeline/local_reviewer@sha256:")
-	var def domain.RoleDefinition
-	require.NoError(t, json.Unmarshal([]byte(roleDefJSON), &def))
-	assert.Equal(t, "Local prompt.", def.RolePrompt)
+	assert.Contains(t, heroVersionID, "graph:pipeline/local_reviewer@sha256:")
+	var def domain.HeroDefinition
+	require.NoError(t, json.Unmarshal([]byte(heroDefJSON), &def))
+	assert.Equal(t, "Local prompt.", def.HeroPrompt)
 	assert.Equal(t, model.ID, def.ModelBinding.ModelProfileID)
 }
 

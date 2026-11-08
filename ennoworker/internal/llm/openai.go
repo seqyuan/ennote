@@ -337,7 +337,7 @@ func validateOpenAIToolMessageSequence(messages []domain.ChatMessage) error {
 	pending := make(map[string]struct{})
 	for messageIndex, message := range messages {
 		if message.Role != domain.RoleTool && len(pending) != 0 {
-			return fmt.Errorf("message %d has role %q before all preceding tool calls have results",
+			return fmt.Errorf("message %d has hero %q before all preceding tool calls have results",
 				messageIndex, message.Role)
 		}
 
@@ -366,12 +366,12 @@ func validateOpenAIToolMessageSequence(messages []domain.ChatMessage) error {
 				toolResultCount++
 			default:
 				if message.Role == domain.RoleTool {
-					return fmt.Errorf("message %d with role tool contains %q content", messageIndex, block.Kind)
+					return fmt.Errorf("message %d with hero tool contains %q content", messageIndex, block.Kind)
 				}
 			}
 		}
 		if message.Role == domain.RoleTool && toolResultCount == 0 {
-			return fmt.Errorf("message %d with role tool has no tool result", messageIndex)
+			return fmt.Errorf("message %d with hero tool has no tool result", messageIndex)
 		}
 		if message.Role == domain.RoleAssistant && toolCallCount == 0 && len(pending) != 0 {
 			return fmt.Errorf("message %d leaves an invalid pending tool call set", messageIndex)

@@ -19,11 +19,11 @@ func fanOutDef(min int) *domain.FlowDefinition {
 		Outputs: map[string]domain.FlowPort{"report": {Type: domain.PortTypeString}},
 		Budget:  domain.FlowBudget{MaxTotalTokens: 100000},
 		Tasks: map[string]domain.FlowTask{
-			"producer": {Type: domain.FlowTaskRole, Role: "writer@1",
+			"producer": {Type: domain.FlowTaskHero, Hero: "writer@1",
 				Goal: "produce", Budget: &domain.FlowTaskBudget{Tokens: 1000}},
-			"scan": {Type: domain.FlowTaskRole, Role: "reader@1", Goal: "scan", Depends: []string{"producer"},
+			"scan": {Type: domain.FlowTaskHero, Hero: "reader@1", Goal: "scan", Depends: []string{"producer"},
 				FanOut: &domain.FlowFanOut{Min: min, Max: 4}, Budget: &domain.FlowTaskBudget{Tokens: 1000}},
-			"accept": {Type: domain.FlowTaskRole, Depends: []string{"scan"},
+			"accept": {Type: domain.FlowTaskHero, Depends: []string{"scan"},
 				Terminal: &domain.FlowTerminal{Status: "success", Output: "report"}},
 		},
 	}

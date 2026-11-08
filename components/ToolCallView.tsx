@@ -24,12 +24,12 @@ const RISK_KEYS: Record<string, string> = {
 };
 
 function isDelegationTool(name: string): boolean {
-  return name === "delegate_tasks" || name === "delegate_roles";
+  return name === "delegate_tasks" || name === "delegate_heroes";
 }
 
 // DelegationTaskList renders the model-authored task graph of a delegate_tasks
-// call (task name, role, optional dependency chain) instead of raw arguments
-// JSON. Legacy delegate_roles history is still parsed for display.
+// call (task name, hero, optional dependency chain) instead of raw arguments
+// JSON. Legacy delegate_heroes history is still parsed for display.
 function DelegationTaskList({ arguments: rawArguments }: { arguments?: unknown }) {
   const t = useT();
   const tasks = useMemo(() => {
@@ -40,17 +40,17 @@ function DelegationTaskList({ arguments: rawArguments }: { arguments?: unknown }
       : (Array.isArray(args.delegations) ? args.delegations : []);
     return list.map((entry) => {
       const task = (entry && typeof entry === "object" ? entry as Record<string, unknown> : {});
-      const role = String(task.role ?? task.roleHandle ?? "");
+      const hero = String(task.hero ?? task.heroHandle ?? "");
       const depends = Array.isArray(task.depends)
         ? (task.depends as unknown[]).map(String).filter(Boolean) : [];
-      return { name: String(task.name ?? ""), role, depends };
-    }).filter(task => task.name || task.role);
+      return { name: String(task.name ?? ""), hero, depends };
+    }).filter(task => task.name || task.hero);
   }, [rawArguments]);
   if (tasks.length === 0) return null;
   return <div className="delegation-task-list" role="list">
     {tasks.map((task, index) => <div className="delegation-task" key={`${task.name}-${index}`} role="listitem">
       <span className="delegation-task-name">{task.name || "(task)"}</span>
-      {task.role && <span className="delegation-task-role">@{task.role}</span>}
+      {task.hero && <span className="delegation-task-hero">@{task.hero}</span>}
       {task.depends.length > 0 && <span className="delegation-task-depends">{t("conversation.tool.after", { names: task.depends.join(", ") })}</span>}
     </div>)}
   </div>;
@@ -90,7 +90,7 @@ export function ToolCallView({ activity, sessionId }: { activity: ToolActivity; 
       </details>}
       </div>
     </details>
-    {(activity.toolName === "delegate_tasks" || activity.toolName === "delegate_roles") && activity.runId &&
+    {(activity.toolName === "delegate_tasks" || activity.toolName === "delegate_heroes") && activity.runId &&
       <NestedActivityPanel parentRunId={activity.runId} toolCallId={activity.toolCallId} />}
     {(activity.result?.artifacts.length ?? 0) > 0 && <div className="tool-artifact-results">
       {activity.result?.artifacts.map(artifact => <ArtifactView sessionId={sessionId} artifact={artifact} key={artifact.artifactId} />)}
@@ -115,7 +115,7 @@ function toolIcon(name: string) {
     case "bash":
     case "exec": return <Terminal {...props} />;
     case "delegate_tasks":
-    case "delegate_roles": return <Users {...props} />;
+    case "delegate_heroes": return <Users {...props} />;
     case "http":
     case "http_request":
     case "fetch":

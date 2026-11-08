@@ -43,7 +43,7 @@ type CreateFlowRunInput struct {
 type FlowNodeFreeze struct {
 	TaskIndex     int
 	Handle        string
-	RoleVersionID string
+	HeroVersionID string
 	// Skills are the task-level additive Skills with the content digest
 	// observed at freeze time. A ref without a digest is unpinned (legacy
 	// callers that only know IDs); new Flow Runs always pin.
@@ -55,10 +55,10 @@ type FlowNodeFreeze struct {
 	// frozen from the resolved Role definition and the task's declares.
 	ReadOnly bool
 	Writes   []string
-	// RoleDefinitionJSON is the full resolved RoleDefinition for the task's
-	// Role (or an inline task role). Required for executable tasks; empty for
+	// HeroDefinitionJSON is the full resolved HeroDefinition for the task's
+	// Role (or an inline task hero). Required for executable tasks; empty for
 	// terminal/check gates that dispatch no child Run.
-	RoleDefinitionJSON json.RawMessage
+	HeroDefinitionJSON json.RawMessage
 }
 
 // CreateFlowRun atomically materializes the anchor agent run, the meta-Run
@@ -81,7 +81,7 @@ func (r *AgentFlowRunRepo) CreateFlowRun(ctx context.Context, input CreateFlowRu
 		return nil, err
 	}
 	now := time.Now().UTC()
-	timestamp := roleTime(now)
+	timestamp := heroTime(now)
 	runID := uuid.NewString()
 	messageID := uuid.NewString()
 	turnID := uuid.NewString()
@@ -181,17 +181,17 @@ func (r *AgentFlowRunRepo) CreateFlowRun(ctx context.Context, input CreateFlowRu
 			readOnly = 1
 		}
 		writesJSON, _ := json.Marshal(node.Writes)
-		roleDefJSON := node.RoleDefinitionJSON
-		if len(roleDefJSON) == 0 {
-			roleDefJSON = json.RawMessage(`{}`)
+		heroDefJSON := node.HeroDefinitionJSON
+		if len(heroDefJSON) == 0 {
+			heroDefJSON = json.RawMessage(`{}`)
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO run_agent_flow_nodes
-			(run_id, task_index, handle, role_version_id, skill_digests_json, goal_digest, goal_text,
-			 budget_json, terminal_state, created_at, read_only, writes_json, role_definition_json)
+			(run_id, task_index, handle, hero_version_id, skill_digests_json, goal_digest, goal_text,
+			 budget_json, terminal_state, created_at, read_only, writes_json, hero_definition_json)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
-			runID, node.TaskIndex, node.Handle, node.RoleVersionID, string(skillsJSON),
+			runID, node.TaskIndex, node.Handle, node.HeroVersionID, string(skillsJSON),
 			node.GoalDigest, node.GoalText, string(budgetJSON), timestamp, readOnly, string(writesJSON),
-			string(roleDefJSON)); err != nil {
+			string(heroDefJSON)); err != nil {
 			return nil, fmt.Errorf("create flow node %d: %w", node.TaskIndex, err)
 		}
 	}
@@ -295,9 +295,9 @@ func scanFlowRuns(rows *sql.Rows) ([]*domain.RunAgentFlow, error) {
 
 // ListNodes returns all task checkpoints of a flow run ordered by task index.
 func (r *AgentFlowRunRepo) ListNodes(ctx context.Context, runID string) ([]*domain.RunAgentFlowNode, error) {
-	rows, err := r.DB.QueryContext(ctx, `SELECT run_id, task_index, handle, role_version_id, skill_digests_json,
+	rows, err := r.DB.QueryContext(ctx, `SELECT run_id, task_index, handle, hero_version_id, skill_digests_json,
 		goal_digest, goal_text, budget_json, terminal_state, output_ref, child_run_id, child_run_ids_json, error_code, created_at, finished_at,
-		read_only, writes_json, role_definition_json
+		read_only, writes_json, hero_definition_json
 		FROM run_agent_flow_nodes WHERE run_id=? ORDER BY task_index`, runID)
 	if err != nil {
 		return nil, err
@@ -316,9 +316,9 @@ func (r *AgentFlowRunRepo) ListNodes(ctx context.Context, runID string) ([]*doma
 
 // GetNode fetches one task checkpoint.
 func (r *AgentFlowRunRepo) GetNode(ctx context.Context, runID string, taskIndex int) (*domain.RunAgentFlowNode, error) {
-	rows, err := r.DB.QueryContext(ctx, `SELECT run_id, task_index, handle, role_version_id, skill_digests_json,
+	rows, err := r.DB.QueryContext(ctx, `SELECT run_id, task_index, handle, hero_version_id, skill_digests_json,
 		goal_digest, goal_text, budget_json, terminal_state, output_ref, child_run_id, child_run_ids_json, error_code, created_at, finished_at,
-		read_only, writes_json, role_definition_json
+		read_only, writes_json, hero_definition_json
 		FROM run_agent_flow_nodes WHERE run_id=? AND task_index=?`, runID, taskIndex)
 	if err != nil {
 		return nil, err
@@ -358,7 +358,7 @@ func (r *AgentFlowRunRepo) UpdateNode(ctx context.Context, runID string, upd Nod
 		}
 		expected = " AND terminal_state IN (" + strings.Join(quoted, ",") + ")"
 	}
-	now := roleTime(time.Now().UTC())
+	now := heroTime(time.Now().UTC())
 	outputRef := ""
 	if len(upd.OutputRef) > 0 {
 		outputRef = string(upd.OutputRef)
@@ -392,7 +392,7 @@ func (r *AgentFlowRunRepo) UpdateNode(ctx context.Context, runID string, upd Nod
 // record the finished timestamp.
 func (r *AgentFlowRunRepo) UpdateFlowState(ctx context.Context, runID string, state domain.FlowState,
 	totalTokens int64, reason string) (*domain.RunAgentFlow, error) {
-	now := roleTime(time.Now().UTC())
+	now := heroTime(time.Now().UTC())
 	finished := ""
 	if state.Terminal() {
 		finished = now
@@ -414,7 +414,7 @@ func (r *AgentFlowRunRepo) UpdateFlowState(ctx context.Context, runID string, st
 func (r *AgentFlowRunRepo) AddTokenUsage(ctx context.Context, runID string, tokens int64) (int64, error) {
 	res, err := r.DB.ExecContext(ctx, `UPDATE run_agent_flow SET
 		total_tokens_used=total_tokens_used+?, updated_at=? WHERE run_id=?`,
-		tokens, roleTime(time.Now().UTC()), runID)
+		tokens, heroTime(time.Now().UTC()), runID)
 	if err != nil {
 		return 0, err
 	}
@@ -454,7 +454,7 @@ func (r *AgentFlowRunRepo) TerminateAnchor(ctx context.Context, runID string, st
 	defer tx.Rollback()
 	res, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status=?, error_code=?, error_message=?,
 		finished_at=? WHERE id=? AND status NOT IN ('succeeded','failed','cancelled','interrupted')`,
-		status, code, message, roleTime(time.Now().UTC()), runID)
+		status, code, message, heroTime(time.Now().UTC()), runID)
 	if err != nil {
 		return err
 	}
@@ -466,7 +466,7 @@ func (r *AgentFlowRunRepo) TerminateAnchor(ctx context.Context, runID string, st
 		turnStatus = "failed"
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE turns SET status=?, updated_at=?
-		WHERE id=(SELECT turn_id FROM agent_runs WHERE id=?)`, turnStatus, roleTime(time.Now().UTC()), runID); err != nil {
+		WHERE id=(SELECT turn_id FROM agent_runs WHERE id=?)`, turnStatus, heroTime(time.Now().UTC()), runID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -474,21 +474,21 @@ func (r *AgentFlowRunRepo) TerminateAnchor(ctx context.Context, runID string, st
 
 func scanFlowNode(scan interface{ Scan(...any) error }) (*domain.RunAgentFlowNode, error) {
 	var node domain.RunAgentFlowNode
-	var roleVersionID, skillsJSON, goalDigest, goalText, budgetJSON, outputRef, childRunID, errorCode, createdAt, finishedAt, roleDefJSON sql.NullString
+	var heroVersionID, skillsJSON, goalDigest, goalText, budgetJSON, outputRef, childRunID, errorCode, createdAt, finishedAt, heroDefJSON sql.NullString
 	var childRunIDsJSON, writesJSON string
 	var readOnly int
-	if err := scan.Scan(&node.RunID, &node.TaskIndex, &node.Handle, &roleVersionID,
+	if err := scan.Scan(&node.RunID, &node.TaskIndex, &node.Handle, &heroVersionID,
 		&skillsJSON, &goalDigest, &goalText, &budgetJSON, &node.TerminalState,
 		&outputRef, &childRunID, &childRunIDsJSON, &errorCode, &createdAt, &finishedAt,
-		&readOnly, &writesJSON, &roleDefJSON); err != nil {
+		&readOnly, &writesJSON, &heroDefJSON); err != nil {
 		return nil, err
 	}
 	node.ReadOnly = readOnly != 0
 	if writesJSON != "" {
 		_ = json.Unmarshal([]byte(writesJSON), &node.Writes)
 	}
-	if roleVersionID.Valid {
-		node.RoleVersionID = roleVersionID.String
+	if heroVersionID.Valid {
+		node.HeroVersionID = heroVersionID.String
 	}
 	if goalDigest.Valid {
 		node.GoalDigest = goalDigest.String
@@ -519,8 +519,8 @@ func scanFlowNode(scan interface{ Scan(...any) error }) (*domain.RunAgentFlowNod
 	if childRunID.Valid {
 		node.ChildRunID = childRunID.String
 	}
-	if roleDefJSON.Valid && roleDefJSON.String != "" && roleDefJSON.String != "{}" {
-		node.RoleDefinitionJSON = json.RawMessage(roleDefJSON.String)
+	if heroDefJSON.Valid && heroDefJSON.String != "" && heroDefJSON.String != "{}" {
+		node.HeroDefinitionJSON = json.RawMessage(heroDefJSON.String)
 	}
 	node.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt.String)
 	if finishedAt.Valid && finishedAt.String != "" {
@@ -547,7 +547,7 @@ func (r *AgentFlowRunRepo) ResumeFlowRun(ctx context.Context, runID string) (*do
 	defer tx.Rollback()
 	res, err := tx.ExecContext(ctx, `UPDATE run_agent_flow SET state='pending', cancel_requested=0,
 		terminal_reason=NULL, finished_at=NULL, updated_at=?
-		WHERE run_id=? AND state IN ('cancelled','failed')`, roleTime(time.Now().UTC()), runID)
+		WHERE run_id=? AND state IN ('cancelled','failed')`, heroTime(time.Now().UTC()), runID)
 	if err != nil {
 		return nil, err
 	}
@@ -580,7 +580,7 @@ func (r *AgentFlowRunRepo) ResumeFlowRun(ctx context.Context, runID string) (*do
 // terminalizes the meta-Run as cancelled.
 func (r *AgentFlowRunRepo) SetCancelRequested(ctx context.Context, runID string) error {
 	res, err := r.DB.ExecContext(ctx, `UPDATE run_agent_flow SET cancel_requested=1, updated_at=?
-		WHERE run_id=?`, roleTime(time.Now().UTC()), runID)
+		WHERE run_id=?`, heroTime(time.Now().UTC()), runID)
 	if err != nil {
 		return err
 	}
@@ -624,6 +624,6 @@ func (r *AgentFlowRunRepo) SetConvergenceRounds(ctx context.Context, runID strin
 		return err
 	}
 	_, err = r.DB.ExecContext(ctx, `UPDATE run_agent_flow SET convergence_rounds_json=?, updated_at=?
-		WHERE run_id=?`, string(encoded), roleTime(time.Now().UTC()), runID)
+		WHERE run_id=?`, string(encoded), heroTime(time.Now().UTC()), runID)
 	return err
 }

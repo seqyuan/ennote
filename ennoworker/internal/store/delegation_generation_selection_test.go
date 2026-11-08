@@ -95,8 +95,8 @@ func TestFollowUpReusedSiblingAndLaterChildAssignment(t *testing.T) {
 	require.NoError(t, err)
 	resolved, err := runs.ResolveAndFreezeConfig(ctx, claimed)
 	require.NoError(t, err)
-	require.NotNil(t, resolved.Effective.Role)
-	assert.Equal(t, "builtin-workspace-explorer-v3", resolved.Effective.Role.VersionID)
+	require.NotNil(t, resolved.Effective.Hero)
+	assert.Equal(t, "builtin-workspace-explorer-v3", resolved.Effective.Hero.VersionID)
 }
 
 func TestReapOrphansPreservesLaterGenerationChildOfTerminalParent(t *testing.T) {

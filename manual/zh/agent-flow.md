@@ -10,7 +10,7 @@ Agent Flow 是可恢复的：中途崩溃、机器重启、你手动取消，都
 ```
 FlowDefinition（声明式 Task DAG）
    ↓ 发布
-AgentFlowVersion（不可变 revision，冻结 role/skill/模型/权限）
+AgentFlowVersion（不可变 revision，冻结 hero/skill/模型/权限）
    ↓ 在 Project 上启用 + 发起
 Anchor Run（元 Run：只做编排，自己从不调用 Provider）
    ↓ 每个 Task 一个
@@ -21,7 +21,7 @@ Anchor Run（元 Run：只做编排，自己从不调用 Provider）
 
 - **编排与执行分离**：元 Run 只做状态机，不做模型调用，所以它能被单独测试、也容易推理
 - **每个 Task 都是独立子 Run**：审批、预算、失败、取消都按子 Run 记录，出问题定位到具体 Task
-- **版本不可变**：一条 Run 用的是哪版定义、哪版 Role、什么模型和权限，事后都能查
+- **版本不可变**：一条 Run 用的是哪版定义、哪版 Hero、什么模型和权限，事后都能查
 
 ## 定义一个 Flow
 
@@ -39,13 +39,13 @@ outputs:
 
 tasks:
   inspect:
-    role: explorer@3               # Role 引用带版本
+    hero: explorer@3               # Hero 引用带版本
     skills: [bio-workspace]
     goal: 读取 {{samples}}，列出样本与质控指标
     depends: []
 
   stats:
-    role: analyst@2
+    hero: analyst@2
     goal: 计算每个样本的 QC 指标
     depends: [inspect]
 
@@ -55,7 +55,7 @@ tasks:
     depends: [stats]
 
   report:
-    role: writer@1
+    hero: writer@1
     goal: 汇总成报告
     depends: [stats]               # 与 gate 同层，可并行
     next:
@@ -63,7 +63,7 @@ tasks:
       fail: retry
 
   retry:
-    role: analyst@2
+    hero: analyst@2
     goal: 修复低质量样本后重算
     depends: [gate]
 
@@ -76,11 +76,11 @@ tasks:
 
 | 字段 | 作用 |
 |---|---|
-| `role` | `role@version`，发布时解析真实定义；解析不到直接拒绝发布 |
+| `hero` | `hero@version`，发布时解析真实定义；解析不到直接拒绝发布 |
 | `skills` | 该 Task 可用的技能 |
 | `goal` | 交给子 Run 的目标描述 |
 | `depends` | 上游任务；决定就绪顺序 |
-| `type` | `role`（默认，生成子 Run）/ `check`（确定性命令闸门）/ 配合 `terminal` 的终点 |
+| `type` | `hero`（默认，生成子 Run）/ `check`（确定性命令闸门）/ 配合 `terminal` 的终点 |
 | `command` | 仅 `check`：要执行的命令，走与工具调用相同的策略闸门与审批 |
 | `fanOut` | 只读并行展开，`min`/`max` 控制实例数，输出按序聚合 |
 | `budget` | 覆盖该 Task 的 token 上限 |
@@ -134,7 +134,7 @@ POST /v1/flows/{flowID}/publish
 PUT /v1/projects/{projectID}/graph-bindings/{flowID}
 ```
 
-发布时的校验是"失败即拒绝"，包括：`role@version` 能否解析、Skill 是否存在、`check`/`fanOut`/
+发布时的校验是"失败即拒绝"，包括：`hero@version` 能否解析、Skill 是否存在、`check`/`fanOut`/
 `terminal`/`next` 的结构是否自洽、并行上限、回边是否成环且有上限。
 
 从 Agent Pack 装进来的 Flow 同样是**草稿**：安装器永远不会自动发布、也不会自动启用。
@@ -164,7 +164,7 @@ PUT /v1/projects/{projectID}/graph-bindings/{flowID}
 
 | 现象 | 原因 |
 |---|---|
-| 发布失败：`role@version` 解析不到 | Role 未发布，或版本号写错 |
+| 发布失败：`hero@version` 解析不到 | Hero 未发布，或版本号写错 |
 | 运行按钮点了没反应 | Flow 有 draft 为未发布 revision，或 Project 没建 GraphBinding |
 | 一直 `pending` | 依赖成环，或依赖的 Task 失败后没有 `next` 兜底 |
 | `convergence_exceeded` | 回边轮数超限，检查 `max_rounds` 与修复任务是否真的在改输入 |

@@ -7,32 +7,32 @@ import (
 	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 )
 
-// RoleDiscovery resolves file-authored Role documents into executable Role
-// definitions (V2). The legacy global role SQL repo and project-file
-// candidate materialization were removed: file Roles are published through
+// HeroDiscovery resolves file-authored Role documents into executable Role
+// definitions (V2). The legacy global hero SQL repo and project-file
+// candidate materialization were removed: file Heroes are published through
 // globalsource and frozen into Sessions at Run start.
-type RoleDiscovery struct {
+type HeroDiscovery struct {
 	Models *ModelRepo
 }
 
-func (d *RoleDiscovery) ResolveDocument(ctx context.Context, document *rolesource.Document) (*domain.RoleDefinition, []domain.RoleValidationDiagnostic) {
+func (d *HeroDiscovery) ResolveDocument(ctx context.Context, document *heroesource.Document) (*domain.HeroDefinition, []domain.HeroValidationDiagnostic) {
 	return d.resolveDefinition(ctx, document)
 }
 
-func (d *RoleDiscovery) resolveDefinition(ctx context.Context, document *rolesource.Document) (*domain.RoleDefinition, []domain.RoleValidationDiagnostic) {
-	diagnostics := make([]domain.RoleValidationDiagnostic, 0)
+func (d *HeroDiscovery) resolveDefinition(ctx context.Context, document *heroesource.Document) (*domain.HeroDefinition, []domain.HeroValidationDiagnostic) {
+	diagnostics := make([]domain.HeroValidationDiagnostic, 0)
 	if d == nil || d.Models == nil {
-		return nil, append(diagnostics, domain.RoleValidationDiagnostic{
+		return nil, append(diagnostics, domain.HeroValidationDiagnostic{
 			Level: "error", Code: "model_reference_invalid",
 			Message: "file-backed model resolver is unavailable", Field: "model.ref",
 		})
 	}
 	model, err := d.Models.ResolvePortableRef(ctx, document.Model.Ref)
 	if err != nil {
-		diagnostics = append(diagnostics, domain.RoleValidationDiagnostic{
+		diagnostics = append(diagnostics, domain.HeroValidationDiagnostic{
 			Level: "error", Code: "model_reference_invalid", Message: err.Error(), Field: "model.ref",
 		})
 		return nil, diagnostics
@@ -41,7 +41,7 @@ func (d *RoleDiscovery) resolveDefinition(ctx context.Context, document *rolesou
 	for index, ref := range document.Model.Fallbacks {
 		fallback, resolveErr := d.Models.ResolvePortableRef(ctx, ref)
 		if resolveErr != nil {
-			diagnostics = append(diagnostics, domain.RoleValidationDiagnostic{
+			diagnostics = append(diagnostics, domain.HeroValidationDiagnostic{
 				Level: "error", Code: "model_reference_invalid", Message: resolveErr.Error(),
 				Field: fmt.Sprintf("model.fallbacks[%d]", index),
 			})
@@ -52,25 +52,25 @@ func (d *RoleDiscovery) resolveDefinition(ctx context.Context, document *rolesou
 	if len(diagnostics) > 0 {
 		return nil, diagnostics
 	}
-	skills := make([]domain.RoleSkillEntry, len(document.Skills))
+	skills := make([]domain.HeroSkillEntry, len(document.Skills))
 	for index, skill := range document.Skills {
-		skills[index] = domain.RoleSkillEntry{SkillID: skill.ID, Mode: skill.Mode}
+		skills[index] = domain.HeroSkillEntry{SkillID: skill.ID, Mode: skill.Mode}
 	}
-	definition := &domain.RoleDefinition{
-		SchemaVersion: document.SchemaVersion, RolePrompt: document.Prompt,
-		ModelBinding: domain.RoleModelBinding{
-			Mode: domain.RoleModelFixed, ModelProfileID: model.ID,
+	definition := &domain.HeroDefinition{
+		SchemaVersion: document.SchemaVersion, HeroPrompt: document.Prompt,
+		ModelBinding: domain.HeroModelBinding{
+			Mode: domain.HeroModelFixed, ModelProfileID: model.ID,
 			ThinkingEffort: document.Model.ThinkingEffort, FallbackModelProfileIDs: fallbackIDs,
 			OverridableFields: []string{},
 		},
-		Skills: domain.RoleSkills{Entries: skills}, Authority: document.Authority.Domain(),
+		Skills: domain.HeroSkills{Entries: skills}, Authority: document.Authority.Domain(),
 		PermissionCeiling: document.PermissionCeiling, AllowedTools: append([]string(nil), document.AllowedTools...),
-		ContextPolicy: domain.RoleContextPolicy{
-			DefaultMode: document.Context.DefaultMode, AllowedModes: append([]domain.RoleContextMode(nil), document.Context.AllowedModes...),
+		ContextPolicy: domain.HeroContextPolicy{
+			DefaultMode: document.Context.DefaultMode, AllowedModes: append([]domain.HeroContextMode(nil), document.Context.AllowedModes...),
 			OwnExecutionContinuity: document.Context.OwnExecutionContinuity,
 		},
-		DelegationPolicy: domain.RoleDelegationPolicy{
-			Admission:                  rolesource.AdmissionDomain(document.Delegation.Admission),
+		DelegationPolicy: domain.HeroDelegationPolicy{
+			Admission:                  heroesource.AdmissionDomain(document.Delegation.Admission),
 			AllowedCallerKinds:         append([]string(nil), document.Delegation.AllowedCallerKinds...),
 			AllowedStrategies:          append([]string(nil), document.Delegation.AllowedStrategies...),
 			MaxInvocationsPerParentRun: document.Delegation.MaxInvocationsPerParentRun,
@@ -89,8 +89,8 @@ func (d *RoleDiscovery) resolveDefinition(ctx context.Context, document *rolesou
 	return definition, diagnostics
 }
 
-// roleToolRequiresMutation reports whether a tool can mutate the workspace.
-func roleToolRequiresMutation(name string) bool {
+// heroToolRequiresMutation reports whether a tool can mutate the workspace.
+func heroToolRequiresMutation(name string) bool {
 	switch name {
 	case "write", "edit", "exec", "bash", "publish_artifact":
 		return true
@@ -99,8 +99,8 @@ func roleToolRequiresMutation(name string) bool {
 	}
 }
 
-// roleTime formats a timestamp for the Session run/flow tables.
-func roleTime(value time.Time) string { return value.Format(time.RFC3339Nano) }
+// heroTime formats a timestamp for the Session run/flow tables.
+func heroTime(value time.Time) string { return value.Format(time.RFC3339Nano) }
 
 // nullableString maps a string pointer to a nullable SQL value.
 func nullableString(value *string) any {

@@ -51,7 +51,7 @@ interface SessionSidebarProps {
   onToggleSidebar: () => void;
   /** Project selector control (owned by AppShell so the welcome stage can open it). */
   projectSelector: ReturnType<typeof useProjectSelector>;
-  /** Main-area view; Roles/Graphs items switch it without leaving the shell. */
+  /** Main-area view; Heroes/Graphs items switch it without leaving the shell. */
   view: WorkspaceView;
   setView: (view: WorkspaceView) => void;
 }
@@ -128,10 +128,10 @@ export function SessionSidebar({
 
       <NewSessionButton disabled={!selectedProject} onClick={createSession} />
 
-      {/* Roles / Graphs below New Session (dsh nav-item style). These switch
+      {/* Heroes / Graphs below New Session (dsh nav-item style). These switch
           the main-area view inside the shell — the sidebar never navigates away. */}
       <nav className="sidebar-nav" aria-label="Workspace">
-        <NavLink active={view === "roles"} label={t("sidebar.roles")} icon={<Bot size={16} />} onClick={() => setView("roles")} />
+        <NavLink active={view === "heroes"} label={t("sidebar.heroes")} icon={<Bot size={16} />} onClick={() => setView("heroes")} />
         <NavLink active={view === "graphs"} label={t("sidebar.graphs")} icon={<Workflow size={16} />} onClick={() => setView("graphs")} />
       </nav>
 

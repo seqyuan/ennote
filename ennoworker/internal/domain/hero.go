@@ -9,27 +9,27 @@ type AgentProfileObjectKind string
 
 const (
 	AgentProfileHost AgentProfileObjectKind = "host_profile"
-	AgentProfileRole AgentProfileObjectKind = "role"
+	AgentProfileHero AgentProfileObjectKind = "hero"
 )
 
 const (
-	RoleSourceManaged     = "managed"
-	RoleSourceProjectFile = "project_file"
+	HeroSourceManaged     = "managed"
+	HeroSourceProjectFile = "project_file"
 )
 
-type RoleScope string
+type HeroScope string
 
 const (
-	RoleScopeBuiltin RoleScope = "builtin"
-	RoleScopeGlobal  RoleScope = "global"
-	RoleScopeProject RoleScope = "project"
-	// RoleScopeFlow is a Role owned by exactly one Agent Flow profile. It is
+	HeroScopeBuiltin HeroScope = "builtin"
+	HeroScopeGlobal  HeroScope = "global"
+	HeroScopeProject HeroScope = "project"
+	// HeroScopeFlow is a Role owned by exactly one Agent Flow profile. It is
 	// only resolvable from task references inside that flow (flow -> project ->
 	// global/builtin precedence) and never from delegate_tasks.
-	RoleScopeFlow RoleScope = "flow"
+	HeroScopeFlow HeroScope = "flow"
 )
 
-type RoleIdentity struct {
+type HeroIdentity struct {
 	ID                        string          `json:"id"`
 	Handle                    string          `json:"handle"`
 	Name                      string          `json:"name"`
@@ -37,7 +37,7 @@ type RoleIdentity struct {
 	Positioning               string          `json:"positioning"`
 	Icon                      string          `json:"icon"`
 	Color                     string          `json:"color"`
-	Scope                     RoleScope       `json:"scope"`
+	Scope                     HeroScope       `json:"scope"`
 	ProjectID                 *string         `json:"projectId,omitempty"`
 	FlowID                    *string         `json:"flowId,omitempty"`
 	Status                    string          `json:"status"`
@@ -55,7 +55,7 @@ type RoleIdentity struct {
 	UpdatedAt                 time.Time       `json:"updatedAt"`
 }
 
-type RoleSummary struct {
+type HeroSummary struct {
 	ID               string    `json:"id"`
 	Handle           string    `json:"handle"`
 	Name             string    `json:"name"`
@@ -63,7 +63,7 @@ type RoleSummary struct {
 	Positioning      string    `json:"positioning"`
 	Icon             string    `json:"icon"`
 	Color            string    `json:"color"`
-	Scope            RoleScope `json:"scope"`
+	Scope            HeroScope `json:"scope"`
 	ProjectID        *string   `json:"projectId,omitempty"`
 	FlowID           *string   `json:"flowId,omitempty"`
 	Status           string    `json:"status"`
@@ -74,74 +74,74 @@ type RoleSummary struct {
 	UpdatedAt        time.Time `json:"updatedAt"`
 }
 
-type RoleVersion struct {
+type HeroVersion struct {
 	ID           string         `json:"id"`
-	RoleID       string         `json:"roleId"`
+	HeroID       string         `json:"heroId"`
 	Version      int            `json:"version"`
-	Definition   RoleDefinition `json:"definition"`
+	Definition   HeroDefinition `json:"definition"`
 	ConfigDigest string         `json:"configDigest"`
 	Status       string         `json:"status"`
 	CreatedAt    time.Time      `json:"createdAt"`
 }
 
-type RoleModelBindingMode string
+type HeroModelBindingMode string
 
 const (
-	RoleModelFixed       RoleModelBindingMode = "fixed"
-	RoleModelOverridable RoleModelBindingMode = "overridable"
-	RoleModelInherit     RoleModelBindingMode = "inherit"
+	HeroModelFixed       HeroModelBindingMode = "fixed"
+	HeroModelOverridable HeroModelBindingMode = "overridable"
+	HeroModelInherit     HeroModelBindingMode = "inherit"
 )
 
-type RoleModelBinding struct {
-	Mode                    RoleModelBindingMode `json:"mode"`
+type HeroModelBinding struct {
+	Mode                    HeroModelBindingMode `json:"mode"`
 	ModelProfileID          string               `json:"modelProfileId,omitempty"`
 	ThinkingEffort          ThinkingEffort       `json:"thinkingEffort"`
 	FallbackModelProfileIDs []string             `json:"fallbackModelProfileIds"`
 	OverridableFields       []string             `json:"overridableFields"`
 }
 
-type RoleSkillMode string
+type HeroSkillMode string
 
 const (
-	RoleSkillPreload   RoleSkillMode = "preload"
-	RoleSkillAvailable RoleSkillMode = "available"
+	HeroSkillPreload   HeroSkillMode = "preload"
+	HeroSkillAvailable HeroSkillMode = "available"
 )
 
-type RoleSkillEntry struct {
+type HeroSkillEntry struct {
 	SkillID string        `json:"skillId"`
-	Mode    RoleSkillMode `json:"mode"`
+	Mode    HeroSkillMode `json:"mode"`
 }
 
-type RoleSkills struct {
-	Entries []RoleSkillEntry `json:"entries"`
+type HeroSkills struct {
+	Entries []HeroSkillEntry `json:"entries"`
 }
 
-type RoleAuthority string
+type HeroAuthority string
 
 const (
-	RoleAuthorityReadOnly RoleAuthority = "read_only"
-	RoleAuthorityMutation RoleAuthority = "mutation"
+	HeroAuthorityReadOnly HeroAuthority = "read_only"
+	HeroAuthorityMutation HeroAuthority = "mutation"
 )
 
-type RoleContextMode string
+type HeroContextMode string
 
 const (
-	RoleContextRoom  RoleContextMode = "room"
-	RoleContextReply RoleContextMode = "reply"
-	RoleContextFresh RoleContextMode = "fresh"
-	RoleContextTask  RoleContextMode = "task_only"
+	HeroContextRoom  HeroContextMode = "room"
+	HeroContextReply HeroContextMode = "reply"
+	HeroContextFresh HeroContextMode = "fresh"
+	HeroContextTask  HeroContextMode = "task_only"
 )
 
-type RolePrivateContinuity string
+type HeroPrivateContinuity string
 
 const (
-	RoleContinuityNone RolePrivateContinuity = "none"
+	HeroContinuityNone HeroPrivateContinuity = "none"
 )
 
-type RoleContextPolicy struct {
-	DefaultMode            RoleContextMode       `json:"defaultMode"`
-	AllowedModes           []RoleContextMode     `json:"allowedModes"`
-	OwnExecutionContinuity RolePrivateContinuity `json:"ownExecutionContinuity"`
+type HeroContextPolicy struct {
+	DefaultMode            HeroContextMode       `json:"defaultMode"`
+	AllowedModes           []HeroContextMode     `json:"allowedModes"`
+	OwnExecutionContinuity HeroPrivateContinuity `json:"ownExecutionContinuity"`
 }
 
 type DelegationAdmission string
@@ -161,7 +161,7 @@ type DelegationBudgetCeiling struct {
 	MaxWallTimeMS    int64 `json:"maxWallTimeMs"`
 }
 
-type RoleDelegationPolicy struct {
+type HeroDelegationPolicy struct {
 	Admission                  DelegationAdmission     `json:"admission"`
 	AllowedCallerKinds         []string                `json:"allowedCallerKinds"`
 	AllowedStrategies          []string                `json:"allowedStrategies"`
@@ -170,29 +170,29 @@ type RoleDelegationPolicy struct {
 	BudgetCeiling              DelegationBudgetCeiling `json:"budgetCeiling"`
 }
 
-type RoleDefinition struct {
+type HeroDefinition struct {
 	SchemaVersion     int                  `json:"schemaVersion"`
-	RolePrompt        string               `json:"rolePrompt"`
-	ModelBinding      RoleModelBinding     `json:"modelBinding"`
-	Skills            RoleSkills           `json:"skills"`
-	Authority         RoleAuthority        `json:"authority"`
+	HeroPrompt        string               `json:"heroPrompt"`
+	ModelBinding      HeroModelBinding     `json:"modelBinding"`
+	Skills            HeroSkills           `json:"skills"`
+	Authority         HeroAuthority        `json:"authority"`
 	PermissionCeiling PermissionMode       `json:"permissionCeiling"`
 	AllowedTools      []string             `json:"allowedTools"`
-	ContextPolicy     RoleContextPolicy    `json:"contextPolicy"`
-	DelegationPolicy  RoleDelegationPolicy `json:"delegationPolicy"`
+	ContextPolicy     HeroContextPolicy    `json:"contextPolicy"`
+	DelegationPolicy  HeroDelegationPolicy `json:"delegationPolicy"`
 	OutputContract    string               `json:"outputContract"`
 	MaxLoopIterations int                  `json:"maxLoopIterations"`
 }
 
-type RoleValidationDiagnostic struct {
+type HeroValidationDiagnostic struct {
 	Level   string `json:"level"`
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Field   string `json:"field,omitempty"`
 }
 
-type RoleValidationResult struct {
+type HeroValidationResult struct {
 	Valid        bool                       `json:"valid"`
-	Diagnostics  []RoleValidationDiagnostic `json:"diagnostics"`
+	Diagnostics  []HeroValidationDiagnostic `json:"diagnostics"`
 	ConfigDigest string                     `json:"configDigest,omitempty"`
 }

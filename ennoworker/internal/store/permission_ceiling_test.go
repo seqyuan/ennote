@@ -17,7 +17,7 @@ func TestResolveChildPermissionCeilingFailsClosed(t *testing.T) {
 	cases := []struct {
 		name     string
 		parent   domain.PermissionMode
-		role     domain.PermissionMode
+		hero     domain.PermissionMode
 		expected domain.PermissionMode
 	}{
 		{"parent looser than the Role keeps the Role", domain.PermissionAuto, domain.PermissionAsk, domain.PermissionAsk},
@@ -38,7 +38,7 @@ func TestResolveChildPermissionCeilingFailsClosed(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			got, err := resolveChildPermissionCeiling(testCase.parent, testCase.role)
+			got, err := resolveChildPermissionCeiling(testCase.parent, testCase.hero)
 			require.NoError(t, err)
 			assert.Equal(t, testCase.expected, got)
 		})

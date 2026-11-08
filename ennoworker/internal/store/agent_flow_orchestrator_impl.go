@@ -73,7 +73,7 @@ func (s *OrchestratorStore) AddTokenUsage(ctx context.Context, runID string, tok
 
 func (s *OrchestratorStore) SetCancelRequested(ctx context.Context, runID string) error {
 	_, err := s.Runs.DB.ExecContext(ctx, `UPDATE run_agent_flow SET cancel_requested=1, updated_at=?
-		WHERE run_id=?`, roleTime(time.Now().UTC()), runID)
+		WHERE run_id=?`, heroTime(time.Now().UTC()), runID)
 	return err
 }
 
@@ -109,31 +109,31 @@ type OrchestratorChildren struct {
 // never leaks an orphaned group/item. Background mode keeps the flow anchor
 // 'running' so the standard coordinator parent-wake machinery stays inert and
 // the orchestrator owns the child lifecycle. The synthetic parent tool call
-// id is unique per attempt. RoleMeta carries the frozen role identity and
-// definition from the flow node so delegation never reads global role SQL.
+// id is unique per attempt. HeroMeta carries the frozen hero identity and
+// definition from the flow node so delegation never reads global hero SQL.
 func (c *OrchestratorChildren) CreateTaskChild(ctx context.Context, parentRunID, sessionID string,
 	spec agentflow.ChildSpec) (agentflow.ChildInfo, error) {
-	var roleMeta *DelegationRoleMeta
-	if len(spec.RoleDefinitionJSON) > 0 {
-		meta, err := delegationRoleMetaFromDefinition(spec.RoleVersionID, spec.RoleDefinitionJSON)
+	var heroMeta *DelegationHeroMeta
+	if len(spec.HeroDefinitionJSON) > 0 {
+		meta, err := delegationHeroMetaFromDefinition(spec.HeroVersionID, spec.HeroDefinitionJSON)
 		if err != nil {
-			return agentflow.ChildInfo{}, fmt.Errorf("freeze task role meta: %w", err)
+			return agentflow.ChildInfo{}, fmt.Errorf("freeze task hero meta: %w", err)
 		}
 		meta.Handle = spec.Handle
 		if meta.DisplayName == "" {
 			meta.DisplayName = spec.Handle
 		}
-		roleMeta = meta
+		heroMeta = meta
 	}
 	item := CreateDelegationItemInput{
 		Name:           spec.Handle,
-		RoleVersionID:  spec.RoleVersionID,
+		HeroVersionID:  spec.HeroVersionID,
 		FrozenSkills:   append(domain.FrozenSkillRefs(nil), spec.Skills...),
 		AssignmentJSON: json.RawMessage(fmt.Sprintf(`{"task":%q}`, spec.Assignment)),
 		// OutputContract empty: the delegation admission resolves the frozen
 		// Role's contract; the typed payload still flows through submit_result.
 		Budget:   spec.Budget,
-		RoleMeta: roleMeta,
+		HeroMeta: heroMeta,
 	}
 	toolCallID := "flow:" + parentRunID + ":" + spec.Handle + ":" + strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
 	tx, err := c.DB.BeginTx(ctx, nil)

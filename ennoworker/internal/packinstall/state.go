@@ -59,8 +59,8 @@ type FlowState struct {
 	PublishedRevision    *string `json:"publishedRevision"`
 }
 
-// RoleState records one installed pack role.
-type RoleState struct {
+// HeroState records one installed pack hero.
+type HeroState struct {
 	PackHandle string `json:"packHandle"`
 	Scope      string `json:"scope"`
 	// StoreID is "<handle>" for a global Role and "<flow>/<handle>" for a
@@ -93,7 +93,7 @@ type State struct {
 	InstallState      string                  `json:"installState"`
 	Source            SourceRef               `json:"source"`
 	Flows             []FlowState             `json:"flows"`
-	Roles             []RoleState             `json:"roles"`
+	Heroes             []HeroState             `json:"heroes"`
 	Skills            []SkillState            `json:"skills"`
 	ExternalRefs      ExternalRefs            `json:"externalRefs"`
 	ModelRequirements agentpack.ModelEnvelope `json:"modelRequirements"`
@@ -108,7 +108,7 @@ type StateSummary struct {
 	InstallState   string       `json:"installState"`
 	Source         SourceRef    `json:"source"`
 	FlowCount      int          `json:"flowCount"`
-	RoleCount      int          `json:"roleCount"`
+	HeroCount      int          `json:"heroCount"`
 	SkillCount     int          `json:"skillCount"`
 	ExternalRefs   ExternalRefs `json:"externalRefs"`
 }
@@ -129,7 +129,7 @@ func (s *State) summary() StateSummary {
 		InstallState:   s.InstallState,
 		Source:         s.Source,
 		FlowCount:      len(s.Flows),
-		RoleCount:      len(s.Roles),
+		HeroCount:      len(s.Heroes),
 		SkillCount:     len(s.Skills),
 		ExternalRefs:   external,
 	}

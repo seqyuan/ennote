@@ -7,7 +7,7 @@ import (
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agent"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/seqyuan/ennote/ennoworker/internal/tools"
 	"github.com/stretchr/testify/assert"
@@ -29,34 +29,34 @@ func TestDelegationAdmissionRewriteValidatesAgainstToolSchema(t *testing.T) {
 	require.NoError(t, err)
 	session := sqlCreateSession(t, db, project.ID)
 
-	sources, models, modelID, _ := setupExecutorFileRoleDelegation(t)
-	document := &rolesource.Document{
-		SchemaVersion: 1, Handle: "auto-role", Name: "Auto",
+	sources, models, modelID, _ := setupExecutorFileHeroDelegation(t)
+	document := &heroesource.Document{
+		SchemaVersion: 1, Handle: "auto-hero", Name: "Auto",
 		Description: "Automatically admitted.", Positioning: "Independent", Icon: "bot", Color: "neutral",
-		Model:  rolesource.ModelBinding{Ref: modelID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills: []rolesource.SkillBinding{}, Authority: rolesource.AuthorityReadOnly,
+		Model:  heroesource.ModelBinding{Ref: modelID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills: []heroesource.SkillBinding{}, Authority: heroesource.AuthorityReadOnly,
 		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read"},
-		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextFresh,
-			AllowedModes: []domain.RoleContextMode{domain.RoleContextFresh}, OwnExecutionContinuity: domain.RoleContinuityNone},
-		Delegation: rolesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+		Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextFresh,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextFresh}, OwnExecutionContinuity: domain.HeroContinuityNone},
+		Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
 			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
 			MaxInvocationsPerParentRun: 1, MaxConcurrentInstances: 1,
-			BudgetCeiling: rolesource.DelegationBudgetCeiling{MaxModelCalls: 1, MaxToolCalls: 1,
+			BudgetCeiling: heroesource.DelegationBudgetCeiling{MaxModelCalls: 1, MaxToolCalls: 1,
 				MaxTotalTokens: 20000, MaxOutputTokens: 4000, MaxWallTimeMS: 120000}},
 		OutputContract: "text-v1", MaxLoopIterations: 8, Prompt: "Read the file.",
 	}
-	_, _, err = sources.CreateRole(document)
+	_, _, err = sources.CreateHero(document)
 	require.NoError(t, err)
-	_, err = sources.PublishRoleRevision(document.Handle)
+	_, err = sources.PublishHeroRevision(document.Handle)
 	require.NoError(t, err)
 
-	hook := delegationAdmissionHook(&store.DelegationRepo{DB: db, RoleSources: sources, Models: models},
+	hook := delegationAdmissionHook(&store.DelegationRepo{DB: db, HeroSources: sources, Models: models},
 		session.ID, map[string]bool{})
 
 	delegationTool := &tools.DelegateTasksTool{}
 	registry, err := tools.NewRegistry(delegationTool)
 	require.NoError(t, err)
-	_, err = registry.RegisterAlias("delegate_roles", "delegate_tasks", delegationTool.LegacySchema())
+	_, err = registry.RegisterAlias("delegate_heroes", "delegate_tasks", delegationTool.LegacySchema())
 	require.NoError(t, err)
 
 	cases := []struct {
@@ -70,15 +70,15 @@ func TestDelegationAdmissionRewriteValidatesAgainstToolSchema(t *testing.T) {
 			name: "canonical_tasks",
 			tool: "delegate_tasks",
 			arguments: `{"executionMode":"background","autoResume":true,"tasks":[
-				{"name":"read","role":"auto-role","goal":"Read /workspace/notes.txt",
+				{"name":"read","hero":"auto-hero","goal":"Read /workspace/notes.txt",
 				 "budget":{"maxModelCalls":1,"maxToolCalls":1}}]}`,
 			wantOtherKey: "delegations",
 		},
 		{
 			name: "legacy_delegations",
-			tool: "delegate_roles",
+			tool: "delegate_heroes",
 			arguments: `{"executionMode":"background","autoResume":true,"delegations":[
-				{"name":"read","roleHandle":"auto-role","assignment":"Read /workspace/notes.txt",
+				{"name":"read","heroHandle":"auto-hero","assignment":"Read /workspace/notes.txt",
 				 "budget":{"maxModelCalls":1,"maxToolCalls":1}}]}`,
 			wantOtherKey: "tasks",
 		},
@@ -110,7 +110,7 @@ func TestDelegationAdmissionRewriteValidatesAgainstToolSchema(t *testing.T) {
 			require.NoError(t, json.Unmarshal(decoded["autoResume"], &autoResume))
 			assert.True(t, autoResume)
 			// The resolved immutable Role version is frozen into the item.
-			assert.Contains(t, string(decision.Arguments), "roleVersionId")
+			assert.Contains(t, string(decision.Arguments), "heroVersionId")
 		})
 	}
 }

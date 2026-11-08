@@ -85,7 +85,7 @@ model_requirements:
   defaults:
     capabilities: [tool_use]
     min_context_window: 128000
-  roles:
+  heroes:
     qc-reviewer:
       capabilities: [tool_use, thinking]
 inputs:
@@ -96,10 +96,10 @@ flows:
   - id: qc-review
     path: flows/qc-review/graph.yaml
     format: graph
-    roles: [qc-reviewer]
-roles:
+    heroes: [qc-reviewer]
+heroes:
   - handle: qc-reviewer
-    path: roles/qc-reviewer/role.md
+    path: heroes/qc-reviewer/hero.md
     scope: flow
 skills:
   - id: cell-qc-tables
@@ -116,11 +116,11 @@ name: QC Review
 tasks:
   load:
     name: Load
-    role: local/qc-reviewer
+    hero: local/qc-reviewer
     goal: Load the samplesheet
   review:
     name: Review
-    role: local/qc-reviewer
+    hero: local/qc-reviewer
     goal: Review QC metrics
     writes: [results/qc.csv]
 graph:
@@ -128,7 +128,7 @@ graph:
   review: [load]
 `
 
-const reviewerRole = `---
+const reviewerHero = `---
 schemaVersion: 1
 handle: qc-reviewer
 name: QC Reviewer
@@ -151,7 +151,7 @@ func mixedPackFiles() []entry {
 		{path: "pack.yaml", body: mixedManifest},
 		{path: "README.md", body: "# Cell QC Review\n"},
 		{path: "flows/qc-review/graph.yaml", body: graphFlow},
-		{path: "roles/qc-reviewer/role.md", body: reviewerRole},
+		{path: "heroes/qc-reviewer/hero.md", body: reviewerHero},
 		{path: "skills/cell-qc-tables/skill.json", body: skillManifestJSON},
 		{path: "skills/cell-qc-tables/SKILL.md", body: "# Cell QC Tables\n"},
 	}

@@ -1,4 +1,4 @@
-package rolesource
+package heroesource
 
 import (
 	"bytes"
@@ -15,9 +15,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const maxRoleFileBytes = 128 * 1024
+const maxHeroFileBytes = 128 * 1024
 
-var roleHandlePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,31}$`)
+var heroHandlePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,31}$`)
 
 type ModelBinding struct {
 	Ref            string                `json:"ref" yaml:"ref"`
@@ -26,8 +26,8 @@ type ModelBinding struct {
 }
 
 // Authority is the Role source-level write authority. It is deliberately not
-// domain.RoleAuthority: portable Role files and the Worker API spell the
-// mutation authority "write_workspace", while the frozen RoleDefinition uses
+// domain.HeroAuthority: portable Role files and the Worker API spell the
+// mutation authority "write_workspace", while the frozen HeroDefinition uses
 // "mutation".
 //
 // Authority is validated but never rewritten: Role revisions are immutable and
@@ -39,20 +39,20 @@ type Authority string
 const (
 	AuthorityReadOnly       Authority = "read_only"
 	AuthorityWriteWorkspace Authority = "write_workspace"
-	// AuthorityMutation is the internal spelling, accepted for Roles authored
-	// against the frozen RoleDefinition contract before "write_workspace" was
+	// AuthorityMutation is the internal spelling, accepted for Heroes authored
+	// against the frozen HeroDefinition contract before "write_workspace" was
 	// documented. It carries exactly the same authority.
 	AuthorityMutation Authority = "mutation"
 )
 
 // Domain maps the source authority onto the internal Role authority. An
 // omitted authority fails closed to read_only.
-func (a Authority) Domain() domain.RoleAuthority {
+func (a Authority) Domain() domain.HeroAuthority {
 	switch a {
 	case AuthorityWriteWorkspace, AuthorityMutation:
-		return domain.RoleAuthorityMutation
+		return domain.HeroAuthorityMutation
 	default:
-		return domain.RoleAuthorityReadOnly
+		return domain.HeroAuthorityReadOnly
 	}
 }
 
@@ -75,13 +75,13 @@ func AdmissionDomain(value domain.DelegationAdmission) domain.DelegationAdmissio
 
 type SkillBinding struct {
 	ID   string               `json:"id" yaml:"id"`
-	Mode domain.RoleSkillMode `json:"mode" yaml:"mode"`
+	Mode domain.HeroSkillMode `json:"mode" yaml:"mode"`
 }
 
 type ContextPolicy struct {
-	DefaultMode            domain.RoleContextMode       `json:"defaultMode" yaml:"defaultMode"`
-	AllowedModes           []domain.RoleContextMode     `json:"allowedModes" yaml:"allowedModes"`
-	OwnExecutionContinuity domain.RolePrivateContinuity `json:"ownExecutionContinuity" yaml:"ownExecutionContinuity"`
+	DefaultMode            domain.HeroContextMode       `json:"defaultMode" yaml:"defaultMode"`
+	AllowedModes           []domain.HeroContextMode     `json:"allowedModes" yaml:"allowedModes"`
+	OwnExecutionContinuity domain.HeroPrivateContinuity `json:"ownExecutionContinuity" yaml:"ownExecutionContinuity"`
 }
 
 type DelegationBudgetCeiling struct {
@@ -123,7 +123,7 @@ type Document struct {
 }
 
 func Parse(data []byte) (*Document, error) {
-	if len(data) > maxRoleFileBytes {
+	if len(data) > maxHeroFileBytes {
 		return nil, fmt.Errorf("Role file exceeds 128 KiB")
 	}
 	normalized := bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
@@ -170,7 +170,7 @@ func Encode(document *Document) ([]byte, error) {
 	copy.Model.Fallbacks = append([]string(nil), document.Model.Fallbacks...)
 	copy.Skills = append([]SkillBinding(nil), document.Skills...)
 	copy.AllowedTools = append([]string(nil), document.AllowedTools...)
-	copy.Context.AllowedModes = append([]domain.RoleContextMode(nil), document.Context.AllowedModes...)
+	copy.Context.AllowedModes = append([]domain.HeroContextMode(nil), document.Context.AllowedModes...)
 	copy.Delegation.AllowedCallerKinds = append([]string(nil), document.Delegation.AllowedCallerKinds...)
 	copy.Delegation.AllowedStrategies = append([]string(nil), document.Delegation.AllowedStrategies...)
 	if err := normalizeAndValidate(&copy); err != nil {
@@ -193,7 +193,7 @@ func SourceDigest(document *Document) (string, error) {
 	copy.Model.Fallbacks = append([]string(nil), document.Model.Fallbacks...)
 	copy.Skills = append([]SkillBinding(nil), document.Skills...)
 	copy.AllowedTools = append([]string(nil), document.AllowedTools...)
-	copy.Context.AllowedModes = append([]domain.RoleContextMode(nil), document.Context.AllowedModes...)
+	copy.Context.AllowedModes = append([]domain.HeroContextMode(nil), document.Context.AllowedModes...)
 	copy.Delegation.AllowedCallerKinds = append([]string(nil), document.Delegation.AllowedCallerKinds...)
 	copy.Delegation.AllowedStrategies = append([]string(nil), document.Delegation.AllowedStrategies...)
 	if err := normalizeAndValidate(&copy); err != nil {
@@ -219,8 +219,8 @@ func normalizeAndValidate(document *Document) error {
 	if document.SchemaVersion != 1 {
 		return fmt.Errorf("Role schemaVersion must be 1")
 	}
-	if !roleHandlePattern.MatchString(document.Handle) {
-		return fmt.Errorf("Role handle must match %s", roleHandlePattern.String())
+	if !heroHandlePattern.MatchString(document.Handle) {
+		return fmt.Errorf("Role handle must match %s", heroHandlePattern.String())
 	}
 	if document.Name == "" {
 		return fmt.Errorf("Role name is required")
@@ -264,18 +264,18 @@ func normalizeAndValidate(document *Document) error {
 		}
 		seenSkills[document.Skills[index].ID] = true
 		switch document.Skills[index].Mode {
-		case domain.RoleSkillPreload, domain.RoleSkillAvailable:
+		case domain.HeroSkillPreload, domain.HeroSkillAvailable:
 		default:
 			return fmt.Errorf("unsupported skill mode %q", document.Skills[index].Mode)
 		}
 	}
 	sort.Slice(document.Skills, func(i, j int) bool { return document.Skills[i].ID < document.Skills[j].ID })
 	document.AllowedTools = trimSortedUnique(document.AllowedTools)
-	if document.Context.DefaultMode != "" && !roleContextModes[document.Context.DefaultMode] {
+	if document.Context.DefaultMode != "" && !heroContextModes[document.Context.DefaultMode] {
 		return fmt.Errorf("unsupported context defaultMode %q", document.Context.DefaultMode)
 	}
 	for index := range document.Context.AllowedModes {
-		if !roleContextModes[document.Context.AllowedModes[index]] {
+		if !heroContextModes[document.Context.AllowedModes[index]] {
 			return fmt.Errorf("unsupported context allowedModes[%d] %q", index, document.Context.AllowedModes[index])
 		}
 	}
@@ -287,13 +287,13 @@ func normalizeAndValidate(document *Document) error {
 	return nil
 }
 
-// roleContextModes is the accepted Role execution-context vocabulary. A Role is
+// heroContextModes is the accepted Role execution-context vocabulary. A Role is
 // only invokable in the modes it declares: task_only is required to run as a
 // delegated child, reply to be addressed with reply_to, and room/fresh for
 // direct Host invocation.
-var roleContextModes = map[domain.RoleContextMode]bool{
-	domain.RoleContextRoom: true, domain.RoleContextReply: true,
-	domain.RoleContextFresh: true, domain.RoleContextTask: true,
+var heroContextModes = map[domain.HeroContextMode]bool{
+	domain.HeroContextRoom: true, domain.HeroContextReply: true,
+	domain.HeroContextFresh: true, domain.HeroContextTask: true,
 }
 
 func validateModelRef(ref string) error {

@@ -108,7 +108,7 @@ type agentExecutor struct {
 	compaction        *compaction.Service
 	approvals         *store.ApprovalRepo
 	standingApprovals *store.StandingApprovalRepo
-	// OnChildRunsCreated is called after delegate_roles creates children.
+	// OnChildRunsCreated is called after delegate_heroes creates children.
 	// The coordinator provides this to enqueue child runs.
 	OnChildRunsCreated func(ctx context.Context, runIDs []string)
 	// MCP wires the MCP tools-only client stores for Run freezing.
@@ -138,18 +138,18 @@ func (e *agentExecutor) registerCreateSkill(registry *tools.Registry) error {
 }
 
 // delegationRepo returns the Session-scoped delegation repository with the
-// file-native Role resolver wired (V2). Host delegation resolves global Roles
-// from immutable file revisions, never from the removed global role SQL.
+// file-native Role resolver wired (V2). Host delegation resolves global Heroes
+// from immutable file revisions, never from the removed global hero SQL.
 func (e *agentExecutor) delegationRepo() *store.DelegationRepo {
 	var sources *globalsource.Store
 	var models *store.ModelRepo
 	var policies *fileconfig.PolicyStore
 	if e.runs != nil {
-		sources = e.runs.RoleSources
+		sources = e.runs.HeroSources
 		models = e.runs.Models
 		policies = e.runs.Policies
 	}
-	return &store.DelegationRepo{DB: e.db, RoleSources: sources, Models: models, Policies: policies}
+	return &store.DelegationRepo{DB: e.db, HeroSources: sources, Models: models, Policies: policies}
 }
 
 type sessionExecutorRouter struct {
@@ -408,8 +408,8 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	// The base of the prompt is platform-owned: either the frozen Agent prompt,
 	// or the platform Role envelope plus the frozen Role definition.
 	baseSegments := agent.BaseSystemPromptSegments(resolved.SystemPrompt.AgentPrompt)
-	if resolved.Effective.Role != nil {
-		baseSegments = agent.RoleSystemPromptSegments(*resolved.Effective.Role, resolved.SystemPrompt.AgentPrompt)
+	if resolved.Effective.Hero != nil {
+		baseSegments = agent.HeroSystemPromptSegments(*resolved.Effective.Hero, resolved.SystemPrompt.AgentPrompt)
 	}
 	systemPrompt := ""
 	var systemPromptSections []domain.PromptSection
@@ -441,7 +441,7 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 
 		// Check if read is allowed by frozen tool policy
 		allowRead := agent.AllowsTool(resolved.Effective.ToolPolicy.Config, "read") &&
-			(resolved.Effective.Role == nil || slices.Contains(resolved.Effective.Role.AllowedTools, "read"))
+			(resolved.Effective.Hero == nil || slices.Contains(resolved.Effective.Hero.AllowedTools, "read"))
 		catalogPrompt := ""
 		if allowRead {
 			// Build catalog from source roots
@@ -499,7 +499,7 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		if taskSkillsErr != nil {
 			return domain.RunOutput{}, fmt.Errorf("load task skills: %w", taskSkillsErr)
 		}
-		taskSegments, taskSkillsErr := e.taskPreloadSegments(resolved.Effective.Role, taskSkills,
+		taskSegments, taskSkillsErr := e.taskPreloadSegments(resolved.Effective.Hero, taskSkills,
 			fmt.Sprintf("task:%s", run.ID))
 		if taskSkillsErr != nil {
 			return domain.RunOutput{}, taskSkillsErr
@@ -507,11 +507,11 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		segments := make([]systemprompt.Segment, 0, len(baseSegments)+6)
 		segments = append(segments, baseSegments...)
 		segments = append(segments, projCtx.Segments(catalogPrompt)...)
-		roleSegments, roleSkillsErr := e.rolePreloadSegments(resolved.Effective.Role)
-		if roleSkillsErr != nil {
-			return domain.RunOutput{}, roleSkillsErr
+		heroSegments, heroSkillsErr := e.heroPreloadSegments(resolved.Effective.Hero)
+		if heroSkillsErr != nil {
+			return domain.RunOutput{}, heroSkillsErr
 		}
-		segments = append(segments, roleSegments...)
+		segments = append(segments, heroSegments...)
 		segments = append(segments, taskSegments...)
 		systemPrompt, systemPromptSections = systemprompt.Compose(segments)
 		// Freeze what the model is about to be given before the first Provider
@@ -560,18 +560,18 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		return domain.RunOutput{}, fmt.Errorf("register todo tool: %w", err)
 	}
 	// Register delegate_tasks with the Host delegation provider, plus its
-	// legacy delegate_roles alias so runs started before the rename can replay
+	// legacy delegate_heroes alias so runs started before the rename can replay
 	// persisted tool calls and approval records. Models only ever see
 	// delegate_tasks (aliases are hidden by the Registry).
 	delegateTasks := &tools.DelegateTasksTool{Provider: e.delegateProvider(run), RunID: run.ID, SessionID: run.SessionID}
 	if _, err := toolReg.Register(delegateTasks); err != nil {
 		return domain.RunOutput{}, fmt.Errorf("register delegate_tasks: %w", err)
 	}
-	if _, err := toolReg.RegisterAlias("delegate_roles", "delegate_tasks", delegateTasks.LegacySchema()); err != nil {
-		return domain.RunOutput{}, fmt.Errorf("register delegate_roles alias: %w", err)
+	if _, err := toolReg.RegisterAlias("delegate_heroes", "delegate_tasks", delegateTasks.LegacySchema()); err != nil {
+		return domain.RunOutput{}, fmt.Errorf("register delegate_heroes alias: %w", err)
 	}
-	if resolved.Effective.Role != nil {
-		toolReg.Restrict(resolved.Effective.Role.AllowedTools)
+	if resolved.Effective.Hero != nil {
+		toolReg.Restrict(resolved.Effective.Hero.AllowedTools)
 	}
 
 	// Freeze MCP server/tool snapshots BEFORE the first Provider request and
@@ -601,8 +601,8 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorCompactionConfigInvalid, err)
 	}
 	var historyTool *tools.CompactedHistoryTool
-	roleAllowsHistory := resolved.Effective.Role == nil || slices.Contains(resolved.Effective.Role.AllowedTools, "search_compacted_history")
-	if roleAllowsHistory && compactionConfig.AllowHistoryLookup &&
+	heroAllowsHistory := resolved.Effective.Hero == nil || slices.Contains(resolved.Effective.Hero.AllowedTools, "search_compacted_history")
+	if heroAllowsHistory && compactionConfig.AllowHistoryLookup &&
 		(prepared.Checkpoint != nil || compactionConfig.Mode == domain.CompactionManualAndAuto) {
 		checkpoint := domain.ContextCompaction{}
 		if prepared.Checkpoint != nil {
@@ -635,7 +635,7 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	}
 	var effectiveToolPolicy agent.ToolPolicy = tp
 	var knownTaskSkills map[string]bool
-	if resolved.Effective.Role == nil {
+	if resolved.Effective.Hero == nil {
 		knownTaskSkills = make(map[string]bool)
 		for _, skill := range skills.Discover(e.skillsDir, e.builtinDir) {
 			knownTaskSkills[skill.Manifest.ID] = true
@@ -645,7 +645,7 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 			KnownSkills: knownTaskSkills}
 	}
 	var delegationHook agent.PreToolHook
-	if resolved.Effective.Role == nil {
+	if resolved.Effective.Hero == nil {
 		delegationHook = delegationAdmissionHook(e.delegationRepo(), run.SessionID, knownTaskSkills)
 	}
 	// Single chain assembly path shared by fresh and resume runs (I6).
@@ -905,7 +905,7 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 	if err != nil {
 		return domain.RunOutput{}, err
 	}
-	if resolved.Effective.Role == nil {
+	if resolved.Effective.Hero == nil {
 		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
 			errors.New("child Run has no frozen Role execution"))
 	}
@@ -973,7 +973,7 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 	if _, err := toolReg.Register(&tools.TodoTool{Store: todoStore}); err != nil {
 		return domain.RunOutput{}, fmt.Errorf("register todo tool: %w", err)
 	}
-	toolReg.Restrict(resolved.Effective.Role.AllowedTools)
+	toolReg.Restrict(resolved.Effective.Hero.AllowedTools)
 	if _, err := toolReg.Register(&tools.SubmitResultTool{}); err != nil {
 		return domain.RunOutput{}, fmt.Errorf("register submit_result: %w", err)
 	}
@@ -981,7 +981,7 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 	// Freeze MCP tools for the child: only the exact intersection with the
 	// Role's frozen allowlist is exposed. A Role that does not list MCP tool
 	// names (the default) receives none — fail closed.
-	childMCPSet, mcpErr := e.freezeMCPIntoRegistry(ctx, run, session, toolReg, resolved.Effective.Role.AllowedTools)
+	childMCPSet, mcpErr := e.freezeMCPIntoRegistry(ctx, run, session, toolReg, resolved.Effective.Hero.AllowedTools)
 	if mcpErr != nil {
 		return domain.RunOutput{}, mcpErr
 	}
@@ -1011,7 +1011,7 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 		if taskSkillsErr != nil {
 			return domain.RunOutput{}, fmt.Errorf("load child task skills: %w", taskSkillsErr)
 		}
-		childSegments, childSegmentsErr := e.delegatedChildSegments(resolved.Effective.Role,
+		childSegments, childSegmentsErr := e.delegatedChildSegments(resolved.Effective.Hero,
 			resolved.SystemPrompt.AgentPrompt, taskSkills, fmt.Sprintf("task:%s", run.ID))
 		if childSegmentsErr != nil {
 			return domain.RunOutput{}, childSegmentsErr
@@ -1142,7 +1142,7 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorIncompleteTerminalContract,
 			errors.New("child Run ended without calling submit_result"))
 	}
-	if resolved.Effective.Role.OutputContract == "structured-v1" && len(loop.SubmitResultGate.Result.Payload) == 0 {
+	if resolved.Effective.Hero.OutputContract == "structured-v1" && len(loop.SubmitResultGate.Result.Payload) == 0 {
 		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorIncompleteTerminalContract,
 			errors.New("structured-v1 child result requires an object payload"))
 	}
@@ -1201,7 +1201,7 @@ func (e *agentExecutor) resolveProvider(resolved *store.ResolvedRunConfig) (llm.
 	return e.resolveRuntimeProvider(runtime)
 }
 
-// delegateProvider creates a DelegateRolesProvider that executes delegation
+// delegateProvider creates a DelegateHeroesProvider that executes delegation
 // via the Store's DelegationRepo and RunRepo.
 func (e *agentExecutor) delegateProvider(run *domain.AgentRun) *agentExecutorDelegationProvider {
 	return &agentExecutorDelegationProvider{
@@ -1251,17 +1251,17 @@ func rewriteDelegationArguments(arguments json.RawMessage, listKey string, specs
 	for index := range items {
 		spec := specs[index]
 		if listKey == "delegations" {
-			items[index]["roleHandle"] = quote(spec.Role)
+			items[index]["heroHandle"] = quote(spec.Hero)
 			items[index]["assignment"] = quote(spec.Goal)
-			delete(items[index], "role")
+			delete(items[index], "hero")
 			delete(items[index], "goal")
 		} else {
-			items[index]["role"] = quote(spec.Role)
+			items[index]["hero"] = quote(spec.Hero)
 			items[index]["goal"] = quote(spec.Goal)
-			delete(items[index], "roleHandle")
+			delete(items[index], "heroHandle")
 			delete(items[index], "assignment")
 		}
-		items[index]["roleVersionId"] = quote(spec.RoleVersionID)
+		items[index]["heroVersionId"] = quote(spec.HeroVersionID)
 	}
 	encoded, err := json.Marshal(items)
 	if err != nil {
@@ -1329,19 +1329,19 @@ func delegationAdmissionHook(delegations *store.DelegationRepo, sessionID string
 			if denial != "" {
 				break
 			}
-			snapshot, resolveErr := delegations.ResolveRoleForDelegation(ctx, sessionID, spec.Role)
-			if errors.Is(resolveErr, store.ErrDelegationRoleUnavailable) {
-				denial = fmt.Sprintf("Role %q is unavailable in this project", spec.Role)
+			snapshot, resolveErr := delegations.ResolveHeroForDelegation(ctx, sessionID, spec.Hero)
+			if errors.Is(resolveErr, store.ErrDelegationHeroUnavailable) {
+				denial = fmt.Sprintf("Role %q is unavailable in this project", spec.Hero)
 				break
 			}
 			if resolveErr != nil {
 				return agent.PreToolDecision{}, resolveErr
 			}
 			if !snapshot.DelegationEnabled || snapshot.Definition.DelegationPolicy.Admission == domain.DelegationDenied {
-				denial = fmt.Sprintf("Role %q does not allow Host delegation", spec.Role)
+				denial = fmt.Sprintf("Role %q does not allow Host delegation", spec.Hero)
 				break
 			}
-			spec.RoleVersionID = snapshot.VersionID
+			spec.HeroVersionID = snapshot.VersionID
 			requiresApproval = requiresApproval ||
 				snapshot.Definition.DelegationPolicy.Admission == domain.DelegationApprovalRequired
 		}
@@ -1358,7 +1358,7 @@ func delegationAdmissionHook(delegations *store.DelegationRepo, sessionID string
 		d.Arguments = encodedArguments
 		if requiresApproval && d.Action == agent.ToolAllow {
 			d.Action = agent.ToolRequireApproval
-			d.Code = "role_delegation_approval_required"
+			d.Code = "hero_delegation_approval_required"
 			d.Reason = "The selected Role requires delegation approval"
 			d.RiskClass = domain.RiskDelegation
 		}
@@ -1420,19 +1420,19 @@ func (p *delegationAdmissionToolPolicy) BeforeToolBatch(ctx context.Context, bat
 			if denial != "" {
 				break
 			}
-			snapshot, resolveErr := p.Delegations.ResolveRoleForDelegation(ctx, p.SessionID, spec.Role)
-			if errors.Is(resolveErr, store.ErrDelegationRoleUnavailable) {
-				denial = fmt.Sprintf("Role %q is unavailable in this project", spec.Role)
+			snapshot, resolveErr := p.Delegations.ResolveHeroForDelegation(ctx, p.SessionID, spec.Hero)
+			if errors.Is(resolveErr, store.ErrDelegationHeroUnavailable) {
+				denial = fmt.Sprintf("Role %q is unavailable in this project", spec.Hero)
 				break
 			}
 			if resolveErr != nil {
 				return nil, resolveErr
 			}
 			if !snapshot.DelegationEnabled || snapshot.Definition.DelegationPolicy.Admission == domain.DelegationDenied {
-				denial = fmt.Sprintf("Role %q does not allow Host delegation", spec.Role)
+				denial = fmt.Sprintf("Role %q does not allow Host delegation", spec.Hero)
 				break
 			}
-			spec.RoleVersionID = snapshot.VersionID
+			spec.HeroVersionID = snapshot.VersionID
 			requiresApproval = requiresApproval ||
 				snapshot.Definition.DelegationPolicy.Admission == domain.DelegationApprovalRequired
 		}
@@ -1451,7 +1451,7 @@ func (p *delegationAdmissionToolPolicy) BeforeToolBatch(ctx context.Context, bat
 		decisions[index].Arguments = encodedArguments
 		if requiresApproval && decisions[index].Action == agent.ToolAllow {
 			decisions[index].Action = agent.ToolRequireApproval
-			decisions[index].Code = "role_delegation_approval_required"
+			decisions[index].Code = "hero_delegation_approval_required"
 			decisions[index].Reason = "The selected Role requires delegation approval"
 			decisions[index].RiskClass = domain.RiskDelegation
 		}
@@ -1526,7 +1526,7 @@ func (p *agentExecutorDelegationProvider) ExecuteDelegation(ctx context.Context,
 
 	type resolvedSpec struct {
 		spec     domain.TaskSpec
-		snapshot *store.DelegationRoleSnapshot
+		snapshot *store.DelegationHeroSnapshot
 	}
 	var resolved []resolvedSpec
 	for _, spec := range specs {
@@ -1540,12 +1540,12 @@ func (p *agentExecutorDelegationProvider) ExecuteDelegation(ctx context.Context,
 				return nil, fmt.Errorf("task %q references unavailable skill %q", spec.Name, skillID)
 			}
 		}
-		snapshot, err := delegations.ResolveRoleForDelegation(ctx, sessionID, spec.Role)
+		snapshot, err := delegations.ResolveHeroForDelegation(ctx, sessionID, spec.Hero)
 		if err != nil {
-			return nil, fmt.Errorf("resolve role %q: %w", spec.Role, err)
+			return nil, fmt.Errorf("resolve hero %q: %w", spec.Hero, err)
 		}
-		if spec.RoleVersionID == "" || spec.RoleVersionID != snapshot.VersionID {
-			return nil, fmt.Errorf("role %q version changed after delegation admission", spec.Role)
+		if spec.HeroVersionID == "" || spec.HeroVersionID != snapshot.VersionID {
+			return nil, fmt.Errorf("hero %q version changed after delegation admission", spec.Hero)
 		}
 		spec.Budget = effectiveDelegationBudget(spec.Budget, snapshot.Definition.DelegationPolicy.BudgetCeiling)
 		if spec.OutputContract == "" {
@@ -1566,23 +1566,23 @@ func (p *agentExecutorDelegationProvider) ExecuteDelegation(ctx context.Context,
 		}
 		definitionJSON, err := json.Marshal(r.snapshot.Definition)
 		if err != nil {
-			return nil, fmt.Errorf("encode role %q definition: %w", r.spec.Role, err)
+			return nil, fmt.Errorf("encode hero %q definition: %w", r.spec.Hero, err)
 		}
-		roleMeta, err := store.NewDelegationRoleMeta(r.snapshot.VersionID, definitionJSON)
+		heroMeta, err := store.NewDelegationHeroMeta(r.snapshot.VersionID, definitionJSON)
 		if err != nil {
-			return nil, fmt.Errorf("freeze role %q meta: %w", r.spec.Role, err)
+			return nil, fmt.Errorf("freeze hero %q meta: %w", r.spec.Hero, err)
 		}
-		roleMeta.Handle = r.spec.Role
-		roleMeta.DisplayName = r.spec.Role
+		heroMeta.Handle = r.spec.Hero
+		heroMeta.DisplayName = r.spec.Hero
 		items[i] = store.CreateDelegationItemInput{
 			Name:           r.spec.Name,
-			RoleVersionID:  r.snapshot.VersionID,
+			HeroVersionID:  r.snapshot.VersionID,
 			AssignmentJSON: json.RawMessage(fmt.Sprintf(`{"task":%q}`, r.spec.Goal)),
 			OutputContract: outputContract,
 			Budget:         r.spec.Budget,
 			Skills:         append([]string(nil), r.spec.Skills...),
 			Depends:        r.spec.Depends,
-			RoleMeta:       roleMeta,
+			HeroMeta:       heroMeta,
 		}
 	}
 
@@ -1638,7 +1638,7 @@ func (e *agentExecutor) livePublisherFor(run *domain.AgentRun) events.LivePublis
 	}
 }
 
-// rolePreloadSegments returns the frozen preload Skills of a Role as inlined
+// heroPreloadSegments returns the frozen preload Skills of a Role as inlined
 // prompt segments. Preload Skills are data injected at execution time and do
 // not require filesystem access, so they remain available even when the read
 // tool is not in the Role allowlist.
@@ -1651,13 +1651,13 @@ func (e *agentExecutor) livePublisherFor(run *domain.AgentRun) events.LivePublis
 // still hash to exactly that digest, otherwise the Run fails closed. Legacy
 // snapshots without FrozenSkills keep their historical behavior: the current
 // on-disk body is used and a missing Skill is skipped defensively.
-func (e *agentExecutor) rolePreloadSegments(role *domain.FrozenRoleExecution) ([]systemprompt.Segment, error) {
-	if role == nil {
+func (e *agentExecutor) heroPreloadSegments(hero *domain.FrozenHeroExecution) ([]systemprompt.Segment, error) {
+	if hero == nil {
 		return nil, nil
 	}
 	var preloads []string
-	for _, entry := range role.Skills.Entries {
-		if entry.Mode == domain.RoleSkillPreload {
+	for _, entry := range hero.Skills.Entries {
+		if entry.Mode == domain.HeroSkillPreload {
 			preloads = append(preloads, strings.TrimSpace(entry.SkillID))
 		}
 	}
@@ -1668,11 +1668,11 @@ func (e *agentExecutor) rolePreloadSegments(role *domain.FrozenRoleExecution) ([
 	for _, skill := range skills.Discover(e.skillsDir, e.builtinDir) {
 		loaded[skill.Manifest.ID] = skill
 	}
-	source := fmt.Sprintf("role:%s@%d", role.Handle, role.Version)
+	source := fmt.Sprintf("hero:%s@%d", hero.Handle, hero.Version)
 	segments := make([]systemprompt.Segment, 0, len(preloads))
 	for _, id := range preloads {
 		skill, ok := loaded[id]
-		digest, _ := role.FrozenSkills.Digest(id)
+		digest, _ := hero.FrozenSkills.Digest(id)
 		if digest == "" {
 			// Unpinned legacy preload: Publish validation already guaranteed the
 			// Skill existed, so skip defensively if the on-disk catalog changed.
@@ -1683,24 +1683,24 @@ func (e *agentExecutor) rolePreloadSegments(role *domain.FrozenRoleExecution) ([
 			continue
 		}
 		if !ok {
-			return nil, fmt.Errorf("role preload skill %q for role %s@%d is unavailable: the Role revision pinned "+
+			return nil, fmt.Errorf("hero preload skill %q for hero %s@%d is unavailable: the Role revision pinned "+
 				"its content (%s) but the current Skill catalog no longer contains it. Restore the Skill or publish "+
-				"a new Role revision", id, role.Handle, role.Version, digest)
+				"a new Role revision", id, hero.Handle, hero.Version, digest)
 		}
 		if digest != skill.ContentHash {
-			return nil, fmt.Errorf("role preload skill %q for role %s@%d does not match its frozen content digest "+
+			return nil, fmt.Errorf("hero preload skill %q for hero %s@%d does not match its frozen content digest "+
 				"(frozen %s, on-disk %s): the Skill changed after this Role revision was published, so the Run "+
 				"refuses to execute unpinned content. Restore the frozen Skill content or publish a new Role revision",
-				id, role.Handle, role.Version, digest, skill.ContentHash)
+				id, hero.Handle, hero.Version, digest, skill.ContentHash)
 		}
 		segments = append(segments, systemprompt.SkillSegment(id, skill.PromptText, source))
 	}
 	return segments, nil
 }
 
-// rolePreloadPrompt is the composed text of rolePreloadSegments.
-func (e *agentExecutor) rolePreloadPrompt(role *domain.FrozenRoleExecution) (string, error) {
-	segments, err := e.rolePreloadSegments(role)
+// heroPreloadPrompt is the composed text of heroPreloadSegments.
+func (e *agentExecutor) heroPreloadPrompt(hero *domain.FrozenHeroExecution) (string, error) {
+	segments, err := e.heroPreloadSegments(hero)
 	if err != nil {
 		return "", err
 	}
@@ -1719,7 +1719,7 @@ func (e *agentExecutor) rolePreloadPrompt(role *domain.FrozenRoleExecution) (str
 // An unpinned ref (empty digest) only exists for references written before
 // content pinning, or for model-authored delegate_tasks Skill lists; those keep
 // their historical behavior.
-func (e *agentExecutor) taskPreloadSegments(role *domain.FrozenRoleExecution, frozen domain.FrozenSkillRefs,
+func (e *agentExecutor) taskPreloadSegments(hero *domain.FrozenHeroExecution, frozen domain.FrozenSkillRefs,
 	source string) ([]systemprompt.Segment, error) {
 	if len(frozen) == 0 {
 		return nil, nil
@@ -1728,11 +1728,11 @@ func (e *agentExecutor) taskPreloadSegments(role *domain.FrozenRoleExecution, fr
 	for _, skill := range skills.Discover(e.skillsDir, e.builtinDir) {
 		loaded[skill.Manifest.ID] = skill
 	}
-	rolePreloads := make(map[string]struct{})
-	if role != nil {
-		for _, entry := range role.Skills.Entries {
-			if entry.Mode == domain.RoleSkillPreload {
-				rolePreloads[strings.TrimSpace(entry.SkillID)] = struct{}{}
+	heroPreloads := make(map[string]struct{})
+	if hero != nil {
+		for _, entry := range hero.Skills.Entries {
+			if entry.Mode == domain.HeroSkillPreload {
+				heroPreloads[strings.TrimSpace(entry.SkillID)] = struct{}{}
 			}
 		}
 	}
@@ -1757,7 +1757,7 @@ func (e *agentExecutor) taskPreloadSegments(role *domain.FrozenRoleExecution, fr
 			continue
 		}
 		seen[id] = struct{}{}
-		if _, inherited := rolePreloads[id]; inherited {
+		if _, inherited := heroPreloads[id]; inherited {
 			continue
 		}
 		segments = append(segments, systemprompt.SkillSegment(id, skill.PromptText, source))
@@ -1766,8 +1766,8 @@ func (e *agentExecutor) taskPreloadSegments(role *domain.FrozenRoleExecution, fr
 }
 
 // taskPreloadPrompt is the composed text of taskPreloadSegments.
-func (e *agentExecutor) taskPreloadPrompt(role *domain.FrozenRoleExecution, frozen domain.FrozenSkillRefs) (string, error) {
-	segments, err := e.taskPreloadSegments(role, frozen, "task")
+func (e *agentExecutor) taskPreloadPrompt(hero *domain.FrozenHeroExecution, frozen domain.FrozenSkillRefs) (string, error) {
+	segments, err := e.taskPreloadSegments(hero, frozen, "task")
 	if err != nil {
 		return "", err
 	}
@@ -2091,23 +2091,23 @@ func describePromptSections(sections []domain.PromptSection) string {
 // catalog. Its context policy is task_only, and it has no /skills mount, so
 // naming a catalog would describe a capability the child does not have. Preload
 // Skills are inlined precisely because they must work without filesystem access.
-func (e *agentExecutor) delegatedChildSegments(role *domain.FrozenRoleExecution, agentPrompt string,
+func (e *agentExecutor) delegatedChildSegments(hero *domain.FrozenHeroExecution, agentPrompt string,
 	taskSkills domain.FrozenSkillRefs, taskSource string) ([]systemprompt.Segment, error) {
-	if role == nil {
+	if hero == nil {
 		return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
 			errors.New("delegated child prompt requires a frozen Role execution"))
 	}
-	taskSegments, err := e.taskPreloadSegments(role, taskSkills, taskSource)
+	taskSegments, err := e.taskPreloadSegments(hero, taskSkills, taskSource)
 	if err != nil {
 		return nil, err
 	}
-	roleSegments, err := e.rolePreloadSegments(role)
+	heroSegments, err := e.heroPreloadSegments(hero)
 	if err != nil {
 		return nil, err
 	}
-	segments := make([]systemprompt.Segment, 0, 4+len(taskSegments)+len(roleSegments))
-	segments = append(segments, agent.RoleSystemPromptSegments(*role, agentPrompt)...)
-	segments = append(segments, roleSegments...)
+	segments := make([]systemprompt.Segment, 0, 4+len(taskSegments)+len(heroSegments))
+	segments = append(segments, agent.HeroSystemPromptSegments(*hero, agentPrompt)...)
+	segments = append(segments, heroSegments...)
 	segments = append(segments, taskSegments...)
 	return segments, nil
 }

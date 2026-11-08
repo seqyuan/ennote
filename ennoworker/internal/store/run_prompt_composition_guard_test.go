@@ -56,7 +56,7 @@ func TestDecodeSystemPromptSnapshotAcceptsSnapshotsWithoutSections(t *testing.T)
 func TestDecodeSystemPromptSnapshotFailsClosedOnTamperedSections(t *testing.T) {
 	sections := []domain.PromptSection{
 		{ID: "base", Kind: domain.PromptSectionBase, Source: "agent_profile", Bytes: 16, Digest: "a"},
-		{ID: "role.definition", Kind: domain.PromptSectionRole, Source: "role:analyst@2", Bytes: 20, Digest: "b"},
+		{ID: "hero.definition", Kind: domain.PromptSectionHero, Source: "hero:analyst@2", Bytes: 20, Digest: "b"},
 	}
 	digest, err := systemprompt.SectionsDigest(sections)
 	require.NoError(t, err)
@@ -68,13 +68,13 @@ func TestDecodeSystemPromptSnapshotFailsClosedOnTamperedSections(t *testing.T) {
 			// The per-section digest changes but the recorded sections digest is
 			// left stale: exactly the tamper validation must catch.
 			out, _ := encodeSnapshotForTest(t, []domain.PromptSection{
-				sections[0], {ID: "role.definition", Kind: domain.PromptSectionRole, Source: "role:analyst@2", Bytes: 20, Digest: "c"},
+				sections[0], {ID: "hero.definition", Kind: domain.PromptSectionHero, Source: "hero:analyst@2", Bytes: 20, Digest: "c"},
 			}, digest)
 			return out
 		},
 		"changed byte count": func(t *testing.T) string {
 			t.Helper()
-			mutated := []domain.PromptSection{sections[0], {ID: "role.definition", Kind: domain.PromptSectionRole, Source: "role:analyst@2", Bytes: 21, Digest: "b"}}
+			mutated := []domain.PromptSection{sections[0], {ID: "hero.definition", Kind: domain.PromptSectionHero, Source: "hero:analyst@2", Bytes: 21, Digest: "b"}}
 			// The digest is deliberately NOT recomputed: this is exactly the
 			// tamper the validation must catch.
 			out, _ := encodeSnapshotForTest(t, mutated, digest)
@@ -82,7 +82,7 @@ func TestDecodeSystemPromptSnapshotFailsClosedOnTamperedSections(t *testing.T) {
 		},
 		"changed source": func(t *testing.T) string {
 			t.Helper()
-			mutated := []domain.PromptSection{sections[0], {ID: "role.definition", Kind: domain.PromptSectionRole, Source: "role:analyst@3", Bytes: 20, Digest: "b"}}
+			mutated := []domain.PromptSection{sections[0], {ID: "hero.definition", Kind: domain.PromptSectionHero, Source: "hero:analyst@3", Bytes: 20, Digest: "b"}}
 			out, _ := encodeSnapshotForTest(t, mutated, digest)
 			return out
 		},

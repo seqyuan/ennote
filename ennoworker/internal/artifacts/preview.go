@@ -267,7 +267,7 @@ func sanitizeStaticHTML(input string) string {
 		"small", "sub", "sup", "pre", "code", "blockquote", "ul", "ol", "li", "dl", "dt", "dd",
 		"table", "caption", "thead", "tbody", "tfoot", "tr", "th", "td", "colgroup", "col", "figure", "figcaption", "img",
 	)
-	policy.AllowAttrs("class", "id", "style", "title", "role", "aria-label", "aria-hidden").Globally()
+	policy.AllowAttrs("class", "id", "style", "title", "hero", "aria-label", "aria-hidden").Globally()
 	policy.AllowAttrs("colspan", "rowspan", "scope", "headers").OnElements("th", "td")
 	policy.AllowAttrs("span", "width").OnElements("col", "colgroup")
 	policy.AllowAttrs("src", "alt", "width", "height").OnElements("img")

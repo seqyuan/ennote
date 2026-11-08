@@ -4,7 +4,7 @@ MCP (Model Context Protocol) servers give the model extra tools: databases, inte
 indexes, and so on.
 
 Ennote does not have a single "turn MCP on and everything appears" switch. There is a chain:
-**Profile → Project binding → Run snapshot → Role intersection**. Once that chain is clear, "I
+**Profile → Project binding → Run snapshot → Hero intersection**. Once that chain is clear, "I
 configured it but the model cannot see it" stops happening.
 
 ## The chain
@@ -15,8 +15,8 @@ Profile (server identity + immutable connection version)   ← Worker level, or 
 ProjectBinding (which tools one Project enables)           ← the switch lives here
    ↓ frozen when a Run starts
 RunMCPServerSnapshot (this Run's capability set)           ← later binding edits do not touch it
-   ↓ narrowed again when work is delegated to a Role
-child tools = binding's selected tools ∩ Role.allowedTools
+   ↓ narrowed again when work is delegated to a Hero
+child tools = binding's selected tools ∩ Hero.allowedTools
 ```
 
 ## Step 1: define the server (Profile)
@@ -100,12 +100,12 @@ an environment blacklist, so Ennote's own secrets never reach the child process.
 The exposed name is `serverSlug__toolName` (for example `mydb__query`). That matters in exactly one
 place, and it is easy to get wrong:
 
-!!! warning "Role allowlists must use the exposed name"
-    A Role's `allowedTools` has to list the **exposed name**. Writing the remote name (`query`) does
+!!! warning "Hero allowlists must use the exposed name"
+    A Hero's `allowedTools` has to list the **exposed name**. Writing the remote name (`query`) does
     not match, and the child Run silently loses the tool.
 
-    A delegated child sees `binding's selected tools ∩ Role.allowedTools`. A Host Run (a direct
-    conversation, no Role) does not apply that filter and sees every selected tool of the binding.
+    A delegated child sees `binding's selected tools ∩ Hero.allowedTools`. A Host Run (a direct
+    conversation, no Hero) does not apply that filter and sees every selected tool of the binding.
 
 A tool's risk class comes from the server's declaration (`readOnlyHint` feeds it), so **approval still
 follows your current permission mode**: under Ask (`ask`) a writing MCP tool asks first; under
@@ -127,7 +127,7 @@ approval identity is bound to the schema digest, an old approval never gets reus
 |---|---|
 | No MCP section in the Run Inspector | the Project has no binding with `desiredEnabled` |
 | The server appears but has no tools | `selectedRemoteToolNames` is empty, or the snapshot carries an `unavailableReason` |
-| A child Run is missing one tool | the Role lists the remote name instead of the exposed name |
+| A child Run is missing one tool | the Hero lists the remote name instead of the exposed name |
 | The Run will not start, binding/profile unavailable | `required: true` and the server is unreachable |
 | Connection refused for a private address | the endpoint is internal and needs an explicit network policy |
 | `credential resolver required for file:` | a `file:`/`keyring:` reference; use `env:` instead |

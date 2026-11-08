@@ -52,39 +52,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/global-roles": {
+    "/v1/global-heroes": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List Worker-global file-authored Roles */
-        get: operations["listGlobalRoles"];
+        /** List Worker-global file-authored Heroes */
+        get: operations["listGlobalHeroes"];
         put?: never;
-        post: operations["createGlobalRole"];
+        post: operations["createGlobalHero"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/v1/global-roles/{roleID}": {
+    "/v1/global-heroes/{heroID}": {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                roleID: string;
+                heroID: string;
             };
             cookie?: never;
         };
-        get: operations["getGlobalRole"];
+        get: operations["getGlobalHero"];
         put?: never;
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
-        patch: operations["updateGlobalRole"];
+        patch: operations["updateGlobalHero"];
         trace?: never;
     };
     "/v1/graphs": {
@@ -122,34 +122,34 @@ export interface paths {
         patch: operations["updateGraph"];
         trace?: never;
     };
-    "/v1/global-roles/{roleID}/publish": {
+    "/v1/global-heroes/{heroID}/publish": {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                roleID: string;
+                heroID: string;
             };
             cookie?: never;
         };
         get?: never;
         put?: never;
-        post: operations["publishGlobalRole"];
+        post: operations["publishGlobalHero"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/v1/global-roles/{roleID}/versions": {
+    "/v1/global-heroes/{heroID}/versions": {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                roleID: string;
+                heroID: string;
             };
             cookie?: never;
         };
-        get: operations["listGlobalRoleRevisions"];
+        get: operations["listGlobalHeroRevisions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -158,17 +158,17 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/global-roles/{roleID}/resolved": {
+    "/v1/global-heroes/{heroID}/resolved": {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                roleID: string;
+                heroID: string;
             };
             cookie?: never;
         };
-        /** Resolve a bare Role handle to its latest published revision with audit source */
-        get: operations["getResolvedGlobalRole"];
+        /** Resolve a bare Hero handle to its latest published revision with audit source */
+        get: operations["getResolvedGlobalHero"];
         put?: never;
         post?: never;
         delete?: never;
@@ -191,7 +191,7 @@ export interface paths {
         /**
          * @description Validates the draft and writes one immutable revision. Validation covers
          *     the references a Graph Run would otherwise only fail on when it freezes
-         *     (model and Role resolution, Skill resolution) plus writes scopes the
+         *     (model and Hero resolution, Skill resolution) plus writes scopes the
          *     scheduler cannot parse. A Graph is a draft format: it carries no budget
          *     and needs no project binding, so it does not run the Agent Flow validator.
          */
@@ -294,9 +294,9 @@ export interface paths {
         put?: never;
         /**
          * Validate and publish one immutable Flow revision
-         * @description Runs the real `agentflow.Validator` (roles, skills, check allowlist,
+         * @description Runs the real `agentflow.Validator` (heroes, skills, check allowlist,
          *     fan-out read-only, budget, secrets) and then freezes the FlowDefinition
-         *     plus every flow-local Role into one immutable revision. Publishing never
+         *     plus every flow-local Hero into one immutable revision. Publishing never
          *     enables the flow; project binding is a separate explicit action.
          */
         post: operations["publishFlow"];
@@ -1954,7 +1954,7 @@ export interface paths {
          * Inspect an Agent Pack read-only without installing it
          * @description Path-only and store-free. Reads a `.enpack` archive or a pack directory
          *     inside the Worker host home, validates `pack.yaml` strictly, and reports
-         *     payload digests, flows, roles, skills, the capability envelope, and
+         *     payload digests, flows, heroes, skills, the capability envelope, and
          *     warnings. It never installs, executes, verifies signatures, or writes to
          *     disk, so it works on a Worker whose stores are unavailable.
          */
@@ -1976,9 +1976,9 @@ export interface paths {
         put?: never;
         /**
          * Plan or apply an Agent Pack install
-         * @description Installs Role-only packs, `format: graph` packs (an unpublished Graph
-         *     draft plus its Graph-private Roles and Skills), and `format: flow` packs
-         *     (an unpublished full Agent Flow draft plus bundled Roles/Skills). The
+         * @description Installs Hero-only packs, `format: graph` packs (an unpublished Graph
+         *     draft plus its Graph-private Heroes and Skills), and `format: flow` packs
+         *     (an unpublished full Agent Flow draft plus bundled Heroes/Skills). The
          *     full-flow draft is validated by the real agentflow.Validator before any
          *     write. Non-empty `mcp` and `requires` are still refused with a stable
          *     blocker code instead of being downgraded.
@@ -2030,7 +2030,7 @@ export interface paths {
          * Uninstall an Agent Pack
          * @description Deletes every installed object this pack owns. Removal is refused while a
          *     non-terminal flow Run references an installed flow, while an installed
-         *     object was edited locally, or while a global Role is still referenced by
+         *     object was edited locally, or while a global Hero is still referenced by
          *     another Graph. `force=true` overrides the last two. A locally edited Skill
          *     is kept with a warning instead of being deleted.
          */
@@ -2417,7 +2417,7 @@ export interface components {
             runId?: string;
             taskIndex?: number;
             handle?: string;
-            roleVersionId?: string;
+            heroVersionId?: string;
             skillDigests?: string[];
             goalDigest?: string;
             goalText?: string;
@@ -2436,7 +2436,7 @@ export interface components {
         };
         FlowDependencyStatus: {
             /** @enum {string} */
-            kind?: "role" | "skill";
+            kind?: "hero" | "skill";
             name?: string;
             version?: number;
             present?: boolean;
@@ -2713,7 +2713,7 @@ export interface components {
             type: "image";
             artifactId: string;
         };
-        InvocationTarget: components["schemas"]["HostInvocationTarget"] | components["schemas"]["RoleInvocationTarget"];
+        InvocationTarget: components["schemas"]["HostInvocationTarget"] | components["schemas"]["HeroInvocationTarget"];
         HostInvocationTarget: {
             /**
              * @description discriminator enum property added by openapi-typescript
@@ -2721,12 +2721,12 @@ export interface components {
              */
             kind: "host";
         };
-        RoleInvocationTarget: {
+        HeroInvocationTarget: {
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
              */
-            kind: "role";
+            kind: "hero";
             objectId: string;
             versionId: string;
             /** @enum {string} */
@@ -2780,7 +2780,7 @@ export interface components {
             modifiedAt: string;
         };
         ContextCategory: {
-            /** @description Ennote-native context category key (version 1 defines system, role, rules, skills, tools, reminders, conversation). */
+            /** @description Ennote-native context category key (version 1 defines system, hero, rules, skills, tools, reminders, conversation). */
             key: string;
             tokens: number;
         };
@@ -2873,7 +2873,7 @@ export interface components {
         };
         SpeakerSnapshot: {
             /** @enum {string} */
-            kind?: "user" | "host" | "role" | "workflow" | "room" | "system";
+            kind?: "user" | "host" | "hero" | "workflow" | "room" | "system";
             objectId?: string;
             versionId?: string;
             handle?: string;
@@ -2894,13 +2894,13 @@ export interface components {
             modelProfileId?: string;
             apiModel?: string;
             /** @enum {string} */
-            speakerKind: "user" | "host" | "role" | "workflow" | "room" | "system";
+            speakerKind: "user" | "host" | "hero" | "workflow" | "room" | "system";
             speakerObjectId?: string;
             speakerVersionId?: string;
             participantInstanceId?: string;
             speakerSnapshot: components["schemas"]["SpeakerSnapshot"];
             /** @enum {string} */
-            addresseeKind?: "host" | "room" | "role" | "graph" | "workflow";
+            addresseeKind?: "host" | "room" | "hero" | "graph" | "workflow";
             addresseeObjectId?: string;
             addresseeVersionId?: string;
             replyToMessageId?: string;
@@ -3100,20 +3100,20 @@ export interface components {
             sourceKind?: "graph" | "flow";
             version: number;
             digest: string;
-            roleDigests?: {
+            heroDigests?: {
                 [key: string]: string;
             };
             /** Format: date-time */
             publishedAt: string;
         };
-        GlobalRoleSummary: {
+        GlobalHeroSummary: {
             id: string;
             name: string;
             path: string;
             digest?: string;
             error?: string;
         };
-        PortableRoleDocument: {
+        PortableHeroDocument: {
             /** @enum {integer} */
             schemaVersion: 1;
             handle: string;
@@ -3164,20 +3164,20 @@ export interface components {
             maxLoopIterations: number;
             prompt: string;
         };
-        GlobalRoleDetail: components["schemas"]["GlobalRoleSummary"] & {
+        GlobalHeroDetail: components["schemas"]["GlobalHeroSummary"] & {
             digest: string;
-            document: components["schemas"]["PortableRoleDocument"];
+            document: components["schemas"]["PortableHeroDocument"];
         };
-        ResolvedGlobalRole: {
-            roleId: string;
+        ResolvedGlobalHero: {
+            heroId: string;
             source: string;
             revision: components["schemas"]["ImmutableFileRevision"];
-            document: components["schemas"]["PortableRoleDocument"];
+            document: components["schemas"]["PortableHeroDocument"];
         };
-        /** @description Role-backed Tasks declare role only; inline Tasks declare model with optional thinking and skills. The modes are mutually exclusive and enforced by the Worker. */
+        /** @description Hero-backed Tasks declare a hero only; inline Tasks declare model with optional thinking and skills. The modes are mutually exclusive and enforced by the Worker. */
         GraphTask: {
             name: string;
-            role?: string;
+            hero?: string;
             model?: string;
             thinking?: components["schemas"]["ThinkingEffort"];
             skills?: string[];
@@ -3277,8 +3277,8 @@ export interface components {
             proposal?: components["schemas"]["GraphBuilderProposal"];
         };
         /** @enum {string} */
-        RoleScope: "builtin" | "global" | "project" | "flow";
-        RoleModelBinding: {
+        HeroScope: "builtin" | "global" | "project" | "flow";
+        HeroModelBinding: {
             /** @enum {string} */
             mode: "fixed" | "overridable" | "inherit";
             modelProfileId?: string;
@@ -3286,7 +3286,7 @@ export interface components {
             fallbackModelProfileIds: string[];
             overridableFields: string[];
         };
-        RoleSkillEntry: {
+        HeroSkillEntry: {
             skillId: string;
             /** @enum {string} */
             mode: "preload" | "available";
@@ -3310,7 +3310,7 @@ export interface components {
             /** Format: int64 */
             maxWallTimeMs: number;
         };
-        RoleDelegationPolicy: {
+        HeroDelegationPolicy: {
             /** @enum {string} */
             admission: "denied" | "approval_required" | "auto_within_budget";
             allowedCallerKinds: "host"[];
@@ -3319,32 +3319,32 @@ export interface components {
             maxConcurrentInstances: number;
             budgetCeiling: components["schemas"]["DelegationBudgetCeiling"];
         };
-        RoleContextPolicy: {
+        HeroContextPolicy: {
             /** @enum {string} */
             defaultMode: "room" | "reply" | "fresh" | "task_only";
             allowedModes: ("room" | "reply" | "fresh" | "task_only")[];
             /** @enum {string} */
             ownExecutionContinuity: "none";
         };
-        RoleDefinition: {
+        HeroDefinition: {
             /** @enum {integer} */
             schemaVersion: 1;
-            rolePrompt: string;
-            modelBinding: components["schemas"]["RoleModelBinding"];
+            heroPrompt: string;
+            modelBinding: components["schemas"]["HeroModelBinding"];
             skills: {
-                entries: components["schemas"]["RoleSkillEntry"][];
+                entries: components["schemas"]["HeroSkillEntry"][];
             };
             /** @enum {string} */
             authority: "read_only" | "mutation";
             /** @enum {string} */
             permissionCeiling: "discuss" | "ask" | "auto";
             allowedTools: string[];
-            contextPolicy: components["schemas"]["RoleContextPolicy"];
-            delegationPolicy: components["schemas"]["RoleDelegationPolicy"];
+            contextPolicy: components["schemas"]["HeroContextPolicy"];
+            delegationPolicy: components["schemas"]["HeroDelegationPolicy"];
             outputContract: string;
             maxLoopIterations: number;
         };
-        RoleSummary: {
+        HeroSummary: {
             id: string;
             handle: string;
             name: string;
@@ -3352,7 +3352,7 @@ export interface components {
             positioning: string;
             icon: string;
             color: string;
-            scope: components["schemas"]["RoleScope"];
+            scope: components["schemas"]["HeroScope"];
             projectId?: string;
             flowId?: string;
             /** @enum {string} */
@@ -3366,9 +3366,9 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
-        RoleIdentity: components["schemas"]["RoleSummary"] & {
+        HeroIdentity: components["schemas"]["HeroSummary"] & {
             sourceDigest?: string;
-            draft: components["schemas"]["RoleDefinition"];
+            draft: components["schemas"]["HeroDefinition"];
             draftRevision: number;
             delegationEnabled: boolean;
             delegationRevocationEpoch: number;
@@ -3377,34 +3377,34 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
-        RoleVersion: {
+        HeroVersion: {
             id: string;
-            roleId: string;
+            heroId: string;
             version: number;
-            definition: components["schemas"]["RoleDefinition"];
+            definition: components["schemas"]["HeroDefinition"];
             configDigest: string;
             /** @enum {string} */
             status: "published";
             /** Format: date-time */
             createdAt: string;
         };
-        RoleCatalogPage: {
-            items: components["schemas"]["RoleSummary"][];
+        HeroCatalogPage: {
+            items: components["schemas"]["HeroSummary"][];
             nextCursor: string;
         };
-        RoleValidationDiagnostic: {
+        HeroValidationDiagnostic: {
             /** @enum {string} */
             level: "error" | "warning";
             code: string;
             message: string;
             field?: string;
         };
-        RoleValidationResult: {
+        HeroValidationResult: {
             valid: boolean;
-            diagnostics: components["schemas"]["RoleValidationDiagnostic"][];
+            diagnostics: components["schemas"]["HeroValidationDiagnostic"][];
             configDigest?: string;
         };
-        RoleCandidate: {
+        HeroCandidate: {
             handle: string;
             name: string;
             description: string;
@@ -3414,32 +3414,32 @@ export interface components {
             sourceLocator: string;
             sourceDigest?: string;
             configDigest?: string;
-            definition?: components["schemas"]["RoleDefinition"];
+            definition?: components["schemas"]["HeroDefinition"];
             alreadyPublished: boolean;
-            roleId?: string;
+            heroId?: string;
             publishedVersionId?: string;
             publishedVersion?: number;
             updateAvailable: boolean;
             parseError?: string;
-            diagnostics: components["schemas"]["RoleValidationDiagnostic"][];
+            diagnostics: components["schemas"]["HeroValidationDiagnostic"][];
         };
-        MaterializedRoleCandidate: {
-            role: components["schemas"]["RoleIdentity"];
-            version: components["schemas"]["RoleVersion"];
+        MaterializedHeroCandidate: {
+            hero: components["schemas"]["HeroIdentity"];
+            version: components["schemas"]["HeroVersion"];
         };
-        CreateRoleInput: {
+        CreateHeroInput: {
             handle: string;
             name: string;
             description?: string;
             positioning?: string;
             icon?: string;
             color?: string;
-            scope: components["schemas"]["RoleScope"];
+            scope: components["schemas"]["HeroScope"];
             projectId?: string;
             flowId?: string;
-            definition: components["schemas"]["RoleDefinition"];
+            definition: components["schemas"]["HeroDefinition"];
         };
-        UpdateRoleDraftInput: {
+        UpdateHeroDraftInput: {
             expectedRevision: number;
             handle?: string;
             name?: string;
@@ -3447,7 +3447,7 @@ export interface components {
             positioning?: string;
             icon?: string;
             color?: string;
-            definition: components["schemas"]["RoleDefinition"];
+            definition: components["schemas"]["HeroDefinition"];
         };
         SystemPromptMetadata: {
             version: number;
@@ -3497,11 +3497,11 @@ export interface components {
         PromptSection: {
             id: string;
             /**
-             * @description Contributing layer: platform-owned base/envelope, or an authored Role, project file, catalog, or Skill body.
+             * @description Contributing layer: platform-owned base/envelope, or an authored Hero, project file, catalog, or Skill body.
              * @enum {string}
              */
-            kind: "base" | "role" | "context" | "skills_catalog" | "skill_preload";
-            /** @description Producer under the (source, version, digest, risk) identity convention, e.g. "role:analyst@3". */
+            kind: "base" | "hero" | "context" | "skills_catalog" | "skill_preload";
+            /** @description Producer under the (source, version, digest, risk) identity convention, e.g. "hero:analyst@3". */
             source: string;
             bytes: number;
             digest: string;
@@ -3583,9 +3583,9 @@ export interface components {
         };
         DelegationApprovalPreview: {
             name: string;
-            role: string;
+            hero: string;
             /** @description legacy preview compat */
-            roleHandle?: string;
+            heroHandle?: string;
             goalPreview: string;
             /** @description legacy preview compat */
             assignmentPreview?: string;
@@ -3607,8 +3607,8 @@ export interface components {
             itemId: string;
             childRunId?: string;
             name: string;
-            roleHandle: string;
-            roleDisplayName: string;
+            heroHandle: string;
+            heroDisplayName: string;
             /** @enum {string} */
             itemStatus: "pending" | "running" | "blocked" | "succeeded" | "failed" | "cancelled" | "not_authorized";
             /** @enum {string} */
@@ -3826,7 +3826,7 @@ export interface components {
         };
         ApprovalAttribution: {
             /** @enum {string} */
-            speakerKind: "user" | "host" | "role" | "workflow" | "room" | "system";
+            speakerKind: "user" | "host" | "hero" | "workflow" | "room" | "system";
             objectId?: string;
             versionId?: string;
             handle?: string;
@@ -3965,7 +3965,7 @@ export interface components {
         };
         PackInspectRequest: {
             source: components["schemas"]["PackSource"];
-            /** @description Echo flow, role, and vendored skill source text (bounded); defaults to false */
+            /** @description Echo flow, hero, and vendored skill source text (bounded); defaults to false */
             includeDocuments?: boolean;
             /** @description Expected sha256 of the payload or the manifest; a mismatch fails the inspect */
             expectedDigest?: string;
@@ -3990,7 +3990,7 @@ export interface components {
             /** @description Always false in S1; inspect never verifies signatures */
             signed: boolean;
             flows: components["schemas"]["PackFlow"][];
-            roles: components["schemas"]["PackRole"][];
+            heroes: components["schemas"]["PackHero"][];
             skills: components["schemas"]["PackSkill"][];
             /** @description External MCP profile references; S1 never resolves or executes them */
             mcp: components["schemas"]["PackMCP"][];
@@ -4028,20 +4028,20 @@ export interface components {
             id: string;
             path: string;
             /**
-             * @description flow: full Agent Flow definition; graph: graphsource role-task document
+             * @description flow: full Agent Flow definition; graph: graphsource hero-task document
              * @enum {string}
              */
             format: "flow" | "graph";
             taskCount: number;
             entryTask?: string;
-            roles: string[];
+            heroes: string[];
             checkTasks: number;
             fanOutTasks: number;
             maxTotalTokens: number;
             pathDigest: string;
             sourceDigest: string;
         };
-        PackRole: {
+        PackHero: {
             handle: string;
             path: string;
             /** @enum {string} */
@@ -4074,10 +4074,10 @@ export interface components {
         };
         PackCapabilityEnvelope: {
             flowCount: number;
-            roleCount: number;
+            heroCount: number;
             skillCount: number;
             taskCount: number;
-            roles: string[];
+            heroes: string[];
             skills: string[];
             /** @description Sorted unique external MCP profile refs the pack declares */
             requiresMcp: string[];
@@ -4090,7 +4090,7 @@ export interface components {
         PackModelRequirements: {
             capabilities: string[];
             minContextWindow: number;
-            perRole: {
+            perHero: {
                 [key: string]: string[];
             };
         };
@@ -4107,7 +4107,7 @@ export interface components {
         };
         PackDocument: {
             /** @enum {string} */
-            kind: "flow" | "role" | "skill";
+            kind: "flow" | "hero" | "skill";
             ref: string;
             path: string;
             bytes: number;
@@ -4128,8 +4128,8 @@ export interface components {
             flows?: {
                 [key: string]: string;
             };
-            /** @description pack Role handle -> installed Role handle */
-            roles?: {
+            /** @description pack Hero handle -> installed Hero handle */
+            heroes?: {
                 [key: string]: string;
             };
         };
@@ -4159,7 +4159,7 @@ export interface components {
         };
         PackAction: {
             /** @enum {string} */
-            kind: "graph" | "flow" | "graph_role" | "role" | "role_revision" | "skill";
+            kind: "graph" | "flow" | "graph_hero" | "hero" | "hero_revision" | "skill";
             /** @description Installed store id; a Graph-private object is "<flow>/<id>" */
             storeId: string;
             /** @enum {string} */
@@ -4188,7 +4188,7 @@ export interface components {
             installState: "installed_draft";
             source: components["schemas"]["PackSource"];
             flows: components["schemas"]["PackFlowState"][];
-            roles: components["schemas"]["PackRoleState"][];
+            heroes: components["schemas"]["PackHeroState"][];
             skills: components["schemas"]["PackSkillState"][];
             externalRefs: components["schemas"]["PackExternalRefs"];
             modelRequirements: components["schemas"]["PackModelRequirements"];
@@ -4203,14 +4203,14 @@ export interface components {
             /** @description Always null in S2a; publishing is a separate user action */
             publishedRevision: string | null;
         };
-        PackRoleState: {
+        PackHeroState: {
             packHandle: string;
             /** @enum {string} */
             scope: "flow" | "global";
-            /** @description "<handle>" for a global Role, "<flow>/<handle>" for a Graph-private Role */
+            /** @description "<handle>" for a global Hero, "<flow>/<handle>" for a Graph-private Hero */
             storeId: string;
             digest: string;
-            /** @description Published revision id; global Roles only */
+            /** @description Published revision id; global Heroes only */
             revision?: string;
         };
         PackSkillState: {
@@ -4236,7 +4236,7 @@ export interface components {
             installState: "installed_draft";
             source: components["schemas"]["PackSource"];
             flowCount: number;
-            roleCount: number;
+            heroCount: number;
             skillCount: number;
             externalRefs: components["schemas"]["PackExternalRefs"];
         };
@@ -4545,7 +4545,7 @@ export interface operations {
             401: components["responses"]["Error"];
         };
     };
-    listGlobalRoles: {
+    listGlobalHeroes: {
         parameters: {
             query?: never;
             header?: never;
@@ -4554,20 +4554,20 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Global Role source summaries */
+            /** @description Global Hero source summaries */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["GlobalRoleSummary"][];
+                        data?: components["schemas"]["GlobalHeroSummary"][];
                     };
                 };
             };
         };
     };
-    createGlobalRole: {
+    createGlobalHero: {
         parameters: {
             query?: never;
             header?: never;
@@ -4577,56 +4577,56 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    document: components["schemas"]["PortableRoleDocument"];
+                    document: components["schemas"]["PortableHeroDocument"];
                 };
             };
         };
         responses: {
-            /** @description Global Role source created */
+            /** @description Global Hero source created */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["GlobalRoleDetail"];
+                        data?: components["schemas"]["GlobalHeroDetail"];
                     };
                 };
             };
             422: components["responses"]["Error"];
         };
     };
-    getGlobalRole: {
+    getGlobalHero: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                roleID: string;
+                heroID: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Global Role source */
+            /** @description Global Hero source */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["GlobalRoleDetail"];
+                        data?: components["schemas"]["GlobalHeroDetail"];
                     };
                 };
             };
             404: components["responses"]["Error"];
         };
     };
-    updateGlobalRole: {
+    updateGlobalHero: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                roleID: string;
+                heroID: string;
             };
             cookie?: never;
         };
@@ -4634,19 +4634,19 @@ export interface operations {
             content: {
                 "application/json": {
                     expectedDigest: string;
-                    document: components["schemas"]["PortableRoleDocument"];
+                    document: components["schemas"]["PortableHeroDocument"];
                 };
             };
         };
         responses: {
-            /** @description Updated global Role source */
+            /** @description Updated global Hero source */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["GlobalRoleDetail"];
+                        data?: components["schemas"]["GlobalHeroDetail"];
                     };
                 };
             };
@@ -4761,18 +4761,18 @@ export interface operations {
             422: components["responses"]["Error"];
         };
     };
-    publishGlobalRole: {
+    publishGlobalHero: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                roleID: string;
+                heroID: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Global Role source published as an immutable runtime version */
+            /** @description Global Hero source published as an immutable runtime version */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -4784,18 +4784,18 @@ export interface operations {
             422: components["responses"]["Error"];
         };
     };
-    listGlobalRoleRevisions: {
+    listGlobalHeroRevisions: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                roleID: string;
+                heroID: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Immutable file-backed Role revisions */
+            /** @description Immutable file-backed Hero revisions */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4809,25 +4809,25 @@ export interface operations {
             404: components["responses"]["Error"];
         };
     };
-    getResolvedGlobalRole: {
+    getResolvedGlobalHero: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                roleID: string;
+                heroID: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Resolved effective Role */
+            /** @description Resolved effective Hero */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["ResolvedGlobalRole"];
+                        data?: components["schemas"]["ResolvedGlobalHero"];
                     };
                 };
             };
@@ -8239,7 +8239,7 @@ export interface operations {
     removePack: {
         parameters: {
             query?: {
-                /** @description Override locally edited objects and shared global Roles */
+                /** @description Override locally edited objects and shared global Heroes */
                 force?: boolean;
             };
             header?: never;

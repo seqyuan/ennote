@@ -9,12 +9,12 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/packinstall"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func flowPackFiles(f *fixture, roleDocumentBody string) []packFile {
+func flowPackFiles(f *fixture, heroDocumentBody string) []packFile {
 	return []packFile{
 		{path: "pack.yaml", body: `schema_version: 1
 id: seqyuan/flow-pack
@@ -24,10 +24,10 @@ flows:
   - id: qc-flow
     path: flows/qc-flow/flow.yaml
     format: flow
-    roles: [qc-reviewer]
-roles:
+    heroes: [qc-reviewer]
+heroes:
   - handle: qc-reviewer
-    path: roles/qc-reviewer/role.md
+    path: heroes/qc-reviewer/hero.md
     scope: flow
 `},
 		{path: "flows/qc-flow/flow.yaml", body: `schemaVersion: 1
@@ -36,7 +36,7 @@ budget:
   max_total_tokens: 20000
 tasks:
   load:
-    role: local/qc-reviewer
+    hero: local/qc-reviewer
     goal: Load the samplesheet
     budget: {tokens: 1000}
   gate:
@@ -44,27 +44,27 @@ tasks:
     command: "test -f ready"
     depends: [load]
   review:
-    role: local/qc-reviewer
+    hero: local/qc-reviewer
     goal: Review QC metrics
     depends: [gate]
     fan_out: {min: 1, max: 2}
     budget: {tokens: 1000}
   done:
-    type: role
+    type: hero
     depends: [review]
     terminal: {status: success}
 `},
-		{path: "roles/qc-reviewer/role.md", body: roleDocumentBody},
+		{path: "heroes/qc-reviewer/hero.md", body: heroDocumentBody},
 	}
 }
 
 func TestFlowPackValidationBlocksUnsafeFanOut(t *testing.T) {
 	f := newFixture(t)
 	f.service.CheckAllowlistAllowsAll = true
-	role := roleDocument(f.modelID, "qc-reviewer", "QC Reviewer")
-	role.Authority = rolesource.AuthorityWriteWorkspace
-	role.AllowedTools = []string{"read", "write"}
-	encoded, err := rolesource.Encode(role)
+	hero := heroDocument(f.modelID, "qc-reviewer", "QC Reviewer")
+	hero.Authority = heroesource.AuthorityWriteWorkspace
+	hero.AllowedTools = []string{"read", "write"}
+	encoded, err := heroesource.Encode(hero)
 	require.NoError(t, err)
 	source := writePack(t, flowPackFiles(f, string(encoded)))
 	plan, err := f.service.Plan(context.Background(), packinstall.Request{SourcePath: source})
@@ -76,7 +76,7 @@ func TestFlowPackValidationBlocksUnsafeFanOut(t *testing.T) {
 func TestFlowPackValidationUsesCheckAllowlist(t *testing.T) {
 	f := newFixture(t)
 	f.service.CheckAllowlist = []string{"go"}
-	source := writePack(t, flowPackFiles(f, roleFile(t, f.modelID, "qc-reviewer", "QC Reviewer")))
+	source := writePack(t, flowPackFiles(f, heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer")))
 	plan, err := f.service.Plan(context.Background(), packinstall.Request{SourcePath: source})
 	require.NoError(t, err)
 	assert.True(t, hasBlocker(plan, packinstall.CodeFlowValidationFailed), blockerCodes(plan))
@@ -87,7 +87,7 @@ func TestRemoveFlowPackRefusesEnabledBinding(t *testing.T) {
 	f := newFixture(t)
 	f.service.CheckAllowlistAllowsAll = true
 	f.service.Projects = f.projects
-	source := writePack(t, flowPackFiles(f, roleFile(t, f.modelID, "qc-reviewer", "QC Reviewer")))
+	source := writePack(t, flowPackFiles(f, heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer")))
 	_, err := f.service.Install(context.Background(), packinstall.Request{SourcePath: source})
 	require.NoError(t, err)
 	project, _, err := f.projects.CreateWithWorkspace(context.Background(), domain.CreateProjectInput{
@@ -117,7 +117,7 @@ func TestFlowPackRollbackRemovesTheFlowDraft(t *testing.T) {
 	f.service.CheckAllowlistAllowsAll = true
 	manifestCopy := f.manifestCopyPath("seqyuan/flow-pack")
 	require.NoError(t, os.MkdirAll(filepath.Join(manifestCopy, "blocker"), 0o700))
-	source := writePack(t, flowPackFiles(f, roleFile(t, f.modelID, "qc-reviewer", "QC Reviewer")))
+	source := writePack(t, flowPackFiles(f, heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer")))
 	_, err := f.service.Install(context.Background(), packinstall.Request{SourcePath: source})
 	require.Error(t, err)
 	_, _, err = f.sources.ReadFlow("qc-flow")

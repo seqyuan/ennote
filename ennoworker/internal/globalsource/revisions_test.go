@@ -7,7 +7,7 @@ import (
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,7 +16,7 @@ func TestAgentSourcesUseSharedAgentsRoot(t *testing.T) {
 	home := t.TempDir()
 	store := Store{HomeDir: home}
 	assert.Equal(t, filepath.Join(home, "agents"), store.AgentsDir())
-	assert.Equal(t, filepath.Join(home, "agents", "roles"), store.RolesDir())
+	assert.Equal(t, filepath.Join(home, "agents", "heroes"), store.HeroesDir())
 	assert.Equal(t, filepath.Join(home, "agents", "graphs"), store.GraphsDir())
 }
 
@@ -55,27 +55,27 @@ func TestGraphRevisionsAreImmutableAndDigestIdempotent(t *testing.T) {
 	assert.Equal(t, []int{1, 2}, []int{revisions[0].Version, revisions[1].Version})
 }
 
-func TestRoleRevisionPublishesCanonicalRoleMarkdown(t *testing.T) {
+func TestHeroRevisionPublishesCanonicalHeroMarkdown(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
-	role := &rolesource.Document{
+	hero := &heroesource.Document{
 		SchemaVersion: 1, Handle: "reviewer", Name: "Reviewer",
-		Model:  rolesource.ModelBinding{Ref: "openai-main/gpt-5", ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills: []rolesource.SkillBinding{}, AllowedTools: []string{"read"},
-		Context:    rolesource.ContextPolicy{AllowedModes: []domain.RoleContextMode{}},
-		Delegation: rolesource.DelegationPolicy{AllowedCallerKinds: []string{}, AllowedStrategies: []string{}},
+		Model:  heroesource.ModelBinding{Ref: "openai-main/gpt-5", ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills: []heroesource.SkillBinding{}, AllowedTools: []string{"read"},
+		Context:    heroesource.ContextPolicy{AllowedModes: []domain.HeroContextMode{}},
+		Delegation: heroesource.DelegationPolicy{AllowedCallerKinds: []string{}, AllowedStrategies: []string{}},
 		Prompt:     "Review the supplied work.",
 	}
-	_, digest, err := store.CreateRole(role)
+	_, digest, err := store.CreateHero(hero)
 	require.NoError(t, err)
-	revision, err := store.PublishRoleRevision("reviewer")
+	revision, err := store.PublishHeroRevision("reviewer")
 	require.NoError(t, err)
 	assert.Equal(t, digest, revision.Digest)
-	contents, err := os.ReadFile(filepath.Join(store.RolesDir(), "reviewer", "revisions", "v000001", "role.md"))
+	contents, err := os.ReadFile(filepath.Join(store.HeroesDir(), "reviewer", "revisions", "v000001", "hero.md"))
 	require.NoError(t, err)
-	parsed, err := rolesource.Parse(contents)
+	parsed, err := heroesource.Parse(contents)
 	require.NoError(t, err)
-	assert.Equal(t, role.Handle, parsed.Handle)
-	assert.Equal(t, role.Prompt, parsed.Prompt)
+	assert.Equal(t, hero.Handle, parsed.Handle)
+	assert.Equal(t, hero.Prompt, parsed.Prompt)
 }
 
 func TestRevisionMetadataRejectsTampering(t *testing.T) {

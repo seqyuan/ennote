@@ -153,32 +153,32 @@ func TestLiveHostedDelegationV15(t *testing.T) {
 	var mismatched int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM delegation_item_attempts a
 		JOIN delegation_items i ON i.id=a.item_id
-		WHERE a.authorization_snapshot_json NOT LIKE '%' || i.role_version_id || '%'`).Scan(&mismatched))
+		WHERE a.authorization_snapshot_json NOT LIKE '%' || i.hero_version_id || '%'`).Scan(&mismatched))
 	assert.Zero(t, mismatched)
 }
 
 // explorerLiveItem mirrors the builtin Workspace Explorer delegation item.
-// The RoleMeta is frozen from an embedded V2 file-native definition with
-// mode=fixed bound to the live model (the removed global role SQL tables and
+// The HeroMeta is frozen from an embedded V2 file-native definition with
+// mode=fixed bound to the live model (the removed global hero SQL tables and
 // the unimplemented legacy inherit mode are gone).
 func explorerLiveItem(t *testing.T, modelID string) store.CreateDelegationItemInput {
 	t.Helper()
 	item := store.CreateDelegationItemInput{
-		Name: "explore", RoleVersionID: "builtin-workspace-explorer-v3",
+		Name: "explore", HeroVersionID: "builtin-workspace-explorer-v3",
 		AssignmentJSON: json.RawMessage(`{"objective":"List the files in /workspace and note their names in one sentence."}`),
 		OutputContract: "text-v1",
 		Budget: domain.BudgetCeilingJSON{MaxModelCalls: 6, MaxToolCalls: 8, MaxTotalTokens: 20000,
 			MaxOutputTokens: 2048, MaxWallTimeMS: 120000},
 	}
-	item.RoleMeta = liveExplorerRoleMeta(modelID)
+	item.HeroMeta = liveExplorerHeroMeta(modelID)
 	return item
 }
 
-// liveExplorerRoleMeta freezes the builtin Workspace Explorer Role identity +
+// liveExplorerHeroMeta freezes the builtin Workspace Explorer Role identity +
 // definition from an embedded V2 definition bound to modelID (mode=fixed).
-func liveExplorerRoleMeta(modelID string) *store.DelegationRoleMeta {
-	definition := fmt.Sprintf(liveExplorerRoleDefinitionV3, modelID)
-	meta, err := store.NewDelegationRoleMeta("builtin-workspace-explorer-v3", []byte(definition))
+func liveExplorerHeroMeta(modelID string) *store.DelegationHeroMeta {
+	definition := fmt.Sprintf(liveExplorerHeroDefinitionV3, modelID)
+	meta, err := store.NewDelegationHeroMeta("builtin-workspace-explorer-v3", []byte(definition))
 	if err != nil {
 		panic(err)
 	}
@@ -188,9 +188,9 @@ func liveExplorerRoleMeta(modelID string) *store.DelegationRoleMeta {
 	return meta
 }
 
-// liveExplorerRoleDefinitionV3 is the builtin Workspace Explorer definition;
+// liveExplorerHeroDefinitionV3 is the builtin Workspace Explorer definition;
 // the %%s placeholder receives the live model profile id (mode=fixed).
-const liveExplorerRoleDefinitionV3 = `{"schemaVersion":1,"rolePrompt":"You are the Workspace Explorer. Use read, ls, grep, and find to answer questions about workspace files. You may inspect git history and status with the git_readonly tool (status, diff, log, show, ls-files, blame). Every answer must be concise. End every turn by calling submit_result with a structured result. Never create, modify, or delete files, and never run arbitrary shell commands.","modelBinding":{"mode":"fixed","modelProfileId":%q,"thinkingEffort":"default","fallbackModelProfileIds":[],"overridableFields":[]},"skills":{"entries":[]},"authority":"read_only","permissionCeiling":"discuss","allowedTools":["read","ls","grep","find","git_readonly"],"contextPolicy":{"defaultMode":"task_only","allowedModes":["task_only"],"ownExecutionContinuity":"none"},"delegationPolicy":{"admission":"auto_within_budget","allowedCallerKinds":["host"],"allowedStrategies":["single","parallel"],"maxInvocationsPerParentRun":16,"maxConcurrentInstances":16,"budgetCeiling":{"maxModelCalls":6,"maxToolCalls":8,"maxTotalTokens":20000,"maxOutputTokens":4000,"maxCostUsdMicros":100000,"maxWallTimeMs":120000}},"outputContract":"text-v1","maxLoopIterations":8}`
+const liveExplorerHeroDefinitionV3 = `{"schemaVersion":1,"heroPrompt":"You are the Workspace Explorer. Use read, ls, grep, and find to answer questions about workspace files. You may inspect git history and status with the git_readonly tool (status, diff, log, show, ls-files, blame). Every answer must be concise. End every turn by calling submit_result with a structured result. Never create, modify, or delete files, and never run arbitrary shell commands.","modelBinding":{"mode":"fixed","modelProfileId":%q,"thinkingEffort":"default","fallbackModelProfileIds":[],"overridableFields":[]},"skills":{"entries":[]},"authority":"read_only","permissionCeiling":"discuss","allowedTools":["read","ls","grep","find","git_readonly"],"contextPolicy":{"defaultMode":"task_only","allowedModes":["task_only"],"ownExecutionContinuity":"none"},"delegationPolicy":{"admission":"auto_within_budget","allowedCallerKinds":["host"],"allowedStrategies":["single","parallel"],"maxInvocationsPerParentRun":16,"maxConcurrentInstances":16,"budgetCeiling":{"maxModelCalls":6,"maxToolCalls":8,"maxTotalTokens":20000,"maxOutputTokens":4000,"maxCostUsdMicros":100000,"maxWallTimeMs":120000}},"outputContract":"text-v1","maxLoopIterations":8}`
 
 // newV15Executor assembles the production agent executor for live runs.
 func newV15Executor(t *testing.T, db *sql.DB, hub *events.Hub, runRepo *store.RunRepo,

@@ -193,7 +193,7 @@ func (r *DelegationRepo) RetryGeneration(ctx context.Context, groupID string,
 			return nil, nil, nil, err
 		}
 		if override, ok := input.BudgetOverrides[state.item.ID]; ok {
-			if err := r.validateRetryRoleAndCeilingTx(ctx, tx, state.item.ID, override); err != nil {
+			if err := r.validateRetryHeroAndCeilingTx(ctx, tx, state.item.ID, override); err != nil {
 				return nil, nil, nil, err
 			}
 			if budgetIncreased(ceiling, override) {
@@ -202,7 +202,7 @@ func (r *DelegationRepo) RetryGeneration(ctx context.Context, groupID string,
 			ceiling = override
 			effective = mustMarshalJSON(ceiling)
 		} else {
-			if err := r.validateRetryRoleAndCeilingTx(ctx, tx, state.item.ID, ceiling); err != nil {
+			if err := r.validateRetryHeroAndCeilingTx(ctx, tx, state.item.ID, ceiling); err != nil {
 				return nil, nil, nil, err
 			}
 		}
@@ -213,12 +213,12 @@ func (r *DelegationRepo) RetryGeneration(ctx context.Context, groupID string,
 		budgetSum.MaxOutputTokens += ceiling.MaxOutputTokens
 		budgetSum.MaxCostMicros += ceiling.MaxCostMicros
 		authSnapshot = append(authSnapshot, map[string]string{
-			"itemId": state.item.ID, "roleVersionId": state.item.RoleVersionID,
+			"itemId": state.item.ID, "heroVersionId": state.item.HeroVersionID,
 		})
 	}
 	for _, reference := range reused {
 		authSnapshot = append(authSnapshot, map[string]string{
-			"itemId": reference.ItemID, "roleVersionId": referenceAttemptRoleVersion(ctx, tx, reference.AttemptID),
+			"itemId": reference.ItemID, "heroVersionId": referenceAttemptHeroVersion(ctx, tx, reference.AttemptID),
 		})
 	}
 	authDigest, err := digestJSON(authSnapshot)
@@ -443,14 +443,14 @@ func (r *DelegationRepo) approvalForGeneration(ctx context.Context, groupID stri
 	return &approval, nil
 }
 
-// validateRetryRoleAndCeilingTx fails closed when the frozen Role meta is
+// validateRetryHeroAndCeilingTx fails closed when the frozen Role meta is
 // missing and validates a retry budget override against the frozen
-// definition's ceiling. V2 never consults global role SQL: the Role facts
+// definition's ceiling. V2 never consults global hero SQL: the Role facts
 // frozen on the delegation item at Run start are the only authority.
-func (r *DelegationRepo) validateRetryRoleAndCeilingTx(ctx context.Context, tx *sql.Tx,
+func (r *DelegationRepo) validateRetryHeroAndCeilingTx(ctx context.Context, tx *sql.Tx,
 	itemID string, request domain.BudgetCeilingJSON) error {
 	var metaJSON string
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(role_meta_json, '{}')
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(hero_meta_json, '{}')
 		FROM delegation_items WHERE id=?`, itemID).Scan(&metaJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("%w: delegation item is unavailable", ErrDelegationNotAuthorized)
@@ -460,7 +460,7 @@ func (r *DelegationRepo) validateRetryRoleAndCeilingTx(ctx context.Context, tx *
 	if strings.TrimSpace(metaJSON) == "" || strings.TrimSpace(metaJSON) == "{}" {
 		return fmt.Errorf("%w: frozen Role meta is unavailable", ErrDelegationNotAuthorized)
 	}
-	var meta DelegationRoleMeta
+	var meta DelegationHeroMeta
 	if err := json.Unmarshal([]byte(metaJSON), &meta); err != nil {
 		return fmt.Errorf("decode frozen Role meta: %w", err)
 	}
@@ -551,11 +551,11 @@ func authSnapshotJSON(selection []map[string]string) json.RawMessage {
 	return encoded
 }
 
-// referenceAttemptRoleVersion returns the frozen Role version of a reused
+// referenceAttemptHeroVersion returns the frozen Role version of a reused
 // attempt (used to complete the generation authorization snapshot).
-func referenceAttemptRoleVersion(ctx context.Context, tx *sql.Tx, attemptID string) string {
+func referenceAttemptHeroVersion(ctx context.Context, tx *sql.Tx, attemptID string) string {
 	var version string
-	_ = tx.QueryRowContext(ctx, `SELECT role_version_id FROM delegation_items i
+	_ = tx.QueryRowContext(ctx, `SELECT hero_version_id FROM delegation_items i
 		JOIN delegation_item_attempts a ON a.item_id=i.id WHERE a.id=?`, attemptID).Scan(&version)
 	return version
 }

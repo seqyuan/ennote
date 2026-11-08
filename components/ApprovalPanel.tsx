@@ -39,13 +39,13 @@ function DelegationPreview({ item }: { item: ApprovalItem }) {
   if (!item.delegations?.length) return <pre>{item.argumentsPreview}</pre>;
   return <div className="approval-delegations">
     {item.delegations.map((delegation, index) => {
-      const role = delegation.role || delegation.roleHandle;
+      const hero = delegation.hero || delegation.heroHandle;
       const goal = delegation.goalPreview || delegation.assignmentPreview;
-      return <div className="approval-delegation" key={`${role}-${index}`}>
+      return <div className="approval-delegation" key={`${hero}-${index}`}>
         <span className="approval-delegation-icon"><Users size={14} aria-hidden="true" /></span>
         <span className="approval-delegation-copy">
           <strong>{delegation.name}</strong>
-          <span>@{role}</span>
+          <span>@{hero}</span>
           <small>{goal}</small>
           {Boolean(delegation.skills?.length) && <small className="approval-delegation-meta">
             {t("conversation.approval.skills")}: {(delegation.skills ?? []).join(", ")}
@@ -74,7 +74,7 @@ export function ApprovalPanel({ approval, resolving, decide }: ApprovalPanelProp
   );
   const selectedSet = useMemo(() => new Set(selectedIndexes), [selectedIndexes]);
   const delegationAdmission = approval.items.some(item =>
-    item.toolName === "delegate_tasks" || item.toolName === "delegate_roles");
+    item.toolName === "delegate_tasks" || item.toolName === "delegate_heroes");
 
   const toggleIndex = useCallback((callIndex: number) => {
     setSelection((current) => {
@@ -104,7 +104,7 @@ export function ApprovalPanel({ approval, resolving, decide }: ApprovalPanelProp
     <div className="approval-heading">
       <div>
         <strong>{delegationAdmission ? t("conversation.approval.delegationRequired") : t("conversation.approval.required")}</strong>
-        {approval.attribution?.speakerKind === "role" && <span className="approval-attribution">
+        {approval.attribution?.speakerKind === "hero" && <span className="approval-attribution">
           @{approval.attribution.handle || approval.attribution.displayName} · {approval.attribution.authority} · {approval.attribution.permissionCeiling}
         </span>}
         <span>{batchLabel}</span>
@@ -117,7 +117,7 @@ export function ApprovalPanel({ approval, resolving, decide }: ApprovalPanelProp
           <code>{item.toolName}</code>
           <span data-risk={item.riskClass}>{t(RISK_KEYS[item.riskClass] ?? "conversation.tool.risk.sensitive")}</span>
         </div>
-        {item.toolName === "delegate_tasks" || item.toolName === "delegate_roles"
+        {item.toolName === "delegate_tasks" || item.toolName === "delegate_heroes"
           ? <DelegationPreview item={item} /> : <pre>{item.argumentsPreview}</pre>}
         <StandingCheckbox item={item}
           checked={selectedSet.has(item.callIndex)}

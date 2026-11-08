@@ -28,7 +28,7 @@ func TestReminderRegistryEmpty(t *testing.T) {
 	assert.True(t, (*ReminderRegistry)(nil).Empty())
 }
 
-func TestReminderRegistryMessagesOrderAndRole(t *testing.T) {
+func TestReminderRegistryMessagesOrderAndHero(t *testing.T) {
 	registry := NewReminderRegistry(
 		ReminderFunc{NameField: "first",
 			Fn: func(context.Context, ReminderContext) (string, bool) { return "one", true }},

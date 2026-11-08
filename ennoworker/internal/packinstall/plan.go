@@ -16,7 +16,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/skills"
 	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
 )
@@ -29,9 +29,9 @@ const PlanVersion = 1
 const (
 	ActionKindGraph        = "graph"
 	ActionKindFlow         = "flow"
-	ActionKindGraphRole    = "graph_role"
-	ActionKindRole         = "role"
-	ActionKindRoleRevision = "role_revision"
+	ActionKindGraphHero    = "graph_hero"
+	ActionKindHero         = "hero"
+	ActionKindHeroRevision = "hero_revision"
 	ActionKindSkill        = "skill"
 )
 
@@ -39,8 +39,8 @@ const (
 const (
 	skillScopeFlow   = agentpack.SkillScopeFlow
 	skillScopeGlobal = agentpack.SkillScopeGlobal
-	roleScopeFlow    = agentpack.RoleScopeFlow
-	roleScopeGlobal  = agentpack.RoleScopeGlobal
+	heroScopeFlow    = agentpack.HeroScopeFlow
+	heroScopeGlobal  = agentpack.HeroScopeGlobal
 )
 
 // Action states.
@@ -48,7 +48,7 @@ const (
 	ActionCreate          = "create"
 	ActionExistsIdentical = "exists_identical"
 	ActionConflict        = "conflict"
-	// ActionPublish is the role_revision action for a Role revision that must be
+	// ActionPublish is the hero_revision action for a Role revision that must be
 	// published; an already-published digest reports exists_identical.
 	ActionPublish = "publish"
 )
@@ -65,7 +65,7 @@ const (
 	// WarningRenamedFlow reports a flow installed under a different Graph id.
 	WarningRenamedFlow = "pack_flow_renamed"
 	// WarningRenamedReference reports a Role installed under a different handle.
-	WarningRenamedReference = "pack_role_renamed"
+	WarningRenamedReference = "pack_hero_renamed"
 	// WarningSkillKept reports a locally edited Skill kept on remove.
 	WarningSkillKept = "pack_skill_kept"
 )
@@ -75,7 +75,7 @@ const (
 // the Worker, not for restructuring a pack.
 type Renames struct {
 	Flows map[string]string `json:"flows,omitempty"`
-	Roles map[string]string `json:"roles,omitempty"`
+	Heroes map[string]string `json:"heroes,omitempty"`
 }
 
 // Request is one plan or install request.
@@ -126,7 +126,7 @@ type Plan struct {
 type installPlan struct {
 	manifest          []byte
 	flows             []*flowTarget
-	roles             []*roleTarget
+	heroes             []*heroTarget
 	skills            []*skillTarget
 	externalRefs      ExternalRefs
 	modelRequirements agentpack.ModelEnvelope
@@ -145,14 +145,14 @@ type flowTarget struct {
 	action     string
 }
 
-type roleTarget struct {
+type heroTarget struct {
 	packHandle string
 	graphID    string // "" for a global Role
 	storeID    string // "<handle>" or "<flow>/<handle>"
 	scope      string
 	digest     string
 	// document is the installed form: its Handle is the store handle.
-	document       *rolesource.Document
+	document       *heroesource.Document
 	action         string
 	revisionAction string
 	revision       string
@@ -206,11 +206,11 @@ func (s *Service) plan(ctx context.Context, request Request) (*Plan, error) {
 		service: s, ctx: ctx, request: request,
 		inspect: result, manifest: manifest, pkg: pkg,
 		flowStoreIDs:    map[string]string{},
-		roleStoreIDs:    map[string]string{},
+		heroStoreIDs:    map[string]string{},
 		flowDocs:        map[string]*graphsource.Document{},
 		flowDefinitions: map[string]*domain.FlowDefinition{},
-		roleDocs:        map[string]*rolesource.Document{},
-		flowRoleRefs:    map[string]map[string]bool{},
+		heroDocs:        map[string]*heroesource.Document{},
+		flowHeroRefs:    map[string]map[string]bool{},
 		flowSkillRefs:   map[string]map[string]bool{},
 		skillEntries:    map[string]agentpack.SkillEntry{},
 		skillInputs:     map[string]skillsmgmt.CreateInput{},
@@ -249,7 +249,7 @@ func (s *Service) plan(ctx context.Context, request Request) (*Plan, error) {
 	if err := planner.planFlows(); err != nil {
 		return nil, err
 	}
-	if err := planner.planRoles(); err != nil {
+	if err := planner.planHeroes(); err != nil {
 		return nil, err
 	}
 	if err := planner.planSkills(); err != nil {
@@ -272,18 +272,18 @@ type planner struct {
 
 	plan *Plan
 
-	// flowStoreIDs / roleStoreIDs map pack ids onto installed store ids after
+	// flowStoreIDs / heroStoreIDs map pack ids onto installed store ids after
 	// renames.
 	flowStoreIDs map[string]string
-	roleStoreIDs map[string]string
+	heroStoreIDs map[string]string
 
 	flowDocs        map[string]*graphsource.Document
 	flowDefinitions map[string]*domain.FlowDefinition
-	roleDocs        map[string]*rolesource.Document
+	heroDocs        map[string]*heroesource.Document
 
-	// flowRoleRefs and flowSkillRefs record which Graph-private object each flow
+	// flowHeroRefs and flowSkillRefs record which Graph-private object each flow
 	// pulls in, so a shared object is installed below every referencing flow.
-	flowRoleRefs  map[string]map[string]bool
+	flowHeroRefs  map[string]map[string]bool
 	flowSkillRefs map[string]map[string]bool
 
 	skillEntries map[string]agentpack.SkillEntry
@@ -327,9 +327,9 @@ func (p *planner) resolveStoreIDs() {
 	for _, entry := range p.manifest.Flows {
 		flowIDs[entry.ID] = true
 	}
-	roleHandles := make(map[string]bool, len(p.manifest.Roles))
-	for _, entry := range p.manifest.Roles {
-		roleHandles[entry.Handle] = true
+	heroHandles := make(map[string]bool, len(p.manifest.Heroes))
+	for _, entry := range p.manifest.Heroes {
+		heroHandles[entry.Handle] = true
 	}
 	for _, packID := range sortedKeys(p.request.Renames.Flows) {
 		storeID := strings.TrimSpace(p.request.Renames.Flows[packID])
@@ -344,27 +344,27 @@ func (p *planner) resolveStoreIDs() {
 		}
 		p.flowStoreIDs[packID] = storeID
 	}
-	for _, packHandle := range sortedKeys(p.request.Renames.Roles) {
-		storeID := strings.TrimSpace(p.request.Renames.Roles[packHandle])
-		if !roleHandles[packHandle] {
-			p.blocker(CodeRoleHandleConflict, fmt.Sprintf("rename names role %q, which the pack does not declare", packHandle))
+	for _, packHandle := range sortedKeys(p.request.Renames.Heroes) {
+		storeID := strings.TrimSpace(p.request.Renames.Heroes[packHandle])
+		if !heroHandles[packHandle] {
+			p.blocker(CodeHeroHandleConflict, fmt.Sprintf("rename names hero %q, which the pack does not declare", packHandle))
 			continue
 		}
-		if !validRoleStoreHandle(storeID) {
-			p.blocker(CodeRoleHandleConflict, fmt.Sprintf(
+		if !validHeroStoreHandle(storeID) {
+			p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
 				"rename %q -> %q is not a valid Role handle (lowercase letter, then up to 31 letters, digits, '-' or '_')", packHandle, storeID))
 			continue
 		}
-		p.roleStoreIDs[packHandle] = storeID
+		p.heroStoreIDs[packHandle] = storeID
 	}
 	for _, entry := range p.manifest.Flows {
 		if _, ok := p.flowStoreIDs[entry.ID]; !ok {
 			p.flowStoreIDs[entry.ID] = entry.ID
 		}
 	}
-	for _, entry := range p.manifest.Roles {
-		if _, ok := p.roleStoreIDs[entry.Handle]; !ok {
-			p.roleStoreIDs[entry.Handle] = entry.Handle
+	for _, entry := range p.manifest.Heroes {
+		if _, ok := p.heroStoreIDs[entry.Handle]; !ok {
+			p.heroStoreIDs[entry.Handle] = entry.Handle
 		}
 	}
 
@@ -383,38 +383,38 @@ func (p *planner) checkStoreIDCollisions() {
 		}
 		flowOwners[storeID] = entry.ID
 	}
-	roleOwners := map[string]string{}
-	for _, entry := range p.manifest.Roles {
-		storeID := p.roleStoreIDs[entry.Handle]
+	heroOwners := map[string]string{}
+	for _, entry := range p.manifest.Heroes {
+		storeID := p.heroStoreIDs[entry.Handle]
 		key := storeID
-		if entry.Scope == agentpack.RoleScopeFlow {
-			// Graph-private Roles live under their flow, so the identity is
+		if entry.Scope == agentpack.HeroScopeFlow {
+			// Graph-private Heroes live under their flow, so the identity is
 			// per-flow: <flow>/<handle>.
-			flows := p.flowsReferencingRole(entry.Handle)
+			flows := p.flowsReferencingHero(entry.Handle)
 			if len(flows) == 0 {
 				continue
 			}
 			for _, flowStoreID := range flows {
 				key = flowStoreID + "/" + storeID
-				if owner, taken := roleOwners[key]; taken && owner != entry.Handle {
-					p.blocker(CodeRoleHandleConflict, fmt.Sprintf(
-						"roles %q and %q both install as %q; renames must keep store ids distinct", owner, entry.Handle, key))
+				if owner, taken := heroOwners[key]; taken && owner != entry.Handle {
+					p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
+						"heroes %q and %q both install as %q; renames must keep store ids distinct", owner, entry.Handle, key))
 					continue
 				}
-				roleOwners[key] = entry.Handle
+				heroOwners[key] = entry.Handle
 			}
 			continue
 		}
-		if owner, taken := roleOwners[key]; taken && owner != entry.Handle {
-			p.blocker(CodeRoleHandleConflict, fmt.Sprintf(
-				"roles %q and %q both install as global Role %q; renames must keep store ids distinct", owner, entry.Handle, key))
+		if owner, taken := heroOwners[key]; taken && owner != entry.Handle {
+			p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
+				"heroes %q and %q both install as global Role %q; renames must keep store ids distinct", owner, entry.Handle, key))
 			continue
 		}
-		roleOwners[key] = entry.Handle
+		heroOwners[key] = entry.Handle
 	}
 }
 
-// loadDocuments parses every flow and role source a second time from the same
+// loadDocuments parses every flow and hero source a second time from the same
 // in-memory package, so the installer writes exactly the bytes inspect reviewed.
 func (p *planner) loadDocuments() error {
 	for _, entry := range p.manifest.Flows {
@@ -439,17 +439,17 @@ func (p *planner) loadDocuments() error {
 			p.flowDefinitions[entry.ID] = definition
 		}
 	}
-	for _, entry := range p.manifest.Roles {
+	for _, entry := range p.manifest.Heroes {
 		file, ok := p.pkg.Lookup(canonicalPackPath(entry.Path))
 		if !ok {
 			continue
 		}
-		document, err := rolesource.Parse(file.Data)
+		document, err := heroesource.Parse(file.Data)
 		if err != nil {
-			return newError(agentpack.CodePackRoleInvalid,
+			return newError(agentpack.CodePackHeroInvalid,
 				fmt.Sprintf("parse Role source %s: %v", entry.Path, err))
 		}
-		p.roleDocs[entry.Handle] = document
+		p.heroDocs[entry.Handle] = document
 	}
 	return nil
 }
@@ -458,8 +458,8 @@ func (p *planner) loadDocuments() error {
 // against the local model catalog. A pack never names a concrete model, so an
 // unresolvable ref is a hard install blocker rather than a run-time surprise.
 func (p *planner) checkModels() {
-	for _, entry := range p.manifest.Roles {
-		document, ok := p.roleDocs[entry.Handle]
+	for _, entry := range p.manifest.Heroes {
+		document, ok := p.heroDocs[entry.Handle]
 		if !ok {
 			continue
 		}
@@ -467,7 +467,7 @@ func (p *planner) checkModels() {
 		for _, ref := range refs {
 			if _, err := p.service.Models.ResolvePortableRef(p.ctx, ref); err != nil {
 				p.blocker(CodeModelUnresolved, fmt.Sprintf(
-					"role %q model ref %q: %v", entry.Handle, ref, err))
+					"hero %q model ref %q: %v", entry.Handle, ref, err))
 			}
 		}
 	}
@@ -475,7 +475,7 @@ func (p *planner) checkModels() {
 		document := p.flowDocs[packFlowID]
 		for _, taskID := range sortedKeys(document.Tasks) {
 			task := document.Tasks[taskID]
-			if task.Role != "" {
+			if task.Hero != "" {
 				continue
 			}
 			if _, err := p.service.Models.ResolvePortableRef(p.ctx, task.Model); err != nil {
@@ -586,12 +586,12 @@ func (p *planner) skillInput(entry agentpack.SkillEntry, directory string) (skil
 	}, nil
 }
 
-// resolveReferences links flows to the Graph-private roles and skills they pull
+// resolveReferences links flows to the Graph-private heroes and skills they pull
 // in, and rejects references whose declared scope contradicts the reference.
 func (p *planner) resolveReferences() {
 	for _, entry := range p.manifest.Flows {
 		refs := map[string]bool{}
-		for _, handle := range entry.Roles {
+		for _, handle := range entry.Heroes {
 			refs[handle] = true
 		}
 		switch entry.Format {
@@ -600,16 +600,16 @@ func (p *planner) resolveReferences() {
 			if document != nil {
 				for _, taskID := range sortedKeys(document.Tasks) {
 					task := document.Tasks[taskID]
-					if scope, handle, ok := strings.Cut(task.Role, "/"); ok && scope == "local" {
+					if scope, handle, ok := strings.Cut(task.Hero, "/"); ok && scope == "local" {
 						refs[handle] = true
-						if _, declared := p.roleDocs[handle]; !declared {
-							p.blocker(CodeRoleHandleConflict, fmt.Sprintf(
+						if _, declared := p.heroDocs[handle]; !declared {
+							p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
 								"flow %q task %q references local Role %q, which the pack does not declare", entry.ID, taskID, handle))
 						}
-					} else if !strings.Contains(task.Role, "/") && task.Role != "" {
+					} else if !strings.Contains(task.Hero, "/") && task.Hero != "" {
 						// Bare handle: flow-local when the pack declares it.
-						if _, declared := p.roleDocs[task.Role]; declared {
-							refs[task.Role] = true
+						if _, declared := p.heroDocs[task.Hero]; declared {
+							refs[task.Hero] = true
 						}
 					}
 					for _, ref := range task.Skills {
@@ -622,8 +622,8 @@ func (p *planner) resolveReferences() {
 			if definition != nil {
 				for _, taskID := range sortedKeys(definition.Tasks) {
 					task := definition.Tasks[taskID]
-					if task.Type == domain.FlowTaskRole {
-						p.collectFlowRoleRef(entry.ID, taskID, task.Role, refs)
+					if task.Type == domain.FlowTaskHero {
+						p.collectFlowHeroRef(entry.ID, taskID, task.Hero, refs)
 					}
 					for _, ref := range task.Skills {
 						p.collectTaskSkillRef(entry.ID, "flow task "+taskID, ref)
@@ -631,13 +631,13 @@ func (p *planner) resolveReferences() {
 				}
 			}
 		}
-		p.flowRoleRefs[entry.ID] = refs
+		p.flowHeroRefs[entry.ID] = refs
 	}
 	// Role preloads are rendered from the Worker user skills root, not from a
 	// Graph-private directory. A local/ binding would therefore install but never
 	// resolve; require a global vendored or already-installed Skill instead.
-	for _, entry := range p.manifest.Roles {
-		document, ok := p.roleDocs[entry.Handle]
+	for _, entry := range p.manifest.Heroes {
+		document, ok := p.heroDocs[entry.Handle]
 		if !ok {
 			continue
 		}
@@ -649,18 +649,18 @@ func (p *planner) resolveReferences() {
 			switch scope {
 			case "local":
 				p.blocker(CodeSkillUnresolved, fmt.Sprintf(
-					"role %q preloads local/%s; Role preloads resolve from the Worker user skills root, so only global/ (or a bare) Skill reference is supported", entry.Handle, id))
+					"hero %q preloads local/%s; Role preloads resolve from the Worker user skills root, so only global/ (or a bare) Skill reference is supported", entry.Handle, id))
 			case "global":
 				if skillEntry, declared := p.skillEntries[id]; declared {
 					if skillEntry.Scope != agentpack.SkillScopeGlobal {
 						p.blocker(CodeSkillUnresolved, fmt.Sprintf(
-							"role %q preloads global/%s but the pack declares it with scope: flow; Role preloads need a global Skill", entry.Handle, id))
+							"hero %q preloads global/%s but the pack declares it with scope: flow; Role preloads need a global Skill", entry.Handle, id))
 					}
 					continue
 				}
 				if _, err := skills.Load(filepath.Join(p.service.SkillsRoot, id)); err != nil {
 					p.blocker(CodeSkillUnresolved, fmt.Sprintf(
-						"role %q preloads global/%s, which is not installed in the Worker user skills root", entry.Handle, id))
+						"hero %q preloads global/%s, which is not installed in the Worker user skills root", entry.Handle, id))
 				}
 			}
 		}
@@ -671,12 +671,12 @@ func (p *planner) resolveReferences() {
 		if entry.Format != agentpack.FlowFormatGraph && entry.Format != agentpack.FlowFormatFlow {
 			continue
 		}
-		for _, handle := range sortedKeys(p.flowRoleRefs[entry.ID]) {
-			roleEntry, declared := p.roleEntry(handle)
-			if !declared || roleEntry.Scope != agentpack.RoleScopeFlow {
+		for _, handle := range sortedKeys(p.flowHeroRefs[entry.ID]) {
+			heroEntry, declared := p.heroEntry(handle)
+			if !declared || heroEntry.Scope != agentpack.HeroScopeFlow {
 				continue
 			}
-			document, ok := p.roleDocs[handle]
+			document, ok := p.heroDocs[handle]
 			if !ok {
 				continue
 			}
@@ -685,7 +685,7 @@ func (p *planner) resolveReferences() {
 				if !ok || scope != "local" {
 					continue
 				}
-				p.checkSkillRef(entry.ID, "role "+handle, scope, id)
+				p.checkSkillRef(entry.ID, "hero "+handle, scope, id)
 			}
 		}
 	}
@@ -707,7 +707,7 @@ func (p *planner) resolveReferences() {
 	}
 }
 
-func (p *planner) collectFlowRoleRef(flowID, taskID, raw string, refs map[string]bool) {
+func (p *planner) collectFlowHeroRef(flowID, taskID, raw string, refs map[string]bool) {
 	ref := strings.TrimSpace(raw)
 	if ref == "" {
 		return
@@ -719,7 +719,7 @@ func (p *planner) collectFlowRoleRef(flowID, taskID, raw string, refs map[string
 		if hasVersion {
 			return // global version pin; not a pack-local Role reference
 		}
-		if _, declared := p.roleDocs[handle]; declared {
+		if _, declared := p.heroDocs[handle]; declared {
 			refs[handle] = true
 		}
 		return
@@ -727,31 +727,31 @@ func (p *planner) collectFlowRoleRef(flowID, taskID, raw string, refs map[string
 	switch scope {
 	case "local":
 		if hasVersion {
-			p.blocker(CodeRoleHandleConflict, fmt.Sprintf(
-				"flow %q task %q pins local Role %q with @%s; flow-local Roles have no revisions", flowID, taskID, id, versionText))
+			p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
+				"flow %q task %q pins local Role %q with @%s; flow-local Heroes have no revisions", flowID, taskID, id, versionText))
 			return
 		}
-		entry, declared := p.roleEntry(id)
+		entry, declared := p.heroEntry(id)
 		if !declared {
-			p.blocker(CodeRoleHandleConflict, fmt.Sprintf(
+			p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
 				"flow %q task %q references local Role %q, which the pack does not declare", flowID, taskID, id))
 			return
 		}
-		if entry.Scope != agentpack.RoleScopeFlow {
-			p.blocker(CodeRoleHandleConflict, fmt.Sprintf(
+		if entry.Scope != agentpack.HeroScopeFlow {
+			p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
 				"flow %q task %q references local/%s but the pack declares it with scope: %s; a local/ reference needs scope: flow",
 				flowID, taskID, id, entry.Scope))
 			return
 		}
 		refs[id] = true
 	case "global":
-		if entry, declared := p.roleEntry(id); declared && entry.Scope == agentpack.RoleScopeFlow {
-			p.blocker(CodeRoleHandleConflict, fmt.Sprintf(
+		if entry, declared := p.heroEntry(id); declared && entry.Scope == agentpack.HeroScopeFlow {
+			p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
 				"flow %q task %q references global/%s but the pack declares it with scope: flow; a global/ reference cannot resolve a flow-local Role",
 				flowID, taskID, id))
 		}
 	default:
-		p.blocker(CodeRoleHandleConflict, fmt.Sprintf(
+		p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
 			"flow %q task %q Role reference %q must use local/<handle>, global/<handle>, or a bare handle",
 			flowID, taskID, ref))
 	}
@@ -803,13 +803,13 @@ func (p *planner) checkSkillRef(flowID, origin, scope, id string) {
 	}
 }
 
-func (p *planner) roleEntry(handle string) (agentpack.RoleEntry, bool) {
-	for _, entry := range p.manifest.Roles {
+func (p *planner) heroEntry(handle string) (agentpack.HeroEntry, bool) {
+	for _, entry := range p.manifest.Heroes {
 		if entry.Handle == handle {
 			return entry, true
 		}
 	}
-	return agentpack.RoleEntry{}, false
+	return agentpack.HeroEntry{}, false
 }
 
 func (p *planner) planFlows() error {
@@ -885,70 +885,70 @@ func (p *planner) planFlows() error {
 	return nil
 }
 
-func (p *planner) planRoles() error {
-	for _, entry := range p.manifest.Roles {
-		document, ok := p.roleDocs[entry.Handle]
+func (p *planner) planHeroes() error {
+	for _, entry := range p.manifest.Heroes {
+		document, ok := p.heroDocs[entry.Handle]
 		if !ok {
 			continue
 		}
-		storeID := p.roleStoreIDs[entry.Handle]
+		storeID := p.heroStoreIDs[entry.Handle]
 		if storeID != entry.Handle && len(p.manifest.Flows) > 0 {
-			p.blocker(CodeRoleHandleConflict, fmt.Sprintf(
-				"role %q cannot be renamed in a pack with flows: S2a does not rewrite flow task role references; rename it before packaging", entry.Handle))
+			p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
+				"hero %q cannot be renamed in a pack with flows: S2a does not rewrite flow task hero references; rename it before packaging", entry.Handle))
 			continue
 		}
 		installed := *document
 		installed.Handle = storeID
-		digest, err := rolesource.SourceDigest(&installed)
+		digest, err := heroesource.SourceDigest(&installed)
 		if err != nil {
 			return fmt.Errorf("digest installed Role %s: %w", storeID, err)
 		}
 		if storeID != entry.Handle {
 			p.warn(WarningRenamedReference, SeverityInfo, fmt.Sprintf(
-				"role %q is installed as %q; in-pack references are not rewritten", entry.Handle, storeID))
+				"hero %q is installed as %q; in-pack references are not rewritten", entry.Handle, storeID))
 		}
 		switch entry.Scope {
-		case agentpack.RoleScopeFlow:
-			for _, flowStoreID := range p.flowsReferencingRole(entry.Handle) {
+		case agentpack.HeroScopeFlow:
+			for _, flowStoreID := range p.flowsReferencingHero(entry.Handle) {
 				targetStoreID := flowStoreID + "/" + storeID
-				action := p.service.graphRoleAction(flowStoreID, storeID, digest)
+				action := p.service.graphHeroAction(flowStoreID, storeID, digest)
 				if action == ActionConflict {
-					p.blocker(CodeRoleHandleConflict, fmt.Sprintf(
+					p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
 						"Graph-private Role %q already exists with different content", targetStoreID))
 				}
-				p.plan.install.roles = append(p.plan.install.roles, &roleTarget{
+				p.plan.install.heroes = append(p.plan.install.heroes, &heroTarget{
 					packHandle: entry.Handle, graphID: flowStoreID, storeID: targetStoreID,
 					scope: entry.Scope, digest: digest, document: &installed, action: action,
 				})
 				p.plan.Actions = append(p.plan.Actions, Action{
-					Kind: ActionKindGraphRole, StoreID: targetStoreID, Action: action, Scope: entry.Scope,
+					Kind: ActionKindGraphHero, StoreID: targetStoreID, Action: action, Scope: entry.Scope,
 				})
 			}
-		case agentpack.RoleScopeGlobal:
-			action := p.service.roleAction(storeID, digest)
+		case agentpack.HeroScopeGlobal:
+			action := p.service.heroAction(storeID, digest)
 			if action == ActionConflict {
-				p.blocker(CodeRoleHandleConflict, fmt.Sprintf(
+				p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
 					"global Role %q already exists with different content", storeID))
 			}
-			revisionAction := p.service.roleRevisionAction(storeID, digest)
-			target := &roleTarget{
+			revisionAction := p.service.heroRevisionAction(storeID, digest)
+			target := &heroTarget{
 				packHandle: entry.Handle, storeID: storeID, scope: entry.Scope,
 				digest: digest, document: &installed, action: action, revisionAction: revisionAction,
 			}
-			p.plan.install.roles = append(p.plan.install.roles, target)
+			p.plan.install.heroes = append(p.plan.install.heroes, target)
 			p.plan.Actions = append(p.plan.Actions,
-				Action{Kind: ActionKindRole, StoreID: storeID, Action: action, Scope: entry.Scope},
-				Action{Kind: ActionKindRoleRevision, StoreID: storeID, Action: revisionAction, Scope: entry.Scope},
+				Action{Kind: ActionKindHero, StoreID: storeID, Action: action, Scope: entry.Scope},
+				Action{Kind: ActionKindHeroRevision, StoreID: storeID, Action: revisionAction, Scope: entry.Scope},
 			)
 		}
 	}
 	return nil
 }
 
-func (p *planner) flowsReferencingRole(handle string) []string {
-	flows := make([]string, 0, len(p.flowRoleRefs))
-	for packFlowID := range p.flowRoleRefs {
-		if !p.flowRoleRefs[packFlowID][handle] {
+func (p *planner) flowsReferencingHero(handle string) []string {
+	flows := make([]string, 0, len(p.flowHeroRefs))
+	for packFlowID := range p.flowHeroRefs {
+		if !p.flowHeroRefs[packFlowID][handle] {
 			continue
 		}
 		flows = append(flows, p.flowStoreIDs[packFlowID])
@@ -1021,8 +1021,8 @@ func (p *planner) assignSkillAction(target *skillTarget) error {
 
 func (p *planner) sortActions() {
 	rank := map[string]int{
-		ActionKindGraph: 0, ActionKindFlow: 1, ActionKindGraphRole: 2, ActionKindRole: 3,
-		ActionKindRoleRevision: 4, ActionKindSkill: 5,
+		ActionKindGraph: 0, ActionKindFlow: 1, ActionKindGraphHero: 2, ActionKindHero: 3,
+		ActionKindHeroRevision: 4, ActionKindSkill: 5,
 	}
 	sort.SliceStable(p.plan.Actions, func(i, j int) bool {
 		left, right := p.plan.Actions[i], p.plan.Actions[j]
@@ -1116,8 +1116,8 @@ func (s *Service) flowAction(storeID, digest string) string {
 	}
 }
 
-func (s *Service) graphRoleAction(graphID, handle, digest string) string {
-	_, existing, err := s.Sources.ReadGraphRole(graphID, handle)
+func (s *Service) graphHeroAction(graphID, handle, digest string) string {
+	_, existing, err := s.Sources.ReadGraphHero(graphID, handle)
 	switch {
 	case err == nil:
 		if existing == digest {
@@ -1131,8 +1131,8 @@ func (s *Service) graphRoleAction(graphID, handle, digest string) string {
 	}
 }
 
-func (s *Service) roleAction(handle, digest string) string {
-	_, existing, err := s.Sources.ReadRole(handle)
+func (s *Service) heroAction(handle, digest string) string {
+	_, existing, err := s.Sources.ReadHero(handle)
 	switch {
 	case err == nil:
 		if existing == digest {
@@ -1146,8 +1146,8 @@ func (s *Service) roleAction(handle, digest string) string {
 	}
 }
 
-func (s *Service) roleRevisionAction(handle, digest string) string {
-	revisions, err := s.Sources.ListRoleRevisions(handle)
+func (s *Service) heroRevisionAction(handle, digest string) string {
+	revisions, err := s.Sources.ListHeroRevisions(handle)
 	if err != nil {
 		return ActionPublish
 	}
@@ -1172,8 +1172,8 @@ func normalizeModelEnvelope(envelope agentpack.ModelEnvelope) agentpack.ModelEnv
 	if envelope.Capabilities == nil {
 		envelope.Capabilities = []string{}
 	}
-	if envelope.PerRole == nil {
-		envelope.PerRole = map[string][]string{}
+	if envelope.PerHero == nil {
+		envelope.PerHero = map[string][]string{}
 	}
 	return envelope
 }
@@ -1235,12 +1235,12 @@ func validFlowStoreID(value string) bool {
 	return graphIDPattern.MatchString(value)
 }
 
-// validRoleStoreHandle matches rolesource's Role handle contract.
-func validRoleStoreHandle(value string) bool {
-	return roleHandlePattern.MatchString(value)
+// validHeroStoreHandle matches heroesource's Role handle contract.
+func validHeroStoreHandle(value string) bool {
+	return heroHandlePattern.MatchString(value)
 }
 
 var (
 	graphIDPattern    = regexp.MustCompile(`^[a-z][a-z0-9-]{1,63}$`)
-	roleHandlePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,31}$`)
+	heroHandlePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,31}$`)
 )

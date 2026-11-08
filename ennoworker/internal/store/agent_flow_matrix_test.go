@@ -24,7 +24,7 @@ import (
 // can consume it after the fact.
 
 func TestAgentFlowMatrixRunAndEventsPersisted(t *testing.T) {
-	db, flowRuns, projectID, _, roleVersionID := setupFlowFixture(t)
+	db, flowRuns, projectID, _, heroVersionID := setupFlowFixture(t)
 	ctx := context.Background()
 
 	def, err := agentflow.ParseDefinition([]byte(flowYAML("review", "")))
@@ -33,12 +33,12 @@ func TestAgentFlowMatrixRunAndEventsPersisted(t *testing.T) {
 
 	inputs, err := store.NormalizeFlowInputs(def, map[string]any{"target": "src/main.go"}, nil)
 	require.NoError(t, err)
-	// Matrix 7: freeze before the first child — exact role version, skill id,
+	// Matrix 7: freeze before the first child — exact hero version, skill id,
 	// goal digest, and per-task budget are captured in the node snapshots.
 	freeze, diagnostics, err := freezeFlowForTest(t, db, flowRuns, projectID, "", def, inputs)
 	require.NoError(t, err, diagnostics)
 	require.Len(t, freeze, 3)
-	assert.Equal(t, roleVersionID, freeze[0].RoleVersionID)
+	assert.Equal(t, heroVersionID, freeze[0].HeroVersionID)
 	assert.Equal(t, "skill-go-dev", freeze[0].Skills[0].ID)
 	assert.NotEmpty(t, freeze[0].GoalDigest)
 
@@ -158,12 +158,12 @@ func (c *stubMatrixChildren) CreateTaskChild(ctx context.Context, parentRunID, s
 		return info, err
 	}
 	_, err = c.db.ExecContext(ctx, `UPDATE delegation_item_attempts SET status='succeeded', finished_at=?
-		WHERE child_run_id=? AND status='queued'`, roleTimeNow(), info.RunID)
+		WHERE child_run_id=? AND status='queued'`, heroTimeNow(), info.RunID)
 	if err != nil {
 		return info, err
 	}
 	_, err = c.db.ExecContext(ctx, `UPDATE agent_runs SET status='succeeded', finished_at=?
-		WHERE id=? AND status IN ('queued','running')`, roleTimeNow(), info.RunID)
+		WHERE id=? AND status IN ('queued','running')`, heroTimeNow(), info.RunID)
 	return info, err
 }
 
@@ -183,7 +183,7 @@ func (c *stubMatrixChildren) CancelChildRun(ctx context.Context, runID string) e
 	return (&store.OrchestratorChildren{DB: c.db}).CancelChildRun(ctx, runID)
 }
 
-func roleTimeNow() string { return time.Now().UTC().Format(time.RFC3339Nano) }
+func heroTimeNow() string { return time.Now().UTC().Format(time.RFC3339Nano) }
 
 func findEvent(events []domain.RunEvent, eventType string) *domain.RunEvent {
 	for i := range events {

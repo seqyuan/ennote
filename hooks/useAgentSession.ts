@@ -640,7 +640,7 @@ export async function streamAgentEvents(
           }
           case "tool_call_completed": {
             setStatus("");
-            if (payload.toolName === "delegate_tasks" || payload.toolName === "delegate_roles") approval.delegated();
+            if (payload.toolName === "delegate_tasks" || payload.toolName === "delegate_heroes") approval.delegated();
             const callID = toolCallIdOf(payload);
             toolOutputs.delete(callID); // final result replaces the live preview
             state.finishedTools.add(callID);

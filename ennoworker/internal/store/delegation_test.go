@@ -23,13 +23,13 @@ func setupDelegationParent(t *testing.T) (*store.DelegationRepo, *store.RunRepo,
 		Policies: &fileconfig.PolicyStore{Path: filepath.Join(t.TempDir(), "config", "policies.json")}}, repo, submission
 }
 
-// explorerRoleDefinitionV3 is the verbatim fixture definition of
+// explorerHeroDefinitionV3 is the verbatim fixture definition of
 // builtin-workspace-explorer-v3, extended with a resolvable modelProfileId so
 // file-native child config freezing (validateFrozenDelegationMeta) can resolve
-// the frozen model. explorerItem() freezes it into the item's RoleMeta so
-// delegation validation never consults global role SQL (V2); keep it in
+// the frozen model. explorerItem() freezes it into the item's HeroMeta so
+// delegation validation never consults global hero SQL (V2); keep it in
 // lockstep with fixture_tables.sql until that snapshot is removed.
-const explorerRoleDefinitionV3 = `{"schemaVersion":1,"rolePrompt":"You are the Workspace Explorer. Use read, ls, grep, and find to answer questions about workspace files. You may inspect git history and status with the git_readonly tool (status, diff, log, show, ls-files, blame). Every answer must be concise. End every turn by calling submit_result with a structured result. Never create, modify, or delete files, and never run arbitrary shell commands.","modelBinding":{"mode":"inherit","modelProfileId":"provider/model","thinkingEffort":"default","fallbackModelProfileIds":[],"overridableFields":[]},"skills":{"entries":[]},"authority":"read_only","permissionCeiling":"discuss","allowedTools":["read","ls","grep","find","git_readonly"],"contextPolicy":{"defaultMode":"task_only","allowedModes":["task_only"],"ownExecutionContinuity":"none"},"delegationPolicy":{"admission":"auto_within_budget","allowedCallerKinds":["host"],"allowedStrategies":["single","parallel"],"maxInvocationsPerParentRun":16,"maxConcurrentInstances":16,"budgetCeiling":{"maxModelCalls":6,"maxToolCalls":8,"maxTotalTokens":20000,"maxOutputTokens":4000,"maxCostUsdMicros":100000,"maxWallTimeMs":120000}},"outputContract":"text-v1","maxLoopIterations":8}`
+const explorerHeroDefinitionV3 = `{"schemaVersion":1,"heroPrompt":"You are the Workspace Explorer. Use read, ls, grep, and find to answer questions about workspace files. You may inspect git history and status with the git_readonly tool (status, diff, log, show, ls-files, blame). Every answer must be concise. End every turn by calling submit_result with a structured result. Never create, modify, or delete files, and never run arbitrary shell commands.","modelBinding":{"mode":"inherit","modelProfileId":"provider/model","thinkingEffort":"default","fallbackModelProfileIds":[],"overridableFields":[]},"skills":{"entries":[]},"authority":"read_only","permissionCeiling":"discuss","allowedTools":["read","ls","grep","find","git_readonly"],"contextPolicy":{"defaultMode":"task_only","allowedModes":["task_only"],"ownExecutionContinuity":"none"},"delegationPolicy":{"admission":"auto_within_budget","allowedCallerKinds":["host"],"allowedStrategies":["single","parallel"],"maxInvocationsPerParentRun":16,"maxConcurrentInstances":16,"budgetCeiling":{"maxModelCalls":6,"maxToolCalls":8,"maxTotalTokens":20000,"maxOutputTokens":4000,"maxCostUsdMicros":100000,"maxWallTimeMs":120000}},"outputContract":"text-v1","maxLoopIterations":8}`
 
 // explorerConfigDigestV3 is the fixture's stored config_digest for
 // builtin-workspace-explorer-v3. The frozen meta carries it so child speaker
@@ -37,17 +37,17 @@ const explorerRoleDefinitionV3 = `{"schemaVersion":1,"rolePrompt":"You are the W
 // validates against while the fixture snapshot exists.
 const explorerConfigDigestV3 = "sha256:c7cf36749030bd0626c24eea7ea325c2b70be64bd2f623b3c94b5fc8b81aa38b"
 
-// roleMetaFromDB freezes a RoleMeta from the fixture's published role version,
+// heroMetaFromDB freezes a HeroMeta from the fixture's published hero version,
 // mirroring how production freezes a resolved file Role revision at Run start.
 // Identity fields (object id, config digest) are read from the fixture so the
-// frozen meta stays consistent with the snapshot role tables.
-func roleMetaFromDB(t *testing.T, db *sql.DB, versionID string) *store.DelegationRoleMeta {
+// frozen meta stays consistent with the snapshot hero tables.
+func heroMetaFromDB(t *testing.T, db *sql.DB, versionID string) *store.DelegationHeroMeta {
 	t.Helper()
 	var objectID, handle, name, configDigest, definitionJSON string
 	require.NoError(t, db.QueryRow(`SELECT p.id,p.handle,p.name,v.config_digest,v.definition_json
 		FROM agent_profiles p JOIN agent_profile_versions v ON v.agent_profile_id=p.id
 		WHERE v.id=?`, versionID).Scan(&objectID, &handle, &name, &configDigest, &definitionJSON))
-	meta, err := store.NewDelegationRoleMeta(versionID, []byte(definitionJSON))
+	meta, err := store.NewDelegationHeroMeta(versionID, []byte(definitionJSON))
 	require.NoError(t, err)
 	meta.ObjectID = objectID
 	meta.Handle = handle
@@ -57,11 +57,11 @@ func roleMetaFromDB(t *testing.T, db *sql.DB, versionID string) *store.Delegatio
 }
 
 func explorerItem() store.CreateDelegationItemInput {
-	var definition domain.RoleDefinition
-	if err := json.Unmarshal([]byte(explorerRoleDefinitionV3), &definition); err != nil {
+	var definition domain.HeroDefinition
+	if err := json.Unmarshal([]byte(explorerHeroDefinitionV3), &definition); err != nil {
 		panic(err)
 	}
-	meta := &store.DelegationRoleMeta{
+	meta := &store.DelegationHeroMeta{
 		ObjectID:     "builtin-workspace-explorer",
 		VersionID:    "builtin-workspace-explorer-v3",
 		Handle:       "workspace-explorer",
@@ -70,11 +70,11 @@ func explorerItem() store.CreateDelegationItemInput {
 		Definition:   definition,
 	}
 	return store.CreateDelegationItemInput{
-		Name: "explore", RoleVersionID: "builtin-workspace-explorer-v3",
+		Name: "explore", HeroVersionID: "builtin-workspace-explorer-v3",
 		AssignmentJSON: json.RawMessage(`{"objective":"inspect the workspace"}`), OutputContract: "text-v1",
 		Budget: domain.BudgetCeilingJSON{MaxModelCalls: 4, MaxToolCalls: 8, MaxTotalTokens: 20000,
 			MaxOutputTokens: 4000, MaxCostMicros: 100000, MaxWallTimeMS: 120000},
-		RoleMeta: meta,
+		HeroMeta: meta,
 	}
 }
 
@@ -104,7 +104,7 @@ func TestCreateGroupPersistsItemsAndRejectsDuplicateToolCall(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	assert.Equal(t, "explore", items[0].Name)
-	assert.Equal(t, "builtin-workspace-explorer-v3", items[0].RoleVersionID)
+	assert.Equal(t, "builtin-workspace-explorer-v3", items[0].HeroVersionID)
 	assert.Equal(t, domain.DelegationItemPending, items[0].Status)
 
 	_, err = delegations.CreateGroup(ctx, store.CreateDelegationGroupInput{
@@ -136,7 +136,7 @@ func TestListActivityUsesFrozenChildIdentityAndTerminalResult(t *testing.T) {
 	require.Len(t, page.Groups[0].Children, 1)
 	activity := page.Groups[0].Children[0]
 	assert.Equal(t, child.ID, activity.ChildRunID)
-	assert.Equal(t, "workspace-explorer", activity.RoleHandle)
+	assert.Equal(t, "workspace-explorer", activity.HeroHandle)
 	assert.Equal(t, domain.RunQueued, activity.RunStatus)
 	assert.Nil(t, activity.Result)
 

@@ -5,11 +5,11 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useT } from "@/components/LocaleProvider";
-import { RoleTargetPicker } from "@/components/RoleTargetPicker";
+import { HeroTargetPicker } from "@/components/HeroTargetPicker";
 import { PermissionChip } from "@/components/PermissionChip";
 import { ModelSelect } from "@/components/ModelSelect";
 import { ContextMeter } from "@/components/ContextMeter";
-import type { ModelProfile, ProviderProfile, RoleSummary } from "@/components/settings/types";
+import type { ModelProfile, ProviderProfile, HeroSummary } from "@/components/settings/types";
 import type { SessionContextUsage, SessionStats } from "@/hooks/chat-controller-types";
 import { artifactPreviewURL } from "@/lib/artifacts";
 import type { PermissionMode, ThinkingEffort } from "@/lib/permission-mode";
@@ -82,9 +82,9 @@ interface ComposerProps {
   setSelectedModelId: (modelId: string) => void;
   thinkingEffort: ThinkingEffort;
   setThinkingEffort: (effort: ThinkingEffort) => void;
-  roles: RoleSummary[];
-  selectedRoleId: string | null;
-  setSelectedRoleId: (roleId: string | null) => void;
+  heroes: HeroSummary[];
+  selectedHeroId: string | null;
+  setSelectedHeroId: (heroId: string | null) => void;
   textAttachments: TextAttachment[];
   removeTextAttachment: (id: string) => void;
   pendingImage: PendingImage | null;
@@ -107,11 +107,11 @@ interface ComposerProps {
   onRequestProject?: () => void;
   // Prompt templates + @addressing panel.
   promptTemplates: { name: string; description: string; argumentHint: string; source: string; editable: boolean }[];
-  panelRoles: { id: string; handle: string; name: string; description?: string }[];
+  panelHeroes: { id: string; handle: string; name: string; description?: string }[];
   panelFlows: { name: string; version?: number; description?: string }[];
   showPromptPanel: boolean;
   onPromptSelect: (name: string) => void;
-  onRoleSelect: (roleId: string, handle: string) => void;
+  onHeroSelect: (heroId: string, handle: string) => void;
   onFlowSelect: (name: string, version?: number) => void;
   onPromptPanelClose: () => void;
   expanding: boolean;
@@ -125,10 +125,10 @@ interface ComposerProps {
 export function Composer({
   selectedSession, activeLeafMessageId, input, setInput, activeRun, questionPending = false, compacting, hasPendingImage, reconnecting,
   permissionMode, permissionReady, setPermissionMode, models, providers, selectedModelId, setSelectedModelId, thinkingEffort, setThinkingEffort,
-  roles, selectedRoleId, setSelectedRoleId, textAttachments, removeTextAttachment, pendingImage, clearPendingImage, attachFiles, uploadImage, submit, steer, steerText, followUp, cancel, cancelFollowUp, compactSession,
+  heroes, selectedHeroId, setSelectedHeroId, textAttachments, removeTextAttachment, pendingImage, clearPendingImage, attachFiles, uploadImage, submit, steer, steerText, followUp, cancel, cancelFollowUp, compactSession,
   pendingFollowUps,
   promptTemplates, showPromptPanel, onPromptSelect, onPromptPanelClose, expanding, expandDiag,
-  panelRoles, panelFlows, onRoleSelect, onFlowSelect, contextUsage, stats, focusNonce,
+  panelHeroes, panelFlows, onHeroSelect, onFlowSelect, contextUsage, stats, focusNonce,
   onRequestProject, inert = false, welcome = false,
 }: ComposerProps) {
   const textarea = useRef<HTMLTextAreaElement>(null);
@@ -375,11 +375,11 @@ export function Composer({
           {showPromptPanel && (
             <PromptCommandMenu
               templates={promptTemplates}
-              roles={panelRoles}
+              heroes={panelHeroes}
               flows={panelFlows}
               input={input}
               onSelectTemplate={onPromptSelect}
-              onSelectRole={onRoleSelect}
+              onSelectHero={onHeroSelect}
               onSelectFlow={onFlowSelect}
               onClose={onPromptPanelClose}
             />
@@ -448,7 +448,7 @@ export function Composer({
                 </button>
               ) : (
                 <button type="submit" className="composer-primary" aria-label={t("composer.send")}
-                  disabled={inert || !selectedSession || (!permissionReady && !selectedRoleId) || (!input.trim() && !hasPendingImage && textAttachments.length === 0)}>
+                  disabled={inert || !selectedSession || (!permissionReady && !selectedHeroId) || (!input.trim() && !hasPendingImage && textAttachments.length === 0)}>
                   <ArrowUp size={16} aria-hidden="true" />
                 </button>
               )}
@@ -459,13 +459,13 @@ export function Composer({
             composer, not inside its border. Keeping it after the editor also keeps
             the tab order following the text area instead of preceding it. */}
         <div className="composer-context-bar" aria-label={t("composer.runContext")}>
-          <RoleTargetPicker roles={roles} selectedRoleId={selectedRoleId} onSelect={setSelectedRoleId}
+          <HeroTargetPicker heroes={heroes} selectedHeroId={selectedHeroId} onSelect={setSelectedHeroId}
             disabled={!selectedSession || activeRun || compacting} />
           <PermissionChip
             permissionMode={permissionMode}
             permissionReady={permissionReady}
             setPermissionMode={setPermissionMode}
-            disabled={!selectedSession || activeRun || compacting || Boolean(selectedRoleId)}
+            disabled={!selectedSession || activeRun || compacting || Boolean(selectedHeroId)}
             frozen={activeRun}
           />
           <span className="composer-context-spacer" aria-hidden="true" />
@@ -476,13 +476,13 @@ export function Composer({
             setSelectedModelId={setSelectedModelId}
             thinkingEffort={thinkingEffort}
             setThinkingEffort={setThinkingEffort}
-            disabled={!selectedSession || activeRun || models.length === 0 || Boolean(selectedRoleId)}
+            disabled={!selectedSession || activeRun || models.length === 0 || Boolean(selectedHeroId)}
           />
           <ContextMeter contextUsage={contextUsage} stats={stats} />
         </div>
       </form>
       <div className="composer-status-line">
-        {!permissionReady && selectedSession && !selectedRoleId && <span className="composer-config-hint is-danger">{t("composer.policyUnavailable")}</span>}
+        {!permissionReady && selectedSession && !selectedHeroId && <span className="composer-config-hint is-danger">{t("composer.policyUnavailable")}</span>}
         {expanding && <span className="composer-status" aria-live="polite">{t("composer.expanding")}</span>}
         {expandDiag && <span className="composer-status diag-warning" aria-live="polite">{expandDiag}</span>}
       </div>

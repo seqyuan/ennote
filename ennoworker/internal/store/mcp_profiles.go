@@ -63,7 +63,7 @@ func (r *MCPProfileRepo) CreateProfile(ctx context.Context, input CreateMCPProfi
 		(id, display_name, slug, source_kind, project_scope, source_locator, lifecycle_status, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
 		profile.ID, profile.DisplayName, profile.Slug, profile.SourceKind,
-		nullableString(input.ProjectScope), profile.SourceLocator, roleTime(now), roleTime(now))
+		nullableString(input.ProjectScope), profile.SourceLocator, heroTime(now), heroTime(now))
 	if err != nil {
 		return nil, fmt.Errorf("insert mcp profile: %w", err)
 	}
@@ -132,14 +132,14 @@ func (r *MCPProfileRepo) CreateVersion(ctx context.Context, profileID string, v 
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		v.ID, profileID, version, v.Transport, v.Executable, string(argvJSON), v.Endpoint,
 		string(envLitJSON), string(envCredJSON), string(headerLitJSON), string(headerCredJSON),
-		v.CWD, v.TimeoutMS, v.NetworkPolicy, v.ConfigDigest, roleTime(v.CreatedAt))
+		v.CWD, v.TimeoutMS, v.NetworkPolicy, v.ConfigDigest, heroTime(v.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("insert mcp profile version: %w", err)
 	}
 	v.ProfileID = profileID
 	v.Version = version
 	_, err = r.DB.ExecContext(ctx, `UPDATE mcp_server_profiles
-		SET latest_version = ?, updated_at = ? WHERE id = ?`, version, roleTime(time.Now().UTC()), profileID)
+		SET latest_version = ?, updated_at = ? WHERE id = ?`, version, heroTime(time.Now().UTC()), profileID)
 	return err
 }
 
@@ -312,7 +312,7 @@ func (r *MCPProfileRepo) Archive(ctx context.Context, profileID string) error {
 	}
 	res, err := r.DB.ExecContext(ctx,
 		`UPDATE mcp_server_profiles SET lifecycle_status='archived', updated_at=? WHERE id=?`,
-		roleTime(time.Now().UTC()), profileID)
+		heroTime(time.Now().UTC()), profileID)
 	if err != nil {
 		return err
 	}
@@ -374,7 +374,7 @@ func (r *MCPBindingRepo) EnsureBindingExists(ctx context.Context, projectID, pro
 		(id, project_id, profile_version_id, desired_enabled, required, selected_remote_tool_names_json,
 		 credential_refs_json, revision, created_at, updated_at)
 		VALUES (?, ?, ?, 0, 1, '[]', '{}', 1, ?, ?)`,
-		b.ID, b.ProjectID, b.ProfileVersionID, roleTime(now), roleTime(now))
+		b.ID, b.ProjectID, b.ProfileVersionID, heroTime(now), heroTime(now))
 	if err != nil {
 		return nil, fmt.Errorf("insert mcp binding: %w", err)
 	}
@@ -469,7 +469,7 @@ func (r *MCPBindingRepo) Update(ctx context.Context, bindingID string, upd MCPBi
 	_, err = tx.ExecContext(ctx, `UPDATE project_mcp_bindings
 		SET desired_enabled=?, required=?, selected_remote_tool_names_json=?,
 		    credential_refs_json=?, revision=revision+1, updated_at=?
-		WHERE id=?`, desired, required, selectedJSON, credJSON, roleTime(time.Now().UTC()), bindingID)
+		WHERE id=?`, desired, required, selectedJSON, credJSON, heroTime(time.Now().UTC()), bindingID)
 	if err != nil {
 		return nil, err
 	}

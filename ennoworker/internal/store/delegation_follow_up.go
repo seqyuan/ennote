@@ -140,7 +140,7 @@ func (r *DelegationRepo) createContinuationGeneration(ctx context.Context, itemI
 	}
 
 	// Freeze the new generation snapshot.
-	itemRoleVersion := source.item.RoleVersionID
+	itemHeroVersion := source.item.HeroVersionID
 	itemBudgetJSON := string(source.item.BudgetJSON)
 	var ceiling domain.BudgetCeilingJSON
 	if err := json.Unmarshal([]byte(itemBudgetJSON), &ceiling); err != nil {
@@ -149,17 +149,17 @@ func (r *DelegationRepo) createContinuationGeneration(ctx context.Context, itemI
 	originalCeiling := ceiling
 	approvalRequired := false
 	if input.Budget != nil {
-		if err := r.validateRetryRoleAndCeilingTx(ctx, tx, itemID, *input.Budget); err != nil {
+		if err := r.validateRetryHeroAndCeilingTx(ctx, tx, itemID, *input.Budget); err != nil {
 			return nil, nil, err
 		}
 		approvalRequired = budgetIncreased(originalCeiling, *input.Budget)
 		ceiling = *input.Budget
 		itemBudgetJSON = mustMarshalJSON(ceiling)
 	}
-	authSnapshot := []map[string]string{{"itemId": itemID, "roleVersionId": itemRoleVersion}}
+	authSnapshot := []map[string]string{{"itemId": itemID, "heroVersionId": itemHeroVersion}}
 	for _, reference := range reused {
 		authSnapshot = append(authSnapshot, map[string]string{
-			"itemId": reference.ItemID, "roleVersionId": referenceAttemptRoleVersion(ctx, tx, reference.AttemptID),
+			"itemId": reference.ItemID, "heroVersionId": referenceAttemptHeroVersion(ctx, tx, reference.AttemptID),
 		})
 	}
 	authDigest, err := digestJSON(authSnapshot)

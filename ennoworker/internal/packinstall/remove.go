@@ -69,7 +69,7 @@ func (s *Service) Remove(ctx context.Context, packID string, force bool) error {
 				"installed object(s) %s were edited locally; reinstall the pack or remove with force",
 				strings.Join(edited, ", "))
 		}
-		referenced, err := s.rolesReferencedByOtherGraphs(state)
+		referenced, err := s.heroesReferencedByOtherGraphs(state)
 		if err != nil {
 			return err
 		}
@@ -195,52 +195,52 @@ func (s *Service) editedObjects(state *State) ([]string, error) {
 			edited = append(edited, flow.Format+":"+flow.StoreID)
 		}
 	}
-	for _, role := range state.Roles {
-		if role.Scope == roleScopeGlobal {
-			_, digest, err := s.Sources.ReadRole(role.StoreID)
+	for _, hero := range state.Heroes {
+		if hero.Scope == heroScopeGlobal {
+			_, digest, err := s.Sources.ReadHero(hero.StoreID)
 			if err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					continue
 				}
-				edited = append(edited, "role:"+role.StoreID)
+				edited = append(edited, "hero:"+hero.StoreID)
 				continue
 			}
-			if digest != role.Digest {
-				edited = append(edited, "role:"+role.StoreID)
+			if digest != hero.Digest {
+				edited = append(edited, "hero:"+hero.StoreID)
 			}
 			continue
 		}
-		graphID, handle, found := strings.Cut(role.StoreID, "/")
+		graphID, handle, found := strings.Cut(hero.StoreID, "/")
 		if !found {
 			continue
 		}
-		_, digest, err := s.Sources.ReadGraphRole(graphID, handle)
+		_, digest, err := s.Sources.ReadGraphHero(graphID, handle)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			edited = append(edited, "graph_role:"+role.StoreID)
+			edited = append(edited, "graph_hero:"+hero.StoreID)
 			continue
 		}
-		if digest != role.Digest {
-			edited = append(edited, "graph_role:"+role.StoreID)
+		if digest != hero.Digest {
+			edited = append(edited, "graph_hero:"+hero.StoreID)
 		}
 	}
 	return edited, nil
 }
 
-// rolesReferencedByOtherGraphs finds global Roles this pack installed that other
+// heroesReferencedByOtherGraphs finds global Heroes this pack installed that other
 // Graphs still point at ("global/<handle>"). Deleting them would break those
 // Graphs, so an unforced remove refuses.
-func (s *Service) rolesReferencedByOtherGraphs(state *State) ([]string, error) {
+func (s *Service) heroesReferencedByOtherGraphs(state *State) ([]string, error) {
 	owned := map[string]bool{}
 	for _, flow := range state.Flows {
 		owned[flow.StoreID] = true
 	}
 	handles := map[string]bool{}
-	for _, role := range state.Roles {
-		if role.Scope == roleScopeGlobal {
-			handles[role.StoreID] = true
+	for _, hero := range state.Heroes {
+		if hero.Scope == heroScopeGlobal {
+			handles[hero.StoreID] = true
 		}
 	}
 	if len(handles) == 0 {
@@ -256,7 +256,7 @@ func (s *Service) rolesReferencedByOtherGraphs(state *State) ([]string, error) {
 			continue
 		}
 		for _, task := range graph.Document.Tasks {
-			handle, found := strings.CutPrefix(task.Role, "global/")
+			handle, found := strings.CutPrefix(task.Hero, "global/")
 			if found && handles[handle] {
 				referenced[handle] = true
 			}
@@ -271,12 +271,12 @@ func (s *Service) rolesReferencedByOtherGraphs(state *State) ([]string, error) {
 			continue
 		}
 		for _, task := range flow.Flow.Tasks {
-			ref := strings.TrimSpace(task.Role)
+			ref := strings.TrimSpace(task.Hero)
 			handle := ""
 			if value, found := strings.CutPrefix(ref, "global/"); found {
 				handle = value
 			} else if ref != "" && !strings.Contains(ref, "/") && !strings.Contains(ref, "@") {
-				if _, _, roleErr := s.Sources.ReadGraphRole(flow.ID, ref); errors.Is(roleErr, os.ErrNotExist) {
+				if _, _, heroErr := s.Sources.ReadGraphHero(flow.ID, ref); errors.Is(heroErr, os.ErrNotExist) {
 					handle = ref
 				}
 			}
@@ -303,12 +303,12 @@ func (s *Service) remove(state *State) {
 			slog.Warn("pack remove: delete graph failed", "pack", state.Pack.ID, "graph", flow.StoreID, "error", err)
 		}
 	}
-	for _, role := range state.Roles {
-		if role.Scope != roleScopeGlobal {
+	for _, hero := range state.Heroes {
+		if hero.Scope != heroScopeGlobal {
 			continue // removed with its Graph directory
 		}
-		if err := s.Sources.DeleteRole(role.StoreID); err != nil && !errors.Is(err, os.ErrNotExist) {
-			slog.Warn("pack remove: delete role failed", "pack", state.Pack.ID, "role", role.StoreID, "error", err)
+		if err := s.Sources.DeleteHero(hero.StoreID); err != nil && !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("pack remove: delete hero failed", "pack", state.Pack.ID, "hero", hero.StoreID, "error", err)
 		}
 	}
 	for _, skill := range state.Skills {

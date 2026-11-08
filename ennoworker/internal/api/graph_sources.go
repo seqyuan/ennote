@@ -202,11 +202,11 @@ func (s *Server) runGlobalGraph(w http.ResponseWriter, r *http.Request) {
 // validateGraphPublish is the Graph authoring format's share of Flow publish
 // validation. A Graph is a draft (it runs straight from its revision, with no
 // project binding and a synthetic budget), so it cannot adopt the Flow checks
-// that need a frozen role, a declared budget or an enabled binding. Two checks
+// that need a frozen hero, a declared budget or an enabled binding. Two checks
 // do carry over, and they are not the same kind of check:
 //
 //   - An unresolved Skill reference already fails the Run when it freezes
-//     (graphrun.resolveTaskRole), so rejecting it at publish only moves an
+//     (graphrun.resolveTaskHero), so rejecting it at publish only moves an
 //     existing failure earlier. It cannot reject a Graph that would have run.
 //   - A writes scope is scheduling-only: the planner reads it as a literal
 //     prefix and nothing enforces it at Run time, so a scope the parser cannot
@@ -243,24 +243,24 @@ func (s *Server) validateGraphPublish(r *http.Request, document *graphsource.Doc
 				return fmt.Errorf("Task %q: %w", taskID, err)
 			}
 		}
-		if task.Role == "" {
+		if task.Hero == "" {
 			continue
 		}
-		scope, id, _ := strings.Cut(task.Role, "/")
+		scope, id, _ := strings.Cut(task.Hero, "/")
 		var refs []string
 		switch scope {
 		case "global":
-			role, _, err := s.GlobalSources.ReadRole(id)
+			hero, _, err := s.GlobalSources.ReadHero(id)
 			if err != nil {
 				return fmt.Errorf("Task %q global Role %q: %w", taskID, id, err)
 			}
-			refs = append([]string{role.Model.Ref}, role.Model.Fallbacks...)
+			refs = append([]string{hero.Model.Ref}, hero.Model.Fallbacks...)
 		case "local":
-			role, _, err := s.GlobalSources.ReadGraphRole(document.ID, id)
+			hero, _, err := s.GlobalSources.ReadGraphHero(document.ID, id)
 			if err != nil {
 				return fmt.Errorf("Task %q local Role %q: %w", taskID, id, err)
 			}
-			refs = append([]string{role.Model.Ref}, role.Model.Fallbacks...)
+			refs = append([]string{hero.Model.Ref}, hero.Model.Fallbacks...)
 		}
 		if s.Models != nil {
 			for _, ref := range refs {

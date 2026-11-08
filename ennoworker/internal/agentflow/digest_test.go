@@ -14,13 +14,13 @@ func TestTaskOrderAcceptsDeclaredConvergenceBackEdge(t *testing.T) {
 		Budget:      domain.FlowBudget{MaxTotalTokens: 1000},
 		Convergence: []domain.ConvergenceRule{{From: "review", To: "draft", MaxRounds: 2}},
 		Tasks: map[string]domain.FlowTask{
-			"draft":  {Type: domain.FlowTaskRole, Role: "writer@1", Goal: "draft"},
-			"review": {Type: domain.FlowTaskRole, Role: "reader@1", Goal: "review", Depends: []string{"draft"}},
+			"draft":  {Type: domain.FlowTaskHero, Hero: "writer@1", Goal: "draft"},
+			"review": {Type: domain.FlowTaskHero, Hero: "reader@1", Goal: "review", Depends: []string{"draft"}},
 		},
 	}
 	// review depends on draft (the forward edge) and draft depends on review
 	// (the declared back-edge); removing the back-edge leaves review -> draft.
-	def.Tasks["draft"] = domain.FlowTask{Type: domain.FlowTaskRole, Role: "writer@1", Goal: "draft", Depends: []string{"review"}}
+	def.Tasks["draft"] = domain.FlowTask{Type: domain.FlowTaskHero, Hero: "writer@1", Goal: "draft", Depends: []string{"review"}}
 	order, err := TaskOrder(def)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"review", "draft"}, order)
@@ -31,8 +31,8 @@ func TestTaskOrderRejectsRealCycle(t *testing.T) {
 		SchemaVersion: 1, ID: "cycle",
 		Budget: domain.FlowBudget{MaxTotalTokens: 1000},
 		Tasks: map[string]domain.FlowTask{
-			"a": {Type: domain.FlowTaskRole, Role: "writer@1", Goal: "a", Depends: []string{"b"}},
-			"b": {Type: domain.FlowTaskRole, Role: "writer@1", Goal: "b", Depends: []string{"a"}},
+			"a": {Type: domain.FlowTaskHero, Hero: "writer@1", Goal: "a", Depends: []string{"b"}},
+			"b": {Type: domain.FlowTaskHero, Hero: "writer@1", Goal: "b", Depends: []string{"a"}},
 		},
 	}
 	_, err := TaskOrder(def)

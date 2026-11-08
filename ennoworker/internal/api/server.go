@@ -203,13 +203,13 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("PUT /v1/model-profiles/{modelID}/default", s.setDefaultModelProfile)
 	mux.HandleFunc("DELETE /v1/model-profiles/{modelID}", s.deleteModelProfile)
 	mux.HandleFunc("GET /v1/policy-profiles", s.listPolicyProfiles)
-	mux.HandleFunc("GET /v1/global-roles", s.listGlobalRoles)
-	mux.HandleFunc("POST /v1/global-roles", s.createGlobalRole)
-	mux.HandleFunc("GET /v1/global-roles/{roleID}", s.getGlobalRole)
-	mux.HandleFunc("PATCH /v1/global-roles/{roleID}", s.updateGlobalRole)
-	mux.HandleFunc("POST /v1/global-roles/{roleID}/publish", s.publishGlobalRole)
-	mux.HandleFunc("GET /v1/global-roles/{roleID}/versions", s.listGlobalRoleRevisions)
-	mux.HandleFunc("GET /v1/global-roles/{roleID}/resolved", s.getResolvedGlobalRole)
+	mux.HandleFunc("GET /v1/global-heroes", s.listGlobalHeroes)
+	mux.HandleFunc("POST /v1/global-heroes", s.createGlobalHero)
+	mux.HandleFunc("GET /v1/global-heroes/{heroID}", s.getGlobalHero)
+	mux.HandleFunc("PATCH /v1/global-heroes/{heroID}", s.updateGlobalHero)
+	mux.HandleFunc("POST /v1/global-heroes/{heroID}/publish", s.publishGlobalHero)
+	mux.HandleFunc("GET /v1/global-heroes/{heroID}/versions", s.listGlobalHeroRevisions)
+	mux.HandleFunc("GET /v1/global-heroes/{heroID}/resolved", s.getResolvedGlobalHero)
 	mux.HandleFunc("POST /v1/policy-profiles", s.createPolicyProfile)
 	mux.HandleFunc("PUT /v1/policy-profiles/{policyID}/default", s.setDefaultPolicyProfile)
 	mux.HandleFunc("DELETE /v1/policy-profiles/{policyID}", s.deactivatePolicyProfile)
@@ -1340,11 +1340,11 @@ func (s *Server) submitInvocation(w http.ResponseWriter, r *http.Request) {
 			SessionID: r.PathValue("sessionID"), ClientRequestID: requestID, BaseMessageID: input.BaseMessageID,
 			Text: input.Text, Parts: parts, RequestedConfig: input.Config,
 		})
-	case domain.InvocationTargetRole:
+	case domain.InvocationTargetHero:
 		submission, err = s.Runs.SubmitInvocation(r.Context(), domain.SubmitInvocationInput{
 			SessionID: r.PathValue("sessionID"), ClientRequestID: requestID, BaseMessageID: input.BaseMessageID,
 			Text: input.Text, Parts: parts, RequestedConfig: input.Config,
-			Target: domain.RoleInvocationTarget{Kind: input.Target.Kind, ObjectID: input.Target.ObjectID,
+			Target: domain.HeroInvocationTarget{Kind: input.Target.Kind, ObjectID: input.Target.ObjectID,
 				VersionID: input.Target.VersionID, ContextMode: input.Target.ContextMode, ReplyTo: input.Target.ReplyTo},
 		})
 	default:

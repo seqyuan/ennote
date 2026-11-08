@@ -25,16 +25,16 @@ type ValidationResult struct {
 	ConfigDigest string                 `json:"configDigest,omitempty"`
 }
 
-// RoleInfo is the publish-time resolution of one role@version reference.
-type RoleInfo struct {
+// HeroInfo is the publish-time resolution of one hero@version reference.
+type HeroInfo struct {
 	VersionID  string
-	Definition domain.RoleDefinition
+	Definition domain.HeroDefinition
 }
 
 // Resolver resolves external references at publish time. It is the seam the
 // store wires with live SQL/catalog lookups; tests use a stub.
 type Resolver interface {
-	ResolveRole(ctx context.Context, roleRef string) (*RoleInfo, error)
+	ResolveHero(ctx context.Context, heroRef string) (*HeroInfo, error)
 	KnownSkill(ctx context.Context, name string) bool
 	ToolReadOnly(ctx context.Context, tool string) bool
 }
@@ -79,7 +79,7 @@ func (v *Validator) allowedCheckExec(command string) bool {
 }
 
 // Validate runs all checks against a parsed definition. Resolver is required:
-// nil fails closed (role/skill/read-only checks cannot run).
+// nil fails closed (hero/skill/read-only checks cannot run).
 func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *ValidationResult {
 	result := &ValidationResult{}
 	add := func(d ValidationDiagnostic) {
@@ -134,7 +134,7 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 		add(v.fail("entry_task_count", message, "tasks"))
 	}
 
-	// 3. role@version / skill resolvability; 6. fan_out read-only; 7. budget.
+	// 3. hero@version / skill resolvability; 6. fan_out read-only; 7. budget.
 	totalTaskTokens := int64(0)
 	checkAllowlistMissing := false
 	// writerScopes collects tasks whose Role can mutate (writer class); used by
@@ -167,27 +167,27 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 					fmt.Sprintf("task %q check command is not in the sandbox allowlist", name), field+".command"))
 				checkAllowlistMissing = true
 			}
-		case domain.FlowTaskRole:
-			if strings.TrimSpace(task.Role) == "" {
-				add(v.fail("role_required", fmt.Sprintf("task %q requires a role", name), field+".role"))
+		case domain.FlowTaskHero:
+			if strings.TrimSpace(task.Hero) == "" {
+				add(v.fail("hero_required", fmt.Sprintf("task %q requires a hero", name), field+".hero"))
 				continue
 			}
-			if strings.HasSuffix(strings.TrimSpace(task.Role), "@latest") {
-				add(v.fail("role_version_required",
-					fmt.Sprintf("task %q role %q must pin an exact version (handle@version, no latest)", name, task.Role),
-					field+".role"))
+			if strings.HasSuffix(strings.TrimSpace(task.Hero), "@latest") {
+				add(v.fail("hero_version_required",
+					fmt.Sprintf("task %q hero %q must pin an exact version (handle@version, no latest)", name, task.Hero),
+					field+".hero"))
 				continue
 			}
 			// A bare handle is a flow-local reference (resolves flow > shared
 			// catalog at freeze time); the resolver enforces that the handle
 			// actually resolves, failing loud otherwise.
-			info, err := v.Resolver.ResolveRole(ctx, task.Role)
+			info, err := v.Resolver.ResolveHero(ctx, task.Hero)
 			if err != nil {
-				add(v.fail("role_not_found", fmt.Sprintf("task %q: %v", name, err), field+".role"))
+				add(v.fail("hero_not_found", fmt.Sprintf("task %q: %v", name, err), field+".hero"))
 				continue
 			}
-			roleDef := info.Definition
-			readOnly := roleAllToolsReadOnly(ctx, v.Resolver, roleDef)
+			heroDef := info.Definition
+			readOnly := heroAllToolsReadOnly(ctx, v.Resolver, heroDef)
 			if task.FanOut != nil {
 				if task.FanOut.Min < 1 || task.FanOut.Max < task.FanOut.Min ||
 					(v.MaxFanOut > 0 && task.FanOut.Max > v.MaxFanOut) {
@@ -214,7 +214,7 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 				}
 				writerScopes[name] = task.Writes
 			}
-			effectiveTokens := roleDef.DelegationPolicy.BudgetCeiling.MaxTotalTokens
+			effectiveTokens := heroDef.DelegationPolicy.BudgetCeiling.MaxTotalTokens
 			if task.Budget != nil && task.Budget.Tokens > 0 {
 				effectiveTokens = task.Budget.Tokens
 				totalTaskTokens += effectiveTokens
@@ -497,11 +497,11 @@ func reachabilityMatrix(tasks map[string]domain.FlowTask, backEdges map[[2]strin
 	return reach
 }
 
-func roleAllToolsReadOnly(ctx context.Context, resolver Resolver, roleDef domain.RoleDefinition) bool {
-	if roleDef.Authority != domain.RoleAuthorityReadOnly {
+func heroAllToolsReadOnly(ctx context.Context, resolver Resolver, heroDef domain.HeroDefinition) bool {
+	if heroDef.Authority != domain.HeroAuthorityReadOnly {
 		return false
 	}
-	for _, tool := range roleDef.AllowedTools {
+	for _, tool := range heroDef.AllowedTools {
 		if !resolver.ToolReadOnly(ctx, tool) {
 			return false
 		}

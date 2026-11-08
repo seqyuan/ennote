@@ -433,7 +433,7 @@ func setupSubmittedRun(t *testing.T, requestID string) (*store.RunRepo, *domain.
 	t.Helper()
 	// V2: Sessions live in per-Session SQLite files under the project store;
 	// the returned RunRepo operates on the opened Session database with the
-	// file-native provider/model/policy/role stores wired.
+	// file-native provider/model/policy/hero stores wired.
 	ctx := context.Background()
 	stack := newFileConfigStack(t)
 	projects := &projectstore.Store{Root: filepath.Join(stack.Home, "projects")}
@@ -447,7 +447,7 @@ func setupSubmittedRun(t *testing.T, requestID string) (*store.RunRepo, *domain.
 	db, err := sessions.OpenSession(ctx, session.ID)
 	require.NoError(t, err)
 	repo := &store.RunRepo{DB: db, Providers: stack.Providers, Models: stack.ModelRepo,
-		Policies: stack.Policies, RoleSources: stack.Sources}
+		Policies: stack.Policies, HeroSources: stack.Sources}
 	submission, err := repo.SubmitTurn(ctx, domain.SubmitTurnInput{
 		SessionID: session.ID, ClientRequestID: requestID, Text: "run",
 	})

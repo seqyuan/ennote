@@ -72,28 +72,28 @@ func setupDelegationApprovalAPI(t *testing.T) (*Server, http.Handler, *store.Del
 }
 
 // apiExplorerItem mirrors the store-level explorer fixture for the api package.
-// The RoleMeta is frozen from the fixture's published Role version so
-// delegation validation never consults global role SQL (V2).
+// The HeroMeta is frozen from the fixture's published Role version so
+// delegation validation never consults global hero SQL (V2).
 func apiExplorerItem(t *testing.T, db *sql.DB) store.CreateDelegationItemInput {
 	t.Helper()
 	item := store.CreateDelegationItemInput{
-		Name: "explore", RoleVersionID: "builtin-workspace-explorer-v3",
+		Name: "explore", HeroVersionID: "builtin-workspace-explorer-v3",
 		AssignmentJSON: json.RawMessage(`{"objective":"inspect"}`), OutputContract: "text-v1",
 		Budget: domain.BudgetCeilingJSON{MaxModelCalls: 2, MaxToolCalls: 4, MaxTotalTokens: 10000,
 			MaxOutputTokens: 2000, MaxCostMicros: 50000, MaxWallTimeMS: 60000},
 	}
-	item.RoleMeta = apiRoleMetaFromDB(t, db, "builtin-workspace-explorer-v3")
+	item.HeroMeta = apiHeroMetaFromDB(t, db, "builtin-workspace-explorer-v3")
 	return item
 }
 
-// apiRoleMetaFromDB freezes the builtin Workspace Explorer RoleMeta without
-// consulting global role SQL (V2): identity + definition are hardcoded in
+// apiHeroMetaFromDB freezes the builtin Workspace Explorer HeroMeta without
+// consulting global hero SQL (V2): identity + definition are hardcoded in
 // lockstep with the fixture snapshot until B4 removes it.
-func apiRoleMetaFromDB(t *testing.T, _ *sql.DB, _ string) *store.DelegationRoleMeta {
+func apiHeroMetaFromDB(t *testing.T, _ *sql.DB, _ string) *store.DelegationHeroMeta {
 	t.Helper()
-	var definition domain.RoleDefinition
-	require.NoError(t, json.Unmarshal([]byte(apiExplorerRoleDefinitionV3), &definition))
-	return &store.DelegationRoleMeta{
+	var definition domain.HeroDefinition
+	require.NoError(t, json.Unmarshal([]byte(apiExplorerHeroDefinitionV3), &definition))
+	return &store.DelegationHeroMeta{
 		ObjectID: "builtin-workspace-explorer", VersionID: "builtin-workspace-explorer-v3",
 		Handle: "workspace-explorer", DisplayName: "Workspace Explorer",
 		ConfigDigest: "sha256:c7cf36749030bd0626c24eea7ea325c2b70be64bd2f623b3c94b5fc8b81aa38b",
@@ -101,7 +101,7 @@ func apiRoleMetaFromDB(t *testing.T, _ *sql.DB, _ string) *store.DelegationRoleM
 	}
 }
 
-const apiExplorerRoleDefinitionV3 = `{"schemaVersion":1,"rolePrompt":"You are the Workspace Explorer. Use read, ls, grep, and find to answer questions about workspace files. You may inspect git history and status with the git_readonly tool (status, diff, log, show, ls-files, blame). Every answer must be concise. End every turn by calling submit_result with a structured result. Never create, modify, or delete files, and never run arbitrary shell commands.","modelBinding":{"mode":"inherit","modelProfileId":"provider/model","thinkingEffort":"default","fallbackModelProfileIds":[],"overridableFields":[]},"skills":{"entries":[]},"authority":"read_only","permissionCeiling":"discuss","allowedTools":["read","ls","grep","find","git_readonly"],"contextPolicy":{"defaultMode":"task_only","allowedModes":["task_only"],"ownExecutionContinuity":"none"},"delegationPolicy":{"admission":"auto_within_budget","allowedCallerKinds":["host"],"allowedStrategies":["single","parallel"],"maxInvocationsPerParentRun":16,"maxConcurrentInstances":16,"budgetCeiling":{"maxModelCalls":6,"maxToolCalls":8,"maxTotalTokens":20000,"maxOutputTokens":4000,"maxCostUsdMicros":100000,"maxWallTimeMs":120000}},"outputContract":"text-v1","maxLoopIterations":8}`
+const apiExplorerHeroDefinitionV3 = `{"schemaVersion":1,"heroPrompt":"You are the Workspace Explorer. Use read, ls, grep, and find to answer questions about workspace files. You may inspect git history and status with the git_readonly tool (status, diff, log, show, ls-files, blame). Every answer must be concise. End every turn by calling submit_result with a structured result. Never create, modify, or delete files, and never run arbitrary shell commands.","modelBinding":{"mode":"inherit","modelProfileId":"provider/model","thinkingEffort":"default","fallbackModelProfileIds":[],"overridableFields":[]},"skills":{"entries":[]},"authority":"read_only","permissionCeiling":"discuss","allowedTools":["read","ls","grep","find","git_readonly"],"contextPolicy":{"defaultMode":"task_only","allowedModes":["task_only"],"ownExecutionContinuity":"none"},"delegationPolicy":{"admission":"auto_within_budget","allowedCallerKinds":["host"],"allowedStrategies":["single","parallel"],"maxInvocationsPerParentRun":16,"maxConcurrentInstances":16,"budgetCeiling":{"maxModelCalls":6,"maxToolCalls":8,"maxTotalTokens":20000,"maxOutputTokens":4000,"maxCostUsdMicros":100000,"maxWallTimeMs":120000}},"outputContract":"text-v1","maxLoopIterations":8}`
 
 func TestDecideDelegationApprovalRejectsAndRewinds(t *testing.T) {
 	server, handler, delegations, approvalID := setupDelegationApprovalAPI(t)

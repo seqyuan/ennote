@@ -4,31 +4,31 @@ import (
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// TestResolveRoleReturnsLatestRevisionWithSource pins the design 六 P1 resolve
+// TestResolveHeroReturnsLatestRevisionWithSource pins the design 六 P1 resolve
 // point: a bare handle resolves to the latest published revision with an audit
 // source ("global" today).
-func TestResolveRoleReturnsLatestRevisionWithSource(t *testing.T) {
+func TestResolveHeroReturnsLatestRevisionWithSource(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
-	role := &rolesource.Document{
+	hero := &heroesource.Document{
 		SchemaVersion: 1, Handle: "reviewer", Name: "Reviewer",
-		Model:        rolesource.ModelBinding{Ref: "openai-main/gpt-5", ThinkingEffort: domain.ThinkingDefault},
-		Skills:       []rolesource.SkillBinding{},
+		Model:        heroesource.ModelBinding{Ref: "openai-main/gpt-5", ThinkingEffort: domain.ThinkingDefault},
+		Skills:       []heroesource.SkillBinding{},
 		AllowedTools: []string{"read"},
-		Context:      rolesource.ContextPolicy{AllowedModes: []domain.RoleContextMode{}},
-		Delegation:   rolesource.DelegationPolicy{AllowedCallerKinds: []string{}, AllowedStrategies: []string{}},
+		Context:      heroesource.ContextPolicy{AllowedModes: []domain.HeroContextMode{}},
+		Delegation:   heroesource.DelegationPolicy{AllowedCallerKinds: []string{}, AllowedStrategies: []string{}},
 		Prompt:       "Review the supplied work.",
 	}
-	_, _, err := store.CreateRole(role)
+	_, _, err := store.CreateHero(hero)
 	require.NoError(t, err)
-	published, err := store.PublishRoleRevision("reviewer")
+	published, err := store.PublishHeroRevision("reviewer")
 	require.NoError(t, err)
 
-	resolved, err := store.ResolveRole("reviewer")
+	resolved, err := store.ResolveHero("reviewer")
 	require.NoError(t, err)
 	assert.Equal(t, "reviewer", resolved.Document.Handle)
 	assert.Equal(t, published.ID(), resolved.Revision.ID())
@@ -36,22 +36,22 @@ func TestResolveRoleReturnsLatestRevisionWithSource(t *testing.T) {
 	assert.Equal(t, "global", resolved.Source)
 }
 
-// TestResolveRoleUnpublishedFails pins that resolution only sees published
+// TestResolveHeroUnpublishedFails pins that resolution only sees published
 // revisions, never the mutable draft.
-func TestResolveRoleUnpublishedFails(t *testing.T) {
+func TestResolveHeroUnpublishedFails(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
-	role := &rolesource.Document{
+	hero := &heroesource.Document{
 		SchemaVersion: 1, Handle: "draft", Name: "Draft",
-		Model:        rolesource.ModelBinding{Ref: "openai-main/gpt-5"},
-		Skills:       []rolesource.SkillBinding{},
+		Model:        heroesource.ModelBinding{Ref: "openai-main/gpt-5"},
+		Skills:       []heroesource.SkillBinding{},
 		AllowedTools: []string{},
-		Context:      rolesource.ContextPolicy{},
-		Delegation:   rolesource.DelegationPolicy{},
+		Context:      heroesource.ContextPolicy{},
+		Delegation:   heroesource.DelegationPolicy{},
 		Prompt:       "unpublished",
 	}
-	_, _, err := store.CreateRole(role)
+	_, _, err := store.CreateHero(hero)
 	require.NoError(t, err)
 
-	_, err = store.ResolveRole("draft")
+	_, err = store.ResolveHero("draft")
 	require.Error(t, err)
 }

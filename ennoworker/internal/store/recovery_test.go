@@ -17,7 +17,7 @@ func setupFailedRun(t *testing.T, requestID string) (*store.RunRepo, *domain.Tur
 	db, _, _ := newSessionDB(t)
 	stack := newFileConfigStack(t)
 	runs := &store.RunRepo{DB: db, Providers: stack.Providers, Models: stack.ModelRepo,
-		Policies: stack.Policies, RoleSources: stack.Sources}
+		Policies: stack.Policies, HeroSources: stack.Sources}
 	sessionID := createRunTestSession(t, runs)
 	submission, err := runs.SubmitTurn(context.Background(), domain.SubmitTurnInput{
 		SessionID: sessionID, ClientRequestID: requestID, Text: "recover this",

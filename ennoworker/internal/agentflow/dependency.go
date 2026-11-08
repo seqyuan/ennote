@@ -13,19 +13,19 @@ import (
 type DependencyKind string
 
 const (
-	DependencyRole  DependencyKind = "role"
+	DependencyHero  DependencyKind = "hero"
 	DependencySkill DependencyKind = "skill"
 )
 
-// DependencyRef is one role@version or skill reference declared by a flow.
+// DependencyRef is one hero@version or skill reference declared by a flow.
 type DependencyRef struct {
 	Kind    DependencyKind `json:"kind"`
 	Name    string         `json:"name"`
-	Version int            `json:"version,omitempty"` // role only
+	Version int            `json:"version,omitempty"` // hero only
 }
 
 // DependencyStatus is the environment resolution of one dependency: whether
-// the referenced role version / skill exists in the target environment, and
+// the referenced hero version / skill exists in the target environment, and
 // why not when it is missing. Resolution NEVER installs or authorizes.
 type DependencyStatus struct {
 	Kind    DependencyKind `json:"kind"`
@@ -35,15 +35,15 @@ type DependencyStatus struct {
 	Reason  string         `json:"reason,omitempty"`
 }
 
-// DependencyResolver resolves role references and skill names at import
+// DependencyResolver resolves hero references and skill names at import
 // pre-check time. It mirrors the publish resolver seam.
 type DependencyResolver interface {
-	ResolveRole(ctx context.Context, roleRef string) (*RoleInfo, error)
+	ResolveHero(ctx context.Context, heroRef string) (*HeroInfo, error)
 	KnownSkill(ctx context.Context, name string) bool
 }
 
 // DependencyManifest extracts the dependency set from a flow definition:
-// role@version references of every role task and every skill reference.
+// hero@version references of every hero task and every skill reference.
 // Check and terminal tasks contribute no dependencies.
 func DependencyManifest(def *domain.FlowDefinition) []DependencyRef {
 	seen := map[string]DependencyRef{}
@@ -57,16 +57,16 @@ func DependencyManifest(def *domain.FlowDefinition) []DependencyRef {
 		refs = append(refs, ref)
 	}
 	for _, task := range def.Tasks {
-		if task.Type != domain.FlowTaskRole || task.Terminal != nil {
+		if task.Type != domain.FlowTaskHero || task.Terminal != nil {
 			continue
 		}
-		handle, versionText, ok := strings.Cut(strings.TrimSpace(task.Role), "@")
+		handle, versionText, ok := strings.Cut(strings.TrimSpace(task.Hero), "@")
 		if !ok {
 			continue
 		}
 		var version int
 		_, _ = fmt.Sscanf(versionText, "%d", &version)
-		add(DependencyRef{Kind: DependencyRole, Name: strings.TrimSpace(handle), Version: version})
+		add(DependencyRef{Kind: DependencyHero, Name: strings.TrimSpace(handle), Version: version})
 		for _, skill := range task.Skills {
 			add(DependencyRef{Kind: DependencySkill, Name: skill})
 		}
@@ -91,8 +91,8 @@ func CheckDependencies(ctx context.Context, resolver DependencyResolver, def *do
 	for _, ref := range DependencyManifest(def) {
 		status := DependencyStatus{Kind: ref.Kind, Name: ref.Name, Version: ref.Version, Present: true}
 		switch ref.Kind {
-		case DependencyRole:
-			if _, err := resolver.ResolveRole(ctx, fmt.Sprintf("%s@%d", ref.Name, ref.Version)); err != nil {
+		case DependencyHero:
+			if _, err := resolver.ResolveHero(ctx, fmt.Sprintf("%s@%d", ref.Name, ref.Version)); err != nil {
 				status.Present = false
 				status.Reason = err.Error()
 			}

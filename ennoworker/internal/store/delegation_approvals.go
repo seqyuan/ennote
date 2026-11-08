@@ -183,7 +183,7 @@ func (r *DelegationApprovalRepo) Decide(ctx context.Context, approvalID string,
 		// never changes. Budget was validated at request time and is
 		// re-validated here against the frozen definition's ceiling.
 		repo := &DelegationRepo{DB: r.DB, Policies: r.Policies}
-		if err := repo.validateRetryRoleAndCeilingTx(ctx, tx, itemID, plan.Budget); err != nil {
+		if err := repo.validateRetryHeroAndCeilingTx(ctx, tx, itemID, plan.Budget); err != nil {
 			return nil, nil, err
 		}
 		override := plan.Budget

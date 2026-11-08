@@ -13,7 +13,7 @@ export function TaskAccordion({ id, task, expanded, busy, models, onToggle, onSa
   onSave: (task: GraphTask) => void;
   onRemove: () => void;
 }) {
-  const roleMode = Boolean(task.role);
+  const heroMode = Boolean(task.hero);
   const selectedModel = models.find((option) => option.ref === task.model);
   const thinkingOptions = selectedModel?.model.supportsThinking
     ? selectedModel.model.supportedThinkingEfforts
@@ -25,7 +25,7 @@ export function TaskAccordion({ id, task, expanded, busy, models, onToggle, onSa
       <button type="button" className="graph-task-summary" onClick={onToggle} aria-expanded={expanded}>
         {expanded ? <ChevronDown size={17} /> : <ChevronRight size={17} />}
         <span><strong>{task.name}</strong><code>{id}</code></span>
-        <small>{roleMode ? task.role : task.model}{!roleMode && task.thinking && task.thinking !== "default" ? ` · ${task.thinking}` : ""}</small>
+        <small>{heroMode ? task.hero : task.model}{!heroMode && task.thinking && task.thinking !== "default" ? ` · ${task.thinking}` : ""}</small>
       </button>
       {expanded && (
         <div className="graph-task-form">
@@ -35,21 +35,21 @@ export function TaskAccordion({ id, task, expanded, busy, models, onToggle, onSa
           <div className="graph-execution-mode" role="group" aria-label="Execution mode">
             <button
               type="button"
-              aria-pressed={!roleMode}
+              aria-pressed={!heroMode}
               disabled={busy || !models[0]}
               onClick={() => onSave({ name: task.name, model: task.model || models[0]?.ref, thinking: "default", skills: [], goal: task.goal, writes: task.writes, budget: task.budget })}
             >Inline configuration</button>
             <button
               type="button"
-              aria-pressed={roleMode}
+              aria-pressed={heroMode}
               disabled={busy}
-              onClick={() => onSave({ name: task.name, role: task.role || `local/${id}`, goal: task.goal, writes: task.writes, budget: task.budget })}
-            >Use a Role</button>
+              onClick={() => onSave({ name: task.name, hero: task.hero || `local/${id}`, goal: task.goal, writes: task.writes, budget: task.budget })}
+            >Use a Hero</button>
           </div>
-          {roleMode ? (
-            <label>Role
-              <input defaultValue={task.role} disabled={busy} placeholder="local/alignment or global/reviewer" onBlur={(event) => saveField("role", event.target.value)} />
-              <span>Local Roles belong only to this Graph. Global Roles are shared and read-only here.</span>
+          {heroMode ? (
+            <label>Hero
+              <input defaultValue={task.hero} disabled={busy} placeholder="local/alignment or global/reviewer" onBlur={(event) => saveField("hero", event.target.value)} />
+              <span>Local Heroes belong only to this Graph. Global Heroes are shared and read-only here.</span>
             </label>
           ) : (
             <>

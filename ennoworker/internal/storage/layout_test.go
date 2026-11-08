@@ -18,7 +18,7 @@ func TestForHomeBuildsV2Paths(t *testing.T) {
 	assert.Equal(t, home, layout.Home)
 	assert.Equal(t, filepath.Join(home, "config", "models.json"), layout.Models)
 	assert.Equal(t, filepath.Join(home, "config", "provider-auth.json"), layout.ProviderAuth)
-	assert.Equal(t, filepath.Join(home, "agents", "roles"), layout.Roles)
+	assert.Equal(t, filepath.Join(home, "agents", "heroes"), layout.Heroes)
 	assert.Equal(t, filepath.Join(home, "agents", "graphs"), layout.Graphs)
 	assert.Equal(t, filepath.Join(home, "projects"), layout.Projects)
 	assert.Equal(t, filepath.Join(home, "data", "catalog.db"), layout.CatalogDB)

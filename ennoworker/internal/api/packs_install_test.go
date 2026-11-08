@@ -80,7 +80,7 @@ func newPackInstallFixture(t *testing.T) *packInstallFixture {
 // whatever the test introduces.
 func installPackFiles(modelRef string) map[string]string {
 	files := packFixtureFiles()
-	files["roles/qc-reviewer/role.md"] = `---
+	files["heroes/qc-reviewer/hero.md"] = `---
 schemaVersion: 1
 handle: qc-reviewer
 name: QC Reviewer
@@ -247,9 +247,9 @@ func TestPackInstallCreatesDraftAndState(t *testing.T) {
 	assert.Equal(t, "qc-review", state.Flows[0].StoreID)
 	// The default-disabled guarantee: the installer never publishes a revision.
 	assert.Nil(t, state.Flows[0].PublishedRevision)
-	require.Len(t, state.Roles, 1)
-	assert.Equal(t, "qc-review/qc-reviewer", state.Roles[0].StoreID)
-	assert.Empty(t, state.Roles[0].Revision)
+	require.Len(t, state.Heroes, 1)
+	assert.Equal(t, "qc-review/qc-reviewer", state.Heroes[0].StoreID)
+	assert.Empty(t, state.Heroes[0].Revision)
 	require.Len(t, state.Skills, 1)
 	assert.Equal(t, "cell-qc-tables", state.Skills[0].StoreID)
 
@@ -313,10 +313,10 @@ flows:
   - id: qc-review
     path: flows/qc-review/flow.yaml
     format: flow
-    roles: [qc-reviewer]
-roles:
+    heroes: [qc-reviewer]
+heroes:
   - handle: qc-reviewer
-    path: roles/qc-reviewer/role.md
+    path: heroes/qc-reviewer/hero.md
     scope: flow
 skills:
   - id: cell-qc-tables
@@ -328,7 +328,7 @@ budget:
   max_total_tokens: 20000
 tasks:
   load:
-    role: local/qc-reviewer
+    hero: local/qc-reviewer
     goal: Load the samplesheet
     budget: {tokens: 1000}
   gate:
@@ -336,13 +336,13 @@ tasks:
     command: "test -f ready"
     depends: [load]
   review:
-    role: local/qc-reviewer
+    hero: local/qc-reviewer
     goal: Review QC metrics
     depends: [gate]
     fan_out: {min: 1, max: 2}
     budget: {tokens: 1000}
   done:
-    type: role
+    type: hero
     depends: [review]
     terminal: {status: success}
 `
@@ -397,7 +397,7 @@ func TestPackListAndRemove(t *testing.T) {
 	assert.Equal(t, "seqyuan/cell-qc-review", summaries[0].Pack.ID)
 	assert.Equal(t, packinstall.InstallStateDraft, summaries[0].InstallState)
 	assert.Equal(t, 1, summaries[0].FlowCount)
-	assert.Equal(t, 1, summaries[0].RoleCount)
+	assert.Equal(t, 1, summaries[0].HeroCount)
 	assert.Equal(t, 1, summaries[0].SkillCount)
 	assert.Equal(t, source, summaries[0].Source.Path)
 
@@ -425,7 +425,7 @@ func TestPackListAndRemove(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, forced.Code, forced.Body.String())
 	_, _, err = fixture.sources.ReadGraph("qc-review")
 	assert.ErrorIs(t, err, os.ErrNotExist)
-	_, _, err = fixture.sources.ReadRole("qc-reviewer")
+	_, _, err = fixture.sources.ReadHero("qc-reviewer")
 	assert.ErrorIs(t, err, os.ErrNotExist)
 
 	missing := request(t, fixture.handler, http.MethodDelete, "/v1/packs/seqyuan/cell-qc-review", nil, true)

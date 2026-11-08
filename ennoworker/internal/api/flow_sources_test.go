@@ -9,7 +9,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -35,23 +35,23 @@ func flowAPIFixture(t *testing.T) (*Server, http.Handler, *globalsource.Store) {
 	})
 	require.NoError(t, err)
 	sources := &globalsource.Store{HomeDir: home}
-	role := &rolesource.Document{
+	hero := &heroesource.Document{
 		SchemaVersion: 1, Handle: "reviewer", Name: "Reviewer",
-		Model:  rolesource.ModelBinding{Ref: "provider/flow-model", ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills: []rolesource.SkillBinding{}, Authority: rolesource.AuthorityReadOnly,
+		Model:  heroesource.ModelBinding{Ref: "provider/flow-model", ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills: []heroesource.SkillBinding{}, Authority: heroesource.AuthorityReadOnly,
 		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read"},
-		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextTask,
-			AllowedModes: []domain.RoleContextMode{domain.RoleContextTask}, OwnExecutionContinuity: domain.RoleContinuityNone},
-		Delegation: rolesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+		Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextTask,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextTask}, OwnExecutionContinuity: domain.HeroContinuityNone},
+		Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
 			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
 			MaxInvocationsPerParentRun: 2, MaxConcurrentInstances: 1,
-			BudgetCeiling: rolesource.DelegationBudgetCeiling{MaxModelCalls: 2, MaxToolCalls: 4,
+			BudgetCeiling: heroesource.DelegationBudgetCeiling{MaxModelCalls: 2, MaxToolCalls: 4,
 				MaxTotalTokens: 20000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 120000}},
 		OutputContract: "text-v1", MaxLoopIterations: 4, Prompt: "Review.",
 	}
-	_, _, err = sources.CreateRole(role)
+	_, _, err = sources.CreateHero(hero)
 	require.NoError(t, err)
-	_, err = sources.PublishRoleRevision("reviewer")
+	_, err = sources.PublishHeroRevision("reviewer")
 	require.NoError(t, err)
 	server := &Server{
 		Token: "test-token", GlobalSources: sources, Models: &store.ModelRepo{Files: models},
@@ -60,13 +60,13 @@ func flowAPIFixture(t *testing.T) (*Server, http.Handler, *globalsource.Store) {
 	return server, server.Handler(), sources
 }
 
-func flowWithRole(id string) *domain.FlowDefinition {
+func flowWithHero(id string) *domain.FlowDefinition {
 	return &domain.FlowDefinition{
 		SchemaVersion: 1, ID: id, Budget: domain.FlowBudget{MaxTotalTokens: 20000},
 		Tasks: map[string]domain.FlowTask{
-			"review": {Type: domain.FlowTaskRole, Role: "global/reviewer", Goal: "Review",
+			"review": {Type: domain.FlowTaskHero, Hero: "global/reviewer", Goal: "Review",
 				Budget: &domain.FlowTaskBudget{Tokens: 1000}},
-			"done": {Type: domain.FlowTaskRole, Role: "global/reviewer", Depends: []string{"review"},
+			"done": {Type: domain.FlowTaskHero, Hero: "global/reviewer", Depends: []string{"review"},
 				Terminal: &domain.FlowTerminal{Status: "success"}},
 		},
 	}
@@ -74,7 +74,7 @@ func flowWithRole(id string) *domain.FlowDefinition {
 
 func TestGlobalFlowPublishAndVersions(t *testing.T) {
 	_, handler, sources := flowAPIFixture(t)
-	_, err := sources.CreateFlowFromDefinition(flowWithRole("review-flow"))
+	_, err := sources.CreateFlowFromDefinition(flowWithHero("review-flow"))
 	require.NoError(t, err)
 
 	list := request(t, handler, http.MethodGet, "/v1/flows", nil, true)
@@ -116,7 +116,7 @@ func TestGlobalFlowPublishAndVersions(t *testing.T) {
 
 func TestGlobalFlowPublishRejectsInvalidDefinition(t *testing.T) {
 	_, handler, sources := flowAPIFixture(t)
-	definition := flowWithRole("bad-check")
+	definition := flowWithHero("bad-check")
 	definition.Budget = domain.FlowBudget{}
 	definition.Tasks = map[string]domain.FlowTask{
 		"gate": {Type: domain.FlowTaskCheck, Command: "rm -rf /"},
@@ -134,7 +134,7 @@ func TestFlowCatalogDoesNotLeakIntoGraphList(t *testing.T) {
 	_, handler, sources := flowAPIFixture(t)
 	_, _, err := sources.CreateGraph("graph-one", "Graph One")
 	require.NoError(t, err)
-	_, err = sources.CreateFlowFromDefinition(flowWithRole("flow-one"))
+	_, err = sources.CreateFlowFromDefinition(flowWithHero("flow-one"))
 	require.NoError(t, err)
 
 	response := request(t, handler, http.MethodGet, "/v1/graphs", nil, true)

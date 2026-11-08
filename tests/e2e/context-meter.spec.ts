@@ -63,7 +63,7 @@ test("expands the seven-category breakdown", async ({ page }) => {
     categoriesVersion: 1,
     categories: [
       { key: "system", tokens: 4000 },
-      { key: "role", tokens: 3000 },
+      { key: "hero", tokens: 3000 },
       { key: "rules", tokens: 2000 },
       { key: "skills", tokens: 1000 },
       { key: "tools", tokens: 6000 },
@@ -75,7 +75,7 @@ test("expands the seven-category breakdown", async ({ page }) => {
   await page.getByRole("button", { name: "40% of context used" }).click();
   const panel = page.getByRole("dialog", { name: "of context used" });
   await expect(panel).toBeVisible();
-  for (const label of ["System prompt", "Role", "Project rules", "Skills", "Tools", "Reminders", "Conversation"]) {
+  for (const label of ["System prompt", "Hero", "Project rules", "Skills", "Tools", "Reminders", "Conversation"]) {
     await expect(panel.getByText(label, { exact: true })).toBeVisible();
   }
 });

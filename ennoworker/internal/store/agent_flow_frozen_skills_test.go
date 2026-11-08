@@ -16,9 +16,9 @@ import (
 
 // pinnedFlowFreeze builds a single-task freeze carrying digest-pinned task
 // Skills, including one duplicate, plus one legacy-style unpinned ref.
-func pinnedFlowFreeze(roleVersionID string) []store.FlowNodeFreeze {
+func pinnedFlowFreeze(heroVersionID string) []store.FlowNodeFreeze {
 	return []store.FlowNodeFreeze{{
-		TaskIndex: 0, Handle: "build", RoleVersionID: roleVersionID,
+		TaskIndex: 0, Handle: "build", HeroVersionID: heroVersionID,
 		Skills: domain.FrozenSkillRefs{
 			{ID: "go-dev", Digest: "sha256:go-dev"},
 			{ID: "go-dev", Digest: "sha256:duplicate-wins-first"},
@@ -30,12 +30,12 @@ func pinnedFlowFreeze(roleVersionID string) []store.FlowNodeFreeze {
 
 func newPinnedFlowRun(t *testing.T) (*store.AgentFlowRunRepo, *domain.RunAgentFlow, func(string) string) {
 	t.Helper()
-	db, flowRuns, projectID, _, roleVersionID := setupFlowFixture(t)
+	db, flowRuns, projectID, _, heroVersionID := setupFlowFixture(t)
 	def := &domain.FlowDefinition{
 		SchemaVersion: domain.FlowSchemaVersion, ID: "pinned-flow",
 		Budget: domain.FlowBudget{MaxTotalTokens: 20000},
 		Tasks: map[string]domain.FlowTask{
-			"build": {Type: domain.FlowTaskRole, Role: "flow-worker@1", Goal: "Build it"},
+			"build": {Type: domain.FlowTaskHero, Hero: "flow-worker@1", Goal: "Build it"},
 		},
 	}
 	version := flowVersionFromDef(def)
@@ -44,7 +44,7 @@ func newPinnedFlowRun(t *testing.T) (*store.AgentFlowRunRepo, *domain.RunAgentFl
 		SessionID: session.ID, ProjectID: projectID, FlowVersionID: version.ID,
 		DefinitionJSON: version.DefinitionJSON, ConfigDigest: version.ConfigDigest,
 		InputsJSON: []byte(`{"inputs":{},"vars":{}}`),
-	}, pinnedFlowFreeze(roleVersionID))
+	}, pinnedFlowFreeze(heroVersionID))
 	require.NoError(t, err)
 	return flowRuns, run, func(query string) string {
 		var raw string
@@ -96,17 +96,17 @@ func TestFlowRunLoadsLegacyTaskSkillIDsAsUnpinned(t *testing.T) {
 }
 
 func TestFlowRunFreezeRejectsBlankTaskSkillID(t *testing.T) {
-	db, flowRuns, projectID, _, roleVersionID := setupFlowFixture(t)
+	db, flowRuns, projectID, _, heroVersionID := setupFlowFixture(t)
 	def := &domain.FlowDefinition{
 		SchemaVersion: domain.FlowSchemaVersion, ID: "pinned-flow",
 		Budget: domain.FlowBudget{MaxTotalTokens: 20000},
 		Tasks: map[string]domain.FlowTask{
-			"build": {Type: domain.FlowTaskRole, Role: "flow-worker@1", Goal: "Build it"},
+			"build": {Type: domain.FlowTaskHero, Hero: "flow-worker@1", Goal: "Build it"},
 		},
 	}
 	version := flowVersionFromDef(def)
 	session := sqlCreateSession(t, db, projectID)
-	freeze := pinnedFlowFreeze(roleVersionID)
+	freeze := pinnedFlowFreeze(heroVersionID)
 	freeze[0].Skills = domain.FrozenSkillRefs{{ID: "  ", Digest: "sha256:blank"}}
 	_, err := flowRuns.CreateFlowRun(context.Background(), store.CreateFlowRunInput{
 		SessionID: session.ID, ProjectID: projectID, FlowVersionID: version.ID,
@@ -203,10 +203,10 @@ func TestOrchestratorChildCarriesFrozenSkillDigestToDelegationItem(t *testing.T)
 	children := &store.OrchestratorChildren{DB: db,
 		Policies: &fileconfig.PolicyStore{Path: filepath.Join(t.TempDir(), "config", "policies.json")}}
 	info, err := children.CreateTaskChild(ctx, run.RunID, session.ID, agentflow.ChildSpec{
-		Handle: "producer", RoleVersionID: freeze[0].RoleVersionID,
+		Handle: "producer", HeroVersionID: freeze[0].HeroVersionID,
 		Skills:     freeze[0].Skills,
 		Assignment: "Implement src/main.go", Budget: budget,
-		RoleDefinitionJSON: freeze[0].RoleDefinitionJSON,
+		HeroDefinitionJSON: freeze[0].HeroDefinitionJSON,
 	})
 	require.NoError(t, err)
 

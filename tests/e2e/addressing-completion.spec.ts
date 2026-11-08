@@ -33,16 +33,16 @@ async function mockBackend(page: Page) {
     if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, null);
     if (path === `/v1/sessions/${session.id}/messages`) return fulfill(route, { messages: [], hasMore: false, activeLeafMessageId: null });
     if (path === `/v1/projects/${project.id}/prompt-templates`) return fulfill(route, { templates: [], diagnostics: [] });
-    if (path === "/v1/global-roles" && method === "GET") {
-      return fulfill(route, [{ id: role.id, name: role.name, path: "/home/roles/security-reviewer/role.md", digest: `sha256:${"a".repeat(64)}` }]);
+    if (path === "/v1/global-heroes" && method === "GET") {
+      return fulfill(route, [{ id: role.id, name: role.name, path: "/home/heroes/security-reviewer/role.md", digest: `sha256:${"a".repeat(64)}` }]);
     }
-    if (path === `/v1/global-roles/${role.id}` && method === "GET") {
+    if (path === `/v1/global-heroes/${role.id}` && method === "GET") {
       return fulfill(route, {
-        id: role.id, name: role.name, path: "/home/roles/security-reviewer/role.md", digest: `sha256:${"a".repeat(64)}`,
+        id: role.id, name: role.name, path: "/home/heroes/security-reviewer/role.md", digest: `sha256:${"a".repeat(64)}`,
         document: { handle: role.handle, name: role.name, description: role.description, positioning: role.positioning, icon: role.icon, color: role.color },
       });
     }
-    if (path === `/v1/global-roles/${role.id}/versions`) return fulfill(route, [{ version: 1, publishedAt: now }]);
+    if (path === `/v1/global-heroes/${role.id}/versions`) return fulfill(route, [{ version: 1, publishedAt: now }]);
     if (path === "/v1/graphs" && method === "GET") return fulfill(route, graphs);
     return route.abort();
   });
@@ -55,20 +55,20 @@ async function openSession(page: Page) {
   await page.getByRole("button", { name: session.title, exact: true }).click();
 }
 
-test("typing @role completes a role target and clears the token", async ({ page }) => {
+test("typing @hero completes a hero target and clears the token", async ({ page }) => {
   await openSession(page);
   const textarea = page.locator("textarea[aria-label]");
   const panel = page.locator(".prompt-command-menu");
 
-  await textarea.fill("@role:sec");
+  await textarea.fill("@hero:sec");
   await expect(panel).toBeVisible();
-  await expect(panel.getByText("@role:security-reviewer")).toBeVisible();
+  await expect(panel.getByText("@hero:security-reviewer")).toBeVisible();
 
-  await panel.getByText("@role:security-reviewer").click();
-  // The token is consumed and the role target is selected instead.
+  await panel.getByText("@hero:security-reviewer").click();
+  // The token is consumed and the hero target is selected instead.
   await expect(textarea).toHaveValue("");
   await expect(panel).not.toBeVisible();
-  await expect(page.locator(".role-target-trigger")).toContainText("@security-reviewer");
+  await expect(page.locator(".hero-target-trigger")).toContainText("@security-reviewer");
 });
 
 test("typing @graph completes a graph invocation with version", async ({ page }) => {
@@ -91,7 +91,7 @@ test("@ addressing does not open when no match exists", async ({ page }) => {
   const textarea = page.locator("textarea[aria-label]");
   const panel = page.locator(".prompt-command-menu");
 
-  await textarea.fill("@role:zzz");
+  await textarea.fill("@hero:zzz");
   await expect(panel).not.toBeVisible();
   await textarea.fill("@graph:nope");
   await expect(panel).not.toBeVisible();

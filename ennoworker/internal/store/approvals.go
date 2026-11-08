@@ -545,9 +545,9 @@ func loadApprovalAttribution(ctx context.Context, reader approvalAttributionRead
 		if err := json.Unmarshal([]byte(effectiveJSON), &effective); err != nil {
 			return nil, err
 		}
-		if effective.Role != nil {
-			attribution.PermissionCeiling = effective.Role.PermissionCeiling
-			attribution.Authority = effective.Role.Authority
+		if effective.Hero != nil {
+			attribution.PermissionCeiling = effective.Hero.PermissionCeiling
+			attribution.Authority = effective.Hero.Authority
 		}
 	}
 	return attribution, nil

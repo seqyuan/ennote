@@ -633,10 +633,10 @@ function formatPackSummary(data) {
   for (const flow of flows) {
     lines.push(`  - ${flow.id} [${flow.format}] ${flow.taskCount} task(s), ${flow.checkTasks} check, ${flow.fanOutTasks} fan-out, ${flow.maxTotalTokens} tokens`);
   }
-  const roles = data.roles ?? [];
-  lines.push(`Roles (${roles.length})`);
-  for (const role of roles) {
-    lines.push(`  - ${role.handle} (${role.scope}) ${role.authority}, tools: ${(role.allowedTools ?? []).join(", ") || "none"}`);
+  const heroes = data.heroes ?? [];
+  lines.push(`Heroes (${heroes.length})`);
+  for (const hero of heroes) {
+    lines.push(`  - ${hero.handle} (${hero.scope}) ${hero.authority}, tools: ${(hero.allowedTools ?? []).join(", ") || "none"}`);
   }
   const skills = data.skills ?? [];
   lines.push(`Skills (${skills.length})`);
@@ -680,13 +680,13 @@ async function packCommand(home, positionals, values) {
   }
   if (action === "install") {
     if (!target) {
-      throw usageError("Usage: ennote pack install <file|dir> [--dry-run] [--json] [--as-flow old=new] [--as-role old=new]");
+      throw usageError("Usage: ennote pack install <file|dir> [--dry-run] [--json] [--as-flow old=new] [--as-hero old=new]");
     }
     // Renames are validated before the Worker is contacted, so a typo is a
     // usage error instead of a refused install.
     const renames = {
       flows: parsePackRenames(values["as-flow"], "--as-flow"),
-      roles: parsePackRenames(values["as-role"], "--as-role"),
+      heroes: parsePackRenames(values["as-hero"], "--as-hero"),
     };
     const endpoint = loadWorkerEndpoint(home);
     const plan = await requestPackInstall(endpoint, path.resolve(target), {
@@ -728,7 +728,7 @@ async function packCommand(home, positionals, values) {
   );
 }
 
-// parsePackRenames turns repeated --as-flow/--as-role old=new flags into the
+// parsePackRenames turns repeated --as-flow/--as-hero old=new flags into the
 // renames object. A rename only changes the installed store id.
 function parsePackRenames(entries, flag) {
   const renames = {};
@@ -764,7 +764,7 @@ async function requestPackInstall(endpoint, target, options = {}) {
   const renames = options.renames ?? {};
   const encoded = {};
   if (Object.keys(renames.flows ?? {}).length > 0) encoded.flows = renames.flows;
-  if (Object.keys(renames.roles ?? {}).length > 0) encoded.roles = renames.roles;
+  if (Object.keys(renames.heroes ?? {}).length > 0) encoded.heroes = renames.heroes;
   if (Object.keys(encoded).length > 0) body.renames = encoded;
   return requestJSON(endpoint, "POST", "/v1/packs/install", { body, action: "pack install" });
 }
@@ -799,7 +799,7 @@ function formatPackInstallPlan(plan, options = {}) {
 
   const state = plan?.state;
   if (state) {
-    lines.push(`State:    ${state.installState ?? "?"}; flows ${state.flows?.length ?? 0}, roles ${state.roles?.length ?? 0}, skills ${state.skills?.length ?? 0}`);
+    lines.push(`State:    ${state.installState ?? "?"}; flows ${state.flows?.length ?? 0}, heroes ${state.heroes?.length ?? 0}, skills ${state.skills?.length ?? 0}`);
     const drafts = (state.flows ?? []).filter(flow => !flow.publishedRevision);
     if (drafts.length > 0) {
       lines.push(`Disabled: ${drafts.map(flow => flow.storeId).join(", ")} (draft Graph, no published revision — publish it to enable runs)`);
@@ -834,7 +834,7 @@ function formatPackList(summaries) {
   for (const summary of summaries) {
     const pack = summary.pack ?? {};
     lines.push(`  - ${pack.name ?? "(unnamed pack)"} (${pack.id ?? "?"}@${pack.version ?? "?"}) ${summary.installState ?? "?"}`);
-    lines.push(`    flows ${summary.flowCount ?? 0}, roles ${summary.roleCount ?? 0}, skills ${summary.skillCount ?? 0}; installed ${summary.installedAt ?? "?"}`);
+    lines.push(`    flows ${summary.flowCount ?? 0}, heroes ${summary.heroCount ?? 0}, skills ${summary.skillCount ?? 0}; installed ${summary.installedAt ?? "?"}`);
   }
   return lines.join("\n");
 }
@@ -883,11 +883,11 @@ Options:
   --port, -p      Browser-facing port (default ${DEFAULT_PORT})
   --hostname, -H  Bind address (default ${DEFAULT_HOSTNAME})
   --json          Machine-readable output (prints the Worker data payload)
-  --documents     pack inspect: include flow, role, and skill source text
+  --documents     pack inspect: include flow, hero, and skill source text
   --dry-run       pack install: plan only and write nothing
   --as-flow       pack install: old=new rename of an installed Graph id
-  --as-role       pack install: old=new rename of an installed Role handle
-  --force         pack remove: override local edits and shared global Roles
+  --as-hero       pack install: old=new rename of an installed Hero handle
+  --force         pack remove: override local edits and shared global Heroes
   --version, -v   Show version
   --help, -h      Show this help`);
 }
@@ -904,7 +904,7 @@ async function main(argv = process.argv.slice(2)) {
       documents: { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
       "as-flow": { type: "string", multiple: true },
-      "as-role": { type: "string", multiple: true },
+      "as-hero": { type: "string", multiple: true },
       force: { type: "boolean", default: false },
       reset: { type: "boolean", default: false },
       version: { type: "boolean", short: "v", default: false },

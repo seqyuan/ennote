@@ -22,7 +22,7 @@ import (
 // liveStack is the V2 file-native live-qualification fixture: a real Provider
 // credential + model wired through the file store, a file-native project and
 // Session (per-Session SQLite), and the opened Session database. It never
-// touches the removed global provider/model/role SQL tables.
+// touches the removed global provider/model/hero SQL tables.
 type liveStack struct {
 	Home      string
 	Models    *fileconfig.ModelStore

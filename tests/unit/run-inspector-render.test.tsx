@@ -18,12 +18,12 @@ function composition(overrides: Partial<RunPromptComposition> = {}): RunPromptCo
     digest: "base-digest-0123456789",
     sections: [
       { id: "base", kind: "base", source: "agent_profile", bytes: 512, digest: "aaaa1111bbbb2222" },
-      { id: "role.definition", kind: "role", source: "role:analyst@3", bytes: 2048, digest: "cccc3333dddd4444" },
-      { id: "skill.preload.report", kind: "skill_preload", source: "role:analyst@3", bytes: 1024, digest: "eeee5555ffff6666", skillId: "report" },
+      { id: "hero.definition", kind: "hero", source: "hero:analyst@3", bytes: 2048, digest: "cccc3333dddd4444" },
+      { id: "skill.preload.report", kind: "skill_preload", source: "hero:analyst@3", bytes: 1024, digest: "eeee5555ffff6666", skillId: "report" },
     ],
     sectionsDigest: "sections-digest",
     composedDigest: "composed-digest",
-    prompt: "base\n\n<role_definition>\nReport.\n</role_definition>",
+    prompt: "base\n\n<hero_definition>\nReport.\n</hero_definition>",
     skillCatalogState: "materialized",
     skillCatalogDigest: "catalog-digest",
     recorded: true,
@@ -183,10 +183,10 @@ describe("RunInspectorBody", () => {
       <RunInspectorBody runId="run-1" composition={composition()} loading={false} error={null} t={t} />);
 
     expect(html).toContain("data-prompt-section=\"base\"");
-    expect(html).toContain("data-prompt-section=\"role\"");
+    expect(html).toContain("data-prompt-section=\"hero\"");
     expect(html).toContain("data-prompt-section=\"skill_preload\"");
-    expect(html).toContain("role:analyst@3");
-    expect(html).toContain("role.definition");
+    expect(html).toContain("hero:analyst@3");
+    expect(html).toContain("hero.definition");
     expect(html).toContain("2.0 KiB");
     // The full digest stays available even though the row shows a prefix.
     expect(html).toContain("aaaa1111bbbb2222");

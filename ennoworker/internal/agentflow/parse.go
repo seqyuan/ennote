@@ -115,16 +115,16 @@ func decodeTask(node yaml.Node) (domain.FlowTask, error) {
 	}
 	task.Type = strings.TrimSpace(task.Type)
 	if task.Type == "" {
-		task.Type = domain.FlowTaskRole
+		task.Type = domain.FlowTaskHero
 	}
 	switch task.Type {
-	case domain.FlowTaskRole, domain.FlowTaskCheck:
+	case domain.FlowTaskHero, domain.FlowTaskCheck:
 	default:
 		return domain.FlowTask{}, fmt.Errorf("unsupported task type %q", task.Type)
 	}
 	if task.Type == domain.FlowTaskCheck {
-		// Check tasks are deterministic gates: no role, no skills, no budget.
-		task.Role = ""
+		// Check tasks are deterministic gates: no hero, no skills, no budget.
+		task.Hero = ""
 		task.Skills = nil
 		task.Budget = nil
 	} else {
@@ -140,7 +140,7 @@ func normalizeDefinition(def *domain.FlowDefinition) error {
 	def.ID = strings.TrimSpace(def.ID)
 	def.Description = strings.TrimSpace(def.Description)
 	for name, task := range def.Tasks {
-		task.Role = strings.TrimSpace(task.Role)
+		task.Hero = strings.TrimSpace(task.Hero)
 		task.Goal = strings.TrimSpace(task.Goal)
 		task.Command = strings.TrimSpace(task.Command)
 		task.Output = strings.TrimSpace(task.Output)

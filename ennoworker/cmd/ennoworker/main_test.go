@@ -16,7 +16,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
@@ -57,7 +57,7 @@ func (allowToolPolicy) AfterToolCall(context.Context, agent.ToolCallContext, dom
 	return agent.AfterToolDecision{}, nil
 }
 
-func TestDelegationAdmissionPolicyPromotesRoleApprovalAndHonorsKillSwitch(t *testing.T) {
+func TestDelegationAdmissionPolicyPromotesHeroApprovalAndHonorsKillSwitch(t *testing.T) {
 	db, _, _ := newSessionDB(t)
 	ctx := context.Background()
 	project, _, err := newFileProjects(t).CreateWithWorkspace(ctx,
@@ -65,43 +65,43 @@ func TestDelegationAdmissionPolicyPromotesRoleApprovalAndHonorsKillSwitch(t *tes
 	require.NoError(t, err)
 	session := sqlCreateSession(t, db, project.ID)
 
-	// V2: the approval Role is a file revision resolved through the file-native
-	// DelegationRepo; the legacy global role SQL is removed.
-	sources, models, modelID, home := setupExecutorFileRoleDelegation(t)
-	document := &rolesource.Document{
-		SchemaVersion: 1, Handle: "approval-role", Name: "Approval",
+	// V2: the approval Hero is a file revision resolved through the file-native
+	// DelegationRepo; the legacy global hero SQL is removed.
+	sources, models, modelID, home := setupExecutorFileHeroDelegation(t)
+	document := &heroesource.Document{
+		SchemaVersion: 1, Handle: "approval-hero", Name: "Approval",
 		Description: "Requires delegation approval.", Positioning: "Independent", Icon: "bot", Color: "neutral",
-		Model:  rolesource.ModelBinding{Ref: modelID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
-		Skills: []rolesource.SkillBinding{}, Authority: rolesource.AuthorityReadOnly,
+		Model:  heroesource.ModelBinding{Ref: modelID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills: []heroesource.SkillBinding{}, Authority: heroesource.AuthorityReadOnly,
 		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read", "grep"},
-		Context: rolesource.ContextPolicy{DefaultMode: domain.RoleContextRoom,
-			AllowedModes: []domain.RoleContextMode{domain.RoleContextRoom}, OwnExecutionContinuity: domain.RoleContinuityNone},
-		Delegation: rolesource.DelegationPolicy{Admission: domain.DelegationApprovalRequired,
+		Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextRoom,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextRoom}, OwnExecutionContinuity: domain.HeroContinuityNone},
+		Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationApprovalRequired,
 			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
 			MaxInvocationsPerParentRun: 1, MaxConcurrentInstances: 1,
-			BudgetCeiling: rolesource.DelegationBudgetCeiling{MaxModelCalls: 1, MaxToolCalls: 1,
+			BudgetCeiling: heroesource.DelegationBudgetCeiling{MaxModelCalls: 1, MaxToolCalls: 1,
 				MaxTotalTokens: 20000, MaxOutputTokens: 4000, MaxWallTimeMS: 120000}},
 		OutputContract: "text-v1", MaxLoopIterations: 8, Prompt: "Approve the delegation.",
 	}
-	_, _, err = sources.CreateRole(document)
+	_, _, err = sources.CreateHero(document)
 	require.NoError(t, err)
-	_, err = sources.PublishRoleRevision(document.Handle)
+	_, err = sources.PublishHeroRevision(document.Handle)
 	require.NoError(t, err)
 	policy := &delegationAdmissionToolPolicy{Base: allowToolPolicy{},
-		Delegations: &store.DelegationRepo{DB: db, RoleSources: sources, Models: models},
+		Delegations: &store.DelegationRepo{DB: db, HeroSources: sources, Models: models},
 		SessionID:   session.ID, KnownSkills: map[string]bool{"review-guard": true}}
 	call := domain.ToolCall{ID: "delegate", Name: "delegate_tasks", Arguments: json.RawMessage(
-		`{"tasks":[{"name":"review","role":"approval-role","goal":"review","skills":["review-guard"],"budget":{"maxModelCalls":1,"maxToolCalls":1}}]}`)}
+		`{"tasks":[{"name":"review","hero":"approval-hero","goal":"review","skills":["review-guard"],"budget":{"maxModelCalls":1,"maxToolCalls":1}}]}`)}
 	decisions, err := policy.BeforeToolBatch(ctx, agent.ToolBatchContext{}, []domain.ToolCall{call})
 	require.NoError(t, err)
 	require.Len(t, decisions, 1)
 	assert.Equal(t, agent.ToolRequireApproval, decisions[0].Action)
-	assert.Contains(t, string(decisions[0].Arguments), `"roleVersionId":"approval-role@v000001"`)
+	assert.Contains(t, string(decisions[0].Arguments), `"heroVersionId":"approval-hero@v000001"`)
 	assert.Contains(t, string(decisions[0].Arguments), `"skills":["review-guard"]`)
 
 	missingSkillCall := call
 	missingSkillCall.Arguments = json.RawMessage(
-		`{"tasks":[{"name":"review","role":"approval-role","goal":"review","skills":["missing"],"budget":{"maxModelCalls":1,"maxToolCalls":1}}]}`)
+		`{"tasks":[{"name":"review","hero":"approval-hero","goal":"review","skills":["missing"],"budget":{"maxModelCalls":1,"maxToolCalls":1}}]}`)
 	decisions, err = policy.BeforeToolBatch(ctx, agent.ToolBatchContext{}, []domain.ToolCall{missingSkillCall})
 	require.NoError(t, err)
 	assert.Equal(t, agent.ToolDeny, decisions[0].Action)
@@ -109,7 +109,7 @@ func TestDelegationAdmissionPolicyPromotesRoleApprovalAndHonorsKillSwitch(t *tes
 
 	invalidDagCall := call
 	invalidDagCall.Arguments = json.RawMessage(
-		`{"tasks":[{"name":"review","role":"approval-role","goal":"review","depends":["missing"],"budget":{"maxModelCalls":1,"maxToolCalls":1}}]}`)
+		`{"tasks":[{"name":"review","hero":"approval-hero","goal":"review","depends":["missing"],"budget":{"maxModelCalls":1,"maxToolCalls":1}}]}`)
 	decisions, err = policy.BeforeToolBatch(ctx, agent.ToolBatchContext{}, []domain.ToolCall{invalidDagCall})
 	require.NoError(t, err)
 	assert.Equal(t, agent.ToolDeny, decisions[0].Action)
@@ -117,7 +117,7 @@ func TestDelegationAdmissionPolicyPromotesRoleApprovalAndHonorsKillSwitch(t *tes
 
 	// V2 kill switch: revoke the Role by removing its file revision; the
 	// admission gate must deny with no child materialization path.
-	require.NoError(t, os.RemoveAll(filepath.Join(sources.RolesDir(), "approval-role")))
+	require.NoError(t, os.RemoveAll(filepath.Join(sources.HeroesDir(), "approval-hero")))
 	decisions, err = policy.BeforeToolBatch(ctx, agent.ToolBatchContext{}, []domain.ToolCall{call})
 	require.NoError(t, err)
 	assert.Equal(t, agent.ToolDeny, decisions[0].Action)
@@ -125,9 +125,9 @@ func TestDelegationAdmissionPolicyPromotesRoleApprovalAndHonorsKillSwitch(t *tes
 	_ = home
 }
 
-// setupExecutorFileRoleDelegation wires a file-backed Role source + model
+// setupExecutorFileHeroDelegation wires a file-backed Role source + model
 // catalog for the admission policy tests.
-func setupExecutorFileRoleDelegation(t *testing.T) (*globalsource.Store, *store.ModelRepo, string, string) {
+func setupExecutorFileHeroDelegation(t *testing.T) (*globalsource.Store, *store.ModelRepo, string, string) {
 	t.Helper()
 	home := t.TempDir()
 	models := fileconfig.NewModelStore(
@@ -137,11 +137,11 @@ func setupExecutorFileRoleDelegation(t *testing.T) (*globalsource.Store, *store.
 	)
 	_, err := models.CreateProvider(context.Background(), fileconfig.CreateProviderInput{
 		Key: "provider", Name: "Provider", ProviderType: domain.ProviderOpenAICompatible,
-		BaseURL: "https://provider.test/v1", APIKey: "sk-role-secret",
+		BaseURL: "https://provider.test/v1", APIKey: "sk-hero-secret",
 	})
 	require.NoError(t, err)
 	model, err := models.CreateModel(context.Background(), fileconfig.CreateModelInput{
-		ProviderID: "provider", ModelName: "role-model", ContextWindow: 32768, MaxOutputTokens: 4096,
+		ProviderID: "provider", ModelName: "hero-model", ContextWindow: 32768, MaxOutputTokens: 4096,
 		SupportsToolUse: true, ThinkingDialect: domain.ThinkingDialectNone,
 		SupportedThinkingEfforts: []domain.ThinkingEffort{domain.ThinkingDefault}, IsDefault: true,
 	})

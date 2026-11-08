@@ -24,20 +24,20 @@ parallelism:
 ` + parallelism + `
 tasks:
   a0:
-    role: reader@1
+    hero: reader@1
     goal: "Dispatch {inputs.target}"
   a1:
-    role: writer@1
+    hero: writer@1
     goal: "Explore A1; write .docs/plan/design-a1.md"
     depends: [a0]
     writes: [".docs/plan/design-a1.md"]
   a2:
-    role: writer@1
+    hero: writer@1
     goal: "Explore A2; write .docs/plan/design-a2.md"
     depends: [a0]
 ` + writesA2 + `
   a3:
-    role: writer@1
+    hero: writer@1
     goal: "Explore A3; write .docs/plan/design-a3.md"
     depends: [a0]
     writes: [".docs/plan/design-a3.md"]

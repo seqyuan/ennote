@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { RoleSummary } from "@/components/settings/types";
+import type { HeroSummary } from "@/components/settings/types";
 import { errorMessage } from "@/lib/provider-errors";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { usePromptTemplates } from "@/hooks/usePromptTemplates";
@@ -25,7 +25,7 @@ export type PromptExpansionDeps = {
   selectedSession: string | null;
   input: string; // commandPanelOpen reads the input VALUE, so it is a dep (P0-1)
   promptCatalog: ReturnType<typeof usePromptTemplates>;
-  roles: RoleSummary[]; // commandPanel @role matching
+  heroes: HeroSummary[]; // commandPanel @hero matching
   setInput: (value: string) => void;
   setError: (error: string | null) => void;
 };
@@ -49,7 +49,7 @@ export function usePromptExpansion(deps: PromptExpansionDeps): {
   expandDiag: string | null;
   setExpandDiag: (diag: string | null) => void;
 } {
-  const { selectedProject, selectedSession, input, promptCatalog, roles, setInput, setError } = deps;
+  const { selectedProject, selectedSession, input, promptCatalog, heroes, setInput, setError } = deps;
 
   const [draftVersion, setDraftVersion] = useState(0);
   const [expandedVersion, setExpandedVersion] = useState<number | null>(null);
@@ -91,9 +91,9 @@ export function usePromptExpansion(deps: PromptExpansionDeps): {
     && !input.slice(1).match(/[\s]/)
     && (
       (input.startsWith("/") && promptCatalog.templates.length > 0)
-      || (input.startsWith("@role") && roles.length > 0)
+      || (input.startsWith("@role") && heroes.length > 0)
       || (input.startsWith("@graph") && flowCatalog.length > 0)
-      || (input.startsWith("@") && (roles.length > 0 || flowCatalog.length > 0))
+      || (input.startsWith("@") && (heroes.length > 0 || flowCatalog.length > 0))
     ),
   );
   const wasPanelOpen = useRef(false);

@@ -96,7 +96,7 @@ func TestInspectDelegationProjection(t *testing.T) {
 	raw, err := json.Marshal(inspection)
 	require.NoError(t, err)
 	text := string(raw)
-	for _, forbidden := range []string{"transcript", "credential", "apiKey", "rolePrompt", "systemPrompt"} {
+	for _, forbidden := range []string{"transcript", "credential", "apiKey", "heroPrompt", "systemPrompt"} {
 		assert.NotContains(t, text, forbidden)
 	}
 	_ = server

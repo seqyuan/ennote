@@ -2,16 +2,16 @@
 
 import { ArrowLeft, Menu, X } from "lucide-react";
 import { useState, type RefObject } from "react";
-import { RolesSettings } from "@/components/settings/RolesSettings";
+import { HeroesSettings } from "@/components/settings/HeroesSettings";
 import { AgentFlowSettings } from "@/components/settings/AgentFlowSettings";
 import type { ModelProfile, ProviderProfile } from "@/components/settings/types";
 import type { WorkspaceView } from "@/components/workspace-view";
 
 /**
- * Main-area settings view rendered when the sidebar's Roles / Graphs
+ * Main-area settings view rendered when the sidebar's Heroes / Graphs
  * item is active. Replaces the chat TopBar + ChatWindow + RightPanel
  * region (center+right) while the sidebar stays mounted. Mirrors the
- * header/error/body chrome the standalone /roles and /graphs pages
+ * header/error/body chrome the standalone /heroes and /graphs pages
  * used to render (same CSS classes, same data-testid) so the editors
  * behave identically inside the shell.
  */
@@ -31,13 +31,13 @@ export function SettingsView({
   menuTriggerRef: RefObject<HTMLButtonElement | null>;
 }) {
   const [error, setError] = useState<string | null>(null);
-  const title = view === "roles" ? "Roles" : "Graphs";
-  const description = view === "roles"
+  const title = view === "heroes" ? "Heroes" : "Graphs";
+  const description = view === "heroes"
     ? "Global reusable execution presets for Chat and Graph Tasks."
     : "Global Task graphs. Every published Graph can run in any Session.";
 
   return (
-    <div className="settings-view" data-testid={view === "roles" ? "roles-page" : "graphs-page"}>
+    <div className="settings-view" data-testid={view === "heroes" ? "heroes-page" : "graphs-page"}>
       <button ref={menuTriggerRef} type="button" className="workspace-mobile-menu" onClick={onOpenMobileNav} aria-label="Open navigation">
         <Menu size={20} />
       </button>
@@ -62,8 +62,8 @@ export function SettingsView({
       )}
 
       <div className="workspace-page-body">
-        {view === "roles"
-          ? <RolesSettings models={models} providers={providers} setError={setError} />
+        {view === "heroes"
+          ? <HeroesSettings models={models} providers={providers} setError={setError} />
           : <AgentFlowSettings setError={setError} />}
       </div>
     </div>

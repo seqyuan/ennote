@@ -40,7 +40,7 @@ function PermissionGlyph({ mode }: { mode: PermissionMode }) {
 /**
  * Labels name what happens to a non-read-only tool — refused, asks you, or runs —
  * because that is the only axis the three modes differ on. The stored mode values
- * stay `discuss`/`ask`/`auto`: they are written into tool policies, Role
+ * stay `discuss`/`ask`/`auto`: they are written into tool policies, Hero
  * permission ceilings, and frozen Run snapshots, so renaming them would be a
  * compatibility break for a display problem.
  */

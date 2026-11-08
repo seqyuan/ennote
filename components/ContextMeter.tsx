@@ -35,7 +35,7 @@ const LEGACY_ROWS = [
 
 const CATEGORY_ROWS: Record<string, { label: string; color: string }> = {
   system: { label: "context.system", color: "cm-color-system" },
-  role: { label: "context.role", color: "cm-color-role" },
+  hero: { label: "context.hero", color: "cm-color-hero" },
   rules: { label: "context.rules", color: "cm-color-rules" },
   skills: { label: "context.skills", color: "cm-color-skills" },
   tools: { label: "context.tools", color: "cm-color-tools" },

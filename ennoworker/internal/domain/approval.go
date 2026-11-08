@@ -48,8 +48,8 @@ type ApprovalItem struct {
 // admitted; the canonical request and Role snapshots remain authoritative.
 type DelegationApprovalPreview struct {
 	Name              string            `json:"name"`
-	Role              string            `json:"role"`
-	RoleHandle        string            `json:"roleHandle,omitempty"` // legacy preview compat
+	Hero              string            `json:"hero"`
+	HeroHandle        string            `json:"heroHandle,omitempty"` // legacy preview compat
 	GoalPreview       string            `json:"goalPreview"`
 	AssignmentPreview string            `json:"assignmentPreview,omitempty"` // legacy preview compat
 	Skills            []string          `json:"skills,omitempty"`
@@ -73,7 +73,7 @@ type ApprovalAttribution struct {
 	Handle            string         `json:"handle,omitempty"`
 	DisplayName       string         `json:"displayName"`
 	PermissionCeiling PermissionMode `json:"permissionCeiling,omitempty"`
-	Authority         RoleAuthority  `json:"authority,omitempty"`
+	Authority         HeroAuthority  `json:"authority,omitempty"`
 }
 
 type ToolApprovalRequest struct {

@@ -11,28 +11,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRoleApprovalCarriesFrozenAttributionAndPermissionCeiling(t *testing.T) {
-	runs, roles, session, role, version, _ := setupPublishedRoleInvocation(t)
+func TestHeroApprovalCarriesFrozenAttributionAndPermissionCeiling(t *testing.T) {
+	runs, heroes, session, hero, version, _ := setupPublishedHeroInvocation(t)
 	ctx := context.Background()
-	submission, err := runs.SubmitInvocation(ctx, roleInvocation(session.ID, "role-approval", role, version))
+	submission, err := runs.SubmitInvocation(ctx, heroInvocation(session.ID, "hero-approval", hero, version))
 	require.NoError(t, err)
 	claimed, err := runs.Claim(ctx, submission.Run.ID)
 	require.NoError(t, err)
 	_, err = runs.ResolveAndFreezeConfig(ctx, claimed)
 	require.NoError(t, err)
 
-	approvals := &store.ApprovalRepo{DB: roles}
+	approvals := &store.ApprovalRepo{DB: heroes}
 	approval, err := approvals.Suspend(ctx, claimed.ID, 1, 1, "batch-digest", json.RawMessage(`{"version":1}`),
 		[]domain.ApprovalItem{{CallIndex: 0, ToolCallID: "tool-1", ToolName: "read", RiskClass: domain.RiskReadOnly,
 			ArgumentsPreview: `{"path":"README.md"}`}}, nil)
 	require.NoError(t, err)
 	require.NotNil(t, approval.Attribution)
-	assert.Equal(t, domain.SpeakerRole, approval.Attribution.SpeakerKind)
-	assert.Equal(t, role.ID, approval.Attribution.ObjectID)
+	assert.Equal(t, domain.SpeakerHero, approval.Attribution.SpeakerKind)
+	assert.Equal(t, hero.ID, approval.Attribution.ObjectID)
 	assert.Equal(t, version.ID, approval.Attribution.VersionID)
 	assert.Equal(t, "security-reviewer", approval.Attribution.Handle)
 	assert.Equal(t, domain.PermissionDiscuss, approval.Attribution.PermissionCeiling)
-	assert.Equal(t, domain.RoleAuthorityReadOnly, approval.Attribution.Authority)
+	assert.Equal(t, domain.HeroAuthorityReadOnly, approval.Attribution.Authority)
 
 	restored, err := approvals.FindPendingBySession(ctx, session.ID)
 	require.NoError(t, err)
@@ -76,8 +76,8 @@ func TestChildRunPermissionConvergesToParentPolicyMode(t *testing.T) {
 	childResolved, err := runs.ResolveAndFreezeConfig(ctx, claimedChild)
 	require.NoError(t, err)
 
-	require.NotNil(t, childResolved.Effective.Role)
-	require.Equal(t, domain.PermissionAuto, childResolved.Effective.Role.PermissionCeiling)
+	require.NotNil(t, childResolved.Effective.Hero)
+	require.Equal(t, domain.PermissionAuto, childResolved.Effective.Hero.PermissionCeiling)
 	var childPolicy domain.ToolPolicyConfig
 	require.NoError(t, json.Unmarshal(childResolved.Effective.ToolPolicy.Config, &childPolicy))
 	assert.Equal(t, "builtin-tool-ask-v1", childResolved.Effective.ToolPolicy.ID)
@@ -89,6 +89,6 @@ func TestChildRunPermissionConvergesToParentPolicyMode(t *testing.T) {
 func autoCeilingExplorerItem(t *testing.T) store.CreateDelegationItemInput {
 	t.Helper()
 	item := explorerItem()
-	item.RoleMeta.Definition.PermissionCeiling = domain.PermissionAuto
+	item.HeroMeta.Definition.PermissionCeiling = domain.PermissionAuto
 	return item
 }

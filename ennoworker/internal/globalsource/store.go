@@ -13,7 +13,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
-	"github.com/seqyuan/ennote/ennoworker/internal/rolesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 )
 
 var objectIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,63}$`)
@@ -48,18 +48,18 @@ type GraphEntry struct {
 	Error      string                 `json:"error,omitempty"`
 }
 
-type RoleEntry struct {
+type HeroEntry struct {
 	ID       string               `json:"id"`
 	Name     string               `json:"name"`
 	Path     string               `json:"path"`
 	Digest   string               `json:"digest,omitempty"`
-	Document *rolesource.Document `json:"document,omitempty"`
+	Document *heroesource.Document `json:"document,omitempty"`
 	Error    string               `json:"error,omitempty"`
 }
 
 func (s Store) AgentsDir() string { return filepath.Join(s.HomeDir, "agents") }
 func (s Store) GraphsDir() string { return filepath.Join(s.AgentsDir(), "graphs") }
-func (s Store) RolesDir() string  { return filepath.Join(s.AgentsDir(), "roles") }
+func (s Store) HeroesDir() string  { return filepath.Join(s.AgentsDir(), "heroes") }
 
 // ListGraphs returns graph-source objects only. Flow objects share the same
 // parent directory but are reported by ListFlows, so the live Graph UI is never
@@ -127,10 +127,10 @@ func (s Store) hasOnlySource(id, filename, other string) bool {
 	return otherExists && !self
 }
 
-func (s Store) ListRoles() ([]RoleEntry, error) {
-	return listObjectDirs(s.RolesDir(), "role.md", nil, func(id, path string, data []byte) RoleEntry {
-		entry := RoleEntry{ID: id, Name: id, Path: path}
-		document, err := rolesource.Parse(data)
+func (s Store) ListHeroes() ([]HeroEntry, error) {
+	return listObjectDirs(s.HeroesDir(), "hero.md", nil, func(id, path string, data []byte) HeroEntry {
+		entry := HeroEntry{ID: id, Name: id, Path: path}
+		document, err := heroesource.Parse(data)
 		if err != nil {
 			entry.Error = err.Error()
 			return entry
@@ -141,7 +141,7 @@ func (s Store) ListRoles() ([]RoleEntry, error) {
 		}
 		entry.Name = document.Name
 		entry.Document = document
-		entry.Digest, err = rolesource.SourceDigest(document)
+		entry.Digest, err = heroesource.SourceDigest(document)
 		if err != nil {
 			entry.Error = err.Error()
 		}
@@ -345,7 +345,7 @@ func (s Store) CreateGraphFromDocument(document *graphsource.Document) (string, 
 		return "", err
 	}
 	// The Graph directory may already exist (an installer writes Graph-private
-	// skills and roles first), so only graph.yaml itself must be new.
+	// skills and heroes first), so only graph.yaml itself must be new.
 	graphDir, err := ensureSourceDir(s.GraphsDir(), document.ID)
 	if err != nil {
 		return "", err
@@ -376,7 +376,7 @@ func (s Store) CreateFlowFromDefinition(definition *domain.FlowDefinition) (stri
 	if err != nil {
 		return "", err
 	}
-	// Local roles and skills may already exist below the object directory.
+	// Local heroes and skills may already exist below the object directory.
 	flowDir, err := ensureSourceDir(s.GraphsDir(), definition.ID)
 	if err != nil {
 		return "", err
@@ -448,7 +448,7 @@ func (s Store) GraphResourceDir(graphID, kind, resourceID string) (string, error
 	if !objectIDPattern.MatchString(graphID) || !objectIDPattern.MatchString(resourceID) {
 		return "", fmt.Errorf("invalid Graph resource id")
 	}
-	if kind != "roles" && kind != "skills" {
+	if kind != "heroes" && kind != "skills" {
 		return "", fmt.Errorf("unsupported Graph resource kind %q", kind)
 	}
 	graphDir := filepath.Join(s.GraphsDir(), graphID)
@@ -464,28 +464,28 @@ func (s Store) GraphResourceDir(graphID, kind, resourceID string) (string, error
 	return filepath.Join(graphDir, kind, resourceID), nil
 }
 
-func (s Store) ReadGraphRole(graphID, roleID string) (*rolesource.Document, string, error) {
-	directory, err := s.GraphResourceDir(graphID, "roles", roleID)
+func (s Store) ReadGraphHero(graphID, heroID string) (*heroesource.Document, string, error) {
+	directory, err := s.GraphResourceDir(graphID, "heroes", heroID)
 	if err != nil {
 		return nil, "", err
 	}
-	data, err := readRegular(filepath.Join(directory, "role.md"))
+	data, err := readRegular(filepath.Join(directory, "hero.md"))
 	if err != nil {
 		return nil, "", err
 	}
-	document, err := rolesource.Parse(data)
+	document, err := heroesource.Parse(data)
 	if err != nil {
 		return nil, "", err
 	}
-	if document.Handle != roleID {
-		return nil, "", fmt.Errorf("Role handle %q must match directory %q", document.Handle, roleID)
+	if document.Handle != heroID {
+		return nil, "", fmt.Errorf("Role handle %q must match directory %q", document.Handle, heroID)
 	}
-	digest, err := rolesource.SourceDigest(document)
+	digest, err := heroesource.SourceDigest(document)
 	return document, digest, err
 }
 
-func (s Store) ReadRole(id string) (*rolesource.Document, string, error) {
-	path, err := objectPath(s.RolesDir(), id, "role.md")
+func (s Store) ReadHero(id string) (*heroesource.Document, string, error) {
+	path, err := objectPath(s.HeroesDir(), id, "hero.md")
 	if err != nil {
 		return nil, "", err
 	}
@@ -493,23 +493,23 @@ func (s Store) ReadRole(id string) (*rolesource.Document, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	document, err := rolesource.Parse(data)
+	document, err := heroesource.Parse(data)
 	if err != nil {
 		return nil, "", err
 	}
 	if document.Handle != id {
 		return nil, "", fmt.Errorf("Role handle %q must match directory %q", document.Handle, id)
 	}
-	digest, err := rolesource.SourceDigest(document)
+	digest, err := heroesource.SourceDigest(document)
 	return document, digest, err
 }
 
-func (s Store) CreateRole(document *rolesource.Document) (*rolesource.Document, string, error) {
-	encoded, err := rolesource.Encode(document)
+func (s Store) CreateHero(document *heroesource.Document) (*heroesource.Document, string, error) {
+	encoded, err := heroesource.Encode(document)
 	if err != nil {
 		return nil, "", err
 	}
-	path, err := createObjectDir(s.RolesDir(), document.Handle, "role.md")
+	path, err := createObjectDir(s.HeroesDir(), document.Handle, "hero.md")
 	if err != nil {
 		return nil, "", err
 	}
@@ -517,17 +517,17 @@ func (s Store) CreateRole(document *rolesource.Document) (*rolesource.Document, 
 		_ = os.Remove(filepath.Dir(path))
 		return nil, "", err
 	}
-	digest, err := rolesource.SourceDigest(document)
+	digest, err := heroesource.SourceDigest(document)
 	return document, digest, err
 }
 
-// CreateGraphRole writes a Graph-private Role draft at
-// agents/graphs/<graphID>/roles/<handle>/role.md. The handle in the document is
+// CreateGraphHero writes a Graph-private Role draft at
+// agents/graphs/<graphID>/heroes/<handle>/hero.md. The handle in the document is
 // the directory name, so a caller that installs under a renamed handle must
 // rewrite document.Handle first; a mismatch is rejected rather than silently
-// writing a Role a Graph can never resolve. Missing Graph/roles directories are
+// writing a Role a Graph can never resolve. Missing Graph/heroes directories are
 // created 0700; an existing Role is never overwritten.
-func (s Store) CreateGraphRole(graphID string, document *rolesource.Document) (string, error) {
+func (s Store) CreateGraphHero(graphID string, document *heroesource.Document) (string, error) {
 	if document == nil {
 		return "", fmt.Errorf("Role source document is required")
 	}
@@ -535,7 +535,7 @@ func (s Store) CreateGraphRole(graphID string, document *rolesource.Document) (s
 	if handle == "" || handle != document.Handle {
 		return "", fmt.Errorf("Role handle %q must match directory %q", document.Handle, handle)
 	}
-	encoded, err := rolesource.Encode(document)
+	encoded, err := heroesource.Encode(document)
 	if err != nil {
 		return "", err
 	}
@@ -543,23 +543,23 @@ func (s Store) CreateGraphRole(graphID string, document *rolesource.Document) (s
 	if err != nil {
 		return "", err
 	}
-	rolesDir, err := ensureSourceDir(graphDir, "roles")
+	heroesDir, err := ensureSourceDir(graphDir, "heroes")
 	if err != nil {
 		return "", err
 	}
-	roleDir, err := createSourceDir(rolesDir, handle)
+	heroDir, err := createSourceDir(heroesDir, handle)
 	if err != nil {
 		return "", err
 	}
-	if err := atomicWrite(filepath.Join(roleDir, "role.md"), encoded, true); err != nil {
-		_ = os.Remove(roleDir)
+	if err := atomicWrite(filepath.Join(heroDir, "hero.md"), encoded, true); err != nil {
+		_ = os.Remove(heroDir)
 		return "", err
 	}
-	return rolesource.SourceDigest(document)
+	return heroesource.SourceDigest(document)
 }
 
-func (s Store) UpdateRole(id, expectedDigest string, mutate func(*rolesource.Document) error) (*rolesource.Document, string, error) {
-	document, digest, err := s.ReadRole(id)
+func (s Store) UpdateHero(id, expectedDigest string, mutate func(*heroesource.Document) error) (*heroesource.Document, string, error) {
+	document, digest, err := s.ReadHero(id)
 	if err != nil {
 		return nil, "", err
 	}
@@ -575,15 +575,15 @@ func (s Store) UpdateRole(id, expectedDigest string, mutate func(*rolesource.Doc
 	if document.Handle != id {
 		return nil, digest, fmt.Errorf("Role handle cannot be changed")
 	}
-	encoded, err := rolesource.Encode(document)
+	encoded, err := heroesource.Encode(document)
 	if err != nil {
 		return nil, digest, err
 	}
-	path, _ := objectPath(s.RolesDir(), id, "role.md")
+	path, _ := objectPath(s.HeroesDir(), id, "hero.md")
 	if err := atomicWrite(path, encoded, false); err != nil {
 		return nil, digest, err
 	}
-	newDigest, err := rolesource.SourceDigest(document)
+	newDigest, err := heroesource.SourceDigest(document)
 	return document, newDigest, err
 }
 
@@ -595,7 +595,7 @@ func objectPath(root, id, filename string) (string, error) {
 }
 
 // DeleteGraph removes the whole Graph directory, including its revisions and its
-// Graph-private roles and skills. Deletion is whole-object because a revision
+// Graph-private heroes and skills. Deletion is whole-object because a revision
 // sequence must stay contiguous: dropping one revision directory would corrupt
 // the object for every later read. The same call removes a flow-source object
 // because both kinds share one object directory.
@@ -603,18 +603,18 @@ func (s Store) DeleteGraph(graphID string) error {
 	return deleteObjectDir(s.GraphsDir(), graphID)
 }
 
-// DeleteGraphRole removes one Graph-private Role directory.
-func (s Store) DeleteGraphRole(graphID, handle string) error {
+// DeleteGraphHero removes one Graph-private Role directory.
+func (s Store) DeleteGraphHero(graphID, handle string) error {
 	if !objectIDPattern.MatchString(graphID) {
 		return fmt.Errorf("invalid object id %q", graphID)
 	}
-	return deleteObjectDir(filepath.Join(s.GraphsDir(), graphID, "roles"), handle)
+	return deleteObjectDir(filepath.Join(s.GraphsDir(), graphID, "heroes"), handle)
 }
 
-// DeleteRole removes the whole Worker-global Role directory, including every
+// DeleteHero removes the whole Worker-global Role directory, including every
 // published revision.
-func (s Store) DeleteRole(handle string) error {
-	return deleteObjectDir(s.RolesDir(), handle)
+func (s Store) DeleteHero(handle string) error {
+	return deleteObjectDir(s.HeroesDir(), handle)
 }
 
 func deleteObjectDir(root, id string) error {
@@ -774,6 +774,6 @@ func SortGraphEntries(entries []GraphEntry) {
 	sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
 }
 
-func SortRoleEntries(entries []RoleEntry) {
+func SortHeroEntries(entries []HeroEntry) {
 	sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
 }

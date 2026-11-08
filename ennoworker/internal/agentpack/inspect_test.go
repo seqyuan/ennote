@@ -39,24 +39,24 @@ func TestInspectDirectoryPack(t *testing.T) {
 	assert.Equal(t, FlowFormatGraph, flow.Format)
 	assert.Equal(t, 2, flow.TaskCount)
 	assert.Equal(t, "load", flow.EntryTask)
-	assert.Equal(t, []string{"qc-reviewer"}, flow.Roles)
+	assert.Equal(t, []string{"qc-reviewer"}, flow.Heroes)
 	assert.Zero(t, flow.CheckTasks)
 	assert.Zero(t, flow.FanOutTasks)
 	assert.Zero(t, flow.MaxTotalTokens)
 	assert.True(t, strings.HasPrefix(flow.PathDigest, "sha256:"))
 	assert.True(t, strings.HasPrefix(flow.SourceDigest, "sha256:"))
 
-	require.Len(t, result.Roles, 1)
-	role := result.Roles[0]
-	assert.Equal(t, "qc-reviewer", role.Handle)
-	assert.Equal(t, "roles/qc-reviewer/role.md", role.Path)
-	assert.Equal(t, RoleScopeFlow, role.Scope)
-	assert.Equal(t, "QC Reviewer", role.Name)
-	assert.Equal(t, "read_only", role.Authority)
-	assert.Equal(t, "discuss", role.PermissionCeiling)
-	assert.Equal(t, []string{"grep", "read"}, role.AllowedTools)
-	assert.Equal(t, []string{"cell-qc-tables"}, role.Skills)
-	assert.True(t, strings.HasPrefix(role.SourceDigest, "sha256:"))
+	require.Len(t, result.Heroes, 1)
+	hero := result.Heroes[0]
+	assert.Equal(t, "qc-reviewer", hero.Handle)
+	assert.Equal(t, "heroes/qc-reviewer/hero.md", hero.Path)
+	assert.Equal(t, HeroScopeFlow, hero.Scope)
+	assert.Equal(t, "QC Reviewer", hero.Name)
+	assert.Equal(t, "read_only", hero.Authority)
+	assert.Equal(t, "discuss", hero.PermissionCeiling)
+	assert.Equal(t, []string{"grep", "read"}, hero.AllowedTools)
+	assert.Equal(t, []string{"cell-qc-tables"}, hero.Skills)
+	assert.True(t, strings.HasPrefix(hero.SourceDigest, "sha256:"))
 
 	require.Len(t, result.Skills, 2)
 	assert.Equal(t, SkillKindVendored, result.Skills[0].Kind)
@@ -76,14 +76,14 @@ func TestInspectDirectoryPack(t *testing.T) {
 
 	envelope := result.CapabilityEnvelope
 	assert.Equal(t, 1, envelope.FlowCount)
-	assert.Equal(t, 1, envelope.RoleCount)
+	assert.Equal(t, 1, envelope.HeroCount)
 	assert.Equal(t, 2, envelope.SkillCount)
 	assert.Equal(t, 2, envelope.TaskCount)
-	assert.Equal(t, []string{"qc-reviewer"}, envelope.Roles)
+	assert.Equal(t, []string{"qc-reviewer"}, envelope.Heroes)
 	assert.Equal(t, []string{"bio-workspace@0.1.0", "cell-qc-tables"}, envelope.Skills)
 	assert.Equal(t, []string{"tool_use"}, envelope.ModelRequirements.Capabilities)
 	assert.Equal(t, int64(128000), envelope.ModelRequirements.MinContextWindow)
-	assert.Equal(t, []string{"thinking", "tool_use"}, envelope.ModelRequirements.PerRole["qc-reviewer"])
+	assert.Equal(t, []string{"thinking", "tool_use"}, envelope.ModelRequirements.PerHero["qc-reviewer"])
 	assert.Equal(t, []string{"grep", "read"}, envelope.Tools)
 	assert.Equal(t, []string{"results/qc.csv"}, envelope.Writes)
 	assert.Empty(t, envelope.CheckCommands)
@@ -92,7 +92,7 @@ func TestInspectDirectoryPack(t *testing.T) {
 	codes := warningCodes(result.Warnings)
 	assert.Contains(t, codes, WarningUnsignedPack)
 	assert.Contains(t, codes, WarningExternalSkillRef)
-	assert.NotContains(t, codes, WarningRoleOnlyPack)
+	assert.NotContains(t, codes, WarningHeroOnlyPack)
 	assert.Empty(t, result.Documents)
 	assert.False(t, result.DocumentsTruncated)
 }
@@ -140,8 +140,8 @@ func TestInspectIncludeDocuments(t *testing.T) {
 	require.Len(t, with.Documents, 3)
 	assert.Equal(t, DocumentFlow, with.Documents[0].Kind)
 	assert.Equal(t, graphFlow, with.Documents[0].Content)
-	assert.Equal(t, DocumentRole, with.Documents[1].Kind)
-	assert.Equal(t, reviewerRole, with.Documents[1].Content)
+	assert.Equal(t, DocumentHero, with.Documents[1].Kind)
+	assert.Equal(t, reviewerHero, with.Documents[1].Content)
 	assert.Equal(t, DocumentSkill, with.Documents[2].Kind)
 	assert.Equal(t, "# Cell QC Tables\n", with.Documents[2].Content)
 	for _, document := range with.Documents {
@@ -274,7 +274,7 @@ func TestInspectPathKindAndPresenceChecks(t *testing.T) {
 	requireCode(t, err, CodePackPathMissing)
 
 	files = mixedPackFiles()
-	files[0] = entry{path: "pack.yaml", body: strings.Replace(mixedManifest, "path: flows/qc-review/graph.yaml", "path: roles/qc-reviewer", 1)}
+	files[0] = entry{path: "pack.yaml", body: strings.Replace(mixedManifest, "path: flows/qc-review/graph.yaml", "path: heroes/qc-reviewer", 1)}
 	_, err = Inspect(Request{Source: Source{Path: writeDirectoryPack(t, files)}})
 	requireCode(t, err, CodePackPathKindUnsupported)
 
@@ -342,21 +342,21 @@ func warningCodes(warnings []Warning) []string {
 	return codes
 }
 
-// A bare Agent Flow task role is the flow-local spelling. It must count as a
-// reference to a declared flow-scoped role even when flows[].roles is omitted.
-func TestInspectBareRoleRefCountsAsFlowReference(t *testing.T) {
+// A bare Agent Flow task hero is the flow-local spelling. It must count as a
+// reference to a declared flow-scoped hero even when flows[].heroes is omitted.
+func TestInspectBareHeroRefCountsAsFlowReference(t *testing.T) {
 	files := mixedPackFiles()
 	files[0] = entry{path: "pack.yaml", body: `schema_version: 1
-id: seqyuan/bare-role
+id: seqyuan/bare-hero
 name: Bare Role
 version: 1.0.0
 flows:
   - id: qc-review
     path: flows/qc-review/flow.yaml
     format: flow
-roles:
+heroes:
   - handle: qc-reviewer
-    path: roles/qc-reviewer/role.md
+    path: heroes/qc-reviewer/hero.md
     scope: flow
 `}
 	files[2] = entry{path: "flows/qc-review/flow.yaml", body: `schemaVersion: 1
@@ -364,13 +364,13 @@ id: qc-review
 budget: {max_total_tokens: 1000}
 tasks:
   review:
-    role: qc-reviewer
+    hero: qc-reviewer
     goal: Review the sample
 `}
 	result := inspectFiles(t, files)
 	require.Len(t, result.Flows, 1)
 	assert.Equal(t, FlowFormatFlow, result.Flows[0].Format)
-	require.Len(t, result.Roles, 1)
-	assert.Equal(t, RoleScopeFlow, result.Roles[0].Scope)
-	assert.NotContains(t, warningCodes(result.Warnings), WarningFlowRefsGlobalRole)
+	require.Len(t, result.Heroes, 1)
+	assert.Equal(t, HeroScopeFlow, result.Heroes[0].Scope)
+	assert.NotContains(t, warningCodes(result.Warnings), WarningFlowRefsGlobalHero)
 }

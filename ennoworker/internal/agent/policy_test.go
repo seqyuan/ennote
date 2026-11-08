@@ -82,7 +82,7 @@ func TestAskRequiresApprovalOnlyAfterSafetyChecks(t *testing.T) {
 		{Name: "exec", Arguments: json.RawMessage(`{"argv":["git","status"]}`)},
 		{Name: "exec", Arguments: json.RawMessage(`{"argv":["git","push"]}`)},
 		{Name: "future_tool", Arguments: json.RawMessage(`{}`)},
-		{Name: "delegate_tasks", Arguments: json.RawMessage(`{"tasks":[{"name":"inspect","role":"workspace-explorer","goal":"Inspect secret=raw","budget":{"maxModelCalls":4,"maxToolCalls":8}}]}`)},
+		{Name: "delegate_tasks", Arguments: json.RawMessage(`{"tasks":[{"name":"inspect","hero":"workspace-explorer","goal":"Inspect secret=raw","budget":{"maxModelCalls":4,"maxToolCalls":8}}]}`)},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, ToolAllow, decisions[0].Action)
@@ -100,12 +100,12 @@ func TestDelegationApprovalPreviewIsStructuredAndRedacted(t *testing.T) {
 	policy := permissionPolicy(t, domain.ToolPolicyConfig{Mode: string(domain.PermissionAsk),
 		RedactPatterns: []string{`secret=[^\s\"]+`}})
 	call := domain.ToolCall{ID: "delegate", Name: "delegate_tasks", Arguments: json.RawMessage(
-		`{"tasks":[{"name":"inspect","role":"workspace-explorer","goal":"Inspect secret=raw","outputContract":"text-v1","budget":{"maxModelCalls":4,"maxToolCalls":8}}]}`)}
+		`{"tasks":[{"name":"inspect","hero":"workspace-explorer","goal":"Inspect secret=raw","outputContract":"text-v1","budget":{"maxModelCalls":4,"maxToolCalls":8}}]}`)}
 	items := approvalItems([]plannedToolCall{{original: call, effective: call,
 		decision: ToolDecision{Action: ToolRequireApproval, RiskClass: domain.RiskDelegation}, requiresApproval: true}}, policy)
 	require.Len(t, items, 1)
 	require.Len(t, items[0].Delegations, 1)
-	assert.Equal(t, "workspace-explorer", items[0].Delegations[0].RoleHandle)
+	assert.Equal(t, "workspace-explorer", items[0].Delegations[0].HeroHandle)
 	assert.Equal(t, 4, items[0].Delegations[0].Budget.MaxModelCalls)
 	assert.NotContains(t, items[0].Delegations[0].AssignmentPreview, "raw")
 }

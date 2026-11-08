@@ -26,7 +26,7 @@ var (
 
 type Task struct {
 	Name     string                `json:"name" yaml:"name"`
-	Role     string                `json:"role,omitempty" yaml:"role,omitempty"`
+	Hero     string                `json:"hero,omitempty" yaml:"hero,omitempty"`
 	Model    string                `json:"model,omitempty" yaml:"model,omitempty"`
 	Thinking domain.ThinkingEffort `json:"thinking,omitempty" yaml:"thinking,omitempty"`
 	Skills   []string              `json:"skills,omitempty" yaml:"skills,omitempty"`
@@ -131,7 +131,7 @@ func normalizeAndValidate(document *Document) error {
 			return fmt.Errorf("Task id %q must match %s", id, taskIDPattern.String())
 		}
 		task.Name = strings.TrimSpace(task.Name)
-		task.Role = strings.TrimSpace(task.Role)
+		task.Hero = strings.TrimSpace(task.Hero)
 		task.Model = strings.TrimSpace(task.Model)
 		task.Goal = strings.TrimSpace(task.Goal)
 		if task.Name == "" {
@@ -141,9 +141,9 @@ func normalizeAndValidate(document *Document) error {
 			return fmt.Errorf("Task %q goal is required", id)
 		}
 
-		if task.Role != "" {
-			if err := validateScopedRef(task.Role); err != nil {
-				return fmt.Errorf("Task %q role: %w", id, err)
+		if task.Hero != "" {
+			if err := validateScopedRef(task.Hero); err != nil {
+				return fmt.Errorf("Task %q hero: %w", id, err)
 			}
 			if task.Model != "" || task.Thinking != "" || len(task.Skills) != 0 {
 				return fmt.Errorf("Task %q Role-backed execution cannot declare model, thinking, or skills", id)

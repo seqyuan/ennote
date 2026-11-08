@@ -16,7 +16,7 @@ function fulfill(route: Route, data: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ data }) });
 }
 
-test("external Role file changes fail closed and expose Reload and Diff", async ({ page }) => {
+test("external Hero file changes fail closed and expose Reload and Diff", async ({ page }) => {
   let diskChanged = false;
   await page.route("**/api/worker/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
@@ -25,12 +25,12 @@ test("external Role file changes fail closed and expose Reload and Diff", async 
     if (path === "/v1/provider-profiles") return fulfill(route, [provider]);
     if (path === "/v1/model-profiles") return fulfill(route, [model]);
     if (path === "/v1/policy-profiles") return fulfill(route, []);
-    if (path === "/v1/global-roles") return fulfill(route, [{ id: "reviewer", name: "Reviewer", path: "/home/roles/reviewer/role.md", digest: "sha256:old" }]);
-    if (path === "/v1/global-roles/reviewer" && route.request().method() === "GET") {
+    if (path === "/v1/global-heroes") return fulfill(route, [{ id: "reviewer", name: "Reviewer", path: "/home/heroes/reviewer/role.md", digest: "sha256:old" }]);
+    if (path === "/v1/global-heroes/reviewer" && route.request().method() === "GET") {
       const document = diskChanged ? { ...baseDocument, description: "Externally edited description" } : baseDocument;
-      return fulfill(route, { id: "reviewer", name: "Reviewer", path: "/home/roles/reviewer/role.md", digest: diskChanged ? "sha256:new" : "sha256:old", document });
+      return fulfill(route, { id: "reviewer", name: "Reviewer", path: "/home/heroes/reviewer/role.md", digest: diskChanged ? "sha256:new" : "sha256:old", document });
     }
-    if (path === "/v1/global-roles/reviewer" && route.request().method() === "PATCH") {
+    if (path === "/v1/global-heroes/reviewer" && route.request().method() === "PATCH") {
       expect(route.request().postDataJSON().expectedDigest).toBe("sha256:old");
       diskChanged = true;
       return route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: { code: "source_conflict", message: "Role file changed on disk" } }) });
@@ -38,7 +38,7 @@ test("external Role file changes fail closed and expose Reload and Diff", async 
     return route.abort();
   });
 
-  await page.goto("/roles");
+  await page.goto("/heroes");
   const description = page.getByLabel("Description");
   await description.fill("My local edit");
   await description.blur();
@@ -46,7 +46,7 @@ test("external Role file changes fail closed and expose Reload and Diff", async 
   await expect(page.getByRole("button", { name: "Publish", exact: true })).toBeDisabled();
 
   await page.getByRole("button", { name: "Diff", exact: true }).click();
-  const diff = page.getByRole("dialog", { name: "Role file diff" });
+  const diff = page.getByRole("dialog", { name: "Hero file diff" });
   await expect(diff).toContainText("My local edit");
   await expect(diff).toContainText("Externally edited description");
   await diff.getByRole("button", { name: "Close" }).click();

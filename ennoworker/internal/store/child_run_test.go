@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCreateChildRunFrozenRoleAndConfigResolution(t *testing.T) {
+func TestCreateChildRunFrozenHeroAndConfigResolution(t *testing.T) {
 	fixture := newFileRunFixture(t, "child-freeze")
 	ctx := context.Background()
 	runs := fixture.Runs
@@ -58,13 +58,13 @@ func TestCreateChildRunFrozenRoleAndConfigResolution(t *testing.T) {
 	require.NoError(t, err)
 	resolved, err := runs.ResolveAndFreezeConfig(ctx, claimed)
 	require.NoError(t, err)
-	require.NotNil(t, resolved.Effective.Role)
-	assert.Equal(t, "workspace-explorer", resolved.Effective.Role.Handle)
-	assert.Equal(t, "builtin-workspace-explorer", resolved.Effective.Role.ObjectID)
-	assert.Equal(t, "builtin-workspace-explorer-v3", resolved.Effective.Role.VersionID)
+	require.NotNil(t, resolved.Effective.Hero)
+	assert.Equal(t, "workspace-explorer", resolved.Effective.Hero.Handle)
+	assert.Equal(t, "builtin-workspace-explorer", resolved.Effective.Hero.ObjectID)
+	assert.Equal(t, "builtin-workspace-explorer-v3", resolved.Effective.Hero.VersionID)
 	assert.Equal(t, "sha256:c7cf36749030bd0626c24eea7ea325c2b70be64bd2f623b3c94b5fc8b81aa38b",
-		resolved.Effective.Role.ConfigDigest)
-	assert.Equal(t, []string{"read", "ls", "grep", "find", "git_readonly"}, resolved.Effective.Role.AllowedTools)
+		resolved.Effective.Hero.ConfigDigest)
+	assert.Equal(t, []string{"read", "ls", "grep", "find", "git_readonly"}, resolved.Effective.Hero.AllowedTools)
 	// inherit binding resolved the parent's frozen model.
 	assert.Equal(t, parentResolved.Effective.ModelProfileID, resolved.Effective.ModelProfileID)
 

@@ -24,7 +24,7 @@ type Layout struct {
 	Policies     string
 	MCP          string
 	Agents       string
-	Roles        string
+	Heroes        string
 	Graphs       string
 	Skills       string
 	Projects     string
@@ -60,7 +60,7 @@ func ForHome(home string) Layout {
 		Policies:     filepath.Join(configDir, "policies.json"),
 		MCP:          filepath.Join(configDir, "mcp.json"),
 		Agents:       agentsDir,
-		Roles:        filepath.Join(agentsDir, "roles"),
+		Heroes:        filepath.Join(agentsDir, "heroes"),
 		Graphs:       filepath.Join(agentsDir, "graphs"),
 		Skills:       filepath.Join(home, "skills"),
 		Projects:     filepath.Join(home, "projects"),
@@ -84,7 +84,7 @@ func Bootstrap(home string, initialize func(Layout) error) (Layout, error) {
 		return Layout{}, err
 	}
 	for _, directory := range []string{
-		layout.Home, layout.Config, layout.Agents, layout.Roles, layout.Graphs,
+		layout.Home, layout.Config, layout.Agents, layout.Heroes, layout.Graphs,
 		layout.Skills, layout.Projects, layout.Data, layout.Cache, layout.MCPCache,
 		layout.Runtime,
 	} {

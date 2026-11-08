@@ -12,7 +12,7 @@ already left the graph.
 ```
 FlowDefinition (declarative task DAG)
    ↓ publish
-AgentFlowVersion (immutable revision: roles, skills, models, permissions frozen)
+AgentFlowVersion (immutable revision: heroes, skills, models, permissions frozen)
    ↓ enable on a Project, then start
 Anchor Run (the meta-Run: orchestration only, never calls a Provider)
    ↓ one per task
@@ -25,7 +25,7 @@ Three consequences:
   and reasoned about on its own
 - **Every task is its own child Run**: approvals, budget, failure and cancellation are recorded per
   task, so a problem points at a task rather than "the run"
-- **Versions are immutable**: which definition, which role, which model and permissions produced a
+- **Versions are immutable**: which definition, which hero, which model and permissions produced a
   given run stays answerable
 
 ## Defining a flow
@@ -44,13 +44,13 @@ outputs:
 
 tasks:
   inspect:
-    role: explorer@3               # role references carry a version
+    hero: explorer@3               # hero references carry a version
     skills: [bio-workspace]
     goal: read {{samples}} and list samples with QC metrics
     depends: []
 
   stats:
-    role: analyst@2
+    hero: analyst@2
     goal: compute per-sample QC metrics
     depends: [inspect]
 
@@ -60,7 +60,7 @@ tasks:
     depends: [stats]
 
   report:
-    role: writer@1
+    hero: writer@1
     goal: summarise into a report
     depends: [stats]               # same layer as gate, may run in parallel
     next:
@@ -68,7 +68,7 @@ tasks:
       fail: retry
 
   retry:
-    role: analyst@2
+    hero: analyst@2
     goal: repair low-quality samples and recompute
     depends: [gate]
 
@@ -81,11 +81,11 @@ tasks:
 
 | Field | Meaning |
 |---|---|
-| `role` | `role@version`, resolved at publish time; an unresolvable reference fails the publish |
+| `hero` | `hero@version`, resolved at publish time; an unresolvable reference fails the publish |
 | `skills` | skills available to this task |
 | `goal` | the objective handed to the child Run |
 | `depends` | upstream tasks; drives readiness order |
-| `type` | `role` (default, spawns a child Run) / `check` (deterministic command gate) / plus a `terminal` endpoint |
+| `type` | `hero` (default, spawns a child Run) / `check` (deterministic command gate) / plus a `terminal` endpoint |
 | `command` | `check` only: the command to run, through the same policy gate and approvals as a tool call |
 | `fanOut` | read-only parallel expansion, `min`/`max` instances, outputs aggregated in order |
 | `budget` | overrides this task's token ceiling |
@@ -140,7 +140,7 @@ POST /v1/flows/{flowID}/publish
 PUT /v1/projects/{projectID}/graph-bindings/{flowID}
 ```
 
-Publishing fails loudly on: an unresolvable `role@version`, an unknown skill, malformed
+Publishing fails loudly on: an unresolvable `hero@version`, an unknown skill, malformed
 `check`/`fanOut`/`terminal`/`next` structure, an out-of-range parallelism value, or a back-edge without
 a round ceiling.
 
@@ -174,7 +174,7 @@ Recovery semantics:
 
 | Symptom | Cause |
 |---|---|
-| Publish fails: `role@version` cannot be resolved | the role was never published, or the version is wrong |
+| Publish fails: `hero@version` cannot be resolved | the hero was never published, or the version is wrong |
 | The run button does nothing | the flow is still a draft, or the Project has no GraphBinding |
 | Stuck in `pending` | a dependency cycle, or a failed dependency with no `next` fallback |
 | `convergence_exceeded` | the back-edge ceiling is too low, or the repair task never changes its input |

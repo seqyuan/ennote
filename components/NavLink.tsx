@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Sidebar nav item for view switching (Roles / Graphs). Rendered as a
+ * Sidebar nav item for view switching (Heroes / Graphs). Rendered as a
  * button instead of a Link so activating it only swaps the main-area
  * view inside AppShell — the sidebar stays mounted and the URL is
  * updated via history.replaceState (no page navigation).
