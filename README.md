@@ -109,6 +109,19 @@ ennote pack remove seqyuan/cell-qc-review --force          # 覆盖本地编辑 
 
 安装后的 source 默认不可运行：`format: graph` 需要发布 Graph revision；`format: flow` 需要 `POST /v1/flows/{id}/publish` 发布 revision，再由 Project GraphBinding 显式启用。安装器永远不会自动发布或自动启用。
 
+### 从 role 升级到 hero
+
+`role` 这一层已经整体改名为 `hero`（英雄）：类型、`/v1/global-heroes` 路径、`agents/heroes/` 目录、
+冻结配置里的 `hero` 键，一律不再兼容旧名。升级后先跑一次迁移脚本，把旧装机搬到新名字上：
+
+```bash
+npm run migrate:to-heroes            # 预览（默认 dry-run，不写任何东西）
+npm run migrate:to-heroes -- --apply # 执行：agents/roles -> agents/heroes、role.md -> hero.md、
+                                     # 冻结 JSON 的键、messages.speaker_kind
+```
+
+脚本是幂等的，重复执行不会二次改动。`Message.role`（system/user/assistant/tool）不属于这次改名。
+
 ### 从 v0.1.x 升级
 
 v0.1.x 的旧数据库（`data/ennote.db`）不再被读取，但也不会被删除：升级后首次启动会把它（含 `-wal`/`-shm`）原子移动到 `data/legacy-v1/` 并打印一条 `archived legacy V1 database` 警告。迁移完成后再次启动不会改动该归档。需要找回旧数据时，从 `data/legacy-v1/` 手动复制即可。

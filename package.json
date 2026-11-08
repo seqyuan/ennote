@@ -42,6 +42,7 @@
     "test:e2e": "playwright test",
     "check:file-sizes": "node scripts/check-file-sizes.mjs",
     "check:repo-hygiene": "node scripts/check-repo-hygiene.mjs",
+    "migrate:to-heroes": "node scripts/migrate-roles-to-heroes.mjs",
     "check:worker-loopback": "node scripts/check-worker-loopback.mjs",
     "check:test-pairing": "node scripts/check-chat-messages-pairing.mjs",
     "check:commit-message": "node scripts/check-commit-message.mjs",
