@@ -109,6 +109,13 @@ export type ComposerView = {
     templates: { name: string; description: string; argumentHint: string; source: string; editable: boolean }[];
     heroes: { id: string; handle: string; name: string; description?: string }[];
     flows: { name: string; version?: number }[];
+    /** Global Skills the turn may carry; role-free ones are selectable. */
+    skills: { id: string; label: string; description?: string; heroBound: boolean; boundBy: string[] }[];
+    /** Selected Skills and graph live in the hook: submit needs them. */
+    pendingSkills: string[];
+    pendingGraph: { name: string; version?: number } | null;
+    toggleSkill: (id: string) => void;
+    clearPendingGraph: () => void;
     show: boolean;
     onSelect: (name: string) => void;
     onHeroSelect: (heroId: string, handle: string) => void;

@@ -22,6 +22,7 @@ import type { usePromptTemplates } from "@/hooks/usePromptTemplates";
 import type { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
 import { useHeroSelection } from "./useHeroSelection";
 import { useAttachments } from "./useAttachments";
+import { useComposerSkills } from "./useComposerSkills";
 import { usePromptExpansion } from "./usePromptExpansion";
 import type { ChatActions, ComposerView } from "./chat-controller-types";
 
@@ -103,6 +104,9 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
     open: false, instructions: "", busy: false,
   });
   const { heroes, selectedHeroId, setSelectedHeroId } = useHeroSelection(selectedProject);
+  const skillCatalog = useComposerSkills(selectedProject);
+  const [pendingSkills, setPendingSkills] = useState<string[]>([]);
+  const [pendingGraph, setPendingGraph] = useState<{ name: string; version?: number } | null>(null);
   const selectedSessionRef = useRef<string | null>(selectedSession);
 
   // Command expansion + panel (usePromptExpansion). Local aliases preserve every
@@ -188,14 +192,19 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
       } : { text: contextualText };
       const selectedHero = heroes.find((role) => role.id === selectedHeroId) ?? null;
       const endpoint = `/v1/sessions/${encodeURIComponent(sessionAtSend)}/invocations`;
+      const skills = pendingSkills.map((id) => ({ id }));
+      const withSkills = skills.length > 0 ? { ...payload, skills } : payload;
       const body = selectedHero && selectedHero.currentVersionId
-        ? { ...payload, target: { kind: "hero", objectId: selectedHero.id,
+        ? { ...withSkills, target: { kind: "hero", objectId: selectedHero.id,
             versionId: selectedHero.currentVersionId, contextMode: "room" } }
-        : { ...withRunConfig(payload, toolPolicyProfileId, selectedModelId, thinkingEffort), target: { kind: "host" } };
+        : { ...withRunConfig(withSkills, toolPolicyProfileId, selectedModelId, thinkingEffort), target: { kind: "host" } };
       const turn = await apiFetch<TurnSubmission>(endpoint, {
         method: "POST", headers: { "Idempotency-Key": genId() }, body: JSON.stringify(body),
       });
       if (selectedSessionRef.current !== sessionAtSend) return;
+      // One-shot: a Skill chosen for this turn must not silently apply to the
+      // next one. The Hero stays, because it answers "who am I talking to".
+      setPendingSkills([]);
       agent.setError(null);
       void agent.watchRun(turn.run as AgentRun);
     } catch (reason) {
@@ -211,7 +220,7 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
       }
     }
   }, [selectedSession, pendingImage, textAttachments, agent, selectedModelId,
-    selectedHeroId, heroes, setInputVersioned, thinkingEffort, clearAttachments, restoreAttachments]);
+    selectedHeroId, heroes, pendingSkills, setInputVersioned, thinkingEffort, clearAttachments, restoreAttachments]);
 
   // Graph invocation is global; the Worker derives Project and workspace from
   // the selected Session when it creates the Run.
@@ -256,6 +265,13 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
     if (invokeMatch) {
       const [name, version] = invokeMatch[1].split("@");
       void invokeAgentFlow(name, version ? Number(version) : undefined, invokeMatch[2]);
+      return;
+    }
+    if (pendingGraph) {
+      const params = input.trim() || undefined;
+      void invokeAgentFlow(pendingGraph.name, pendingGraph.version, params).then((ok) => {
+        if (ok) setPendingGraph(null);
+      });
       return;
     }
     const flowToken = input.trim().match(/^@graph:([\w.-]+)(?:@(\d+))?(?:\s+([\s\S]+))?$/);
@@ -440,6 +456,12 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
       heroes: heroes.map((role) => ({ id: role.id, handle: role.handle, name: role.name, description: role.description })),
       flows: flowCatalog,
       show: commandPanelOpen && !promptPanelDismissed,
+      skills: skillCatalog.skills,
+      pendingSkills,
+      pendingGraph,
+      toggleSkill: (id: string) => setPendingSkills((current) =>
+        current.includes(id) ? current.filter((item) => item !== id) : [...current, id]),
+      clearPendingGraph: () => setPendingGraph(null),
       onSelect: (name: string) => {
         setPromptPanelDismissed(false);
         setInputVersioned(`/${name} `);
@@ -447,11 +469,12 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
       onHeroSelect: (heroId: string) => {
         setSelectedHeroId(heroId);
         setPromptPanelDismissed(true);
-        setInputVersioned("");
       },
       onFlowSelect: (name: string, version?: number) => {
+        // A graph invocation is a pill, not a token in the draft: the message
+        // box should contain what the user typed, nothing the UI inserted.
         setPromptPanelDismissed(false);
-        setInputVersioned(`@graph:${name}${version ? `@${version}` : ""} `);
+        setPendingGraph({ name, version });
       },
       onClose: () => setPromptPanelDismissed(true),
       expanding,

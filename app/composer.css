@@ -1083,3 +1083,156 @@ html.dark .composer-editor.composer-no-session::after {
 .composer-drop-zone {
   border-radius: var(--cmp-radius-panel);
 }
+
+/* ---- Composer picker: one vertical, grouped, collapsible panel ---- */
+.composer-picker {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: var(--layer-popover);
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--cmp-border);
+  border-radius: var(--cmp-radius-menu);
+  background: var(--cmp-fill);
+  box-shadow: var(--cmp-shadow-menu);
+}
+.composer-picker-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--cmp-border);
+  color: var(--cmp-text-tertiary);
+}
+.composer-picker-filter input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--cmp-text-primary);
+  font: inherit;
+}
+.composer-picker-body {
+  max-height: min(50vh, 320px);
+  overflow-y: auto;
+  padding: 4px;
+  overscroll-behavior: contain;
+}
+.composer-picker-group + .composer-picker-group { margin-top: 2px; }
+.composer-picker-group-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px 3px;
+  border: none;
+  background: var(--cmp-fill);
+  color: var(--cmp-text-tertiary);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.composer-picker-group-head:disabled { cursor: default; }
+.composer-picker-group-count { margin-left: auto; font-variant-numeric: tabular-nums; }
+.composer-picker-group-tag {
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  background: var(--cmp-hover);
+  font-size: var(--text-xs);
+}
+.composer-picker-group-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: currentColor;
+}
+.composer-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: var(--cmp-radius-item);
+  background: transparent;
+  color: var(--cmp-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.composer-picker-item:hover:not([aria-disabled="true"]),
+.composer-picker-item.active { background: var(--cmp-hover); }
+.composer-picker-item[aria-disabled="true"] { color: var(--cmp-text-tertiary); cursor: default; }
+.composer-picker-item-icon { display: inline-flex; flex: none; color: var(--cmp-text-tertiary); }
+.composer-picker-item-copy { display: flex; flex: 1; flex-direction: column; gap: 1px; min-width: 0; }
+.composer-picker-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-md);
+}
+.composer-picker-item-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cmp-text-tertiary);
+  font-size: var(--text-xs);
+}
+.composer-picker-item-hint {
+  flex: none;
+  color: var(--cmp-text-tertiary);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+.composer-picker-empty { padding: 12px 10px; color: var(--cmp-text-tertiary); }
+
+/* ---- Addressed targets (Hero / graph / Skill) sit on the attachment shelf ---- */
+.composer-target-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  width: min(100%, 952px);
+  margin: 0 auto 6px;
+  box-sizing: border-box;
+  padding: 0 2px;
+}
+.composer-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 260px;
+  padding: 2px 4px 2px 8px;
+  border: 1px solid var(--cmp-border);
+  border-radius: var(--radius-full);
+  background: var(--cmp-fill);
+  color: var(--cmp-text-secondary);
+  font-size: var(--text-sm);
+}
+.composer-pill-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-pill button {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--cmp-text-tertiary);
+  cursor: pointer;
+}
+.composer-pill button:hover { background: var(--cmp-hover); color: var(--cmp-text-primary); }
+.composer-pill.is-hero { color: var(--cmp-text-primary); }
+.composer-pill.is-graph { color: var(--cmp-text-primary); }

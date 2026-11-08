@@ -75,8 +75,12 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
 
     await expect(page.getByText(`@${hero.handle}`, { exact: true }).first()).toBeVisible();
     await expect(page.getByText("The boundary is explicit.")).toBeVisible();
-    await page.getByTitle("Invocation target").click();
-    await page.getByRole("option", { name: new RegExp(hero.handle) }).click();
+    // Addressing is an input action now: type the token, pick the Hero, get a pill.
+    await page.getByRole("textbox", { name: "Message the agent" }).fill(`@hero:${hero.handle.slice(0, 4)}`);
+    const picker = page.locator(".composer-picker");
+    await expect(picker).toBeVisible();
+    await picker.getByRole("option", { name: new RegExp(hero.handle) }).click();
+    await expect(page.locator(".composer-pill.is-hero")).toContainText(`@${hero.handle}`);
     await expect(page.getByTitle("Default Model")).toBeDisabled();
     await expect(page.getByRole("button", { name: /Permission mode/ })).toBeDisabled();
     await page.getByRole("textbox", { name: "Message the agent" }).fill("Check the new policy.");

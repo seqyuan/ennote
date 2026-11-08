@@ -1,11 +1,13 @@
 "use client";
 
 import {
-  ArrowUp, File, FileSpreadsheet, FileText, ImagePlus, ListPlus, Minimize2, Paperclip, Plus, Presentation, Square, X,
+  ArrowUp, Bot, File, FileSpreadsheet, FileText, ImagePlus, ListPlus, Minimize2, Paperclip, Plus,
+  Presentation, Sparkles, Square, Workflow, X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent as ReactChangeEvent, type DragEvent, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useT } from "@/components/LocaleProvider";
-import { HeroTargetPicker } from "@/components/HeroTargetPicker";
+import { ComposerPicker } from "@/components/ComposerPicker";
+import { ComposerTargetPills } from "@/components/ComposerTargetPills";
 import { PermissionChip } from "@/components/PermissionChip";
 import { ModelSelect } from "@/components/ModelSelect";
 import { ContextMeter } from "@/components/ContextMeter";
@@ -13,8 +15,8 @@ import type { ModelProfile, ProviderProfile, HeroSummary } from "@/components/se
 import type { SessionContextUsage, SessionStats } from "@/hooks/chat-controller-types";
 import { artifactPreviewURL } from "@/lib/artifacts";
 import type { PermissionMode, ThinkingEffort } from "@/lib/permission-mode";
-import { PromptCommandMenu } from "./PromptCommandMenu";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
+import { useComposerPicker, type ComposerPickerData } from "@/hooks/useComposerPicker";
 import { QueueDock, type QueuedMessage } from "./QueueDock";
 
 const COMPOSER_MIN_HEIGHT = 120;
@@ -105,15 +107,8 @@ interface ComposerProps {
   welcome?: boolean;
   /** No session selected: the inert composer requests a project (welcome picker). */
   onRequestProject?: () => void;
-  // Prompt templates + @addressing panel.
-  promptTemplates: { name: string; description: string; argumentHint: string; source: string; editable: boolean }[];
-  panelHeroes: { id: string; handle: string; name: string; description?: string }[];
-  panelFlows: { name: string; version?: number; description?: string }[];
-  showPromptPanel: boolean;
-  onPromptSelect: (name: string) => void;
-  onHeroSelect: (heroId: string, handle: string) => void;
-  onFlowSelect: (name: string, version?: number) => void;
-  onPromptPanelClose: () => void;
+  /** The picker's catalogue and the turn's addressed targets. */
+  picker: ComposerPickerData;
   expanding: boolean;
   expandDiag: string | null;
   contextUsage: SessionContextUsage | null;
@@ -127,8 +122,7 @@ export function Composer({
   permissionMode, permissionReady, setPermissionMode, models, providers, selectedModelId, setSelectedModelId, thinkingEffort, setThinkingEffort,
   heroes, selectedHeroId, setSelectedHeroId, textAttachments, removeTextAttachment, pendingImage, clearPendingImage, attachFiles, uploadImage, submit, steer, steerText, followUp, cancel, cancelFollowUp, compactSession,
   pendingFollowUps,
-  promptTemplates, showPromptPanel, onPromptSelect, onPromptPanelClose, expanding, expandDiag,
-  panelHeroes, panelFlows, onHeroSelect, onFlowSelect, contextUsage, stats, focusNonce,
+  picker, expanding, expandDiag, contextUsage, stats, focusNonce,
   onRequestProject, inert = false, welcome = false,
 }: ComposerProps) {
   const textarea = useRef<HTMLTextAreaElement>(null);
@@ -263,6 +257,12 @@ export function Composer({
   }, [cancelFollowUp, steerText]);
 
   const canAttach = Boolean(selectedSession) && !activeRun && !compacting;
+  const composerPicker = useComposerPicker({
+    input, setInput, data: picker, canAct: canAttach,
+    onAttachFile: () => fileInput.current?.click(),
+    onAttachImage: () => imageInput.current?.click(),
+    onCompact: compactSession,
+  });
   const handleDragEnter = useCallback((event: DragEvent) => {
     if (!canAttach || !event.dataTransfer.types.includes("Files")) return;
     event.preventDefault();
@@ -330,6 +330,18 @@ export function Composer({
         </div>
       )}
 
+      <ComposerTargetPills
+        hero={picker.heroes.find((hero) => hero.id === picker.selectedHeroId) ?? null}
+        graph={picker.pendingGraph}
+        skills={picker.pendingSkills.map((id) => {
+          const skill = picker.skills.find((entry) => entry.id === id);
+          return { id, label: skill?.label ?? id };
+        })}
+        onClearHero={() => picker.onSelectHero("", "")}
+        onClearGraph={picker.onClearGraph}
+        onRemoveSkill={picker.onToggleSkill}
+      />
+
       <form className="composer" onSubmit={onSubmit} ref={form}>
         <div
           className="composer-resizer"
@@ -372,22 +384,20 @@ export function Composer({
               </div>
             </div>
           )}
-          {showPromptPanel && (
-            <PromptCommandMenu
-              templates={promptTemplates}
-              heroes={panelHeroes}
-              flows={panelFlows}
-              input={input}
-              onSelectTemplate={onPromptSelect}
-              onSelectHero={onHeroSelect}
-              onSelectFlow={onFlowSelect}
-              onClose={onPromptPanelClose}
-            />
-          )}
+          <ComposerPicker
+            open={composerPicker.open}
+            sections={composerPicker.sections}
+            filter={composerPicker.filter}
+            showFilter={composerPicker.fromPlus}
+            ariaLabel={t("composer.picker")}
+            onFilterChange={composerPicker.setPlusFilter}
+            onPick={composerPicker.pick}
+            onClose={composerPicker.close}
+          />
           <textarea
             ref={textarea}
             value={input}
-            onChange={(event) => setInput(event.target.value)}
+            onChange={composerPicker.onInputChange}
             onKeyDown={onKeyDown}
             rows={1}
             readOnly={inert}
@@ -425,11 +435,11 @@ export function Composer({
               <button
                 type="button"
                 className="composer-plus"
-                aria-expanded={configOpen}
+                aria-expanded={composerPicker.open}
                 aria-label={t("composer.configureRun")}
                 title={t("composer.configureRun")}
                 disabled={!selectedSession || compacting}
-                onClick={() => setConfigOpen((value) => !value)}
+                onClick={composerPicker.toggle}
               >
                 <Plus size={14} aria-hidden="true" />
               </button>
@@ -459,8 +469,6 @@ export function Composer({
             composer, not inside its border. Keeping it after the editor also keeps
             the tab order following the text area instead of preceding it. */}
         <div className="composer-context-bar" aria-label={t("composer.runContext")}>
-          <HeroTargetPicker heroes={heroes} selectedHeroId={selectedHeroId} onSelect={setSelectedHeroId}
-            disabled={!selectedSession || activeRun || compacting} />
           <PermissionChip
             permissionMode={permissionMode}
             permissionReady={permissionReady}

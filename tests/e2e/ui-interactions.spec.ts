@@ -43,15 +43,15 @@ test("manual compaction uses an inline prompt bar and submits the focus instruct
   });
   await openConversation(page);
 
-  // Attach / compact tools live in the "+" config panel.
+  // Attach / compact are the picker's pinned Actions group, behind "+".
   const configBtn = page.getByRole("button", { name: "Configure run" });
   const openConfig = async () => {
     if ((await configBtn.getAttribute("aria-expanded")) !== "true") await configBtn.click();
   };
 
-  // The compact button opens the inline bar instead of a native prompt.
+  // The compact action opens the inline bar instead of a native prompt.
   await openConfig();
-  await page.getByRole("button", { name: "Compact context" }).click();
+  await page.locator(".composer-picker").getByRole("option", { name: /Compact context/ }).click();
   await expect(page.getByText("Create context checkpoint")).toBeVisible();
   await expect(page.getByPlaceholder("Optional focus for the checkpoint…")).toBeVisible();
 
@@ -63,7 +63,7 @@ test("manual compaction uses an inline prompt bar and submits the focus instruct
 
   // Confirm path submits the focus instruction.
   await openConfig();
-  await page.getByRole("button", { name: "Compact context" }).click();
+  await page.locator(".composer-picker").getByRole("option", { name: /Compact context/ }).click();
   await page.getByPlaceholder("Optional focus for the checkpoint…").fill("Keep the conclusion section intact");
   await page.getByRole("button", { name: "Create checkpoint" }).click();
   await expect.poll(() => compactionBody).not.toBeNull();

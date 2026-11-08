@@ -126,14 +126,15 @@ test("panel opens on /, filters by prefix, selects with click", async ({ page })
   const textarea = page.locator("textarea[aria-label]");
   await textarea.fill("/re");
   // Panel should be visible with matching entries.
-  const panel = page.locator(".prompt-command-menu");
+  const panel = page.locator(".composer-picker");
   await expect(panel).toBeVisible();
   // "review" matches prefix; "deploy" doesn't match "re".
-  await expect(panel.getByText("/review")).toBeVisible();
-  await expect(panel.getByText("/deploy")).not.toBeVisible();
+  const templates = panel.getByRole("group", { name: "Templates" });
+  await expect(templates.getByText("/review")).toBeVisible();
+  await expect(templates.getByText("/deploy")).not.toBeVisible();
 
   // Click on "review".
-  await panel.getByText("/review").click();
+  await panel.getByRole("group", { name: "Templates" }).getByText("/review").click();
   // The draft must be replaced with "/review ".
   await expect(textarea).toHaveValue("/review ");
   // Panel must close (since there's a space after the name).
@@ -145,7 +146,7 @@ test("panel closes when argument whitespace is typed", async ({ page }) => {
   const textarea = page.locator("textarea[aria-label]");
 
   await textarea.fill("/review");
-  const panel = page.locator(".prompt-command-menu");
+  const panel = page.locator(".composer-picker");
   await expect(panel).toBeVisible();
 
   await textarea.fill("/review alpha");

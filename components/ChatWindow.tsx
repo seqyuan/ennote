@@ -273,9 +273,20 @@ export function ChatWindow({
           pendingImage={composer.pendingImage} clearPendingImage={composer.clearPendingImage}
           attachFiles={composer.attachFiles} uploadImage={composer.uploadImage} submit={actions.submit} steer={actions.steer} steerText={actions.steerText} followUp={actions.followUp} cancel={run.cancel} cancelFollowUp={run.cancelFollowUp} compactSession={composer.compactSession}
           pendingFollowUps={run.pendingFollowUps}
-          promptTemplates={composer.promptPanel.templates} showPromptPanel={composer.promptPanel.show} onPromptSelect={composer.promptPanel.onSelect}
-          panelHeroes={composer.promptPanel.heroes} panelFlows={composer.promptPanel.flows} onHeroSelect={composer.promptPanel.onHeroSelect} onFlowSelect={composer.promptPanel.onFlowSelect}
-          onPromptPanelClose={composer.promptPanel.onClose}
+          picker={{
+            templates: composer.promptPanel.templates,
+            heroes: composer.promptPanel.heroes,
+            graphs: composer.promptPanel.flows,
+            skills: composer.promptPanel.skills,
+            pendingSkills: composer.promptPanel.pendingSkills,
+            pendingGraph: composer.promptPanel.pendingGraph,
+            selectedHeroId: composer.selectedHeroId,
+            onSelectTemplate: composer.promptPanel.onSelect,
+            onSelectHero: composer.promptPanel.onHeroSelect,
+            onSelectGraph: composer.promptPanel.onFlowSelect,
+            onToggleSkill: composer.promptPanel.toggleSkill,
+            onClearGraph: composer.promptPanel.clearPendingGraph,
+          }}
           expanding={composer.promptPanel.expanding} expandDiag={composer.promptPanel.expandDiag}
           contextUsage={run.contextUsage} stats={run.stats} />
       </div>

@@ -44,6 +44,16 @@ async function mockBackend(page: Page) {
     }
     if (path === `/v1/global-heroes/${role.id}/versions`) return fulfill(route, [{ version: 1, publishedAt: now }]);
     if (path === "/v1/graphs" && method === "GET") return fulfill(route, graphs);
+    if (path === "/v1/skills" && method === "GET") {
+      return fulfill(route, {
+        skills: [
+          { skillId: "cell-qc", name: "cell-qc", description: "QC tables", heroBound: false, boundBy: [] },
+          { skillId: "review-guard", name: "review-guard", description: "Bound to the reviewer hero",
+            heroBound: true, boundBy: ["security-reviewer"] },
+        ],
+        diagnostics: [],
+      });
+    }
     return route.abort();
   });
 }
@@ -58,38 +68,74 @@ async function openSession(page: Page) {
 test("typing @hero completes a hero target and clears the token", async ({ page }) => {
   await openSession(page);
   const textarea = page.locator("textarea[aria-label]");
-  const panel = page.locator(".prompt-command-menu");
+  const panel = page.locator(".composer-picker");
 
   await textarea.fill("@hero:sec");
   await expect(panel).toBeVisible();
-  await expect(panel.getByText("@hero:security-reviewer")).toBeVisible();
+  const heroes = panel.getByRole("group", { name: "Heroes" });
+  await expect(heroes.getByText("@security-reviewer")).toBeVisible();
 
-  await panel.getByText("@hero:security-reviewer").click();
-  // The token is consumed and the hero target is selected instead.
+  await heroes.getByText("@security-reviewer").click();
+  // The token is consumed and the hero becomes a pill on the attachment shelf.
   await expect(textarea).toHaveValue("");
   await expect(panel).not.toBeVisible();
-  await expect(page.locator(".hero-target-trigger")).toContainText("@security-reviewer");
+  await expect(page.locator(".composer-pill.is-hero")).toContainText("@security-reviewer");
 });
 
-test("typing @graph completes a graph invocation with version", async ({ page }) => {
+test("typing @graph picks a graph invocation as a pill", async ({ page }) => {
   await openSession(page);
   const textarea = page.locator("textarea[aria-label]");
-  const panel = page.locator(".prompt-command-menu");
+  const panel = page.locator(".composer-picker");
 
   await textarea.fill("@graph:go-");
   await expect(panel).toBeVisible();
-  await expect(panel.getByText("@graph:go-review@2")).toBeVisible();
+  const graphs = panel.getByRole("group", { name: "Graphs" });
+  await expect(graphs.getByText("go-review")).toBeVisible();
 
-  await panel.getByText("@graph:go-review@2").click();
-  // The invocation token is inserted; the existing submit gate parses it.
-  await expect(textarea).toHaveValue("@graph:go-review@2 ");
+  await graphs.getByText("go-review").click();
+  // A graph invocation is a pill, not text the UI inserted into the draft.
+  await expect(textarea).toHaveValue("");
   await expect(panel).not.toBeVisible();
+  await expect(page.locator(".composer-pill.is-graph")).toContainText("go-review@2");
+});
+
+test("typing / lists global skills and keeps the bound ones out of reach", async ({ page }) => {
+  await openSession(page);
+  const textarea = page.locator("textarea[aria-label]");
+  const panel = page.locator(".composer-picker");
+
+  await textarea.fill("/cell");
+  await expect(panel).toBeVisible();
+  const skills = panel.getByRole("group", { name: "Skills" });
+  await expect(skills.getByText("/cell-qc")).toBeVisible();
+
+  await skills.getByText("/cell-qc").click();
+  await expect(page.locator(".composer-pill.is-skill")).toContainText("/cell-qc");
+  await expect(textarea).toHaveValue("");
+});
+
+test("a skill a hero already loads is listed read-only, not offered", async ({ page }) => {
+  await openSession(page);
+  const textarea = page.locator("textarea[aria-label]");
+
+  // Clear the filter so every group is visible, then open the bound group.
+  await textarea.fill("/");
+  const panel = page.locator(".composer-picker");
+  await expect(panel).toBeVisible();
+  const boundHead = panel.getByRole("button", { name: /Loaded by a Hero/ });
+  await boundHead.click();
+  const bound = panel.getByRole("group", { name: /Loaded by a Hero/ });
+  const row = bound.getByRole("option", { name: /review-guard/ });
+  await expect(row).toHaveAttribute("aria-disabled", "true");
+  // A read-only row is not selectable, so no Skill pill can appear from it.
+  await expect(page.locator(".composer-pill.is-skill")).toHaveCount(0);
+  await expect(row).toHaveAccessibleName(/security-reviewer/);
 });
 
 test("@ addressing does not open when no match exists", async ({ page }) => {
   await openSession(page);
   const textarea = page.locator("textarea[aria-label]");
-  const panel = page.locator(".prompt-command-menu");
+  const panel = page.locator(".composer-picker");
 
   await textarea.fill("@hero:zzz");
   await expect(panel).not.toBeVisible();
