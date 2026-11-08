@@ -215,7 +215,7 @@ CREATE TABLE delegation_items (
     group_id         TEXT NOT NULL REFERENCES delegation_groups(id),
     child_run_id     TEXT REFERENCES agent_runs(id),
     name             TEXT NOT NULL,
-    hero_version_id  TEXT NOT NULL,
+    role_version_id  TEXT NOT NULL,
     assignment_json  TEXT NOT NULL DEFAULT '{}',
     output_contract  TEXT NOT NULL DEFAULT 'text-v1',
     budget_json      TEXT NOT NULL DEFAULT '{}',
@@ -223,7 +223,7 @@ CREATE TABLE delegation_items (
     status           TEXT NOT NULL DEFAULT 'pending',
     ordinal          INTEGER NOT NULL,
     created_at       TEXT NOT NULL, depends_json TEXT NOT NULL DEFAULT '[]', skills_json TEXT NOT NULL DEFAULT '[]',
-    hero_meta_json TEXT NOT NULL DEFAULT '{}',
+    role_meta_json TEXT NOT NULL DEFAULT '{}',
     UNIQUE(group_id, ordinal),
     UNIQUE(child_run_id)
 );
@@ -334,8 +334,8 @@ CREATE TABLE model_calls (
 CREATE TABLE room_member_instances (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    hero_id TEXT NOT NULL,
-    created_at TEXT NOT NULL, hero_version_id TEXT,
+    role_id TEXT NOT NULL,
+    created_at TEXT NOT NULL, role_version_id TEXT,
     UNIQUE(session_id, id)
 );
 CREATE TABLE run_agent_flow (
@@ -370,7 +370,7 @@ CREATE TABLE run_agent_flow_nodes (
     run_id          TEXT NOT NULL REFERENCES run_agent_flow(run_id),
     task_index      INTEGER NOT NULL,
     handle          TEXT NOT NULL,
-    hero_version_id TEXT,
+    role_version_id TEXT,
     skill_digests_json TEXT NOT NULL DEFAULT '[]',
     goal_digest     TEXT,
     goal_text       TEXT,
@@ -383,7 +383,7 @@ CREATE TABLE run_agent_flow_nodes (
     error_code      TEXT,
     created_at      TEXT NOT NULL,
     finished_at     TEXT, child_run_ids_json TEXT NOT NULL DEFAULT '[]', read_only INTEGER NOT NULL DEFAULT 0, writes_json TEXT NOT NULL DEFAULT '[]',
-    hero_definition_json TEXT NOT NULL DEFAULT '',
+    role_definition_json TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (run_id, task_index)
 );
 CREATE TABLE run_budgets (
@@ -642,8 +642,7 @@ CREATE TABLE "turns" (
     target_version_id            TEXT,
     target_participant_instance_id TEXT REFERENCES room_member_instances(id),
     context_mode                 TEXT NOT NULL DEFAULT 'room',
-    reply_to_json                TEXT NOT NULL DEFAULT '[]',
-    skills_json                  TEXT NOT NULL DEFAULT '[]'
+    reply_to_json                TEXT NOT NULL DEFAULT '[]'
 );
 CREATE TABLE usage_records (
     id          TEXT PRIMARY KEY,
@@ -733,9 +732,9 @@ CREATE UNIQUE INDEX ux_execution_checkpoint_pending
     WHERE status IN ('pending', 'executing');
 CREATE UNIQUE INDEX ux_model_calls_run_generation_iteration_purpose_attempt_source
     ON model_calls(run_id, request_generation, iteration, purpose, attempt, source_artifact_id);
-CREATE UNIQUE INDEX ux_room_members_hero_version
-ON room_member_instances(session_id, hero_id, hero_version_id)
-WHERE hero_version_id IS NOT NULL;
+CREATE UNIQUE INDEX ux_room_members_role_version
+ON room_member_instances(session_id, role_id, role_version_id)
+WHERE role_version_id IS NOT NULL;
 CREATE UNIQUE INDEX ux_run_context_compactions_one_active
     ON run_context_compactions(run_id) WHERE status IN ('planned','running');
 CREATE UNIQUE INDEX ux_run_context_compactions_reuse
@@ -800,17 +799,17 @@ BEGIN
 END;
 CREATE TRIGGER messages_attribution_validate_insert
 BEFORE INSERT ON messages
-WHEN NEW.speaker_kind NOT IN ('user', 'host', 'hero', 'workflow', 'room', 'system')
+WHEN NEW.speaker_kind NOT IN ('user', 'host', 'role', 'workflow', 'room', 'system')
   OR NEW.visibility NOT IN ('public', 'private', 'room_control', 'legacy_execution')
-  OR (NEW.addressee_kind IS NOT NULL AND NEW.addressee_kind NOT IN ('host', 'room', 'hero', 'graph', 'workflow'))
+  OR (NEW.addressee_kind IS NOT NULL AND NEW.addressee_kind NOT IN ('host', 'room', 'role', 'graph', 'workflow'))
 BEGIN
     SELECT RAISE(ABORT, 'message_attribution_invalid');
 END;
 CREATE TRIGGER messages_attribution_validate_update
 BEFORE UPDATE OF speaker_kind, visibility, addressee_kind ON messages
-WHEN NEW.speaker_kind NOT IN ('user', 'host', 'hero', 'workflow', 'room', 'system')
+WHEN NEW.speaker_kind NOT IN ('user', 'host', 'role', 'workflow', 'room', 'system')
   OR NEW.visibility NOT IN ('public', 'private', 'room_control', 'legacy_execution')
-  OR (NEW.addressee_kind IS NOT NULL AND NEW.addressee_kind NOT IN ('host', 'room', 'hero', 'graph', 'workflow'))
+  OR (NEW.addressee_kind IS NOT NULL AND NEW.addressee_kind NOT IN ('host', 'room', 'role', 'graph', 'workflow'))
 BEGIN
     SELECT RAISE(ABORT, 'message_attribution_invalid');
 END;

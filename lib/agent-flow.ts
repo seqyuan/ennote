@@ -2,13 +2,13 @@
 // suggestions. Kept dependency-free so the UI, unit tests, and e2e mocks
 // share one canonical YAML serializer.
 
-export type FlowTaskKind = "role" | "check" | "terminal";
+export type FlowTaskKind = "hero" | "check" | "terminal";
 
 export interface TaskDraft {
   id: string;
   name: string;
   kind: FlowTaskKind;
-  role: string;
+  hero: string;
   skills: string[];
   goal: string;
   depends: string[];
@@ -38,8 +38,8 @@ export function emptyTask(name: string): TaskDraft {
   return {
     id: `task-${Math.random().toString(36).slice(2)}`,
     name,
-    kind: "role",
-    role: "",
+    kind: "hero",
+    hero: "",
     skills: [],
     goal: "",
     depends: [],
@@ -74,7 +74,7 @@ type RawFlowDefinition = {
 
 type RawTask = {
   type?: string;
-  role?: string;
+  hero?: string;
   skills?: string[];
   goal?: string;
   depends?: string[];
@@ -87,10 +87,10 @@ type RawTask = {
 export function flowToDraft(def: RawFlowDefinition | undefined, id: string): FlowDraft {
   if (!def) return emptyDraft(id);
   const tasks = Object.entries(def.tasks ?? {}).map(([name, task]) => {
-    const kind: FlowTaskKind = task.terminal ? "terminal" : task.type === "check" ? "check" : "role";
+    const kind: FlowTaskKind = task.terminal ? "terminal" : task.type === "check" ? "check" : "hero";
     return {
       id: `task-${Math.random().toString(36).slice(2)}`, name,
-      kind, role: task.role ?? "", skills: task.skills ?? [], goal: task.goal ?? "",
+      kind, hero: task.hero ?? "", skills: task.skills ?? [], goal: task.goal ?? "",
       depends: task.depends ?? [], budgetTokens: String(task.budget?.tokens ?? ""),
       command: task.command ?? "", outputPort: task.terminal?.output ?? "",
       writes: task.writes ?? [],
@@ -150,12 +150,12 @@ export function draftToYAML(draft: FlowDraft): string {
       lines.push(`    terminal: {status: success, output: ${task.outputPort || "report"}}`);
       lines.push(`    output: ${task.outputPort || "report"}`);
     } else {
-      lines.push(`    role: ${task.role}`);
+      lines.push(`    hero: ${task.hero}`);
       if (task.skills.length > 0) lines.push(`    skills: [${task.skills.join(", ")}]`);
       lines.push(`    goal: ${jsonQuote(task.goal)}`);
     }
     if (task.depends.length > 0) lines.push(`    depends: [${task.depends.join(", ")}]`);
-    if (task.kind === "role") {
+    if (task.kind === "hero") {
       if (task.budgetTokens) {
         lines.push(`    budget: {tokens: ${Number(task.budgetTokens) || 0}}`);
       }

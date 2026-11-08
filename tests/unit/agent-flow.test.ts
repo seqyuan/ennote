@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { diffText, draftToYAML, emptyTask, flowToDraft, suggestedBudget, variableChips, type FlowDraft } from "../../lib/agent-flow";
 
 function sampleDraft(): FlowDraft {
-  const producer = { ...emptyTask("producer"), role: "flow-worker@1", skills: ["go-dev"], goal: "Implement {inputs.target}", budgetTokens: "50000" };
-  const reviewer = { ...emptyTask("reviewer"), role: "flow-worker@1", goal: "Review {task.producer.output.changedFiles}", depends: ["producer"] };
+  const producer = { ...emptyTask("producer"), hero: "flow-worker@1", skills: ["go-dev"], goal: "Implement {inputs.target}", budgetTokens: "50000" };
+  const reviewer = { ...emptyTask("reviewer"), hero: "flow-worker@1", goal: "Review {task.producer.output.changedFiles}", depends: ["producer"] };
   const accept = { ...emptyTask("accept"), kind: "terminal" as const, depends: ["reviewer"], outputPort: "report" };
   return {
     id: "go-review", description: "maker-checker",
@@ -26,7 +26,7 @@ describe("Agent Flow editor YAML contract", () => {
     expect(yaml).toContain("parallelism:");
     expect(yaml).toContain("  max: 3");
     expect(yaml).toContain("  allow_disjoint_writers: true");
-    expect(yaml).toContain("role: flow-worker@1");
+    expect(yaml).toContain("hero: flow-worker@1");
     expect(yaml).toContain('goal: "Implement {inputs.target}"');
     expect(yaml).toContain("depends: [producer]");
     expect(yaml).not.toContain("type: check"); // no check task here
@@ -50,7 +50,7 @@ describe("Agent Flow editor YAML contract", () => {
       budget: { maxTotalTokens: 99999 },
       parallelism: { max: 4, allowDisjointWriters: true },
       tasks: {
-        producer: { role: "flow-worker@1", skills: ["go-dev"], goal: "g", budget: { tokens: 4000 } },
+        producer: { hero: "flow-worker@1", skills: ["go-dev"], goal: "g", budget: { tokens: 4000 } },
         gate: { type: "check", command: "go test ./...", depends: ["producer"] },
         accept: { terminal: { status: "success", output: "report" }, depends: ["gate"] },
       },
@@ -58,7 +58,7 @@ describe("Agent Flow editor YAML contract", () => {
     expect(draft.id).toBe("round");
     expect(draft.maxTotalTokens).toBe("99999");
     expect(draft.tasks).toHaveLength(3);
-    expect(draft.tasks[0].kind).toBe("role");
+    expect(draft.tasks[0].kind).toBe("hero");
     expect(draft.tasks[1].kind).toBe("check");
     expect(draft.tasks[2].kind).toBe("terminal");
     expect(draft.tasks[1].command).toBe("go test ./...");
@@ -72,7 +72,7 @@ describe("Agent Flow editor YAML contract", () => {
     const yaml = draftToYAML(draft);
     expect(yaml).toContain('writes: [".docs/plan/design-a1.md"]');
     const back = flowToDraft({
-      tasks: { producer: { role: "flow-worker@1", writes: [".docs/plan/x.md", ".docs/plan/y.md"] } },
+      tasks: { producer: { hero: "flow-worker@1", writes: [".docs/plan/x.md", ".docs/plan/y.md"] } },
     }, "w");
     expect(back.tasks[0].writes).toEqual([".docs/plan/x.md", ".docs/plan/y.md"]);
   });

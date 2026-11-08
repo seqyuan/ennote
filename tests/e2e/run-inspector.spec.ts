@@ -28,7 +28,7 @@ function promptComposition(recorded: boolean) {
     runId: RUN, version: 1, platformVersion: "hosted-v1", digest: "base-digest",
     sections: recorded ? [
       { id: "base", kind: "base", source: "agent_profile", bytes: 512, digest: "aaaa1111bbbb2222" },
-      { id: "role.definition", kind: "role", source: "role:analyst@3", bytes: 2048, digest: "cccc3333dddd4444" },
+      { id: "hero.definition", kind: "hero", source: "hero:analyst@3", bytes: 2048, digest: "cccc3333dddd4444" },
       { id: "skill.preload.report", kind: "skill_preload", source: "role:analyst@3", bytes: 1024, digest: "eeee5555ffff6666", skillId: "report" },
     ] : [],
     sectionsDigest: recorded ? "sections-digest" : "",

@@ -21,11 +21,15 @@ func TestApplyUpgradesALegacySessionDatabase(t *testing.T) {
 	last := migrations[len(migrations)-1]
 
 	// Build the database as the previous applier left it: one legacy version
-	// table, every migration before the last already applied.
+	// table, every migration up to the question-approval schema already applied.
+	// The boundary is pinned rather than "everything except the last one" because
+	// the assertion below names a column that version 10 introduced; later
+	// migrations are exercised by the same Apply call.
+	const legacyBoundary = 10
 	_, err = db.Exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`)
 	require.NoError(t, err)
 	for _, migration := range migrations {
-		if migration.Version == last.Version {
+		if migration.Version >= legacyBoundary {
 			continue
 		}
 		_, err := db.Exec(migration.SQL)
@@ -41,7 +45,7 @@ func TestApplyUpgradesALegacySessionDatabase(t *testing.T) {
 		require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('tool_approval_requests') WHERE name='kind'`).Scan(&count))
 		return count == 1
 	}
-	require.False(t, hasKindColumn(), "the pre-upgrade database must actually predate the last migration")
+	require.False(t, hasKindColumn(), "the pre-upgrade database must actually predate migration 10")
 
 	require.NoError(t, Apply(db))
 

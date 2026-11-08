@@ -10,17 +10,17 @@ const model = { id: "model", providerId: "provider", modelName: "model", display
   supportedThinkingEfforts: ["default"], isDefault: true, status: "active", createdAt: now, updatedAt: now };
 const policies = ["discuss", "ask", "auto"].map((mode) => ({ id: `builtin-tool-${mode}-v1`, name: mode, kind: "tool",
   version: 1, config: { mode }, status: "active", createdAt: now, updatedAt: now }));
-const role = { id: "security-role", handle: "security-reviewer", name: "Security Reviewer", description: "Independent review",
+const hero = { id: "security-hero", handle: "security-reviewer", name: "Security Reviewer", description: "Independent review",
   positioning: "Inspect trust boundaries.", icon: "shield-check", color: "#b91c1c", scope: "project", projectId: project.id,
   status: "active", currentVersionId: "v000001", currentVersion: 1, updatedAt: now };
 const messages = [
   { id: "question", sessionId: session.id, role: "user", status: "complete", speakerKind: "user",
-    speakerSnapshot: { kind: "user", displayName: "You" }, addresseeKind: "role", addresseeObjectId: role.id,
-    addresseeVersionId: role.currentVersionId, visibility: "public", parts: [{ type: "text", text: "Review this boundary." }], createdAt: now },
-  { id: "role-answer", sessionId: session.id, parentMessageId: "question", role: "assistant", status: "complete", runId: "old-run",
-    speakerKind: "role", speakerObjectId: role.id, speakerVersionId: role.currentVersionId, participantInstanceId: "participant",
-    speakerSnapshot: { kind: "role", objectId: role.id, versionId: role.currentVersionId, handle: role.handle,
-      displayName: role.name, color: role.color }, addresseeKind: "room", visibility: "public",
+    speakerSnapshot: { kind: "user", displayName: "You" }, addresseeKind: "hero", addresseeObjectId: hero.id,
+    addresseeVersionId: hero.currentVersionId, visibility: "public", parts: [{ type: "text", text: "Review this boundary." }], createdAt: now },
+  { id: "hero-answer", sessionId: session.id, parentMessageId: "question", role: "assistant", status: "complete", runId: "old-run",
+    speakerKind: "hero", speakerObjectId: hero.id, speakerVersionId: hero.currentVersionId, participantInstanceId: "participant",
+    speakerSnapshot: { kind: "hero", objectId: hero.id, versionId: hero.currentVersionId, handle: hero.handle,
+      displayName: hero.name, color: hero.color }, addresseeKind: "room", visibility: "public",
     parts: [{ type: "text", text: "The boundary is explicit." }], createdAt: now },
 ];
 
@@ -37,15 +37,15 @@ async function mockDirectHero(page: Page, onInvocation: (body: Record<string, un
     if (path === "/v1/model-profiles") return fulfill(route, [model]);
     if (path === "/v1/policy-profiles") return fulfill(route, policies);
     if (path === "/v1/global-heroes") {
-      return fulfill(route, [{ id: role.id, name: role.name, path: "/home/heroes/security-reviewer/role.md", digest: `sha256:${"a".repeat(64)}` }]);
+      return fulfill(route, [{ id: hero.id, name: hero.name, path: "/home/heroes/security-reviewer/hero.md", digest: `sha256:${"a".repeat(64)}` }]);
     }
-    if (path === `/v1/global-heroes/${role.id}`) {
+    if (path === `/v1/global-heroes/${hero.id}`) {
       return fulfill(route, {
-        id: role.id, name: role.name, path: "/home/heroes/security-reviewer/role.md", digest: `sha256:${"a".repeat(64)}`,
-        document: { handle: role.handle, name: role.name, description: role.description, positioning: role.positioning, icon: role.icon, color: role.color },
+        id: hero.id, name: hero.name, path: "/home/heroes/security-reviewer/hero.md", digest: `sha256:${"a".repeat(64)}`,
+        document: { handle: hero.handle, name: hero.name, description: hero.description, positioning: hero.positioning, icon: hero.icon, color: hero.color },
       });
     }
-    if (path === `/v1/global-heroes/${role.id}/versions`) return fulfill(route, [{ version: 1, publishedAt: now }]);
+    if (path === `/v1/global-heroes/${hero.id}/versions`) return fulfill(route, [{ version: 1, publishedAt: now }]);
     if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, [session]);
     if (path === `/v1/sessions/${session.id}`) return fulfill(route, session);
     if (path === `/v1/sessions/${session.id}/active-run`) return fulfill(route, null);
@@ -56,7 +56,7 @@ async function mockDirectHero(page: Page, onInvocation: (body: Record<string, un
       return fulfill(route, { turnId: "new-turn", userMessageId: "new-user", existing: false,
         run: { id: "new-run", sessionId: session.id, runKind: "agent", attempt: 1, status: "queued",
           commitFormatVersion: 2, executionDepth: 0, publishMode: "public_final",
-          speakerSnapshot: { kind: "role", handle: role.handle, displayName: role.name }, contextSnapshot: {},
+          speakerSnapshot: { kind: "hero", handle: hero.handle, displayName: hero.name }, contextSnapshot: {},
           requestedConfig: {}, effectiveConfig: {}, createdAt: now } }, 202);
     }
     if (path === "/v1/runs/new-run/events") {
@@ -73,17 +73,17 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     await mockDirectHero(page, (body) => { invocation = body; });
     await openSession(page, { projectId: project.id, sessionId: session.id });
 
-    await expect(page.getByText(`@${role.handle}`, { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(`@${hero.handle}`, { exact: true }).first()).toBeVisible();
     await expect(page.getByText("The boundary is explicit.")).toBeVisible();
     await page.getByTitle("Invocation target").click();
-    await page.getByRole("option", { name: new RegExp(role.handle) }).click();
+    await page.getByRole("option", { name: new RegExp(hero.handle) }).click();
     await expect(page.getByTitle("Default Model")).toBeDisabled();
     await expect(page.getByRole("button", { name: /Permission mode/ })).toBeDisabled();
     await page.getByRole("textbox", { name: "Message the agent" }).fill("Check the new policy.");
     await page.getByRole("button", { name: "Send", exact: true }).click();
     await expect.poll(() => invocation).toBeTruthy();
-    expect(invocation).toMatchObject({ text: "Check the new policy.", target: { kind: "role", objectId: role.id,
-      versionId: role.currentVersionId, contextMode: "room" } });
+    expect(invocation).toMatchObject({ text: "Check the new policy.", target: { kind: "hero", objectId: hero.id,
+      versionId: hero.currentVersionId, contextMode: "room" } });
     expect(invocation).not.toHaveProperty("config");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   });

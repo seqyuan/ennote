@@ -189,7 +189,7 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
       const selectedHero = heroes.find((role) => role.id === selectedHeroId) ?? null;
       const endpoint = `/v1/sessions/${encodeURIComponent(sessionAtSend)}/invocations`;
       const body = selectedHero && selectedHero.currentVersionId
-        ? { ...payload, target: { kind: "role", objectId: selectedHero.id,
+        ? { ...payload, target: { kind: "hero", objectId: selectedHero.id,
             versionId: selectedHero.currentVersionId, contextMode: "room" } }
         : { ...withRunConfig(payload, toolPolicyProfileId, selectedModelId, thinkingEffort), target: { kind: "host" } };
       const turn = await apiFetch<TurnSubmission>(endpoint, {
