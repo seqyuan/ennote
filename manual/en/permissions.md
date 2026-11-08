@@ -26,14 +26,18 @@ settings" stays answerable afterwards.
 
 ## Three permission modes
 
-| Mode | Behaviour | Suits |
-|---|---|---|
-| `discuss` | read-only tools only. Writes, execution and network are refused | reading and reasoning |
-| `ask` | read-only tools run; writes, execution and network ask first | the default recommendation |
-| `auto` | everything runs | a task you already trust |
+The three modes differ in exactly one thing: **what happens to a tool that is not read-only** —
+writing a file, running a command, fetching the web, delegating. The name is the answer; the value in
+parentheses is what the configuration stores.
 
-The mode can be switched from the top of the Session at any time. Switching affects later tool calls;
-it never replays what already happened.
+| Mode | A non-read-only tool | Suits |
+|---|---|---|
+| Read-only (`discuss`) | is refused | reading and reasoning |
+| Ask (`ask`) | waits for your approval | the default recommendation |
+| Auto (`auto`) | runs | a task you already trust |
+
+Switch it any time from the run-configuration row under the composer. Switching affects later tool
+calls; it never replays what already happened.
 
 ## A Role's permission ceiling
 
@@ -43,8 +47,9 @@ When work is delegated to a Role, the child Run gets **the stricter of the two**
 child permission = min(parent Run's mode, the Role's permission ceiling)
 ```
 
-So a parent in `ask` delegating to an `auto` Role still runs at `ask`, and a `discuss` Role stays
-read-only even under an `auto` parent.
+So a parent in Ask (`ask`) delegating to an Auto (`auto`) Role still runs at `ask`, and a Read-only
+(`discuss`) Role stays read-only even under an `auto` parent. The Permission ceiling dropdown in the
+Role editor is these same three values, ordered by strictness.
 
 When a mode cannot be expressed as a built-in profile (a restricted policy, or one this build does not
 know), the child is pinned to the strictest built-in mode rather than inheriting the looser side: when

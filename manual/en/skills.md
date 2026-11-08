@@ -61,8 +61,8 @@ One consequence is easy to trip over:
 
 !!! warning "Skills depend on the `read` tool"
     If the current policy does not allow `read`, the whole skill catalogue is skipped (recorded as
-    disabled) and the model sees none of it. Usually fine under `discuss`; keep it in mind when you
-    tighten the tool allowlist.
+    disabled) and the model sees none of it. Usually fine under Read-only (`discuss`); keep it in mind
+    when you tighten the tool allowlist.
 
 ## Hierarchy and precedence
 

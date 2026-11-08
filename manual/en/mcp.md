@@ -108,8 +108,8 @@ place, and it is easy to get wrong:
     conversation, no Role) does not apply that filter and sees every selected tool of the binding.
 
 A tool's risk class comes from the server's declaration (`readOnlyHint` feeds it), so **approval still
-follows your current permission mode**: under `ask`, a writing MCP tool asks first; under `discuss` it
-is refused. MCP is not a way around approvals.
+follows your current permission mode**: under Ask (`ask`) a writing MCP tool asks first; under
+Read-only (`discuss`) it is refused. MCP is not a way around approvals.
 
 ## When a server changes its tool list
 
