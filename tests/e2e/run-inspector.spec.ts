@@ -29,7 +29,7 @@ function promptComposition(recorded: boolean) {
     sections: recorded ? [
       { id: "base", kind: "base", source: "agent_profile", bytes: 512, digest: "aaaa1111bbbb2222" },
       { id: "hero.definition", kind: "hero", source: "hero:analyst@3", bytes: 2048, digest: "cccc3333dddd4444" },
-      { id: "skill.preload.report", kind: "skill_preload", source: "role:analyst@3", bytes: 1024, digest: "eeee5555ffff6666", skillId: "report" },
+      { id: "skill.preload.report", kind: "skill_preload", source: "hero:analyst@3", bytes: 1024, digest: "eeee5555ffff6666", skillId: "report" },
     ] : [],
     sectionsDigest: recorded ? "sections-digest" : "",
     composedDigest: recorded ? "composed-digest" : "",
@@ -116,11 +116,11 @@ test("the inspector shows the frozen prompt composition of the run", async ({ pa
 
   // Every contribution is attributed to what produced it, with its byte count.
   await expect(page.locator('[data-prompt-section="base"]')).toContainText("agent_profile");
-  await expect(page.locator('[data-prompt-section="role"]')).toContainText("role:analyst@3");
+  await expect(page.locator('[data-prompt-section="hero"]')).toContainText("hero:analyst@3");
   await expect(page.locator('[data-prompt-section="skill_preload"]')).toContainText("report");
-  await expect(page.locator('[data-prompt-section="role"]')).toContainText("2.0 KiB");
+  await expect(page.locator('[data-prompt-section="hero"]')).toContainText("2.0 KiB");
   // A truncated digest is shown, with the full value available on hover.
-  await expect(page.locator('[data-prompt-section="role"]')).toContainText("cccc3333…");
+  await expect(page.locator('[data-prompt-section="hero"]')).toContainText("cccc3333…");
   await expect(page.locator('[data-prompt-section]')).toHaveCount(3);
 
   // The exact prompt text is available on demand, not dumped by default.
