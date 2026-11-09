@@ -11,3 +11,7 @@
 # strings.Trim. generic-api-key matches it on entropy alone; it is a charset,
 # not a credential.
 e470d6ac7ebfa60803eb84158e0b544695ea76eb:ennoworker/cmd/ennogate/sessions.go:generic-api-key:177
+
+# Self-inflicted: the first version of this file quoted the charset in a
+# comment (7b87c60, line 8), so the scanner reported its own explanation.
+7b87c60c1c6382ce9b11da8cfafac0df5735d0f1:.gitleaksignore:generic-api-key:8
