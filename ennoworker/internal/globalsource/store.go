@@ -1,4 +1,4 @@
-// Package globalsource owns file-authored Role and Graph drafts under ENNOTE_HOME.
+// Package globalsource owns file-authored Hero and Graph drafts under ENNOTE_HOME.
 package globalsource
 
 import (
@@ -136,7 +136,7 @@ func (s Store) ListHeroes() ([]HeroEntry, error) {
 			return entry
 		}
 		if document.Handle != id {
-			entry.Error = fmt.Sprintf("Role handle %q must match directory %q", document.Handle, id)
+			entry.Error = fmt.Sprintf("Hero handle %q must match directory %q", document.Handle, id)
 			return entry
 		}
 		entry.Name = document.Name
@@ -478,7 +478,7 @@ func (s Store) ReadGraphHero(graphID, heroID string) (*heroesource.Document, str
 		return nil, "", err
 	}
 	if document.Handle != heroID {
-		return nil, "", fmt.Errorf("Role handle %q must match directory %q", document.Handle, heroID)
+		return nil, "", fmt.Errorf("Hero handle %q must match directory %q", document.Handle, heroID)
 	}
 	digest, err := heroesource.SourceDigest(document)
 	return document, digest, err
@@ -498,7 +498,7 @@ func (s Store) ReadHero(id string) (*heroesource.Document, string, error) {
 		return nil, "", err
 	}
 	if document.Handle != id {
-		return nil, "", fmt.Errorf("Role handle %q must match directory %q", document.Handle, id)
+		return nil, "", fmt.Errorf("Hero handle %q must match directory %q", document.Handle, id)
 	}
 	digest, err := heroesource.SourceDigest(document)
 	return document, digest, err
@@ -521,19 +521,19 @@ func (s Store) CreateHero(document *heroesource.Document) (*heroesource.Document
 	return document, digest, err
 }
 
-// CreateGraphHero writes a Graph-private Role draft at
+// CreateGraphHero writes a Graph-private Hero draft at
 // agents/graphs/<graphID>/heroes/<handle>/hero.md. The handle in the document is
 // the directory name, so a caller that installs under a renamed handle must
 // rewrite document.Handle first; a mismatch is rejected rather than silently
-// writing a Role a Graph can never resolve. Missing Graph/heroes directories are
-// created 0700; an existing Role is never overwritten.
+// writing a Hero a Graph can never resolve. Missing Graph/heroes directories are
+// created 0700; an existing Hero is never overwritten.
 func (s Store) CreateGraphHero(graphID string, document *heroesource.Document) (string, error) {
 	if document == nil {
-		return "", fmt.Errorf("Role source document is required")
+		return "", fmt.Errorf("Hero source document is required")
 	}
 	handle := strings.TrimSpace(document.Handle)
 	if handle == "" || handle != document.Handle {
-		return "", fmt.Errorf("Role handle %q must match directory %q", document.Handle, handle)
+		return "", fmt.Errorf("Hero handle %q must match directory %q", document.Handle, handle)
 	}
 	encoded, err := heroesource.Encode(document)
 	if err != nil {
@@ -567,13 +567,13 @@ func (s Store) UpdateHero(id, expectedDigest string, mutate func(*heroesource.Do
 		return nil, digest, ErrConflict
 	}
 	if mutate == nil {
-		return nil, digest, fmt.Errorf("Role mutation is required")
+		return nil, digest, fmt.Errorf("Hero mutation is required")
 	}
 	if err := mutate(document); err != nil {
 		return nil, digest, err
 	}
 	if document.Handle != id {
-		return nil, digest, fmt.Errorf("Role handle cannot be changed")
+		return nil, digest, fmt.Errorf("Hero handle cannot be changed")
 	}
 	encoded, err := heroesource.Encode(document)
 	if err != nil {
@@ -603,7 +603,7 @@ func (s Store) DeleteGraph(graphID string) error {
 	return deleteObjectDir(s.GraphsDir(), graphID)
 }
 
-// DeleteGraphHero removes one Graph-private Role directory.
+// DeleteGraphHero removes one Graph-private Hero directory.
 func (s Store) DeleteGraphHero(graphID, handle string) error {
 	if !objectIDPattern.MatchString(graphID) {
 		return fmt.Errorf("invalid object id %q", graphID)
@@ -611,7 +611,7 @@ func (s Store) DeleteGraphHero(graphID, handle string) error {
 	return deleteObjectDir(filepath.Join(s.GraphsDir(), graphID, "heroes"), handle)
 }
 
-// DeleteHero removes the whole Worker-global Role directory, including every
+// DeleteHero removes the whole Worker-global Hero directory, including every
 // published revision.
 func (s Store) DeleteHero(handle string) error {
 	return deleteObjectDir(s.HeroesDir(), handle)

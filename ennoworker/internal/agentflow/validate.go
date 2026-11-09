@@ -137,7 +137,7 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 	// 3. hero@version / skill resolvability; 6. fan_out read-only; 7. budget.
 	totalTaskTokens := int64(0)
 	checkAllowlistMissing := false
-	// writerScopes collects tasks whose Role can mutate (writer class); used by
+	// writerScopes collects tasks whose Hero can mutate (writer class); used by
 	// the allow_disjoint_writers validation.
 	writerScopes := map[string][]string{}
 	for name, task := range def.Tasks {
@@ -197,7 +197,7 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 				}
 				if !readOnly {
 					add(v.fail("fan_out_not_read_only",
-						fmt.Sprintf("task %q fan_out requires the Role allowlist to be fully read-only", name),
+						fmt.Sprintf("task %q fan_out requires the Hero allowlist to be fully read-only", name),
 						field+".fanOut"))
 				}
 			}
@@ -220,7 +220,7 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 				totalTaskTokens += effectiveTokens
 			}
 			// Tasks without an explicit budget contribute 0 to the publish-time
-			// sum: their effective ceiling is the Role's, which the runtime flow
+			// sum: their effective ceiling is the Hero's, which the runtime flow
 			// budget still caps unconditionally.
 			for _, skill := range task.Skills {
 				if !v.Resolver.KnownSkill(ctx, skill) {

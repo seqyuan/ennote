@@ -131,7 +131,7 @@ type FrozenHeroExecution struct {
 	PermissionCeiling PermissionMode `json:"permissionCeiling"`
 	AllowedTools      []string       `json:"allowedTools"`
 	Skills            HeroSkills     `json:"skills"`
-	// FrozenSkills pins the Role's preload Skills by content digest at config
+	// FrozenSkills pins the Hero's preload Skills by content digest at config
 	// freeze time. It is a separate field so old run snapshots (which only have
 	// Skills) stay readable and unpinned; an empty ref digest also stays
 	// unpinned for compatibility.
@@ -366,7 +366,7 @@ const (
 //
 // The vocabulary follows the platform/authoring split of
 // docs/design-philosophy.md: a section the platform owns (base, hero envelope)
-// is closed, while a section that renders an authoring object (Role definition,
+// is closed, while a section that renders an authoring object (Hero definition,
 // Skill body, project instruction file) is open but frozen at Run start.
 type PromptSectionKind string
 

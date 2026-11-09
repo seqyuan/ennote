@@ -9,7 +9,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 )
 
-// resolveFileHeroForDelegation resolves a bare global Role handle to its latest
+// resolveFileHeroForDelegation resolves a bare global Hero handle to its latest
 // published file revision (V2). Graph-local and inline Heroes are never
 // delegated by handle: they are frozen into the delegation item at Run start.
 func (r *DelegationRepo) resolveFileHeroForDelegation(ctx context.Context, sessionID, handle string) (*DelegationHeroSnapshot, error) {
@@ -31,9 +31,9 @@ func (r *DelegationRepo) resolveFileHeroForDelegation(ctx context.Context, sessi
 	definition, diagnostics := (&HeroDiscovery{Models: r.Models}).ResolveDocument(ctx, document)
 	if definition == nil {
 		if len(diagnostics) != 0 {
-			return nil, fmt.Errorf("resolve Role revision: %s", diagnostics[0].Message)
+			return nil, fmt.Errorf("resolve Hero revision: %s", diagnostics[0].Message)
 		}
-		return nil, fmt.Errorf("resolve Role revision")
+		return nil, fmt.Errorf("resolve Hero revision")
 	}
 	_ = projectID // file Heroes are global; no project scoping in V2 delegation
 	return &DelegationHeroSnapshot{

@@ -33,12 +33,12 @@ const explorerHeroDefinitionV3 = `{"schemaVersion":1,"heroPrompt":"You are the W
 
 // explorerConfigDigestV3 is the fixture's stored config_digest for
 // builtin-workspace-explorer-v3. The frozen meta carries it so child speaker
-// snapshots match the published Role identity the legacy SQL config path still
+// snapshots match the published Hero identity the legacy SQL config path still
 // validates against while the fixture snapshot exists.
 const explorerConfigDigestV3 = "sha256:c7cf36749030bd0626c24eea7ea325c2b70be64bd2f623b3c94b5fc8b81aa38b"
 
 // heroMetaFromDB freezes a HeroMeta from the fixture's published hero version,
-// mirroring how production freezes a resolved file Role revision at Run start.
+// mirroring how production freezes a resolved file Hero revision at Run start.
 // Identity fields (object id, config digest) are read from the fixture so the
 // frozen meta stays consistent with the snapshot hero tables.
 func heroMetaFromDB(t *testing.T, db *sql.DB, versionID string) *store.DelegationHeroMeta {

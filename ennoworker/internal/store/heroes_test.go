@@ -143,7 +143,7 @@ func TestDelegationCreationEnforcesAdmissionKillSwitchAndBudget(t *testing.T) {
 		ParentToolCallID: "over-budget", Strategy: domain.DelegationStrategySingle,
 		Items: []store.CreateDelegationItemInput{tooLarge}, AdmissionApproved: true})
 	assert.ErrorIs(t, err, store.ErrDelegationNotAuthorized)
-	// A denied Role (admission=denied) is rejected even when approved.
+	// A denied Hero (admission=denied) is rejected even when approved.
 	deniedDoc := *document
 	deniedDoc.Handle = "denied-reviewer"
 	deniedDoc.Delegation.Admission = domain.DelegationDenied

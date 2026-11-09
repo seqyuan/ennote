@@ -20,7 +20,7 @@ func setupPublishedHeroInvocation(t *testing.T) (*store.RunRepo, *sql.DB, domain
 }
 
 // setupPublishedHeroInvocationWithSkills is setupPublishedHeroInvocation with
-// explicit Role Skill bindings so preload-pinning tests can publish a Role that
+// explicit Hero Skill bindings so preload-pinning tests can publish a Hero that
 // carries them.
 func setupPublishedHeroInvocationWithSkills(t *testing.T,
 	skillBindings []heroesource.SkillBinding) (*store.RunRepo, *sql.DB, domain.Session, domain.HeroIdentity, domain.HeroVersion, *globalsource.Store) {
@@ -28,7 +28,7 @@ func setupPublishedHeroInvocationWithSkills(t *testing.T,
 	stack := newFileConfigStack(t)
 	ctx := context.Background()
 	db, _, session := newSessionDB(t)
-	// V2: the invoked Role is a published file revision (globalsource), never a
+	// V2: the invoked Hero is a published file revision (globalsource), never a
 	// global hero SQL row.
 	document := &heroesource.Document{
 		SchemaVersion: 1, Handle: "security-reviewer", Name: "Security Reviewer",

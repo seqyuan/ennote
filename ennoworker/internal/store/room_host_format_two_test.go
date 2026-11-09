@@ -12,7 +12,7 @@ import (
 
 // TestFormatTwoHostTurnResolvesWithoutHeroTarget pins the regression where a
 // speaker-ledger (format 2) Host turn failed config freeze with
-// invocation_target_invalid: the resolver unconditionally looked up a Role
+// invocation_target_invalid: the resolver unconditionally looked up a Hero
 // target, even though a plain user message on a room lineage has none.
 func TestFormatTwoHostTurnResolvesWithoutHeroTarget(t *testing.T) {
 	ctx := context.Background()
@@ -30,7 +30,7 @@ func TestFormatTwoHostTurnResolvesWithoutHeroTarget(t *testing.T) {
 	run, err := runs.Claim(ctx, submission.Run.ID)
 	require.NoError(t, err)
 	// A room lineage already upgraded to the speaker ledger commits Host turns
-	// as format 2 too (runs.go), so the freeze must resolve a Host, not a Role.
+	// as format 2 too (runs.go), so the freeze must resolve a Host, not a Hero.
 	run.CommitFormatVersion = domain.CommitFormatSpeakerV2
 
 	resolved, err := runs.ResolveAndFreezeConfig(ctx, run)

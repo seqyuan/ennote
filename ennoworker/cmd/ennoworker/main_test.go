@@ -115,7 +115,7 @@ func TestDelegationAdmissionPolicyPromotesHeroApprovalAndHonorsKillSwitch(t *tes
 	assert.Equal(t, agent.ToolDeny, decisions[0].Action)
 	assert.Equal(t, string(domain.ErrorDelegationDagInvalid), decisions[0].Code)
 
-	// V2 kill switch: revoke the Role by removing its file revision; the
+	// V2 kill switch: revoke the Hero by removing its file revision; the
 	// admission gate must deny with no child materialization path.
 	require.NoError(t, os.RemoveAll(filepath.Join(sources.HeroesDir(), "approval-hero")))
 	decisions, err = policy.BeforeToolBatch(ctx, agent.ToolBatchContext{}, []domain.ToolCall{call})
@@ -125,7 +125,7 @@ func TestDelegationAdmissionPolicyPromotesHeroApprovalAndHonorsKillSwitch(t *tes
 	_ = home
 }
 
-// setupExecutorFileHeroDelegation wires a file-backed Role source + model
+// setupExecutorFileHeroDelegation wires a file-backed Hero source + model
 // catalog for the admission policy tests.
 func setupExecutorFileHeroDelegation(t *testing.T) (*globalsource.Store, *store.ModelRepo, string, string) {
 	t.Helper()

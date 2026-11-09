@@ -165,8 +165,8 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
     () => { return permissionPolicyID(settings.policies, permissionMode); },
     [permissionMode, settings.policies],
   );
-  // The frozen Run is authoritative: a Role Run pins the mode through the
-  // Role's permissionCeiling, a host Run through the frozen tool policy. The
+  // The frozen Run is authoritative: a Hero Run pins the mode through the
+  // Hero's permissionCeiling, a host Run through the frozen tool policy. The
   // local selection only shows before a Run exists (or if the snapshot is
   // missing).
   const displayedPermissionMode = useCallback(

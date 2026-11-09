@@ -11,7 +11,7 @@ import (
 // DelegationHeroMeta is the frozen hero identity + definition captured at Run
 // start for one delegated child. It is stored on the delegation item so child
 // Run materialization and effective-config resolution never re-read mutable
-// Role files or the removed global agent_profile_versions tables.
+// Hero files or the removed global agent_profile_versions tables.
 type DelegationHeroMeta struct {
 	// ObjectID is the stable hero object id: "<heroID>" for global Heroes,
 	// "graph:<graphID>/<heroID>" for graph-local Heroes, "inline:<taskID>" for
@@ -22,24 +22,24 @@ type DelegationHeroMeta struct {
 	Handle    string `json:"handle"`
 	// DisplayName is the human label used in speaker snapshots and UI.
 	DisplayName string `json:"displayName"`
-	// ConfigDigest identifies the exact frozen Role content.
+	// ConfigDigest identifies the exact frozen Hero content.
 	ConfigDigest string `json:"configDigest"`
 	// Definition is the full resolved HeroDefinition.
 	Definition domain.HeroDefinition `json:"definition"`
 }
 
-// NewDelegationHeroMeta builds the frozen Role meta from a hero version ref
+// NewDelegationHeroMeta builds the frozen Hero meta from a hero version ref
 // and its full definition JSON, deriving the object id and content digest
 // from the ref. The digest is recomputed over the canonical definition so a
 // tampered payload fails loudly. The caller sets Handle/DisplayName from the
-// resolved Role identity before persisting the item.
+// resolved Hero identity before persisting the item.
 func NewDelegationHeroMeta(versionID string, definitionJSON []byte) (*DelegationHeroMeta, error) {
 	if strings.TrimSpace(versionID) == "" {
 		return nil, fmt.Errorf("hero version ref is required")
 	}
 	var definition domain.HeroDefinition
 	if err := json.Unmarshal(definitionJSON, &definition); err != nil {
-		return nil, fmt.Errorf("decode frozen Role definition: %w", err)
+		return nil, fmt.Errorf("decode frozen Hero definition: %w", err)
 	}
 	objectID, _, _ := strings.Cut(versionID, "@")
 	digest, err := digestJSON(definition)
@@ -59,15 +59,15 @@ func delegationHeroMetaFromDefinition(versionID string, definitionJSON []byte) (
 	return NewDelegationHeroMeta(versionID, definitionJSON)
 }
 
-// validateFrozenDelegationMeta verifies a frozen delegation Role meta is
+// validateFrozenDelegationMeta verifies a frozen delegation Hero meta is
 // structurally complete before it is used to freeze a child effective config.
 func validateFrozenDelegationMeta(meta DelegationHeroMeta) error {
 	if strings.TrimSpace(meta.ObjectID) == "" || strings.TrimSpace(meta.VersionID) == "" ||
 		strings.TrimSpace(meta.Handle) == "" || strings.TrimSpace(meta.ConfigDigest) == "" {
-		return fmt.Errorf("frozen delegation Role meta is incomplete")
+		return fmt.Errorf("frozen delegation Hero meta is incomplete")
 	}
 	if meta.Definition.HeroPrompt == "" || meta.Definition.ModelBinding.ModelProfileID == "" {
-		return fmt.Errorf("frozen delegation Role definition is incomplete")
+		return fmt.Errorf("frozen delegation Hero definition is incomplete")
 	}
 	return nil
 }

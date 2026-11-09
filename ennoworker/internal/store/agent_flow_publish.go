@@ -24,7 +24,7 @@ var (
 // --- Publish resolver wiring ---
 
 // FlowPublishOptions wires the publish-time validator against the file-native
-// Role/Skill catalog. The legacy SQL profile tables were removed in V2, so
+// Hero/Skill catalog. The legacy SQL profile tables were removed in V2, so
 // production always supplies Sources + Models.
 type FlowPublishOptions struct {
 	// DB and ProjectID are retained for source compatibility with callers
@@ -32,7 +32,7 @@ type FlowPublishOptions struct {
 	// reads them.
 	DB        *sql.DB
 	ProjectID string
-	// FlowID is the owning flow; it enables flow-local Role and Skill
+	// FlowID is the owning flow; it enables flow-local Hero and Skill
 	// resolution (local/<handle>, local/<skill>).
 	FlowID string
 	// Skills is the known global Skill id set. SkillCatalog, when set, is
@@ -71,10 +71,10 @@ type flowPublishResolver struct {
 
 // ResolveHero resolves a task hero reference at publish time. The semantics
 // intentionally mirror graphrun freeze:
-//   - local/<handle>  -> the owning flow's Graph-private Role document;
-//   - global/<handle> -> latest (or an exact vNNNNNN / integer) published Role;
+//   - local/<handle>  -> the owning flow's Graph-private Hero document;
+//   - global/<handle> -> latest (or an exact vNNNNNN / integer) published Hero;
 //   - bare <handle>   -> flow-local first, then the shared catalog's latest;
-//   - handle@N        -> exact shared Role revision version N.
+//   - handle@N        -> exact shared Hero revision version N.
 func (f *flowPublishResolver) ResolveHero(ctx context.Context, heroRef string) (*agentflow.HeroInfo, error) {
 	ref := strings.TrimSpace(heroRef)
 	handle, versionText, hasVersion := strings.Cut(ref, "@")
@@ -83,7 +83,7 @@ func (f *flowPublishResolver) ResolveHero(ctx context.Context, heroRef string) (
 		return nil, fmt.Errorf("hero reference %q has an empty handle", heroRef)
 	}
 	if f.sources == nil || f.models == nil {
-		return nil, fmt.Errorf("file-native Role catalog is unavailable")
+		return nil, fmt.Errorf("file-native Hero catalog is unavailable")
 	}
 	if strings.HasPrefix(handle, "local/") {
 		if hasVersion {

@@ -34,9 +34,9 @@ type RunRepo struct {
 	Policies    *fileconfig.PolicyStore
 	HeroSources *globalsource.Store
 	// SkillDigests is the optional Skill digest catalog observed at startup,
-	// mapping Skill ID to loader ContentHash. When non-nil, freezing a Role
+	// mapping Skill ID to loader ContentHash. When non-nil, freezing a Hero
 	// config pins every preload Skill to its digest so later on-disk edits fail
-	// closed instead of silently changing a published Role's prompt. A nil
+	// closed instead of silently changing a published Hero's prompt. A nil
 	// catalog keeps legacy/fixture behavior: preload refs stay unpinned.
 	// It is the static fallback used when SkillCatalog is nil.
 	SkillDigests map[string]string
@@ -54,11 +54,11 @@ func (r *RunRepo) SubmitTurn(ctx context.Context, input domain.SubmitTurnInput) 
 func (r *RunRepo) SubmitInvocation(ctx context.Context, input domain.SubmitInvocationInput) (*domain.TurnSubmission, error) {
 	if input.Target.Kind != domain.InvocationTargetHero || strings.TrimSpace(input.Target.ObjectID) == "" ||
 		strings.TrimSpace(input.Target.VersionID) == "" {
-		return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("a Role object and version are required"))
+		return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("a Hero object and version are required"))
 	}
 	if strings.TrimSpace(string(input.RequestedConfig)) != "" && string(input.RequestedConfig) != "null" && string(input.RequestedConfig) != "{}" {
 		return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
-			fmt.Errorf("direct Role invocation does not allow runtime model, permission, or loop config overrides"))
+			fmt.Errorf("direct Hero invocation does not allow runtime model, permission, or loop config overrides"))
 	}
 	if input.Target.ContextMode != domain.InvocationContextRoom && input.Target.ContextMode != domain.InvocationContextFresh &&
 		input.Target.ContextMode != domain.InvocationContextReplyTo {
@@ -161,13 +161,13 @@ func (r *RunRepo) submitTurn(ctx context.Context, input domain.SubmitTurnInput, 
 				AND (p.project_id IS NULL OR p.project_id=?)`, target.ObjectID, target.VersionID, sessionProjectID).
 				Scan(&handle, &name, &icon, &color, &positioning, &configDigest, &definitionJSON)
 			if errors.Is(err, sql.ErrNoRows) {
-				return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("Role target is unavailable or not published"))
+				return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("Hero target is unavailable or not published"))
 			}
 			if err != nil {
-				return nil, fmt.Errorf("resolve Role target: %w", err)
+				return nil, fmt.Errorf("resolve Hero target: %w", err)
 			}
 			if err := json.Unmarshal([]byte(definitionJSON), &definition); err != nil {
-				return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("decode Role target: %w", err))
+				return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("decode Hero target: %w", err))
 			}
 		}
 		contextAllowed := false
@@ -177,7 +177,7 @@ func (r *RunRepo) submitTurn(ctx context.Context, input domain.SubmitTurnInput, 
 		}
 		if !contextAllowed {
 			return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
-				fmt.Errorf("Role does not allow %s context", target.ContextMode))
+				fmt.Errorf("Hero does not allow %s context", target.ContextMode))
 		}
 		speakerSnapshot, err = json.Marshal(map[string]string{
 			"kind": "hero", "objectId": target.ObjectID, "versionId": target.VersionID, "handle": handle,
@@ -201,7 +201,7 @@ func (r *RunRepo) submitTurn(ctx context.Context, input domain.SubmitTurnInput, 
 		if errors.Is(err, sql.ErrNoRows) {
 			participantInstanceID, createParticipant, inviteParticipant = uuid.NewString(), true, true
 		} else if err != nil {
-			return nil, fmt.Errorf("resolve Role participant: %w", err)
+			return nil, fmt.Errorf("resolve Hero participant: %w", err)
 		}
 	}
 
@@ -227,7 +227,7 @@ func (r *RunRepo) submitTurn(ctx context.Context, input domain.SubmitTurnInput, 
 	if target == nil && baseMessageID != "" {
 		// Host-only sessions stay format 1 so the Conversation Surface tool
 		// timeline survives reload. Once the active lineage already contains a
-		// format-2 (Role) contribution, the room runs on the speaker-ledger
+		// format-2 (Hero) contribution, the room runs on the speaker-ledger
 		// model and this Host turn must project other Speakers safely.
 		var formatTwoAncestors int
 		if err := tx.QueryRowContext(ctx, `WITH RECURSIVE chain(id,parent_message_id,run_id) AS (
@@ -255,7 +255,7 @@ func (r *RunRepo) submitTurn(ctx context.Context, input domain.SubmitTurnInput, 
 			AND json_extract(p.payload_json,'$.participantInstanceId')=?`, baseMessageID, input.SessionID,
 				input.SessionID, participantInstanceID).Scan(&invitedOnLineage)
 			if err != nil {
-				return nil, fmt.Errorf("fold Role participant invitation: %w", err)
+				return nil, fmt.Errorf("fold Hero participant invitation: %w", err)
 			}
 		}
 		inviteParticipant = invitedOnLineage == 0
@@ -275,7 +275,7 @@ func (r *RunRepo) submitTurn(ctx context.Context, input domain.SubmitTurnInput, 
 		if _, err := tx.ExecContext(ctx, `INSERT INTO room_member_instances
 			(id,session_id,hero_id,hero_version_id,created_at) VALUES(?,?,?,?,?)`, participantInstanceID,
 			input.SessionID, targetObjectID, targetVersionID, timestamp.Format(time.RFC3339Nano)); err != nil {
-			return nil, fmt.Errorf("create Role participant: %w", err)
+			return nil, fmt.Errorf("create Hero participant: %w", err)
 		}
 	}
 	if inviteParticipant {
@@ -616,7 +616,7 @@ func (r *RunRepo) FinalizeSuccess(ctx context.Context, runID string, output doma
 	} else {
 		for index, message := range output.Messages {
 			if message.Role != domain.RoleUser && message.Role != domain.RoleAssistant && message.Role != domain.RoleTool {
-				return fmt.Errorf("unsupported projected message hero: %s", message.Role)
+				return fmt.Errorf("unsupported projected message role: %s", message.Role)
 			}
 			messageID := uuid.NewString()
 			visibility := domain.VisibilityLegacyExecution

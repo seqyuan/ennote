@@ -21,7 +21,7 @@ var nonTerminalRunStates = []string{"pending", "running"}
 
 // Remove uninstalls a pack. It refuses while a non-terminal flow Run references
 // an installed flow, and (without force) while an installed object was edited
-// locally or a global Role is still referenced by another Graph. A Skill edited
+// locally or a global Hero is still referenced by another Graph. A Skill edited
 // locally is kept with a warning instead of being deleted.
 func (s *Service) Remove(ctx context.Context, packID string, force bool) error {
 	s.mu.Lock()
@@ -75,7 +75,7 @@ func (s *Service) Remove(ctx context.Context, packID string, force bool) error {
 		}
 		if len(referenced) > 0 {
 			return errorf(CodeInstallBlocked,
-				"global Role(s) %s are still referenced by other Graphs; remove with force to delete them anyway",
+				"global Hero(s) %s are still referenced by other Graphs; remove with force to delete them anyway",
 				strings.Join(referenced, ", "))
 		}
 	}
@@ -295,7 +295,7 @@ func (s *Service) heroesReferencedByOtherGraphs(state *State) ([]string, error) 
 }
 
 // remove deletes the installed objects. Whole directories are removed because a
-// Role/Graph revision sequence must stay contiguous, and a Skill keeps a local
+// Hero/Graph revision sequence must stay contiguous, and a Skill keeps a local
 // edit instead of being destroyed.
 func (s *Service) remove(state *State) {
 	for _, flow := range state.Flows {

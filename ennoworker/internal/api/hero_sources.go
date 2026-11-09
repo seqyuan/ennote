@@ -54,7 +54,7 @@ func (s *Server) createGlobalHero(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Document == nil {
-		writeError(w, r, http.StatusBadRequest, "hero_document_required", "Role document is required", false)
+		writeError(w, r, http.StatusBadRequest, "hero_document_required", "Hero document is required", false)
 		return
 	}
 	document, digest, err := sources.CreateHero(body.Document)
@@ -98,8 +98,8 @@ func (s *Server) publishGlobalHero(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	// V2: publishing a global Role is a pure file operation (immutable
-	// revision). The legacy SQL Role repo was removed.
+	// V2: publishing a global Hero is a pure file operation (immutable
+	// revision). The legacy SQL Hero repo was removed.
 	revision, err := sources.PublishHeroRevision(document.Handle)
 	if err != nil {
 		writeError(w, r, http.StatusUnprocessableEntity, "hero_publish_failed", err.Error(), false)
@@ -121,7 +121,7 @@ func (s *Server) listGlobalHeroRevisions(w http.ResponseWriter, r *http.Request)
 	writeData(w, http.StatusOK, revisions)
 }
 
-// getResolvedGlobalHero dumps the final effective Role for a bare handle: the
+// getResolvedGlobalHero dumps the final effective Hero for a bare handle: the
 // latest published revision plus its audit source (design 六 P1). Unlike the
 // draft endpoint it never returns unpublished hero.md content.
 func (s *Server) getResolvedGlobalHero(w http.ResponseWriter, r *http.Request) {
@@ -155,7 +155,7 @@ func (s *Server) updateGlobalHero(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Document == nil {
-		writeError(w, r, http.StatusBadRequest, "hero_document_required", "Role document is required", false)
+		writeError(w, r, http.StatusBadRequest, "hero_document_required", "Hero document is required", false)
 		return
 	}
 	document, digest, err := sources.UpdateHero(r.PathValue("heroID"), body.ExpectedDigest, func(current *heroesource.Document) error {

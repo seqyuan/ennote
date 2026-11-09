@@ -28,8 +28,8 @@ const (
 	FlowFormatGraph = "graph"
 )
 
-// Role scopes. A flow-scoped hero is visible only inside the pack's flows; a
-// global hero is installed as an ordinary Worker-global Role.
+// Hero scopes. A flow-scoped hero is visible only inside the pack's flows; a
+// global hero is installed as an ordinary Worker-global Hero.
 const (
 	HeroScopeFlow   = "flow"
 	HeroScopeGlobal = "global"

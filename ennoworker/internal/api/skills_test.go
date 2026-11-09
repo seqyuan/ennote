@@ -308,7 +308,7 @@ func TestCreateSkillEndpointFeedsLiveCatalog(t *testing.T) {
 	}
 	assert.True(t, found, "created skill must appear in the live catalog")
 
-	// Flow/Role freeze reads the catalog from disk at freeze time; the new ID
+	// Flow/Hero freeze reads the catalog from disk at freeze time; the new ID
 	// must carry a non-empty digest there too (no restart, no cached snapshot).
 	frozen := skills.DigestCatalog(server.Skills.UserRoot)
 	assert.NotEmpty(t, frozen["release-notes"])

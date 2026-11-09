@@ -56,7 +56,7 @@ func runLiveMCPServer() {
 }
 
 // TestLiveAgentFlowChildCallsMCP qualifies the Agent Flow child → MCP tool
-// path against a real Provider and a real MCP stdio server: a Role-backed
+// path against a real Provider and a real MCP stdio server: a Hero-backed
 // Task's child Run discovers the bound server, freezes the echo tool, calls
 // it, and folds the echoed value into its submitted result.
 //
@@ -101,7 +101,7 @@ func TestLiveAgentFlowChildCallsMCP(t *testing.T) {
 		Bundled:  mcpclient.NewBundledRegistry(), Logger: slog.Default(),
 	}
 
-	// ——— Role (auto ceiling so the MCP tool is allowed) ———
+	// ——— Hero (auto ceiling so the MCP tool is allowed) ———
 	hero := &heroesource.Document{
 		SchemaVersion: 1, Handle: "mcp-caller", Name: "MCP Caller",
 		Description: "Calls the bound MCP echo tool.", Positioning: "Independent",
@@ -124,7 +124,7 @@ func TestLiveAgentFlowChildCallsMCP(t *testing.T) {
 	_, err = stack.Sources.PublishHeroRevision(hero.Handle)
 	require.NoError(t, err)
 
-	// ——— Graph: one Role-backed Task ———
+	// ——— Graph: one Hero-backed Task ———
 	_, digest, err := stack.Sources.CreateGraph("mcp-flow", "MCP Flow")
 	require.NoError(t, err)
 	_, _, err = stack.Sources.UpdateGraph("mcp-flow", digest, func(d *graphsource.Document) error {

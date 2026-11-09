@@ -199,7 +199,7 @@ func (s *Service) apply(plan *Plan, request Request, staging string, record *jou
 		}
 		digest, err := s.Sources.CreateGraphHero(target.graphID, target.document)
 		if err != nil {
-			return fmt.Errorf("install Graph-private Role %s: %w", target.storeID, err)
+			return fmt.Errorf("install Graph-private Hero %s: %w", target.storeID, err)
 		}
 		if err := s.record(staging, record, journalEntry{
 			Kind: journalKindGraphHero, StoreID: target.storeID, Digest: digest,
@@ -262,7 +262,7 @@ func (s *Service) apply(plan *Plan, request Request, staging string, record *jou
 		}
 		_, digest, err := s.Sources.CreateHero(target.document)
 		if err != nil {
-			return fmt.Errorf("install Role %s: %w", target.storeID, err)
+			return fmt.Errorf("install Hero %s: %w", target.storeID, err)
 		}
 		if err := s.record(staging, record, journalEntry{
 			Kind: journalKindHero, StoreID: target.storeID, Digest: digest,
@@ -273,7 +273,7 @@ func (s *Service) apply(plan *Plan, request Request, staging string, record *jou
 			PackHandle: target.packHandle, Scope: target.scope, StoreID: target.storeID, Digest: digest,
 		})
 	}
-	// 6. Publish the global Role revisions. Publishing is digest-deduplicated, so
+	// 6. Publish the global Hero revisions. Publishing is digest-deduplicated, so
 	// a reinstall never appends a duplicate revision.
 	for index := range state.Heroes {
 		installed := state.Heroes[index]
@@ -282,7 +282,7 @@ func (s *Service) apply(plan *Plan, request Request, staging string, record *jou
 		}
 		revision, err := s.Sources.PublishHeroRevision(installed.StoreID)
 		if err != nil {
-			return fmt.Errorf("publish Role %s: %w", installed.StoreID, err)
+			return fmt.Errorf("publish Hero %s: %w", installed.StoreID, err)
 		}
 		if err := s.record(staging, record, journalEntry{
 			Kind: journalKindHeroRevision, StoreID: installed.StoreID, Digest: revision.Digest,
@@ -355,8 +355,8 @@ func (s *Service) rollback(record *journal) {
 				removeSkillDir(entry.Root, entry.StoreID)
 			}
 		case journalKindHeroRevision:
-			// A Role revision is immutable and the revision sequence must stay
-			// contiguous; the owning Role directory entry above removes it whole.
+			// A Hero revision is immutable and the revision sequence must stay
+			// contiguous; the owning Hero directory entry above removes it whole.
 		}
 	}
 	s.removeEmptyGraphDirs(record)

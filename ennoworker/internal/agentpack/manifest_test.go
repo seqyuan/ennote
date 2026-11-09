@@ -170,7 +170,7 @@ func TestInspectHeroOnlyPackRejectsFlowScopedHero(t *testing.T) {
 
 func TestInspectRejectsUnreferencedFlowHero(t *testing.T) {
 	// report-writer is flow-scoped but neither a flow entry nor a flow task
-	// references it: the pack would install an unreachable Role.
+	// references it: the pack would install an unreachable Hero.
 	manifest := strings.Replace(mixedManifest, `heroes:
   - handle: qc-reviewer
     path: heroes/qc-reviewer/hero.md

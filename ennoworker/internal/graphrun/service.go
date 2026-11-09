@@ -1,8 +1,8 @@
 // Package graphrun starts file-native Graph Runs. At Run start it resolves the
-// immutable Graph revision, resolves every Task's Role/Model/Skill, and
-// freezes the complete execution plan (FlowDefinition + per-Task Role
+// immutable Graph revision, resolves every Task's Hero/Model/Skill, and
+// freezes the complete execution plan (FlowDefinition + per-Task Hero
 // definitions) into the owning Session database before any Provider call.
-// Execution never re-reads mutable Role/Graph files or the removed global
+// Execution never re-reads mutable Hero/Graph files or the removed global
 // agent_profile_versions / agent_flow_versions tables.
 package graphrun
 
@@ -168,7 +168,7 @@ func (s *Service) resolveRevision(ctx context.Context, graphID string, version i
 
 // definitionFromDocument converts the canonical graphsource Document to the
 // flow execution contract. Every Task is a hero task: model-backed Tasks get
-// a synthetic inline Role resolved at freeze time.
+// a synthetic inline Hero resolved at freeze time.
 func definitionFromDocument(document *graphsource.Document) *domain.FlowDefinition {
 	definition := &domain.FlowDefinition{
 		SchemaVersion: domain.FlowSchemaVersion, ID: document.ID,
@@ -228,7 +228,7 @@ func freezeInputsJSON(inputs, vars map[string]any) (json.RawMessage, error) {
 	return encoded, nil
 }
 
-// frozenTaskHero is the per-Task frozen Role identity + definition captured at
+// frozenTaskHero is the per-Task frozen Hero identity + definition captured at
 // Run start.
 type frozenTaskHero struct {
 	ObjectID     string
@@ -281,16 +281,16 @@ func (s *Service) freezeTasks(ctx context.Context, document *graphsource.Documen
 		switch hero.Definition.DelegationPolicy.Admission {
 		case domain.DelegationAutoWithinBudget:
 		case domain.DelegationDenied:
-			return nil, fmt.Errorf("Task %q: Role %s denies Host delegation", name, hero.VersionID)
+			return nil, fmt.Errorf("Task %q: Hero %s denies Host delegation", name, hero.VersionID)
 		case domain.DelegationApprovalRequired:
-			return nil, fmt.Errorf("Task %q: Role %s requires explicit delegation approval; Graph Runs only admit auto_within_budget Heroes", name, hero.VersionID)
+			return nil, fmt.Errorf("Task %q: Hero %s requires explicit delegation approval; Graph Runs only admit auto_within_budget Heroes", name, hero.VersionID)
 		default:
-			return nil, fmt.Errorf("Task %q: Role %s has an invalid admission policy", name, hero.VersionID)
+			return nil, fmt.Errorf("Task %q: Hero %s has an invalid admission policy", name, hero.VersionID)
 		}
 		ceiling := hero.Definition.DelegationPolicy.BudgetCeiling
 		if task.Budget != nil && task.Budget.Tokens > 0 {
 			if task.Budget.Tokens > ceiling.MaxTotalTokens {
-				return nil, fmt.Errorf("Task %q: budget tokens %d exceed the Role ceiling %d", name, task.Budget.Tokens, ceiling.MaxTotalTokens)
+				return nil, fmt.Errorf("Task %q: budget tokens %d exceed the Hero ceiling %d", name, task.Budget.Tokens, ceiling.MaxTotalTokens)
 			}
 			ceiling.MaxTotalTokens = task.Budget.Tokens
 		}
@@ -312,14 +312,14 @@ func (s *Service) freezeTasks(ctx context.Context, document *graphsource.Documen
 	return freeze, nil
 }
 
-// resolveTaskHero resolves one Task's Role facts at Run start:
-//   - "global/<id>"  -> the latest published immutable Role revision;
-//   - "local/<id>"   -> the Graph-private Role document (digest-versioned);
-//   - ""             -> a synthetic inline Role bound to the Task's model.
+// resolveTaskHero resolves one Task's Hero facts at Run start:
+//   - "global/<id>"  -> the latest published immutable Hero revision;
+//   - "local/<id>"   -> the Graph-private Hero document (digest-versioned);
+//   - ""             -> a synthetic inline Hero bound to the Task's model.
 //
 // Global Task Skills are validated, resolved to their current content digest,
 // and returned as additive preload refs; local Task Skills are inlined into the
-// Role prompt and tool allowlist.
+// Hero prompt and tool allowlist.
 func (s *Service) resolveTaskHero(ctx context.Context, document *graphsource.Document,
 	taskID string, task graphsource.Task, skillCatalog map[string]string) (*frozenTaskHero, domain.FrozenSkillRefs, error) {
 	if task.Hero != "" {
@@ -328,11 +328,11 @@ func (s *Service) resolveTaskHero(ctx context.Context, document *graphsource.Doc
 		case "global":
 			heroDoc, revision, err := s.Sources.LatestHeroRevision(id)
 			if err != nil {
-				return nil, nil, fmt.Errorf("global Role %q: %w", id, err)
+				return nil, nil, fmt.Errorf("global Hero %q: %w", id, err)
 			}
 			definition, diagnostics := (&store.HeroDiscovery{Models: s.Models}).ResolveDocument(ctx, heroDoc)
 			if definition == nil {
-				return nil, nil, fmt.Errorf("global Role %q: %s", id, heroDiagnostic(diagnostics))
+				return nil, nil, fmt.Errorf("global Hero %q: %s", id, heroDiagnostic(diagnostics))
 			}
 			return &frozenTaskHero{
 				ObjectID: id, VersionID: id + "@" + revision.ID(),
@@ -342,11 +342,11 @@ func (s *Service) resolveTaskHero(ctx context.Context, document *graphsource.Doc
 		case "local":
 			heroDoc, digest, err := s.Sources.ReadGraphHero(document.ID, id)
 			if err != nil {
-				return nil, nil, fmt.Errorf("local Role %q: %w", id, err)
+				return nil, nil, fmt.Errorf("local Hero %q: %w", id, err)
 			}
 			definition, err := s.resolveLocalHero(ctx, document.ID, heroDoc)
 			if err != nil {
-				return nil, nil, fmt.Errorf("local Role %q: %w", id, err)
+				return nil, nil, fmt.Errorf("local Hero %q: %w", id, err)
 			}
 			objectID := "graph:" + document.ID + "/" + id
 			return &frozenTaskHero{
@@ -355,7 +355,7 @@ func (s *Service) resolveTaskHero(ctx context.Context, document *graphsource.Doc
 				ConfigDigest: digest, Definition: *definition,
 			}, nil, nil
 		default:
-			return nil, nil, fmt.Errorf("unsupported Role reference %q", task.Hero)
+			return nil, nil, fmt.Errorf("unsupported Hero reference %q", task.Hero)
 		}
 	}
 	// Inline model-backed Task.
@@ -389,7 +389,7 @@ func (s *Service) resolveTaskHero(ctx context.Context, document *graphsource.Doc
 			}
 			prompt += "\n\n<graph_local_skill id=\"" + id + "\" digest=\"" + loaded.ContentHash + "\">\n" + loaded.PromptText + "\n</graph_local_skill>"
 			// A local Skill may describe tools, but it can never widen the
-			// Role/Task allowlist it is preloaded into.
+			// Hero/Task allowlist it is preloaded into.
 		default:
 			return nil, nil, fmt.Errorf("unsupported Skill reference %q", ref)
 		}
@@ -406,7 +406,7 @@ func (s *Service) resolveTaskHero(ctx context.Context, document *graphsource.Doc
 	}, globalSkills, nil
 }
 
-// resolveLocalHero resolves a Graph-private Role document, inlining local
+// resolveLocalHero resolves a Graph-private Hero document, inlining local
 // Skills into the prompt and tool allowlist (global Skills keep their catalog
 // binding).
 func (s *Service) resolveLocalHero(ctx context.Context, graphID string, document *heroesource.Document) (*domain.HeroDefinition, error) {
@@ -431,11 +431,11 @@ func (s *Service) resolveLocalHero(ctx context.Context, graphID string, document
 			return nil, err
 		}
 		copy.Prompt += "\n\n<graph_local_skill id=\"" + id + "\" digest=\"" + loaded.ContentHash + "\">\n" + loaded.PromptText + "\n</graph_local_skill>"
-		// Graph-local Skill tool hints never widen the Role's allowlist.
+		// Graph-local Skill tool hints never widen the Hero's allowlist.
 	}
 	definition, diagnostics := (&store.HeroDiscovery{Models: s.Models}).ResolveDocument(ctx, &copy)
 	if definition == nil {
-		return nil, fmt.Errorf("private Role is invalid: %s", heroDiagnostic(diagnostics))
+		return nil, fmt.Errorf("private Hero is invalid: %s", heroDiagnostic(diagnostics))
 	}
 	return definition, nil
 }
@@ -450,7 +450,7 @@ func (s *Service) loadLocalSkill(graphID, id string) (*skills.LoadedSkill, error
 
 func heroDiagnostic(diagnostics []domain.HeroValidationDiagnostic) string {
 	if len(diagnostics) == 0 {
-		return "invalid Role"
+		return "invalid Hero"
 	}
 	return diagnostics[0].Message
 }
@@ -466,7 +466,7 @@ func inlineHandle(taskID string) string {
 	return "inline_" + taskID
 }
 
-// inlineHero synthesizes the default Role for a model-backed Task. Unlike the
+// inlineHero synthesizes the default Hero for a model-backed Task. Unlike the
 // legacy publish path it allows task_only context so delegated children can
 // execute it.
 func inlineHero(modelID string, thinking domain.ThinkingEffort, prompt string, tools []string) domain.HeroDefinition {

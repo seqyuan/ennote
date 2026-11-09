@@ -2,8 +2,8 @@
 //
 // S2a installs two pack shapes and nothing else:
 //
-//   - a Role-only pack: every Role is installed once as a Worker-global Role and
-//     published as an immutable Role revision; and
+//   - a Hero-only pack: every Hero is installed once as a Worker-global Hero and
+//     published as an immutable Hero revision; and
 //   - a pack Flow with format: graph: the flow becomes an ordinary file-native
 //     Graph draft (agents/graphs/<id>/graph.yaml) plus its Graph-private Heroes
 //     and Skills.
@@ -44,11 +44,11 @@ const (
 	CodeVersionConflict = "pack_version_conflict"
 	// CodeFlowIDConflict reports an installed Graph id collision or a bad rename.
 	CodeFlowIDConflict = "pack_flow_id_conflict"
-	// CodeHeroHandleConflict reports a Role handle collision or a bad rename.
+	// CodeHeroHandleConflict reports a Hero handle collision or a bad rename.
 	CodeHeroHandleConflict = "pack_hero_handle_conflict"
 	// CodeSkillConflict reports a Skill id collision.
 	CodeSkillConflict = "pack_skill_conflict"
-	// CodeModelUnresolved reports a Role/Task model ref the catalog cannot resolve.
+	// CodeModelUnresolved reports a Hero/Task model ref the catalog cannot resolve.
 	CodeModelUnresolved = "pack_model_unresolved"
 	// CodeSkillUnresolved reports an external or Graph-local Skill the Worker
 	// cannot resolve.

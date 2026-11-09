@@ -30,7 +30,7 @@ import (
 //	the retried child succeeds and its follow-up resumes the exact thread
 //	final completion and Attention settle
 //
-// It asserts Provider call counts, frozen Role/version snapshots, private
+// It asserts Provider call counts, frozen Hero/version snapshots, private
 // transcript boundaries, root/child usage, and one completion per generation.
 func TestLiveHostedDelegationV15(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
@@ -149,7 +149,7 @@ func TestLiveHostedDelegationV15(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT COALESCE(MAX(execution_depth),0) FROM agent_runs WHERE run_kind='delegated_agent'`).Scan(&maxDepth))
 	assert.Equal(t, 1, maxDepth)
 
-	// Frozen Role/version snapshots: every attempt pins the exact version.
+	// Frozen Hero/version snapshots: every attempt pins the exact version.
 	var mismatched int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM delegation_item_attempts a
 		JOIN delegation_items i ON i.id=a.item_id
@@ -174,7 +174,7 @@ func explorerLiveItem(t *testing.T, modelID string) store.CreateDelegationItemIn
 	return item
 }
 
-// liveExplorerHeroMeta freezes the builtin Workspace Explorer Role identity +
+// liveExplorerHeroMeta freezes the builtin Workspace Explorer Hero identity +
 // definition from an embedded V2 definition bound to modelID (mode=fixed).
 func liveExplorerHeroMeta(modelID string) *store.DelegationHeroMeta {
 	definition := fmt.Sprintf(liveExplorerHeroDefinitionV3, modelID)

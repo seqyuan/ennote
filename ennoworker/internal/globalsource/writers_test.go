@@ -24,7 +24,7 @@ func writerTestGraph(id string) *graphsource.Document {
 
 func writerTestHero(handle string) *heroesource.Document {
 	return &heroesource.Document{
-		SchemaVersion: 1, Handle: handle, Name: "Pack Role",
+		SchemaVersion: 1, Handle: handle, Name: "Pack Hero",
 		Model:             heroesource.ModelBinding{Ref: "provider/model", ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
 		Skills:            []heroesource.SkillBinding{},
 		Authority:         heroesource.AuthorityReadOnly,
@@ -92,7 +92,7 @@ func TestCreateGraphHeroNestedDirectories(t *testing.T) {
 	_, err = store.CreateGraphHero("pack-graph", mismatched)
 	require.Error(t, err)
 
-	// An existing Graph-local Role is never overwritten.
+	// An existing Graph-local Hero is never overwritten.
 	_, err = store.CreateGraphHero("pack-graph", hero)
 	require.Error(t, err)
 }
@@ -128,7 +128,7 @@ func TestDeleteGraphHeroAndHeroRemoveWholeDirectories(t *testing.T) {
 	require.NoError(t, store.DeleteHero("report-writer"))
 	_, _, err = store.ReadHero("report-writer")
 	require.ErrorIs(t, err, os.ErrNotExist)
-	// The revision directory went with the Role: a revision sequence must stay
+	// The revision directory went with the Hero: a revision sequence must stay
 	// contiguous.
 	_, err = os.Lstat(filepath.Join(home, "agents", "heroes", "report-writer"))
 	require.ErrorIs(t, err, os.ErrNotExist)

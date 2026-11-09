@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// halfExplorerItem is an explorer item whose budget sits below the Role
+// halfExplorerItem is an explorer item whose budget sits below the Hero
 // ceiling, so a retry can demonstrate an approval-visible increase.
 func halfExplorerItem() store.CreateDelegationItemInput {
 	item := explorerItem()
@@ -209,7 +209,7 @@ func TestRetryHeroKillSwitchFailsClosed(t *testing.T) {
 	delegations, _, _, group, failedItemID := settleMixedGroup(t)
 	ctx := context.Background()
 
-	// V2 kill switch: the frozen Role meta is the only runtime authority for a
+	// V2 kill switch: the frozen Hero meta is the only runtime authority for a
 	// retry. Simulate a revoked identity by clearing the item's frozen meta:
 	// retry must fail closed before creating any child.
 	_, err := delegations.DB.Exec(`UPDATE delegation_items SET hero_meta_json='{}'
@@ -232,7 +232,7 @@ func TestRetryBudgetIncreaseRequiresApproval(t *testing.T) {
 	delegations, _, _, group, failedItemID := settleMixedGroup(t)
 	ctx := context.Background()
 
-	// Raising the failed item's budget (within the frozen Role ceiling but
+	// Raising the failed item's budget (within the frozen Hero ceiling but
 	// above the frozen item budget) requires a durable approval snapshot and
 	// creates no child Run.
 	generation, children, approval, err := delegations.RetryGeneration(ctx, group.ID, domain.RetryDelegationInput{

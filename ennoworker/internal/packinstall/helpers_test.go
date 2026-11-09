@@ -155,7 +155,7 @@ func cutPackID(packID string) (string, string, bool) {
 	return "", "", false
 }
 
-// heroDocument builds a valid Role source document under modelID.
+// heroDocument builds a valid Hero source document under modelID.
 func heroDocument(modelID, handle, name string, skills ...heroesource.SkillBinding) *heroesource.Document {
 	return &heroesource.Document{
 		SchemaVersion: 1, Handle: handle, Name: name, Description: name + " hero",

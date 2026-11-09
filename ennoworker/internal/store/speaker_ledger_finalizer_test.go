@@ -104,7 +104,7 @@ func TestFormatTwoRetryPreservesFrozenHeroAndContextFacts(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, projected.Digest, reprojected.Digest)
 	require.NoError(t, runs.FinalizeSuccess(ctx, retry.Run.ID, domain.RunOutput{Messages: []domain.ChatMessage{{
-		Role: domain.RoleAssistant, Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: "Recovered Role answer"}},
+		Role: domain.RoleAssistant, Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: "Recovered Hero answer"}},
 	}}}))
 }
 
@@ -117,7 +117,7 @@ func TestHostTurnUpgradesToFormatTwoAfterHeroContribution(t *testing.T) {
 	_, err = runs.Claim(ctx, submission.Run.ID)
 	require.NoError(t, err)
 	require.NoError(t, runs.FinalizeSuccess(ctx, submission.Run.ID, domain.RunOutput{Messages: []domain.ChatMessage{{
-		Role: domain.RoleAssistant, Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: "Role answer"}},
+		Role: domain.RoleAssistant, Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: "Hero answer"}},
 	}}}))
 
 	hostTurn, err := runs.SubmitTurn(ctx, domain.SubmitTurnInput{
@@ -125,7 +125,7 @@ func TestHostTurnUpgradesToFormatTwoAfterHeroContribution(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, domain.CommitFormatSpeakerV2, hostTurn.Run.CommitFormatVersion,
-		"a Host turn after a format-2 Role contribution must project other Speakers safely")
+		"a Host turn after a format-2 Hero contribution must project other Speakers safely")
 	claimed, err := runs.Claim(ctx, hostTurn.Run.ID)
 	require.NoError(t, err)
 	projected, err := (&store.ContextProjector{DB: heroes}).ProjectAndFreeze(ctx, *claimed)

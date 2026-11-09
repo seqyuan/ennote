@@ -48,7 +48,7 @@ const (
 	ActionCreate          = "create"
 	ActionExistsIdentical = "exists_identical"
 	ActionConflict        = "conflict"
-	// ActionPublish is the hero_revision action for a Role revision that must be
+	// ActionPublish is the hero_revision action for a Hero revision that must be
 	// published; an already-published digest reports exists_identical.
 	ActionPublish = "publish"
 )
@@ -64,7 +64,7 @@ const (
 const (
 	// WarningRenamedFlow reports a flow installed under a different Graph id.
 	WarningRenamedFlow = "pack_flow_renamed"
-	// WarningRenamedReference reports a Role installed under a different handle.
+	// WarningRenamedReference reports a Hero installed under a different handle.
 	WarningRenamedReference = "pack_hero_renamed"
 	// WarningSkillKept reports a locally edited Skill kept on remove.
 	WarningSkillKept = "pack_skill_kept"
@@ -147,7 +147,7 @@ type flowTarget struct {
 
 type heroTarget struct {
 	packHandle string
-	graphID    string // "" for a global Role
+	graphID    string // "" for a global Hero
 	storeID    string // "<handle>" or "<flow>/<handle>"
 	scope      string
 	digest     string
@@ -352,7 +352,7 @@ func (p *planner) resolveStoreIDs() {
 		}
 		if !validHeroStoreHandle(storeID) {
 			p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
-				"rename %q -> %q is not a valid Role handle (lowercase letter, then up to 31 letters, digits, '-' or '_')", packHandle, storeID))
+				"rename %q -> %q is not a valid Hero handle (lowercase letter, then up to 31 letters, digits, '-' or '_')", packHandle, storeID))
 			continue
 		}
 		p.heroStoreIDs[packHandle] = storeID
@@ -407,7 +407,7 @@ func (p *planner) checkStoreIDCollisions() {
 		}
 		if owner, taken := heroOwners[key]; taken && owner != entry.Handle {
 			p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
-				"heroes %q and %q both install as global Role %q; renames must keep store ids distinct", owner, entry.Handle, key))
+				"heroes %q and %q both install as global Hero %q; renames must keep store ids distinct", owner, entry.Handle, key))
 			continue
 		}
 		heroOwners[key] = entry.Handle
@@ -447,14 +447,14 @@ func (p *planner) loadDocuments() error {
 		document, err := heroesource.Parse(file.Data)
 		if err != nil {
 			return newError(agentpack.CodePackHeroInvalid,
-				fmt.Sprintf("parse Role source %s: %v", entry.Path, err))
+				fmt.Sprintf("parse Hero source %s: %v", entry.Path, err))
 		}
 		p.heroDocs[entry.Handle] = document
 	}
 	return nil
 }
 
-// checkModels resolves every Role model ref and every inline Task model ref
+// checkModels resolves every Hero model ref and every inline Task model ref
 // against the local model catalog. A pack never names a concrete model, so an
 // unresolvable ref is a hard install blocker rather than a run-time surprise.
 func (p *planner) checkModels() {
@@ -604,7 +604,7 @@ func (p *planner) resolveReferences() {
 						refs[handle] = true
 						if _, declared := p.heroDocs[handle]; !declared {
 							p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
-								"flow %q task %q references local Role %q, which the pack does not declare", entry.ID, taskID, handle))
+								"flow %q task %q references local Hero %q, which the pack does not declare", entry.ID, taskID, handle))
 						}
 					} else if !strings.Contains(task.Hero, "/") && task.Hero != "" {
 						// Bare handle: flow-local when the pack declares it.
@@ -633,7 +633,7 @@ func (p *planner) resolveReferences() {
 		}
 		p.flowHeroRefs[entry.ID] = refs
 	}
-	// Role preloads are rendered from the Worker user skills root, not from a
+	// Hero preloads are rendered from the Worker user skills root, not from a
 	// Graph-private directory. A local/ binding would therefore install but never
 	// resolve; require a global vendored or already-installed Skill instead.
 	for _, entry := range p.manifest.Heroes {
@@ -649,12 +649,12 @@ func (p *planner) resolveReferences() {
 			switch scope {
 			case "local":
 				p.blocker(CodeSkillUnresolved, fmt.Sprintf(
-					"hero %q preloads local/%s; Role preloads resolve from the Worker user skills root, so only global/ (or a bare) Skill reference is supported", entry.Handle, id))
+					"hero %q preloads local/%s; Hero preloads resolve from the Worker user skills root, so only global/ (or a bare) Skill reference is supported", entry.Handle, id))
 			case "global":
 				if skillEntry, declared := p.skillEntries[id]; declared {
 					if skillEntry.Scope != agentpack.SkillScopeGlobal {
 						p.blocker(CodeSkillUnresolved, fmt.Sprintf(
-							"hero %q preloads global/%s but the pack declares it with scope: flow; Role preloads need a global Skill", entry.Handle, id))
+							"hero %q preloads global/%s but the pack declares it with scope: flow; Hero preloads need a global Skill", entry.Handle, id))
 					}
 					continue
 				}
@@ -665,8 +665,8 @@ func (p *planner) resolveReferences() {
 			}
 		}
 	}
-	// A flow-scoped Role's local/ Skill bindings are Graph-local Skills too: the
-	// Role is installed below the flow, so its Skill must be there as well.
+	// A flow-scoped Hero's local/ Skill bindings are Graph-local Skills too: the
+	// Hero is installed below the flow, so its Skill must be there as well.
 	for _, entry := range p.manifest.Flows {
 		if entry.Format != agentpack.FlowFormatGraph && entry.Format != agentpack.FlowFormatFlow {
 			continue
@@ -717,7 +717,7 @@ func (p *planner) collectFlowHeroRef(flowID, taskID, raw string, refs map[string
 	scope, id, scoped := strings.Cut(handle, "/")
 	if !scoped {
 		if hasVersion {
-			return // global version pin; not a pack-local Role reference
+			return // global version pin; not a pack-local Hero reference
 		}
 		if _, declared := p.heroDocs[handle]; declared {
 			refs[handle] = true
@@ -728,13 +728,13 @@ func (p *planner) collectFlowHeroRef(flowID, taskID, raw string, refs map[string
 	case "local":
 		if hasVersion {
 			p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
-				"flow %q task %q pins local Role %q with @%s; flow-local Heroes have no revisions", flowID, taskID, id, versionText))
+				"flow %q task %q pins local Hero %q with @%s; flow-local Heroes have no revisions", flowID, taskID, id, versionText))
 			return
 		}
 		entry, declared := p.heroEntry(id)
 		if !declared {
 			p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
-				"flow %q task %q references local Role %q, which the pack does not declare", flowID, taskID, id))
+				"flow %q task %q references local Hero %q, which the pack does not declare", flowID, taskID, id))
 			return
 		}
 		if entry.Scope != agentpack.HeroScopeFlow {
@@ -747,12 +747,12 @@ func (p *planner) collectFlowHeroRef(flowID, taskID, raw string, refs map[string
 	case "global":
 		if entry, declared := p.heroEntry(id); declared && entry.Scope == agentpack.HeroScopeFlow {
 			p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
-				"flow %q task %q references global/%s but the pack declares it with scope: flow; a global/ reference cannot resolve a flow-local Role",
+				"flow %q task %q references global/%s but the pack declares it with scope: flow; a global/ reference cannot resolve a flow-local Hero",
 				flowID, taskID, id))
 		}
 	default:
 		p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
-			"flow %q task %q Role reference %q must use local/<handle>, global/<handle>, or a bare handle",
+			"flow %q task %q Hero reference %q must use local/<handle>, global/<handle>, or a bare handle",
 			flowID, taskID, ref))
 	}
 }
@@ -901,7 +901,7 @@ func (p *planner) planHeroes() error {
 		installed.Handle = storeID
 		digest, err := heroesource.SourceDigest(&installed)
 		if err != nil {
-			return fmt.Errorf("digest installed Role %s: %w", storeID, err)
+			return fmt.Errorf("digest installed Hero %s: %w", storeID, err)
 		}
 		if storeID != entry.Handle {
 			p.warn(WarningRenamedReference, SeverityInfo, fmt.Sprintf(
@@ -914,7 +914,7 @@ func (p *planner) planHeroes() error {
 				action := p.service.graphHeroAction(flowStoreID, storeID, digest)
 				if action == ActionConflict {
 					p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
-						"Graph-private Role %q already exists with different content", targetStoreID))
+						"Graph-private Hero %q already exists with different content", targetStoreID))
 				}
 				p.plan.install.heroes = append(p.plan.install.heroes, &heroTarget{
 					packHandle: entry.Handle, graphID: flowStoreID, storeID: targetStoreID,
@@ -928,7 +928,7 @@ func (p *planner) planHeroes() error {
 			action := p.service.heroAction(storeID, digest)
 			if action == ActionConflict {
 				p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
-					"global Role %q already exists with different content", storeID))
+					"global Hero %q already exists with different content", storeID))
 			}
 			revisionAction := p.service.heroRevisionAction(storeID, digest)
 			target := &heroTarget{
@@ -1235,7 +1235,7 @@ func validFlowStoreID(value string) bool {
 	return graphIDPattern.MatchString(value)
 }
 
-// validHeroStoreHandle matches heroesource's Role handle contract.
+// validHeroStoreHandle matches heroesource's Hero handle contract.
 func validHeroStoreHandle(value string) bool {
 	return heroHandlePattern.MatchString(value)
 }

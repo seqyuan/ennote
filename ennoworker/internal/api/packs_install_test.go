@@ -23,7 +23,7 @@ import (
 )
 
 // packInstallFixture is a real Worker home: a file-native model catalog so a
-// pack Role model ref resolves, the source store and user skills root the
+// pack Hero model ref resolves, the source store and user skills root the
 // installer writes, a Session manager for the active-Run check, and HostHome
 // pinned to the same home so the path confinement matches production.
 type packInstallFixture struct {
@@ -75,7 +75,7 @@ func newPackInstallFixture(t *testing.T) *packInstallFixture {
 	}
 }
 
-// installPackFiles is the review fixture pack with the Role model ref bound to
+// installPackFiles is the review fixture pack with the Hero model ref bound to
 // this fixture's model catalog, so the install has exactly one blocker source:
 // whatever the test introduces.
 func installPackFiles(modelRef string) map[string]string {

@@ -58,7 +58,7 @@ func TestBackgroundMutationHeroDeniedAtomically(t *testing.T) {
 	delegations, _, submission := setupRootBudgetParent(t, "background-mutation")
 	ctx := context.Background()
 
-	// V2: the mutation Role lives as a file revision and is resolved through
+	// V2: the mutation Hero lives as a file revision and is resolved through
 	// the file-native DelegationRepo before the item freezes HeroMeta.
 	sources, models, modelID, home := setupFileHeroDelegation(t)
 	document := &heroesource.Document{
@@ -80,7 +80,7 @@ func TestBackgroundMutationHeroDeniedAtomically(t *testing.T) {
 
 	resolver := &store.DelegationRepo{DB: delegations.DB, HeroSources: sources, Models: models,
 		Policies: delegations.Policies}
-	// Resolve the published mutation Role version and attempt background mode.
+	// Resolve the published mutation Hero version and attempt background mode.
 	snapshot, err := resolver.ResolveHeroForDelegation(ctx, submission.Run.SessionID, "mutator")
 	require.NoError(t, err)
 	mutationItem := explorerItem()

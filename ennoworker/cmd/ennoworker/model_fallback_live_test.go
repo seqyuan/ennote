@@ -17,7 +17,7 @@ import (
 )
 
 // TestLiveModelFallbackFreezesCandidateSet qualifies the model fallback path
-// against a real Provider: a Role declares a fallback model profile; the
+// against a real Provider: a Hero declares a fallback model profile; the
 // frozen effective config carries both the primary and fallback in the routing
 // candidate set, and the child still completes on the primary.
 //
@@ -41,7 +41,7 @@ func TestLiveModelFallbackFreezesCandidateSet(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// ——— Role meta with a fallback binding ———
+	// ——— Hero meta with a fallback binding ———
 	definition := fallbackHeroDefinitionJSON(stack.ModelID, fallback.ID)
 	meta, err := store.NewDelegationHeroMeta("fallback-reader-v1", []byte(definition))
 	require.NoError(t, err)
@@ -128,7 +128,7 @@ func TestLiveModelFallbackFreezesCandidateSet(t *testing.T) {
 	assert.Positive(t, usageCount)
 }
 
-// fallbackHeroDefinitionJSON builds a read-only Role definition bound to
+// fallbackHeroDefinitionJSON builds a read-only Hero definition bound to
 // primaryModelID with fallbackModelID as a fallback candidate.
 func fallbackHeroDefinitionJSON(primaryModelID, fallbackModelID string) string {
 	return `{"schemaVersion":1,"heroPrompt":"You are a read-only workspace inspector. Use read, ls, grep, and find to answer the task. Be concise. End by calling submit_result with a structured result.","modelBinding":{"mode":"fixed","modelProfileId":` +

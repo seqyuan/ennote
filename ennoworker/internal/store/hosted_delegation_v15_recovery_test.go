@@ -109,7 +109,7 @@ func TestSecurityMatrixPrivacyBoundaries(t *testing.T) {
 	require.NotNil(t, approval)
 
 	// Inspect the group projection and the approval payload: no private
-	// transcript, credentials, Role prompt, or assignment may leak.
+	// transcript, credentials, Hero prompt, or assignment may leak.
 	inspection, err := delegations.Inspect(ctx, group.ID)
 	require.NoError(t, err)
 	raw, err := jsonMarshal(inspection)
@@ -128,7 +128,7 @@ func TestSecurityMatrixKillSwitchAndDepth(t *testing.T) {
 	delegations, _, _, group, failedItemID := settleMixedGroup(t)
 	ctx := context.Background()
 
-	// V2 kill switch: the frozen Role meta is the only runtime authority for a
+	// V2 kill switch: the frozen Hero meta is the only runtime authority for a
 	// retry. Simulate a revoked identity by clearing the item's frozen meta;
 	// the retry is denied with zero child Provider calls (no child rows).
 	_, err := delegations.DB.Exec(`UPDATE delegation_items SET hero_meta_json='{}'
@@ -143,7 +143,7 @@ func TestSecurityMatrixKillSwitchAndDepth(t *testing.T) {
 	require.NoError(t, delegations.DB.QueryRow(`SELECT COUNT(*) FROM agent_runs WHERE parent_run_id=?`, group.ParentRunID).Scan(&childRuns))
 	assert.Equal(t, 2, childRuns)
 
-	// A delegated Role must never receive delegate_tasks: verify the child tool
+	// A delegated Hero must never receive delegate_tasks: verify the child tool
 	// registry excludes it by checking a depth-two materialization is refused.
 	// (Depth is enforced at create time: children are delegated_agent runs with
 	// no further delegation path; verify via the execution-depth contract.)

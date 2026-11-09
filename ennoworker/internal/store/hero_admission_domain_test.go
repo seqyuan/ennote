@@ -12,7 +12,7 @@ import (
 )
 
 // TestHeroAdmissionDenyMapsToDomainDenied pins the contract mismatch where the
-// portable Role document (and the Role editor) spell a denied delegation
+// portable Hero document (and the Hero editor) spell a denied delegation
 // admission "deny", while the frozen domain vocabulary spells it "denied". An
 // unresolved "deny" was silently treated as not-denied by the admission gate.
 func TestHeroAdmissionDenyMapsToDomainDenied(t *testing.T) {

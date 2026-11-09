@@ -69,7 +69,7 @@ describe("frozen run permission mode", () => {
     { id: "builtin-tool-auto-v1", kind: "tool", status: "active", config: { mode: "auto" } },
   ];
 
-  // A Role Run ignores the requested host policy: the Role's frozen
+  // A Hero Run ignores the requested host policy: the Hero's frozen
   // permissionCeiling is the authority the Worker actually executes.
   it("prefers the Role permissionCeiling over the requested policy", () => {
     const run = {

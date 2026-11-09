@@ -25,12 +25,12 @@ type ModelBinding struct {
 	Fallbacks      []string              `json:"fallbacks" yaml:"fallbacks"`
 }
 
-// Authority is the Role source-level write authority. It is deliberately not
-// domain.HeroAuthority: portable Role files and the Worker API spell the
+// Authority is the Hero source-level write authority. It is deliberately not
+// domain.HeroAuthority: portable Hero files and the Worker API spell the
 // mutation authority "write_workspace", while the frozen HeroDefinition uses
 // "mutation".
 //
-// Authority is validated but never rewritten: Role revisions are immutable and
+// Authority is validated but never rewritten: Hero revisions are immutable and
 // digest-verified, so normalizing an existing field would change the digest of
 // revisions written before this type existed. Domain maps every accepted value
 // onto the internal vocabulary.
@@ -45,7 +45,7 @@ const (
 	AuthorityMutation Authority = "mutation"
 )
 
-// Domain maps the source authority onto the internal Role authority. An
+// Domain maps the source authority onto the internal Hero authority. An
 // omitted authority fails closed to read_only.
 func (a Authority) Domain() domain.HeroAuthority {
 	switch a {
@@ -56,14 +56,14 @@ func (a Authority) Domain() domain.HeroAuthority {
 	}
 }
 
-// AdmissionDeny is the portable Role-file spelling of a denied delegation
-// admission, as documented by the OpenAPI contract and emitted by the Role
+// AdmissionDeny is the portable Hero-file spelling of a denied delegation
+// admission, as documented by the OpenAPI contract and emitted by the Hero
 // editor. The internal domain vocabulary spells the same state "denied"
 // (domain.DelegationDenied).
 const AdmissionDeny domain.DelegationAdmission = "deny"
 
-// AdmissionDomain maps a portable Role-file admission onto the internal domain
-// vocabulary so a Role authored with the documented wire value is enforced
+// AdmissionDomain maps a portable Hero-file admission onto the internal domain
+// vocabulary so a Hero authored with the documented wire value is enforced
 // exactly like one written with the internal spelling. Unrecognized values pass
 // through unchanged so fail-closed consumers still reject them.
 func AdmissionDomain(value domain.DelegationAdmission) domain.DelegationAdmission {
@@ -124,36 +124,36 @@ type Document struct {
 
 func Parse(data []byte) (*Document, error) {
 	if len(data) > maxHeroFileBytes {
-		return nil, fmt.Errorf("Role file exceeds 128 KiB")
+		return nil, fmt.Errorf("Hero file exceeds 128 KiB")
 	}
 	normalized := bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
 	if !bytes.HasPrefix(normalized, []byte("---\n")) {
-		return nil, fmt.Errorf("Role file requires an opening frontmatter delimiter")
+		return nil, fmt.Errorf("Hero file requires an opening frontmatter delimiter")
 	}
 	closing := bytes.Index(normalized[4:], []byte("\n---\n"))
 	if closing < 0 {
-		return nil, fmt.Errorf("Role file requires a closing frontmatter delimiter")
+		return nil, fmt.Errorf("Hero file requires a closing frontmatter delimiter")
 	}
 	closing += 4
 	frontmatter := normalized[4:closing]
 	body := normalized[closing+5:]
 	body = bytes.TrimSuffix(body, []byte("\n"))
 	if len(bytes.TrimSpace(body)) == 0 || len(body) > 65536 {
-		return nil, fmt.Errorf("Role prompt must contain 1 to 65536 bytes")
+		return nil, fmt.Errorf("Hero prompt must contain 1 to 65536 bytes")
 	}
 
 	var document Document
 	decoder := yaml.NewDecoder(bytes.NewReader(frontmatter))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&document); err != nil {
-		return nil, fmt.Errorf("parse Role frontmatter: %w", err)
+		return nil, fmt.Errorf("parse Hero frontmatter: %w", err)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		if err == nil {
-			return nil, fmt.Errorf("Role frontmatter must contain one YAML document")
+			return nil, fmt.Errorf("Hero frontmatter must contain one YAML document")
 		}
-		return nil, fmt.Errorf("parse Role frontmatter: %w", err)
+		return nil, fmt.Errorf("parse Hero frontmatter: %w", err)
 	}
 	document.Prompt = string(body)
 	if err := normalizeAndValidate(&document); err != nil {
@@ -164,7 +164,7 @@ func Parse(data []byte) (*Document, error) {
 
 func Encode(document *Document) ([]byte, error) {
 	if document == nil {
-		return nil, fmt.Errorf("Role source document is required")
+		return nil, fmt.Errorf("Hero source document is required")
 	}
 	copy := *document
 	copy.Model.Fallbacks = append([]string(nil), document.Model.Fallbacks...)
@@ -180,14 +180,14 @@ func Encode(document *Document) ([]byte, error) {
 	copy.Prompt = ""
 	frontmatter, err := yaml.Marshal(&copy)
 	if err != nil {
-		return nil, fmt.Errorf("encode Role frontmatter: %w", err)
+		return nil, fmt.Errorf("encode Hero frontmatter: %w", err)
 	}
 	return []byte("---\n" + string(frontmatter) + "---\n" + prompt + "\n"), nil
 }
 
 func SourceDigest(document *Document) (string, error) {
 	if document == nil {
-		return "", fmt.Errorf("Role source document is required")
+		return "", fmt.Errorf("Hero source document is required")
 	}
 	copy := *document
 	copy.Model.Fallbacks = append([]string(nil), document.Model.Fallbacks...)
@@ -201,7 +201,7 @@ func SourceDigest(document *Document) (string, error) {
 	}
 	encoded, err := json.Marshal(copy)
 	if err != nil {
-		return "", fmt.Errorf("encode Role source: %w", err)
+		return "", fmt.Errorf("encode Hero source: %w", err)
 	}
 	digest := sha256.Sum256(encoded)
 	return "sha256:" + hex.EncodeToString(digest[:]), nil
@@ -217,13 +217,13 @@ func normalizeAndValidate(document *Document) error {
 	document.Model.Ref = strings.TrimSpace(document.Model.Ref)
 	document.OutputContract = strings.TrimSpace(document.OutputContract)
 	if document.SchemaVersion != 1 {
-		return fmt.Errorf("Role schemaVersion must be 1")
+		return fmt.Errorf("Hero schemaVersion must be 1")
 	}
 	if !heroHandlePattern.MatchString(document.Handle) {
-		return fmt.Errorf("Role handle must match %s", heroHandlePattern.String())
+		return fmt.Errorf("Hero handle must match %s", heroHandlePattern.String())
 	}
 	if document.Name == "" {
-		return fmt.Errorf("Role name is required")
+		return fmt.Errorf("Hero name is required")
 	}
 	if document.Icon == "" {
 		document.Icon = "bot"
@@ -237,7 +237,7 @@ func normalizeAndValidate(document *Document) error {
 	switch document.Authority {
 	case "", AuthorityReadOnly, AuthorityWriteWorkspace, AuthorityMutation:
 	default:
-		return fmt.Errorf("unsupported Role authority %q", document.Authority)
+		return fmt.Errorf("unsupported Hero authority %q", document.Authority)
 	}
 	if err := validateModelRef(document.Model.Ref); err != nil {
 		return fmt.Errorf("model.ref: %w", err)
@@ -287,7 +287,7 @@ func normalizeAndValidate(document *Document) error {
 	return nil
 }
 
-// heroContextModes is the accepted Role execution-context vocabulary. A Role is
+// heroContextModes is the accepted Hero execution-context vocabulary. A Hero is
 // only invokable in the modes it declares: task_only is required to run as a
 // delegated child, reply to be addressed with reply_to, and room/fresh for
 // direct Host invocation.

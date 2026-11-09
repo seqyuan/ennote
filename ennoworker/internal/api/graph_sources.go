@@ -252,20 +252,20 @@ func (s *Server) validateGraphPublish(r *http.Request, document *graphsource.Doc
 		case "global":
 			hero, _, err := s.GlobalSources.ReadHero(id)
 			if err != nil {
-				return fmt.Errorf("Task %q global Role %q: %w", taskID, id, err)
+				return fmt.Errorf("Task %q global Hero %q: %w", taskID, id, err)
 			}
 			refs = append([]string{hero.Model.Ref}, hero.Model.Fallbacks...)
 		case "local":
 			hero, _, err := s.GlobalSources.ReadGraphHero(document.ID, id)
 			if err != nil {
-				return fmt.Errorf("Task %q local Role %q: %w", taskID, id, err)
+				return fmt.Errorf("Task %q local Hero %q: %w", taskID, id, err)
 			}
 			refs = append([]string{hero.Model.Ref}, hero.Model.Fallbacks...)
 		}
 		if s.Models != nil {
 			for _, ref := range refs {
 				if _, err := s.Models.ResolvePortableRef(r.Context(), ref); err != nil {
-					return fmt.Errorf("Task %q Role model: %w", taskID, err)
+					return fmt.Errorf("Task %q Hero model: %w", taskID, err)
 				}
 			}
 		}

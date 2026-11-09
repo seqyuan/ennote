@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A direct Role invocation freezes the Role definition, so it must also freeze
+// A direct Hero invocation freezes the Hero definition, so it must also freeze
 // the content digest of every preload Skill. Order is the published order and
 // 'available' Skills are not part of the prompt, so they are not pinned.
 func TestHeroConfigFreezePinsPreloadSkillsByContentDigest(t *testing.T) {
@@ -71,7 +71,7 @@ func TestHeroConfigFreezeLeavesPreloadSkillsUnpinnedWithoutCatalog(t *testing.T)
 }
 
 // With a catalog present, an unnameable preload Skill must not freeze: an
-// unpinned published Role prompt is exactly the silent-change hole this pins.
+// unpinned published Hero prompt is exactly the silent-change hole this pins.
 func TestHeroConfigFreezeFailsWhenPreloadSkillIsNotInCatalog(t *testing.T) {
 	runs, _, session, hero, version, _ := setupPublishedHeroInvocationWithSkills(t,
 		[]heroesource.SkillBinding{{ID: "missing-skill", Mode: domain.HeroSkillPreload}})
@@ -107,7 +107,7 @@ func TestHeroConfigFreezeFailsWhenPreloadSkillHasNoDigest(t *testing.T) {
 	assert.Contains(t, err.Error(), "no content digest")
 }
 
-// The delegated-child freeze path reads the Role definition from the frozen
+// The delegated-child freeze path reads the Hero definition from the frozen
 // delegation meta, not from global SQL, so it must pin preloads there too.
 func TestDelegatedChildConfigFreezePinsPreloadSkills(t *testing.T) {
 	fixture := newFileRunFixture(t, "child-preload-pin")
@@ -146,7 +146,7 @@ func TestDelegatedChildConfigFreezeFailsWhenPreloadSkillIsNotInCatalog(t *testin
 }
 
 // claimDelegatedChildWithHeroSkills creates a parent Run, a delegation item
-// whose frozen meta carries the supplied Role Skills, and returns the claimed
+// whose frozen meta carries the supplied Hero Skills, and returns the claimed
 // child Run ready for config resolution.
 func claimDelegatedChildWithHeroSkills(t *testing.T, fixture *fileRunFixture, requestID string,
 	entries []domain.HeroSkillEntry) *domain.AgentRun {
@@ -199,7 +199,7 @@ func writeCatalogSkill(t *testing.T, skillsDir, id, body string) string {
 	return loaded.ContentHash
 }
 
-// freezeHeroInvocation submits, claims, and freezes one direct Role invocation,
+// freezeHeroInvocation submits, claims, and freezes one direct Hero invocation,
 // returning the resolved config and the claimed Run.
 func freezeHeroInvocation(t *testing.T, runs *store.RunRepo, sessionID, requestID string,
 	hero domain.HeroIdentity, version domain.HeroVersion) (*store.ResolvedRunConfig, *domain.AgentRun, error) {

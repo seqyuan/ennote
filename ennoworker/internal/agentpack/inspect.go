@@ -250,12 +250,12 @@ func (b *builder) analyseHeroes() error {
 		document, err := heroesource.Parse(file.Data)
 		if err != nil {
 			return fieldError(CodePackHeroInvalid, field+".path",
-				"parse Role source %s: %v", path, err)
+				"parse Hero source %s: %v", path, err)
 		}
 		digest, err := heroesource.SourceDigest(document)
 		if err != nil {
 			return fieldError(CodePackHeroInvalid, field+".path",
-				"digest Role source %s: %v", path, err)
+				"digest Hero source %s: %v", path, err)
 		}
 		authority := string(document.Authority)
 		if authority == "" {
@@ -380,17 +380,17 @@ func (b *builder) checkCrossReferences() error {
 			}
 		}
 	}
-	// A Role-only pack installs global Heroes only: a flow-scoped Role would be
+	// A Hero-only pack installs global Heroes only: a flow-scoped Hero would be
 	// invisible to every flow.
 	if len(b.manifest.Flows) == 0 {
 		for index := range b.manifest.Heroes {
 			if b.manifest.Heroes[index].Scope != HeroScopeGlobal {
 				return fieldError(CodePackHeroInvalid, "heroes["+strconv.Itoa(index)+"].scope",
-					"Role-only pack requires scope: global for hero %q", b.manifest.Heroes[index].Handle)
+					"Hero-only pack requires scope: global for hero %q", b.manifest.Heroes[index].Handle)
 			}
 		}
 	}
-	// Every flow-scoped Role must be reachable from a flow.
+	// Every flow-scoped Hero must be reachable from a flow.
 	for index := range b.manifest.Heroes {
 		hero := b.manifest.Heroes[index]
 		if hero.Scope == HeroScopeFlow && !b.flowHeroRefs[hero.Handle] {
@@ -448,7 +448,7 @@ func (b *builder) collectWarnings() {
 	switch {
 	case len(b.manifest.Flows) == 0:
 		b.warn(WarningHeroOnlyPack, SeverityInfo,
-			"pack ships heroes only; every hero is installed as a Worker-global Role")
+			"pack ships heroes only; every hero is installed as a Worker-global Hero")
 	case len(b.manifest.Heroes) == 0:
 		b.warn(WarningFlowOnlyPack, SeverityInfo,
 			"pack ships flows only; every task hero must resolve from the Worker's global Heroes")

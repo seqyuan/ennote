@@ -348,7 +348,7 @@ func TestInspectBareHeroRefCountsAsFlowReference(t *testing.T) {
 	files := mixedPackFiles()
 	files[0] = entry{path: "pack.yaml", body: `schema_version: 1
 id: seqyuan/bare-hero
-name: Bare Role
+name: Bare Hero
 version: 1.0.0
 flows:
   - id: qc-review

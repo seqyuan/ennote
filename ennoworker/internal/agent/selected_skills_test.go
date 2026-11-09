@@ -14,7 +14,7 @@ func loadedFixture(id, text, hash string) *skills.LoadedSkill {
 }
 
 // A Skill the user picked is injected with its own provenance, so the frozen
-// composition record can tell a Role's preload from a person's choice.
+// composition record can tell a Hero's preload from a person's choice.
 func TestSelectedSkillSegmentsNameTheUserAsTheSource(t *testing.T) {
 	segments, err := SelectedSkillSegments(
 		domain.FrozenSkillRefs{{ID: "cell-qc", Digest: "hash-1"}},

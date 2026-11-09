@@ -161,7 +161,7 @@ func (s *Service) freezeFlow(ctx context.Context, flowID string, definition *dom
 		}
 		readOnly := domain.HeroDefinitionIsReadOnly(hero.Definition)
 		if task.FanOut != nil && !readOnly {
-			return nil, fmt.Errorf("flow_fan_out_not_read_only: Task %q fan_out requires a fully read-only Role", name)
+			return nil, fmt.Errorf("flow_fan_out_not_read_only: Task %q fan_out requires a fully read-only Hero", name)
 		}
 		frozenSkills, err := domain.NormalizeFrozenSkills(globalSkills)
 		if err != nil {
@@ -170,16 +170,16 @@ func (s *Service) freezeFlow(ctx context.Context, flowID string, definition *dom
 		switch hero.Definition.DelegationPolicy.Admission {
 		case domain.DelegationAutoWithinBudget:
 		case domain.DelegationDenied:
-			return nil, fmt.Errorf("Task %q: Role %s denies Host delegation", name, hero.VersionID)
+			return nil, fmt.Errorf("Task %q: Hero %s denies Host delegation", name, hero.VersionID)
 		case domain.DelegationApprovalRequired:
-			return nil, fmt.Errorf("Task %q: Role %s requires explicit delegation approval; Flow Runs only admit auto_within_budget Heroes", name, hero.VersionID)
+			return nil, fmt.Errorf("Task %q: Hero %s requires explicit delegation approval; Flow Runs only admit auto_within_budget Heroes", name, hero.VersionID)
 		default:
-			return nil, fmt.Errorf("Task %q: Role %s has an invalid admission policy", name, hero.VersionID)
+			return nil, fmt.Errorf("Task %q: Hero %s has an invalid admission policy", name, hero.VersionID)
 		}
 		ceiling := hero.Definition.DelegationPolicy.BudgetCeiling
 		if task.Budget != nil && task.Budget.Tokens > 0 {
 			if task.Budget.Tokens > ceiling.MaxTotalTokens {
-				return nil, fmt.Errorf("Task %q: budget tokens %d exceed the Role ceiling %d", name, task.Budget.Tokens, ceiling.MaxTotalTokens)
+				return nil, fmt.Errorf("Task %q: budget tokens %d exceed the Hero ceiling %d", name, task.Budget.Tokens, ceiling.MaxTotalTokens)
 			}
 			ceiling.MaxTotalTokens = task.Budget.Tokens
 		}
@@ -212,12 +212,12 @@ func (s *Service) freezeFlowHero(ctx context.Context, flowID, taskID string, tas
 	switch {
 	case strings.HasPrefix(handle, "local/"):
 		if hasVersion {
-			return nil, nil, fmt.Errorf("flow_local_hero_version_unsupported: Role %q cannot be version-pinned", ref)
+			return nil, nil, fmt.Errorf("flow_local_hero_version_unsupported: Hero %q cannot be version-pinned", ref)
 		}
 		id := strings.TrimSpace(strings.TrimPrefix(handle, "local/"))
 		bundledDocument, ok := bundled[id]
 		if !ok {
-			return nil, nil, fmt.Errorf("flow-local Role %q is not present in the published revision bundle", id)
+			return nil, nil, fmt.Errorf("flow-local Hero %q is not present in the published revision bundle", id)
 		}
 		document = bundledDocument
 		digest, _ = heroesource.SourceDigest(document)
@@ -246,7 +246,7 @@ func (s *Service) freezeFlowHero(ctx context.Context, flowID, taskID string, tas
 	}
 	definition, err := s.resolveLocalHero(ctx, flowID, document)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Role %q: %w", handle, err)
+		return nil, nil, fmt.Errorf("Hero %q: %w", handle, err)
 	}
 	globalSkills, err := s.applyFlowTaskSkills(ctx, flowID, definition, task.Skills, skillCatalog)
 	if err != nil {
@@ -263,7 +263,7 @@ func (s *Service) flowGlobalHero(handle, versionText string, hasVersion bool) (*
 	if !hasVersion {
 		document, revision, err := s.Sources.LatestHeroRevision(handle)
 		if err != nil {
-			return nil, nil, fmt.Errorf("global Role %q: %w", handle, err)
+			return nil, nil, fmt.Errorf("global Hero %q: %w", handle, err)
 		}
 		return document, revision, nil
 	}
@@ -281,10 +281,10 @@ func (s *Service) flowGlobalHero(handle, versionText string, hasVersion bool) (*
 			return document, read, nil
 		}
 	}
-	return nil, nil, fmt.Errorf("global Role %q has no published version %q", handle, versionText)
+	return nil, nil, fmt.Errorf("global Hero %q has no published version %q", handle, versionText)
 }
 
-// applyFlowTaskSkills inlines local Skills (never widening the Role's tool
+// applyFlowTaskSkills inlines local Skills (never widening the Hero's tool
 // allowlist) and returns the content-pinned global Skill refs.
 func (s *Service) applyFlowTaskSkills(ctx context.Context, flowID string, definition *domain.HeroDefinition,
 	refs []string, skillCatalog map[string]string) (domain.FrozenSkillRefs, error) {

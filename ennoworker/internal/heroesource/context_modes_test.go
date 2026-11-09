@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestParseAcceptsDelegationAndReplyContextModes pins that the portable Role
-// document carries the full frozen HeroContextPolicy vocabulary. A Role that
+// TestParseAcceptsDelegationAndReplyContextModes pins that the portable Hero
+// document carries the full frozen HeroContextPolicy vocabulary. A Hero that
 // declares task_only can run as a delegated child; reply enables reply_to
 // addressing. Neither was authorable before, so UI-created Heroes could never be
 // delegated to.

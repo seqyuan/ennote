@@ -719,7 +719,7 @@ button:disabled { cursor: default; }
 
 /* Attachment strip */
 
-/* Role target picker (composer + panel). */
+/* Hero target picker (composer + panel). */
 .hero-target-picker { position: relative; flex: 0 0 auto; }
 .hero-target-trigger { display: grid; grid-template-columns: 14px minmax(38px, auto) 12px; height: 27px; max-width: 190px; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-panel); color: var(--text); font: 700 var(--text-xs) var(--font-mono); cursor: pointer; }
 .hero-target-trigger span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1467,7 +1467,7 @@ html.dark .file-code .shiki span { color: var(--shiki-dark); }
   .project-create-dialog { width: calc(100vw - 24px); }
 }
 
-/* Role skill picker */
+/* Hero-bound skill list */
 .role-skill-picker { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .role-skill-search {
   display: flex; align-items: center; gap: 6px;
@@ -1695,7 +1695,7 @@ html.dark .file-code .shiki span { color: var(--shiki-dark); }
   .graph-section-heading p, .graph-task-summary small, .workspace-page-header p { color: var(--text); }
 }
 
-/* Worker-global Role catalog */
+/* Worker-global Hero catalog */
 .global-heroes { display: grid; grid-template-columns: 278px minmax(0, 1fr); width: 100%; height: 100%; min-height: 0; }
 .global-heroes-list { display: flex; min-width: 0; min-height: 0; flex-direction: column; border-right: 1px solid var(--border); background: var(--bg-panel); }
 .global-heroes-list > header { display: flex; min-height: 58px; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px 8px 13px; border-bottom: 1px solid var(--border); }

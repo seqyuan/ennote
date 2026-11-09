@@ -112,7 +112,7 @@ func TestFrozenSkillRefsExposeIDsAndDigests(t *testing.T) {
 	assert.Equal(t, []string{"a", "b"}, ids)
 }
 
-// A FrozenHeroExecution written before Role preload pinning has no
+// A FrozenHeroExecution written before Hero preload pinning has no
 // frozenSkills field. It must keep decoding, with preload refs left unpinned so
 // the executor falls back to the current on-disk Skill body.
 func TestFrozenHeroExecutionKeepsLegacySnapshotsUnpinned(t *testing.T) {
@@ -123,7 +123,7 @@ func TestFrozenHeroExecutionKeepsLegacySnapshotsUnpinned(t *testing.T) {
 	require.Len(t, hero.Skills.Entries, 1)
 	assert.Equal(t, "hero-skill", hero.Skills.Entries[0].SkillID)
 
-	// A newly frozen Role round trips its pinned refs.
+	// A newly frozen Hero round trips its pinned refs.
 	hero.FrozenSkills = domain.FrozenSkillRefs{{ID: "hero-skill", Digest: "sha256:aaa"}}
 	encoded, err := json.Marshal(hero)
 	require.NoError(t, err)

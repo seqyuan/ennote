@@ -12,7 +12,7 @@ import (
 // SelectedSkillSource names the prompt segment provenance of a Skill the user
 // attached to one turn. It is deliberately distinct from the Hero's
 // `hero:<handle>@<version>` source so the composition record answers "who put
-// this body in front of the model": a Role revision, or the person typing.
+// this body in front of the model": a Hero revision, or the person typing.
 const SelectedSkillSource = "user-skill-select"
 
 // SelectedSkillSegments turns the turn's frozen Skill selection into inlined

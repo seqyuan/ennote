@@ -81,7 +81,7 @@ func (s *Server) listSkills(w http.ResponseWriter, r *http.Request) {
 }
 
 // createSkill authors a new Skill under the user skills root. The created
-// Skill is immediately visible to the live catalog (and to Flow/Role freeze),
+// Skill is immediately visible to the live catalog (and to Flow/Hero freeze),
 // because the catalog is re-read from disk at list/freeze time.
 func (s *Server) createSkill(w http.ResponseWriter, r *http.Request) {
 	if s.Skills == nil {

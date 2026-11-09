@@ -180,7 +180,7 @@ func (r *DelegationRepo) RetryGeneration(ctx context.Context, groupID string,
 	}
 
 	// Freeze authorization and budget snapshots for the new generation. The
-	// Role version is the frozen item version — a republished or archived Role
+	// Hero version is the frozen item version — a republished or archived Hero
 	// never replaces it, but a disabled identity fails closed.
 	authSnapshot := make([]map[string]string, 0, len(items))
 	var budgetSum domain.BudgetCeilingJSON
@@ -443,9 +443,9 @@ func (r *DelegationRepo) approvalForGeneration(ctx context.Context, groupID stri
 	return &approval, nil
 }
 
-// validateRetryHeroAndCeilingTx fails closed when the frozen Role meta is
+// validateRetryHeroAndCeilingTx fails closed when the frozen Hero meta is
 // missing and validates a retry budget override against the frozen
-// definition's ceiling. V2 never consults global hero SQL: the Role facts
+// definition's ceiling. V2 never consults global hero SQL: the Hero facts
 // frozen on the delegation item at Run start are the only authority.
 func (r *DelegationRepo) validateRetryHeroAndCeilingTx(ctx context.Context, tx *sql.Tx,
 	itemID string, request domain.BudgetCeilingJSON) error {
@@ -458,11 +458,11 @@ func (r *DelegationRepo) validateRetryHeroAndCeilingTx(ctx context.Context, tx *
 		return err
 	}
 	if strings.TrimSpace(metaJSON) == "" || strings.TrimSpace(metaJSON) == "{}" {
-		return fmt.Errorf("%w: frozen Role meta is unavailable", ErrDelegationNotAuthorized)
+		return fmt.Errorf("%w: frozen Hero meta is unavailable", ErrDelegationNotAuthorized)
 	}
 	var meta DelegationHeroMeta
 	if err := json.Unmarshal([]byte(metaJSON), &meta); err != nil {
-		return fmt.Errorf("decode frozen Role meta: %w", err)
+		return fmt.Errorf("decode frozen Hero meta: %w", err)
 	}
 	if err := validateDelegationBudget(request, meta.Definition.DelegationPolicy.BudgetCeiling); err != nil {
 		return fmt.Errorf("%w: %v", ErrDelegationNotAuthorized, err)
@@ -551,7 +551,7 @@ func authSnapshotJSON(selection []map[string]string) json.RawMessage {
 	return encoded
 }
 
-// referenceAttemptHeroVersion returns the frozen Role version of a reused
+// referenceAttemptHeroVersion returns the frozen Hero version of a reused
 // attempt (used to complete the generation authorization snapshot).
 func referenceAttemptHeroVersion(ctx context.Context, tx *sql.Tx, attemptID string) string {
 	var version string

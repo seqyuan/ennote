@@ -53,7 +53,7 @@ Your submit_result summary MUST begin with the exact token LIVE_SKILL_MARKER fol
 	}
 	require.Contains(t, globalSkills, "live-marker", "live-marker skill must be discovered")
 
-	// ——— file-native global Role (reader) carrying a preload Skill ———
+	// ——— file-native global Hero (reader) carrying a preload Skill ———
 	hero := &heroesource.Document{
 		SchemaVersion: 1, Handle: "skill-reader", Name: "Skill Reader",
 		Description: "Read-only inspector with a preloaded marker Skill.", Positioning: "Independent",
@@ -77,7 +77,7 @@ Your submit_result summary MUST begin with the exact token LIVE_SKILL_MARKER fol
 	_, err = stack.Sources.PublishHeroRevision(hero.Handle)
 	require.NoError(t, err)
 
-	// ——— file-native Graph: one hero-backed Task (Skill preloaded via Role) ———
+	// ——— file-native Graph: one hero-backed Task (Skill preloaded via Hero) ———
 	_, digest, err := stack.Sources.CreateGraph("skill-flow", "Skill Flow")
 	require.NoError(t, err)
 	_, _, err = stack.Sources.UpdateGraph("skill-flow", digest, func(d *graphsource.Document) error {
@@ -180,7 +180,7 @@ Your submit_result summary MUST begin with the exact token LIVE_SKILL_MARKER fol
 	require.NoError(t, db.QueryRow(`SELECT COALESCE(i.hero_meta_json, '{}') FROM delegation_items i
 		JOIN delegation_item_attempts a ON a.item_id=i.id
 		WHERE a.child_run_id IN (SELECT child_run_id FROM run_agent_flow_nodes WHERE run_id=?) LIMIT 1`, run.RunID).Scan(&heroMetaJSON))
-	assert.Contains(t, heroMetaJSON, "live-marker", "frozen Role meta must carry the preloaded Skill")
+	assert.Contains(t, heroMetaJSON, "live-marker", "frozen Hero meta must carry the preloaded Skill")
 
 	// ——— the Skill's prompt marker reached the submitted result ———
 	var resultJSON string

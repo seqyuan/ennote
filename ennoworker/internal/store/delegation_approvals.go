@@ -179,7 +179,7 @@ func (r *DelegationApprovalRepo) Decide(ctx context.Context, approvalID string,
 		if !ok {
 			return nil, nil, fmt.Errorf("approval items do not cover selected item %s", itemID)
 		}
-		// Fail closed when the frozen Role meta is missing; the frozen version
+		// Fail closed when the frozen Hero meta is missing; the frozen version
 		// never changes. Budget was validated at request time and is
 		// re-validated here against the frozen definition's ceiling.
 		repo := &DelegationRepo{DB: r.DB, Policies: r.Policies}

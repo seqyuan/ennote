@@ -131,7 +131,7 @@ func (c *OrchestratorChildren) CreateTaskChild(ctx context.Context, parentRunID,
 		FrozenSkills:   append(domain.FrozenSkillRefs(nil), spec.Skills...),
 		AssignmentJSON: json.RawMessage(fmt.Sprintf(`{"task":%q}`, spec.Assignment)),
 		// OutputContract empty: the delegation admission resolves the frozen
-		// Role's contract; the typed payload still flows through submit_result.
+		// Hero's contract; the typed payload still flows through submit_result.
 		Budget:   spec.Budget,
 		HeroMeta: heroMeta,
 	}

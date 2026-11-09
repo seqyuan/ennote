@@ -70,8 +70,8 @@ test("global file Role authors the context modes delegation and reply need", asy
   await page.goto("/heroes");
   await expect(page.getByRole("option", { name: /Security Reviewer/ })).toBeVisible();
   await expect(page.getByLabel("Default context mode")).toHaveValue("room");
-  // task_only is what lets the Role run as a delegated child; without a UI
-  // control for it a Role created here could never be delegated to.
+  // task_only is what lets the Hero run as a delegated child; without a UI
+  // control for it a Hero created here could never be delegated to.
   await page.getByRole("checkbox", { name: "Task only" }).check();
   await expect.poll(() => patches.length).toBeGreaterThan(0);
   const document = patches.at(-1)?.document as { context: { allowedModes: string[] } };

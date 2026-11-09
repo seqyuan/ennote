@@ -109,7 +109,7 @@ func TestDelegationAdmissionRewriteValidatesAgainstToolSchema(t *testing.T) {
 			var autoResume bool
 			require.NoError(t, json.Unmarshal(decoded["autoResume"], &autoResume))
 			assert.True(t, autoResume)
-			// The resolved immutable Role version is frozen into the item.
+			// The resolved immutable Hero version is frozen into the item.
 			assert.Contains(t, string(decision.Arguments), "heroVersionId")
 		})
 	}

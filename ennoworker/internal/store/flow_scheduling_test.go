@@ -53,7 +53,7 @@ func TestFlowPublishResolverToolReadOnlyMatrix(t *testing.T) {
 	}
 }
 
-// publishSchedulingHero publishes a file-native Role with an explicit authority
+// publishSchedulingHero publishes a file-native Hero with an explicit authority
 // and tool allowlist so publish-time scheduling can be exercised end to end.
 func publishSchedulingHero(t *testing.T, stack *fileConfigStack, handle string,
 	authority heroesource.Authority, tools []string) {
@@ -104,10 +104,10 @@ func fanOutFlow(id, heroRef string) *domain.FlowDefinition {
 }
 
 // TestFlowPublishFanOutRequiresSharedReadOnlyClassifier proves publish-time
-// scheduling now uses the conservative shared allowlist: a read_only Role that
+// scheduling now uses the conservative shared allowlist: a read_only Hero that
 // carries an MCP tool is no longer fan_out-eligible (the old graphrun copy
 // accepted any mcp__* name without "__write__"), while a genuinely read-only
-// Role keeps validating.
+// Hero keeps validating.
 func TestFlowPublishFanOutRequiresSharedReadOnlyClassifier(t *testing.T) {
 	ctx := context.Background()
 	stack := newFileConfigStack(t)
@@ -122,10 +122,10 @@ func TestFlowPublishFanOutRequiresSharedReadOnlyClassifier(t *testing.T) {
 
 	// Regression guard: real read-only Heroes keep their fan_out parallelism.
 	pure := validator.Validate(ctx, fanOutFlow("fanout-pure", "pure-reader@1"))
-	require.Empty(t, pure.Diagnostics, "read-only Role must stay fan_out-eligible")
+	require.Empty(t, pure.Diagnostics, "read-only Hero must stay fan_out-eligible")
 	assert.True(t, pure.Valid)
 
-	// A read_only Role containing an MCP tool must not be scheduled as read-only.
+	// A read_only Hero containing an MCP tool must not be scheduled as read-only.
 	mcp := validator.Validate(ctx, fanOutFlow("fanout-mcp", "mcp-reader@1"))
 	assert.False(t, mcp.Valid)
 	codes := make([]string, 0, len(mcp.Diagnostics))

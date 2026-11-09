@@ -34,7 +34,7 @@ func TestDelegatedChildSegmentsInlineHeroPreloadSkillBodies(t *testing.T) {
 
 	text, sections := systemprompt.Compose(segments)
 	assert.Contains(t, text, "ROLE_PRELOAD_BODY",
-		"a delegated child executes the frozen Role, so it must receive that Role's preload Skills")
+		"a delegated child executes the frozen Hero, so it must receive that Hero's preload Skills")
 
 	kinds := make([]domain.PromptSectionKind, 0, len(sections))
 	for _, section := range sections {
@@ -62,7 +62,7 @@ func TestDelegatedChildSegmentsInlineFrozenTaskSkills(t *testing.T) {
 	assert.Contains(t, text, "ROLE_PRELOAD_BODY")
 	assert.Contains(t, text, "TASK_PRELOAD_BODY")
 	assert.Equal(t, 1, strings.Count(text, "ROLE_PRELOAD_BODY"),
-		"a task Skill that the Role already preloads must not be inlined twice")
+		"a task Skill that the Hero already preloads must not be inlined twice")
 
 	require.Len(t, sections, 5)
 	assert.Equal(t, "task:child-9", sections[4].Source, "the task Skill names the child Run it was frozen for")
@@ -70,7 +70,7 @@ func TestDelegatedChildSegmentsInlineFrozenTaskSkills(t *testing.T) {
 }
 
 // A delegated child runs in task_only context. Project instruction files carry
-// workspace-wide operating rules that the Role's own context policy never asked
+// workspace-wide operating rules that the Hero's own context policy never asked
 // for, so they must never be folded into a child's prompt.
 func TestDelegatedChildSegmentsContainNoProjectContext(t *testing.T) {
 	executor := &agentExecutor{}
@@ -115,7 +115,7 @@ func TestDelegatedChildSegmentsFailClosedOnChangedSkillContent(t *testing.T) {
 	assert.NotContains(t, err.Error(), "EDITED_BODY")
 }
 
-// A delegated child executes the frozen Role, so its Role preload Skills are
+// A delegated child executes the frozen Hero, so its Hero preload Skills are
 // pinned exactly like task Skills: changed on-disk content fails closed.
 func TestDelegatedChildSegmentsFailClosedOnChangedHeroPreloadContent(t *testing.T) {
 	skillsDir := t.TempDir()
@@ -127,7 +127,7 @@ func TestDelegatedChildSegmentsFailClosedOnChangedHeroPreloadContent(t *testing.
 	hero.FrozenSkills = domain.FrozenSkillRefs{{ID: "hero-skill", Digest: frozen.ContentHash}}
 	executor := &agentExecutor{skillsDir: skillsDir}
 	segments, err := executor.delegatedChildSegments(hero, "Review.", nil, "task:child-6")
-	require.NoError(t, err, "unchanged Role content still materializes")
+	require.NoError(t, err, "unchanged Hero content still materializes")
 	text, _ := systemprompt.Compose(segments)
 	assert.Contains(t, text, "FROZEN_ROLE_BODY")
 
@@ -140,7 +140,7 @@ func TestDelegatedChildSegmentsFailClosedOnChangedHeroPreloadContent(t *testing.
 	assert.Contains(t, err.Error(), "skill-reader@3")
 }
 
-// A task Skill that duplicates a Role preload is verified twice. Both paths
+// A task Skill that duplicates a Hero preload is verified twice. Both paths
 // must agree on the frozen content, so a matching duplicate renders once and a
 // changed duplicate fails closed rather than slipping through de-duplication.
 func TestDelegatedChildSegmentsVerifyDuplicateHeroAndTaskSkillConsistently(t *testing.T) {
@@ -177,5 +177,5 @@ func TestDelegatedChildSegmentsEqualTheComposedPrompt(t *testing.T) {
 	heroPrompt, err := executor.heroPreloadPrompt(hero)
 	require.NoError(t, err)
 	assert.Equal(t, agent.HeroSystemPrompt(*hero, "Review.")+heroPrompt, text,
-		"the child prompt is the Role prompt followed by its preload bodies")
+		"the child prompt is the Hero prompt followed by its preload bodies")
 }

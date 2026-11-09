@@ -10,7 +10,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 )
 
-// HeroDiscovery resolves file-authored Role documents into executable Role
+// HeroDiscovery resolves file-authored Hero documents into executable Hero
 // definitions (V2). The legacy global hero SQL repo and project-file
 // candidate materialization were removed: file Heroes are published through
 // globalsource and frozen into Sessions at Run start.

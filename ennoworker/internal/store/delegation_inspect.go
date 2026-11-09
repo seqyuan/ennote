@@ -15,7 +15,7 @@ import (
 // Inspect returns the parent-visible projection of a delegation group: logical
 // items with their full attempt history, all generations, pending
 // authorization, and the currently valid actions. It never exposes the private
-// transcript, credentials, Role prompt, or full assignment.
+// transcript, credentials, Hero prompt, or full assignment.
 func (r *DelegationRepo) Inspect(ctx context.Context, groupID string) (*domain.DelegationInspection, error) {
 	group, err := r.GetGroup(ctx, groupID)
 	if err != nil {
@@ -168,7 +168,7 @@ func (r *DelegationRepo) Inspect(ctx context.Context, groupID string) (*domain.D
 }
 
 // validGroupActions derives the currently permitted operations from the
-// frozen state, never from live Role drafts or timestamps.
+// frozen state, never from live Hero drafts or timestamps.
 func validGroupActions(inspection *domain.DelegationInspection) []string {
 	actions := make([]string, 0)
 	if inspection.PendingApproval != nil {

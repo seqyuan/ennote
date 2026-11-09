@@ -52,7 +52,7 @@ func (p *ContextProjector) ProjectAndFreeze(ctx context.Context, run domain.Agen
 		return ProjectedContext{}, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("format 2 Run target is invalid"))
 	}
 	if targetKind == "hero" && (targetObjectID == "" || targetVersionID == "" || participantInstanceID == "") {
-		return ProjectedContext{}, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("Role target identity is incomplete"))
+		return ProjectedContext{}, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("Hero target identity is incomplete"))
 	}
 	if targetKind == "host" && (targetObjectID != "" || targetVersionID != "") {
 		return ProjectedContext{}, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("Host target cannot carry object identity"))
@@ -80,7 +80,7 @@ func (p *ContextProjector) ProjectAndFreeze(ctx context.Context, run domain.Agen
 		}
 		if !invited {
 			return ProjectedContext{}, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
-				errors.New("Role participant is not invited on the selected branch lineage"))
+				errors.New("Hero participant is not invited on the selected branch lineage"))
 		}
 	}
 	selected, err := selectProjectedMessages(lineage, run.BaseMessageID, contextMode, json.RawMessage(replyJSON))

@@ -10,7 +10,7 @@ type GlobalHeroDetail = components["schemas"]["GlobalHeroDetail"];
 type FileRevision = { version: number; publishedAt: string };
 
 /**
- * Role catalog + selection for the composer. Loads published global Heroes.
+ * Hero catalog + selection for the composer. Loads published global Heroes.
  * Selection does not survive a project switch (declarative, §4.1.3).
  */
 export function useHeroSelection(selectedProject: string | null): {
@@ -21,7 +21,7 @@ export function useHeroSelection(selectedProject: string | null): {
   const [selectedHeroId, setSelectedHeroId] = useState<string | null>(null);
   const [heroes, setHeroes] = useState<HeroSummary[]>([]);
 
-  // Role selection does not survive a project switch (declarative, §4.1.3).
+  // Hero selection does not survive a project switch (declarative, §4.1.3).
   useLayoutEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedHeroId(null);

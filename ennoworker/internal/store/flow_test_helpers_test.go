@@ -17,9 +17,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// setupFlowFixture seeds a Project + published file Role (globalsource) for
+// setupFlowFixture seeds a Project + published file Hero (globalsource) for
 // the orchestrator tests. Flow versions are in-memory (flowVersionFromDef);
-// the freeze helper resolves the Role from the file source + model catalog.
+// the freeze helper resolves the Hero from the file source + model catalog.
 func setupFlowFixture(t *testing.T) (*sql.DB, *store.AgentFlowRunRepo, string, string, string) {
 	t.Helper()
 	db := store.SetupDB(t)
@@ -139,7 +139,7 @@ func freezeFlowForTest(t *testing.T, db *sql.DB, flowRuns *store.AgentFlowRunRep
 		node := store.FlowNodeFreeze{TaskIndex: indexOf[name], Handle: name,
 			GoalDigest: agentflow.TaskGoalDigest(task.Goal)}
 		if task.Terminal != nil || task.Type == domain.FlowTaskCheck {
-			// Terminal/check gates complete the flow; they freeze no Role binding.
+			// Terminal/check gates complete the flow; they freeze no Hero binding.
 			node.BudgetJSON = json.RawMessage(`{}`)
 			freeze = append(freeze, node)
 			continue
@@ -155,11 +155,11 @@ func freezeFlowForTest(t *testing.T, db *sql.DB, flowRuns *store.AgentFlowRunRep
 		}
 		var heroDef domain.HeroDefinition
 		if err := json.Unmarshal(definitionJSON, &heroDef); err != nil {
-			add("task %q: decode Role definition: %v", name, err)
+			add("task %q: decode Hero definition: %v", name, err)
 			continue
 		}
 		if heroDef.DelegationPolicy.Admission != domain.DelegationAutoWithinBudget {
-			add("task %q: Role %s is not auto_within_budget", name, task.Hero)
+			add("task %q: Hero %s is not auto_within_budget", name, task.Hero)
 			continue
 		}
 		// The test fixture has no on-disk Skill catalog, so frozen refs are
@@ -176,7 +176,7 @@ func freezeFlowForTest(t *testing.T, db *sql.DB, flowRuns *store.AgentFlowRunRep
 		ceiling := heroDef.DelegationPolicy.BudgetCeiling
 		if task.Budget != nil && task.Budget.Tokens > 0 {
 			if task.Budget.Tokens > ceiling.MaxTotalTokens {
-				add("task %q: budget tokens %d exceed the Role ceiling %d", name, task.Budget.Tokens, ceiling.MaxTotalTokens)
+				add("task %q: budget tokens %d exceed the Hero ceiling %d", name, task.Budget.Tokens, ceiling.MaxTotalTokens)
 				continue
 			}
 			ceiling.MaxTotalTokens = task.Budget.Tokens
@@ -201,12 +201,12 @@ func freezeFlowForTest(t *testing.T, db *sql.DB, flowRuns *store.AgentFlowRunRep
 	return freeze, nil, nil
 }
 
-// testFlowSources/testFlowModels carry the file Role source + model catalog
+// testFlowSources/testFlowModels carry the file Hero source + model catalog
 // for the current flow freeze (set by the flow fixtures; tests run serially).
 var testFlowSources *globalsource.Store
 var testFlowModels *store.ModelRepo
 
-// resolveFlowHeroForTest resolves a file Role reference (handle@version) to
+// resolveFlowHeroForTest resolves a file Hero reference (handle@version) to
 // its published file revision id + resolved definition JSON (V2).
 func resolveFlowHeroForTest(t *testing.T, _ *sql.DB, heroRef string) (string, json.RawMessage, error) {
 	t.Helper()
@@ -216,7 +216,7 @@ func resolveFlowHeroForTest(t *testing.T, _ *sql.DB, heroRef string) (string, js
 		return "", nil, fmt.Errorf("hero reference %q has an empty handle", heroRef)
 	}
 	if testFlowSources == nil || testFlowModels == nil {
-		return "", nil, fmt.Errorf("flow Role source is unavailable")
+		return "", nil, fmt.Errorf("flow Hero source is unavailable")
 	}
 	document, revision, err := testFlowSources.ReadHeroRevision(handle, "v000001")
 	if err != nil {

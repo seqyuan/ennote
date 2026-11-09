@@ -138,7 +138,7 @@ func (e *agentExecutor) registerCreateSkill(registry *tools.Registry) error {
 }
 
 // delegationRepo returns the Session-scoped delegation repository with the
-// file-native Role resolver wired (V2). Host delegation resolves global Heroes
+// file-native Hero resolver wired (V2). Host delegation resolves global Heroes
 // from immutable file revisions, never from the removed global hero SQL.
 func (e *agentExecutor) delegationRepo() *store.DelegationRepo {
 	var sources *globalsource.Store
@@ -203,8 +203,8 @@ func (r *sessionExecutorRouter) CheckPrompt(ctx context.Context, sessionID, prom
 // freeze an unavailable snapshot and continue. Returns nil connection set when
 // MCP is disabled.
 //
-// allowlist filters exposed MCP tools to the exact intersection with a Role's
-// allowedTools (delegation children): a Role never sees MCP tools outside its
+// allowlist filters exposed MCP tools to the exact intersection with a Hero's
+// allowedTools (delegation children): a Hero never sees MCP tools outside its
 // frozen allowlist. nil allowlist means no filtering (Host runs).
 func (e *agentExecutor) freezeMCPIntoRegistry(ctx context.Context, run *domain.AgentRun,
 	session *domain.Session, toolReg *tools.Registry, allowlist []string) (*mcpclient.RunConnectionSet, error) {
@@ -250,7 +250,7 @@ func (e *agentExecutor) freezeMCPIntoRegistry(ctx context.Context, run *domain.A
 			remoteName := frozen.RemoteName
 			exposedName := frozen.ExposedName
 			// Delegation child: expose only the exact intersection with the
-			// Role's frozen allowlist. Host runs (nil allowlist) expose all
+			// Hero's frozen allowlist. Host runs (nil allowlist) expose all
 			// binding-selected tools.
 			if allowlist != nil && !allowed[exposedName] {
 				continue
@@ -406,7 +406,7 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	}
 
 	// The base of the prompt is platform-owned: either the frozen Agent prompt,
-	// or the platform Role envelope plus the frozen Role definition.
+	// or the platform Hero envelope plus the frozen Hero definition.
 	baseSegments := agent.BaseSystemPromptSegments(resolved.SystemPrompt.AgentPrompt)
 	if resolved.Effective.Hero != nil {
 		baseSegments = agent.HeroSystemPromptSegments(*resolved.Effective.Hero, resolved.SystemPrompt.AgentPrompt)
@@ -632,7 +632,7 @@ func (e *agentExecutor) Execute(ctx context.Context, run *domain.AgentRun) (doma
 	if err != nil {
 		return domain.RunOutput{}, err
 	}
-	// BuiltinToolPolicy must observe the FINAL effective tool set (after Role
+	// BuiltinToolPolicy must observe the FINAL effective tool set (after Hero
 	// Restrict and conditional registration), so it is constructed from the
 	// completed Registry. Unknown/restricted tools resolve to RiskSensitive.
 	tp, policyErr := agent.NewBuiltinToolPolicy(resolved.Effective.ToolPolicy, toolReg)
@@ -893,8 +893,8 @@ func (e *agentExecutor) enqueueQueuedChildren(ctx context.Context, parentRunID s
 }
 
 // executeDelegatedChild runs a private delegated_agent child: it resolves the
-// frozen Role version from the delegation item, builds a task_only context from
-// the assignment, restricts tools to the Role allowlist plus submit_result, and
+// frozen Hero version from the delegation item, builds a task_only context from
+// the assignment, restricts tools to the Hero allowlist plus submit_result, and
 // requires the terminal contract to end the Run.
 func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.AgentRun) (domain.RunOutput, error) {
 	budget := e.delegationRepo()
@@ -913,7 +913,7 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 	}
 	if resolved.Effective.Hero == nil {
 		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
-			errors.New("child Run has no frozen Role execution"))
+			errors.New("child Run has no frozen Hero execution"))
 	}
 	assignment, err := (&store.DelegationRepo{DB: e.db}).AssignmentForChild(ctx, run.ID)
 	if err != nil {
@@ -985,7 +985,7 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 	}
 
 	// Freeze MCP tools for the child: only the exact intersection with the
-	// Role's frozen allowlist is exposed. A Role that does not list MCP tool
+	// Hero's frozen allowlist is exposed. A Hero that does not list MCP tool
 	// names (the default) receives none — fail closed.
 	childMCPSet, mcpErr := e.freezeMCPIntoRegistry(ctx, run, session, toolReg, resolved.Effective.Hero.AllowedTools)
 	if mcpErr != nil {
@@ -995,15 +995,15 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 		defer childMCPSet.Close()
 	}
 
-	// A private child's prompt is the platform Role envelope, the frozen Role
-	// definition, the Role's preload Skill bodies, and the explicit task Skill
+	// A private child's prompt is the platform Hero envelope, the frozen Hero
+	// definition, the Hero's preload Skill bodies, and the explicit task Skill
 	// bodies frozen on its delegation item. Preloads are inlined data on purpose:
 	// a child has no /skills mount, so a Skill it cannot read is still a Skill it
 	// must be able to follow.
 	//
 	// A resumed child keeps the prompt its checkpoint already carries. Recomposing
 	// it would be wasted work, and re-freezing it would fail closed whenever the
-	// Role or a project file changed while the child waited for approval — which
+	// Hero or a project file changed while the child waited for approval — which
 	// is exactly what freezing is supposed to prevent, not to trip over.
 	var systemPrompt string
 	var systemPromptSections []domain.PromptSection
@@ -1061,7 +1061,7 @@ func (e *agentExecutor) executeDelegatedChild(ctx context.Context, run *domain.A
 	}
 
 	// BuiltinToolPolicy observes the FINAL child tool set: todo registered,
-	// Role Restrict applied, then submit_result registered.
+	// Hero Restrict applied, then submit_result registered.
 	tp, policyErr := agent.NewBuiltinToolPolicy(resolved.Effective.ToolPolicy, toolReg)
 	if policyErr != nil {
 		return domain.RunOutput{}, domain.NewCodedError(domain.ErrorToolPolicyFailed, policyErr)
@@ -1337,14 +1337,14 @@ func delegationAdmissionHook(delegations *store.DelegationRepo, sessionID string
 			}
 			snapshot, resolveErr := delegations.ResolveHeroForDelegation(ctx, sessionID, spec.Hero)
 			if errors.Is(resolveErr, store.ErrDelegationHeroUnavailable) {
-				denial = fmt.Sprintf("Role %q is unavailable in this project", spec.Hero)
+				denial = fmt.Sprintf("Hero %q is unavailable in this project", spec.Hero)
 				break
 			}
 			if resolveErr != nil {
 				return agent.PreToolDecision{}, resolveErr
 			}
 			if !snapshot.DelegationEnabled || snapshot.Definition.DelegationPolicy.Admission == domain.DelegationDenied {
-				denial = fmt.Sprintf("Role %q does not allow Host delegation", spec.Hero)
+				denial = fmt.Sprintf("Hero %q does not allow Host delegation", spec.Hero)
 				break
 			}
 			spec.HeroVersionID = snapshot.VersionID
@@ -1365,7 +1365,7 @@ func delegationAdmissionHook(delegations *store.DelegationRepo, sessionID string
 		if requiresApproval && d.Action == agent.ToolAllow {
 			d.Action = agent.ToolRequireApproval
 			d.Code = "hero_delegation_approval_required"
-			d.Reason = "The selected Role requires delegation approval"
+			d.Reason = "The selected Hero requires delegation approval"
 			d.RiskClass = domain.RiskDelegation
 		}
 		return d, nil
@@ -1428,14 +1428,14 @@ func (p *delegationAdmissionToolPolicy) BeforeToolBatch(ctx context.Context, bat
 			}
 			snapshot, resolveErr := p.Delegations.ResolveHeroForDelegation(ctx, p.SessionID, spec.Hero)
 			if errors.Is(resolveErr, store.ErrDelegationHeroUnavailable) {
-				denial = fmt.Sprintf("Role %q is unavailable in this project", spec.Hero)
+				denial = fmt.Sprintf("Hero %q is unavailable in this project", spec.Hero)
 				break
 			}
 			if resolveErr != nil {
 				return nil, resolveErr
 			}
 			if !snapshot.DelegationEnabled || snapshot.Definition.DelegationPolicy.Admission == domain.DelegationDenied {
-				denial = fmt.Sprintf("Role %q does not allow Host delegation", spec.Hero)
+				denial = fmt.Sprintf("Hero %q does not allow Host delegation", spec.Hero)
 				break
 			}
 			spec.HeroVersionID = snapshot.VersionID
@@ -1458,7 +1458,7 @@ func (p *delegationAdmissionToolPolicy) BeforeToolBatch(ctx context.Context, bat
 		if requiresApproval && decisions[index].Action == agent.ToolAllow {
 			decisions[index].Action = agent.ToolRequireApproval
 			decisions[index].Code = "hero_delegation_approval_required"
-			decisions[index].Reason = "The selected Role requires delegation approval"
+			decisions[index].Reason = "The selected Hero requires delegation approval"
 			decisions[index].RiskClass = domain.RiskDelegation
 		}
 	}
@@ -1644,13 +1644,13 @@ func (e *agentExecutor) livePublisherFor(run *domain.AgentRun) events.LivePublis
 	}
 }
 
-// heroPreloadSegments returns the frozen preload Skills of a Role as inlined
+// heroPreloadSegments returns the frozen preload Skills of a Hero as inlined
 // prompt segments. Preload Skills are data injected at execution time and do
 // not require filesystem access, so they remain available even when the read
-// tool is not in the Role allowlist.
+// tool is not in the Hero allowlist.
 //
-// Each segment names the exact frozen Role version that carried the preload
-// binding, so the composition record shows which Role version put which Skill
+// Each segment names the exact frozen Hero version that carried the preload
+// binding, so the composition record shows which Hero version put which Skill
 // body into the prompt.
 //
 // A preload Skill frozen with a content digest is pinned: the on-disk Skill must
@@ -1716,7 +1716,7 @@ func (e *agentExecutor) heroPreloadPrompt(hero *domain.FrozenHeroExecution) (str
 	return prompt, nil
 }
 
-// taskPreloadSegments renders explicit task Skills as an additive overlay. Role
+// taskPreloadSegments renders explicit task Skills as an additive overlay. Hero
 // preload Skills are rendered separately and are de-duplicated here; explicit
 // task Skills must still exist in the current catalog so a removed or invalid
 // frozen binding fails loudly rather than silently weakening the task.
@@ -1754,7 +1754,7 @@ func (e *agentExecutor) taskPreloadSegments(hero *domain.FrozenHeroExecution, fr
 				fmt.Errorf("task skill %q for %s is unavailable", id, source))
 		}
 		// Verify the pinned content before any de-duplication: even when the
-		// Role already preloads this Skill, the task froze a specific body and
+		// Hero already preloads this Skill, the task froze a specific body and
 		// a changed catalog must not slip through another path.
 		if ref.Digest != "" && ref.Digest != skill.ContentHash {
 			return nil, domain.NewCodedError(domain.ErrorSkillNotFound,
@@ -2093,8 +2093,8 @@ func describePromptSections(sections []domain.PromptSection) string {
 }
 
 // delegatedChildSegments returns the ordered composition of a private delegated
-// child's system prompt: the platform Role envelope, the frozen Role definition,
-// the Role's preload Skill bodies, and the explicit task Skill bodies frozen on
+// child's system prompt: the platform Hero envelope, the frozen Hero definition,
+// the Hero's preload Skill bodies, and the explicit task Skill bodies frozen on
 // the delegation item.
 //
 // A child deliberately receives no project instruction files and no Skill
@@ -2105,7 +2105,7 @@ func (e *agentExecutor) delegatedChildSegments(hero *domain.FrozenHeroExecution,
 	taskSkills domain.FrozenSkillRefs, taskSource string) ([]systemprompt.Segment, error) {
 	if hero == nil {
 		return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
-			errors.New("delegated child prompt requires a frozen Role execution"))
+			errors.New("delegated child prompt requires a frozen Hero execution"))
 	}
 	taskSegments, err := e.taskPreloadSegments(hero, taskSkills, taskSource)
 	if err != nil {

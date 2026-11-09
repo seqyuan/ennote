@@ -62,11 +62,11 @@ type ChildSpec struct {
 	HeroVersionID string
 	// Skills are the task-level additive preload Skills frozen on the flow
 	// node, including the content digest pinned at freeze time. They
-	// supplement, but never replace or widen, the Role policy.
+	// supplement, but never replace or widen, the Hero policy.
 	Skills domain.FrozenSkillRefs
 	// HeroDefinitionJSON is the full resolved HeroDefinition frozen at Run
 	// start. It is passed to child Run materialization so delegation never
-	// re-reads mutable Role files or the removed global hero SQL.
+	// re-reads mutable Hero files or the removed global hero SQL.
 	HeroDefinitionJSON json.RawMessage
 	Assignment         string
 	Budget             domain.BudgetCeilingJSON

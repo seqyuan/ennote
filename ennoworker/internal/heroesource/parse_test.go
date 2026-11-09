@@ -155,7 +155,7 @@ func TestParseValidatesHeroAuthority(t *testing.T) {
 }
 
 // TestHeroAuthorityIsDigestStable pins the compatibility invariant behind the
-// Authority type: parsing and re-encoding a Role must not rewrite the authority
+// Authority type: parsing and re-encoding a Hero must not rewrite the authority
 // field, because ReadHeroRevision re-verifies the published digest.
 func TestHeroAuthorityIsDigestStable(t *testing.T) {
 	sources := []string{

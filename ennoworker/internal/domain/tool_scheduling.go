@@ -33,11 +33,11 @@ func IsReadOnlySchedulingTool(tool string) bool {
 	return ok
 }
 
-// HeroDefinitionIsReadOnly reports whether a frozen Role definition is fully
+// HeroDefinitionIsReadOnly reports whether a frozen Hero definition is fully
 // read-only: read_only authority plus an allowlist made entirely of read-only
 // scheduling tools. It is the shared classification behind fan_out safety,
 // writer-scope accounting, flow publish validation, and Graph Run freezes, so
-// the same Role can never receive different scheduling classes per entry path.
+// the same Hero can never receive different scheduling classes per entry path.
 func HeroDefinitionIsReadOnly(heroDef HeroDefinition) bool {
 	if heroDef.Authority != HeroAuthorityReadOnly {
 		return false

@@ -146,7 +146,7 @@ func normalizeAndValidate(document *Document) error {
 				return fmt.Errorf("Task %q hero: %w", id, err)
 			}
 			if task.Model != "" || task.Thinking != "" || len(task.Skills) != 0 {
-				return fmt.Errorf("Task %q Role-backed execution cannot declare model, thinking, or skills", id)
+				return fmt.Errorf("Task %q Hero-backed execution cannot declare model, thinking, or skills", id)
 			}
 		} else {
 			if err := validateModelRef(task.Model); err != nil {

@@ -77,7 +77,7 @@ func TestServiceFreezeMatchesSharedReadOnlyClassifier(t *testing.T) {
 	_, _, err = sources.CreateGraph("pipeline", "Pipeline")
 	require.NoError(t, err)
 
-	// One read_only Role per matrix row, each allowed exactly {read, <tool>}.
+	// One read_only Hero per matrix row, each allowed exactly {read, <tool>}.
 	tasks := make(map[string]graphsource.Task, len(schedulingToolMatrix))
 	deps := make(map[string][]string, len(schedulingToolMatrix))
 	for index, tc := range schedulingToolMatrix {

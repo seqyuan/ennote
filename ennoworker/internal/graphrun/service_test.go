@@ -118,7 +118,7 @@ func TestServiceFreezesFileNativeGraphRun(t *testing.T) {
 	require.Contains(t, def.Tasks, "produce")
 	require.Contains(t, def.Tasks, "review")
 
-	// Every node froze its full Role definition (inline + global revision).
+	// Every node froze its full Hero definition (inline + global revision).
 	var handle, heroVersionID, heroDefJSON, skillJSON string
 	require.NoError(t, db.QueryRow(`SELECT handle, hero_version_id, hero_definition_json, skill_digests_json
 		FROM run_agent_flow_nodes WHERE run_id=? AND task_index=0`, run.RunID).

@@ -433,7 +433,7 @@ func TestContractSamples(t *testing.T) {
 		values: projectRoute, status: http.StatusOK,
 	})
 
-	// Authoring surfaces: a Portable Role document and the Graph draft it can be
+	// Authoring surfaces: a Portable Hero document and the Graph draft it can be
 	// referenced from. Both are the largest hand-shaped JSON the Worker answers
 	// outside chat, and neither had a sample.
 	heroDocument := map[string]any{

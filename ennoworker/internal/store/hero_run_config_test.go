@@ -23,7 +23,7 @@ func TestHeroRunFreezesPublishedExecutionDefinitionAndPrompt(t *testing.T) {
 	// speaker or the published definition selected by the Turn: the run stays
 	// pinned to the originally selected revision.
 	_, _, err = sources.UpdateHero(hero.ID, version.ConfigDigest, func(document *heroesource.Document) error {
-		document.Name = "Renamed Live Role"
+		document.Name = "Renamed Live Hero"
 		document.Prompt = "This draft must not be executed."
 		return nil
 	})

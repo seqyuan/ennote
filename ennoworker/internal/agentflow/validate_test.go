@@ -397,7 +397,7 @@ tasks:
 	assert.True(t, hasCode(result, "standing_approval_present"))
 }
 
-// Role/skill resolvability.
+// Hero/skill resolvability.
 func TestValidationHeroAndSkillResolvability(t *testing.T) {
 	result := validateDef(t, `schemaVersion: 1
 id: x

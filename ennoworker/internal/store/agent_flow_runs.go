@@ -52,11 +52,11 @@ type FlowNodeFreeze struct {
 	GoalText   string
 	BudgetJSON json.RawMessage
 	// ReadOnly/Writes are the scheduler's concurrency class for this node,
-	// frozen from the resolved Role definition and the task's declares.
+	// frozen from the resolved Hero definition and the task's declares.
 	ReadOnly bool
 	Writes   []string
 	// HeroDefinitionJSON is the full resolved HeroDefinition for the task's
-	// Role (or an inline task hero). Required for executable tasks; empty for
+	// Hero (or an inline task hero). Required for executable tasks; empty for
 	// terminal/check gates that dispatch no child Run.
 	HeroDefinitionJSON json.RawMessage
 }

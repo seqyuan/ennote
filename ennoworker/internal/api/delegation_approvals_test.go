@@ -72,7 +72,7 @@ func setupDelegationApprovalAPI(t *testing.T) (*Server, http.Handler, *store.Del
 }
 
 // apiExplorerItem mirrors the store-level explorer fixture for the api package.
-// The HeroMeta is frozen from the fixture's published Role version so
+// The HeroMeta is frozen from the fixture's published Hero version so
 // delegation validation never consults global hero SQL (V2).
 func apiExplorerItem(t *testing.T, db *sql.DB) store.CreateDelegationItemInput {
 	t.Helper()

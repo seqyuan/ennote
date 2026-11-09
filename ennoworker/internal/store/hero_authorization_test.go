@@ -41,8 +41,8 @@ func TestHeroApprovalCarriesFrozenAttributionAndPermissionCeiling(t *testing.T) 
 }
 
 // TestChildRunPermissionConvergesToParentPolicyMode pins the one-way
-// convergence of delegated permissions: a Role can tighten but never loosen the
-// permission mode its parent Run froze. A parent in Ask with a Role ceiling of
+// convergence of delegated permissions: a Hero can tighten but never loosen the
+// permission mode its parent Run froze. A parent in Ask with a Hero ceiling of
 // Auto must freeze Ask for the child.
 func TestChildRunPermissionConvergesToParentPolicyMode(t *testing.T) {
 	fixture := newFileRunFixture(t, "child-permission-mode")
@@ -84,7 +84,7 @@ func TestChildRunPermissionConvergesToParentPolicyMode(t *testing.T) {
 	assert.Equal(t, string(domain.PermissionAsk), childPolicy.Mode)
 }
 
-// autoCeilingExplorerItem freezes the explorer Role with an auto permission
+// autoCeilingExplorerItem freezes the explorer Hero with an auto permission
 // ceiling, so the child's own ceiling is looser than its parent's policy mode.
 func autoCeilingExplorerItem(t *testing.T) store.CreateDelegationItemInput {
 	t.Helper()

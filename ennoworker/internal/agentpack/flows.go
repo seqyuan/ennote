@@ -107,7 +107,7 @@ func (b *builder) checkScopedHeroRef(field, ref string) error {
 	if !scoped {
 		// A bare handle is the Agent Flow spelling that resolves flow-local
 		// first and then the shared catalog. When the pack declares that handle,
-		// treat the reference as local so a flow-scoped Role is not reported as
+		// treat the reference as local so a flow-scoped Hero is not reported as
 		// unreferenced just because the task omitted the local/ prefix.
 		if handle != "" && b.heroSet[handle] {
 			b.flowHeroRefs[handle] = true
@@ -119,7 +119,7 @@ func (b *builder) checkScopedHeroRef(field, ref string) error {
 	}
 	if scope == "global" {
 		b.warn(WarningFlowRefsGlobalHero, SeverityWarning,
-			"task hero "+strings.TrimSpace(ref)+" points at a Worker-global Role; a portable pack should vendor it as local/")
+			"task hero "+strings.TrimSpace(ref)+" points at a Worker-global Hero; a portable pack should vendor it as local/")
 		return nil
 	}
 	if !b.heroSet[handle] {

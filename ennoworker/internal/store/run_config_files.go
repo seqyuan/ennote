@@ -15,7 +15,7 @@ import (
 )
 
 // loadTurnTargetKind reads the invocation target kind of a turn so a format-2
-// config freeze can tell a Role turn (which must resolve a Role revision) from
+// config freeze can tell a Hero turn (which must resolve a Hero revision) from
 // a Host turn (which must not). A missing turn is an invalid invocation target.
 func loadTurnTargetKind(ctx context.Context, tx *sql.Tx, turnID string) (string, error) {
 	var kind string
@@ -112,10 +112,10 @@ func (r *RunRepo) skillDigests() map[string]string {
 	return r.SkillDigests
 }
 
-// freezeHeroPreloadSkills pins every preload-mode Role Skill against the
-// current Skill catalog. A published Role revision is immutable, but its
+// freezeHeroPreloadSkills pins every preload-mode Hero Skill against the
+// current Skill catalog. A published Hero revision is immutable, but its
 // preload binding names a Skill that lives outside the revision; without a
-// digest a later on-disk edit would silently change the Role's prompt.
+// digest a later on-disk edit would silently change the Hero's prompt.
 //
 // A nil catalog (legacy tests/fixtures) leaves the refs unpinned. A non-nil
 // catalog must be able to name every preload Skill: a missing or digest-less
@@ -142,7 +142,7 @@ func (r *RunRepo) freezeHeroPreloadSkills(hero *domain.FrozenHeroExecution) erro
 		digest := strings.TrimSpace(catalog[id])
 		if digest == "" {
 			return domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
-				fmt.Errorf("hero %s (%s@%d) preload skill %q is missing from the Skill catalog or has no content digest; refusing to freeze an unpinned Role prompt",
+				fmt.Errorf("hero %s (%s@%d) preload skill %q is missing from the Skill catalog or has no content digest; refusing to freeze an unpinned Hero prompt",
 					hero.Handle, hero.ObjectID, hero.Version, id))
 		}
 		refs = append(refs, domain.FrozenSkillRef{ID: id, Digest: digest})
@@ -215,7 +215,7 @@ func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.Ag
 	var heroPrompt string
 	if run.CommitFormatVersion == domain.CommitFormatSpeakerV2 {
 		if run.RunKind == domain.RunKindDelegatedAgent {
-			// Private children resolve the exact Role facts frozen on the
+			// Private children resolve the exact Hero facts frozen on the
 			// delegation item at Run start; no global hero SQL is consulted.
 			var metaJSON string
 			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(di.hero_meta_json, '{}')
@@ -224,18 +224,18 @@ func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.Ag
 				WHERE a.child_run_id=?`, run.ID).Scan(&metaJSON); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
-						errors.New("child Run has no frozen delegation Role meta"))
+						errors.New("child Run has no frozen delegation Hero meta"))
 				}
 				return nil, err
 			}
 			if strings.TrimSpace(metaJSON) == "" || strings.TrimSpace(metaJSON) == "{}" {
 				return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
-					errors.New("file-backed delegated Role execution requires a frozen Role meta"))
+					errors.New("file-backed delegated Hero execution requires a frozen Hero meta"))
 			}
 			var meta DelegationHeroMeta
 			if err := json.Unmarshal([]byte(metaJSON), &meta); err != nil {
 				return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
-					fmt.Errorf("decode frozen delegation Role meta: %w", err))
+					fmt.Errorf("decode frozen delegation Hero meta: %w", err))
 			}
 			if err := validateFrozenDelegationMeta(meta); err != nil {
 				return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid, err)
@@ -260,13 +260,13 @@ func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.Ag
 			}
 			if !allowedContext {
 				return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
-					errors.New("frozen Role revision does not allow task_only context"))
+					errors.New("frozen Hero revision does not allow task_only context"))
 			}
 			if heroDefinition.Authority == domain.HeroAuthorityReadOnly {
 				for _, tool := range heroDefinition.AllowedTools {
 					if heroToolRequiresMutation(tool) {
 						return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
-							fmt.Errorf("read-only Role revision contains mutation tool %s", tool))
+							fmt.Errorf("read-only Hero revision contains mutation tool %s", tool))
 					}
 				}
 			}
@@ -281,14 +281,14 @@ func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.Ag
 		} else if targetKind, kindErr := loadTurnTargetKind(ctx, tx, run.TurnID); kindErr != nil {
 			return nil, kindErr
 		} else if targetKind == "hero" {
-			// Only a Role turn carries a Role target to resolve. A format-2 Host
+			// Only a Hero turn carries a Hero target to resolve. A format-2 Host
 			// turn (a plain user message on a room lineage already upgraded to the
 			// speaker ledger) must keep the Agent/default base prompt instead of
-			// failing as if its Role target were missing.
+			// failing as if its Hero target were missing.
 			var heroID, versionID, contextMode string
 			if err := tx.QueryRowContext(ctx, `SELECT target_object_id,target_version_id,context_mode
 				FROM turns WHERE id=? AND target_kind='hero'`, run.TurnID).Scan(&heroID, &versionID, &contextMode); err != nil {
-				return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("load Role target: %w", err))
+				return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid, fmt.Errorf("load Hero target: %w", err))
 			}
 			resolvedHero, err := r.resolveFileHero(ctx, heroID, versionID)
 			if err != nil {
@@ -302,7 +302,7 @@ func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.Ag
 			}
 			if !allowedContext {
 				return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
-					fmt.Errorf("Role revision does not allow %s context", contextMode))
+					fmt.Errorf("Hero revision does not allow %s context", contextMode))
 			}
 			var speaker struct {
 				ObjectID, VersionID, Handle, DisplayName, ConfigDigest string
@@ -316,13 +316,13 @@ func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.Ag
 				requestedConfig.AllowAutoRoute || requestedConfig.ThinkingEffort != "" || requestedConfig.MaxIterations != 0 ||
 				requestedConfig.ToolPolicyProfileID != "" {
 				return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
-					errors.New("direct Role execution does not allow runtime identity, model, loop, or permission overrides"))
+					errors.New("direct Hero execution does not allow runtime identity, model, loop, or permission overrides"))
 			}
 			if heroDefinition.Authority == domain.HeroAuthorityReadOnly {
 				for _, tool := range heroDefinition.AllowedTools {
 					if heroToolRequiresMutation(tool) {
 						return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
-							fmt.Errorf("read-only Role revision contains mutation tool %s", tool))
+							fmt.Errorf("read-only Hero revision contains mutation tool %s", tool))
 					}
 				}
 			}
@@ -407,10 +407,10 @@ func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.Ag
 	if policies == nil {
 		policies = &fileconfig.PolicyStore{}
 	}
-	// A frozen Role's permission ceiling pins the tool policy the same way the
+	// A frozen Hero's permission ceiling pins the tool policy the same way the
 	// published definition does: discuss/ask/auto map to the builtin profiles.
 	// A delegated child additionally converges on its parent's frozen mode so a
-	// Role can never loosen the permission the parent Run is running under.
+	// Hero can never loosen the permission the parent Run is running under.
 	toolPolicyID := requestedConfig.ToolPolicyProfileID
 	if frozenHero != nil {
 		ceiling := heroDefinition.PermissionCeiling
@@ -433,7 +433,7 @@ func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.Ag
 			toolPolicyID = "builtin-tool-auto-v1"
 		default:
 			return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
-				errors.New("invalid Role permission ceiling"))
+				errors.New("invalid Hero permission ceiling"))
 		}
 	}
 	toolPolicy, err := policies.Resolve(ctx, toolPolicyID, domain.PolicyKindTool)
@@ -645,19 +645,19 @@ func permissionModeRank(mode domain.PermissionMode) (rank int, ok bool) {
 const deploymentModeAllowExistingBehavior = domain.PermissionMode("allow_existing_behavior")
 
 // resolveChildPermissionCeiling returns the mode a delegated child freezes: the
-// stricter of the parent's mode and the Role's ceiling. It fails closed rather
+// stricter of the parent's mode and the Hero's ceiling. It fails closed rather
 // than leaving the child loose whenever an answer cannot be proven.
 //
 // restricted is the strictest deployment mode, but a child can only be pinned to
 // a builtin profile, so the strictest builtin (discuss) is the tightest ceiling
 // available. An unrecognized mode (an older frozen snapshot, a mode this build
 // does not know) is treated the same way: the child must not inherit the looser
-// Role ceiling just because the parent's mode could not be ranked.
+// Hero ceiling just because the parent's mode could not be ranked.
 func resolveChildPermissionCeiling(parentMode, heroCeiling domain.PermissionMode) (domain.PermissionMode, error) {
 	ceilingRank, ok := permissionModeRank(heroCeiling)
 	if !ok {
 		return "", domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
-			errors.New("invalid Role permission ceiling"))
+			errors.New("invalid Hero permission ceiling"))
 	}
 	if parentMode == deploymentModeAllowExistingBehavior {
 		return heroCeiling, nil
@@ -675,7 +675,7 @@ func resolveChildPermissionCeiling(parentMode, heroCeiling domain.PermissionMode
 // parentFrozenToolPolicyModeTx reads the tool policy mode frozen on a child
 // Run's parent. A delegated child is only created after its parent froze an
 // effective config, so a missing or unreadable snapshot is an inconsistent
-// child state rather than a reason to fall back to the looser Role ceiling.
+// child state rather than a reason to fall back to the looser Hero ceiling.
 func parentFrozenToolPolicyModeTx(ctx context.Context, tx *sql.Tx, parentRunID string) (domain.PermissionMode, error) {
 	var effectiveJSON string
 	if err := tx.QueryRowContext(ctx, `SELECT effective_config_json FROM agent_runs WHERE id=?`, parentRunID).

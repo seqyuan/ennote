@@ -63,8 +63,8 @@ type FlowState struct {
 type HeroState struct {
 	PackHandle string `json:"packHandle"`
 	Scope      string `json:"scope"`
-	// StoreID is "<handle>" for a global Role and "<flow>/<handle>" for a
-	// Graph-private Role.
+	// StoreID is "<handle>" for a global Hero and "<flow>/<handle>" for a
+	// Graph-private Hero.
 	StoreID  string `json:"storeId"`
 	Digest   string `json:"digest"`
 	Revision string `json:"revision,omitempty"`

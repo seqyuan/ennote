@@ -8,7 +8,7 @@ import (
 )
 
 // Context category keys. The set is ennote-native: the platform base prompt,
-// the frozen Role, project instruction files, Skills, tool schemas, ephemeral
+// the frozen Hero, project instruction files, Skills, tool schemas, ephemeral
 // reminders, and the conversation itself. Delegated child Runs keep their own
 // accounting and are deliberately not folded into the parent.
 const (

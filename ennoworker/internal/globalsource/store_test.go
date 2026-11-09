@@ -105,7 +105,7 @@ func TestStoreReportsCorruptHeroAndGraphAsEntryErrors(t *testing.T) {
 			assert.NotEmpty(t, entry.Error)
 		}
 	}
-	assert.True(t, found, "corrupt Role must be reported with a parse error, not dropped")
+	assert.True(t, found, "corrupt Hero must be reported with a parse error, not dropped")
 
 	graphs, err := store.ListGraphs()
 	require.NoError(t, err)

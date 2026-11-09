@@ -40,7 +40,7 @@ func TestHeroPreloadSegmentsNameTheFrozenHeroVersion(t *testing.T) {
 	assert.Equal(t, "skill.preload.review-guard", segments[0].ID)
 	assert.Equal(t, domain.PromptSectionSkillPreload, segments[0].Kind)
 	assert.Equal(t, "review-guard", segments[0].SkillID)
-	// The inlined body is attributed to the exact frozen Role version that
+	// The inlined body is attributed to the exact frozen Hero version that
 	// carried the preload binding, so a reader can trace it back.
 	assert.Equal(t, "hero:security-reviewer@4", segments[0].Source)
 	assert.Contains(t, segments[0].Text, "GUARD_BODY")
@@ -126,9 +126,9 @@ func TestTaskPreloadSegmentsUseCurrentContentForLegacyUnpinnedRefs(t *testing.T)
 	assert.Contains(t, segments[0].Text, "CURRENT_BODY")
 }
 
-// A Role preload Skill frozen with a content digest is pinned: the on-disk
+// A Hero preload Skill frozen with a content digest is pinned: the on-disk
 // Skill must still hash to exactly that digest, or prompt composition fails
-// closed instead of silently changing a published Role's prompt.
+// closed instead of silently changing a published Hero's prompt.
 func TestHeroPreloadSegmentsVerifyFrozenContentDigest(t *testing.T) {
 	skillsDir := t.TempDir()
 	writePreloadSkill(t, skillsDir, "hero-skill", "FROZEN_ROLE_BODY")
@@ -149,8 +149,8 @@ func TestHeroPreloadSegmentsVerifyFrozenContentDigest(t *testing.T) {
 	require.Len(t, segments, 1)
 	assert.Contains(t, segments[0].Text, "FROZEN_ROLE_BODY")
 
-	// Editing the Skill after the Role was published must not silently change
-	// what the frozen Role injects into the model prompt.
+	// Editing the Skill after the Hero was published must not silently change
+	// what the frozen Hero injects into the model prompt.
 	writePreloadSkill(t, skillsDir, "hero-skill", "EDITED_ROLE_BODY")
 	_, err = executor.heroPreloadSegments(hero)
 	require.Error(t, err)
@@ -162,7 +162,7 @@ func TestHeroPreloadSegmentsVerifyFrozenContentDigest(t *testing.T) {
 }
 
 // A pinned preload Skill that disappeared from the catalog fails closed too: a
-// published Role cannot silently lose a prompt constraint.
+// published Hero cannot silently lose a prompt constraint.
 func TestHeroPreloadSegmentsFailClosedOnMissingPinnedSkill(t *testing.T) {
 	executor := &agentExecutor{}
 	hero := &domain.FrozenHeroExecution{
@@ -179,7 +179,7 @@ func TestHeroPreloadSegmentsFailClosedOnMissingPinnedSkill(t *testing.T) {
 	assert.Contains(t, err.Error(), "sha256:deadbeef")
 }
 
-// Legacy Role snapshots carry no FrozenSkills. They keep the historical
+// Legacy Hero snapshots carry no FrozenSkills. They keep the historical
 // behavior: the current on-disk body is used, and a missing Skill is skipped.
 func TestHeroPreloadSegmentsUseCurrentContentForLegacyUnpinnedHero(t *testing.T) {
 	skillsDir := t.TempDir()
@@ -230,7 +230,7 @@ func TestPreloadSegmentsComposeToTheStringAPI(t *testing.T) {
 	assert.Equal(t, mustTaskPreloadPrompt(t, executor, hero, domain.FrozenSkillRefs{
 		{ID: "hero-skill"}, {ID: "task-skill"}, {ID: "task-skill"},
 	}), taskText)
-	require.Len(t, taskSections, 1, "Role preloads are de-duplicated out of the task overlay")
+	require.Len(t, taskSections, 1, "Hero preloads are de-duplicated out of the task overlay")
 	assert.Equal(t, "task-skill", taskSections[0].SkillID)
 }
 

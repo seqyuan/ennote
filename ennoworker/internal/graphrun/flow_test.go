@@ -169,7 +169,7 @@ func TestServiceFlowFreezeUsesPublishedHeroBundle(t *testing.T) {
 	revision := fixture.publish(t, "immutable-flow", false, "published prompt")
 	fixture.bind(t, "immutable-flow", revision.ID(), true)
 
-	// Editing the draft Role after publish must not change this revision.
+	// Editing the draft Hero after publish must not change this revision.
 	encoded, err := heroesource.Encode(fixture.localHero(t, "reviewer", heroesource.AuthorityReadOnly, []string{"read"}, "edited prompt"))
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(fixture.sources.GraphsDir(), "immutable-flow", "heroes", "reviewer", "hero.md"), encoded, 0o600))

@@ -23,7 +23,7 @@ const (
 	HeroScopeBuiltin HeroScope = "builtin"
 	HeroScopeGlobal  HeroScope = "global"
 	HeroScopeProject HeroScope = "project"
-	// HeroScopeFlow is a Role owned by exactly one Agent Flow profile. It is
+	// HeroScopeFlow is a Hero owned by exactly one Agent Flow profile. It is
 	// only resolvable from task references inside that flow (flow -> project ->
 	// global/builtin precedence) and never from delegate_tasks.
 	HeroScopeFlow HeroScope = "flow"

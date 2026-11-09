@@ -26,11 +26,11 @@ var (
 	ErrDelegationBudgetReserved  = errors.New("delegation budget already reserved")
 	ErrDelegationNoOwnedChildren = errors.New("parent owns no non-terminal children")
 	ErrDelegationNotAuthorized   = errors.New("delegation is not authorized")
-	ErrDelegationHeroUnavailable = errors.New("delegation Role is unavailable")
+	ErrDelegationHeroUnavailable = errors.New("delegation Hero is unavailable")
 	ErrDelegationAttemptNotFound = errors.New("delegation attempt not found")
 )
 
-// attemptAuthorizationSnapshot freezes the Role facts an attempt runs under.
+// attemptAuthorizationSnapshot freezes the Hero facts an attempt runs under.
 // It is immutable once the attempt row exists.
 type attemptAuthorizationSnapshot struct {
 	ItemID         string `json:"itemId"`
@@ -46,7 +46,7 @@ type attemptAuthorizationSnapshot struct {
 type DelegationRepo struct {
 	DB *sql.DB
 
-	// HeroSources and Models enable file-native Role resolution for delegation
+	// HeroSources and Models enable file-native Hero resolution for delegation
 	// (V2). When HeroSources is nil, the legacy global SQL path is used.
 	HeroSources *globalsource.Store
 	Models      *ModelRepo
@@ -62,7 +62,7 @@ type CreateDelegationItemInput struct {
 	OutputContract string
 	Budget         domain.BudgetCeilingJSON
 	// Skills are task-level additive preload Skill IDs. They do not change the
-	// frozen Role's tool policy or authority and are persisted for retry/recovery.
+	// frozen Hero's tool policy or authority and are persisted for retry/recovery.
 	Skills []string
 	// FrozenSkills are digest-pinned task Skill refs frozen by an Agent Flow
 	// node. They are merged with Skills by ID (pinned wins, first occurrence
@@ -74,7 +74,7 @@ type CreateDelegationItemInput struct {
 	// Empty means the item is an entry task. The topology is validated in
 	// createDelegationGroupTx (no dangling refs, no cycles, one entry minimum).
 	Depends []string
-	// HeroMeta freezes the full Role identity + definition at Run start. When
+	// HeroMeta freezes the full Hero identity + definition at Run start. When
 	// present, delegation validation and child config resolution use the frozen
 	// copy and never touch global hero SQL or mutable files.
 	HeroMeta *DelegationHeroMeta
@@ -147,7 +147,7 @@ func (r *DelegationRepo) DelegationToolCallApproved(ctx context.Context, runID, 
 }
 
 // CreateGroup persists a delegation group and its items in one transaction.
-// The parent must be a running top-level Run; each item carries the frozen Role
+// The parent must be a running top-level Run; each item carries the frozen Hero
 // version and its own budget ceiling snapshot.
 func (r *DelegationRepo) CreateGroup(ctx context.Context, input CreateDelegationGroupInput) (*domain.DelegationGroup, error) {
 	tx, err := r.DB.BeginTx(ctx, nil)
@@ -261,7 +261,7 @@ func createDelegationGroupTx(ctx context.Context, tx *sql.Tx,
 			return nil, nil, fmt.Errorf("delegation item name is required")
 		}
 		if strings.TrimSpace(item.HeroVersionID) == "" {
-			return nil, nil, fmt.Errorf("delegation item %s requires a Role version", name)
+			return nil, nil, fmt.Errorf("delegation item %s requires a Hero version", name)
 		}
 		if err := validateDelegationHeroTx(ctx, tx, input, &item, proposedByHero); err != nil {
 			return nil, nil, fmt.Errorf("delegation item %s: %w", name, err)
@@ -374,7 +374,7 @@ func validateTaskTopologyTx(items []CreateDelegationItemInput) error {
 		byName[name] = index
 	}
 	// Duplicate names are permitted for dependency-free parallel batches
-	// (multiple instances of the same Role); once any depends declaration
+	// (multiple instances of the same Hero); once any depends declaration
 	// exists, names must be unique because depends references by name.
 	if !hasDepends {
 		return nil // flat parallel batch: legacy semantics, no topology checks
@@ -449,7 +449,7 @@ func validateTaskTopologyTx(items []CreateDelegationItemInput) error {
 	return nil
 }
 
-// validateDelegationHeroTx validates a delegation item's Role facts. V2
+// validateDelegationHeroTx validates a delegation item's Hero facts. V2
 // requires a frozen HeroMeta captured at Run start: the legacy global hero SQL
 // path was removed, so items without HeroMeta are rejected. Admission checks
 // run against the frozen definition and invocation limits count prior
@@ -457,7 +457,7 @@ func validateTaskTopologyTx(items []CreateDelegationItemInput) error {
 func validateDelegationHeroTx(ctx context.Context, tx *sql.Tx, input CreateDelegationGroupInput,
 	item *CreateDelegationItemInput, proposedByHero map[string]int) error {
 	if item.HeroMeta == nil {
-		return fmt.Errorf("%w: delegation items require a frozen Role meta", ErrDelegationNotAuthorized)
+		return fmt.Errorf("%w: delegation items require a frozen Hero meta", ErrDelegationNotAuthorized)
 	}
 	return validateFrozenDelegationHeroTx(ctx, tx, input, item, proposedByHero)
 }
@@ -469,12 +469,12 @@ func validateDelegationBudget(request domain.BudgetCeilingJSON, ceiling domain.D
 		request.MaxOutputTokens < 1 || request.MaxOutputTokens > ceiling.MaxOutputTokens ||
 		request.MaxWallTimeMS < 1 || request.MaxWallTimeMS > ceiling.MaxWallTimeMS ||
 		request.MaxCostMicros < 0 || (ceiling.MaxCostUSDMicros > 0 && request.MaxCostMicros > ceiling.MaxCostUSDMicros) {
-		return errors.New("requested budget exceeds the frozen Role ceiling")
+		return errors.New("requested budget exceeds the frozen Hero ceiling")
 	}
 	return nil
 }
 
-// validateFrozenDelegationHeroTx validates a delegation item whose Role facts
+// validateFrozenDelegationHeroTx validates a delegation item whose Hero facts
 // were frozen at Run start (V2 file-native Graph Runs). It performs the same
 // admission checks as validateDelegationHeroTx against the frozen definition
 // and counts prior invocations by the frozen object id (substr on the hero
@@ -488,25 +488,25 @@ func validateFrozenDelegationHeroTx(ctx context.Context, tx *sql.Tx, input Creat
 		callerAllowed = callerAllowed || caller == "host"
 	}
 	if !callerAllowed {
-		return fmt.Errorf("%w: Role does not allow Host callers", ErrDelegationNotAuthorized)
+		return fmt.Errorf("%w: Hero does not allow Host callers", ErrDelegationNotAuthorized)
 	}
 	switch definition.DelegationPolicy.Admission {
 	case domain.DelegationDenied:
-		return fmt.Errorf("%w: Role denies Host delegation", ErrDelegationNotAuthorized)
+		return fmt.Errorf("%w: Hero denies Host delegation", ErrDelegationNotAuthorized)
 	case domain.DelegationApprovalRequired:
 		if !input.AdmissionApproved {
-			return fmt.Errorf("%w: Role requires explicit delegation approval", ErrDelegationNotAuthorized)
+			return fmt.Errorf("%w: Hero requires explicit delegation approval", ErrDelegationNotAuthorized)
 		}
 	case domain.DelegationAutoWithinBudget:
 	default:
-		return fmt.Errorf("%w: Role has an invalid admission policy", ErrDelegationNotAuthorized)
+		return fmt.Errorf("%w: Hero has an invalid admission policy", ErrDelegationNotAuthorized)
 	}
 	strategyAllowed := false
 	for _, strategy := range definition.DelegationPolicy.AllowedStrategies {
 		strategyAllowed = strategyAllowed || strategy == string(input.Strategy)
 	}
 	if !strategyAllowed {
-		return fmt.Errorf("%w: Role does not allow %s strategy", ErrDelegationNotAuthorized, input.Strategy)
+		return fmt.Errorf("%w: Hero does not allow %s strategy", ErrDelegationNotAuthorized, input.Strategy)
 	}
 	if definition.Authority == domain.HeroAuthorityMutation && input.Strategy != domain.DelegationStrategySingle {
 		return fmt.Errorf("%w: mutation Heroes require the single mutation lane", ErrDelegationNotAuthorized)
@@ -518,7 +518,7 @@ func validateFrozenDelegationHeroTx(ctx context.Context, tx *sql.Tx, input Creat
 		item.OutputContract = definition.OutputContract
 	}
 	if item.OutputContract != definition.OutputContract {
-		return fmt.Errorf("%w: requested output contract exceeds the frozen Role contract", ErrDelegationNotAuthorized)
+		return fmt.Errorf("%w: requested output contract exceeds the frozen Hero contract", ErrDelegationNotAuthorized)
 	}
 	if err := validateDelegationBudget(item.Budget, definition.DelegationPolicy.BudgetCeiling); err != nil {
 		return fmt.Errorf("%w: %v", ErrDelegationNotAuthorized, err)
@@ -535,7 +535,7 @@ func validateFrozenDelegationHeroTx(ctx context.Context, tx *sql.Tx, input Creat
 	}
 	if limit := definition.DelegationPolicy.MaxInvocationsPerParentRun; limit < 1 ||
 		priorInvocations+proposedByHero[meta.ObjectID] > limit {
-		return fmt.Errorf("%w: Role invocation limit exceeded", ErrDelegationNotAuthorized)
+		return fmt.Errorf("%w: Hero invocation limit exceeded", ErrDelegationNotAuthorized)
 	}
 	var activeInstances int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_runs ar
@@ -547,7 +547,7 @@ func validateFrozenDelegationHeroTx(ctx context.Context, tx *sql.Tx, input Creat
 	}
 	if limit := definition.DelegationPolicy.MaxConcurrentInstances; limit < 1 ||
 		activeInstances+proposedByHero[meta.ObjectID] > limit {
-		return fmt.Errorf("%w: Role concurrent instance limit exceeded", ErrDelegationNotAuthorized)
+		return fmt.Errorf("%w: Hero concurrent instance limit exceeded", ErrDelegationNotAuthorized)
 	}
 	return nil
 }
@@ -782,7 +782,7 @@ func (r *DelegationRepo) ListActivity(ctx context.Context, parentRunID string) (
 	if strings.TrimSpace(parentRunID) == "" {
 		return nil, fmt.Errorf("parent run id is required")
 	}
-	// V2: the child's Role identity comes from the frozen speaker snapshot
+	// V2: the child's Hero identity comes from the frozen speaker snapshot
 	// (or its HeroMeta), never from the removed global hero SQL tables.
 	rows, err := r.DB.QueryContext(ctx, `SELECT
 		g.id,g.parent_tool_call_id,g.strategy,g.status,g.created_at,
@@ -1035,7 +1035,7 @@ type CreateChildRunInput struct {
 }
 
 // CreateChildRun atomically: validates the parent is running and owns the item,
-// freezes the child's speaker snapshot from the exact Role version, inserts the
+// freezes the child's speaker snapshot from the exact Hero version, inserts the
 // delegated_agent Run (format 2, private_to_parent, depth=parent+1), assigns
 // the item, and reserves the child budget row. All in one transaction.
 func (r *DelegationRepo) CreateChildRun(ctx context.Context, input CreateChildRunInput) (*domain.AgentRun, error) {
@@ -1059,7 +1059,7 @@ func (r *DelegationRepo) CreateChildRun(ctx context.Context, input CreateChildRu
 
 // CreateGroupWithChildren commits the group, all items, all child Runs, and
 // every child budget reservation together. No partially materialized tree is
-// visible if any Role snapshot, Run insert, or budget reservation fails.
+// visible if any Hero snapshot, Run insert, or budget reservation fails.
 func (r *DelegationRepo) CreateGroupWithChildren(ctx context.Context, input CreateDelegationGroupInput,
 	sessionID string) (*domain.DelegationGroup, []domain.DelegationItem, []*domain.AgentRun, error) {
 	executionMode := input.ExecutionMode
@@ -1173,11 +1173,11 @@ func createChildRunTx(ctx context.Context, tx *sql.Tx, input CreateChildRunInput
 	var objectID, handle, displayName, configDigest string
 	if strings.TrimSpace(item.HeroMetaJSON) == "" || strings.TrimSpace(item.HeroMetaJSON) == "{}" {
 		return nil, domain.NewCodedError(domain.ErrorInvocationTargetInvalid,
-			errors.New("child Run requires a frozen delegation Role meta"))
+			errors.New("child Run requires a frozen delegation Hero meta"))
 	}
 	var meta DelegationHeroMeta
 	if err := json.Unmarshal([]byte(item.HeroMetaJSON), &meta); err != nil {
-		return nil, fmt.Errorf("decode frozen Role meta: %w", err)
+		return nil, fmt.Errorf("decode frozen Hero meta: %w", err)
 	}
 	objectID = meta.ObjectID
 	handle = meta.Handle

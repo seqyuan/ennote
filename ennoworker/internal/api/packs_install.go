@@ -162,7 +162,7 @@ func writePackInstallError(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 // writePackRemoveError maps removal failures: an unknown pack is 404, a refused
-// removal (active Run, locally edited object, shared Role) is 409.
+// removal (active Run, locally edited object, shared Hero) is 409.
 func writePackRemoveError(w http.ResponseWriter, r *http.Request, err error) {
 	switch packinstall.Code(err) {
 	case packinstall.CodeNotInstalled:

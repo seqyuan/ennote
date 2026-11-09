@@ -121,13 +121,13 @@ func run() error {
 	hub := events.NewHub()
 	globalSources := &globalsource.Store{HomeDir: cfg.HomeDir}
 	// The same live ID -> content digest catalog pins both Flow task Skills
-	// (graphrun) and Role preload Skills (RunRepo config freeze). It is resolved
+	// (graphrun) and Hero preload Skills (RunRepo config freeze). It is resolved
 	// at each freeze, never at startup, so a Skill created or edited through
 	// Ennote (or on disk) is usable without restarting the Worker.
 	skillCatalog := func() map[string]string {
 		return skills.DigestCatalog(cfg.SkillsDir, cfg.BuiltinSkillsDir)
 	}
-	// The pack installer writes the same file-native stores the Graph, Role, and
+	// The pack installer writes the same file-native stores the Graph, Hero, and
 	// Skill surfaces read, so it shares their roots instead of keeping a second
 	// installed copy. A crash mid-install leaves only packs/staging/<txid>,
 	// which is garbage once this process is the only writer.

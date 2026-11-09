@@ -337,7 +337,7 @@ flows:
 }
 
 // TestInspectPackDeclaresExternalMCPRefs covers the review surface for packs
-// that declare external MCP profiles: mixed and Role-only packs inspect
+// that declare external MCP profiles: mixed and Hero-only packs inspect
 // successfully, and the refs show up in both the result and the envelope.
 func TestInspectPackDeclaresExternalMCPRefs(t *testing.T) {
 	server, handler := packServer(t)

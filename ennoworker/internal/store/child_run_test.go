@@ -53,7 +53,7 @@ func TestCreateChildRunFrozenHeroAndConfigResolution(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, domain.DelegationGroupWaitingChildren, storedGroup.Status)
 
-	// The child freezes its Role config from the delegation item (no Turn).
+	// The child freezes its Hero config from the delegation item (no Turn).
 	claimed, err := runs.Claim(ctx, child.ID)
 	require.NoError(t, err)
 	resolved, err := runs.ResolveAndFreezeConfig(ctx, claimed)

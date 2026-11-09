@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// setupFileHeroDelegation wires a file-backed Role source + model catalog for
+// setupFileHeroDelegation wires a file-backed Hero source + model catalog for
 // a Session-scoped DelegationRepo (V2 file-native hero resolution). It returns
 // the source, the file-backed ModelRepo, the resolved model portable ref, and
 // the temp home dir.
@@ -39,7 +39,7 @@ func setupFileHeroDelegation(t *testing.T) (*globalsource.Store, *store.ModelRep
 	return &globalsource.Store{HomeDir: home}, &store.ModelRepo{Files: models}, model.ID, home
 }
 
-// createFileHero writes and publishes one Role document as an immutable file
+// createFileHero writes and publishes one Hero document as an immutable file
 // revision (V2). The returned handle is the hero's file id.
 func createFileHero(t *testing.T, sources *globalsource.Store, document *heroesource.Document) error {
 	t.Helper()

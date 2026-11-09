@@ -235,7 +235,7 @@ func (r *Registry) RetryPolicy(toolName string) domain.ToolRetryPolicy {
 }
 
 // RiskClass implements domain.ToolRiskClassifier. Unknown, unregistered, and
-// Role-restricted tools resolve to RiskSensitive so policy fails closed.
+// Hero-restricted tools resolve to RiskSensitive so policy fails closed.
 func (r *Registry) RiskClass(toolName string) domain.RiskClass {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

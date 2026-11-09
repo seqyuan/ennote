@@ -42,10 +42,10 @@ type ApprovalItem struct {
 }
 
 // DelegationApprovalPreview is the bounded, approval-visible portion of one
-// requested child assignment. It contains no Role prompt or execution config.
+// requested child assignment. It contains no Hero prompt or execution config.
 // DelegationApprovalPreview is the admission preview of one delegated task.
 // It is the parent-visible, read-only projection shown before the batch is
-// admitted; the canonical request and Role snapshots remain authoritative.
+// admitted; the canonical request and Hero snapshots remain authoritative.
 type DelegationApprovalPreview struct {
 	Name              string            `json:"name"`
 	Hero              string            `json:"hero"`

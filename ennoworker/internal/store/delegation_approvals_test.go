@@ -34,7 +34,7 @@ func requestBudgetApproval(t *testing.T) (*store.DelegationRepo, *store.Delegati
 
 func TestApprovalRequestPreviewIsBounded(t *testing.T) {
 	_, _, _, _, approval := requestBudgetApproval(t)
-	// The approval preview carries only bounded facts: no Role prompt,
+	// The approval preview carries only bounded facts: no Hero prompt,
 	// credentials, transcript, or full assignment.
 	raw, err := json.Marshal(approval)
 	require.NoError(t, err)
@@ -142,7 +142,7 @@ func TestApprovalFailsClosedOnHeroKillSwitch(t *testing.T) {
 	delegations, approvals, _, _, approval := requestBudgetApproval(t)
 	ctx := context.Background()
 
-	// V2 kill switch: the frozen Role meta is the only authority. Simulate a
+	// V2 kill switch: the frozen Hero meta is the only authority. Simulate a
 	// revoked identity by clearing the item's frozen meta; Decide must fail
 	// closed and materialize nothing.
 	_, err := delegations.DB.Exec(`UPDATE delegation_items SET hero_meta_json='{}'

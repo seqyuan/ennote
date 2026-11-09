@@ -68,7 +68,7 @@ func TestTaskPreloadPromptAddsExplicitSkillsWithoutDuplicatingHeroPreloads(t *te
 		{ID: "hero-skill"}, {ID: "task-skill"}, {ID: "task-skill"},
 	})
 	require.NoError(t, err)
-	assert.NotContains(t, fragment, "ROLE_SKILL_BODY", "Role preloads are rendered by heroPreloadPrompt")
+	assert.NotContains(t, fragment, "ROLE_SKILL_BODY", "Hero preloads are rendered by heroPreloadPrompt")
 	assert.Equal(t, 1, strings.Count(fragment, "TASK_SKILL_BODY"))
 
 	_, err = executor.taskPreloadPrompt(hero, domain.FrozenSkillRefs{{ID: "missing-task-skill"}})

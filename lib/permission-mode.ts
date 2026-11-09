@@ -37,8 +37,8 @@ export function permissionModeForPolicyID(profiles: PermissionPolicyProfile[], p
 }
 
 /**
- * Resolve the permission mode actually frozen onto a Run. A Role Run pins it
- * through the Role's permissionCeiling (and the builtin tool policy mapped from
+ * Resolve the permission mode actually frozen onto a Run. A Hero Run pins it
+ * through the Hero's permissionCeiling (and the builtin tool policy mapped from
  * it), so requestedConfig is not authoritative there. `requestedConfig` is only
  * a fallback for a Run whose effective snapshot has not been recorded yet.
  */

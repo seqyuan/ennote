@@ -107,8 +107,8 @@ func heroOnlyPack(t *testing.T, f *fixture) string {
 	})
 }
 
-// mixedPack ships a graph flow, a Graph-private Role, a Graph-private Skill, and
-// a Worker-global Role plus a global Skill.
+// mixedPack ships a graph flow, a Graph-private Hero, a Graph-private Skill, and
+// a Worker-global Hero plus a global Skill.
 func mixedPack(t *testing.T, f *fixture) string {
 	t.Helper()
 	flowHero := heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer",
@@ -199,7 +199,7 @@ func TestInstallGraphPackWritesDraftAndScopedObjects(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, revisions)
 
-	// Graph-private Role and Skill.
+	// Graph-private Hero and Skill.
 	heroDoc, _, err := f.sources.ReadGraphHero("qc-review", "qc-reviewer")
 	require.NoError(t, err)
 	assert.Equal(t, "qc-reviewer", heroDoc.Handle)
@@ -208,7 +208,7 @@ func TestInstallGraphPackWritesDraftAndScopedObjects(t *testing.T) {
 	assert.Equal(t, "cell-qc-tables", loadedFlowSkill.Manifest.ID)
 	assert.Equal(t, []string{"read"}, loadedFlowSkill.Manifest.AllowedTools)
 
-	// Global Role with one published revision, and a global Skill under the user
+	// Global Hero with one published revision, and a global Skill under the user
 	// skills root.
 	globalHero, globalDigest, err := f.sources.ReadHero("report-writer")
 	require.NoError(t, err)
@@ -595,7 +595,7 @@ func TestRenamesRejectCollapsingStoreIDs(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, hasBlocker(plan, packinstall.CodeHeroHandleConflict), blockerCodes(plan))
-	assert.Contains(t, plan.Blockers[0].Message, "both install as global Role")
+	assert.Contains(t, plan.Blockers[0].Message, "both install as global Hero")
 }
 
 func TestRemoveRefusesActiveRunAndEditedFilesThenDeletes(t *testing.T) {

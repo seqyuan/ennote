@@ -15,7 +15,7 @@ import (
 )
 
 // validateFlow runs the real publish validator against the staged documents
-// before anything is written. The resolver reads the pack's in-memory Role and
+// before anything is written. The resolver reads the pack's in-memory Hero and
 // Skill files first, then falls back to already-installed global sources.
 func (p *planner) validateFlow(packFlowID string, definition *domain.FlowDefinition) error {
 	resolver := &stagedResolver{planner: p}
