@@ -3,9 +3,11 @@
 # Each entry is `<commit>:<file>:<rule>:<line>` as printed in the gitleaks
 # report. Keep this list empty of anything that was ever a real credential: a
 # line belongs here only when the matching text is provably not a secret, and
-# the justification says why.
+# the justification says why. Do not quote the matched text in a comment — the
+# scanner reads this file too, and a quoted literal of sufficient entropy gets
+# reported as a new finding.
 
-# `strings.Trim(token, "0123456789abcdef")` — the hex charset that a Session
-# token is validated against. generic-api-key matches the quoted string because
-# it is high-entropy, but it is a character set, not a credential.
+# The hex character set a Session token is validated against, passed to
+# strings.Trim. generic-api-key matches it on entropy alone; it is a charset,
+# not a credential.
 e470d6ac7ebfa60803eb84158e0b544695ea76eb:ennoworker/cmd/ennogate/sessions.go:generic-api-key:177
