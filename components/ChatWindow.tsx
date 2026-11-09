@@ -268,7 +268,6 @@ export function ChatWindow({
           permissionMode={composer.displayedPermissionMode} permissionReady={composer.permissionReady} setPermissionMode={composer.setPermissionMode}
           models={composer.models} providers={composer.providers} selectedModelId={composer.selectedModelId} setSelectedModelId={composer.setSelectedModelId}
           thinkingEffort={composer.thinkingEffort} setThinkingEffort={composer.setThinkingEffort}
-          heroes={composer.heroes} selectedHeroId={composer.selectedHeroId} setSelectedHeroId={composer.setSelectedHeroId}
           textAttachments={composer.textAttachments} removeTextAttachment={composer.removeTextAttachment}
           pendingImage={composer.pendingImage} clearPendingImage={composer.clearPendingImage}
           attachFiles={composer.attachFiles} uploadImage={composer.uploadImage} submit={actions.submit} steer={actions.steer} steerText={actions.steerText} followUp={actions.followUp} cancel={run.cancel} cancelFollowUp={run.cancelFollowUp} compactSession={composer.compactSession}

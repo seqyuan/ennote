@@ -41,6 +41,7 @@ export const BUDGETS = [
 export const RECORDED_CEILINGS = {
   "lib/messages.ts": 1100, // flat dictionary, one block per locale
   "hooks/useAgentSession.ts": 700,
+  "hooks/useChatComposer.ts": 520, // turn Skills/graph pill state + submit gates
   "lib/session-store.ts": 600,
   "lib/chat-messages.ts": 600,
   "components/Composer.tsx": 550,

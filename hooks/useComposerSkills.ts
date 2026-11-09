@@ -18,6 +18,8 @@ type SkillRow = {
   description?: string;
   heroBound?: boolean;
   boundBy?: string[];
+  /** "global" rows are the only ones a turn can name; project rows are scope-local. */
+  sourceInfo?: { scope?: string };
 };
 
 /**
@@ -35,12 +37,16 @@ export function useComposerSkills(projectId: string | null): {
 } {
   const [skills, setSkills] = useState<ComposerSkill[]>([]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (isCurrent: () => boolean = () => true) => {
     try {
       const query = projectId ? `?${new URLSearchParams({ projectID: projectId })}` : "";
       const result = await apiFetch<{ skills?: SkillRow[] }>(`/v1/skills${query}`);
+      if (!isCurrent()) return;
       setSkills((result?.skills ?? [])
-        .filter((row) => Boolean(row.skillId))
+        // Only global rows: the turn validator resolves ids against the global
+        // digest catalogue, so offering a project-scope Skill would promise a
+        // selection the submit answers with 400.
+        .filter((row) => Boolean(row.skillId) && (row.sourceInfo?.scope ?? "global") === "global")
         .map((row) => ({
           id: row.skillId ?? "",
           label: row.name || row.skillId || "",
@@ -58,10 +64,9 @@ export function useComposerSkills(projectId: string | null): {
   // the setState happens in its continuation rather than in the effect body.
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
-      if (cancelled) return;
-      await refresh();
-    })();
+    // One microtask deeper than the effect body: the linter (rightly) rejects a
+    // synchronous setState there, and the fetch is async anyway.
+    void (async () => { await refresh(() => !cancelled); })();
     return () => { cancelled = true; };
   }, [refresh]);
 

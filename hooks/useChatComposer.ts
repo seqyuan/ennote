@@ -136,6 +136,8 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
     // connectWorkspace). Switching between real sessions still clears.
     if (previous === null && selectedSession) return;
     setInputVersioned("");
+    setPendingSkills([]);
+    setPendingGraph(null);
     clearAttachments();
   }, [selectedSession, setInputVersioned, clearAttachments]);
 
@@ -222,6 +224,10 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
   }, [selectedSession, pendingImage, textAttachments, agent, selectedModelId,
     selectedHeroId, heroes, pendingSkills, setInputVersioned, thinkingEffort, clearAttachments, restoreAttachments]);
 
+  // A Skill or graph pill is meaningless while a run is active: steer and follow-up
+  // carry text only, so the picker must not offer them.
+  const oneShotLocked = Boolean(agent.activeRunID);
+
   // Graph invocation is global; the Worker derives Project and workspace from
   // the selected Session when it creates the Run.
   const invokeAgentFlow = useCallback(async (name: string, version?: number, rawParams?: string) => {
@@ -256,7 +262,9 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
   const policyId = selectedPermissionPolicyID();
 
   const submit = useCallback(async () => {
-    if (!selectedSession || (!input.trim() && !pendingImage && textAttachments.length === 0) || agent.activeRunID) return;
+    // A picked graph is content on its own: a graph whose inputs are optional
+    // must be invocable from an empty draft.
+    if (!selectedSession || (!input.trim() && !pendingImage && textAttachments.length === 0 && !pendingGraph) || agent.activeRunID) return;
 
     // Graph addressing gates run BEFORE the normal turn: an explicit
     // /invoke_agent_flow command or a leading @graph:name[@version] token is a
@@ -268,7 +276,13 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
       return;
     }
     if (pendingGraph) {
-      const params = input.trim() || undefined;
+      // The draft carries `key=value` pairs for the flow. Prose is not a parameter
+      // list, so it is passed as the flow's single `prompt` input instead of being
+      // silently discarded as an unparseable string.
+      const draft = input.trim();
+      const params = draft
+        ? (/(^|\s)[A-Za-z_][\w-]*=/.test(draft) ? draft : `prompt=${JSON.stringify(draft)}`)
+        : undefined;
       void invokeAgentFlow(pendingGraph.name, pendingGraph.version, params).then((ok) => {
         if (ok) setPendingGraph(null);
       });
@@ -305,7 +319,7 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
     }
 
     void sendTurn(input, policyId ?? "");
-  }, [selectedSession, input, pendingImage, textAttachments.length, policyId, permissionMode,
+  }, [selectedSession, input, pendingImage, textAttachments.length, policyId, permissionMode, pendingGraph,
      agent, sendTurn, selectedProject, selectedHeroId, expandedVersion, draftVersion, invokeAgentFlow, expandDraftOrFallback, setExpandDiag]);
 
   const steer = useCallback(async () => {
@@ -457,6 +471,7 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
       flows: flowCatalog,
       show: commandPanelOpen && !promptPanelDismissed,
       skills: skillCatalog.skills,
+      oneShotLocked,
       pendingSkills,
       pendingGraph,
       toggleSkill: (id: string) => setPendingSkills((current) =>
@@ -467,7 +482,9 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
         setInputVersioned(`/${name} `);
       },
       onHeroSelect: (heroId: string) => {
-        setSelectedHeroId(heroId);
+        // "" is "no Hero": the pill's remove button clears the target rather than
+        // selecting a Hero whose id happens to be empty.
+        setSelectedHeroId(heroId === "" ? null : heroId);
         setPromptPanelDismissed(true);
       },
       onFlowSelect: (name: string, version?: number) => {

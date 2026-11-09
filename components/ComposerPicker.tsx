@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useT } from "@/components/LocaleProvider";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 
@@ -29,6 +29,10 @@ export interface PickerSection {
 
 const COLLAPSED_KEY = "ennote-picker-collapsed";
 
+function persistCollapsed(value: Record<string, boolean>): void {
+  try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(value)); } catch { /* storage unavailable */ }
+}
+
 function readCollapsed(): Record<string, boolean> {
   if (typeof window === "undefined") return {};
   try {
@@ -49,9 +53,14 @@ function readCollapsed(): Record<string, boolean> {
  * around. Filtering is the caller's text when the picker was opened from a token
  * (`@sec`) and this component's own input when it was opened from `+`.
  */
-export function ComposerPicker({
-  open, sections, filter, showFilter = false, activeKey, ariaLabel, onFilterChange, onPick, onClose,
-}: {
+export interface ComposerPickerHandle {
+  /** Move the cursor by one addressable row. */
+  move: (delta: number) => void;
+  /** Pick the row the cursor is on. Returns false when there is nothing to pick. */
+  pickActive: () => boolean;
+}
+
+export const ComposerPicker = forwardRef<ComposerPickerHandle, {
   open: boolean;
   sections: PickerSection[];
   filter: string;
@@ -61,7 +70,9 @@ export function ComposerPicker({
   onFilterChange?: (value: string) => void;
   onPick: (item: PickerItem, section: PickerSection) => void;
   onClose: () => void;
-}) {
+}>(function ComposerPicker({
+  open, sections, filter, showFilter = false, activeKey, ariaLabel, onFilterChange, onPick, onClose,
+}, ref) {
   const t = useT();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(readCollapsed);
   const [active, setActive] = useState(0);
@@ -85,9 +96,12 @@ export function ComposerPicker({
       .filter((section) => section.pinned || section.items.length > 0 || section.readOnly);
   }, [sections, collapsed, filter]);
 
+  // Pinned actions are shortcuts, not the content the panel was opened for: the
+  // cursor starts on the first addressable row, so Enter never opens a file
+  // dialog when the user typed a query.
   const selectable = useMemo(
     () => visible.flatMap((section) => section.items
-      .filter((item) => !section.readOnly && !item.disabled)
+      .filter((item) => !section.pinned && !section.readOnly && !item.disabled)
       .map((item) => ({ item, section }))),
     [visible],
   );
@@ -121,7 +135,7 @@ export function ComposerPicker({
   const toggle = useCallback((key: string, currentlyCollapsed: boolean) => {
     setCollapsed((previous) => {
       const next = { ...previous, [key]: !currentlyCollapsed };
-      try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next)); } catch { /* storage unavailable */ }
+      persistCollapsed(next);
       return next;
     });
   }, []);
@@ -137,7 +151,7 @@ export function ComposerPicker({
       setActive((index) => Math.max(index - 1, 0));
       return;
     }
-    if (event.key === "Enter" || event.key === "Tab") {
+    if (event.key === "Enter") {
       const picked = selectable[active];
       if (!picked) return;
       event.preventDefault();
@@ -153,6 +167,20 @@ export function ComposerPicker({
 
   // A token filter that matches nothing closes the panel: leaving only the pinned
   // Actions group visible would answer "@zzz" with "attach a file".
+  useImperativeHandle(ref, () => ({
+    move: (delta: number) => setActive((index) => {
+      const next = index + delta;
+      if (next < 0) return 0;
+      return Math.min(next, Math.max(selectable.length - 1, 0));
+    }),
+    pickActive: () => {
+      const picked = selectable[Math.min(active, Math.max(selectable.length - 1, 0))];
+      if (!picked) return false;
+      onPick(picked.item, picked.section);
+      return true;
+    },
+  }), [selectable, active, onPick]);
+
   if (!open) return null;
   const filteredMatch = visible.some((section) => !section.pinned && section.items.length > 0);
   if (!showFilter && filter.trim().length > 0 && !filteredMatch) return null;
@@ -171,7 +199,13 @@ export function ComposerPicker({
           />
         </label>
       )}
-      <div ref={listRef} className="composer-picker-body" role="listbox" aria-label={ariaLabel}>
+      <div
+        ref={listRef}
+        className="composer-picker-body"
+        role="listbox"
+        aria-label={t("picker.list")}
+        aria-activedescendant={selectable[active] ? `picker-${selectable[active].item.key}` : undefined}
+      >
         {visible.map((section) => {
           // A read-only group explains rather than offers, so it starts folded.
         const isCollapsed = collapsed[section.key] ?? section.readOnly ?? false;
@@ -184,6 +218,12 @@ export function ComposerPicker({
                 aria-expanded={collapsible ? !isCollapsed : undefined}
                 disabled={!collapsible}
                 onClick={() => collapsible && toggle(section.key, isCollapsed)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (collapsible) toggle(section.key, isCollapsed);
+                }}
                 title={collapsible ? t(isCollapsed ? "picker.expand" : "picker.collapse") : undefined}
               >
                 {collapsible
@@ -198,13 +238,14 @@ export function ComposerPicker({
                 return (
                   <button
                     key={item.key}
+                    id={`picker-${item.key}`}
                     type="button"
                     role="option"
                     data-picker-item
                     data-active={isActive || undefined}
                     aria-selected={isActive}
                     aria-disabled={section.readOnly || item.disabled || undefined}
-                    className={`composer-picker-item${isActive ? " active" : ""}`}
+                    className={`composer-picker-item${isActive ? " active" : ""}${section.pinned ? " is-action" : ""}`}
                     onClick={() => { if (!section.readOnly && !item.disabled) onPick(item, section); }}
                   >
                     <span className="composer-picker-item-icon" aria-hidden="true">{item.icon}</span>
@@ -221,7 +262,7 @@ export function ComposerPicker({
         })}
         {selectable.length === 0 && <div className="composer-picker-empty">{t("picker.empty")}</div>}
       </div>
-      {activeKey && <span className="sr-only" aria-live="polite">{activeKey}</span>}
+      <span className="sr-only" aria-live="polite">{activeKey ?? selectable[active]?.item.label ?? ""}</span>
     </div>
   );
-}
+});

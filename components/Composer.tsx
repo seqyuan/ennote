@@ -1,12 +1,12 @@
 "use client";
 
 import {
-  ArrowUp, Bot, File, FileSpreadsheet, FileText, ImagePlus, ListPlus, Minimize2, Paperclip, Plus,
-  Presentation, Sparkles, Square, Workflow, X,
+  ArrowUp, File, FileSpreadsheet, FileText, ImagePlus, ListPlus, Minimize2, Paperclip, Plus,
+  Presentation, Square, X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type ChangeEvent as ReactChangeEvent, type DragEvent, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useT } from "@/components/LocaleProvider";
-import { ComposerPicker } from "@/components/ComposerPicker";
+import { ComposerPicker, type ComposerPickerHandle } from "@/components/ComposerPicker";
 import { ComposerTargetPills } from "@/components/ComposerTargetPills";
 import { PermissionChip } from "@/components/PermissionChip";
 import { ModelSelect } from "@/components/ModelSelect";
@@ -84,9 +84,6 @@ interface ComposerProps {
   setSelectedModelId: (modelId: string) => void;
   thinkingEffort: ThinkingEffort;
   setThinkingEffort: (effort: ThinkingEffort) => void;
-  heroes: HeroSummary[];
-  selectedHeroId: string | null;
-  setSelectedHeroId: (heroId: string | null) => void;
   textAttachments: TextAttachment[];
   removeTextAttachment: (id: string) => void;
   pendingImage: PendingImage | null;
@@ -120,7 +117,7 @@ interface ComposerProps {
 export function Composer({
   selectedSession, activeLeafMessageId, input, setInput, activeRun, questionPending = false, compacting, hasPendingImage, reconnecting,
   permissionMode, permissionReady, setPermissionMode, models, providers, selectedModelId, setSelectedModelId, thinkingEffort, setThinkingEffort,
-  heroes, selectedHeroId, setSelectedHeroId, textAttachments, removeTextAttachment, pendingImage, clearPendingImage, attachFiles, uploadImage, submit, steer, steerText, followUp, cancel, cancelFollowUp, compactSession,
+  textAttachments, removeTextAttachment, pendingImage, clearPendingImage, attachFiles, uploadImage, submit, steer, steerText, followUp, cancel, cancelFollowUp, compactSession,
   pendingFollowUps,
   picker, expanding, expandDiag, contextUsage, stats, focusNonce,
   onRequestProject, inert = false, welcome = false,
@@ -236,6 +233,9 @@ export function Composer({
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (!selectedSession) return;
+    // The picker owns Arrow/Enter/Escape while it is open: otherwise Enter would
+    // send `@sec` as a chat message instead of picking the hero it names.
+    if (!event.nativeEvent.isComposing && composerPicker.handleKeyDown(event)) return;
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
     if (activeRun && questionPending) return;
@@ -257,8 +257,9 @@ export function Composer({
   }, [cancelFollowUp, steerText]);
 
   const canAttach = Boolean(selectedSession) && !activeRun && !compacting;
+  const pickerRef = useRef<ComposerPickerHandle>(null);
   const composerPicker = useComposerPicker({
-    input, setInput, data: picker, canAct: canAttach,
+    input, setInput, data: picker, canAct: canAttach, panel: pickerRef,
     onAttachFile: () => fileInput.current?.click(),
     onAttachImage: () => imageInput.current?.click(),
     onCompact: compactSession,
@@ -385,6 +386,7 @@ export function Composer({
             </div>
           )}
           <ComposerPicker
+            ref={pickerRef}
             open={composerPicker.open}
             sections={composerPicker.sections}
             filter={composerPicker.filter}
@@ -392,7 +394,7 @@ export function Composer({
             ariaLabel={t("composer.picker")}
             onFilterChange={composerPicker.setPlusFilter}
             onPick={composerPicker.pick}
-            onClose={composerPicker.close}
+            onClose={() => { composerPicker.close(); textarea.current?.focus(); }}
           />
           <textarea
             ref={textarea}
@@ -436,6 +438,8 @@ export function Composer({
                 type="button"
                 className="composer-plus"
                 aria-expanded={composerPicker.open}
+                aria-haspopup="dialog"
+                onPointerDown={composerPicker.notePointerClose}
                 aria-label={t("composer.configureRun")}
                 title={t("composer.configureRun")}
                 disabled={!selectedSession || compacting}
@@ -458,7 +462,8 @@ export function Composer({
                 </button>
               ) : (
                 <button type="submit" className="composer-primary" aria-label={t("composer.send")}
-                  disabled={inert || !selectedSession || (!permissionReady && !selectedHeroId) || (!input.trim() && !hasPendingImage && textAttachments.length === 0)}>
+                  disabled={inert || !selectedSession || (!permissionReady && !picker.selectedHeroId)
+                    || (!input.trim() && !hasPendingImage && textAttachments.length === 0 && !picker.pendingGraph)}>
                   <ArrowUp size={16} aria-hidden="true" />
                 </button>
               )}
@@ -473,7 +478,7 @@ export function Composer({
             permissionMode={permissionMode}
             permissionReady={permissionReady}
             setPermissionMode={setPermissionMode}
-            disabled={!selectedSession || activeRun || compacting || Boolean(selectedHeroId)}
+            disabled={!selectedSession || activeRun || compacting || Boolean(picker.selectedHeroId)}
             frozen={activeRun}
           />
           <span className="composer-context-spacer" aria-hidden="true" />
@@ -484,13 +489,13 @@ export function Composer({
             setSelectedModelId={setSelectedModelId}
             thinkingEffort={thinkingEffort}
             setThinkingEffort={setThinkingEffort}
-            disabled={!selectedSession || activeRun || models.length === 0 || Boolean(selectedHeroId)}
+            disabled={!selectedSession || activeRun || models.length === 0 || Boolean(picker.selectedHeroId)}
           />
           <ContextMeter contextUsage={contextUsage} stats={stats} />
         </div>
       </form>
       <div className="composer-status-line">
-        {!permissionReady && selectedSession && !selectedHeroId && <span className="composer-config-hint is-danger">{t("composer.policyUnavailable")}</span>}
+        {!permissionReady && selectedSession && !picker.selectedHeroId && <span className="composer-config-hint is-danger">{t("composer.policyUnavailable")}</span>}
         {expanding && <span className="composer-status" aria-live="polite">{t("composer.expanding")}</span>}
         {expandDiag && <span className="composer-status diag-warning" aria-live="polite">{expandDiag}</span>}
       </div>

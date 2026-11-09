@@ -15,11 +15,11 @@ const graphs = [
   { id: "go-review", name: "Go Review", path: "/home/graphs/go-review/graph.yaml", digest: `sha256:${"a".repeat(64)}`, latestVersion: 2 },
 ];
 
-function fulfill(route: Route, data: unknown) {
-  return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data }) });
+function fulfill(route: Route, data: unknown, status = 200) {
+  return route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ data }) });
 }
 
-async function mockBackend(page: Page) {
+async function mockBackend(page: Page, onInvocation?: (body: Record<string, unknown>) => void) {
   await page.route("**/api/worker/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
@@ -44,18 +44,46 @@ async function mockBackend(page: Page) {
     }
     if (path === `/v1/global-heroes/${role.id}/versions`) return fulfill(route, [{ version: 1, publishedAt: now }]);
     if (path === "/v1/graphs" && method === "GET") return fulfill(route, graphs);
+    if (path === `/v1/sessions/${session.id}/invocations` && method === "POST") {
+      onInvocation?.(JSON.parse(route.request().postData() ?? "{}"));
+      return fulfill(route, {
+        turnId: "turn-1", userMessageId: "m-1", existing: false,
+        run: { id: "run-1", turnId: "turn-1", sessionId: session.id, runKind: "agent", attempt: 1,
+          status: "queued", commitFormatVersion: 2, executionDepth: 0, publishMode: "public_final",
+          speakerSnapshot: { kind: "host", displayName: "Host" }, contextSnapshot: {},
+          requestedConfig: {}, effectiveConfig: {}, createdAt: now },
+      }, 202);
+    }
     if (path === "/v1/skills" && method === "GET") {
       return fulfill(route, {
         skills: [
-          { skillId: "cell-qc", name: "cell-qc", description: "QC tables", heroBound: false, boundBy: [] },
+          { skillId: "cell-qc", name: "cell-qc", description: "QC tables",
+            heroBound: false, boundBy: [], sourceInfo: { scope: "global" } },
           { skillId: "review-guard", name: "review-guard", description: "Bound to the reviewer hero",
-            heroBound: true, boundBy: ["security-reviewer"] },
+            heroBound: true, boundBy: ["security-reviewer"], sourceInfo: { scope: "global" } },
+          { skillId: "project-only", name: "project-only", description: "Project scope",
+            heroBound: false, boundBy: [], sourceInfo: { scope: "project" } },
         ],
         diagnostics: [],
       });
     }
     return route.abort();
   });
+}
+
+/**
+ * Wait until the composer has the Hero and Skill catalogues. Under parallel load
+ * the first `@` can be typed before the fetches land, which makes a token test
+ * flaky for reasons that have nothing to do with the token.
+ */
+async function awaitCatalogue(page: Page) {
+  const plus = page.getByRole("button", { name: "Configure run" });
+  await plus.click();
+  const picker = page.locator(".composer-picker");
+  await expect(picker.getByRole("group", { name: "Heroes" })).toBeVisible();
+  await expect(picker.getByRole("group", { name: "Skills" })).toBeVisible();
+  await plus.click();
+  await expect(picker).toBeHidden();
 }
 
 async function openSession(page: Page) {
@@ -67,6 +95,7 @@ async function openSession(page: Page) {
 
 test("typing @hero completes a hero target and clears the token", async ({ page }) => {
   await openSession(page);
+  await awaitCatalogue(page);
   const textarea = page.locator("textarea[aria-label]");
   const panel = page.locator(".composer-picker");
 
@@ -84,6 +113,7 @@ test("typing @hero completes a hero target and clears the token", async ({ page 
 
 test("typing @graph picks a graph invocation as a pill", async ({ page }) => {
   await openSession(page);
+  await awaitCatalogue(page);
   const textarea = page.locator("textarea[aria-label]");
   const panel = page.locator(".composer-picker");
 
@@ -101,6 +131,7 @@ test("typing @graph picks a graph invocation as a pill", async ({ page }) => {
 
 test("typing / lists global skills and keeps the bound ones out of reach", async ({ page }) => {
   await openSession(page);
+  await awaitCatalogue(page);
   const textarea = page.locator("textarea[aria-label]");
   const panel = page.locator(".composer-picker");
 
@@ -116,6 +147,7 @@ test("typing / lists global skills and keeps the bound ones out of reach", async
 
 test("a skill a hero already loads is listed read-only, not offered", async ({ page }) => {
   await openSession(page);
+  await awaitCatalogue(page);
   const textarea = page.locator("textarea[aria-label]");
 
   // Clear the filter so every group is visible, then open the bound group.
@@ -134,6 +166,7 @@ test("a skill a hero already loads is listed read-only, not offered", async ({ p
 
 test("@ addressing does not open when no match exists", async ({ page }) => {
   await openSession(page);
+  await awaitCatalogue(page);
   const textarea = page.locator("textarea[aria-label]");
   const panel = page.locator(".composer-picker");
 
@@ -141,4 +174,40 @@ test("@ addressing does not open when no match exists", async ({ page }) => {
   await expect(panel).not.toBeVisible();
   await textarea.fill("@graph:nope");
   await expect(panel).not.toBeVisible();
+});
+
+test("a picked skill rides on the turn and does not survive it", async ({ page }) => {
+  let body: Record<string, unknown> | undefined;
+  await mockBackend(page, (captured) => { body = captured; });
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByRole("button", { name: session.title, exact: true }).click();
+  await awaitCatalogue(page);
+
+  const textarea = page.locator("textarea[aria-label]");
+  await textarea.fill("/cell");
+  await page.locator(".composer-picker").getByRole("group", { name: "Skills" }).getByText("/cell-qc").click();
+  await expect(page.locator(".composer-pill.is-skill")).toContainText("/cell-qc");
+  // The token is consumed, so the draft holds only what the user typed.
+  await expect(textarea).toHaveValue("");
+
+  await textarea.fill("run the QC");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => body).toBeTruthy();
+  expect(body).toMatchObject({ text: "run the QC", skills: [{ id: "cell-qc" }] });
+
+  // One-shot: the next turn starts clean.
+  await expect(page.locator(".composer-pill.is-skill")).toHaveCount(0);
+});
+
+test("a project-scope skill is never offered, because a turn cannot name it", async ({ page }) => {
+  await mockBackend(page);
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByRole("button", { name: session.title, exact: true }).click();
+  await awaitCatalogue(page);
+
+  await page.locator("textarea[aria-label]").fill("/project");
+  const skills = page.locator(".composer-picker").getByRole("group", { name: "Skills" });
+  await expect(skills.getByText("/project-only")).toHaveCount(0);
 });

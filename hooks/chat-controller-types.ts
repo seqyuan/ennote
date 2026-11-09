@@ -111,6 +111,8 @@ export type ComposerView = {
     flows: { name: string; version?: number }[];
     /** Global Skills the turn may carry; role-free ones are selectable. */
     skills: { id: string; label: string; description?: string; heroBound: boolean; boundBy: string[] }[];
+    /** A run is active: text-only paths cannot carry a Skill or graph pill. */
+    oneShotLocked: boolean;
     /** Selected Skills and graph live in the hook: submit needs them. */
     pendingSkills: string[];
     pendingGraph: { name: string; version?: number } | null;

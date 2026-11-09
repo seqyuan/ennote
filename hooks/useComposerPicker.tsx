@@ -1,9 +1,9 @@
 "use client";
 
 import { Bot, FileText, ImagePlus, Minimize2, Paperclip, Sparkles, Workflow } from "lucide-react";
-import { useCallback, useMemo, useState, type ChangeEvent } from "react";
+import { useCallback, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
 import { useT } from "@/components/LocaleProvider";
-import type { PickerItem, PickerSection } from "@/components/ComposerPicker";
+import type { ComposerPickerHandle, PickerItem, PickerSection } from "@/components/ComposerPicker";
 import { detectComposerTrigger, type TriggerKind } from "@/lib/composer-trigger";
 
 export interface ComposerPickerData {
@@ -11,6 +11,7 @@ export interface ComposerPickerData {
   heroes: { id: string; handle: string; name: string; description?: string }[];
   graphs: { name: string; version?: number }[];
   skills: { id: string; label: string; description?: string; heroBound: boolean; boundBy: string[] }[];
+  oneShotLocked?: boolean;
   pendingSkills: string[];
   pendingGraph: { name: string; version?: number } | null;
   selectedHeroId: string | null;
@@ -38,8 +39,9 @@ interface PickerState {
  * pills from disagreeing.
  */
 export function useComposerPicker({
-  input, setInput, data, canAct, onAttachFile, onAttachImage, onCompact,
+  input, setInput, data, canAct, panel, onAttachFile, onAttachImage, onCompact,
 }: {
+  panel: RefObject<ComposerPickerHandle | null>;
   input: string;
   setInput: (value: string) => void;
   data: ComposerPickerData;
@@ -82,6 +84,7 @@ export function useComposerPicker({
           label: graph.name,
           hint: graph.version ? `v${graph.version}` : undefined,
           icon: <Workflow size={14} aria-hidden="true" />,
+          disabled: data.oneShotLocked === true,
         })),
       },
       {
@@ -92,6 +95,7 @@ export function useComposerPicker({
           hint: data.pendingSkills.includes(skill.id) ? t("picker.selected") : undefined,
           description: skill.description,
           icon: <Sparkles size={14} aria-hidden="true" />,
+          disabled: data.oneShotLocked === true,
         })),
       },
       {
@@ -119,6 +123,19 @@ export function useComposerPicker({
     return groups;
   }, [data, t, canAct]);
 
+  /**
+   * Which groups a trigger opens. `@` (kind "all") addresses an executor, so it
+   * offers Heroes and Graphs; `/` inserts, so it offers Skills, Templates and the
+   * read-only bound group; `+` is the one entry that shows everything.
+   */
+  const wanted = useCallback((kind: TriggerKind): string[] => {
+    if (kind === "hero") return ["heroes"];
+    if (kind === "graph") return ["graphs"];
+    if (kind === "skill") return ["skills", "templates", "bound"];
+    if (kind === "template") return ["templates"];
+    return ["heroes", "graphs"];
+  }, []);
+
   /** Remove the token the picker owns; a `+` pick never had one. */
   const consumeToken = useCallback(() => {
     if (!state || state.fromPlus) return;
@@ -138,6 +155,10 @@ export function useComposerPicker({
       data.onSelectHero(item.key.slice("hero:".length), item.label.replace(/^@/, ""));
     } else if (section.key === "graphs") {
       const graph = data.graphs.find((entry) => `graph:${entry.name}` === item.key);
+      // A graph run replaces the turn: a Hero or Skill pill beside it would show
+      // a decision the run never reads, so both are cleared with the pick.
+      if (data.selectedHeroId) data.onSelectHero("", "");
+      for (const id of data.pendingSkills) data.onToggleSkill(id);
       data.onSelectGraph(item.key.slice("graph:".length), graph?.version);
     } else if (section.key === "skills") {
       data.onToggleSkill(item.key.slice("skill:".length));
@@ -148,9 +169,8 @@ export function useComposerPicker({
       setState(null);
       return;
     } else if (section.key === "templates") {
-      // A template replaces the draft, so the token goes first and the panel closes.
-      if (state && !state.fromPlus) setInput(input.slice(0, state.start) + input.slice(state.caret));
-      else if (state?.fromPlus) setInput("");
+      // A template replaces the draft: `onSelectTemplate` writes `/name ` itself,
+      // so the token is not stripped here (the second write would win anyway).
       data.onSelectTemplate(item.key.slice("template:".length));
       setState(null);
       return;
@@ -164,6 +184,19 @@ export function useComposerPicker({
     setState({ kind: "all", query: "", start: 0, caret: 0, fromPlus: true });
   }, []);
 
+  // The document-level pointerdown closes the panel before the button's click
+  // runs, so a naive toggle re-opens it on the same gesture. This ref records
+  // that the pointer already dismissed it.
+  const closedByPointer = useRef(false);
+  const notePointerClose = useCallback(() => { closedByPointer.current = state !== null; }, [state]);
+  const toggle = useCallback(() => {
+    // The document-level pointerdown already closed it on this same gesture: the
+    // click must finish the close, not undo it.
+    if (closedByPointer.current) { closedByPointer.current = false; return; }
+    if (state) { setState(null); return; }
+    openFromPlus();
+  }, [state, openFromPlus]);
+
   const onInputChange = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
     const value = event.target.value;
     setInput(value);
@@ -176,16 +209,46 @@ export function useComposerPicker({
     setState({ kind: trigger.kind, query: trigger.query, start: trigger.start, caret, fromPlus: false });
   }, [setInput]);
 
+  const visibleSections = useMemo(() => {
+    // `+` is the picker's everything surface: actions first, then every group.
+    if (state?.fromPlus) return sections;
+    const allowed = new Set(wanted(state?.kind ?? "all"));
+    return sections.filter((section) => allowed.has(section.key));
+  }, [sections, state?.kind, state?.fromPlus, wanted]);
+
+  /**
+   * The panel is a sibling of the textarea, so the textarea's keydown owns focus
+   * while the caret is in the draft. Navigation is forwarded to the panel's
+   * imperative handle, which is what makes ArrowDown/Enter work from there.
+   */
+  const handleKeyDown = useCallback((event: { key: string; preventDefault: () => void }): boolean => {
+    if (!state) return false;
+    if (event.key === "ArrowDown") { event.preventDefault(); panel.current?.move(1); return true; }
+    if (event.key === "ArrowUp") { event.preventDefault(); panel.current?.move(-1); return true; }
+    if (event.key === "Enter") {
+      // Nothing to pick means the draft is an ordinary message: let Enter send it
+      // rather than swallowing the keystroke on an empty panel.
+      const picked = panel.current?.pickActive() ?? false;
+      if (!picked) return false;
+      event.preventDefault();
+      return true;
+    }
+    if (event.key === "Escape") { event.preventDefault(); setState(null); return true; }
+    return false;
+  }, [state, panel]);
+
   return {
     open: state !== null,
+    notePointerClose,
+    handleKeyDown,
     fromPlus: state?.fromPlus === true,
     filter: state?.fromPlus ? plusFilter : (state?.query ?? ""),
-    sections,
+    sections: visibleSections,
     pick,
     openFromPlus,
     onInputChange,
     setPlusFilter,
     close: () => setState(null),
-    toggle: () => (state ? setState(null) : openFromPlus()),
+    toggle,
   };
 }
