@@ -1,0 +1,81 @@
+name: attest
+
+# This repository publishes the Ennote runtime binaries. They are built and
+# tested in the private source repository (`seqyuan/ennote`), mirrored here as
+# release assets, and attested here — artifact attestations are a public
+# repository feature, so this is the only place the statement can be produced.
+#
+# The dispatch payload carries the source tag and commit so the attestation and
+# the release notes name the exact revision the bytes came from:
+#   client_payload: { tag: "v0.8.0", sha: "<commit>" }
+
+on:
+  repository_dispatch:
+    types: [ennote-release]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag already published in this repository
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  attest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Resolve the tag
+        id: ref
+        env:
+          DISPATCH_TAG: ${{ github.event.client_payload.tag }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${DISPATCH_TAG:-${INPUT_TAG}}"
+          if [ -z "$tag" ]; then
+            echo "::error::no tag in the dispatch payload"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "sha=${{ github.event.client_payload.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Download the released assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ref.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" --dir assets --pattern 'ennogate-*' --clobber
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" --dir assets --pattern 'ennoworker-*' --clobber
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" --dir assets --pattern 'SHA256SUMS' --clobber
+          ls -l assets
+
+      # Verify a downloaded file with:
+      #   gh attestation verify assets/ennogate-<suffix> --repo seqyuan/ennote-bin
+      - name: Attest Build Provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            assets/ennogate-*
+            assets/ennoworker-*
+            assets/SHA256SUMS
+
+      - name: Record the source revision on the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ref.outputs.tag }}
+          SHA: ${{ steps.ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Ennote runtime binaries for \`${TAG}\`."
+            echo
+            echo "Built by \`seqyuan/ennote\` at \`${SHA:-unknown}\` and attested here."
+            echo "Verify with: \`gh attestation verify <file> --repo ${GITHUB_REPOSITORY}\`"
+          } > notes.md
+          gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --notes-file notes.md

@@ -18,7 +18,10 @@ const START_TIMEOUT_MS = 45_000;
 const STOP_TIMEOUT_MS = 15_000;
 const PACK_INSPECT_TIMEOUT_MS = 15_000;
 const PACK_REQUEST_TIMEOUT_MS = 15_000;
-const DEFAULT_RELEASES_BASE = "https://github.com/seqyuan/ennote/releases/download";
+// Binaries live in a public repository so a fresh install can download them
+// without a GitHub token: asset downloads from a private repository are
+// authenticated, which an unauthenticated `npx` run cannot satisfy.
+const DEFAULT_RELEASES_BASE = "https://github.com/seqyuan/ennote-bin/releases/download";
 
 // releasesBase honours ENNOTE_RELEASES_BASE so a mirror (or an air-gapped
 // install serving the release assets locally) can be used instead of GitHub.

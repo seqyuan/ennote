@@ -75,7 +75,7 @@ ennote start
 ```
 
 - npm 包（`@seqyuan/ennote`）只包含 CLI 脚本和编译后的静态前端（约 12 MB）。
-- 首次 `ennote start` 时，CLI 会从本仓库（[seqyuan/ennote](https://github.com/seqyuan/ennote)）的 GitHub Release 按当前平台/架构下载 Go 二进制（ennogate + ennoworker），缓存到 `~/.ennote/bin/`，后续启动不再下载。
+- 首次 `ennote start` 时，CLI 会从公开的二进制仓库 [seqyuan/ennote-bin](https://github.com/seqyuan/ennote-bin) 的 GitHub Release 按当前平台/架构下载 Go 二进制（ennogate + ennoworker），缓存到 `~/.ennote/bin/`，后续启动不再下载。二进制放在公开仓库是有意的：私有仓库的 release 资产下载需要凭据，而 `npx` 首次运行没有。可用 `ENNOTE_RELEASES_BASE` 指向镜像。
 - 支持平台：linux-x64 / linux-arm64 / darwin-x64 / darwin-arm64。
 - 发布流程：打版本 tag（`vX.Y.Z`）后，[release workflow](.github/workflows/release.yml) 运行测试、构建四平台二进制、验证 npm 版本已生效，最后创建 GitHub Release。
 

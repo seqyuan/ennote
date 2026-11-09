@@ -152,12 +152,13 @@ jobs:
           npm view "$ENNOTE_NPM_PACKAGE@${{ steps.pkg.outputs.version }}" --json || true
           exit 1
 
-      # Provenance for the artifacts users actually run: the published tarball and
-      # every worker binary. `SHA256SUMS` proves the bytes did not change in
-      # transit but says nothing about who built them or from which commit, which
-      # is the gap this closes. Verify with:
-      #   gh attestation verify <file> --repo seqyuan/ennote
-      - name: Attest Release Provenance
+      # Attestation is a public-repository feature: GitHub refuses to create one
+      # for a workflow running in a private repository (unless the org is on
+      # GHEC). This repository is private, so the binaries are attested where
+      # they are published — `seqyuan/ennote-bin` — by the dispatch below. When
+      # this repository becomes public the step runs here instead.
+      - name: Attest Release Provenance (public source only)
+        if: ${{ github.event.repository.visibility == 'public' }}
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
@@ -165,6 +166,8 @@ jobs:
             worker/ennoworker-*
             worker/SHA256SUMS
 
+      # Kept as the private audit trail: the tag, the commit, and the bytes that
+      # were produced for it, readable by the maintainer without a public repo.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -175,3 +178,33 @@ jobs:
             worker/ennoworker-*
             worker/SHA256SUMS
           fail_on_unmatched_files: true
+
+      # The binaries users actually run are published from the public repository:
+      # a release asset in a private repository is authenticated, so `npx` cannot
+      # fetch it on first run. `BIN_REPO_TOKEN` is a fine-grained PAT with
+      # contents:write on seqyuan/ennote-bin; without it the mirror is skipped
+      # with a warning rather than failing a release that is otherwise complete.
+      - name: Mirror Binaries To The Public Repository
+        env:
+          GH_TOKEN: ${{ secrets.BIN_REPO_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::warning::BIN_REPO_TOKEN is not set; the public mirror was skipped and users cannot download ${TAG}."
+            exit 0
+          fi
+          if ! gh release view "$TAG" -R seqyuan/ennote-bin >/dev/null 2>&1; then
+            gh release create "$TAG" -R seqyuan/ennote-bin \
+              --title "$TAG" \
+              --notes "Ennote runtime binaries for ${TAG} (source: seqyuan/ennote@${GITHUB_SHA})."
+          fi
+          gh release upload "$TAG" worker/ennogate-* worker/ennoworker-* worker/SHA256SUMS \
+            -R seqyuan/ennote-bin --clobber
+          # The public repository attests the assets it just received: an
+          # attestation is only verifiable against the repository that produced
+          # it, and that repository is now this one.
+          gh api -X POST "repos/seqyuan/ennote-bin/dispatches" \
+            -f event_type=ennote-release \
+            -F "client_payload[tag]=${TAG}" \
+            -F "client_payload[sha]=${GITHUB_SHA}"
