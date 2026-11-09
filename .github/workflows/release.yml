@@ -118,9 +118,12 @@ jobs:
           if npm view "$ENNOTE_NPM_PACKAGE@${{ steps.pkg.outputs.version }}" version >/dev/null 2>&1; then
             echo "Package $ENNOTE_NPM_PACKAGE@${{ steps.pkg.outputs.version }} already published, nothing to do."
           else
-            # --provenance has npm attach a Sigstore attestation linking this
-            # tarball to the workflow run and commit that produced it.
-            npm publish --access public --provenance
+            # No --provenance: the registry refuses a Sigstore bundle whose source
+            # repository is private ("E422 … Unsupported GitHub Actions source
+            # repository visibility"), and this repository is private by design.
+            # The binaries users run are still attested — in the public repository
+            # they are published from (see AGENTS.md, "Recorded exception").
+            npm publish --access public
           fi
           # Accounts with 2FA may leave the publish staged instead of live.
           # If the verification step below fails, approve the staged release

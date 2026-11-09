@@ -19,6 +19,18 @@ This file is the workflow that belongs in `ennote-bin` at
 `.github/workflows/attest.yml`: it downloads the assets it just received,
 attests them, and records the source revision in the release notes.
 
+## npm provenance
+
+`npm publish` runs **without** `--provenance` while this source repository is
+private: the registry rejects a Sigstore bundle whose source repository is not
+public (`E422 … Unsupported GitHub Actions source repository visibility`). The
+npm tarball is therefore unsigned; the binaries it downloads are attested in
+`ennote-bin`, which is what a user actually executes.
+
+To restore npm provenance, make `seqyuan/ennote` public (or move to GHEC) and put
+`--provenance` back on the publish step. AGENTS.md records this as the one allowed
+gap and not a precedent.
+
 Setup (once):
 
 ```bash
