@@ -1,0 +1,11 @@
+# Gitleaks fingerprints for findings that are not secrets.
+#
+# Each entry is `<commit>:<file>:<rule>:<line>` as printed in the gitleaks
+# report. Keep this list empty of anything that was ever a real credential: a
+# line belongs here only when the matching text is provably not a secret, and
+# the justification says why.
+
+# `strings.Trim(token, "0123456789abcdef")` — the hex charset that a Session
+# token is validated against. generic-api-key matches the quoted string because
+# it is high-entropy, but it is a character set, not a credential.
+e470d6ac7ebfa60803eb84158e0b544695ea76eb:ennoworker/cmd/ennogate/sessions.go:generic-api-key:177
