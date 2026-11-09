@@ -1593,6 +1593,9 @@ func (s *Server) writeStoreError(w http.ResponseWriter, r *http.Request, err err
 		writeError(w, r, http.StatusConflict, string(domain.ErrorCompactionCheckpointInvalid), err.Error(), false)
 	case domain.ErrorCodeOf(err) == domain.ErrorInvocationTargetInvalid:
 		writeError(w, r, http.StatusBadRequest, string(domain.ErrorInvocationTargetInvalid), err.Error(), false)
+	case domain.ErrorCodeOf(err) == domain.ErrorProviderConfigurationInvalid:
+		// A misconfigured Worker cannot be fixed by retrying the request.
+		writeError(w, r, http.StatusBadRequest, string(domain.ErrorProviderConfigurationInvalid), err.Error(), false)
 	case domain.ErrorCodeOf(err) == domain.ErrorSkillNotFound:
 		writeError(w, r, http.StatusBadRequest, string(domain.ErrorSkillNotFound), err.Error(), false)
 	case domain.ErrorCodeOf(err) == domain.ErrorTooManySkills:

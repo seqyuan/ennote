@@ -65,6 +65,12 @@ export function RunInspectorBody({ runId, composition, mcp, transcript, loading,
 
   const sections = composition.sections ?? [];
   const recorded = composition.recorded;
+  // Skills the user attached to this turn, read back from the frozen composition
+  // itself: the section source is the provenance, so this list cannot disagree
+  // with what the model was actually given.
+  const userSelectedSkills = sections
+    .filter((section) => section.kind === "skill_preload" && section.source === "user-skill-select")
+    .map((section) => section.skillId || section.id.replace(/^skill\.preload\./, ""));
 
   return <div className={styles.body}>
     <div>
@@ -80,6 +86,12 @@ export function RunInspectorBody({ runId, composition, mcp, transcript, loading,
           {t("inspector.sections", { count: String(sections.length) })}
         </span>
       </div>
+      {userSelectedSkills.length > 0 && (
+        <div className={styles.selectedSkills}>
+          <span className={styles.muted}>{t("inspector.selectedSkills")}</span>
+          {userSelectedSkills.map((id) => <code key={id}>{`/${id}`}</code>)}
+        </div>
+      )}
       <div className={styles.group}>
         {sections.map((section) => <SectionRow key={section.id} section={section} />)}
       </div>

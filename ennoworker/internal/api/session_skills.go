@@ -31,16 +31,12 @@ func (s *Server) resolveSessionSkills(_ context.Context, ids []string) (domain.F
 	if s.SkillCatalog != nil {
 		catalog = s.SkillCatalog()
 	}
-	var known map[string]bool
-	if catalog == nil && s.Skills != nil {
-		result, err := s.Skills.List("")
-		if err != nil {
-			return nil, fmt.Errorf("load skill catalog: %w", err)
-		}
-		known = make(map[string]bool, len(result.Skills))
-		for _, skill := range result.Skills {
-			known[skill.SkillID] = true
-		}
+	if catalog == nil {
+		// Without the digest catalogue there is nothing to pin, so every selection
+		// would freeze unpinned. That is an install-wide misconfiguration, and it
+		// must not be reported as "this Skill does not exist".
+		return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
+			fmt.Errorf("the Skill catalogue is unavailable on this Worker, so a turn cannot pin Skill content"))
 	}
 	refs := make(domain.FrozenSkillRefs, 0, len(ids))
 	seen := map[string]bool{}
@@ -54,14 +50,8 @@ func (s *Server) resolveSessionSkills(_ context.Context, ids []string) (domain.F
 				fmt.Errorf("a turn may select at most %d skills", maxSelectedSkills))
 		}
 		seen[id] = true
-		digest := ""
-		if catalog != nil {
-			digest = strings.TrimSpace(catalog[id])
-			if digest == "" {
-				return nil, domain.NewCodedError(domain.ErrorSkillNotFound,
-					fmt.Errorf("skill %q is not in the catalog", id))
-			}
-		} else if known != nil && !known[id] {
+		digest := strings.TrimSpace(catalog[id])
+		if digest == "" {
 			return nil, domain.NewCodedError(domain.ErrorSkillNotFound,
 				fmt.Errorf("skill %q is not in the catalog", id))
 		}

@@ -44,7 +44,7 @@ test("manual compaction uses an inline prompt bar and submits the focus instruct
   await openConversation(page);
 
   // Attach / compact are the picker's pinned Actions group, behind "+".
-  const configBtn = page.getByRole("button", { name: "Configure run" });
+  const configBtn = page.getByRole("button", { name: "Insert a hero, graph, skill, or file" });
   const openConfig = async () => {
     if ((await configBtn.getAttribute("aria-expanded")) !== "true") await configBtn.click();
   };

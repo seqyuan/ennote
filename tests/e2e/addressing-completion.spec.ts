@@ -77,7 +77,7 @@ async function mockBackend(page: Page, onInvocation?: (body: Record<string, unkn
  * flaky for reasons that have nothing to do with the token.
  */
 async function awaitCatalogue(page: Page) {
-  const plus = page.getByRole("button", { name: "Configure run" });
+  const plus = page.getByRole("button", { name: "Insert a hero, graph, skill, or file" });
   await plus.click();
   const picker = page.locator(".composer-picker");
   await expect(picker.getByRole("group", { name: "Heroes" })).toBeVisible();

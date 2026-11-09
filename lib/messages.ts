@@ -71,6 +71,7 @@ export const messages: Record<Locale, Record<string, string>> = {
 
     "composer.dropFiles": "Drop images or text files",
     "composer.picker": "Insert",
+    "composer.insert": "Insert a hero, graph, skill, or file",
     "picker.selected": "selected",
     "picker.filter": "Filter…",
     "picker.expand": "Expand group",
@@ -245,6 +246,7 @@ export const messages: Record<Locale, Record<string, string>> = {
       "Frozen before the first model request. Nothing here is re-derived from current settings.",
     "inspector.unrecorded":
       "This run did not record its prompt composition, so there is nothing to show.",
+    "inspector.selectedSkills": "Skills you attached",
     "inspector.composition": "Prompt composition",
     "inspector.sections": "{count} sections",
     "inspector.prompt": "Frozen prompt text",
@@ -593,6 +595,7 @@ export const messages: Record<Locale, Record<string, string>> = {
 
     "composer.dropFiles": "拖放图片或文本文件",
     "composer.picker": "插入",
+    "composer.insert": "插入英雄、图谱、技能或文件",
     "picker.selected": "已选",
     "picker.filter": "筛选…",
     "picker.expand": "展开分组",
@@ -765,6 +768,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "inspector.run": "Run",
     "inspector.frozen": "在首次模型请求前冻结。此处内容不会根据当前设置重新推导。",
     "inspector.unrecorded": "该 Run 未记录提示词组成，无可显示内容。",
+    "inspector.selectedSkills": "你附加的技能",
     "inspector.composition": "提示词组成",
     "inspector.sections": "共 {count} 段",
     "inspector.prompt": "冻结的提示词全文",

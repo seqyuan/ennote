@@ -313,7 +313,6 @@ export const listGraphs200: WorkerOperationResponse<"listGraphs", 200> = {
 export const listProjectActiveRuns200: WorkerOperationResponse<"listProjectActiveRuns", 200> = {
   "data": {
     "sessionIds": [
-      "00000000-0000-0000-0000-000000000011",
       "00000000-0000-0000-0000-000000000005"
     ]
   }

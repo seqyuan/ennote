@@ -1,8 +1,7 @@
 "use client";
 
 import {
-  ArrowUp, File, FileSpreadsheet, FileText, ImagePlus, ListPlus, Minimize2, Paperclip, Plus,
-  Presentation, Square, X,
+  ArrowUp, File, FileSpreadsheet, FileText, ListPlus, Paperclip, Plus, Presentation, Square, X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useT } from "@/components/LocaleProvider";
@@ -11,11 +10,10 @@ import { ComposerTargetPills } from "@/components/ComposerTargetPills";
 import { PermissionChip } from "@/components/PermissionChip";
 import { ModelSelect } from "@/components/ModelSelect";
 import { ContextMeter } from "@/components/ContextMeter";
-import type { ModelProfile, ProviderProfile, HeroSummary } from "@/components/settings/types";
+import type { ModelProfile, ProviderProfile } from "@/components/settings/types";
 import type { SessionContextUsage, SessionStats } from "@/hooks/chat-controller-types";
 import { artifactPreviewURL } from "@/lib/artifacts";
 import type { PermissionMode, ThinkingEffort } from "@/lib/permission-mode";
-import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { useComposerPicker, type ComposerPickerData } from "@/hooks/useComposerPicker";
 import { QueueDock, type QueuedMessage } from "./QueueDock";
 
@@ -128,8 +126,6 @@ export function Composer({
   const imageInput = useRef<HTMLInputElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const dragCounter = useRef(0);
-  const [configOpen, setConfigOpen] = useState(false);
-  const configRef = useRef<HTMLDivElement>(null);
   const [manualHeight, setManualHeight] = useState(() => {
     if (typeof window === "undefined") return 0;
     try {
@@ -193,17 +189,6 @@ export function Composer({
     applyManualHeight(next);
     persistManualHeight(next);
   }, [applyManualHeight, persistManualHeight]);
-
-  useOverlayLayer(configOpen, () => setConfigOpen(false));
-
-  useEffect(() => {
-    if (!configOpen) return;
-    const close = (event: PointerEvent) => {
-      if (!configRef.current?.contains(event.target as Node)) setConfigOpen(false);
-    };
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
-  }, [configOpen]);
 
   useEffect(() => {
     if (!focusNonce) return;
@@ -364,27 +349,8 @@ export function Composer({
         />
         <div
           className={`composer-editor${inert ? " composer-no-session" : ""}`}
-          ref={configRef}
           onClick={() => { if (inert) onRequestProject?.(); }}
         >
-          {configOpen && (
-            <div className="composer-config-panel" role="dialog" aria-label={t("composer.attachMenu")}>
-              <div className="composer-config-row">
-                <span className="composer-config-label">{t("composer.attach")}</span>
-                <div className="composer-config-tools">
-                  <button type="button" className="icon-command" disabled={!canAttach} onClick={() => fileInput.current?.click()} aria-label={t("composer.attachFiles")} title={t("composer.attachFiles")}>
-                    <Paperclip size={15} aria-hidden="true" />
-                  </button>
-                  <button type="button" className="icon-command" disabled={!canAttach} onClick={() => imageInput.current?.click()} aria-label={t("composer.attachImage")} title={t("composer.attachImage")}>
-                    <ImagePlus size={15} aria-hidden="true" />
-                  </button>
-                  <button type="button" className="icon-command" onClick={compactSession} disabled={!selectedSession || !activeLeafMessageId || activeRun} aria-label={t("composer.compactContext")} title={t("composer.compactContext")}>
-                    <Minimize2 size={15} aria-hidden="true" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
           <ComposerPicker
             ref={pickerRef}
             open={composerPicker.open}
@@ -440,8 +406,8 @@ export function Composer({
                 aria-expanded={composerPicker.open}
                 aria-haspopup="dialog"
                 onPointerDown={composerPicker.notePointerClose}
-                aria-label={t("composer.configureRun")}
-                title={t("composer.configureRun")}
+                aria-label={t("composer.insert")}
+                title={t("composer.insert")}
                 disabled={!selectedSession || compacting}
                 onClick={composerPicker.toggle}
               >

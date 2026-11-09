@@ -523,6 +523,29 @@ func TestContractSamples(t *testing.T) {
 		values: sessionRoute, status: http.StatusOK,
 	})
 
+	runRoute := map[string]string{"runID": submission.Run.ID}
+	samples.record(contractSampleRequest{
+		method: http.MethodGet, route: "/v1/runs/{runID}", auth: true, values: runRoute, status: http.StatusOK,
+	})
+	samples.record(contractSampleRequest{
+		method: http.MethodGet, route: "/v1/runs/{runID}", auth: true,
+		values: map[string]string{"runID": "00000000-0000-0000-0000-000000000000"},
+		status: http.StatusNotFound,
+	})
+	// Recorded after the turn: the submitted Run is queued, so both answers carry a
+	// real element rather than an empty array that validates nothing.
+	samples.record(contractSampleRequest{
+		method: http.MethodGet, route: "/v1/sessions/{sessionID}/active-run", auth: true,
+		values: sessionRoute, status: http.StatusOK,
+	})
+	samples.record(contractSampleRequest{
+		method: http.MethodGet, route: "/v1/projects/{projectID}/active-runs", auth: true,
+		values: projectRoute, status: http.StatusOK,
+	})
+
+	// Recorded last: the invocation below leaves a second queued Run behind, and
+	// `active-runs` answers in row order, so it has to be sampled before the
+	// session that owns that Run exists.
 	// The two operations this branch's capability rides on had no sample, which is
 	// why a renamed field (`perHero`) and a null array (`boundBy`) slipped through.
 	// The invocation gets its own session: the turn above left a queued Run behind,
@@ -544,26 +567,6 @@ func TestContractSamples(t *testing.T) {
 	})
 	samples.record(contractSampleRequest{
 		method: http.MethodGet, route: "/v1/skills", auth: true, status: http.StatusOK,
-	})
-
-	runRoute := map[string]string{"runID": submission.Run.ID}
-	samples.record(contractSampleRequest{
-		method: http.MethodGet, route: "/v1/runs/{runID}", auth: true, values: runRoute, status: http.StatusOK,
-	})
-	samples.record(contractSampleRequest{
-		method: http.MethodGet, route: "/v1/runs/{runID}", auth: true,
-		values: map[string]string{"runID": "00000000-0000-0000-0000-000000000000"},
-		status: http.StatusNotFound,
-	})
-	// Recorded after the turn: the submitted Run is queued, so both answers carry a
-	// real element rather than an empty array that validates nothing.
-	samples.record(contractSampleRequest{
-		method: http.MethodGet, route: "/v1/sessions/{sessionID}/active-run", auth: true,
-		values: sessionRoute, status: http.StatusOK,
-	})
-	samples.record(contractSampleRequest{
-		method: http.MethodGet, route: "/v1/projects/{projectID}/active-runs", auth: true,
-		values: projectRoute, status: http.StatusOK,
 	})
 
 	if os.Getenv(contractSampleUpdateEnv) != "1" {

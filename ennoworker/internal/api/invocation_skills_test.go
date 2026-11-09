@@ -57,6 +57,7 @@ func TestSubmitInvocationAcceptsSessionSelectedSkills(t *testing.T) {
 func TestSubmitInvocationRejectsAnUnknownSkill(t *testing.T) {
 	server, handler := setupServer(t, &fakeController{})
 	server.Skills = skillServiceFixture(t, "cell-qc")
+	server.SkillCatalog = func() map[string]string { return map[string]string{"cell-qc": "digest-cell-qc"} }
 	workspace := hostWorkspace(t, server, "unknown-skill")
 	created := request(t, handler, http.MethodPost, "/v1/projects",
 		map[string]any{"name": "P", "hostPath": workspace}, true)
@@ -213,4 +214,31 @@ func TestSubmitInvocationAcceptsAModelHiddenSkill(t *testing.T) {
 		"skills": []map[string]any{{"id": "manual-only"}}}
 	response := request(t, handler, http.MethodPost, "/v1/sessions/"+createdSession.ID+"/invocations", body, true)
 	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+}
+
+// A Worker with no digest catalogue cannot pin anything, so a selection is refused
+// as a configuration problem rather than reported as a missing Skill.
+func TestSubmitInvocationRefusesASelectionWithoutACatalogue(t *testing.T) {
+	server, handler := setupServer(t, &fakeController{})
+	server.Skills = skillServiceFixture(t, "cell-qc")
+	server.SkillCatalog = nil
+	workspace := hostWorkspace(t, server, "no-catalogue")
+	created := request(t, handler, http.MethodPost, "/v1/projects",
+		map[string]any{"name": "P", "hostPath": workspace}, true)
+	var project struct {
+		Project domain.Project `json:"project"`
+	}
+	decodeData(t, created, &project)
+	session := request(t, handler, http.MethodPost, "/v1/projects/"+project.Project.ID+"/sessions",
+		map[string]any{"title": "S"}, true)
+	var createdSession struct {
+		ID string `json:"id"`
+	}
+	decodeData(t, session, &createdSession)
+
+	body := map[string]any{"text": "use it", "target": map[string]any{"kind": "host"},
+		"skills": []map[string]any{{"id": "cell-qc"}}}
+	response := request(t, handler, http.MethodPost, "/v1/sessions/"+createdSession.ID+"/invocations", body, true)
+	assert.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), string(domain.ErrorProviderConfigurationInvalid))
 }

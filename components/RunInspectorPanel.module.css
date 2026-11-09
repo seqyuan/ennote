@@ -256,3 +256,20 @@
 }
 .loadOlder:hover:not(:disabled) { color: var(--content-1); background: var(--surface-hover); }
 .loadOlder:disabled { opacity: 0.55; cursor: default; }
+
+/* Skills the person attached to the turn, derived from the frozen composition. */
+.selectedSkills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 8px;
+  font-size: var(--text-sm);
+}
+.selectedSkills code {
+  padding: 1px 6px;
+  border: 1px solid var(--cmp-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}

@@ -19,6 +19,8 @@ function composition(overrides: Partial<RunPromptComposition> = {}): RunPromptCo
     sections: [
       { id: "base", kind: "base", source: "agent_profile", bytes: 512, digest: "aaaa1111bbbb2222" },
       { id: "hero.definition", kind: "hero", source: "hero:analyst@3", bytes: 2048, digest: "cccc3333dddd4444" },
+      { id: "skill.preload.cell-qc", kind: "skill_preload", source: "user-skill-select", bytes: 900,
+        digest: "ffff9999aaaa1111", skillId: "cell-qc" },
       { id: "skill.preload.report", kind: "skill_preload", source: "hero:analyst@3", bytes: 1024, digest: "eeee5555ffff6666", skillId: "report" },
     ],
     sectionsDigest: "sections-digest",
@@ -187,6 +189,10 @@ describe("RunInspectorBody", () => {
     expect(html).toContain("data-prompt-section=\"skill_preload\"");
     expect(html).toContain("hero:analyst@3");
     expect(html).toContain("hero.definition");
+    // A Skill the user attached is stated explicitly, derived from the frozen
+    // composition rather than from a second source of truth.
+    expect(html).toContain("inspector.selectedSkills");
+    expect(html).toContain("/cell-qc");
     expect(html).toContain("2.0 KiB");
     // The full digest stays available even though the row shows a prefix.
     expect(html).toContain("aaaa1111bbbb2222");
