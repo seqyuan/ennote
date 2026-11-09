@@ -18,6 +18,7 @@ import (
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
+	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
 	"github.com/stretchr/testify/require"
 )
 
@@ -394,6 +395,17 @@ func TestContractSamples(t *testing.T) {
 	// The Authoring surface (Heroes, Graphs) reads the file-native source store, so
 	// the fixture needs one before those routes can answer at all.
 	server.GlobalSources = &globalsource.Store{HomeDir: t.TempDir()}
+	// One Skill with a Hero binding and one without: the sample pins both the
+	// boolean and the array (a nil slice would encode as null and tsc would not
+	// catch it — the contract says array).
+	skillRoot := t.TempDir()
+	for _, id := range []string{"contract-skill", "hero-bound-skill"} {
+		dir := filepath.Join(skillRoot, id)
+		require.NoError(t, os.MkdirAll(dir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"),
+			[]byte("---\nname: "+id+"\ndescription: fixture.\n---\n\nbody\n"), 0o644))
+	}
+	server.Skills = &skillsmgmt.Service{UserRoot: skillRoot, HomeDir: t.TempDir()}
 
 	samples := &contractSamples{
 		t:          t,
@@ -509,6 +521,29 @@ func TestContractSamples(t *testing.T) {
 	samples.record(contractSampleRequest{
 		method: http.MethodGet, route: "/v1/sessions/{sessionID}/compactions", auth: true,
 		values: sessionRoute, status: http.StatusOK,
+	})
+
+	// The two operations this branch's capability rides on had no sample, which is
+	// why a renamed field (`perHero`) and a null array (`boundBy`) slipped through.
+	// The invocation gets its own session: the turn above left a queued Run behind,
+	// and a second submission on a busy session answers 409.
+	invocationSession := request(t, handler, http.MethodPost,
+		"/v1/projects/"+project.Project.ID+"/sessions",
+		map[string]any{"title": "contract invocation"}, true)
+	require.Equal(t, http.StatusCreated, invocationSession.Code, invocationSession.Body.String())
+	var invocationSessionBody struct {
+		ID string `json:"id"`
+	}
+	decodeData(t, invocationSession, &invocationSessionBody)
+	samples.record(contractSampleRequest{
+		method: http.MethodPost, route: "/v1/sessions/{sessionID}/invocations", auth: true,
+		values: map[string]string{"sessionID": invocationSessionBody.ID},
+		body:   map[string]any{"text": "hello hero", "target": map[string]any{"kind": "host"}},
+		header: map[string]string{"Idempotency-Key": "contract-sample-invocation"},
+		status: http.StatusAccepted,
+	})
+	samples.record(contractSampleRequest{
+		method: http.MethodGet, route: "/v1/skills", auth: true, status: http.StatusOK,
 	})
 
 	runRoute := map[string]string{"runID": submission.Run.ID}

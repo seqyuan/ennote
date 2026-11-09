@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -145,4 +146,71 @@ func requestWithIdempotencyKey(t *testing.T, handler http.Handler, path string, 
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, req)
 	return recorder
+}
+
+// Each selected Skill injects a whole body into the prompt, so the cap is a real
+// limit rather than a suggestion.
+func TestSubmitInvocationRefusesMoreSkillsThanTheCap(t *testing.T) {
+	server, handler := setupServer(t, &fakeController{})
+	ids := make([]string, 0, maxSelectedSkills+1)
+	catalog := map[string]string{}
+	for index := 0; index <= maxSelectedSkills; index++ {
+		id := fmt.Sprintf("skill-%02d", index)
+		ids = append(ids, id)
+		catalog[id] = "digest-" + id
+	}
+	server.SkillCatalog = func() map[string]string { return catalog }
+	workspace := hostWorkspace(t, server, "skills-cap")
+	created := request(t, handler, http.MethodPost, "/v1/projects",
+		map[string]any{"name": "P", "hostPath": workspace}, true)
+	var project struct {
+		Project domain.Project `json:"project"`
+	}
+	decodeData(t, created, &project)
+	session := request(t, handler, http.MethodPost, "/v1/projects/"+project.Project.ID+"/sessions",
+		map[string]any{"title": "S"}, true)
+	var createdSession struct {
+		ID string `json:"id"`
+	}
+	decodeData(t, session, &createdSession)
+
+	selection := make([]map[string]any, 0, len(ids))
+	for _, id := range ids {
+		selection = append(selection, map[string]any{"id": id})
+	}
+	body := map[string]any{"text": "too many", "target": map[string]any{"kind": "host"}, "skills": selection}
+	response := request(t, handler, http.MethodPost, "/v1/sessions/"+createdSession.ID+"/invocations", body, true)
+	require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), string(domain.ErrorTooManySkills))
+}
+
+// A Skill the model may not invoke on its own is exactly what a person picking it
+// in the composer is for, so the validator must accept it.
+func TestSubmitInvocationAcceptsAModelHiddenSkill(t *testing.T) {
+	server, handler := setupServer(t, &fakeController{})
+	root := t.TempDir()
+	dir := filepath.Join(root, "manual-only")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"),
+		[]byte("---\nname: manual-only\ndescription: fixture.\ndisable-model-invocation: true\n---\n\nbody\n"), 0o644))
+	server.Skills = &skillsmgmt.Service{UserRoot: root, HomeDir: t.TempDir()}
+	server.SkillCatalog = func() map[string]string { return map[string]string{"manual-only": "digest-manual"} }
+	workspace := hostWorkspace(t, server, "manual-skill")
+	created := request(t, handler, http.MethodPost, "/v1/projects",
+		map[string]any{"name": "P", "hostPath": workspace}, true)
+	var project struct {
+		Project domain.Project `json:"project"`
+	}
+	decodeData(t, created, &project)
+	session := request(t, handler, http.MethodPost, "/v1/projects/"+project.Project.ID+"/sessions",
+		map[string]any{"title": "S"}, true)
+	var createdSession struct {
+		ID string `json:"id"`
+	}
+	decodeData(t, session, &createdSession)
+
+	body := map[string]any{"text": "use it", "target": map[string]any{"kind": "host"},
+		"skills": []map[string]any{{"id": "manual-only"}}}
+	response := request(t, handler, http.MethodPost, "/v1/sessions/"+createdSession.ID+"/invocations", body, true)
+	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 }

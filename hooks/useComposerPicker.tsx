@@ -95,7 +95,9 @@ export function useComposerPicker({
           hint: data.pendingSkills.includes(skill.id) ? t("picker.selected") : undefined,
           description: skill.description,
           icon: <Sparkles size={14} aria-hidden="true" />,
-          disabled: data.oneShotLocked === true,
+          // A graph run replaces the turn and never carries Skills, so a Skill
+          // picked beside one would be a pill the run ignores.
+          disabled: data.oneShotLocked === true || data.pendingGraph !== null,
         })),
       },
       {

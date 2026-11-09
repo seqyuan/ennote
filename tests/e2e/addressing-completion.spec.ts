@@ -58,11 +58,11 @@ async function mockBackend(page: Page, onInvocation?: (body: Record<string, unkn
       return fulfill(route, {
         skills: [
           { skillId: "cell-qc", name: "cell-qc", description: "QC tables",
-            heroBound: false, boundBy: [], sourceInfo: { scope: "global" } },
+            heroBound: false, boundBy: [], sourceInfo: { source: "user", scope: "user" } },
           { skillId: "review-guard", name: "review-guard", description: "Bound to the reviewer hero",
-            heroBound: true, boundBy: ["security-reviewer"], sourceInfo: { scope: "global" } },
+            heroBound: true, boundBy: ["security-reviewer"], sourceInfo: { source: "builtin", scope: "builtin" } },
           { skillId: "project-only", name: "project-only", description: "Project scope",
-            heroBound: false, boundBy: [], sourceInfo: { scope: "project" } },
+            heroBound: false, boundBy: [], sourceInfo: { source: "project", scope: "project" } },
         ],
         diagnostics: [],
       });

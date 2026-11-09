@@ -60,8 +60,8 @@ function renameKeys(value, seen = 0) {
   return out;
 }
 
-/** A message's `role` column and its JSON `role` field are the chat speaker. */
-function renameBlob(json, isMessage) {
+/** Rewrite one JSON blob into the hero vocabulary. */
+function renameBlob(json) {
   let parsed;
   try {
     parsed = JSON.parse(json);
@@ -70,7 +70,10 @@ function renameBlob(json, isMessage) {
   }
   const next = renameKeys(parsed);
   if (next?.speakerKind === "role") next.speakerKind = "hero";
-  if (next?.kind === "role" && !isMessage) next.kind = "hero";
+  // `kind: "role"` is the executor attribution in a speaker snapshot, a Run
+  // target and a delegation meta blob alike. The message's own role lives in a
+  // column, not here, so this flip is unconditional.
+  if (next?.kind === "role") next.kind = "hero";
   return JSON.stringify(next);
 }
 
@@ -130,29 +133,52 @@ for (const path of databaseFiles) {
     continue;
   }
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row) => row.name);
+  // `isMessage` only protects the message's own `role` column value; a speaker
+  // snapshot's `kind` is the executor attribution and must move with the rest.
   const rewrites = [
     ["agent_runs", "requested_config_json", false],
     ["agent_runs", "effective_config_json", false],
     ["messages", "speaker_snapshot_json", true],
+    ["delegation_items", "role_meta_json", false],
+    ["delegation_items", "hero_meta_json", false],
+    ["run_agent_flow_nodes", "role_definition_json", false],
+    ["run_agent_flow_nodes", "hero_definition_json", false],
   ];
-  for (const [table, column, isMessage] of rewrites) {
+  for (const [table, column] of rewrites) {
     if (!tables.includes(table)) continue;
     const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name);
     if (!columns.includes(column)) continue;
     const rows = db.prepare(`SELECT rowid AS id, ${column} AS blob FROM ${table} WHERE ${column} IS NOT NULL`).all();
     for (const row of rows) {
-      const next = renameBlob(row.blob, isMessage);
+      const next = renameBlob(row.blob);
       if (next === null || next === row.blob) continue;
       if (apply) db.prepare(`UPDATE ${table} SET ${column} = ? WHERE rowid = ?`).run(next, row.id);
       log("rewrite", `${name}:${table}.${column}`, `rowid=${row.id}`);
     }
   }
-  const speakerKind = tables.includes("messages")
-    ? db.prepare("SELECT COUNT(*) AS n FROM messages WHERE speaker_kind = 'role'").get().n
-    : 0;
-  if (speakerKind > 0) {
-    log("rewrite", `${name}:messages.speaker_kind`, `${speakerKind} row(s) 'role' -> 'hero'`);
-    if (apply) db.prepare("UPDATE messages SET speaker_kind = 'hero' WHERE speaker_kind = 'role'").run();
+  if (tables.includes("messages")) {
+    const speakerKind = db.prepare("SELECT COUNT(*) AS n FROM messages WHERE speaker_kind = 'role'").get().n;
+    const addresseeKind = db.prepare("SELECT COUNT(*) AS n FROM messages WHERE addressee_kind = 'role'").get().n;
+    if (speakerKind + addresseeKind > 0) {
+      log("rewrite", `${name}:messages attribution`, `speaker_kind ${speakerKind}, addressee_kind ${addresseeKind} 'role' -> 'hero'`);
+      if (apply) {
+        // The released schema's UPDATE trigger enumerates the old value and aborts
+        // this statement. Drop it, backfill, and recreate it with `hero` — the same
+        // dance migration 0011 performs, kept here for installs that run the script
+        // before the Worker ever opens the database.
+        db.exec("DROP TRIGGER IF EXISTS messages_attribution_validate_update");
+        db.exec("UPDATE messages SET speaker_kind = 'hero' WHERE speaker_kind = 'role'");
+        db.exec("UPDATE messages SET addressee_kind = 'hero' WHERE addressee_kind = 'role'");
+        db.exec(`CREATE TRIGGER messages_attribution_validate_update
+BEFORE UPDATE OF speaker_kind, visibility, addressee_kind ON messages
+WHEN NEW.speaker_kind NOT IN ('user', 'host', 'hero', 'workflow', 'room', 'system')
+  OR NEW.visibility NOT IN ('public', 'private', 'room_control', 'legacy_execution')
+  OR (NEW.addressee_kind IS NOT NULL AND NEW.addressee_kind NOT IN ('host', 'room', 'hero', 'graph', 'workflow'))
+BEGIN
+    SELECT RAISE(ABORT, 'message_attribution_invalid');
+END;`);
+      }
+    }
   }
   db.close();
 }

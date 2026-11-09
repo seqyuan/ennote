@@ -132,3 +132,43 @@ func TestReleasedMigrationChecksumsAreFrozen(t *testing.T) {
 				"Add a new migration instead of editing this one", migration.Version)
 	}
 }
+
+// Migration 0011 moves the schema and the attribution values together. A row
+// written by the released build carries `speaker_kind='role'`, and the released
+// UPDATE trigger rejects `'hero'`; the migration has to drop that trigger before
+// the backfill and put the new one back afterwards.
+func TestMigrationElevenBackfillsAttributionValues(t *testing.T) {
+	db := openTestDB(t)
+	migrations, err := Sorted()
+	require.NoError(t, err)
+	// Build the released schema and record it the way the applier does, so Apply
+	// runs only the migrations this test is about.
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS migration_history (
+		prefix TEXT NOT NULL, version INTEGER NOT NULL, checksum TEXT NOT NULL,
+		applied_at TEXT NOT NULL, PRIMARY KEY (prefix, version))`)
+	require.NoError(t, err)
+	for _, migration := range migrations {
+		if migration.Version >= 11 {
+			continue
+		}
+		_, err := db.Exec(migration.SQL)
+		require.NoError(t, err, "apply migration %d", migration.Version)
+		_, err = db.Exec(`INSERT INTO migration_history (prefix, version, checksum, applied_at) VALUES ('session', ?, ?, '2026-11-09T00:00:00Z')`,
+			migration.Version, migration.Checksum)
+		require.NoError(t, err, "record migration %d", migration.Version)
+	}
+	// The released schema still accepts its own vocabulary.
+	_, err = db.Exec(`INSERT INTO messages (id,session_id,role,status,speaker_kind,addressee_kind,created_at)
+		VALUES ('m1','s1','assistant','complete','role','role','2026-11-09T00:00:00Z')`)
+	require.NoError(t, err, "the pre-migration schema must accept a role attribution")
+
+	require.NoError(t, Apply(db))
+
+	var speaker, addressee string
+	require.NoError(t, db.QueryRow(`SELECT speaker_kind, addressee_kind FROM messages WHERE id='m1'`).Scan(&speaker, &addressee))
+	assert.Equal(t, "hero", speaker)
+	assert.Equal(t, "hero", addressee)
+	// The recreated trigger still guards the column.
+	_, err = db.Exec(`UPDATE messages SET speaker_kind='role' WHERE id='m1'`)
+	require.Error(t, err, "the rebuilt attribution trigger must reject the retired value")
+}

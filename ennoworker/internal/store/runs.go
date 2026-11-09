@@ -184,7 +184,7 @@ func (r *RunRepo) submitTurn(ctx context.Context, input domain.SubmitTurnInput, 
 			"displayName": name, "icon": icon, "color": color, "positioning": positioning, "configDigest": configDigest,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("encode Role speaker snapshot: %w", err)
+			return nil, fmt.Errorf("encode Hero speaker snapshot: %w", err)
 		}
 		if len(target.ReplyTo) != 0 {
 			replyTo, err = json.Marshal(target.ReplyTo)

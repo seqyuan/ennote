@@ -58,6 +58,14 @@ func (s *Server) skillsTrusted(w http.ResponseWriter, r *http.Request, projectID
 // listSkills returns the merged catalog with install annotations and, for a
 // selected project, the project-scope skills plus its trust status.
 func (s *Server) listSkills(w http.ResponseWriter, r *http.Request) {
+	if s.Skills == nil {
+		// A Worker without a skills service (fixtures) still answers: the shape is
+		// what clients parse, and an empty catalogue is the truthful answer.
+		writeData(w, http.StatusOK, skillsmgmt.ListResult{
+			Skills: []skillsmgmt.AnnotatedSkill{}, Diagnostics: []skillsmgmt.Diagnostic{},
+		})
+		return
+	}
 	projectID := strings.TrimSpace(r.URL.Query().Get("projectID"))
 	workspaceDir := s.skillsWorkspaceDir(w, r, projectID)
 	if workspaceDir == "" && projectID != "" {
@@ -73,7 +81,12 @@ func (s *Server) listSkills(w http.ResponseWriter, r *http.Request) {
 	}
 	bindings := s.skillHeroBindings()
 	for index := range result.Skills {
-		handles := bindings[result.Skills[index].SkillID]
+		handles, ok := bindings[result.Skills[index].SkillID]
+		if !ok || handles == nil {
+			// The contract says "array", not "array or null": a client that maps
+			// over it should not have to guard the common case.
+			handles = []string{}
+		}
 		result.Skills[index].BoundBy = handles
 		result.Skills[index].HeroBound = len(handles) > 0
 	}

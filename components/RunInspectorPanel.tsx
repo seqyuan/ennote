@@ -199,7 +199,7 @@ function TranscriptRow({ message, t }: { message: RunMessagePage["messages"][num
   return <details data-transcript-ordinal={message.ordinal} className={styles.transcriptRow}>
     <summary className={styles.transcriptSummary}>
       <span className={`${styles.muted} ${styles.transcriptOrdinal}`}>{message.ordinal}</span>
-      <span className={styles.transcriptHero}>
+      <span className={styles.transcriptRole}>
         {ROLE_LABEL[message.role] ?? message.role}
       </span>
       {message.visibility === "private" && <span data-transcript-private className={styles.privateBadge}>

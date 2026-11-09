@@ -1,0 +1,38 @@
+{
+  "data": {
+    "diagnostics": [],
+    "projectResourcesLoaded": false,
+    "skills": [
+      {
+        "baseDir": "<temp-path>",
+        "boundBy": [],
+        "description": "fixture.",
+        "disableModelInvocation": false,
+        "filePath": "<temp-path>",
+        "heroBound": false,
+        "name": "contract-skill",
+        "relPath": "contract-skill",
+        "skillId": "contract-skill",
+        "sourceInfo": {
+          "scope": "user",
+          "source": "user"
+        }
+      },
+      {
+        "baseDir": "<temp-path>",
+        "boundBy": [],
+        "description": "fixture.",
+        "disableModelInvocation": false,
+        "filePath": "<temp-path>",
+        "heroBound": false,
+        "name": "hero-bound-skill",
+        "relPath": "hero-bound-skill",
+        "skillId": "hero-bound-skill",
+        "sourceInfo": {
+          "scope": "user",
+          "source": "user"
+        }
+      }
+    ]
+  }
+}

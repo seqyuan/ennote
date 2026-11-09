@@ -252,7 +252,7 @@ func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.Ag
 				frozenSpeaker.VersionID != meta.VersionID || frozenSpeaker.ConfigDigest != meta.ConfigDigest ||
 				frozenSpeaker.Handle != meta.Handle || frozenSpeaker.Handle == "" {
 				return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
-					errors.New("child speaker snapshot does not match the frozen Role meta"))
+					errors.New("child speaker snapshot does not match the frozen Hero meta"))
 			}
 			allowedContext := false
 			for _, allowed := range heroDefinition.ContextPolicy.AllowedModes {
@@ -310,7 +310,7 @@ func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.Ag
 			if err := json.Unmarshal(run.SpeakerSnapshot, &speaker); err != nil || speaker.ObjectID != heroID ||
 				speaker.VersionID != versionID || speaker.ConfigDigest != resolvedHero.Revision.Digest || speaker.Handle != resolvedHero.Document.Handle {
 				return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
-					errors.New("Role speaker snapshot does not match the immutable revision"))
+					errors.New("Hero speaker snapshot does not match the immutable revision"))
 			}
 			if requestedConfig.ModelProfileID != "" || len(requestedConfig.CandidateModelProfileIDs) != 0 ||
 				requestedConfig.AllowAutoRoute || requestedConfig.ThinkingEffort != "" || requestedConfig.MaxIterations != 0 ||

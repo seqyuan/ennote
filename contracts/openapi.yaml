@@ -5757,7 +5757,7 @@ components:
           items: { $ref: "#/components/schemas/PackFlow" }
         heroes:
           type: array
-          items: { $ref: "#/components/schemas/PackRole" }
+          items: { $ref: "#/components/schemas/PackHero" }
         skills:
           type: array
           items: { $ref: "#/components/schemas/PackSkill" }
@@ -5832,7 +5832,7 @@ components:
         maxTotalTokens: { type: integer }
         pathDigest: { type: string }
         sourceDigest: { type: string }
-    PackRole:
+    PackHero:
       type: object
       additionalProperties: false
       required: [handle, path, scope, name, authority, allowedTools, skills, pathDigest, sourceDigest]
@@ -5911,13 +5911,13 @@ components:
     PackModelRequirements:
       type: object
       additionalProperties: false
-      required: [capabilities, minContextWindow, perRole]
+      required: [capabilities, minContextWindow, perHero]
       properties:
         capabilities:
           type: array
           items: { type: string }
         minContextWindow: { type: integer }
-        perRole:
+        perHero:
           type: object
           additionalProperties:
             type: array

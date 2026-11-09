@@ -313,6 +313,7 @@ export const listGraphs200: WorkerOperationResponse<"listGraphs", 200> = {
 export const listProjectActiveRuns200: WorkerOperationResponse<"listProjectActiveRuns", 200> = {
   "data": {
     "sessionIds": [
+      "00000000-0000-0000-0000-000000000011",
       "00000000-0000-0000-0000-000000000005"
     ]
   }
@@ -367,6 +368,76 @@ export const listSessionMessages200: WorkerOperationResponse<"listSessionMessage
 /** listSessions answering 200. */
 export const listSessions200: WorkerOperationResponse<"listSessions", 200> = {
   "data": []
+};
+
+/** listSkills answering 200. */
+export const listSkills200: WorkerOperationResponse<"listSkills", 200> = {
+  "data": {
+    "diagnostics": [],
+    "projectResourcesLoaded": false,
+    "skills": [
+      {
+        "baseDir": "<temp-path>",
+        "boundBy": [],
+        "description": "fixture.",
+        "disableModelInvocation": false,
+        "filePath": "<temp-path>",
+        "heroBound": false,
+        "name": "contract-skill",
+        "relPath": "contract-skill",
+        "skillId": "contract-skill",
+        "sourceInfo": {
+          "scope": "user",
+          "source": "user"
+        }
+      },
+      {
+        "baseDir": "<temp-path>",
+        "boundBy": [],
+        "description": "fixture.",
+        "disableModelInvocation": false,
+        "filePath": "<temp-path>",
+        "heroBound": false,
+        "name": "hero-bound-skill",
+        "relPath": "hero-bound-skill",
+        "skillId": "hero-bound-skill",
+        "sourceInfo": {
+          "scope": "user",
+          "source": "user"
+        }
+      }
+    ]
+  }
+};
+
+/** submitInvocation answering 202. */
+export const submitInvocation202: WorkerOperationResponse<"submitInvocation", 202> = {
+  "data": {
+    "existing": false,
+    "run": {
+      "attempt": 1,
+      "baseMessageId": "00000000-0000-0000-0000-000000000009",
+      "commitFormatVersion": 1,
+      "contextSnapshot": {},
+      "createdAt": "2026-01-01T00:00:04Z",
+      "effectiveConfig": {},
+      "executionDepth": 0,
+      "id": "00000000-0000-0000-0000-000000000010",
+      "publishMode": "public_final",
+      "requestedConfig": {},
+      "rootRunId": "00000000-0000-0000-0000-000000000010",
+      "runKind": "agent",
+      "sessionId": "00000000-0000-0000-0000-000000000011",
+      "speakerSnapshot": {
+        "displayName": "Host",
+        "kind": "host"
+      },
+      "status": "queued",
+      "turnId": "00000000-0000-0000-0000-000000000012"
+    },
+    "turnId": "00000000-0000-0000-0000-000000000012",
+    "userMessageId": "00000000-0000-0000-0000-000000000009"
+  }
 };
 
 /** submitTurn answering 202. */

@@ -3994,7 +3994,7 @@ export interface components {
             /** @description Always false in S1; inspect never verifies signatures */
             signed: boolean;
             flows: components["schemas"]["PackFlow"][];
-            heroes: components["schemas"]["PackRole"][];
+            heroes: components["schemas"]["PackHero"][];
             skills: components["schemas"]["PackSkill"][];
             /** @description External MCP profile references; S1 never resolves or executes them */
             mcp: components["schemas"]["PackMCP"][];
@@ -4045,7 +4045,7 @@ export interface components {
             pathDigest: string;
             sourceDigest: string;
         };
-        PackRole: {
+        PackHero: {
             handle: string;
             path: string;
             /** @enum {string} */
@@ -4094,7 +4094,7 @@ export interface components {
         PackModelRequirements: {
             capabilities: string[];
             minContextWindow: number;
-            perRole: {
+            perHero: {
                 [key: string]: string[];
             };
         };

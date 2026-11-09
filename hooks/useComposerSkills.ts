@@ -43,10 +43,12 @@ export function useComposerSkills(projectId: string | null): {
       const result = await apiFetch<{ skills?: SkillRow[] }>(`/v1/skills${query}`);
       if (!isCurrent()) return;
       setSkills((result?.skills ?? [])
-        // Only global rows: the turn validator resolves ids against the global
+        // Only catalogue rows: the turn validator resolves ids against the global
         // digest catalogue, so offering a project-scope Skill would promise a
-        // selection the submit answers with 400.
-        .filter((row) => Boolean(row.skillId) && (row.sourceInfo?.scope ?? "global") === "global")
+        // selection the submit answers with 400. `scope` names the source root
+        // ("user", "builtin", "project"), not a global/local flag — project is the
+        // only value that must be dropped.
+        .filter((row) => Boolean(row.skillId) && row.sourceInfo?.scope !== "project")
         .map((row) => ({
           id: row.skillId ?? "",
           label: row.name || row.skillId || "",
