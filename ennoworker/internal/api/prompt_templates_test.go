@@ -10,7 +10,7 @@ import (
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/prompts"
-	"github.com/seqyuan/ennote/ennoworker/internal/store"
+	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore/sessionstoretest"
 	"github.com/seqyuan/ennote/ennoworker/internal/workspace"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,10 +29,7 @@ func setupPromptServer(t *testing.T) (*Server, http.Handler, string) {
 	builtins, err := prompts.LoadBuiltins()
 	require.NoError(t, err)
 
-	db, err := store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.MigrateFixtureSchema(db))
+	db := sessionstoretest.OpenFixture(t)
 
 	trustStore, err := workspace.NewTrustStore(home)
 	require.NoError(t, err)

@@ -96,6 +96,9 @@ func (m *Manager) Create(ctx context.Context, input domain.CreateSessionInput) (
 		return nil, fmt.Errorf("write session manifest: %w", err)
 	}
 	databasePath := filepath.Join(temporary, "session.db")
+	if err := seedFromTemplate(databasePath); err != nil {
+		return nil, err
+	}
 	db, err := openDatabase(databasePath)
 	if err != nil {
 		return nil, err
@@ -220,7 +223,11 @@ func (m *Manager) OpenSession(ctx context.Context, sessionID string) (*sql.DB, e
 	if manifest.SessionID != sessionID || manifest.ProjectID != projectID {
 		return nil, fmt.Errorf("session manifest identity does not match directory")
 	}
-	db, err := openDatabase(filepath.Join(path, "session.db"))
+	databasePath := filepath.Join(path, "session.db")
+	if err := seedFromTemplate(databasePath); err != nil {
+		return nil, err
+	}
+	db, err := openDatabase(databasePath)
 	if err != nil {
 		return nil, err
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/mcpclient"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
+	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore/sessionstoretest"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -399,10 +400,7 @@ func TestMCPProjectFileDiscovery(t *testing.T) {
 }
 
 func TestMCPProjectFileMissing(t *testing.T) {
-	db, err := store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.MigrateFixtureSchema(db))
+	db := sessionstoretest.OpenFixture(t)
 	projectRepo := newFileProjects(t)
 	// The catalog cache is file-backed and has one form. Give the fixture what
 	// production uses, so the optional path exercises a real cache miss instead of
@@ -428,10 +426,7 @@ func TestMCPProjectFileMissing(t *testing.T) {
 }
 
 func TestMCPBundledCatalogAndCandidates(t *testing.T) {
-	db, err := store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.MigrateFixtureSchema(db))
+	db := sessionstoretest.OpenFixture(t)
 	projectRepo := newFileProjects(t)
 
 	// P1 ships an empty bundled registry; the API plumbing still runs.
@@ -475,10 +470,7 @@ func newAPIFileMCP(t *testing.T) (profiles *store.MCPProfileRepo, bindings *stor
 	project, _, err := projects.CreateWithWorkspace(t.Context(),
 		domain.CreateProjectInput{Name: "P", HostPath: t.TempDir()})
 	require.NoError(t, err)
-	db, err = store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.MigrateSession(db))
+	db = sessionstoretest.OpenFixture(t)
 	return &store.MCPProfileRepo{FilePath: filepath.Join(home, "config", "mcp.json")},
 		&store.MCPBindingRepo{Projects: projects},
 		&store.MCPCatalogRepo{CacheDir: filepath.Join(home, "cache", "mcp")},

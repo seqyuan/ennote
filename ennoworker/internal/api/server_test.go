@@ -29,6 +29,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/providerdoctor"
 	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
+	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore/sessionstoretest"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -88,10 +89,7 @@ func setupServer(t *testing.T, control RunController) (*Server, http.Handler) {
 	require.NoError(t, err)
 	// Legacy repos that still consult global tables (SQL HeroRepo until B3d,
 	// MCP profiles) get their own fixture database.
-	fixDB, err := store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = fixDB.Close() })
-	require.NoError(t, store.MigrateFixtureSchema(fixDB))
+	fixDB := sessionstoretest.OpenFixture(t)
 	// V2: provider/model/policy repos resolve from file stores.
 	modelFiles := fileconfig.NewModelStore(
 		filepath.Join(home, "config", "models.json"),

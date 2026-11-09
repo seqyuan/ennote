@@ -10,6 +10,7 @@ import (
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
+	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore/sessionstoretest"
 	"github.com/seqyuan/ennote/ennoworker/internal/skills"
 	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
@@ -20,10 +21,7 @@ import (
 
 func setupSkillsServer(t *testing.T) (*Server, http.Handler, string) {
 	t.Helper()
-	db, err := store.OpenMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, store.MigrateFixtureSchema(db))
+	db := sessionstoretest.OpenFixture(t)
 
 	home := t.TempDir()
 	userRoot := filepath.Join(home, ".pi", "agent", "skills")
