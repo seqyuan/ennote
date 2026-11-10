@@ -72,7 +72,10 @@ export function RightPanel(props: {
         <FilesChannel
           projectId={projectId}
           displayPath={displayPath}
-          onOpenFile={onOpenFile}
+          onOpenFile={(path, name) => {
+            onOpenFile(path, name);
+            setNavigatorOpen(false);
+          }}
           onPreviewFile={onPreviewFile}
         />
       </div>

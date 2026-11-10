@@ -287,3 +287,42 @@ test("a pinned channel does not reopen a shell the reader collapsed", async ({ p
   await page.getByTitle("Show panel").click();
   await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
 });
+
+test("the tree scrolls inside its lane", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 600 });
+  // Enough rows that the list cannot fit: the point is that it scrolls at all.
+  await page.route("**/api/worker/v1/**", async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillHarnessRoutes(route)) return;
+    if (path === "/v1/projects") return fulfill(route, [project]);
+    if (path === "/v1/provider-profiles") return fulfill(route, [provider]);
+    if (path === "/v1/model-profiles") return fulfill(route, []);
+    if (path === "/v1/policy-profiles") return fulfill(route, policies);
+    if (path === `/v1/projects/${project.id}/workspace`) return fulfill(route, workspace);
+    if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/files`) {
+      return fulfill(route, Array.from({ length: 60 }, (_, index) => ({
+        name: `f${index}.txt`, path: `/workspace/f${index}.txt`, isDir: false, size: 1,
+        modifiedAt: "2026-10-01T00:00:00Z",
+      })));
+    }
+    return route.abort();
+  });
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+
+  const list = page.locator(".file-tree-list");
+  const metrics = await list.evaluate((el) => ({
+    client: el.clientHeight,
+    scroll: el.scrollHeight,
+    parent: (el.parentElement as HTMLElement | null)?.clientHeight ?? 0,
+  }));
+
+  // A list taller than its box must scroll inside it, not spill out of the panel.
+  expect(metrics.scroll).toBeGreaterThan(metrics.client);
+  await list.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  const lastVisible = await page.locator('.file-tree-main[title="/workspace/f59.txt"]').isVisible();
+  expect(lastVisible).toBe(true);
+});

@@ -210,6 +210,18 @@ button:disabled { cursor: default; }
 }
 .right-panel-body { flex: 1; min-height: 0; overflow: hidden; }
 
+/* One channel's body inside the lane. It fills the lane so the tree inside can
+   scroll against a real height, and it stays mounted while another channel is
+   on screen — the reader's place in the tree survives the switch. */
+.right-panel-channel-slot {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.right-panel-channel-slot[hidden] { display: none; }
+
 /* The channel strip: tabs take the room, the panel's own actions keep theirs. */
 .right-panel-strip {
   display: flex;
