@@ -1,19 +1,24 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import { PanelLeft } from "lucide-react";
 
 import { ResizeHandle } from "./ResizeHandle";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { INSPECTOR_MIN_WIDTH, LANE_DIVIDER_WIDTH, PRIMARY_MIN_WIDTH, laneMode } from "@/lib/right-panel-width";
 import styles from "./RightPanelLanes.module.css";
 
+/** The widest the navigator gets when it slides over the preview instead of beside it. */
+const OVERLAY_PRIMARY_WIDTH = 300;
+
 /**
  * The panel's layout: one lane at narrow widths, two once there is room.
  *
- * Both lanes stay mounted when both are drawn. That is the whole point of the
- * split — a file opening in the inspector lane must not unmount the tree, or the
- * user loses the directory they were browsing and the tree loses its scroll
- * position. The divider only changes widths; it never decides what renders.
+ * Every mode except the drawer draws the same three children in the same order —
+ * the channel lane, the divider, the inspector lane — and only their geometry
+ * changes. Moving the channel lane between containers by mode would remount the
+ * tree inside it, and the tree's expanded directories and scroll position are
+ * exactly what the lane split exists to protect.
  *
  * Which mode applies is `laneMode`'s decision, from the panel's own width and
  * the drawer breakpoint. The drawer fills the viewport and has no conversation
@@ -31,16 +36,19 @@ export function RightPanelLanes(props: {
   /** The single strip and body the narrow layout draws, strips already merged. */
   narrowStrip: ReactNode;
   narrowBody: ReactNode;
-  /** The left lane's width. */
+  /** The left lane's width while both lanes are drawn. */
   primaryWidth: number;
   onResizePrimary: (delta: number) => void;
+  /** Whether the medium layout has the channel lane sliding over the inspector. */
+  navigatorOpen: boolean;
+  onToggleNavigator: () => void;
 }) {
   const drawer = useMediaQuery("(max-width: 960px)");
   const mode = laneMode(props.width, drawer);
 
-  // Both lanes need their floors before they are worth drawing; below that the
-  // panel is the strip it always was.
-  if (mode !== "wide") {
+  // The drawer is a different composition, not a narrower split: one strip with
+  // the workspace channels and the open files side by side, as it always was.
+  if (mode === "narrow") {
     return (
       <div className={styles.narrow}>
         {props.narrowStrip}
@@ -49,37 +57,77 @@ export function RightPanelLanes(props: {
     );
   }
 
-  // With nothing open on the right there is no split to draw: the channel lane
-  // takes the whole panel, exactly as it did before the lanes existed.
   const hasInspector = props.inspectorBody !== null;
+  // Too narrow for two columns, wide enough that the tree is still worth having:
+  // the navigator slides over the preview instead of squeezing it.
+  const overlay = mode === "medium" && hasInspector;
+  const parked = overlay && !props.navigatorOpen;
+
+  const primaryStyle: CSSProperties = overlay
+    ? { width: `min(${OVERLAY_PRIMARY_WIDTH}px, 78%)` }
+    : hasInspector
+      ? { width: props.primaryWidth }
+      : { flex: "1 1 auto" };
+
+  const layout = overlay ? "medium" : hasInspector ? "wide" : "single";
 
   return (
-    <div className={styles.lanes} data-mode={mode} data-testid="right-panel-lanes">
+    <div className={styles.lanes} data-mode={layout} data-testid="right-panel-lanes">
+      {overlay && props.navigatorOpen && (
+        <div
+          key="backdrop"
+          className={styles.backdrop}
+          onPointerDown={props.onToggleNavigator}
+          aria-hidden="true"
+        />
+      )}
       <div
-        className={styles.primary}
-        style={hasInspector ? { width: props.primaryWidth } : { flex: "1 1 auto" }}
+        key="primary"
+        className={`${styles.primary}${overlay ? ` ${styles["primary-overlay"]}` : ""}`}
+        style={primaryStyle}
+        data-open={overlay ? props.navigatorOpen || undefined : undefined}
+        data-parked={parked || undefined}
+        data-testid="right-panel-primary"
+        inert={parked}
       >
         {props.channelStrip}
         <div className={styles.body}>{props.channelBody}</div>
       </div>
+      {hasInspector && mode === "wide" && (
+        <ResizeHandle
+          key="divider"
+          side="right"
+          ariaLabel="Resize the file navigator"
+          value={props.primaryWidth}
+          min={PRIMARY_MIN_WIDTH}
+          max={Math.max(
+            PRIMARY_MIN_WIDTH,
+            props.width - LANE_DIVIDER_WIDTH - INSPECTOR_MIN_WIDTH,
+          )}
+          onResize={props.onResizePrimary}
+        />
+      )}
       {hasInspector && (
-        <>
-          <ResizeHandle
-            side="right"
-            ariaLabel="Resize the file navigator"
-            value={props.primaryWidth}
-            min={PRIMARY_MIN_WIDTH}
-            max={Math.max(
-              PRIMARY_MIN_WIDTH,
-              props.width - LANE_DIVIDER_WIDTH - INSPECTOR_MIN_WIDTH,
-            )}
-            onResize={props.onResizePrimary}
-          />
-          <div className={styles.inspector}>
+        <div key="inspector" className={styles.inspector}>
+          <div className={styles.strip}>
             {props.inspectorStrip}
-            <div className={styles.body}>{props.inspectorBody}</div>
+            {overlay && (
+              // Last, not first: while the navigator covers this lane's left part
+              // the control that brings it back has to stay reachable.
+              <button
+                type="button"
+                className={styles["nav-toggle"]}
+                aria-label={props.navigatorOpen ? "Hide the file navigator" : "Show the file navigator"}
+                aria-expanded={props.navigatorOpen}
+                data-open={props.navigatorOpen || undefined}
+                onClick={props.onToggleNavigator}
+              >
+                <PanelLeft size={15} aria-hidden="true" />
+              </button>
+            )}
           </div>
-        </>
+          <div className={styles.body}>{props.inspectorBody}</div>
+        </div>
       )}
     </div>
   );

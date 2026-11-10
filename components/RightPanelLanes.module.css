@@ -1,13 +1,15 @@
 /*
  * The panel's lane geometry. Colours and radii come from app/tokens.css; this
- * file only decides widths and stacking.
+ * file only decides widths, stacking, and which lane is parked.
  */
 
 .lanes {
+  position: relative;
   display: flex;
   height: 100%;
   min-height: 0;
   min-width: 0;
+  overflow: hidden;
 }
 
 .narrow {
@@ -25,6 +27,26 @@
   overflow: hidden;
 }
 
+/* The medium layout's navigator: docked over the inspector, parked off its left
+   edge when closed. It is only ever translated — never unmounted — so the tree
+   inside keeps its expanded directories and its scroll position. */
+.primary-overlay {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: var(--layer-popover);
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  transform: none;
+  transition: transform 0.18s ease;
+}
+
+.primary-overlay[data-parked="true"] {
+  transform: translateX(-100%);
+  visibility: hidden;
+}
+
 .inspector {
   display: flex;
   flex-direction: column;
@@ -32,6 +54,43 @@
   min-width: 0;
   overflow: hidden;
 }
+
+.backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: var(--layer-sticky);
+  background: transparent;
+}
+
+.strip {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+/* The inspector's tabs take the strip's room; the navigator toggle keeps its own. */
+.strip > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.nav-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.nav-toggle:hover { color: var(--text); }
+.nav-toggle[data-open="true"] { color: var(--text); background: var(--bg-hover); }
 
 .body {
   flex: 1 1 auto;

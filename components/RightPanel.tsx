@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { FileViewer } from "./FileViewer";
 import { TabBar } from "./TabBar";
@@ -35,6 +36,13 @@ export function RightPanel(props: {
     selectedSession, sessionTitle, activeRun, inspectorRunId, status, permissionMode,
   } = props;
   const { state, fileTabs } = panel;
+  const [navigatorOpen, setNavigatorOpen] = useState(false);
+  const toggleNavigator = () => setNavigatorOpen((open) => !open);
+  // Picking a channel answers the question the overlay was open for, so it closes.
+  const selectChannel = (tabId: string) => {
+    panel.setActiveTabId(tabId);
+    setNavigatorOpen(false);
+  };
   const activeChannelId = state.activeChannelId ?? "files";
   const activeFileTab = fileTabs.find((tab) => tab.id === state.activeInspectorId);
 
@@ -76,7 +84,7 @@ export function RightPanel(props: {
     <TabBar
       tabs={CHANNEL_TABS.filter((tab) => state.openChannels.includes(tab.id as PanelChannel))}
       activeTabId={activeChannelId}
-      onSelectTab={panel.setActiveTabId}
+      onSelectTab={selectChannel}
       onCloseTab={panel.closeTab}
     />
   );
@@ -114,7 +122,7 @@ export function RightPanel(props: {
           <TabBar
             tabs={[...CHANNEL_TABS, ...fileTabs]}
             activeTabId={panel.activeTabId}
-            onSelectTab={panel.setActiveTabId}
+            onSelectTab={selectChannel}
             onCloseTab={panel.closeTab}
             onReorder={panel.reorderTabs}
           />
@@ -126,6 +134,8 @@ export function RightPanel(props: {
         )}
         primaryWidth={state.primaryWidth}
         onResizePrimary={(delta) => panel.resizePrimaryBy(delta, resize.width)}
+        navigatorOpen={navigatorOpen}
+        onToggleNavigator={toggleNavigator}
       />
     </div>
   );

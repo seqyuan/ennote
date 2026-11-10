@@ -51,13 +51,15 @@ test("opening a file keeps the tree mounted beside it", async ({ page }) => {
   await page.getByTitle("Show panel").click();
 
   const lanes = page.getByTestId("right-panel-lanes");
-  await expect(lanes).toHaveAttribute("data-mode", "wide");
+  // Nothing is open on the right yet, so the panel is one channel, not a split.
+  await expect(lanes).toHaveAttribute("data-mode", "single");
 
   await page.locator('.file-tree-main[title="/workspace/src"]').click();
   await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
 
   // The file is on the right...
   await expect(page.locator(".file-code")).toContainText("ready");
+  await expect(lanes).toHaveAttribute("data-mode", "wide");
   // ...and the tree it came from is still on the left, still expanded.
   await expect(page.locator('.file-tree-main[title="/workspace/src"]')).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
@@ -66,18 +68,49 @@ test("opening a file keeps the tree mounted beside it", async ({ page }) => {
   await page.getByRole("button", { name: "Close main.ts" }).click();
   await expect(page.locator(".file-code")).toHaveCount(0);
   await expect(page.locator('.file-tree-main[title="/workspace/src"]')).toHaveAttribute("aria-expanded", "true");
-  await expect(lanes).toHaveAttribute("data-mode", "wide");
+  await expect(lanes).toHaveAttribute("data-mode", "single");
+});
+
+test("a medium panel slides the navigator over the preview", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await mockLanes(page);
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+  await page.locator('.file-tree-main[title="/workspace/src"]').click();
+  await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
+
+  const lanes = page.getByTestId("right-panel-lanes");
+  await expect(lanes).toHaveAttribute("data-mode", "medium");
+  await expect(page.locator(".file-code")).toContainText("ready");
+
+  // Not drawn beside the preview at this width: the navigator is parked off the edge.
+  const navigator = page.getByTestId("right-panel-primary");
+  await expect(navigator).toHaveAttribute("data-parked", "true");
+
+  await page.getByRole("button", { name: "Show the file navigator" }).click();
+  await expect(navigator).not.toHaveAttribute("data-parked", "true");
+  await expect(navigator).toHaveAttribute("data-open", "true");
+
+  // The tree kept the directory it had expanded before the file opened.
+  await expect(navigator.locator('.file-tree-main[title="/workspace/src"]')).toHaveAttribute("aria-expanded", "true");
+
+  // Picking a channel answers what the navigator was opened for, so it parks again
+  // and the preview's lane is left as it was.
+  await navigator.getByRole("tab", { name: "Graphs" }).click();
+  await expect(navigator).toHaveAttribute("data-parked", "true");
+  await expect(page.locator(".file-code")).toContainText("ready");
 });
 
 test("a narrow panel keeps the single tab strip", async ({ page }) => {
-  await page.setViewportSize({ width: 1024, height: 900 });
+  await page.setViewportSize({ width: 900, height: 900 });
   await mockLanes(page);
   await page.goto("/");
   await selectProject(page, project.name);
   await page.getByTitle("Show panel").click();
 
-  // 1024 leaves the panel a 299px ceiling: below the two-lane threshold.
-  const strip = page.getByRole("tab", { name: "Graphs" });
-  await expect(strip).toBeVisible();
+  // Below 960 the panel is a drawer, so it is the single strip whatever its width.
+  await expect(page.getByRole("tab", { name: "Graphs" })).toBeVisible();
   await expect(page.getByTestId("right-panel-lanes")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Back to conversation" })).toBeVisible();
 });
