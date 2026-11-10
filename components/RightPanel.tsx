@@ -2,22 +2,22 @@
 
 import { ArrowLeft } from "lucide-react";
 import { FileViewer } from "./FileViewer";
-import { TabBar, type Tab } from "./TabBar";
+import { TabBar } from "./TabBar";
+import { RightPanelLanes } from "./RightPanelLanes";
+import { CHANNEL_TABS } from "./right-panel/channel-tabs";
 import { FilesChannel } from "./right-panel/FilesChannel";
 import { GraphsChannel } from "./right-panel/GraphsChannel";
 import { StatusChannel } from "./right-panel/StatusChannel";
+import type { useRightPanel } from "@/hooks/useRightPanel";
 import type { useResizable } from "@/hooks/useResizable";
+import type { PanelChannel } from "@/lib/right-panel-channels";
 import type { PermissionMode } from "@/lib/permission-mode";
 
 export function RightPanel(props: {
   open: boolean;
   onClose: () => void;
   resize: ReturnType<typeof useResizable>;
-  tabs: Tab[];
-  activeTabId: string;
-  onSelectTab: (id: string) => void;
-  onCloseTab: (id: string) => void;
-  onReorderTab?: (fromId: string, toId: string) => void;
+  panel: ReturnType<typeof useRightPanel>;
   projectId: string | null;
   displayPath: string | null;
   onOpenFile: (path: string, name: string) => void;
@@ -31,11 +31,65 @@ export function RightPanel(props: {
   permissionMode: PermissionMode;
 }) {
   const {
-    open, onClose, resize, tabs, activeTabId, onSelectTab, onCloseTab, onReorderTab,
-    projectId, displayPath, onOpenFile, onPreviewFile,
+    open, onClose, resize, panel, projectId, displayPath, onOpenFile, onPreviewFile,
     selectedSession, sessionTitle, activeRun, inspectorRunId, status, permissionMode,
   } = props;
-  const activeFileTab = tabs.find((t) => t.id === activeTabId);
+  const { state, fileTabs } = panel;
+  const activeChannelId = state.activeChannelId ?? "files";
+  const activeFileTab = fileTabs.find((tab) => tab.id === state.activeInspectorId);
+
+  const channelBody = (
+    <>
+      {activeChannelId === "files" && (
+        <FilesChannel
+          projectId={projectId}
+          displayPath={displayPath}
+          onOpenFile={onOpenFile}
+          onPreviewFile={onPreviewFile}
+        />
+      )}
+      {activeChannelId === "graph" && (
+        <GraphsChannel sessionId={selectedSession} />
+      )}
+      {activeChannelId === "tools" && (
+        <StatusChannel
+          runId={inspectorRunId}
+          selectedSession={selectedSession}
+          sessionTitle={sessionTitle}
+          activeRun={activeRun}
+          status={status}
+          permissionMode={permissionMode}
+        />
+      )}
+    </>
+  );
+
+  const inspectorBody = activeFileTab?.projectId === projectId && activeFileTab.filePath ? (
+    // Never render a row the current Project does not own, even if a caller
+    // hands the panel a tab list that was not scoped (useRightPanel scopes it).
+    <FileViewer projectId={activeFileTab.projectId} filePath={activeFileTab.filePath} fileName={activeFileTab.label} />
+  ) : null;
+
+  // The left lane always has a channel; the right lane exists only while files
+  // are open. Its strip is therefore the inspector's own, not the merged one.
+  const channelStrip = (
+    <TabBar
+      tabs={CHANNEL_TABS.filter((tab) => state.openChannels.includes(tab.id as PanelChannel))}
+      activeTabId={activeChannelId}
+      onSelectTab={panel.setActiveTabId}
+      onCloseTab={panel.closeTab}
+    />
+  );
+
+  const inspectorStrip = fileTabs.length > 0 ? (
+    <TabBar
+      tabs={fileTabs}
+      activeTabId={state.activeInspectorId ?? ""}
+      onSelectTab={panel.setActiveTabId}
+      onCloseTab={panel.closeTab}
+      onReorder={panel.reorderTabs}
+    />
+  ) : null;
 
   return (
     <div
@@ -50,41 +104,29 @@ export function RightPanel(props: {
         <ArrowLeft size={15} aria-hidden="true" />
         Back to conversation
       </button>
-      <TabBar
-        tabs={tabs}
-        activeTabId={activeTabId}
-        onSelectTab={onSelectTab}
-        onCloseTab={onCloseTab}
-        onReorder={onReorderTab}
+      <RightPanelLanes
+        width={resize.width}
+        channelStrip={channelStrip}
+        channelBody={channelBody}
+        inspectorStrip={inspectorStrip}
+        inspectorBody={inspectorBody}
+        narrowStrip={(
+          <TabBar
+            tabs={[...CHANNEL_TABS, ...fileTabs]}
+            activeTabId={panel.activeTabId}
+            onSelectTab={panel.setActiveTabId}
+            onCloseTab={panel.closeTab}
+            onReorder={panel.reorderTabs}
+          />
+        )}
+        narrowBody={(
+          <div className="right-panel-body">
+            {panel.activeTabId === state.activeInspectorId && inspectorBody ? inspectorBody : channelBody}
+          </div>
+        )}
+        primaryWidth={state.primaryWidth}
+        onResizePrimary={(delta) => panel.resizePrimaryBy(delta, resize.width)}
       />
-      <div className="right-panel-body">
-        {activeTabId === "files" && (
-          <FilesChannel
-            projectId={projectId}
-            displayPath={displayPath}
-            onOpenFile={onOpenFile}
-            onPreviewFile={onPreviewFile}
-          />
-        )}
-        {activeTabId === "graph" && (
-          <GraphsChannel sessionId={selectedSession} />
-        )}
-        {activeTabId === "tools" && (
-          <StatusChannel
-            runId={inspectorRunId}
-            selectedSession={selectedSession}
-            sessionTitle={sessionTitle}
-            activeRun={activeRun}
-            status={status}
-            permissionMode={permissionMode}
-          />
-        )}
-        {activeFileTab?.projectId === projectId && activeFileTab.filePath && (
-          // Never render a row the current Project does not own, even if a caller
-          // hands the panel a tab list that was not scoped (useRightPanel scopes it).
-          <FileViewer projectId={activeFileTab.projectId} filePath={activeFileTab.filePath} fileName={activeFileTab.label} />
-        )}
-      </div>
     </div>
   );
 }

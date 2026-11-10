@@ -35,6 +35,13 @@ const state = (over: Partial<RightPanelState> = {}): RightPanelState => ({
 });
 
 describe("right panel channel contract", () => {
+  it("keeps only the pins once the user has pinned", () => {
+    const hydrated = initialRightPanelState(prefs({ pinnedChannels: ["tools"] }));
+
+    expect(hydrated.openChannels).toEqual(["tools"]);
+    expect(hydrated.activeChannelId).toBe("tools");
+  });
+
   it("selects an already-open channel without touching the open set or the pins", () => {
     const before = state({ openChannels: ["files", "graph"], activeChannelId: "files" });
     const after = openChannel(before, "graph");
@@ -45,10 +52,10 @@ describe("right panel channel contract", () => {
     expect(after.open).toBe(true);
   });
 
-  it("opens a channel from the add menu without pinning it", () => {
-    const after = openChannel(state(), "tools");
+  it("reopens a channel the user had closed, without pinning it", () => {
+    const after = openChannel(closeChannel(state(), "tools"), "tools");
 
-    expect(after.openChannels).toEqual(["files", "tools"]);
+    expect(after.openChannels).toEqual(["files", "graph", "tools"]);
     expect(after.pinnedChannels).toEqual([]);
     expect(after.activeChannelId).toBe("tools");
   });
@@ -67,7 +74,7 @@ describe("right panel channel contract", () => {
     const unpinned = unpinChannel(pinned, "graph");
 
     expect(unpinned.pinnedChannels).toEqual([]);
-    expect(unpinned.openChannels).toEqual(["files", "graph"]);
+    expect(unpinned.openChannels).toEqual(["files", "graph", "tools"]);
     expect(unpinned.activeChannelId).toBe("graph");
   });
 
@@ -75,7 +82,7 @@ describe("right panel channel contract", () => {
     const pinned = pinChannel(state(), "graph");
     const closed = closeChannel(pinned, "graph");
 
-    expect(closed.openChannels).toEqual(["files"]);
+    expect(closed.openChannels).toEqual(["files", "tools"]);
     expect(closed.pinnedChannels).toEqual(["graph"]);
     expect(closed.open).toBe(true);
   });
@@ -103,7 +110,7 @@ describe("right panel channel contract", () => {
 
     expect(after.open).toBe(true);
     expect(after.activeInspectorId).toBe("main.py");
-    expect(after.openChannels).toEqual(["files"]);
+    expect(after.openChannels).toEqual(["files", "graph", "tools"]);
     expect(after.pinnedChannels).toEqual([]);
   });
 
@@ -157,10 +164,10 @@ describe("hydrate", () => {
     expect(hydrated.open).toBe(true);
   });
 
-  it("opens nothing when a project has no pins and no shell state", () => {
+  it("shows every channel when a project has no pins and no shell state", () => {
     const hydrated = initialRightPanelState(prefs());
 
-    expect(hydrated.openChannels).toEqual(["files"]);
+    expect(hydrated.openChannels).toEqual(["files", "graph", "tools"]);
     expect(hydrated.activeChannelId).toBe("files");
     expect(hydrated.open).toBe(false);
     expect(hydrated.activeInspectorId).toBeNull();

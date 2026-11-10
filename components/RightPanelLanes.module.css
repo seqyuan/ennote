@@ -1,0 +1,41 @@
+/*
+ * The panel's lane geometry. Colours and radii come from app/tokens.css; this
+ * file only decides widths and stacking.
+ */
+
+.lanes {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+.narrow {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.primary {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.inspector {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}

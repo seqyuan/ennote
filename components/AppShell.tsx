@@ -260,13 +260,9 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
   const currentProjectId = selectedSessionRecord?.projectId ?? selectedProject;
   const {
     currentCwd,
-    rightTabs,
-    activeRightTabId,
-    setActiveRightTabId,
+    panel,
     handleOpenFile,
     handlePreviewFile,
-    closeTab,
-    reorderTabs,
     panelOpen,
     openPanel,
     closePanel,
@@ -442,11 +438,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
             open={panelOpen}
             onClose={closePanel}
             resize={rightPanelResize}
-            tabs={rightTabs}
-            activeTabId={activeRightTabId}
-            onSelectTab={setActiveRightTabId}
-            onCloseTab={closeTab}
-            onReorderTab={reorderTabs}
+            panel={panel}
             projectId={currentProjectId ?? null}
             displayPath={currentCwd}
             onOpenFile={handleOpenFile}

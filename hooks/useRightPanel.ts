@@ -20,9 +20,11 @@ import {
   openInspectorTab,
   parsePreferences,
   preferencesOf,
+  setPrimaryWidth,
   rightPanelPreferencesKey,
   serializePreferences,
 } from "@/lib/right-panel-channels";
+import { resolvePrimaryLaneWidth } from "@/lib/right-panel-width";
 
 /**
  * Where the right panel's tabs are and what they show.
@@ -114,6 +116,15 @@ export function useRightPanel(projectId: string | null) {
     setState((current) => closeChannel(current, channel));
   }, []);
 
+  // The divider only changes widths: the lane it resizes stays mounted, and the
+  // bound is the one the layout uses, so a drag cannot starve the other lane.
+  const resizePrimaryBy = useCallback((delta: number, shellWidth: number) => {
+    setState((current) => setPrimaryWidth(
+      current,
+      resolvePrimaryLaneWidth(current.primaryWidth + delta, shellWidth),
+    ));
+  }, []);
+
   return {
     fileTabs,
     activeTabId,
@@ -122,6 +133,7 @@ export function useRightPanel(projectId: string | null) {
     closeTab,
     reorderTabs,
     closeChannelTab,
+    resizePrimaryBy,
     state,
     open: state.open,
     openShell: () => setState((current) => expandShell(current)),

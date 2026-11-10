@@ -147,9 +147,23 @@ export function serializePreferences(preferences: RightPanelPreferencesV1): stri
 }
 
 /**
+ * The channels a visit starts with: the pins when there are any, otherwise all
+ * of them.
+ *
+ * A fresh Project has no preference, so it shows the panel as the workspace
+ * always has — every channel in the strip. A pin is a deliberate narrow
+ * ("restore just this one"), so once the user pins, the pins are the whole
+ * answer rather than an addition to a default.
+ * @param pinned - the Project's pinned channels.
+ */
+export function seedOpenChannels(pinned: readonly PanelChannel[]): PanelChannel[] {
+  return pinned.length > 0 ? normalizeChannels(pinned) : [...PANEL_CHANNELS];
+}
+
+/**
  * The state a visit to a Project starts from.
  *
- * The pins seed the open set, and the first pinned channel is selected. The
+ * The pins seed the open set, and the first channel is selected. The
  * persisted shell flag is applied here too — not as a last step in the caller —
  * because a caller that applied it after selecting a channel would expand the
  * shell the user had collapsed.
@@ -157,7 +171,7 @@ export function serializePreferences(preferences: RightPanelPreferencesV1): stri
  */
 export function initialRightPanelState(preferences: RightPanelPreferencesV1): RightPanelState {
   const pinnedChannels = normalizeChannels(preferences.pinnedChannels);
-  const openChannels = pinnedChannels.length > 0 ? [...pinnedChannels] : ["files" as PanelChannel];
+  const openChannels = seedOpenChannels(pinnedChannels);
   return {
     projectId: preferences.projectId,
     openChannels,

@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect } from "react";
-import type { Tab } from "@/components/TabBar";
 import { useRightPanel } from "@/hooks/useRightPanel";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
@@ -41,10 +40,7 @@ export function useProjectFiles({
   }, [projectId, setRunError, workspaceFor]);
 
   const panel = useRightPanel(projectId);
-  const {
-    fileTabs, activeTabId: activeRightTabId, setActiveTabId: setActiveRightTabId,
-    closeTab, reorderTabs, openInspector,
-  } = panel;
+  const { openInspector } = panel;
 
   const handleOpenFile = useCallback((filePath: string, fileName: string) => {
     openInspector(filePath, fileName);
@@ -55,25 +51,12 @@ export function useProjectFiles({
     onPreviewFile({ projectId, path: filePath, name: fileName });
   }, [projectId, onPreviewFile]);
 
-  // Right tabs: built-in views first, then open file tabs.
-  const rightTabs: Tab[] = [
-    { id: "files", label: "Files", closable: false, icon: "files" },
-    { id: "graph", label: "Graphs", closable: false, icon: "graph" },
-    { id: "tools", label: "Status", closable: false, icon: "tools" },
-    ...fileTabs,
-  ];
-
   return {
     currentWorkspace,
     currentCwd,
-    fileTabs,
-    rightTabs,
-    activeRightTabId,
-    setActiveRightTabId,
+    panel,
     handleOpenFile,
     handlePreviewFile,
-    closeTab,
-    reorderTabs,
     panelOpen: panel.open,
     openPanel: panel.openShell,
     closePanel: panel.closeShell,
