@@ -35,6 +35,9 @@ export const INSPECTOR_MIN_WIDTH = 264;
 /** The draggable divider between the two lanes. */
 export const LANE_DIVIDER_WIDTH = 8;
 
+/** The left lane opens at this width; `resolvePrimaryLaneWidth` clamps it to the shell. */
+export const PRIMARY_DEFAULT_WIDTH = 280;
+
 /** Below this the two lanes cannot both be useful, so the panel shows one. */
 export const DUAL_LANE_MIN_WIDTH = 520;
 
@@ -70,7 +73,7 @@ export function resolveRightPanelWidth(
  */
 export function resolvePrimaryLaneWidth(stored: number | null, shellWidth: number): number {
   const max = Math.max(PRIMARY_MIN_WIDTH, shellWidth - LANE_DIVIDER_WIDTH - INSPECTOR_MIN_WIDTH);
-  const wanted = stored !== null && Number.isFinite(stored) ? stored : 280;
+  const wanted = stored !== null && Number.isFinite(stored) ? stored : PRIMARY_DEFAULT_WIDTH;
   return Math.max(PRIMARY_MIN_WIDTH, Math.min(max, wanted));
 }
 

@@ -6,13 +6,15 @@
  * and no late update from the previous Project can reach the panel — there is
  * no generation window to track.
  */
+import { PANEL_CHANNELS } from "./right-panel-channels";
+
 export function scopeFileTabs<T extends { projectId?: string }>(tabs: T[], projectId: string | null): T[] {
   if (!projectId) return [];
   return tabs.filter((tab) => tab.projectId === projectId);
 }
 
 /** Panel tabs that are not file rows; they belong to the workspace, not a Project. */
-const PANEL_TAB_IDS = new Set(["files", "graph", "tools"]);
+const PANEL_TAB_IDS: ReadonlySet<string> = new Set(PANEL_CHANNELS);
 
 /**
  * The active tab after scoping. A file row that the current Project does not
