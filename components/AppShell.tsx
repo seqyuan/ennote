@@ -5,11 +5,13 @@ import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import { TopBar } from "./TopBar";
 import { RightPanel } from "./RightPanel";
+import { RightPanelResizeHandle } from "./RightPanelResizeHandle";
 import { FilePreviewWindow } from "./FilePreviewWindow";
 import { ResizeHandle } from "./ResizeHandle";
 import { AppShellDialogs } from "./AppShellDialogs";
 import { OfflineBanner } from "./OfflineBanner";
 import { useResizable } from "@/hooks/useResizable";
+import { useRightPanelWidth } from "@/hooks/useRightPanelWidth";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { useSessionTitle } from "@/hooks/useSessionTitle";
 import { useProjectSessions } from "@/hooks/useProjectSessions";
@@ -75,14 +77,20 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
   }, []);
 
   // Resizable panels
-  const sidebarResize = useResizable({ initialWidth: 280, minWidth: 264, maxWidth: 420, storageKey: "--ennote-sidebar-width" });
-  const rightPanelResize = useResizable({ initialWidth: 420, minWidth: 280, maxWidth: 1000, storageKey: "--ennote-right-panel-width", direction: "left" });
+  const sidebarResize = useResizable({
+    initialWidth: 280, minWidth: 264, maxWidth: 420,
+    storageKey: "--ennote-sidebar-width", cssVariable: "--ennote-sidebar-width",
+  });
 
   // Project selector dropdown for the sidebar; ChatWindow owns the middle one.
   const projectSelector = useProjectSelector();
 
   // Right panel layout state (file tabs live in useFileTabs)
   const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  // The panel shares its row with the conversation, so its width comes from the
+  // room left over rather than from the stored number alone.
+  const rightPanelResize = useRightPanelWidth(sidebarOpen && !isMobile ? sidebarResize.width : 0);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<{ projectId: string; path: string; name: string } | null>(null);
 
@@ -425,18 +433,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
         </div>
 
         {/* Right panel resize handle (chat view only) */}
-        {view === "chat" && rightPanelOpen && (
-          <ResizeHandle
-            side="left"
-            ariaLabel="Resize right panel"
-            value={rightPanelResize.width}
-            min={280}
-            max={1000}
-            onResizeStart={rightPanelResize.beginResize}
-            onResize={rightPanelResize.resizeBy}
-            onResizeEnd={rightPanelResize.endResize}
-          />
-        )}
+        {view === "chat" && rightPanelOpen && <RightPanelResizeHandle resize={rightPanelResize} />}
 
         {/* Right panel (chat view only) */}
         {view === "chat" && (
