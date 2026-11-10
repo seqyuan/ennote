@@ -57,7 +57,7 @@ describe("right panel channel contract", () => {
     const after = pinChannel(state(), "graph");
     expect(after.pinnedChannels).toEqual(["graph"]);
 
-    const next = initialRightPanelState(preferencesOf(after, "p1"));
+    const next = initialRightPanelState(preferencesOf(after));
     expect(next.openChannels).toEqual(["graph"]);
     expect(next.activeChannelId).toBe("graph");
   });
@@ -105,6 +105,18 @@ describe("right panel channel contract", () => {
     expect(after.activeInspectorId).toBe("main.py");
     expect(after.openChannels).toEqual(["files"]);
     expect(after.pinnedChannels).toEqual([]);
+  });
+
+  it("remembers which lane the user last activated", () => {
+    const opened = openInspectorTab(state(), "main.py");
+    expect(opened.activeLane).toBe("inspector");
+
+    // Selecting a channel keeps the tab open, it only hands the strip back.
+    const back = openChannel(opened, "graph");
+    expect(back.activeLane).toBe("channel");
+    expect(back.activeInspectorId).toBe("main.py");
+
+    expect(closeInspectorTab(back, "main.py", []).activeLane).toBe("channel");
   });
 
   it("closes the last inspector tab without closing the shell", () => {
@@ -192,7 +204,7 @@ describe("preferences", () => {
   it("writes back only the fields the panel restores", () => {
     const after = openChannel(pinChannel(state(), "graph"), "tools");
 
-    expect(preferencesOf(after, "p1")).toEqual({
+    expect(preferencesOf(after)).toEqual({
       version: 1,
       projectId: "p1",
       pinnedChannels: ["graph"],

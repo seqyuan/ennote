@@ -39,12 +39,26 @@ export interface InspectorTab {
 
 /** The panel's whole state for one Project. */
 export interface RightPanelState {
+  /**
+   * The Project this state belongs to. It travels with the state so a caller
+   * can never write one Project's selection under another Project's key: a
+   * project switch produces a new state, and until it lands the old state still
+   * names the old Project.
+   */
+  projectId: string;
   /** Channels shown right now. Never persisted. */
   openChannels: PanelChannel[];
   /** Channels restored on the next visit to this Project. Persisted. */
   pinnedChannels: PanelChannel[];
   /** The selected channel; `null` means the launcher is showing. */
   activeChannelId: PanelChannel | null;
+  /**
+   * Which lane the user last activated. Both lanes stay mounted, so the panel
+   * needs this to know which one the tab strip should highlight: selecting a
+   * channel must not discard the inspector, and selecting a tab must not
+   * discard the channel.
+   */
+  activeLane: "channel" | "inspector";
   /** Whether the shell is expanded. Persisted. */
   open: boolean;
   /** The left lane's width while both lanes are drawn. Persisted. */
@@ -145,9 +159,11 @@ export function initialRightPanelState(preferences: RightPanelPreferencesV1): Ri
   const pinnedChannels = normalizeChannels(preferences.pinnedChannels);
   const openChannels = pinnedChannels.length > 0 ? [...pinnedChannels] : ["files" as PanelChannel];
   return {
+    projectId: preferences.projectId,
     openChannels,
     pinnedChannels,
     activeChannelId: openChannels[0] ?? null,
+    activeLane: "channel",
     open: preferences.open,
     primaryWidth: preferences.primaryWidth,
     activeInspectorId: null,
@@ -155,10 +171,10 @@ export function initialRightPanelState(preferences: RightPanelPreferencesV1): Ri
 }
 
 /** The preferences a state writes back. The open set is not among them. */
-export function preferencesOf(state: RightPanelState, projectId: string): RightPanelPreferencesV1 {
+export function preferencesOf(state: RightPanelState): RightPanelPreferencesV1 {
   return {
     version: 1,
-    projectId,
+    projectId: state.projectId,
     pinnedChannels: normalizeChannels(state.pinnedChannels),
     primaryWidth: state.primaryWidth,
     open: state.open,
@@ -170,7 +186,7 @@ export function openChannel(state: RightPanelState, channel: PanelChannel): Righ
   const openChannels = state.openChannels.includes(channel)
     ? state.openChannels
     : [...state.openChannels, channel];
-  return { ...state, openChannels, activeChannelId: channel, open: true };
+  return { ...state, openChannels, activeChannelId: channel, activeLane: "channel", open: true };
 }
 
 /**
@@ -182,7 +198,12 @@ export function closeChannel(state: RightPanelState, channel: PanelChannel): Rig
   const openChannels = state.openChannels.filter((entry) => entry !== channel);
   if (state.activeChannelId !== channel) return { ...state, openChannels };
   const remaining = PANEL_CHANNELS.filter((entry) => openChannels.includes(entry));
-  return { ...state, openChannels, activeChannelId: remaining[0] ?? null };
+  return {
+    ...state,
+    openChannels,
+    activeChannelId: remaining[0] ?? null,
+    activeLane: "channel",
+  };
 }
 
 /** Restore this channel on the next visit, and show it now. */
@@ -216,7 +237,7 @@ export function setPrimaryWidth(state: RightPanelState, width: number): RightPan
 
 /** Open a file in the inspector lane and show the shell. */
 export function openInspectorTab(state: RightPanelState, tabId: string): RightPanelState {
-  return { ...state, activeInspectorId: tabId, open: true };
+  return { ...state, activeInspectorId: tabId, activeLane: "inspector", open: true };
 }
 
 /**
@@ -232,5 +253,7 @@ export function closeInspectorTab(
 ): RightPanelState {
   if (state.activeInspectorId !== tabId) return state;
   const remaining = remainingIds.filter((id) => id !== tabId);
-  return { ...state, activeInspectorId: remaining[remaining.length - 1] ?? null };
+  const next = remaining[remaining.length - 1] ?? null;
+  // An emptied lane hands the strip back to the channel; the tabs stay closed.
+  return { ...state, activeInspectorId: next, activeLane: next === null ? "channel" : "inspector" };
 }

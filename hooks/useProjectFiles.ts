@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect } from "react";
 import type { Tab } from "@/components/TabBar";
-import { useFileTabs } from "@/hooks/useFileTabs";
+import { useRightPanel } from "@/hooks/useRightPanel";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
 
@@ -18,13 +18,11 @@ export function useProjectFiles({
   projectId,
   workspaceFor,
   setRunError,
-  onOpenPanel,
   onPreviewFile,
 }: {
   projectId: string | null;
   workspaceFor: (projectId: string) => ProjectWorkspace | undefined;
   setRunError: (message: string) => void;
-  onOpenPanel: () => void;
   onPreviewFile: (file: { projectId: string; path: string; name: string }) => void;
 }) {
   const currentWorkspace = projectId ? workspaceFor(projectId) ?? null : null;
@@ -42,13 +40,15 @@ export function useProjectFiles({
     // workspaceFor is stable via context; re-run on project switch.
   }, [projectId, setRunError, workspaceFor]);
 
-  const fileTabsState = useFileTabs(projectId);
-  const { fileTabs, activeTabId: activeRightTabId, setActiveTabId: setActiveRightTabId, openFile, closeTab, reorderTabs } = fileTabsState;
+  const panel = useRightPanel(projectId);
+  const {
+    fileTabs, activeTabId: activeRightTabId, setActiveTabId: setActiveRightTabId,
+    closeTab, reorderTabs, openInspector,
+  } = panel;
 
   const handleOpenFile = useCallback((filePath: string, fileName: string) => {
-    openFile(filePath, fileName);
-    onOpenPanel();
-  }, [openFile, onOpenPanel]);
+    openInspector(filePath, fileName);
+  }, [openInspector]);
 
   const handlePreviewFile = useCallback((filePath: string, fileName: string) => {
     if (!projectId) return;
@@ -74,5 +74,8 @@ export function useProjectFiles({
     handlePreviewFile,
     closeTab,
     reorderTabs,
+    panelOpen: panel.open,
+    openPanel: panel.openShell,
+    closePanel: panel.closeShell,
   };
 }

@@ -91,7 +91,6 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
   // The panel shares its row with the conversation, so its width comes from the
   // room left over rather than from the stored number alone.
   const rightPanelResize = useRightPanelWidth(sidebarOpen && !isMobile ? sidebarResize.width : 0);
-  const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<{ projectId: string; path: string; name: string } | null>(null);
 
   // Top bar
@@ -268,11 +267,13 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
     handlePreviewFile,
     closeTab,
     reorderTabs,
+    panelOpen,
+    openPanel,
+    closePanel,
   } = useProjectFiles({
     projectId: currentProjectId,
     workspaceFor,
     setRunError: chat.run.setError,
-    onOpenPanel: () => setRightPanelOpen(true),
     onPreviewFile: setPreviewFile,
   });
 
@@ -391,8 +392,8 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
                   disabled: Boolean(chat.run.activeRun),
                   onActivate: chat.branches.activateBranch,
                 }}
-                rightPanelOpen={rightPanelOpen}
-                onToggleRightPanel={() => setRightPanelOpen((v) => !v)}
+                rightPanelOpen={panelOpen}
+                onToggleRightPanel={() => (panelOpen ? closePanel() : openPanel())}
                 attention={{
                   projectId: selectedProject ?? currentProjectId ?? undefined,
                   onNavigate: (item) => {
@@ -433,13 +434,13 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
         </div>
 
         {/* Right panel resize handle (chat view only) */}
-        {view === "chat" && rightPanelOpen && <RightPanelResizeHandle resize={rightPanelResize} />}
+        {view === "chat" && panelOpen && <RightPanelResizeHandle resize={rightPanelResize} />}
 
         {/* Right panel (chat view only) */}
         {view === "chat" && (
           <RightPanel
-            open={rightPanelOpen}
-            onClose={() => setRightPanelOpen(false)}
+            open={panelOpen}
+            onClose={closePanel}
             resize={rightPanelResize}
             tabs={rightTabs}
             activeTabId={activeRightTabId}
