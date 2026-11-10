@@ -5,7 +5,10 @@ import { PanelLeft } from "lucide-react";
 
 import { ResizeHandle } from "./ResizeHandle";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { INSPECTOR_MIN_WIDTH, LANE_DIVIDER_WIDTH, PRIMARY_MIN_WIDTH, laneMode } from "@/lib/right-panel-width";
+import {
+  INSPECTOR_MIN_WIDTH, LANE_DIVIDER_WIDTH, PRIMARY_MIN_WIDTH, laneMode, resolvePrimaryLaneWidth,
+} from "@/lib/right-panel-width";
+import { useT } from "@/components/LocaleProvider";
 import styles from "./RightPanelLanes.module.css";
 
 /** The widest the navigator gets when it slides over the preview instead of beside it. */
@@ -39,12 +42,19 @@ export function RightPanelLanes(props: {
   /** The left lane's width while both lanes are drawn. */
   primaryWidth: number;
   onResizePrimary: (delta: number) => void;
+  onResizePrimaryStart: () => void;
+  onResizePrimaryEnd: () => void;
   /** Whether the medium layout has the channel lane sliding over the inspector. */
   navigatorOpen: boolean;
   onToggleNavigator: () => void;
 }) {
+  const t = useT();
   const drawer = useMediaQuery("(max-width: 960px)");
   const mode = laneMode(props.width, drawer);
+  // A width saved on a wider panel is not a width this panel can afford: the
+  // split is re-derived from the shell it has now, so the inspector lane can
+  // never be squeezed below its floor by a stale number.
+  const primaryWidth = resolvePrimaryLaneWidth(props.primaryWidth, props.width);
 
   // The drawer is a different composition, not a narrower split: one strip with
   // the workspace channels and the open files side by side, as it always was.
@@ -66,7 +76,7 @@ export function RightPanelLanes(props: {
   const primaryStyle: CSSProperties = overlay
     ? { width: `min(${OVERLAY_PRIMARY_WIDTH}px, 78%)` }
     : hasInspector
-      ? { width: props.primaryWidth }
+      ? { width: primaryWidth }
       : { flex: "1 1 auto" };
 
   const layout = overlay ? "medium" : hasInspector ? "wide" : "single";
@@ -97,14 +107,16 @@ export function RightPanelLanes(props: {
         <ResizeHandle
           key="divider"
           side="right"
-          ariaLabel="Resize the file navigator"
-          value={props.primaryWidth}
+          ariaLabel={t("rightPanel.resizeNavigator")}
+          value={primaryWidth}
           min={PRIMARY_MIN_WIDTH}
           max={Math.max(
             PRIMARY_MIN_WIDTH,
             props.width - LANE_DIVIDER_WIDTH - INSPECTOR_MIN_WIDTH,
           )}
           onResize={props.onResizePrimary}
+          onResizeStart={props.onResizePrimaryStart}
+          onResizeEnd={props.onResizePrimaryEnd}
         />
       )}
       {hasInspector && (
@@ -117,7 +129,7 @@ export function RightPanelLanes(props: {
               <button
                 type="button"
                 className={styles["nav-toggle"]}
-                aria-label={props.navigatorOpen ? "Hide the file navigator" : "Show the file navigator"}
+                aria-label={props.navigatorOpen ? t("rightPanel.hideNavigator") : t("rightPanel.showNavigator")}
                 aria-expanded={props.navigatorOpen}
                 data-open={props.navigatorOpen || undefined}
                 onClick={props.onToggleNavigator}

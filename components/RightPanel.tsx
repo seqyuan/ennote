@@ -6,7 +6,7 @@ import { ArrowLeft, Pin, PinOff, Plus } from "lucide-react";
 import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
 import { RightPanelLanes } from "./RightPanelLanes";
-import { channelLabel, channelTabs } from "./right-panel/channel-tabs";
+import { channelTabs } from "./right-panel/channel-tabs";
 import { ChannelLauncher } from "./right-panel/ChannelLauncher";
 import { FilesChannel } from "./right-panel/FilesChannel";
 import { GraphsChannel } from "./right-panel/GraphsChannel";
@@ -14,7 +14,7 @@ import { StatusChannel } from "./right-panel/StatusChannel";
 import { useT } from "@/components/LocaleProvider";
 import type { useRightPanel } from "@/hooks/useRightPanel";
 import type { useResizable } from "@/hooks/useResizable";
-import { PANEL_CHANNELS, isPanelChannel, type PanelChannel } from "@/lib/right-panel-channels";
+import { PANEL_CHANNELS, isPanelChannel } from "@/lib/right-panel-channels";
 import type { PermissionMode } from "@/lib/permission-mode";
 
 export function RightPanel(props: {
@@ -41,12 +41,15 @@ export function RightPanel(props: {
   const t = useT();
   const { state, fileTabs } = panel;
   const [navigatorOpen, setNavigatorOpen] = useState(false);
-  const toggleNavigator = () => setNavigatorOpen((open) => !open);
+  const toggleNavigator = () => setNavigatorOpen((next) => !next);
+  // Collapsing the panel ends the gesture the overlay was opened for.
+  const closePanel = () => {
+    setNavigatorOpen(false);
+    onClose();
+  };
 
   const openChannels = state.openChannels;
-  const activeChannelId = openChannels.includes(state.activeChannelId as PanelChannel)
-    ? state.activeChannelId as PanelChannel
-    : openChannels[0] ?? null;
+  const activeChannelId = panel.activeChannelId;
 
   const closeLabel = (tab: Tab) => t("rightPanel.close", { name: tab.label });
   const closeTab = (tabId: string) => {
@@ -62,14 +65,16 @@ export function RightPanel(props: {
 
   const channelBody = activeChannelId === null ? null : (
     <>
-      {activeChannelId === "files" && (
+      {/* The tree holds the reader's place: expanded directories, scroll, filter.
+          It stays mounted while another channel is on screen, and only hides. */}
+      <div className="right-panel-channel-slot" hidden={activeChannelId !== "files"}>
         <FilesChannel
           projectId={projectId}
           displayPath={displayPath}
           onOpenFile={onOpenFile}
           onPreviewFile={onPreviewFile}
         />
-      )}
+      </div>
       {activeChannelId === "graph" && (
         <GraphsChannel sessionId={selectedSession} />
       )}
@@ -102,7 +107,7 @@ export function RightPanel(props: {
         transition: resize.isResizing ? "none" : undefined,
       }}
     >
-      <button type="button" className="right-panel-back-button" onClick={onClose}>
+      <button type="button" className="right-panel-back-button" onClick={closePanel}>
         <ArrowLeft size={15} aria-hidden="true" />
         Back to conversation
       </button>
@@ -158,7 +163,10 @@ export function RightPanel(props: {
             channels={PANEL_CHANNELS}
             hint={t("rightPanel.launcherHint")}
             t={t}
-            onOpen={panel.openChannel}
+            onOpen={(channel) => {
+              panel.openChannel(channel);
+              setNavigatorOpen(false);
+            }}
           />
         )}
         inspectorStrip={fileTabs.length > 0 ? (
@@ -191,7 +199,9 @@ export function RightPanel(props: {
         )}
         primaryWidth={state.primaryWidth}
         onResizePrimary={(delta) => panel.resizePrimaryBy(delta, resize.width)}
-        navigatorOpen={navigatorOpen}
+        onResizePrimaryStart={panel.beginPrimaryResize}
+        onResizePrimaryEnd={panel.endPrimaryResize}
+        navigatorOpen={navigatorOpen && open}
         onToggleNavigator={toggleNavigator}
       />
     </div>
@@ -201,6 +211,3 @@ export function RightPanel(props: {
 // The summary lives with the channel that draws it; it stays exported here
 // because it is the panel's public half for the status render test.
 export { RightPanelSummary } from "./right-panel/StatusChannel";
-
-/** Kept for callers that still import the label helper from here. */
-export { channelLabel };

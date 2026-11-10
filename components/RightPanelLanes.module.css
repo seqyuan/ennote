@@ -55,9 +55,13 @@
   overflow: hidden;
 }
 
+/* Starts below the strip: the control that closes the overlay lives up there. */
 .backdrop {
   position: absolute;
-  inset: 0;
+  top: 36px;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: var(--layer-sticky);
   background: transparent;
 }

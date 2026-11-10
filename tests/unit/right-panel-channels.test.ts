@@ -16,6 +16,8 @@ import {
   preferencesOf,
   rightPanelPreferencesKey,
   serializePreferences,
+  expandShell,
+  setPrimaryWidth,
   unpinChannel,
 } from "@/lib/right-panel-channels";
 
@@ -126,6 +128,15 @@ describe("right panel channel contract", () => {
     expect(closeInspectorTab(back, "main.py", []).activeLane).toBe("channel");
   });
 
+  it("closing the selected channel does not steal the lane from an open file", () => {
+    const reading = openInspectorTab(state(), "main.py");
+    const closed = closeChannel(reading, "files");
+
+    expect(closed.openChannels).toEqual(["graph", "tools"]);
+    expect(closed.activeLane).toBe("inspector");
+    expect(closed.activeInspectorId).toBe("main.py");
+  });
+
   it("closes the last inspector tab without closing the shell", () => {
     const opened = openInspectorTab(state(), "main.py");
     const closed = closeInspectorTab(opened, "main.py", []);
@@ -149,6 +160,23 @@ describe("right panel channel contract", () => {
 
     const last = state({ openChannels: ["files"], activeChannelId: "files" });
     expect(closeChannel(last, "files").activeChannelId).toBeNull();
+  });
+});
+
+describe("shell and lane width", () => {
+  it("expands and collapses without changing anything else", () => {
+    const base = state();
+    const opened = expandShell(base);
+    expect(opened.open).toBe(true);
+    expect(collapseShell(opened).open).toBe(false);
+    expect(expandShell(opened)).toBe(opened); // already open: same object, no render
+    expect(collapseShell(base)).toBe(base);   // already closed
+  });
+
+  it("records the lane width and ignores a repeated value", () => {
+    const widened = setPrimaryWidth(state(), 320);
+    expect(widened.primaryWidth).toBe(320);
+    expect(setPrimaryWidth(widened, 320)).toBe(widened);
   });
 });
 

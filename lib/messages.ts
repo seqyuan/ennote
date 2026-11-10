@@ -539,6 +539,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "rightPanel.launcherHint": "Choose a channel to show beside the conversation.",
     "rightPanel.showNavigator": "Show the file navigator",
     "rightPanel.hideNavigator": "Hide the file navigator",
+    "rightPanel.resizeNavigator": "Resize the file navigator",
   },
   "zh-CN": {
     "general.title": "通用",
@@ -1071,6 +1072,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "rightPanel.launcherHint": "选择一个要显示在对话旁的通道。",
     "rightPanel.showNavigator": "显示文件导航",
     "rightPanel.hideNavigator": "隐藏文件导航",
+    "rightPanel.resizeNavigator": "调整文件导航宽度",
   },
 };
 

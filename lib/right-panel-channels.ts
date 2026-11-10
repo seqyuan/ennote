@@ -216,7 +216,9 @@ export function closeChannel(state: RightPanelState, channel: PanelChannel): Rig
     ...state,
     openChannels,
     activeChannelId: remaining[0] ?? null,
-    activeLane: "channel",
+    // Hiding the channel is all the press asked for; the lane the reader was in
+    // stays theirs when it still has something to show.
+    activeLane: state.activeLane,
   };
 }
 

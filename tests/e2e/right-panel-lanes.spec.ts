@@ -19,12 +19,16 @@ async function fulfill(route: Route, data: unknown) {
   await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data }) });
 }
 
-async function mockLanes(page: Page) {
+async function mockLanes(page: Page, options: { withSecondProject?: boolean } = {}) {
+  const projects = options.withSecondProject ? [project, second] : [project];
   await page.route("**/api/worker/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/worker", "");
     if (await tryFulfillHarnessRoutes(route)) return;
-    if (path === "/v1/projects") return fulfill(route, [project]);
+    if (path === "/v1/projects") return fulfill(route, projects);
+    if (path === `/v1/projects/${second.id}/workspace`) return fulfill(route, secondWorkspace);
+    if (path === `/v1/projects/${second.id}/sessions`) return fulfill(route, []);
+    if (path === `/v1/projects/${second.id}/files`) return fulfill(route, []);
     if (path === "/v1/provider-profiles") return fulfill(route, [provider]);
     if (path === "/v1/model-profiles") return fulfill(route, []);
     if (path === "/v1/policy-profiles") return fulfill(route, policies);
@@ -42,6 +46,66 @@ async function mockLanes(page: Page) {
     return route.abort();
   });
 }
+
+const second = { id: "other-project", name: "Other project", description: "", status: "active", createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z" };
+const secondWorkspace = { id: "workspace-2", projectId: second.id, kind: "local", hostPath: "/tmp/other-project", virtualPath: "/workspace", status: "active", pathFingerprint: "fingerprint-2", createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z" };
+
+test("switching projects and back returns to the file that was open", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockLanes(page, { withSecondProject: true });
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+  await page.locator('.file-tree-main[title="/workspace/src"]').click();
+  await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
+  await expect(page.locator(".file-code")).toContainText("ready");
+
+  // The other Project must not inherit the first one's file.
+  await selectProject(page, second.name);
+  await expect(page.locator(".file-code")).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "main.ts" })).toHaveCount(0);
+
+  // Coming back returns the reader to where they were.
+  await selectProject(page, project.name);
+  await expect(page.getByRole("tab", { name: "main.ts" })).toBeVisible();
+  await expect(page.locator(".file-code")).toContainText("ready");
+});
+
+test("the lane divider cannot starve the preview", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockLanes(page);
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+  await page.locator('.file-tree-main[title="/workspace/src"]').click();
+  await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
+  await expect(page.getByTestId("right-panel-lanes")).toHaveAttribute("data-mode", "wide");
+
+  const divider = page.getByRole("separator", { name: "Resize the file navigator" });
+  const box = await divider.boundingBox();
+  if (!box) throw new Error("divider has no box");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 600, box.y + box.height / 2, { steps: 8 });
+  await page.mouse.up();
+
+  // 264px is the inspector's floor; the drag stops there rather than at the edge.
+  const inspector = await page.getByTestId("right-panel-primary").boundingBox();
+  const panel = await page.locator(".right-panel-container").boundingBox();
+  if (!inspector || !panel) throw new Error("lanes have no box");
+  expect(panel.width - inspector.width).toBeGreaterThanOrEqual(264);
+
+  // The settled width survives a reload. The open file does not — inspector tabs
+  // are deliberately not persisted — so the file is reopened to get a split back.
+  const settled = inspector.width;
+  await page.reload();
+  await expect(page.getByTestId("right-panel-lanes")).toHaveAttribute("data-mode", "single");
+  await page.locator('.file-tree-main[title="/workspace/src"]').click();
+  await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
+  await expect(page.getByTestId("right-panel-lanes")).toHaveAttribute("data-mode", "wide");
+  const afterReload = await page.getByTestId("right-panel-primary").boundingBox();
+  expect(Math.abs((afterReload?.width ?? 0) - settled)).toBeLessThanOrEqual(2);
+});
 
 test("opening a file keeps the tree mounted beside it", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });

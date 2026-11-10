@@ -9,8 +9,6 @@ import type { Translator } from "@/lib/messages";
  * attached. Each carries its own close button — closing a channel narrows the
  * strip without touching the pin that restores it later.
  */
-export const CHANNEL_ORDER: readonly Exclude<PanelChannel, never>[] = ["files", "graph", "tools"];
-
 const LABEL_KEYS: Record<PanelChannel, string> = {
   files: "rightPanel.files",
   graph: "rightPanel.graphs",
