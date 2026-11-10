@@ -526,6 +526,19 @@ export const messages: Record<Locale, Record<string, string>> = {
     "conversation.delegation.active": "{count} active",
     "conversation.delegation.settled": "all settled",
     "conversation.delegation.running": "running in background…",
+
+    // The right panel's channels are the workspace surfaces beside the
+    // conversation; the strip's actions sit on the channels they act on.
+    "rightPanel.files": "Files",
+    "rightPanel.graphs": "Graphs",
+    "rightPanel.status": "Status",
+    "rightPanel.pin": "Pin this channel",
+    "rightPanel.unpin": "Unpin this channel",
+    "rightPanel.close": "Close {name}",
+    "rightPanel.add": "Add a channel",
+    "rightPanel.launcherHint": "Choose a channel to show beside the conversation.",
+    "rightPanel.showNavigator": "Show the file navigator",
+    "rightPanel.hideNavigator": "Hide the file navigator",
   },
   "zh-CN": {
     "general.title": "通用",
@@ -1047,6 +1060,17 @@ export const messages: Record<Locale, Record<string, string>> = {
     "conversation.delegation.active": "{count} 个进行中",
     "conversation.delegation.settled": "全部已结束",
     "conversation.delegation.running": "后台运行中…",
+
+    "rightPanel.files": "文件",
+    "rightPanel.graphs": "图谱",
+    "rightPanel.status": "状态",
+    "rightPanel.pin": "固定此通道",
+    "rightPanel.unpin": "取消固定此通道",
+    "rightPanel.close": "关闭 {name}",
+    "rightPanel.add": "添加通道",
+    "rightPanel.launcherHint": "选择一个要显示在对话旁的通道。",
+    "rightPanel.showNavigator": "显示文件导航",
+    "rightPanel.hideNavigator": "隐藏文件导航",
   },
 };
 

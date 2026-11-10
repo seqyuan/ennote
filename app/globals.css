@@ -209,6 +209,63 @@ button:disabled { cursor: default; }
   border-left: 1px solid var(--border);
 }
 .right-panel-body { flex: 1; min-height: 0; overflow: hidden; }
+
+/* The channel strip: tabs take the room, the panel's own actions keep theirs. */
+.right-panel-strip {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.right-panel-strip > [role="tablist"] { flex: 1 1 auto; min-width: 0; }
+
+.right-panel-strip-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 26px;
+  border: none;
+  border-left: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.right-panel-strip-action:hover { color: var(--text); background: var(--bg-hover); }
+.right-panel-strip-action[aria-pressed="true"] { color: var(--accent); }
+
+.right-panel-launcher {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px 16px;
+}
+
+.right-panel-launcher-hint {
+  margin: 0 0 4px;
+  color: var(--text-dim);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.right-panel-launcher-card {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.right-panel-launcher-card:hover { background: var(--bg-hover); }
+.right-panel-launcher-card svg { color: var(--text-muted); }
 .right-panel-tools { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .right-panel-summary {
   margin-top: auto;

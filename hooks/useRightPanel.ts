@@ -19,8 +19,10 @@ import {
   openChannel,
   openInspectorTab,
   parsePreferences,
+  pinChannel,
   preferencesOf,
   setPrimaryWidth,
+  unpinChannel,
   rightPanelPreferencesKey,
   serializePreferences,
 } from "@/lib/right-panel-channels";
@@ -112,6 +114,16 @@ export function useRightPanel(projectId: string | null) {
     setOpenTabs((previous) => moveTab(previous, fromId, toId));
   }, []);
 
+  const openChannelTab = useCallback((channel: PanelChannel) => {
+    setState((current) => openChannel(current, channel));
+  }, []);
+
+  const togglePin = useCallback((channel: PanelChannel) => {
+    setState((current) => (current.pinnedChannels.includes(channel)
+      ? unpinChannel(current, channel)
+      : pinChannel(current, channel)));
+  }, []);
+
   const closeChannelTab = useCallback((channel: PanelChannel) => {
     setState((current) => closeChannel(current, channel));
   }, []);
@@ -133,6 +145,8 @@ export function useRightPanel(projectId: string | null) {
     closeTab,
     reorderTabs,
     closeChannelTab,
+    openChannel: openChannelTab,
+    togglePin,
     resizePrimaryBy,
     state,
     open: state.open,

@@ -20,9 +20,11 @@ interface Props {
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
   onReorder?: (fromId: string, toId: string) => void;
+  /** The close button's accessible name; defaults to English. */
+  closeLabel?: (tab: Tab) => string;
 }
 
-export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onReorder }: Props) {
+export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onReorder, closeLabel }: Props) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const resetDrag = () => { setDraggingId(null); setDropTargetId(null); };
@@ -104,7 +106,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onReorder }
                 className={styles.close}
                 onClick={(e) => { e.stopPropagation(); onCloseTab(tab.id); }}
                 title="Close"
-                aria-label={`Close ${tab.label}`}
+                aria-label={closeLabel ? closeLabel(tab) : `Close ${tab.label}`}
               >
                 <X size={10} aria-hidden="true" />
               </button>

@@ -114,3 +114,68 @@ test("a narrow panel keeps the single tab strip", async ({ page }) => {
   await expect(page.getByTestId("right-panel-lanes")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Back to conversation" })).toBeVisible();
 });
+
+test("closing a channel narrows the strip, pinning decides what returns", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockLanes(page);
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+
+  await expect(page.getByRole("tab", { name: "Status" })).toBeVisible();
+
+  // Closing a channel removes it from this visit and leaves the others alone.
+  await page.getByRole("button", { name: "Close Status" }).click();
+  await expect(page.getByRole("tab", { name: "Status" })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
+
+  // The add control brings back exactly the channel that is missing.
+  await page.getByRole("button", { name: "Add a channel" }).click();
+  await expect(page.getByRole("tab", { name: "Status" })).toBeVisible();
+
+  // Pin acts on the selected channel, which the add control just selected.
+  await expect(page.getByRole("button", { name: "Pin this channel" })).toHaveAttribute("aria-pressed", "false");
+  await page.getByRole("button", { name: "Pin this channel" }).click();
+  await expect(page.getByRole("button", { name: "Unpin this channel" })).toHaveAttribute("aria-pressed", "true");
+
+  // A pin is the restore set: after a reload the strip is exactly what was pinned,
+  // and the channels that were never pinned are not brought back.
+  await page.reload();
+  await expect(page.getByRole("tab", { name: "Status" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Files" })).toHaveCount(0);
+});
+
+test("closing a pinned channel hides it now and restores it later", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockLanes(page);
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+
+  await page.getByRole("button", { name: "Pin this channel" }).click();
+  await expect(page.getByRole("button", { name: "Unpin this channel" })).toBeVisible();
+
+  // Closing does not unpin: the tab leaves, the pin stays.
+  await page.getByRole("button", { name: "Close Files" }).click();
+  await expect(page.getByRole("tab", { name: "Files" })).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
+});
+
+test("closing every channel leaves a launcher instead of an empty lane", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockLanes(page);
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+
+  for (const name of ["Files", "Graphs", "Status"]) {
+    await page.getByRole("button", { name: `Close ${name}` }).click();
+  }
+
+  // The strip has nothing left, so the lane offers the way back.
+  const launcher = page.getByRole("group", { name: /Choose a channel/ });
+  await expect(launcher).toBeVisible();
+  await launcher.getByRole("button", { name: "Graphs" }).click();
+  await expect(page.getByRole("tab", { name: "Graphs" })).toBeVisible();
+});
