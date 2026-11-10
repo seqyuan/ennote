@@ -243,3 +243,47 @@ test("closing every channel leaves a launcher instead of an empty lane", async (
   await launcher.getByRole("button", { name: "Graphs" }).click();
   await expect(page.getByRole("tab", { name: "Graphs" })).toBeVisible();
 });
+
+test("unpinning leaves the channel open but stops restoring it", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockLanes(page);
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+
+  await page.getByRole("button", { name: "Pin this channel" }).click();
+  await expect(page.getByRole("button", { name: "Unpin this channel" })).toHaveAttribute("aria-pressed", "true");
+  await page.reload();
+  await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
+
+  // Unpin keeps the strip exactly as it is; only the next visit changes.
+  await page.getByRole("button", { name: "Unpin this channel" }).click();
+  await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add a channel" })).toBeVisible();
+
+  await page.reload();
+  // No pin is left, so the next visit falls back to the default set of all three.
+  await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Graphs" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Status" })).toBeVisible();
+});
+
+test("a pinned channel does not reopen a shell the reader collapsed", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockLanes(page);
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+  await page.getByRole("button", { name: "Pin this channel" }).click();
+
+  // Collapse from the top bar, the way a reader would.
+  await page.getByTitle("Hide panel").click();
+  await expect(page.locator(".right-panel-container")).toHaveClass(/right-panel-closed/);
+
+  await page.reload();
+  await expect(page.locator(".right-panel-container")).toHaveClass(/right-panel-closed/);
+
+  // The pin still decides what appears once the shell is opened again.
+  await page.getByTitle("Show panel").click();
+  await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
+});

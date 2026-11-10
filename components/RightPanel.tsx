@@ -63,10 +63,11 @@ export function RightPanel(props: {
     setNavigatorOpen(false);
   };
 
-  const channelBody = activeChannelId === null ? null : (
+  const channelBody = (
     <>
       {/* The tree holds the reader's place: expanded directories, scroll, filter.
-          It stays mounted while another channel is on screen, and only hides. */}
+          It stays mounted while another channel is on screen — and while none is,
+          which is when the launcher shows — and only hides. */}
       <div className="right-panel-channel-slot" hidden={activeChannelId !== "files"}>
         <FilesChannel
           projectId={projectId}
@@ -86,6 +87,17 @@ export function RightPanel(props: {
           activeRun={activeRun}
           status={status}
           permissionMode={permissionMode}
+        />
+      )}
+      {activeChannelId === null && (
+        <ChannelLauncher
+          channels={PANEL_CHANNELS}
+          hint={t("rightPanel.launcherHint")}
+          t={t}
+          onOpen={(channel) => {
+            panel.openChannel(channel);
+            setNavigatorOpen(false);
+          }}
         />
       )}
     </>
@@ -158,17 +170,7 @@ export function RightPanel(props: {
             )}
           </div>
         )}
-        channelBody={channelBody ?? (
-          <ChannelLauncher
-            channels={PANEL_CHANNELS}
-            hint={t("rightPanel.launcherHint")}
-            t={t}
-            onOpen={(channel) => {
-              panel.openChannel(channel);
-              setNavigatorOpen(false);
-            }}
-          />
-        )}
+        channelBody={channelBody}
         inspectorStrip={fileTabs.length > 0 ? (
           <TabBar
             tabs={fileTabs}

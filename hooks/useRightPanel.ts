@@ -59,21 +59,22 @@ export function useRightPanel(projectId: string | null) {
   const rememberedTab = useRef(new Map<string, string>());
   const lastWritten = useRef<string | null>(null);
   const draggingPrimary = useRef(false);
-  // Whether the shell is the reader's decision yet. Until they expand or
-  // collapse it in this session, a Project switch takes that Project's stored
-  // flag; after that their choice outlives the project they were looking at.
-  const shellDecided = useRef(false);
+  // Set when the stored preferences could not be read. Writing then would
+  // replace real preferences with the defaults this session is running on.
+  const storageUnreadable = useRef(false);
 
   const key = projectId ?? "";
 
-  // A Project switch restores that Project's channels without re-deciding the
-  // shell: `shellDecided` says whether the current flag is the reader's or the
-  // stored one. A null project consumes no decision — it is a moment of the app
-  // starting up, not a project with preferences of its own.
+  // Every Project keeps its own preferences, the shell flag included, so a
+  // switch applies the incoming Project's stored state as a whole. A null
+  // project is the app starting up rather than a project of its own: it hydrates
+  // from defaults and writes nothing.
   useEffect(() => {
     if (hydratedFor === key) return;
-    const preferences = projectId ? readPreferences(projectId) : emptyPreferences("");
-    setState((current) => {
+    const preferences = projectId
+      ? readPreferences(projectId, storageUnreadable)
+      : emptyPreferences("");
+    setState(() => {
       const next = initialRightPanelState(preferences);
       const parked = openTabs
         .filter((tab) => tab.projectId === projectId)
@@ -82,7 +83,7 @@ export function useRightPanel(projectId: string | null) {
       const restored = remembered !== undefined && parked.includes(remembered) ? remembered : null;
       return {
         ...next,
-        open: shellDecided.current ? current.open : next.open,
+        open: next.open,
         activeInspectorId: restored,
         activeLane: restored === null ? "channel" : "inspector",
       };
@@ -116,7 +117,7 @@ export function useRightPanel(projectId: string | null) {
     if (hydratedFor !== projectId) return;
     // A drag writes once, when it ends: every intermediate width would
     // otherwise cost a synchronous localStorage write per pointer move.
-    if (draggingPrimary.current) return;
+    if (draggingPrimary.current || storageUnreadable.current) return;
     const serialized = serializePreferences(preferencesOf(state));
     if (lastWritten.current === serialized) return;
     try {
@@ -132,7 +133,6 @@ export function useRightPanel(projectId: string | null) {
       ? previous
       : [...previous, { id, label: fileName, filePath, projectId }]);
     rememberedTab.current.set(projectId, id);
-    shellDecided.current = true;
     setState((current) => openInspectorTab(current, id));
   }, [projectId]);
 
@@ -173,10 +173,12 @@ export function useRightPanel(projectId: string | null) {
   // The divider only changes widths: the lane it resizes stays mounted, and the
   // bound is the one the layout uses, so a drag cannot starve the other lane.
   const resizePrimaryBy = useCallback((delta: number, shellWidth: number) => {
-    setState((current) => setPrimaryWidth(
-      current,
-      resolvePrimaryLaneWidthOf(current.primaryWidth + delta, shellWidth),
-    ));
+    setState((current) => {
+      // Start from what the lane is showing, not from what was stored: a width
+      // saved on a wider panel would otherwise eat the first Npx of the drag.
+      const from = resolvePrimaryLaneWidthOf(current.primaryWidth, shellWidth);
+      return setPrimaryWidth(current, resolvePrimaryLaneWidthOf(from + delta, shellWidth));
+    });
   }, []);
 
   const beginPrimaryResize = useCallback(() => { draggingPrimary.current = true; }, []);
@@ -202,21 +204,18 @@ export function useRightPanel(projectId: string | null) {
     endPrimaryResize,
     state,
     open: state.open,
-    openShell: () => {
-      shellDecided.current = true;
-      setState((current) => expandShell(current));
-    },
-    closeShell: () => {
-      shellDecided.current = true;
-      setState((current) => collapseShell(current));
-    },
+    openShell: () => setState((current) => expandShell(current)),
+    closeShell: () => setState((current) => collapseShell(current)),
   };
 }
 
-function readPreferences(projectId: string): RightPanelPreferencesV1 {
+function readPreferences(projectId: string, unreadable: { current: boolean }): RightPanelPreferencesV1 {
   try {
     return parsePreferences(window.localStorage.getItem(rightPanelPreferencesKey(projectId)), projectId);
   } catch {
+    // Nothing can be trusted about what is stored, so this session must not
+    // write over it.
+    unreadable.current = true;
     return emptyPreferences(projectId);
   }
 }
