@@ -19,6 +19,7 @@ import {
   rightPanelPreferencesKey,
   serializePreferences,
   expandShell,
+  setNavigatorHidden,
   setPrimaryWidth,
   unpinChannel,
 } from "@/lib/right-panel-channels";
@@ -265,6 +266,30 @@ describe("remembered inspector rows", () => {
   });
 });
 
+describe("navigator visibility", () => {
+  it("survives a write and a read", () => {
+    const hidden = setNavigatorHidden(state(), true);
+    const back = parsePreferences(serializePreferences(preferencesOf(hidden)), "p1");
+
+    expect(back.navigatorHidden).toBe(true);
+    expect(initialRightPanelState(back).navigatorHidden).toBe(true);
+  });
+
+  it("defaults to showing the navigator, including on a payload without the field", () => {
+    expect(state().navigatorHidden).toBe(false);
+    const legacy = parsePreferences(JSON.stringify({
+      version: 1, projectId: "p1", pinnedChannels: [], primaryWidth: 280, open: false,
+    }), "p1");
+    expect(legacy.navigatorHidden).toBe(false);
+  });
+
+  it("returns the same state when nothing changes", () => {
+    const shown = state();
+    expect(setNavigatorHidden(shown, false)).toBe(shown);
+    expect(setNavigatorHidden(setNavigatorHidden(shown, true), true)).not.toBe(shown);
+  });
+});
+
 describe("shell and lane width", () => {
   it("expands and collapses without changing anything else", () => {
     const base = state();
@@ -349,6 +374,7 @@ describe("preferences", () => {
       open: true,
       inspectorTabs: [],
       activeInspectorId: null,
+      navigatorHidden: false,
     });
   });
 });

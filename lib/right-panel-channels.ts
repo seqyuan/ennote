@@ -71,6 +71,12 @@ export interface RightPanelState {
    * that is what makes a reload give the reader their files back.
    */
   inspectorTabs: PersistedInspectorTab[];
+  /**
+   * The navigator lane is hidden. It means one thing — "I do not want the tree
+   * right now" — and each layout presents that differently: side by side with
+   * the preview, slid over it, or not at all.
+   */
+  navigatorHidden: boolean;
 }
 
 /** A file the panel had open, as it is remembered between visits. */
@@ -98,6 +104,8 @@ export interface RightPanelPreferencesV1 {
   inspectorTabs?: PersistedInspectorTab[];
   /** The row that was selected, when it is still among `inspectorTabs`. */
   activeInspectorId?: string | null;
+  /** The reader chose to hide the navigator; it stays hidden on the next visit. */
+  navigatorHidden?: boolean;
 }
 
 /**
@@ -118,6 +126,7 @@ export function emptyPreferences(projectId: string): RightPanelPreferencesV1 {
     open: false,
     inspectorTabs: [],
     activeInspectorId: null,
+    navigatorHidden: false,
   };
 }
 
@@ -169,6 +178,7 @@ export function parsePreferences(raw: string | null, projectId: string): RightPa
     open: row.open === true,
     inspectorTabs,
     activeInspectorId,
+    navigatorHidden: row.navigatorHidden === true,
   };
 }
 
@@ -208,6 +218,7 @@ export function serializePreferences(preferences: RightPanelPreferencesV1): stri
     primaryWidth: preferences.primaryWidth,
     open: preferences.open,
     inspectorTabs: readInspectorTabs(preferences.inspectorTabs),
+    navigatorHidden: preferences.navigatorHidden === true,
     activeInspectorId: preferences.activeInspectorId ?? null,
   });
 }
@@ -245,6 +256,7 @@ export function initialRightPanelState(preferences: RightPanelPreferencesV1): Ri
     activeChannelId: openChannels[0] ?? null,
     open: preferences.open,
     primaryWidth: preferences.primaryWidth,
+    navigatorHidden: preferences.navigatorHidden === true,
     activeInspectorId: preferences.activeInspectorId ?? null,
     activeLane: preferences.activeInspectorId ? "inspector" : "channel",
     inspectorTabs: readInspectorTabs(preferences.inspectorTabs),
@@ -268,7 +280,13 @@ export function preferencesOf(state: RightPanelState): RightPanelPreferencesV1 {
     open: state.open,
     inspectorTabs: readInspectorTabs(state.inspectorTabs),
     activeInspectorId: state.activeInspectorId,
+    navigatorHidden: state.navigatorHidden,
   };
+}
+
+/** Show or hide the navigator lane. */
+export function setNavigatorHidden(state: RightPanelState, hidden: boolean): RightPanelState {
+  return state.navigatorHidden === hidden ? state : { ...state, navigatorHidden: hidden };
 }
 
 /** Reorder the remembered rows, so the strip's order survives a reload too. */

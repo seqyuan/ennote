@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { ArrowLeft, Pin, PinOff, Plus } from "lucide-react";
 
 import { FileViewer } from "./FileViewer";
@@ -15,6 +14,7 @@ import { useT } from "@/components/LocaleProvider";
 import type { useRightPanel } from "@/hooks/useRightPanel";
 import type { useResizable } from "@/hooks/useResizable";
 import { PANEL_CHANNELS, isPanelChannel } from "@/lib/right-panel-channels";
+import { DUAL_LANE_MIN_WIDTH } from "@/lib/right-panel-width";
 import type { PermissionMode } from "@/lib/permission-mode";
 
 export function RightPanel(props: {
@@ -40,13 +40,9 @@ export function RightPanel(props: {
   } = props;
   const t = useT();
   const { state, fileTabs } = panel;
-  const [navigatorOpen, setNavigatorOpen] = useState(false);
-  const toggleNavigator = () => setNavigatorOpen((next) => !next);
-  // Collapsing the panel ends the gesture the overlay was opened for.
-  const closePanel = () => {
-    setNavigatorOpen(false);
-    onClose();
-  };
+  const navigatorOpen = !state.navigatorHidden;
+  const toggleNavigator = panel.toggleNavigator;
+  const closePanel = onClose;
 
   const openChannels = state.openChannels;
   const activeChannelId = panel.activeChannelId;
@@ -57,10 +53,15 @@ export function RightPanel(props: {
     else panel.closeTab(tabId);
   };
 
-  // A channel's strip pick closes the navigator it was opened from.
+  /**
+   * Hand the strip back to a channel. In the overlay layout the navigator was a
+   * temporary look, so the pick ends it; a wide panel keeps the split the reader
+   * asked for.
+   */
   const selectTab = (tabId: string) => {
     panel.setActiveTabId(tabId);
-    setNavigatorOpen(false);
+    const narrow = resize.width < DUAL_LANE_MIN_WIDTH;
+    if (narrow && !state.navigatorHidden) panel.toggleNavigator();
   };
 
   const channelBody = (
@@ -72,10 +73,7 @@ export function RightPanel(props: {
         <FilesChannel
           projectId={projectId}
           displayPath={displayPath}
-          onOpenFile={(path, name) => {
-            onOpenFile(path, name);
-            setNavigatorOpen(false);
-          }}
+          onOpenFile={onOpenFile}
           onPreviewFile={onPreviewFile}
         />
       </div>
@@ -97,10 +95,7 @@ export function RightPanel(props: {
           channels={PANEL_CHANNELS}
           hint={t("rightPanel.launcherHint")}
           t={t}
-          onOpen={(channel) => {
-            panel.openChannel(channel);
-            setNavigatorOpen(false);
-          }}
+          onOpen={panel.openChannel}
         />
       )}
     </>

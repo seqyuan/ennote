@@ -25,6 +25,7 @@ import {
   reorderInspectorTabs,
   rightPanelPreferencesKey,
   serializePreferences,
+  setNavigatorHidden,
   setPrimaryWidth,
   unpinChannel,
 } from "@/lib/right-panel-channels";
@@ -188,6 +189,10 @@ export function useRightPanel(projectId: string | null) {
     setState((current) => reorderInspectorTabs(current, pathOf(fromId), pathOf(toId)));
   }, []);
 
+  const toggleNavigator = useCallback(() => {
+    setState((current) => setNavigatorHidden(current, !current.navigatorHidden));
+  }, []);
+
   const closeChannelTab = useCallback((channel: PanelChannel) => {
     setState((current) => closeChannel(current, channel));
   }, []);
@@ -229,6 +234,7 @@ export function useRightPanel(projectId: string | null) {
     closeTab,
     reorderTabs,
     closeChannelTab,
+    toggleNavigator,
     openChannel: openChannelTab,
     togglePin,
     resizePrimaryBy,

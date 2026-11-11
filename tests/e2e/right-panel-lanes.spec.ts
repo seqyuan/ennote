@@ -145,13 +145,17 @@ test("a medium panel slides the navigator over the preview", async ({ page }) =>
   await expect(lanes).toHaveAttribute("data-mode", "medium");
   await expect(page.locator(".file-code")).toContainText("ready");
 
-  // Not drawn beside the preview at this width: the navigator is parked off the edge.
+  // Not drawn beside the preview at this width: the navigator slides over it, and
+  // the reader starts with it showing because that is what opened the file.
   const navigator = page.getByTestId("right-panel-primary");
-  await expect(navigator).toHaveAttribute("data-parked", "true");
+  await expect(navigator).toHaveAttribute("data-open", "true");
+  await expect(navigator).not.toHaveAttribute("data-parked", "true");
 
+  // Hiding it parks the whole lane off the edge; the preview keeps the panel.
+  await page.getByRole("button", { name: "Hide the file navigator" }).click();
+  await expect(navigator).toHaveAttribute("data-parked", "true");
   await page.getByRole("button", { name: "Show the file navigator" }).click();
   await expect(navigator).not.toHaveAttribute("data-parked", "true");
-  await expect(navigator).toHaveAttribute("data-open", "true");
 
   // The tree kept the directory it had expanded before the file opened.
   await expect(navigator.locator('.file-tree-main[title="/workspace/src"]')).toHaveAttribute("aria-expanded", "true");
@@ -416,4 +420,34 @@ test("a stored row does not leak into another project", async ({ page }) => {
 
   await selectProject(page, second.name);
   await expect(page.getByRole("tab", { name: "main.ts" })).toHaveCount(0);
+});
+
+test("the navigator can be hidden and stays hidden", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockLanes(page);
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+  await page.locator('.file-tree-main[title="/workspace/src"]').click();
+  await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
+  await expect(page.getByTestId("right-panel-lanes")).toHaveAttribute("data-mode", "wide");
+
+  // Hiding it hands the whole panel to the preview, and the lane stays mounted.
+  await page.getByRole("button", { name: "Hide the file navigator" }).click();
+  const lanes = page.getByTestId("right-panel-lanes");
+  await expect(lanes).toHaveAttribute("data-mode", "fill");
+  await expect(page.locator(".file-code")).toContainText("ready");
+  await expect(page.getByRole("tab", { name: "Files" })).toBeHidden();
+  await expect(page.getByRole("separator", { name: "Resize the file navigator" })).toHaveCount(0);
+
+  // Hiding does not cost the tree its place: showing it again finds the same
+  // directory still expanded.
+  await page.getByRole("button", { name: "Show the file navigator" }).click();
+  await expect(lanes).toHaveAttribute("data-mode", "wide");
+  await expect(page.locator('.file-tree-main[title="/workspace/src"]')).toHaveAttribute("aria-expanded", "true");
+
+  // The choice belongs to the Project, so a reload keeps the preview in front.
+  await page.getByRole("button", { name: "Hide the file navigator" }).click();
+  await page.reload();
+  await expect(page.getByTestId("right-panel-lanes")).toHaveAttribute("data-mode", "fill");
 });

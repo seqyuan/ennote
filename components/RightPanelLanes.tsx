@@ -44,7 +44,11 @@ export function RightPanelLanes(props: {
   onResizePrimary: (delta: number) => void;
   onResizePrimaryStart: () => void;
   onResizePrimaryEnd: () => void;
-  /** Whether the medium layout has the channel lane sliding over the inspector. */
+  /**
+   * Whether the navigator is showing. Each layout presents that one fact its own
+   * way: side by side when there is room, slid over the preview when there is
+   * not, and — when hidden — not at all, which leaves the preview the panel.
+   */
   navigatorOpen: boolean;
   onToggleNavigator: () => void;
 }) {
@@ -71,15 +75,23 @@ export function RightPanelLanes(props: {
   // Too narrow for two columns, wide enough that the tree is still worth having:
   // the navigator slides over the preview instead of squeezing it.
   const overlay = mode === "medium" && hasInspector;
+  // With the navigator hidden there is no second column to size, so the preview
+  // takes the panel — the third presentation of the same flag.
+  const split = hasInspector && (overlay || props.navigatorOpen);
+  // Hidden in a wide panel: the lane stays mounted so the tree keeps its
+  // expanded directories, and stops taking space so the preview fills the panel.
+  const primaryHidden = hasInspector && !overlay && !props.navigatorOpen;
   const parked = overlay && !props.navigatorOpen;
 
   const primaryStyle: CSSProperties = overlay
     ? { width: `min(${OVERLAY_PRIMARY_WIDTH}px, 78%)` }
-    : hasInspector
-      ? { width: primaryWidth }
-      : { flex: "1 1 auto" };
+    : primaryHidden
+      ? { display: "none" }
+      : split
+        ? { width: primaryWidth }
+        : { flex: "1 1 auto" };
 
-  const layout = overlay ? "medium" : hasInspector ? "wide" : "single";
+  const layout = overlay ? "medium" : primaryHidden ? "fill" : split ? "wide" : "single";
 
   return (
     <div className={styles.lanes} data-mode={layout} data-testid="right-panel-lanes">
@@ -103,7 +115,7 @@ export function RightPanelLanes(props: {
         {props.channelStrip}
         <div className={styles.body}>{props.channelBody}</div>
       </div>
-      {hasInspector && mode === "wide" && (
+      {split && !overlay && (
         <ResizeHandle
           key="divider"
           side="right"
@@ -123,20 +135,18 @@ export function RightPanelLanes(props: {
         <div key="inspector" className={styles.inspector}>
           <div className={styles.strip}>
             {props.inspectorStrip}
-            {overlay && (
-              // Last, not first: while the navigator covers this lane's left part
-              // the control that brings it back has to stay reachable.
-              <button
-                type="button"
-                className={styles["nav-toggle"]}
-                aria-label={props.navigatorOpen ? t("rightPanel.hideNavigator") : t("rightPanel.showNavigator")}
-                aria-expanded={props.navigatorOpen}
-                data-open={props.navigatorOpen || undefined}
-                onClick={props.onToggleNavigator}
-              >
-                <PanelLeft size={15} aria-hidden="true" />
-              </button>
-            )}
+            {/* Last, not first: while the navigator covers this lane's left part
+                the control that brings it back has to stay reachable. */}
+            <button
+              type="button"
+              className={styles["nav-toggle"]}
+              aria-label={props.navigatorOpen ? t("rightPanel.hideNavigator") : t("rightPanel.showNavigator")}
+              aria-expanded={props.navigatorOpen}
+              data-open={props.navigatorOpen || undefined}
+              onClick={props.onToggleNavigator}
+            >
+              <PanelLeft size={15} aria-hidden="true" />
+            </button>
           </div>
           <div className={styles.body}>{props.inspectorBody}</div>
         </div>
