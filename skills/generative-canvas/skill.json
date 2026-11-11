@@ -1,0 +1,7 @@
+{
+  "id": "generative-canvas",
+  "version": "0.1.0",
+  "description": "Publish an interactive HTML canvas (SVG diagram, chart, calculator) as a widget artifact",
+  "prompt": "SKILL.md",
+  "allowedTools": ["read", "write", "publish_artifact", "ls", "grep", "find"]
+}
