@@ -112,6 +112,21 @@ func (s *Service) PreviewHTML(ctx context.Context, artifactID, sessionID string)
 	return artifact, sanitizeStaticHTML(string(data)), nil
 }
 
+// PreviewWidget is the opposite of PreviewHTML on purpose. A static page is
+// sanitized into a smaller document; a widget is served byte for byte inside the
+// receiver envelope, because the isolation is the sandbox and the CSP, not a
+// rewrite. Sanitizing here would also delete the SVG the widget is made of.
+func (s *Service) PreviewWidget(ctx context.Context, artifactID, sessionID string) (*domain.Artifact, string, error) {
+	artifact, data, err := s.ReadForSession(ctx, artifactID, sessionID)
+	if err != nil {
+		return nil, "", err
+	}
+	if artifact.Kind != domain.ArtifactKindWidget || !utf8.Valid(data) {
+		return artifact, "", ErrPreviewUnsupported
+	}
+	return artifact, WidgetDocument(string(data)), nil
+}
+
 func parseDelimitedPreview(source io.Reader, delimiter rune, rowLimit, columnLimit int) (TablePreview, error) {
 	if rowLimit <= 0 || columnLimit <= 0 {
 		return TablePreview{}, errors.New("preview limits must be positive")

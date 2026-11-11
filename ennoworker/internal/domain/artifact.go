@@ -6,8 +6,13 @@ const (
 	ArtifactKindImage      = "image"
 	ArtifactKindTable      = "table"
 	ArtifactKindStaticHTML = "static_html"
-	ArtifactKindText       = "text"
-	ArtifactKindFile       = "file"
+	// ArtifactKindWidget is a self-contained HTML document the client renders in an
+	// isolated, script-enabled frame. It is never inferred: an .html file stays
+	// ArtifactKindStaticHTML unless the publisher asks for a widget by name, because
+	// inference would silently add script execution to files that never had it.
+	ArtifactKindWidget = "widget"
+	ArtifactKindText   = "text"
+	ArtifactKindFile   = "file"
 )
 
 type ArtifactReference struct {

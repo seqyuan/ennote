@@ -19,12 +19,20 @@ type ArtifactSink struct {
 
 func (s *ArtifactSink) Publish(ctx context.Context, toolCallID, name, sourceKind, workspacePath string,
 	source io.Reader) (domain.ArtifactReference, error) {
+	return s.PublishAs(ctx, toolCallID, name, sourceKind, workspacePath, "", source)
+}
+
+// PublishAs is Publish with an asserted kind. Only `publish_artifact` asks for one;
+// command output and every other sink caller keeps the inferred behaviour.
+func (s *ArtifactSink) PublishAs(ctx context.Context, toolCallID, name, sourceKind, workspacePath, kind string,
+	source io.Reader) (domain.ArtifactReference, error) {
 	if s == nil || s.Service == nil {
 		return domain.ArtifactReference{}, fmt.Errorf("artifact service is unavailable")
 	}
 	artifact, err := s.Service.Store(ctx, artifacts.PublishInput{
 		ProjectID: s.ProjectID, SessionID: s.SessionID, RunID: s.RunID, ToolCallID: toolCallID,
 		Name: name, SourceKind: sourceKind, SourceWorkspacePath: workspacePath, RetentionClass: "project",
+		Kind: kind,
 	}, source)
 	if err != nil {
 		return domain.ArtifactReference{}, err

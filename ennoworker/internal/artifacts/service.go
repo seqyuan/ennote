@@ -40,6 +40,12 @@ const (
 	defaultMaxArtifactBytes = int64(50 << 20)
 	defaultMaxProjectBytes  = int64(2 << 30)
 	defaultMaxImagePixels   = int64(40_000_000)
+	// defaultMaxWidgetBytes is deliberately far below the artifact ceiling. A
+	// widget is not a document to be downloaded; it is a message that has to fit
+	// through the remote transport's bounded JSON envelope and over a phone's
+	// cellular link (tauri-remote-access-design-v4 §6.4, §10.1). 128 KiB is
+	// generous for a self-contained SVG plus one inline data snapshot.
+	defaultMaxWidgetBytes = int64(128 << 10)
 )
 
 type Service struct {
@@ -49,6 +55,7 @@ type Service struct {
 	MaxImageBytes    int64
 	MaxArtifactBytes int64
 	MaxProjectBytes  int64
+	MaxWidgetBytes   int64
 	MaxPixels        int64
 }
 
@@ -61,6 +68,10 @@ type PublishInput struct {
 	SourceKind          string
 	SourceWorkspacePath string
 	RetentionClass      string
+	// Kind names a kind the publisher asserts instead of letting classification
+	// decide. Today only domain.ArtifactKindWidget is accepted; empty means
+	// "classify by content and extension".
+	Kind string
 }
 
 // ForScope returns a new Service bound to the given database and artifact
@@ -76,6 +87,7 @@ func (s *Service) ForScope(db *sql.DB, root string) *Service {
 		MaxImageBytes:    s.MaxImageBytes,
 		MaxArtifactBytes: s.MaxArtifactBytes,
 		MaxProjectBytes:  s.MaxProjectBytes,
+		MaxWidgetBytes:   s.MaxWidgetBytes,
 		MaxPixels:        s.MaxPixels,
 	}
 }
@@ -133,7 +145,7 @@ func (s *Service) Store(ctx context.Context, input PublishInput, source io.Reade
 		return nil, err
 	}
 
-	limit := s.maxArtifactBytes()
+	limit := s.limitFor(input.Kind)
 	hash := sha256.New()
 	written, copyErr := io.Copy(io.MultiWriter(temp, hash), io.LimitReader(source, limit+1))
 	if copyErr != nil {
@@ -156,7 +168,7 @@ func (s *Service) Store(ctx context.Context, input PublishInput, source io.Reade
 		return nil, err
 	}
 
-	kind, mimeType, width, height, metadata, err := classifyArtifact(tempPath, name, written, s.maxPixels())
+	kind, mimeType, width, height, metadata, err := classifyArtifact(tempPath, name, written, s.maxPixels(), input.Kind)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +308,10 @@ func (s *Service) ValidateForSession(ctx context.Context, artifactID, sessionID 
 		Width: artifact.Width, Height: artifact.Height, Data: data}, nil
 }
 
-func classifyArtifact(path, name string, size, maxPixels int64) (string, string, int, int, map[string]any, error) {
+func classifyArtifact(path, name string, size, maxPixels int64, wantKind string) (string, string, int, int, map[string]any, error) {
+	if wantKind == domain.ArtifactKindWidget {
+		return classifyWidget(path, name)
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return "", "", 0, 0, nil, err
@@ -372,6 +387,34 @@ func classifyArtifact(path, name string, size, maxPixels int64) (string, string,
 	return domain.ArtifactKindFile, detected, 0, 0, metadata, nil
 }
 
+func classifyWidget(path, name string) (string, string, int, int, map[string]any, error) {
+	ext := strings.ToLower(filepath.Ext(name))
+	if ext != ".html" && ext != ".htm" {
+		return "", "", 0, 0, nil, fmt.Errorf("%w: a widget must be an .html file", ErrArtifactInvalid)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", 0, 0, nil, err
+	}
+	if !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
+		return "", "", 0, 0, nil, fmt.Errorf("%w: a widget must be UTF-8 text", ErrArtifactInvalid)
+	}
+	// TrimSpace (not an ASCII-only trim) plus a BOM strip: an .html file saved by an
+	// editor that writes a BOM is still an .html file.
+	trimmed := bytes.TrimSpace(bytes.TrimPrefix(data, []byte("\xef\xbb\xbf")))
+	if !bytes.HasPrefix(trimmed, []byte("<")) {
+		return "", "", 0, 0, nil, fmt.Errorf("%w: a widget must start with a tag", ErrArtifactInvalid)
+	}
+	// Only validation happens here. The bytes are stored verbatim: the isolation is
+	// the sandbox and the CSP, never a rewrite of what the model wrote. See
+	// docs/plans/2026-11-11-generative-canvas-design.md §3.6.
+	metadata := map[string]any{
+		"format":              "html",
+		"widgetPolicyVersion": WidgetPolicyVersion,
+	}
+	return domain.ArtifactKindWidget, "text/html; charset=utf-8", 0, 0, metadata, nil
+}
+
 func (s *Service) validateOwnership(ctx context.Context, projectID, sessionID string) error {
 	var count int
 	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions WHERE id=? AND project_id=? AND status='active'`,
@@ -437,6 +480,27 @@ func (s *Service) maxArtifactBytes() int64 {
 		return s.MaxArtifactBytes
 	}
 	return defaultMaxArtifactBytes
+}
+
+// limitFor is the byte ceiling the copy is allowed to reach. A widget request
+// lowers it: the artifact ceiling protects the disk, this one protects the
+// client that has to render the result.
+func (s *Service) limitFor(kind string) int64 {
+	limit := s.maxArtifactBytes()
+	if kind != domain.ArtifactKindWidget {
+		return limit
+	}
+	if widgetLimit := s.maxWidgetBytes(); widgetLimit < limit {
+		return widgetLimit
+	}
+	return limit
+}
+
+func (s *Service) maxWidgetBytes() int64 {
+	if s.MaxWidgetBytes > 0 {
+		return s.MaxWidgetBytes
+	}
+	return defaultMaxWidgetBytes
 }
 
 func (s *Service) maxProjectBytes() int64 {

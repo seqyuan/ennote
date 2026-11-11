@@ -135,6 +135,23 @@ export const createSession201: WorkerOperationResponse<"createSession", 201> = {
   }
 };
 
+/** getArtifact answering 200. */
+export const getArtifact200: WorkerOperationResponse<"getArtifact", 200> = {
+  "data": {
+    "createdAt": "2026-01-01T00:00:06Z",
+    "id": "00000000-0000-0000-0000-000000000013",
+    "kind": "widget",
+    "mimeType": "text/html; charset=utf-8",
+    "name": "canvas.html",
+    "projectId": "00000000-0000-0000-0000-000000000002",
+    "retentionClass": "project",
+    "sessionId": "00000000-0000-0000-0000-000000000005",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000004",
+    "sizeBytes": 75,
+    "sourceKind": "workspace_publish"
+  }
+};
+
 /** getGlobalHero answering 200. */
 export const getGlobalHero200: WorkerOperationResponse<"getGlobalHero", 200> = {
   "data": {

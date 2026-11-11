@@ -1127,6 +1127,17 @@ func (s *Server) previewArtifact(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'; frame-ancestors 'self'")
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, preview)
+	case domain.ArtifactKindWidget:
+		_, preview, err := s.Artifacts.PreviewWidget(r.Context(), artifact.ID, r.PathValue("sessionID"))
+		if err != nil {
+			s.writeArtifactError(w, r, err)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Disposition", contentDisposition("inline", artifact.Name))
+		w.Header().Set("Content-Security-Policy", artifacts.WidgetContentSecurityPolicy)
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, preview)
 	case domain.ArtifactKindText:
 		_, preview, err := s.Artifacts.PreviewText(r.Context(), artifact.ID, r.PathValue("sessionID"))
 		if err != nil {

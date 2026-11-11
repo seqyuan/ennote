@@ -2712,7 +2712,7 @@ export interface components {
             artifactId: string;
             name: string;
             /** @enum {string} */
-            kind: "image" | "table" | "static_html" | "text" | "file";
+            kind: "image" | "table" | "static_html" | "widget" | "text" | "file";
             mimeType: string;
             /** Format: int64 */
             sizeBytes: number;
@@ -2728,7 +2728,7 @@ export interface components {
             runId?: string;
             name: string;
             /** @enum {string} */
-            kind: "image" | "image_attachment" | "table" | "static_html" | "text" | "file";
+            kind: "image" | "image_attachment" | "table" | "static_html" | "widget" | "text" | "file";
             mimeType: string;
             /** Format: int64 */
             sizeBytes: number;
@@ -7082,7 +7082,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Safe preview selected by the stored artifact kind */
+            /**
+             * @description Safe preview selected by the stored artifact kind. `table` and `text`
+             *     answer JSON; `image` answers its own bytes; the HTML answer differs by
+             *     kind and the difference is the point: `static_html` is sanitized into a
+             *     smaller script-free document, while `widget` is served byte for byte
+             *     inside a Worker-authored receiver document under a strict
+             *     Content-Security-Policy (`sandbox allow-scripts`, four CDN origins, no
+             *     network). A client renders either answer, but only a widget needs
+             *     `sandbox="allow-scripts"` on the frame.
+             */
             200: {
                 headers: {
                     "X-Content-Type-Options"?: "nosniff";

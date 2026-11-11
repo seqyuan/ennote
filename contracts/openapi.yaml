@@ -1983,7 +1983,15 @@ paths:
           schema: { type: string }
       responses:
         "200":
-          description: Safe preview selected by the stored artifact kind
+          description: |
+            Safe preview selected by the stored artifact kind. `table` and `text`
+            answer JSON; `image` answers its own bytes; the HTML answer differs by
+            kind and the difference is the point: `static_html` is sanitized into a
+            smaller script-free document, while `widget` is served byte for byte
+            inside a Worker-authored receiver document under a strict
+            Content-Security-Policy (`sandbox allow-scripts`, four CDN origins, no
+            network). A client renders either answer, but only a widget needs
+            `sandbox="allow-scripts"` on the frame.
           headers:
             X-Content-Type-Options:
               schema: { type: string, const: nosniff }
@@ -4081,7 +4089,7 @@ components:
       properties:
         artifactId: { type: string }
         name: { type: string }
-        kind: { type: string, enum: [image, table, static_html, text, file] }
+        kind: { type: string, enum: [image, table, static_html, widget, text, file] }
         mimeType: { type: string }
         sizeBytes: { type: integer, format: int64, minimum: 0 }
         sha256: { type: string }
@@ -4098,7 +4106,7 @@ components:
         messageId: { type: string }
         runId: { type: string }
         name: { type: string }
-        kind: { type: string, enum: [image, image_attachment, table, static_html, text, file] }
+        kind: { type: string, enum: [image, image_attachment, table, static_html, widget, text, file] }
         mimeType: { type: string }
         sizeBytes: { type: integer, format: int64, minimum: 0 }
         sha256: { type: string }

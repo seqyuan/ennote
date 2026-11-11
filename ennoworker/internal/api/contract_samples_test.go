@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/seqyuan/ennote/ennoworker/internal/artifacts"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
@@ -582,6 +584,31 @@ func TestContractSamples(t *testing.T) {
 	})
 	samples.record(contractSampleRequest{
 		method: http.MethodGet, route: "/v1/skills", auth: true, status: http.StatusOK,
+	})
+
+	// The artifact routes had no sample at all, which is why adding a kind to
+	// `Artifact.kind` could have shipped with nothing verifying the shape it is
+	// returned in. Recorded after the message page because the artifact carries no
+	// message id, so it cannot change what that page answered.
+	//
+	// The row is seeded through the same scope the middleware builds for a session
+	// route (per-Session database and per-Session artifact root) rather than through
+	// `server.Artifacts`: that service is bound to whichever Session setupServer
+	// opened, and an artifact written there is invisible to this Session's routes.
+	sessionDB, err := server.SessionStores.OpenSession(context.Background(), session.ID)
+	require.NoError(t, err)
+	sessionPath, err := server.SessionStores.SessionPath(session.ID)
+	require.NoError(t, err)
+	storedWidget, err := server.Artifacts.ForScope(sessionDB, filepath.Join(sessionPath, "artifacts")).Store(
+		context.Background(), artifacts.PublishInput{
+			ProjectID: project.Project.ID, SessionID: session.ID, Name: "canvas.html",
+			SourceKind: "workspace_publish", RetentionClass: "project", Kind: domain.ArtifactKindWidget,
+		}, strings.NewReader("<!doctype html><svg viewBox=\"0 0 10 10\"><circle cx=\"5\" cy=\"5\" r=\"4\"/></svg>"))
+	require.NoError(t, err)
+	samples.record(contractSampleRequest{
+		method: http.MethodGet, route: "/v1/sessions/{sessionID}/artifacts/{artifactID}", auth: true,
+		values: map[string]string{"sessionID": session.ID, "artifactID": storedWidget.ID},
+		status: http.StatusOK,
 	})
 
 	if os.Getenv(contractSampleUpdateEnv) != "1" {

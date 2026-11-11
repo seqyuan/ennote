@@ -222,6 +222,29 @@ func TestArtifactMetadataPreviewDownloadAndSessionScope(t *testing.T) {
 	assert.NotContains(t, htmlPreview.Body.String(), "script")
 	assert.NotContains(t, htmlPreview.Body.String(), "onclick")
 
+	// A widget is the same route with the opposite policy: bytes served verbatim
+	// under a script-allowing sandbox, because sanitizing it would delete the SVG it
+	// is made of. The two branch off by kind, so neither can weaken the other.
+	widgetBody := `<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg><script>document.title="ready"</script>`
+	widgetArtifact, err := server.Artifacts.Store(context.Background(), artifacts.PublishInput{
+		ProjectID: project.ID, SessionID: session.ID, Name: "canvas.html", Kind: domain.ArtifactKindWidget,
+	}, strings.NewReader(widgetBody))
+	require.NoError(t, err)
+	assert.Equal(t, domain.ArtifactKindWidget, widgetArtifact.Kind)
+	widgetPreview := request(t, handler, http.MethodGet,
+		"/v1/sessions/"+session.ID+"/artifacts/"+widgetArtifact.ID+"/preview", nil, true)
+	require.Equal(t, http.StatusOK, widgetPreview.Code, widgetPreview.Body.String())
+	assert.Equal(t, "text/html; charset=utf-8", widgetPreview.Header().Get("Content-Type"))
+	assert.Equal(t, "nosniff", widgetPreview.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "private, no-store", widgetPreview.Header().Get("Cache-Control"))
+	widgetCSP := widgetPreview.Header().Get("Content-Security-Policy")
+	assert.Contains(t, widgetCSP, "sandbox allow-scripts")
+	assert.Contains(t, widgetCSP, "connect-src 'none'")
+	assert.Contains(t, widgetCSP, "https://cdnjs.cloudflare.com")
+	assert.Contains(t, widgetCSP, "frame-ancestors 'self'")
+	assert.Contains(t, widgetPreview.Body.String(), widgetBody, "the published bytes are served unchanged")
+	assert.Contains(t, widgetPreview.Body.String(), "ennote:widget:height")
+
 	require.NoError(t, os.WriteFile(filepath.Join(server.Artifacts.Root, table.StoragePath), []byte("corrupt"), 0o600))
 	corrupt := request(t, handler, http.MethodGet, base+"/download", nil, true)
 	assert.Equal(t, http.StatusConflict, corrupt.Code)

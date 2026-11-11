@@ -23,10 +23,18 @@ func (t *PublishArtifactTool) ExecutionClass() domain.ExecutionClass {
 
 func (t *PublishArtifactTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
-		Name:        "publish_artifact",
-		Description: "Publish one completed Workspace file as an immutable conversation artifact. Files are never published automatically.",
-		Parameters:  schema(`{"type":"object","properties":{"path":{"type":"string","description":"Workspace path of the completed file"},"name":{"type":"string","description":"Optional download filename"}},"required":["path"],"additionalProperties":false}`),
-		RiskClass:   domain.RiskLocalWrite,
+		Name: "publish_artifact",
+		Description: "Publish one completed Workspace file as an immutable conversation artifact. " +
+			"Files are never published automatically. " +
+			"kind: \"widget\" publishes a self-contained interactive HTML page (.html, UTF-8, at most 128 KiB) " +
+			"that the reader sees in an isolated frame: no network, no cookies, no Workspace access, no eval. " +
+			"Prefer inline SVG/CSS and inline data over external libraries; the only allowed script hosts are " +
+			"cdnjs.cloudflare.com, cdn.jsdelivr.net, unpkg.com and esm.sh. Read/fetch the data yourself and inline a bounded " +
+			"snapshot; a widget cannot fetch anything. Style with var(--color-text-primary), var(--color-background-primary), " +
+			"var(--color-border-secondary), var(--font-sans), var(--font-mono); the frame is 320-900 px wide, so never fix " +
+			"a pixel width. Omit kind for ordinary files. Guide: /skills/generative-canvas/SKILL.md",
+		Parameters: schema(`{"type":"object","properties":{"path":{"type":"string","description":"Workspace path of the completed file"},"name":{"type":"string","description":"Optional download filename"},"kind":{"type":"string","enum":["auto","widget"],"description":"auto infers from content and never yields a widget; widget renders an interactive HTML page in an isolated frame"}},"required":["path"],"additionalProperties":false}`),
+		RiskClass:  domain.RiskLocalWrite,
 	}
 }
 
@@ -34,6 +42,7 @@ func (t *PublishArtifactTool) Execute(ctx context.Context, call domain.ToolCall)
 	var args struct {
 		Path string `json:"path"`
 		Name string `json:"name"`
+		Kind string `json:"kind"`
 	}
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
 		return errorResult(call, fmt.Errorf("invalid publish_artifact arguments: %w", err)), nil
@@ -41,9 +50,31 @@ func (t *PublishArtifactTool) Execute(ctx context.Context, call domain.ToolCall)
 	if strings.TrimSpace(args.Path) == "" {
 		return errorResult(call, fmt.Errorf("path must not be empty")), nil
 	}
+	// A widget is only ever produced on request. `auto` means "classify by content",
+	// and that classifier turns .html into static_html — the script-free kind.
+	// Case and surrounding space are normalised, which cannot weaken anything: the
+	// only way to reach the widget path is still to name it.
+	kind := strings.ToLower(strings.TrimSpace(args.Kind))
+	switch kind {
+	case "", "auto":
+		kind = ""
+	case domain.ArtifactKindWidget:
+	default:
+		return errorResult(call, fmt.Errorf("kind must be \"auto\" or \"widget\"")), nil
+	}
 	resolved, err := t.Jail.ResolveWorkspaceExisting(args.Path)
 	if err != nil {
 		return errorResult(call, err), nil
+	}
+	if kind == domain.ArtifactKindWidget {
+		// Checked against the Workspace path as well as the artifact name, because the
+		// name is the model's to choose and the error message should point at the file
+		// the reader can actually see.
+		switch strings.ToLower(filepath.Ext(resolved)) {
+		case ".html", ".htm":
+		default:
+			return errorResult(call, fmt.Errorf("a widget must be published from an .html file")), nil
+		}
 	}
 	file, err := os.Open(resolved)
 	if err != nil {
@@ -65,7 +96,7 @@ func (t *PublishArtifactTool) Execute(ctx context.Context, call domain.ToolCall)
 	if name == "" {
 		name = filepath.Base(resolved)
 	}
-	reference, err := t.Sink.Publish(ctx, call.ID, name, "workspace_publish", displayPath, file)
+	reference, err := t.Sink.PublishAs(ctx, call.ID, name, "workspace_publish", displayPath, kind, file)
 	if err != nil {
 		return errorResult(call, err), nil
 	}
