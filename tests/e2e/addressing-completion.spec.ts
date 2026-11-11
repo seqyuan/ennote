@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { selectProject, tryFulfillHarnessRoutes } from "./harness";
+import { openSession as openSeededSession, tryFulfillHarnessRoutes } from "./harness";
 
 const now = "2026-08-06T00:00:00Z";
 const project = { id: "addr-proj", name: "Addressing", description: "", status: "active", createdAt: now, updatedAt: now };
@@ -67,30 +67,34 @@ async function mockBackend(page: Page, onInvocation?: (body: Record<string, unkn
         diagnostics: [],
       });
     }
-    return route.abort();
+    // A route this spec does not serve answers 501 instead of aborting: an
+    // aborted request becomes an empty catalogue that the composer swallows, and
+    // the symptom ("no options") then points at the wrong place.
+    return route.fulfill({ status: 501, contentType: "application/json", body: JSON.stringify({ error: { code: "unmocked_route", message: `no mock for ${path}` } }) });
   });
 }
 
 /**
- * Wait until the composer has the Hero and Skill catalogues. Under parallel load
- * the first `@` can be typed before the fetches land, which makes a token test
- * flaky for reasons that have nothing to do with the token.
+ * Wait until the composer has the Hero and Skill catalogues.
+ *
+ * Opening the `+` panel proves only that the panel opened: an empty group is
+ * dropped before it is drawn, so "no group yet" and "no data yet" look the same,
+ * and a click that closes the panel again says nothing about the fetches behind
+ * it. These waits are on the requests, which is what the typing actually depends
+ * on. Under parallel load the first `@` arrives before the fetches land, and that
+ * — not the token logic — is what used to fail.
  */
 async function awaitCatalogue(page: Page) {
-  const plus = page.getByRole("button", { name: "Insert a hero, graph, skill, or file" });
-  await plus.click();
-  const picker = page.locator(".composer-picker");
-  await expect(picker.getByRole("group", { name: "Heroes" })).toBeVisible();
-  await expect(picker.getByRole("group", { name: "Skills" })).toBeVisible();
-  await plus.click();
-  await expect(picker).toBeHidden();
+  await page.waitForResponse((response) => response.url().includes("/v1/skills") && response.ok());
+  await page.waitForResponse((response) => /\/v1\/global-heroes\/[^/]+$/.test(new URL(response.url()).pathname) && response.ok());
 }
 
-async function openSession(page: Page) {
-  await mockBackend(page);
-  await page.goto("/");
-  await selectProject(page, project.name);
-  await page.getByRole("button", { name: session.title, exact: true }).click();
+async function openSession(page: Page, onInvocation?: (body: Record<string, unknown>) => void) {
+  await mockBackend(page, onInvocation);
+  // The stored session is restored by the app's own startup path, so nothing here
+  // competes with the connect hook's selection.
+  await openSeededSession(page, { projectId: project.id, sessionId: session.id });
+  await expect(page.locator("textarea[aria-label]")).toBeVisible({ timeout: 15_000 });
 }
 
 test("typing @hero completes a hero target and clears the token", async ({ page }) => {
@@ -178,10 +182,7 @@ test("@ addressing does not open when no match exists", async ({ page }) => {
 
 test("a picked skill rides on the turn and does not survive it", async ({ page }) => {
   let body: Record<string, unknown> | undefined;
-  await mockBackend(page, (captured) => { body = captured; });
-  await page.goto("/");
-  await selectProject(page, project.name);
-  await page.getByRole("button", { name: session.title, exact: true }).click();
+  await openSession(page, (captured) => { body = captured; });
   await awaitCatalogue(page);
 
   const textarea = page.locator("textarea[aria-label]");
@@ -201,10 +202,7 @@ test("a picked skill rides on the turn and does not survive it", async ({ page }
 });
 
 test("a project-scope skill is never offered, because a turn cannot name it", async ({ page }) => {
-  await mockBackend(page);
-  await page.goto("/");
-  await selectProject(page, project.name);
-  await page.getByRole("button", { name: session.title, exact: true }).click();
+  await openSession(page);
   await awaitCatalogue(page);
 
   await page.locator("textarea[aria-label]").fill("/project");
