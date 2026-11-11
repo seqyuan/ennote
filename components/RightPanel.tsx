@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { ArrowLeft, Pin, PinOff, Plus } from "lucide-react";
 
 import { FileViewer } from "./FileViewer";
@@ -14,8 +15,9 @@ import { useT } from "@/components/LocaleProvider";
 import type { useRightPanel } from "@/hooks/useRightPanel";
 import type { useResizable } from "@/hooks/useResizable";
 import { PANEL_CHANNELS, isPanelChannel } from "@/lib/right-panel-channels";
-import { DUAL_LANE_MIN_WIDTH } from "@/lib/right-panel-width";
 import type { PermissionMode } from "@/lib/permission-mode";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { laneMode } from "@/lib/right-panel-width";
 
 export function RightPanel(props: {
   open: boolean;
@@ -40,8 +42,16 @@ export function RightPanel(props: {
   } = props;
   const t = useT();
   const { state, fileTabs } = panel;
-  const navigatorOpen = !state.navigatorHidden;
-  const toggleNavigator = panel.toggleNavigator;
+  // Two levels, because the two layouts mean different things by "the navigator".
+  // A wide panel really does have a second column, so hiding it is a standing
+  // choice and it is persisted with the rest of the Project's preferences. In a
+  // medium panel the navigator is a sheet over the preview, and a sheet is
+  // something you open for a moment — it lives for this visit only.
+  const drawer = useMediaQuery("(max-width: 960px)");
+  const medium = laneMode(resize.width, drawer) === "medium";
+  const [peek, setPeek] = useState(false);
+  const navigatorOpen = medium ? peek : !state.navigatorHidden;
+  const toggleNavigator = () => (medium ? setPeek((open) => !open) : panel.toggleNavigator());
   const closePanel = onClose;
 
   const openChannels = state.openChannels;
@@ -53,15 +63,10 @@ export function RightPanel(props: {
     else panel.closeTab(tabId);
   };
 
-  /**
-   * Hand the strip back to a channel. In the overlay layout the navigator was a
-   * temporary look, so the pick ends it; a wide panel keeps the split the reader
-   * asked for.
-   */
+  /** Hand the strip back to a channel. A peek has served its purpose by then. */
   const selectTab = (tabId: string) => {
     panel.setActiveTabId(tabId);
-    const narrow = resize.width < DUAL_LANE_MIN_WIDTH;
-    if (narrow && !state.navigatorHidden) panel.toggleNavigator();
+    if (medium) setPeek(false);
   };
 
   const channelBody = (
@@ -73,7 +78,12 @@ export function RightPanel(props: {
         <FilesChannel
           projectId={projectId}
           displayPath={displayPath}
-          onOpenFile={onOpenFile}
+          onOpenFile={(path, name) => {
+            onOpenFile(path, name);
+            // The file is what the reader asked to see, so the sheet gets out of
+            // the way. This is not a preference: it costs one click to reopen.
+            if (medium) setPeek(false);
+          }}
           onPreviewFile={onPreviewFile}
         />
       </div>

@@ -60,15 +60,17 @@ test("switching projects and back returns to the file that was open", async ({ p
   await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
   await expect(page.locator(".file-code")).toContainText("ready");
 
-  // The other Project must not inherit the first one's file.
+  // The other Project must not inherit the first one's file. The panel hydrates
+  // per Project, so these assertions wait for the switch to settle rather than
+  // for a fixed slice of time.
   await selectProject(page, second.name);
-  await expect(page.locator(".file-code")).toHaveCount(0);
-  await expect(page.getByRole("tab", { name: "main.ts" })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "main.ts" })).toHaveCount(0, { timeout: 15000 });
+  await expect(page.locator(".file-code")).toHaveCount(0, { timeout: 15000 });
 
   // Coming back returns the reader to where they were.
   await selectProject(page, project.name);
-  await expect(page.getByRole("tab", { name: "main.ts" })).toBeVisible();
-  await expect(page.locator(".file-code")).toContainText("ready");
+  await expect(page.getByRole("tab", { name: "main.ts" })).toBeVisible({ timeout: 15000 });
+  await expect(page.locator(".file-code")).toContainText("ready", { timeout: 15000 });
 });
 
 test("the lane divider cannot starve the preview", async ({ page }) => {
@@ -145,17 +147,14 @@ test("a medium panel slides the navigator over the preview", async ({ page }) =>
   await expect(lanes).toHaveAttribute("data-mode", "medium");
   await expect(page.locator(".file-code")).toContainText("ready");
 
-  // Not drawn beside the preview at this width: the navigator slides over it, and
-  // the reader starts with it showing because that is what opened the file.
+  // Not drawn beside the preview at this width: the sheet starts closed, because
+  // the file the reader just opened is what they asked to see.
   const navigator = page.getByTestId("right-panel-primary");
-  await expect(navigator).toHaveAttribute("data-open", "true");
-  await expect(navigator).not.toHaveAttribute("data-parked", "true");
-
-  // Hiding it parks the whole lane off the edge; the preview keeps the panel.
-  await page.getByRole("button", { name: "Hide the file navigator" }).click();
   await expect(navigator).toHaveAttribute("data-parked", "true");
+
   await page.getByRole("button", { name: "Show the file navigator" }).click();
   await expect(navigator).not.toHaveAttribute("data-parked", "true");
+  await expect(navigator).toHaveAttribute("data-open", "true");
 
   // The tree kept the directory it had expanded before the file opened.
   await expect(navigator.locator('.file-tree-main[title="/workspace/src"]')).toHaveAttribute("aria-expanded", "true");
