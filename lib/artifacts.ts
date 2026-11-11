@@ -19,6 +19,15 @@ export function artifactDownloadURL(sessionId: string, artifactId: string): stri
   return `${artifactMetadataURL(sessionId, artifactId)}/download`;
 }
 
+/**
+ * Whether this artifact is a widget — the only kind the client renders with scripts
+ * enabled. Kept next to the other artifact predicates so a caller cannot open-code a
+ * string comparison and drift.
+ */
+export function isWidgetArtifact(artifact: { kind: string }): boolean {
+  return artifact.kind === "widget";
+}
+
 export function formatArtifactSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;

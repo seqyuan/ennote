@@ -1,10 +1,12 @@
 "use client";
 
-import { Download, FileCode2, FileText, Image as ImageIcon, Table2 } from "lucide-react";
+import { Download, FileCode2, FileText, Image as ImageIcon, Sparkles, Table2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ArtifactTablePreview } from "@/components/ArtifactTablePreview";
+import { ArtifactWidget } from "@/components/ArtifactWidget";
 import {
-  artifactDownloadURL, artifactPreviewURL, formatArtifactSize, type ArtifactReference, type TextPreview,
+  artifactDownloadURL, artifactPreviewURL, formatArtifactSize, isWidgetArtifact,
+  type ArtifactReference, type TextPreview,
 } from "@/lib/artifacts";
 import { apiFetch } from "@/lib/worker-api.client";
 
@@ -26,6 +28,7 @@ export function ArtifactView({ sessionId, artifact }: { sessionId: string; artif
     {artifact.kind === "table" && <ArtifactTablePreview sessionId={sessionId} artifact={artifact} />}
     {artifact.kind === "static_html" && <iframe className="artifact-html-preview" src={previewURL}
       title={`${artifact.name} preview`} sandbox="" referrerPolicy="no-referrer" loading="lazy" />}
+    {isWidgetArtifact(artifact) && <ArtifactWidget sessionId={sessionId} artifact={artifact} />}
     {artifact.kind === "text" && <ArtifactTextPreview sessionId={sessionId} artifact={artifact} />}
   </section>;
 }
@@ -66,5 +69,6 @@ function artifactIcon(kind: ArtifactReference["kind"]) {
   if (kind === "image") return <ImageIcon {...props} />;
   if (kind === "table") return <Table2 {...props} />;
   if (kind === "static_html") return <FileCode2 {...props} />;
+  if (kind === "widget") return <Sparkles {...props} />;
   return <FileText {...props} />;
 }
