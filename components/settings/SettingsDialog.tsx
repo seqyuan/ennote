@@ -1,11 +1,12 @@
 "use client";
 
-import { Database, FileText, Layers, Plug, Search, Settings2, Shield, Sparkles, X } from "lucide-react";
+import { Database, FileText, Layers, Package, Plug, Search, Settings2, Shield, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useT } from "@/components/LocaleProvider";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { ContextSettings } from "@/components/settings/ContextSettings";
 import { GeneralSettings } from "@/components/settings/GeneralSettings";
+import { PacksPanel } from "./PacksPanel";
 import { McpSettings } from "@/components/settings/McpSettings";
 import { SkillsSettings } from "@/components/settings/SkillsSettings";
 import { ModelsSettings } from "@/components/settings/ModelsSettings";
@@ -30,6 +31,7 @@ function tabIcon(id: SettingsTab) {
     case "templates": return <FileText size={15} aria-hidden="true" />;
     case "mcp": return <Plug size={15} aria-hidden="true" />;
     case "skills": return <Sparkles size={15} aria-hidden="true" />;
+    case "packs": return <Package size={15} aria-hidden="true" />;
   }
 }
 
@@ -146,6 +148,7 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
     { id: "templates", label: "Templates", description: "Slash-command prompt templates", icon: tabIcon("templates") },
     { id: "mcp", label: "MCP", description: "MCP servers and project bindings", icon: tabIcon("mcp") },
     { id: "skills", label: "Skills", description: "Skill catalog, marketplace, and updates", icon: tabIcon("skills") },
+    { id: "packs", label: "Packs", description: "Agent Packs: inspect, install, and remove", icon: tabIcon("packs") },
   ];
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -306,6 +309,11 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
             {activeTab === "skills" && (
               <div className="settings-tab-scroll">
                 <SkillsSettings projectId={projectId} setError={reportError} />
+              </div>
+            )}
+            {activeTab === "packs" && (
+              <div className="settings-tab-scroll">
+                <PacksPanel setError={reportError} />
               </div>
             )}
             </div>

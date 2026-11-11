@@ -28,4 +28,4 @@ export type SkillSearchResult = components["schemas"]["SkillSearchResult"];
 export type SkillUpdateResult = components["schemas"]["SkillUpdateResult"];
 export type SkillRoot = components["schemas"]["SkillRoot"];
 
-export type SettingsTab = "general" | "models" | "policies" | "context" | "templates" | "mcp" | "skills";
+export type SettingsTab = "general" | "models" | "policies" | "context" | "templates" | "mcp" | "skills" | "packs";

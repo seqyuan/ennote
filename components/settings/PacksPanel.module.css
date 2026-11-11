@@ -1,0 +1,192 @@
+/*
+ * Agent Packs panel. Sizes and colours come from app/tokens.css.
+ */
+
+.heading {
+  margin: 0 0 4px;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.note {
+  margin: 0 0 10px;
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.installer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.pathLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.pathInput {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+}
+
+.button {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) { background: var(--bg-hover); }
+.button:disabled { color: var(--text-dim); cursor: default; }
+.primary { border-color: var(--accent); color: var(--accent); }
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.card[data-blocked="true"] { border-color: var(--danger); }
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--text-muted);
+}
+
+.cardName { color: var(--text); font-size: var(--text-sm); font-weight: 600; }
+
+.badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.counts, .digest, .meta {
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+}
+
+.digest { font-family: var(--font-mono); }
+
+.actionList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.actionRow { display: flex; align-items: center; gap: 6px; font-size: var(--text-xs); }
+
+.actionId {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actionVerb { color: var(--text-muted); }
+.actionVerb[data-action="conflict"] { color: var(--danger); }
+.actionVerb[data-action="exists_identical"] { color: var(--text-dim); }
+
+.issueList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.issueRow {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.issueRow[data-severity="error"] { color: var(--danger); }
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 16px 0 6px;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.sectionCount { color: var(--text-dim); font-weight: 400; }
+
+.stack { display: flex; flex-direction: column; gap: 6px; }
+
+.empty { color: var(--text-dim); font-size: var(--text-xs); }
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.identity { flex: 1; min-width: 0; }
+.titleRow { display: flex; align-items: center; gap: 6px; }
+.name { color: var(--text); font-size: var(--text-sm); font-weight: 600; }
+
+.iconButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.iconButton:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.iconButton:disabled { color: var(--text-dim); cursor: default; }

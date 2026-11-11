@@ -101,13 +101,13 @@ test("Settings tabs use arrow navigation, retain Chat, and restore focus", async
   // Shift+Tab wraps to the previous focusable in DOM order: the last nav
   // cell (the rail precedes the content column, dsh layout).
   await closeSettings.press("Shift+Tab");
-  await expect(page.getByRole("tab", { name: "Skills" })).toBeFocused();
-  await page.getByRole("tab", { name: "Skills" }).press("Tab");
+  await expect(page.getByRole("tab", { name: "Packs" })).toBeFocused();
+  await page.getByRole("tab", { name: "Packs" }).press("Tab");
   await expect(closeSettings).toBeFocused();
   await models.press("ArrowRight");
   await expect(page.getByRole("tab", { name: "Policies" })).toHaveAttribute("aria-selected", "true");
   await page.getByRole("tab", { name: "Policies" }).press("End");
-  await expect(page.getByRole("tab", { name: "Skills" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "Packs" })).toHaveAttribute("aria-selected", "true");
   await page.getByRole("tab", { name: "Context & session" }).click();
   await expect(page.getByLabel("Default model")).toBeVisible();
   expect(await page.evaluate(() => (window as typeof window & { retainedChat?: Element | null }).retainedChat === document.querySelector(".chat-area"))).toBe(true);
