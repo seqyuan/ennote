@@ -110,7 +110,18 @@ export function useRightPanel(projectId: string | null) {
       const wanted = remembered ?? next.activePanes[next.focusedPane] ?? undefined;
       const restored = wanted !== undefined && parked.includes(wanted) ? wanted : null;
       if (restored === null) {
-        return { ...next, activePanes: { main: null, side: null }, activeLane: "channel" };
+        // Rows without a selection: the strip still has something to draw, so the
+        // lane stays with the inspector and the first row takes the focus.
+        const fallback = next.inspectorTabs[0];
+        if (!fallback) return { ...next, activePanes: { main: null, side: null }, activeLane: "channel" };
+        const fallbackId = fileTabId(projectId ?? "", fallback.path);
+        const fallbackPane = fallback.pane ?? "main";
+        return {
+          ...next,
+          activePanes: { ...next.activePanes, [fallbackPane]: fallbackId },
+          focusedPane: fallbackPane,
+          activeLane: "inspector",
+        };
       }
       const pane = next.inspectorTabs.find((row) => fileTabId(projectId ?? "", row.path) === restored)?.pane ?? "main";
       return {

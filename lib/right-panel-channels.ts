@@ -271,11 +271,18 @@ export function serializePreferences(preferences: RightPanelPreferencesV1): stri
     open: preferences.open,
     inspectorTabs: readInspectorTabs(preferences.inspectorTabs),
     navigatorHidden: preferences.navigatorHidden === true,
+    // Explicit nulls stay nulls: `??` would substitute the focused row — which
+    // may live in the side pane — into main's slot, and the next read would
+    // believe main had a selection it never had.
     activeInspectorIds: {
-      main: preferences.activeInspectorIds?.main ?? preferences.activeInspectorId ?? null,
-      side: preferences.activeInspectorIds?.side ?? null,
+      main: preferences.activeInspectorIds
+        ? preferences.activeInspectorIds.main ?? null
+        : preferences.activeInspectorId ?? null,
+      side: preferences.activeInspectorIds ? preferences.activeInspectorIds.side ?? null : null,
     },
-    activeInspectorId: preferences.activeInspectorIds?.main ?? preferences.activeInspectorId ?? null,
+    activeInspectorId: preferences.activeInspectorIds
+      ? preferences.activeInspectorIds.main ?? null
+      : preferences.activeInspectorId ?? null,
   });
 }
 
@@ -319,17 +326,45 @@ export function initialRightPanelState(preferences: RightPanelPreferencesV1): Ri
       tools: widthOf(preferences.primaryWidths?.tools, widthOf(preferences.primaryWidth, PRIMARY_DEFAULT_WIDTH)),
     },
     navigatorHidden: preferences.navigatorHidden === true,
-    activePanes: {
-      main: preferences.activeInspectorIds?.main ?? preferences.activeInspectorId ?? null,
-      side: preferences.activeInspectorIds?.side ?? null,
-    },
-    focusedPane: preferences.activeInspectorIds?.side
-      && !(preferences.activeInspectorIds?.main ?? preferences.activeInspectorId)
-      ? "side"
-      : "main",
-    activeLane: (preferences.activeInspectorIds?.main ?? preferences.activeInspectorId
-      ?? preferences.activeInspectorIds?.side) ? "inspector" : "channel",
-    inspectorTabs: readInspectorTabs(preferences.inspectorTabs),
+    ...seedPanes(preferences),
+  };
+}
+
+/**
+ * The selections a Project starts with, one per pane.
+ *
+ * An explicit null stays null: a Project whose files all live in the side pane
+ * must not come back with one of them selected in main. When rows exist but no
+ * selection survived (a row closed in another tab, a payload older than panes),
+ * the first row takes the focus — a strip with rows and no selection is a state
+ * nothing can draw.
+ */
+function seedPanes(preferences: RightPanelPreferencesV1): Pick<RightPanelState,
+  "inspectorTabs" | "activePanes" | "focusedPane" | "activeLane"> {
+  const inspectorTabs = readInspectorTabs(preferences.inspectorTabs);
+  const stored = preferences.activeInspectorIds;
+  const owned = (pane: InspectorPane, value: string | null): string | null =>
+    value !== null && inspectorTabs.some((row) => (row.pane ?? "main") === pane
+      && fileTabId(preferences.projectId, row.path) === value)
+      ? value
+      : null;
+
+  const activePanes: Record<InspectorPane, string | null> = {
+    main: owned("main", stored ? stored.main ?? null : preferences.activeInspectorId ?? null),
+    side: owned("side", stored ? stored.side ?? null : null),
+  };
+
+  if (activePanes.main === null && activePanes.side === null && inspectorTabs.length > 0) {
+    const first = inspectorTabs[0];
+    activePanes[first.pane ?? "main"] = fileTabId(preferences.projectId, first.path);
+  }
+
+  const focusedPane: InspectorPane = activePanes.side !== null && activePanes.main === null ? "side" : "main";
+  return {
+    inspectorTabs,
+    activePanes,
+    focusedPane,
+    activeLane: activePanes[focusedPane] !== null ? "inspector" : "channel",
   };
 }
 
@@ -525,7 +560,7 @@ export function closeInspectorTab(state: RightPanelState, tabId: string): RightP
   }
   const elsewhere: InspectorPane = pane === "main" ? "side" : "main";
   const focusedPane = activePanes[pane] === null && activePanes[elsewhere] !== null ? elsewhere : state.focusedPane;
-  const anyLeft = activePanes.main !== null || activePanes.side !== null;
+  const anyLeft = inspectorTabs.length > 0;
 
   return {
     ...state,

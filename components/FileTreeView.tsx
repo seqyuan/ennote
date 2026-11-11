@@ -132,8 +132,8 @@ export function FileTreeMenu(props: {
   at: { x: number; y: number };
   onClose: () => void;
   onOpen: () => void;
-  /** Open beside what the panel already shows, in the side pane. */
-  onOpenToSide: () => void;
+  /** Open beside what the panel already shows; absent when there is no room. */
+  onOpenToSide?: () => void;
   onPreview: () => void;
   onNewFile: () => void;
   onNewFolder: () => void;
@@ -191,7 +191,9 @@ export function FileTreeMenu(props: {
         {!entry.isDir && (
           <>
             <button type="button" role="menuitem" onClick={run(props.onOpen)}>Open</button>
-            <button type="button" role="menuitem" onClick={run(props.onOpenToSide)}>Open to the side</button>
+            {props.onOpenToSide && (
+              <button type="button" role="menuitem" onClick={run(props.onOpenToSide)}>Open to the side</button>
+            )}
             <button type="button" role="menuitem" onClick={run(props.onPreview)}>Open in floating window</button>
           </>
         )}

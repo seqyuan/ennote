@@ -18,7 +18,7 @@ import { PANEL_CHANNELS, isPanelChannel } from "@/lib/right-panel-channels";
 import { statusNeedsHuman } from "@/lib/run-status-copy";
 import type { PermissionMode } from "@/lib/permission-mode";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { laneMode } from "@/lib/right-panel-width";
+import { INSPECTOR_MIN_WIDTH, laneMode } from "@/lib/right-panel-width";
 
 export function RightPanel(props: {
   open: boolean;
@@ -84,6 +84,12 @@ export function RightPanel(props: {
     if (state.navigatorHidden && tabId !== "files") panel.toggleNavigator();
   };
 
+  // Two panes need room for two readable files; below that the reader gets the
+  // one they were last in, and the offer to open beside it is withdrawn rather
+  // than accepted into a pane nothing can draw.
+  const canSplit = !medium && laneMode(resize.width, drawer) === "wide"
+    && resize.width >= INSPECTOR_MIN_WIDTH * 2 + 8;
+
   const channelBody = (
     <>
       {/* The tree holds the reader's place: expanded directories, scroll, filter.
@@ -103,6 +109,7 @@ export function RightPanel(props: {
             onOpenFileToSide(path, name);
             if (medium) setPeek(false);
           }}
+          canOpenToSide={canSplit}
           onPreviewFile={onPreviewFile}
         />
       </div>
@@ -142,21 +149,38 @@ export function RightPanel(props: {
 
   // Each pane draws its own selection. A row the current Project does not own is
   // never rendered, even if a caller hands the panel an unscoped list.
-  const bodyFor = (tabId: string | null) => {
-    const tab = fileTabs.find((candidate) => candidate.id === tabId);
+  // A row is only ever found in its own pane's list: searching the union is how
+  // one file ends up drawn twice after a stale selection.
+  const bodyFor = (tabId: string | null, tabs: typeof fileTabs) => {
+    const tab = tabs.find((candidate) => candidate.id === tabId);
     if (!tab?.projectId || !tab.filePath || tab.projectId !== projectId) return null;
     return <FileViewer projectId={tab.projectId} filePath={tab.filePath} fileName={tab.label} />;
   };
-  const mainBody = bodyFor(panel.activePanes.main);
-  const sideBody = bodyFor(panel.activePanes.side);
-  const hasSide = panel.paneTabs.side.length > 0;
-  const focusedBody = bodyFor(panel.activePanes[panel.focusedPane]);
-  const inspectorBody = hasSide ? (
-    <div className="right-panel-panes">
-      <div className="right-panel-pane" data-testid="inspector-pane-main">{mainBody}</div>
-      <div className="right-panel-pane" data-testid="inspector-pane-side">{sideBody}</div>
+  const mainBody = bodyFor(panel.activePanes.main, panel.paneTabs.main);
+  const sideBody = bodyFor(panel.activePanes.side, panel.paneTabs.side);
+  const split = canSplit && panel.paneTabs.side.length > 0;
+  const focusedBody = bodyFor(panel.activePanes[panel.focusedPane], fileTabs);
+  // The pane wrapper is always the container, split or not: turning the side pane
+  // on must not move the main pane to a different place in the tree, or React
+  // remounts the viewer and the reader loses the line they were on.
+  const paneBodies = split
+    ? [mainBody, sideBody]
+    // Rows exist for the side pane but there is no room: show the one the reader
+    // is in, so nothing they opened becomes unreachable.
+    : [panel.paneTabs.side.length > 0 ? focusedBody : mainBody];
+  const inspectorBody = fileTabs.length > 0 ? (
+    <div className={`right-panel-panes${split ? " is-split" : ""}`}>
+      {paneBodies.map((body, index) => (
+        <div
+          key={index === 0 ? "main" : "side"}
+          className="right-panel-pane"
+          data-testid={index === 0 ? "inspector-pane-main" : "inspector-pane-side"}
+        >
+          {body}
+        </div>
+      ))}
     </div>
-  ) : mainBody;
+  ) : null;
 
   return (
     <div
@@ -219,7 +243,7 @@ export function RightPanel(props: {
           </div>
         )}
         channelBody={channelBody}
-        inspectorStrip={hasSide ? (
+        inspectorStrip={split ? (
           <div className="right-panel-pane-strips">
             <TabBar
               tabs={panel.paneTabs.main}
@@ -263,9 +287,7 @@ export function RightPanel(props: {
         )}
         narrowBody={(
           <div className="right-panel-body">
-            {panel.activeTabId === (panel.activePanes.main ?? panel.activePanes.side) && focusedBody
-              ? focusedBody
-              : channelBody}
+            {panel.activeTabId === panel.activeInspectorId && focusedBody ? focusedBody : channelBody}
           </div>
         )}
         primaryWidth={state.primaryWidths[activeChannelId ?? "files"]}

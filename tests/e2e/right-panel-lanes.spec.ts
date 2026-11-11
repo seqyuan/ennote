@@ -688,7 +688,7 @@ test("a file opens to the side and the two are compared", async ({ page }) => {
   // One file is one pane: the split appears only when there is something to
   // compare it with.
   await expect(page.locator(".file-code")).toContainText("const A = 1");
-  await expect(page.getByTestId("inspector-pane-main")).toHaveCount(0);
+  await expect(page.getByTestId("inspector-pane-side")).toHaveCount(0);
 
   // The side pane is asked for explicitly, from the file's own menu.
   await page.locator('.file-tree-main[title="/workspace/b.ts"]').click({ button: "right" });
@@ -722,4 +722,100 @@ test("the side pane survives a reload, and the same file is never opened twice",
 
   await page.reload();
   await expect(page.getByRole("tab", { name: "main.ts" })).toBeVisible();
+});
+
+test("two panes need room, and the reading position survives the split", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route("**/api/worker/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    if (await tryFulfillHarnessRoutes(route)) return;
+    if (path === "/v1/projects") return fulfill(route, [project]);
+    if (path === "/v1/provider-profiles") return fulfill(route, [provider]);
+    if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/workspace`) return fulfill(route, workspace);
+    if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/files`) return fulfill(route, [
+      { name: "a.ts", path: "/workspace/a.ts", isDir: false, size: 4, modifiedAt: "2026-10-01T00:00:00Z" },
+      { name: "b.ts", path: "/workspace/b.ts", isDir: false, size: 4, modifiedAt: "2026-10-01T00:00:00Z" },
+    ]);
+    if (path === `/v1/projects/${project.id}/files/content`) {
+      // Enough lines that the viewer has something to scroll.
+      const body = Array.from({ length: 200 }, (_, index) => `line ${index}`).join("\n");
+      return route.fulfill({ status: 200, contentType: "text/typescript", body });
+    }
+    return route.fulfill({ status: 501, contentType: "application/json", body: JSON.stringify({ error: { code: "unmocked_route", message: path } }) });
+  });
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+  await page.locator('.file-tree-main[title="/workspace/a.ts"]').click();
+  await expect(page.locator(".file-code")).toContainText("line 0");
+
+  // Scroll the main file, then split: the split must not reset where the reader was.
+  const mainScroller = page.locator(".file-viewer-body").first();
+  await mainScroller.evaluate((el) => { el.scrollTop = 400; });
+  await page.locator('.file-tree-main[title="/workspace/b.ts"]').click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Open to the side" }).click();
+
+  const panes = page.locator(".right-panel-pane");
+  await expect(panes).toHaveCount(2);
+
+  // Each pane scrolls on its own: a shared scroller would move both together.
+  const scrolls = await page.evaluate(() => {
+    const bodies = Array.from(document.querySelectorAll(".file-viewer-body")) as HTMLElement[];
+    return bodies.map((el) => ({ top: el.scrollTop, scrollable: el.scrollHeight > el.clientHeight }));
+  });
+  expect(scrolls).toHaveLength(2);
+  expect(scrolls.every((entry) => entry.scrollable)).toBe(true);
+  expect(scrolls[0].top).toBeGreaterThan(0);
+});
+
+test("a narrow panel offers no side pane", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await mockLanes(page);
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+  await page.locator('.file-tree-main[title="/workspace/src"]').click();
+  await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
+  await expect(page.getByTestId("right-panel-lanes")).toHaveAttribute("data-mode", "medium");
+
+  // No room for two readable files, so the action is not offered at all. The tree
+  // lives in the overlay at this width, so it is opened first.
+  await page.getByRole("button", { name: "Show the file navigator" }).click();
+  await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click({ button: "right" });
+  await expect(page.getByRole("menuitem", { name: "Open to the side" })).toHaveCount(0);
+});
+
+test("the side pane comes back after a reload", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route("**/api/worker/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    if (await tryFulfillHarnessRoutes(route)) return;
+    if (path === "/v1/projects") return fulfill(route, [project]);
+    if (path === "/v1/provider-profiles") return fulfill(route, [provider]);
+    if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/workspace`) return fulfill(route, workspace);
+    if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/files`) return fulfill(route, [
+      { name: "a.ts", path: "/workspace/a.ts", isDir: false, size: 4, modifiedAt: "2026-10-01T00:00:00Z" },
+      { name: "b.ts", path: "/workspace/b.ts", isDir: false, size: 4, modifiedAt: "2026-10-01T00:00:00Z" },
+    ]);
+    if (path === `/v1/projects/${project.id}/files/content`) {
+      const wanted = new URL(route.request().url()).searchParams.get("path") ?? "";
+      return route.fulfill({ status: 200, contentType: "text/typescript", body: wanted.endsWith("a.ts") ? "const A = 1;" : "const B = 2;" });
+    }
+    return route.fulfill({ status: 501, contentType: "application/json", body: JSON.stringify({ error: { code: "unmocked_route", message: path } }) });
+  });
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+  await page.locator('.file-tree-main[title="/workspace/a.ts"]').click();
+  await page.locator('.file-tree-main[title="/workspace/b.ts"]').click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Open to the side" }).click();
+  await expect(page.getByTestId("inspector-pane-side")).toContainText("const B = 2");
+
+  await page.reload();
+  await expect(page.getByTestId("inspector-pane-main")).toContainText("const A = 1");
+  await expect(page.getByTestId("inspector-pane-side")).toContainText("const B = 2");
 });

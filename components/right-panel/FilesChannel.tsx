@@ -14,6 +14,8 @@ export function FilesChannel(props: {
   displayPath: string | null;
   onOpenFile: (path: string, name: string) => void;
   onOpenFileToSide: (path: string, name: string) => void;
+  /** Whether the panel has room for a second pane right now. */
+  canOpenToSide: boolean;
   onPreviewFile: (path: string, name: string) => void;
 }) {
   return (
@@ -23,6 +25,7 @@ export function FilesChannel(props: {
       displayPath={props.displayPath}
       onOpenFile={props.onOpenFile}
       onOpenFileToSide={props.onOpenFileToSide}
+      canOpenToSide={props.canOpenToSide}
       onPreviewFile={props.onPreviewFile}
     />
   );

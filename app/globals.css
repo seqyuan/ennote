@@ -231,16 +231,34 @@ button:disabled { cursor: default; }
 }
 
 .right-panel-pane-strips > * { flex: 1 1 50%; min-width: 0; }
-.right-panel-panes { flex: 1; min-height: 0; }
 
+/* The bodies need a real height to scroll against: their parent is a flex child
+   with a definite height, and each pane is a column that fills it. */
+.right-panel-panes {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+/* `flex-basis: 0` makes one pane fill the row and two share it, without the
+   single-pane case being half-width. */
 .right-panel-pane {
-  flex: 1 1 50%;
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
 
-.right-panel-pane + .right-panel-pane { border-left: 1px solid var(--border); }
+.right-panel-pane > * { flex: 1 1 auto; min-height: 0; }
+
+.right-panel-panes.is-split .right-panel-pane + .right-panel-pane {
+  border-left: 1px solid var(--border);
+  /* The strip above reserves the navigator toggle's width and the body row does
+     not, so the halves would be 14px apart without this. */
+  padding-right: 28px;
+}
 
 /* The channel strip: tabs take the room, the panel's own actions keep theirs. */
 .right-panel-strip {

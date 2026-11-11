@@ -258,8 +258,10 @@ describe("remembered inspector rows", () => {
       inspectorTabs: [{ path: "/workspace/a.ts", name: "a.ts" }],
       activeInspectorId: "file:p1:/workspace/gone.ts",
     }), "p1");
-    expect(initialRightPanelState(stale).activePanes.main).toBeNull();
-    expect(initialRightPanelState(stale).activeLane).toBe("channel");
+    // A stale selection is dropped; the row that is still there takes the focus,
+    // because a strip with rows and nothing selected cannot be drawn.
+    expect(initialRightPanelState(stale).activePanes.main).toBe("file:p1:/workspace/a.ts");
+    expect(initialRightPanelState(stale).activeLane).toBe("inspector");
   });
 
   it("does not carry another Project's rows across a key", () => {
@@ -351,6 +353,32 @@ describe("two panes", () => {
       ["/workspace/b.ts", "side"],
     ]);
     expect(back.activeInspectorIds).toEqual({ main: id("/workspace/a.ts"), side: id("/workspace/b.ts") });
+  });
+
+  it("keeps an empty main pane empty through a round trip", () => {
+    // The bug this pins: `??` treated an explicit null as "missing", so the
+    // focused side row was written into main's slot and read back as main's.
+    const sideOnly = openIn("side", "/workspace/b.ts");
+    const stored = serializePreferences(preferencesOf(sideOnly));
+    const back = parsePreferences(stored, "p1");
+    const hydrated = initialRightPanelState(back);
+
+    expect(hydrated.activePanes).toEqual({ main: null, side: id("/workspace/b.ts") });
+    expect(hydrated.focusedPane).toBe("side");
+    expect(hydrated.activeLane).toBe("inspector");
+
+    // And it is a fixed point: writing the hydrated state again changes nothing.
+    expect(serializePreferences(preferencesOf(hydrated))).toBe(stored);
+  });
+
+  it("selects the first row when a pane has rows but no selection", () => {
+    const stored = parsePreferences(JSON.stringify({
+      version: 1, projectId: "p1", pinnedChannels: [], primaryWidth: 280, open: true,
+      inspectorTabs: [{ path: "/workspace/a.ts", name: "a.ts", pane: "side" }],
+      activeInspectorIds: { main: null, side: null },
+    }), "p1");
+
+    expect(initialRightPanelState(stored).activeLane).toBe("inspector");
   });
 
   it("puts rows written before panes existed in the main pane", () => {
