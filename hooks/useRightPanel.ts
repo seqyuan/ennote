@@ -213,9 +213,11 @@ export function useRightPanel(projectId: string | null) {
     setState((current) => {
       // The divider resizes the lane of the channel on screen, and each channel
       // keeps its own width: the tree wants room the run inspector does not.
-      const channel = isPanelChannel(current.activeChannelId)
-        ? current.activeChannelId
-        : current.openChannels[0] ?? "files";
+      // Only the channel that is actually drawn has a lane to drag. With the
+      // launcher on screen there is no channel, and guessing one would rewrite a
+      // width the reader never touched.
+      const channel = isPanelChannel(current.activeChannelId) ? current.activeChannelId : null;
+      if (channel === null) return current;
       // Start from what the lane is showing, not from what was stored: a width
       // saved on a wider panel would otherwise eat the first Npx of the drag.
       const from = resolvePrimaryLaneWidthOf(current.primaryWidths[channel], shellWidth);

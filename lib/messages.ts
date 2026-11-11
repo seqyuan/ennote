@@ -540,6 +540,8 @@ export const messages: Record<Locale, Record<string, string>> = {
     "rightPanel.showNavigator": "Show the file navigator",
     "rightPanel.hideNavigator": "Hide the file navigator",
     "rightPanel.resizeNavigator": "Resize the file navigator",
+    "rightPanel.runsCount": "{count} runs",
+    "rightPanel.needsAttention": "Waiting for you",
   },
   "zh-CN": {
     "general.title": "通用",
@@ -1073,6 +1075,8 @@ export const messages: Record<Locale, Record<string, string>> = {
     "rightPanel.showNavigator": "显示文件导航",
     "rightPanel.hideNavigator": "隐藏文件导航",
     "rightPanel.resizeNavigator": "调整文件导航宽度",
+    "rightPanel.runsCount": "{count} 个运行",
+    "rightPanel.needsAttention": "等待你处理",
   },
 };
 

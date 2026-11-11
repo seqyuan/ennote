@@ -658,5 +658,5 @@ test("a channel's tab carries what it has to say", async ({ page }) => {
 
   // The count comes from the channel itself, on the tab, in the strip.
   await page.getByRole("tab", { name: "Graphs" }).click();
-  await expect(page.getByRole("tab", { name: /Graphs/ }).getByLabel("2")).toBeVisible();
+  await expect(page.getByRole("tab", { name: /Graphs 2 runs/ })).toBeVisible();
 });

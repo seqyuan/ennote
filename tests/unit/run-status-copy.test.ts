@@ -4,6 +4,7 @@ import { messages, translate } from "../../lib/messages";
 import {
   RUN_STATUS_RECONNECTING,
   STATUS_KEYS,
+  statusNeedsHuman,
   decodeRunStatus,
   encodeRunStatus,
   runStatusText,
@@ -69,5 +70,23 @@ describe("run status copy", () => {
     expect(runStatusText(encodeRunStatus("running_tool", detail), en)).toBe(`Running: ${detail}…`);
     expect(runStatusText(encodeRunStatus("model_retry", detail), zh)).toContain(detail);
     expect(runStatusText(encodeRunStatus("model_retry", detail), zh)).not.toContain("{detail}");
+  });
+});
+
+describe("statusNeedsHuman", () => {
+  it("reads the code out of the wire form", () => {
+    expect(statusNeedsHuman("waiting_approval")).toBe(true);
+    expect(statusNeedsHuman("waiting_approval\u001Fbash")).toBe(true);
+    expect(statusNeedsHuman("running_tool\u001Fbash")).toBe(false);
+    expect(statusNeedsHuman("")).toBe(false);
+  });
+
+  it("only names codes the catalog knows", () => {
+    // The human-waiting set is a second list, so it has to be checked against the
+    // first one: a renamed code would otherwise stop raising the dot, silently.
+    for (const code of ["waiting_answer", "waiting_approval", "waiting_delegation_admission", "checkpoint_ready"]) {
+      expect(statusNeedsHuman(code)).toBe(true);
+      expect(STATUS_KEYS[code]).toBeTruthy();
+    }
   });
 });

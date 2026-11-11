@@ -16,7 +16,7 @@
  * Everything here is a pure function of its input. Storage and window are the
  * caller's business; that keeps the contract testable and the rules in one file.
  */
-import { PRIMARY_DEFAULT_WIDTH } from "./right-panel-width";
+import { PRIMARY_DEFAULT_WIDTH, PRIMARY_MIN_WIDTH } from "./right-panel-width";
 
 /** A channel the panel keeps open beside the inspector lane. */
 export type PanelChannel = "files" | "graph" | "tools";
@@ -409,9 +409,16 @@ export function setPrimaryWidth(
   return { ...state, primaryWidths: { ...state.primaryWidths, [channel]: width } };
 }
 
-/** A stored width, when it is one. */
+/**
+ * A stored width, when it is one.
+ *
+ * Clamped to a drawable range on the way in: a stored 0 or a negative number
+ * would otherwise be written back forever, and the lane would only look right
+ * because the resolver clamps it at render time.
+ */
 function widthOf(value: unknown, fallback: number): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(PRIMARY_MIN_WIDTH, Math.min(2000, Math.round(value)));
 }
 
 /**

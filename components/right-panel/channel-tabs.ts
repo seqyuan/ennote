@@ -47,5 +47,10 @@ export function channelTabs(
     icon: ICONS[channel],
     badge: signal[channel]?.count,
     dot: signal[channel]?.attention,
+    signalLabel: signal[channel]?.count !== undefined
+      ? t("rightPanel.runsCount", { count: signal[channel]?.count ?? 0 })
+      : signal[channel]?.attention
+        ? t("rightPanel.needsAttention")
+        : undefined,
   }));
 }

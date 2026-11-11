@@ -16,6 +16,12 @@ export interface Tab {
   badge?: number;
   /** Something needs a human here, with no number to put on it. */
   dot?: boolean;
+  /**
+   * What the badge or dot means, for the tab's accessible name. A `title`-less
+   * coloured chip says nothing to a screen reader, and a bare number says nothing
+   * to anyone.
+   */
+  signalLabel?: string;
 }
 
 interface Props {
@@ -104,10 +110,15 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onReorder, 
             <span className={styles.label} title={tab.filePath ?? tab.label}>
               {tab.label}
             </span>
-            {tab.badge !== undefined && tab.badge > 0 && (
-              <span className={styles.badge} aria-label={`${tab.badge}`}>{tab.badge}</span>
-            )}
-            {tab.dot && <span className={styles.dot} aria-label="Needs attention" />}
+            {(tab.badge !== undefined && tab.badge > 0) || tab.dot ? (
+              <>
+                {tab.badge !== undefined && tab.badge > 0 && (
+                  <span className={styles.badge} aria-hidden="true">{tab.badge}</span>
+                )}
+                {tab.dot && <span className={styles.dot} aria-hidden="true" />}
+                {tab.signalLabel && <span className="sr-only">{tab.signalLabel}</span>}
+              </>
+            ) : null}
             {closable && (
               <button
                 type="button"

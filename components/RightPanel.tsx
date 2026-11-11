@@ -53,7 +53,9 @@ export function RightPanel(props: {
   const [peek, setPeek] = useState(false);
   // What each channel has to say about itself. The counts come from the channel
   // that fetched them, so the strip never adds a request of its own.
-  const [graphRuns, setGraphRuns] = useState<number | undefined>(undefined);
+  // Tagged with the session that reported it: a count from the previous session
+  // must not linger on the tab after a switch.
+  const [graphRuns, setGraphRuns] = useState<{ session: string | null; count: number } | null>(null);
   const navigatorOpen = medium ? peek : !state.navigatorHidden;
   const toggleNavigator = () => (medium ? setPeek((open) => !open) : panel.toggleNavigator());
   const closePanel = () => {
@@ -100,7 +102,10 @@ export function RightPanel(props: {
         />
       </div>
       {activeChannelId === "graph" && (
-        <GraphsChannel sessionId={selectedSession} onCount={setGraphRuns} />
+        <GraphsChannel
+          sessionId={selectedSession}
+          onCount={(count) => setGraphRuns({ session: selectedSession, count })}
+        />
       )}
       {activeChannelId === "tools" && (
         <StatusChannel
@@ -126,7 +131,7 @@ export function RightPanel(props: {
   // What each channel has to say about itself. The count is reported by the
   // channel that fetched it, so the strip adds no request of its own.
   const signals = {
-    graph: { count: graphRuns },
+    graph: { count: graphRuns?.session === selectedSession ? graphRuns.count : undefined },
     tools: { attention: statusNeedsHuman(status) },
   } as const;
 
