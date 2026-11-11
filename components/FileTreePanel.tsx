@@ -18,6 +18,13 @@ const FILTER_DEBOUNCE_MS = 250;
 /** How many directories one filter pass may start listing. */
 const MAX_FILTER_LOADS = 12;
 
+/**
+ * How many listings one typed filter may cost in total. A filter is not a
+ * workspace crawl: past this, the reader is told what has been searched rather
+ * than the panel quietly listing every directory on the disk.
+ */
+const MAX_FILTER_LISTINGS = 36;
+
 /** One drawn row: what it is, how deep it sits, and what it hangs under. */
 interface TreeRow {
   entry: WorkspaceFileEntry;
@@ -49,6 +56,7 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
   const [focusedPath, setFocusedPath] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ path: string; x: number; y: number } | null>(null);
   const nestedControllers = useRef<Map<string, AbortController>>(new Map());
+  const filterBudget = useRef(MAX_FILTER_LISTINGS);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -172,7 +180,7 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
   // makes "filter matches nested files" true. Deferred a tick so the filtered
   // first paint is not blocked by the fetches it starts.
   useEffect(() => {
-    if (!query) return;
+    if (!query) { filterBudget.current = MAX_FILTER_LISTINGS; return; }
     const timer = window.setTimeout(() => {
       const known = new Set<string>();
       for (const entry of entries) if (entry.isDir) known.add(entry.path);
@@ -184,14 +192,17 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
       // next pass, which the growing `dirContents` schedules by itself.
       let started = 0;
       for (const path of known) {
-        if (started >= MAX_FILTER_LOADS) break;
-        if (dirContents.has(path) || nestedControllers.current.has(path)) continue;
+        if (started >= MAX_FILTER_LOADS || filterBudget.current <= 0) break;
+        // A directory that failed is not asked again by the scan: the reader can
+        // retry it by expanding it, which is a deliberate act.
+        if (dirContents.has(path) || dirErrors.has(path) || nestedControllers.current.has(path)) continue;
         void loadDir(path);
+        filterBudget.current -= 1;
         started += 1;
       }
     }, FILTER_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [query, entries, dirContents, loadDir]);
+  }, [query, entries, dirContents, dirErrors, loadDir]);
 
   const focusRow = useCallback((path: string) => {
     setFocusedPath(path);
@@ -207,8 +218,10 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
   }, [rows, focusRow]);
 
   const onKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>, index: number) => {
-    // The preview button inside the row is its own control: its keys stay its own.
-    if (event.target !== event.currentTarget) return;
+    // The preview button inside the row is its own control for Enter and Space.
+    // The arrows still walk the tree from there, so the keyboard never gets stuck
+    // on a row's inner button.
+    if (event.target !== event.currentTarget && (event.key === "Enter" || event.key === " ")) return;
     const row = rows[index];
     if (!row) return;
     switch (event.key) {
@@ -303,11 +316,17 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
         ) : rows.length === 0 ? (
           <div className="file-tree-state">{query ? "No files match." : "No files found."}</div>
         ) : (
-          <div role="tree" aria-label="Workspace files">
+          <>
             {error && <p className="file-tree-inline-error" role="alert">{error}</p>}
+            <div role="tree" aria-label="Workspace files">
             {rows.map((row, index) => {
               const { entry, depth } = row;
-              const isExpanded = query ? true : expandedDirs.has(entry.path);
+              // A directory is only drawn as expanded if it really shows children:
+              // while filtering, claiming otherwise would announce a subtree that
+              // is not there.
+              const isExpanded = query
+                ? (dirContents.get(entry.path)?.length ?? 0) > 0
+                : expandedDirs.has(entry.path);
               const loading = loadingDirs.has(entry.path);
               return (
                 <div
@@ -373,7 +392,8 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
                 </div>
               );
             })}
-          </div>
+            </div>
+          </>
         )}
       </div>
 

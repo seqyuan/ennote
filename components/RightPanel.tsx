@@ -52,7 +52,10 @@ export function RightPanel(props: {
   const [peek, setPeek] = useState(false);
   const navigatorOpen = medium ? peek : !state.navigatorHidden;
   const toggleNavigator = () => (medium ? setPeek((open) => !open) : panel.toggleNavigator());
-  const closePanel = onClose;
+  const closePanel = () => {
+    setPeek(false);
+    onClose();
+  };
 
   const openChannels = state.openChannels;
   const activeChannelId = panel.activeChannelId;
@@ -63,10 +66,15 @@ export function RightPanel(props: {
     else panel.closeTab(tabId);
   };
 
-  /** Hand the strip back to a channel. A peek has served its purpose by then. */
+  /**
+   * Hand the strip back to a channel. A peek has served its purpose by then, and
+   * picking a channel other than Files ends a hidden tree: the lane it lives in
+   * is the only way to reach Graphs or Status.
+   */
   const selectTab = (tabId: string) => {
     panel.setActiveTabId(tabId);
     if (medium) setPeek(false);
+    if (state.navigatorHidden && tabId !== "files") panel.toggleNavigator();
   };
 
   const channelBody = (
@@ -212,6 +220,7 @@ export function RightPanel(props: {
         onResizePrimaryStart={panel.beginPrimaryResize}
         onResizePrimaryEnd={panel.endPrimaryResize}
         navigatorOpen={navigatorOpen && open}
+        primaryHidden={!navigatorOpen && activeChannelId === "files"}
         onToggleNavigator={toggleNavigator}
       />
     </div>

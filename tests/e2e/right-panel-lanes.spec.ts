@@ -56,6 +56,7 @@ test("switching projects and back returns to the file that was open", async ({ p
   await page.goto("/");
   await selectProject(page, project.name);
   await page.getByTitle("Show panel").click();
+  await expect(page.locator('.file-tree-main[title="/workspace/src"]')).toBeVisible();
   await page.locator('.file-tree-main[title="/workspace/src"]').click();
   await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
   await expect(page.locator(".file-code")).toContainText("ready");
@@ -79,6 +80,7 @@ test("the lane divider cannot starve the preview", async ({ page }) => {
   await page.goto("/");
   await selectProject(page, project.name);
   await page.getByTitle("Show panel").click();
+  await expect(page.locator('.file-tree-main[title="/workspace/src"]')).toBeVisible();
   await page.locator('.file-tree-main[title="/workspace/src"]').click();
   await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
   await expect(page.getByTestId("right-panel-lanes")).toHaveAttribute("data-mode", "wide");
@@ -140,6 +142,7 @@ test("a medium panel slides the navigator over the preview", async ({ page }) =>
   await page.goto("/");
   await selectProject(page, project.name);
   await page.getByTitle("Show panel").click();
+  await expect(page.locator('.file-tree-main[title="/workspace/src"]')).toBeVisible();
   await page.locator('.file-tree-main[title="/workspace/src"]').click();
   await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
 
@@ -333,6 +336,7 @@ test("the files a reader had open come back after a reload", async ({ page }) =>
   await page.goto("/");
   await selectProject(page, project.name);
   await page.getByTitle("Show panel").click();
+  await expect(page.locator('.file-tree-main[title="/workspace/src"]')).toBeVisible();
   await page.locator('.file-tree-main[title="/workspace/src"]').click();
   await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
   await expect(page.locator(".file-code")).toContainText("ready");
@@ -371,6 +375,7 @@ test("two open files both come back, with the same one selected", async ({ page 
   await page.goto("/");
   await selectProject(page, project.name);
   await page.getByTitle("Show panel").click();
+  await expect(page.locator('.file-tree-main[title="/workspace/main.ts"]')).toBeVisible();
   await page.locator('.file-tree-main[title="/workspace/main.ts"]').click();
   await page.locator('.file-tree-main[title="/workspace/util.ts"]').click();
   await expect(page.getByRole("tab", { name: "main.ts" })).toBeVisible();
@@ -391,6 +396,7 @@ test("returning to a project after a reload gives its files back", async ({ page
   await page.goto("/");
   await selectProject(page, project.name);
   await page.getByTitle("Show panel").click();
+  await expect(page.locator('.file-tree-main[title="/workspace/src"]')).toBeVisible();
   await page.locator('.file-tree-main[title="/workspace/src"]').click();
   await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
   await expect(page.locator(".file-code")).toContainText("ready");
@@ -410,6 +416,7 @@ test("a stored row does not leak into another project", async ({ page }) => {
   await page.goto("/");
   await selectProject(page, project.name);
   await page.getByTitle("Show panel").click();
+  await expect(page.locator('.file-tree-main[title="/workspace/src"]')).toBeVisible();
   await page.locator('.file-tree-main[title="/workspace/src"]').click();
   await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
   await expect(page.locator(".file-code")).toContainText("ready");
@@ -427,6 +434,7 @@ test("the navigator can be hidden and stays hidden", async ({ page }) => {
   await page.goto("/");
   await selectProject(page, project.name);
   await page.getByTitle("Show panel").click();
+  await expect(page.locator('.file-tree-main[title="/workspace/src"]')).toBeVisible();
   await page.locator('.file-tree-main[title="/workspace/src"]').click();
   await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
   await expect(page.getByTestId("right-panel-lanes")).toHaveAttribute("data-mode", "wide");

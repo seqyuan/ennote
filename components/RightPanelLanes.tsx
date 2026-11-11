@@ -50,6 +50,12 @@ export function RightPanelLanes(props: {
    * not, and — when hidden — not at all, which leaves the preview the panel.
    */
   navigatorOpen: boolean;
+  /**
+   * The channel lane is hidden to give the preview the panel. The panel decides
+   * this, because hiding the navigator must only ever hide the tree — the other
+   * channels live in that lane too and must stay reachable.
+   */
+  primaryHidden: boolean;
   onToggleNavigator: () => void;
 }) {
   const t = useT();
@@ -77,10 +83,10 @@ export function RightPanelLanes(props: {
   const overlay = mode === "medium" && hasInspector;
   // With the navigator hidden there is no second column to size, so the preview
   // takes the panel — the third presentation of the same flag.
-  const split = hasInspector && (overlay || props.navigatorOpen);
+  const split = hasInspector && !props.primaryHidden;
   // Hidden in a wide panel: the lane stays mounted so the tree keeps its
   // expanded directories, and stops taking space so the preview fills the panel.
-  const primaryHidden = hasInspector && !overlay && !props.navigatorOpen;
+  const primaryHidden = hasInspector && !overlay && props.primaryHidden;
   const parked = overlay && !props.navigatorOpen;
 
   const primaryStyle: CSSProperties = overlay
