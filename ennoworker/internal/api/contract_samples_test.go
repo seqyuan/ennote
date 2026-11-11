@@ -445,6 +445,21 @@ func TestContractSamples(t *testing.T) {
 		values: projectRoute, status: http.StatusOK,
 	})
 
+	// The workspace write endpoints: the first handlers that change user files
+	// without a tool call behind them, so their answers get the same type check as
+	// everything else. `deleteProjectFileEntry` answers 204 with no body, which no
+	// sample can describe — there is no shape to check.
+	samples.record(contractSampleRequest{
+		method: http.MethodPost, route: "/v1/projects/{projectID}/files/create", auth: true,
+		values: projectRoute, status: http.StatusCreated,
+		body: map[string]any{"path": "/workspace/sample.txt", "kind": "file", "content": "sampled"},
+	})
+	samples.record(contractSampleRequest{
+		method: http.MethodPost, route: "/v1/projects/{projectID}/files/move", auth: true,
+		values: projectRoute, status: http.StatusOK,
+		body: map[string]any{"from": "/workspace/sample.txt", "to": "/workspace/renamed.txt"},
+	})
+
 	// Authoring surfaces: a Portable Hero document and the Graph draft it can be
 	// referenced from. Both are the largest hand-shaped JSON the Worker answers
 	// outside chat, and neither had a sample.

@@ -221,6 +221,21 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
     }
   }, [projectId]);
 
+  /** Drop a subtree's cached listing and its expansion, in that order. */
+  const forgetDir = useCallback((dirPath: string) => {
+    setDirContents((previous) => {
+      const next = new Map(previous);
+      for (const key of [...next.keys()]) {
+        if (key === dirPath || key.startsWith(`${dirPath}/`)) next.delete(key);
+      }
+      return next;
+    });
+    setExpandedDirs((previous) => {
+      const next = new Set([...previous].filter((key) => key !== dirPath && !key.startsWith(`${dirPath}/`)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, []);
+
   const writes = useProjectTreeWrites({
     projectId,
     rows,
@@ -229,6 +244,7 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
     expand,
     focusRow: (path) => focusRow(path),
     refreshDir,
+    forgetDir,
     setError,
   });
   const { pending, setPending, beginCreate, beginRename, createDepth, submitCreate, submitRename, requestDelete } = writes;
@@ -365,7 +381,10 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
         ) : error && entries.length === 0 ? (
           <div className="file-tree-state is-error">{error}</div>
         ) : rows.length === 0 ? (
-          <div className="file-tree-state">{query ? "No files match." : "No files found."}</div>
+          <>
+            {error && <p className="file-tree-inline-error" role="alert">{error}</p>}
+            <div className="file-tree-state">{query ? "No files match." : "No files found."}</div>
+          </>
         ) : (
           <>
             {error && <p className="file-tree-inline-error" role="alert">{error}</p>}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { confirmAction } from "@/components/ui/confirm";
 import {
@@ -38,12 +38,15 @@ export function useProjectTreeWrites(input: {
   expand: (path: string) => void;
   focusRow: (path: string) => void;
   refreshDir: (path: string) => Promise<void>;
+  /** Forget a subtree's cached listing (a delete or a rename invalidates it). */
+  forgetDir: (path: string) => void;
   setError: (message: string | null) => void;
 }) {
-  const { projectId, rows, focusedPath, menuPath, expand, focusRow, refreshDir, setError } = input;
+  const { projectId, rows, focusedPath, menuPath, expand, focusRow, refreshDir, forgetDir, setError } = input;
   // One slot, because one name is being typed at a time.
   const [pending, setPending] = useState<PendingName | null>(null);
   const [busy, setBusy] = useState(false);
+  const inFlight = useRef(false);
 
   /** A name is a path segment, never a path. */
   const nameProblem = (name: string): string | null => {
@@ -92,15 +95,20 @@ export function useProjectTreeWrites(input: {
     const problem = nameProblem(name);
     if (problem) { setError(problem); return; }
     const target = joinPath(pending.parent, name);
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     try {
       await createProjectEntry(projectId, { path: target, kind: pending.entryKind, content: "" });
       setPending(null);
       await refreshDir(pending.parent);
-      focusRow(target);
+      // The row exists only after the listing lands, so the focus is asked for
+      // once more on the next frame rather than against a list that is not there.
+      window.requestAnimationFrame(() => focusRow(target));
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   }, [pending, projectId, refreshDir, focusRow, setError]);
@@ -113,19 +121,25 @@ export function useProjectTreeWrites(input: {
     if (problem) { setError(problem); return; }
     const parent = splitWorkspacePath(entry.path).parent;
     const target = joinPath(parent, name);
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     try {
       await moveProjectEntry(projectId, { from: entry.path, to: target });
       setPending(null);
+      // Whatever was cached under the old path described a directory that no
+      // longer has that name.
+      forgetDir(entry.path);
       await refreshDir(parent);
       // The row that was renamed is the row that keeps the focus.
-      focusRow(target);
+      window.requestAnimationFrame(() => focusRow(target));
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
-  }, [projectId, refreshDir, focusRow, setError]);
+  }, [projectId, refreshDir, forgetDir, focusRow, setError]);
 
   const requestDelete = useCallback(async () => {
     if (!projectId) return;
@@ -141,16 +155,20 @@ export function useProjectTreeWrites(input: {
       tone: "danger",
     });
     if (!confirmed) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     try {
       await deleteProjectEntry(projectId, entry.path, { recursive: entry.isDir });
+      forgetDir(entry.path);
       await refreshDir(splitWorkspacePath(entry.path).parent);
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
-  }, [projectId, rows, menuPath, refreshDir, setError]);
+  }, [projectId, rows, menuPath, refreshDir, forgetDir, setError]);
 
 
   return {

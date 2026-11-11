@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/workspace"
 )
@@ -66,13 +67,8 @@ type workspaceFileMoveRequest struct {
 // writableTarget resolves a path for writing and reports the virtual path it
 // names, refusing the mount root and anything the jail keeps read-only.
 func writableTarget(w http.ResponseWriter, r *http.Request, jail *workspace.Jail, requested string) (string, string, bool) {
-	virtual := strings.TrimSpace(requested)
-	if virtual == "" {
-		writeError(w, r, http.StatusBadRequest, "invalid_file_path", "path is required", false)
-		return "", "", false
-	}
-	if strings.TrimRight(virtual, "/") == workspacePathPrefix {
-		writeError(w, r, http.StatusBadRequest, "workspace_root_immutable", "the workspace root cannot be created, moved or deleted", false)
+	virtual, ok := workspaceWritePath(w, r, requested)
+	if !ok {
 		return "", "", false
 	}
 	hostPath, err := jail.ResolveForWrite(virtual)
@@ -80,26 +76,72 @@ func writableTarget(w http.ResponseWriter, r *http.Request, jail *workspace.Jail
 		writeWorkspaceWriteError(w, r, err)
 		return "", "", false
 	}
+	// The root check runs on the resolved path, not on what was typed: "/workspace/.",
+	// "//workspace" and the empty string all name the root once resolved, and the
+	// root is never a target.
+	if sameHostPath(hostPath, jail.Root()) {
+		writeError(w, r, http.StatusBadRequest, "workspace_root_immutable", "the workspace root cannot be created, moved or deleted", false)
+		return "", "", false
+	}
 	return hostPath, virtual, true
 }
 
 // existingTarget resolves a path that must already exist and be writable.
+// existingTarget resolves an entry that is already there, WITHOUT following a
+// symlink at the last segment: renaming or deleting a link must act on the link,
+// not on whatever it points at.
 func existingTarget(w http.ResponseWriter, r *http.Request, jail *workspace.Jail, requested string) (string, string, bool) {
-	virtual := strings.TrimSpace(requested)
-	if virtual == "" {
-		writeError(w, r, http.StatusBadRequest, "invalid_file_path", "path is required", false)
+	virtual, ok := workspaceWritePath(w, r, requested)
+	if !ok {
 		return "", "", false
 	}
-	if strings.TrimRight(virtual, "/") == workspacePathPrefix {
-		writeError(w, r, http.StatusBadRequest, "workspace_root_immutable", "the workspace root cannot be created, moved or deleted", false)
-		return "", "", false
-	}
-	hostPath, err := jail.ResolveWorkspaceExisting(virtual)
+	parentVirtual, name := splitVirtual(virtual)
+	parentHost, err := jail.ResolveForWrite(parentVirtual)
 	if err != nil {
 		writeWorkspaceWriteError(w, r, err)
 		return "", "", false
 	}
+	hostPath := filepath.Join(parentHost, name)
+	if _, statErr := os.Lstat(hostPath); statErr != nil {
+		writeWorkspaceWriteError(w, r, statErr)
+		return "", "", false
+	}
+	if sameHostPath(hostPath, jail.Root()) {
+		writeError(w, r, http.StatusBadRequest, "workspace_root_immutable", "the workspace root cannot be created, moved or deleted", false)
+		return "", "", false
+	}
 	return hostPath, virtual, true
+}
+
+// workspaceWritePath validates the one shape every write path must have: a
+// /workspace path with something after it. The contract declares the pattern;
+// this is where it is actually enforced.
+func workspaceWritePath(w http.ResponseWriter, r *http.Request, requested string) (string, bool) {
+	virtual := path.Clean("/" + strings.TrimSpace(requested))
+	if !strings.HasPrefix(strings.TrimSpace(requested), workspacePathPrefix) {
+		writeError(w, r, http.StatusBadRequest, "invalid_workspace_path", "path must be rooted at /workspace", false)
+		return "", false
+	}
+	if virtual == workspacePathPrefix {
+		writeError(w, r, http.StatusBadRequest, "workspace_root_immutable", "the workspace root cannot be created, moved or deleted", false)
+		return "", false
+	}
+	return virtual, true
+}
+
+// splitVirtual splits a virtual path into its parent and its last segment.
+func splitVirtual(virtual string) (string, string) {
+	cleaned := path.Clean(virtual)
+	parent := path.Dir(cleaned)
+	if parent == "." {
+		parent = workspacePathPrefix
+	}
+	return parent, path.Base(cleaned)
+}
+
+// sameHostPath compares two resolved host paths.
+func sameHostPath(a, b string) bool {
+	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 func (s *Server) createProjectFileEntry(w http.ResponseWriter, r *http.Request) {
@@ -203,9 +245,10 @@ func (s *Server) moveProjectFileEntry(w http.ResponseWriter, r *http.Request) {
 		writeWorkspaceWriteError(w, r, statErr)
 		return
 	}
-	// Rename refuses to replace, on every platform: the check above is the
-	// portable guarantee, os.Rename's behaviour differs.
-	if err := os.Rename(fromHost, toHost); err != nil {
+	// The existence check above is a courtesy; this is the guarantee. A plain
+	// rename would silently replace the target on POSIX, so the platform layer
+	// asks the kernel to refuse instead.
+	if err := renameNoReplace(fromHost, toHost); err != nil {
 		writeWorkspaceWriteError(w, r, err)
 		return
 	}
@@ -294,6 +337,10 @@ func writeWorkspaceWriteError(w http.ResponseWriter, r *http.Request, err error)
 		writeError(w, r, http.StatusForbidden, "workspace_permission_denied", "the worker cannot write that path", false)
 	case errors.Is(err, os.ErrExist):
 		writeError(w, r, http.StatusConflict, "workspace_path_exists", "an entry already exists at that path", false)
+	case errors.Is(err, syscall.EXDEV):
+		writeError(w, r, http.StatusConflict, "cross_device_move", "the destination is on another filesystem", false)
+	case errors.Is(err, syscall.ENOSPC):
+		writeError(w, r, http.StatusInsufficientStorage, "insufficient_storage", "the worker host is out of space", false)
 	default:
 		writeError(w, r, http.StatusBadRequest, "invalid_workspace_path", err.Error(), false)
 	}

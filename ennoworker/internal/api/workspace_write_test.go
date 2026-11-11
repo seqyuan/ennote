@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,6 +142,58 @@ func TestDeleteProjectFileEntryNeedsRecursionForANonEmptyDirectory(t *testing.T)
 	assert.Contains(t, recursive.Body.String(), "workspace_root_immutable")
 }
 
+func TestWorkspaceRootIsProtectedHoweverItIsSpelled(t *testing.T) {
+	_, handler, projectID := writeFixture(t)
+
+	// Every spelling of the root is refused. Two of them (`//workspace`, empty) are
+	// refused earlier as "not a /workspace path" — a different message for the same
+	// outcome, which is what matters here.
+	for _, spelling := range []string{"/workspace", "/workspace/", "/workspace/.", "//workspace", "/workspace/..//workspace", ""} {
+		deleted := request(t, handler, http.MethodDelete,
+			"/v1/projects/"+projectID+"/files?path="+url.QueryEscape(spelling)+"&recursive=true", nil, true)
+		require.Equal(t, http.StatusBadRequest, deleted.Code, "delete %q: %s", spelling, deleted.Body.String())
+		body := deleted.Body.String()
+		assert.True(t,
+			strings.Contains(body, "workspace_root_immutable") || strings.Contains(body, "invalid_workspace_path"),
+			"delete %q: %s", spelling, body)
+	}
+	// The root is still there: nothing above may have deleted it.
+	root := request(t, handler, http.MethodGet, "/v1/projects/"+projectID+"/workspace", nil, true)
+	require.Equal(t, http.StatusOK, root.Code)
+}
+
+func TestWorkspaceWritesRefuseAPathOutsideTheMount(t *testing.T) {
+	_, handler, projectID := writeFixture(t)
+
+	for _, spelling := range []string{"relative.txt", "../outside.txt", "/etc/passwd", "/workspace/../outside.txt"} {
+		answer := createEntry(t, handler, projectID, spelling, "file", "")
+		assert.Equal(t, http.StatusBadRequest, answer.Code, "create %q: %s", spelling, answer.Body.String())
+	}
+}
+
+func TestMoveAndDeleteActOnASymlinkItself(t *testing.T) {
+	_, handler, projectID := writeFixture(t)
+	require.Equal(t, http.StatusCreated, createEntry(t, handler, projectID, "/workspace/real.txt", "file", "keep").Code)
+
+	record := request(t, handler, http.MethodGet, "/v1/projects/"+projectID+"/workspace", nil, true)
+	var workspaceRecord struct {
+		HostPath string `json:"hostPath"`
+	}
+	decodeData(t, record, &workspaceRecord)
+	linkPath := filepath.Join(workspaceRecord.HostPath, "link.txt")
+	require.NoError(t, os.Symlink(filepath.Join(workspaceRecord.HostPath, "real.txt"), linkPath))
+
+	// Deleting the link deletes the link, not the file it names.
+	removed := request(t, handler, http.MethodDelete,
+		"/v1/projects/"+projectID+"/files?path=/workspace/link.txt", nil, true)
+	require.Equal(t, http.StatusNoContent, removed.Code, removed.Body.String())
+	_, err := os.Lstat(linkPath)
+	assert.True(t, os.IsNotExist(err), "the link is gone")
+	kept := request(t, handler, http.MethodGet,
+		"/v1/projects/"+projectID+"/files/content?path=/workspace/real.txt", nil, true)
+	assert.Contains(t, kept.Body.String(), "keep", "the file the link pointed at is untouched")
+}
+
 func TestWorkspaceWritesStayInsideTheWorkspaceMount(t *testing.T) {
 	_, handler, projectID := writeFixture(t)
 
@@ -169,10 +222,12 @@ func TestWorkspaceWritesRefuseAReadOnlyMount(t *testing.T) {
 	// /skills is a read-only mount on every workspace.
 	answer := createEntry(t, handler, projectID, "/skills/anything.md", "file", "")
 	assert.Contains(t, []int{http.StatusBadRequest, http.StatusForbidden}, answer.Code, answer.Body.String())
-	// Either refusal is correct: a read-only mount and a path outside /workspace
+	// Either refusal is correct: a path outside /workspace and a read-only mount
 	// are both "you may not write this".
 	body := answer.Body.String()
-	assert.True(t, strings.Contains(body, "workspace_read_only") || strings.Contains(body, "workspace_path_escape"), body)
+	assert.True(t,
+		strings.Contains(body, "workspace_read_only") || strings.Contains(body, "workspace_path_escape") || strings.Contains(body, "invalid_workspace_path"),
+		body)
 }
 
 func TestCreateProjectFileEntryRejectsAnOversizedBody(t *testing.T) {

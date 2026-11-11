@@ -4,7 +4,7 @@
 # ErrorCode constants, and literal envelope codes. Do not edit by hand: run
 # `npm run generate:error-codes` and commit the diff, which makes a vocabulary
 # change visible in review instead of at runtime.
-# 261 codes.
+# 263 codes.
 active_runs_unavailable
 approval_checkpoint_invalid
 approval_conflict
@@ -42,6 +42,7 @@ context_overflow_after_compaction
 context_overflow_in_run
 context_projection_not_enabled
 context_turn_too_large
+cross_device_move
 database_unavailable
 delegation_approval_conflict
 delegation_approval_not_found
@@ -109,6 +110,7 @@ host_not_allowed
 image_invalid
 incomplete_terminal_contract
 installed_skill_not_found
+insufficient_storage
 internal_error
 invalid_answer
 invalid_approval_decision

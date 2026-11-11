@@ -110,17 +110,28 @@ export const createProject201: WorkerOperationResponse<"createProject", 201> = {
   }
 };
 
+/** createProjectFileEntry answering 201. */
+export const createProjectFileEntry201: WorkerOperationResponse<"createProjectFileEntry", 201> = {
+  "data": {
+    "isDir": false,
+    "modifiedAt": "2026-01-01T00:00:02Z",
+    "name": "sample.txt",
+    "path": "/workspace/sample.txt",
+    "size": 7
+  }
+};
+
 /** createSession answering 201. */
 export const createSession201: WorkerOperationResponse<"createSession", 201> = {
   "data": {
     "activeBranchId": "00000000-0000-0000-0000-000000000004",
-    "createdAt": "2026-01-01T00:00:02Z",
+    "createdAt": "2026-01-01T00:00:03Z",
     "id": "00000000-0000-0000-0000-000000000005",
     "mode": "hosted",
     "projectId": "00000000-0000-0000-0000-000000000002",
     "status": "active",
     "title": "contract",
-    "updatedAt": "2026-01-01T00:00:02Z"
+    "updatedAt": "2026-01-01T00:00:03Z"
   }
 };
 
@@ -204,7 +215,7 @@ export const getRun200: WorkerOperationResponse<"getRun", 200> = {
     "baseMessageId": "00000000-0000-0000-0000-000000000006",
     "commitFormatVersion": 1,
     "contextSnapshot": {},
-    "createdAt": "2026-01-01T00:00:03Z",
+    "createdAt": "2026-01-01T00:00:04Z",
     "effectiveConfig": {},
     "executionDepth": 0,
     "id": "00000000-0000-0000-0000-000000000007",
@@ -260,7 +271,7 @@ export const getSessionActiveRun200: WorkerOperationResponse<"getSessionActiveRu
       "baseMessageId": "00000000-0000-0000-0000-000000000006",
       "commitFormatVersion": 1,
       "contextSnapshot": {},
-      "createdAt": "2026-01-01T00:00:03Z",
+      "createdAt": "2026-01-01T00:00:04Z",
       "effectiveConfig": {},
       "executionDepth": 0,
       "id": "00000000-0000-0000-0000-000000000007",
@@ -340,9 +351,9 @@ export const listSessionMessages200: WorkerOperationResponse<"listSessionMessage
     "messages": [
       {
         "addresseeKind": "host",
-        "createdAt": "2026-01-01T00:00:03Z",
+        "createdAt": "2026-01-01T00:00:04Z",
         "id": "00000000-0000-0000-0000-000000000006",
-        "originatedAt": "2026-01-01T00:00:03Z",
+        "originatedAt": "2026-01-01T00:00:04Z",
         "parts": [
           {
             "text": "hello",
@@ -409,6 +420,17 @@ export const listSkills200: WorkerOperationResponse<"listSkills", 200> = {
   }
 };
 
+/** moveProjectFileEntry answering 200. */
+export const moveProjectFileEntry200: WorkerOperationResponse<"moveProjectFileEntry", 200> = {
+  "data": {
+    "isDir": false,
+    "modifiedAt": "2026-01-01T00:00:02Z",
+    "name": "renamed.txt",
+    "path": "/workspace/renamed.txt",
+    "size": 7
+  }
+};
+
 /** submitInvocation answering 202. */
 export const submitInvocation202: WorkerOperationResponse<"submitInvocation", 202> = {
   "data": {
@@ -418,7 +440,7 @@ export const submitInvocation202: WorkerOperationResponse<"submitInvocation", 20
       "baseMessageId": "00000000-0000-0000-0000-000000000009",
       "commitFormatVersion": 1,
       "contextSnapshot": {},
-      "createdAt": "2026-01-01T00:00:04Z",
+      "createdAt": "2026-01-01T00:00:05Z",
       "effectiveConfig": {},
       "executionDepth": 0,
       "id": "00000000-0000-0000-0000-000000000010",
@@ -448,7 +470,7 @@ export const submitTurn202: WorkerOperationResponse<"submitTurn", 202> = {
       "baseMessageId": "00000000-0000-0000-0000-000000000006",
       "commitFormatVersion": 1,
       "contextSnapshot": {},
-      "createdAt": "2026-01-01T00:00:03Z",
+      "createdAt": "2026-01-01T00:00:04Z",
       "effectiveConfig": {},
       "executionDepth": 0,
       "id": "00000000-0000-0000-0000-000000000007",
