@@ -63,9 +63,26 @@ export interface RightPanelState {
   open: boolean;
   /** The left lane's width while both lanes are drawn. Persisted. */
   primaryWidth: number;
-  /** The selected inspector tab, or `null` when the lane is empty. Never persisted. */
+  /** The selected inspector tab, or `null` when the lane is empty. */
   activeInspectorId: string | null;
+  /**
+   * The files this Project has open, oldest first. They belong to the Project,
+   * not to the session, so they are persisted with the rest of its preferences —
+   * that is what makes a reload give the reader their files back.
+   */
+  inspectorTabs: PersistedInspectorTab[];
 }
+
+/** A file the panel had open, as it is remembered between visits. */
+export interface PersistedInspectorTab {
+  /** Project-relative file path under /workspace. */
+  path: string;
+  /** What the row shows; the path's last segment when it was opened. */
+  name: string;
+}
+
+/** How many inspector rows one Project keeps. localStorage is not a repository. */
+export const MAX_PERSISTED_INSPECTOR_TABS = 20;
 
 /** What the browser keeps for one Project. */
 export interface RightPanelPreferencesV1 {
@@ -74,6 +91,13 @@ export interface RightPanelPreferencesV1 {
   pinnedChannels: PanelChannel[];
   primaryWidth: number;
   open: boolean;
+  /**
+   * Files that were open, oldest first. Optional because rows written before
+   * this field existed carry no such array; an absent one means "none".
+   */
+  inspectorTabs?: PersistedInspectorTab[];
+  /** The row that was selected, when it is still among `inspectorTabs`. */
+  activeInspectorId?: string | null;
 }
 
 /**
@@ -126,13 +150,47 @@ export function parsePreferences(raw: string | null, projectId: string): RightPa
   const primaryWidth = typeof row.primaryWidth === "number" && Number.isFinite(row.primaryWidth)
     ? row.primaryWidth
     : PRIMARY_DEFAULT_WIDTH;
+  const inspectorTabs = readInspectorTabs(row.inspectorTabs);
+  const activeInspectorId = typeof row.activeInspectorId === "string"
+    && inspectorTabs.some((tab) => `file:${projectId}:${tab.path}` === row.activeInspectorId)
+    ? row.activeInspectorId
+    : null;
   return {
     version: 1,
     projectId,
     pinnedChannels: normalizeChannels(row.pinnedChannels.filter(isPanelChannel)),
     primaryWidth,
     open: row.open === true,
+    inspectorTabs,
+    activeInspectorId,
   };
+}
+
+/**
+ * Read the remembered file rows, keeping the newest and dropping junk.
+ *
+ * The array is written oldest-first, so trimming drops from the front: a Project
+ * that has opened hundreds of files over months must not carry all of them, and
+ * the ones the reader is likely to want back are the recent ones.
+ */
+function readInspectorTabs(value: unknown): PersistedInspectorTab[] {
+  if (!Array.isArray(value)) return [];
+  const rows: PersistedInspectorTab[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const row = entry as Partial<PersistedInspectorTab>;
+    if (typeof row.path !== "string" || row.path.length === 0) continue;
+    if (seen.has(row.path)) continue;
+    seen.add(row.path);
+    rows.push({ path: row.path, name: typeof row.name === "string" && row.name.length > 0 ? row.name : lastSegment(row.path) });
+  }
+  return rows.slice(-MAX_PERSISTED_INSPECTOR_TABS);
+}
+
+function lastSegment(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  return parts[parts.length - 1] ?? path;
 }
 
 /** Write one Project's preferences, normalised. */
@@ -143,6 +201,8 @@ export function serializePreferences(preferences: RightPanelPreferencesV1): stri
     pinnedChannels: normalizeChannels(preferences.pinnedChannels),
     primaryWidth: preferences.primaryWidth,
     open: preferences.open,
+    inspectorTabs: readInspectorTabs(preferences.inspectorTabs),
+    activeInspectorId: preferences.activeInspectorId ?? null,
   });
 }
 
@@ -177,14 +237,22 @@ export function initialRightPanelState(preferences: RightPanelPreferencesV1): Ri
     openChannels,
     pinnedChannels,
     activeChannelId: openChannels[0] ?? null,
-    activeLane: "channel",
     open: preferences.open,
     primaryWidth: preferences.primaryWidth,
-    activeInspectorId: null,
+    activeInspectorId: preferences.activeInspectorId ?? null,
+    activeLane: preferences.activeInspectorId ? "inspector" : "channel",
+    inspectorTabs: readInspectorTabs(preferences.inspectorTabs),
   };
 }
 
-/** The preferences a state writes back. The open set is not among them. */
+/**
+ * The preferences a state writes back.
+ *
+ * The open *channel* set is not among them; the open *file* rows are, because
+ * they are the Project's history of what the reader was looking at, and that is
+ * exactly what a reload should give back.
+ * @param state - the panel's state.
+ */
 export function preferencesOf(state: RightPanelState): RightPanelPreferencesV1 {
   return {
     version: 1,
@@ -192,7 +260,35 @@ export function preferencesOf(state: RightPanelState): RightPanelPreferencesV1 {
     pinnedChannels: normalizeChannels(state.pinnedChannels),
     primaryWidth: state.primaryWidth,
     open: state.open,
+    inspectorTabs: readInspectorTabs(state.inspectorTabs),
+    activeInspectorId: state.activeInspectorId,
   };
+}
+
+/** Reorder the remembered rows, so the strip's order survives a reload too. */
+export function reorderInspectorTabs(
+  state: RightPanelState,
+  fromPath: string,
+  toPath: string,
+): RightPanelState {
+  const from = state.inspectorTabs.findIndex((row) => row.path === fromPath);
+  const to = state.inspectorTabs.findIndex((row) => row.path === toPath);
+  if (from < 0 || to < 0 || from === to) return state;
+  const rows = [...state.inspectorTabs];
+  const [moved] = rows.splice(from, 1);
+  rows.splice(to, 0, moved);
+  return { ...state, inspectorTabs: rows };
+}
+
+/** The file a row id names. The id is `file:<projectId>:<path>`. */
+export function pathOf(tabId: string): string {
+  const parts = tabId.split(":");
+  return parts.length < 3 ? tabId : parts.slice(2).join(":");
+}
+
+/** The row id for a file in a Project. */
+export function fileTabId(projectId: string, path: string): string {
+  return `file:${projectId}:${path}`;
 }
 
 /** Show a channel: used by a channel tab, the add menu, and the launcher alike. */
@@ -251,9 +347,21 @@ export function setPrimaryWidth(state: RightPanelState, width: number): RightPan
   return state.primaryWidth === width ? state : { ...state, primaryWidth: width };
 }
 
-/** Open a file in the inspector lane and show the shell. */
-export function openInspectorTab(state: RightPanelState, tabId: string): RightPanelState {
-  return { ...state, activeInspectorId: tabId, activeLane: "inspector", open: true };
+/**
+ * Open a file in the inspector lane and show the shell.
+ * @param state - the current state.
+ * @param tabId - the row's id, derived from the Project and the path.
+ * @param row - the file to remember; passing it again keeps its position.
+ */
+export function openInspectorTab(
+  state: RightPanelState,
+  tabId: string,
+  row: PersistedInspectorTab,
+): RightPanelState {
+  const inspectorTabs = state.inspectorTabs.some((tab) => tab.path === row.path)
+    ? state.inspectorTabs
+    : readInspectorTabs([...state.inspectorTabs, row]);
+  return { ...state, inspectorTabs, activeInspectorId: tabId, activeLane: "inspector", open: true };
 }
 
 /**
@@ -267,9 +375,15 @@ export function closeInspectorTab(
   tabId: string,
   remainingIds: readonly string[],
 ): RightPanelState {
-  if (state.activeInspectorId !== tabId) return state;
   const remaining = remainingIds.filter((id) => id !== tabId);
-  const next = remaining[remaining.length - 1] ?? null;
-  // An emptied lane hands the strip back to the channel; the tabs stay closed.
-  return { ...state, activeInspectorId: next, activeLane: next === null ? "channel" : "inspector" };
+  const next = state.activeInspectorId === tabId
+    ? remaining[remaining.length - 1] ?? null
+    : state.activeInspectorId;
+  return {
+    ...state,
+    inspectorTabs: state.inspectorTabs.filter((row) => row.path !== pathOf(tabId)),
+    activeInspectorId: next,
+    // An emptied lane hands the strip back to the channel; the tabs stay closed.
+    activeLane: next === null ? "channel" : state.activeLane,
+  };
 }

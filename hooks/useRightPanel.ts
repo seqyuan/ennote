@@ -3,8 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { Tab } from "@/components/TabBar";
-import { moveTab } from "@/lib/tab-order";
-import { scopeFileTabs } from "@/lib/file-tabs";
 import { resolvePrimaryLaneWidth as resolvePrimaryLaneWidthOf } from "@/lib/right-panel-width";
 import {
   type PanelChannel,
@@ -18,10 +16,13 @@ import {
   initialRightPanelState,
   isPanelChannel,
   openChannel,
+  fileTabId,
   openInspectorTab,
   parsePreferences,
+  pathOf,
   pinChannel,
   preferencesOf,
+  reorderInspectorTabs,
   rightPanelPreferencesKey,
   serializePreferences,
   setPrimaryWidth,
@@ -42,7 +43,6 @@ import {
  * which tab list the panel should draw.
  */
 export function useRightPanel(projectId: string | null) {
-  const [openTabs, setOpenTabs] = useState<Tab[]>([]);
   const [state, setState] = useState<RightPanelState>(() =>
     initialRightPanelState(emptyPreferences(projectId ?? "")),
   );
@@ -76,22 +76,29 @@ export function useRightPanel(projectId: string | null) {
       : emptyPreferences("");
     setState(() => {
       const next = initialRightPanelState(preferences);
-      const parked = openTabs
-        .filter((tab) => tab.projectId === projectId)
-        .map((tab) => tab.id);
+      const parked = next.inspectorTabs.map((row) => fileTabId(projectId ?? "", row.path));
+      // A switch inside this session wins over what was stored: the reader was
+      // just there. Otherwise the stored selection is the one to return to.
       const remembered = rememberedTab.current.get(key);
-      const restored = remembered !== undefined && parked.includes(remembered) ? remembered : null;
+      const wanted = remembered ?? next.activeInspectorId ?? undefined;
+      const restored = wanted !== undefined && parked.includes(wanted) ? wanted : null;
       return {
         ...next,
-        open: next.open,
         activeInspectorId: restored,
         activeLane: restored === null ? "channel" : "inspector",
       };
     });
     setHydratedFor(key);
-  }, [key, projectId, hydratedFor, openTabs]);
+  }, [key, projectId, hydratedFor]);
 
-  const fileTabs = useMemo(() => scopeFileTabs(openTabs, projectId), [openTabs, projectId]);
+  // The strip's rows are the Project's remembered files, in their own order.
+  const fileTabs = useMemo<Tab[]>(() => (state.projectId === projectId ? state.inspectorTabs : [])
+    .map((row) => ({
+      id: fileTabId(projectId ?? "", row.path),
+      label: row.name,
+      filePath: row.path,
+      projectId: projectId ?? undefined,
+    })), [state.projectId, state.inspectorTabs, projectId]);
   const scopedIds = useMemo(() => fileTabs.map((tab) => tab.id), [fileTabs]);
 
   // The strip highlights whichever lane the user touched last. A tab that the
@@ -128,32 +135,33 @@ export function useRightPanel(projectId: string | null) {
 
   const openInspector = useCallback((filePath: string, fileName: string) => {
     if (!projectId) return;
-    const id = `file:${projectId}:${filePath}`;
-    setOpenTabs((previous) => previous.some((tab) => tab.id === id)
-      ? previous
-      : [...previous, { id, label: fileName, filePath, projectId }]);
+    const id = fileTabId(projectId, filePath);
     rememberedTab.current.set(projectId, id);
-    setState((current) => openInspectorTab(current, id));
+    setState((current) => openInspectorTab(current, id, { path: filePath, name: fileName }));
   }, [projectId]);
+
+  // Selecting a row only moves the selection; its remembered row is already there.
+  const rowOf = (current: RightPanelState, tabId: string) => current.inspectorTabs
+    .find((row) => fileTabId(current.projectId, row.path) === tabId)
+    ?? { path: pathOf(tabId), name: pathOf(tabId).split("/").filter(Boolean).pop() ?? tabId };
 
   const setActiveTabId = useCallback((tabId: string) => {
     if (!isPanelChannel(tabId)) rememberedTab.current.set(projectId ?? "", tabId);
     setState((current) => (isPanelChannel(tabId)
       ? openChannel(current, tabId as PanelChannel)
-      : openInspectorTab(current, tabId)));
+      : openInspectorTab(current, tabId, rowOf(current, tabId))));
   }, [projectId]);
 
   const closeTab = useCallback((tabId: string) => {
     // Inspector rows only: channels close through `closeChannelTab`, so the
     // strip's own × and this path stay distinct.
     if (isPanelChannel(tabId)) return;
-    setOpenTabs((previous) => previous.filter((tab) => tab.id !== tabId));
     if (rememberedTab.current.get(projectId ?? "") === tabId) rememberedTab.current.delete(projectId ?? "");
     setState((current) => closeInspectorTab(current, tabId, scopedIds));
   }, [projectId, scopedIds]);
 
   const reorderTabs = useCallback((fromId: string, toId: string) => {
-    setOpenTabs((previous) => moveTab(previous, fromId, toId));
+    setState((current) => reorderInspectorTabs(current, pathOf(fromId), pathOf(toId)));
   }, []);
 
   const closeChannelTab = useCallback((channel: PanelChannel) => {

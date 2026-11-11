@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  MAX_PERSISTED_INSPECTOR_TABS,
   type PanelChannel,
   type RightPanelPreferencesV1,
   type RightPanelState,
@@ -108,7 +109,7 @@ describe("right panel channel contract", () => {
   });
 
   it("opens the shell when a file is opened from the tree or a message", () => {
-    const after = openInspectorTab(state(), "main.py");
+    const after = openInspectorTab(state(), "main.py", { path: "/workspace/main.py", name: "main.py" });
 
     expect(after.open).toBe(true);
     expect(after.activeInspectorId).toBe("main.py");
@@ -117,7 +118,7 @@ describe("right panel channel contract", () => {
   });
 
   it("remembers which lane the user last activated", () => {
-    const opened = openInspectorTab(state(), "main.py");
+    const opened = openInspectorTab(state(), "main.py", { path: "/workspace/main.py", name: "main.py" });
     expect(opened.activeLane).toBe("inspector");
 
     // Selecting a channel keeps the tab open, it only hands the strip back.
@@ -129,7 +130,7 @@ describe("right panel channel contract", () => {
   });
 
   it("closing the selected channel does not steal the lane from an open file", () => {
-    const reading = openInspectorTab(state(), "main.py");
+    const reading = openInspectorTab(state(), "main.py", { path: "/workspace/main.py", name: "main.py" });
     const closed = closeChannel(reading, "files");
 
     expect(closed.openChannels).toEqual(["graph", "tools"]);
@@ -138,7 +139,7 @@ describe("right panel channel contract", () => {
   });
 
   it("closes the last inspector tab without closing the shell", () => {
-    const opened = openInspectorTab(state(), "main.py");
+    const opened = openInspectorTab(state(), "main.py", { path: "/workspace/main.py", name: "main.py" });
     const closed = closeInspectorTab(opened, "main.py", []);
 
     expect(closed.activeInspectorId).toBeNull();
@@ -147,7 +148,8 @@ describe("right panel channel contract", () => {
   });
 
   it("selects the remaining tab when the active inspector tab is closed", () => {
-    const opened = openInspectorTab(openInspectorTab(state(), "a.py"), "b.py");
+    const first = openInspectorTab(state(), "a.py", { path: "/workspace/a.py", name: "a.py" });
+    const opened = openInspectorTab(first, "b.py", { path: "/workspace/b.py", name: "b.py" });
     expect(opened.activeInspectorId).toBe("b.py");
 
     expect(closeInspectorTab(opened, "b.py", ["a.py"]).activeInspectorId).toBe("a.py");
@@ -160,6 +162,90 @@ describe("right panel channel contract", () => {
 
     const last = state({ openChannels: ["files"], activeChannelId: "files" });
     expect(closeChannel(last, "files").activeChannelId).toBeNull();
+  });
+});
+
+describe("remembered inspector rows", () => {
+  const rows = (count: number) => Array.from({ length: count }, (_, index) => ({
+    path: `/workspace/f${index}.ts`, name: `f${index}.ts`,
+  }));
+
+  const withRows = (all: ReturnType<typeof rows>) => all.reduce(
+    (current, row) => openInspectorTab(current, `file:p1:${row.path}`, row),
+    state(),
+  );
+
+  it("survives a write and a read", () => {
+    const preferences = preferencesOf(withRows(rows(2)));
+    const back = parsePreferences(serializePreferences(preferences), "p1");
+
+    expect(back.inspectorTabs).toEqual(rows(2));
+  });
+
+  it("reads a payload written before the field existed", () => {
+    const legacy = JSON.stringify({
+      version: 1, projectId: "p1", pinnedChannels: ["files"], primaryWidth: 320, open: true,
+    });
+    const back = parsePreferences(legacy, "p1");
+
+    expect(back.pinnedChannels).toEqual(["files"]);
+    expect(back.primaryWidth).toBe(320);
+    expect(back.open).toBe(true);
+    expect(back.inspectorTabs).toEqual([]);
+    expect(back.activeInspectorId).toBeNull();
+  });
+
+  it("drops junk rows and de-duplicates by path", () => {
+    const raw = JSON.stringify({
+      version: 1, projectId: "p1", pinnedChannels: [], primaryWidth: 280, open: false,
+      inspectorTabs: [
+        { path: "/workspace/a.ts", name: "a.ts" },
+        { path: "/workspace/a.ts", name: "duplicate" },
+        { name: "no path" },
+        null,
+        { path: "/workspace/b.ts", name: "" },
+      ],
+    });
+    const back = parsePreferences(raw, "p1");
+
+    expect(back.inspectorTabs).toEqual([
+      { path: "/workspace/a.ts", name: "a.ts" },
+      { path: "/workspace/b.ts", name: "b.ts" }, // name filled from the path
+    ]);
+  });
+
+  it("keeps the newest rows when a Project has opened many files", () => {
+    const back = parsePreferences(
+      serializePreferences(preferencesOf(withRows(rows(MAX_PERSISTED_INSPECTOR_TABS + 5)))),
+      "p1",
+    );
+
+    expect(back.inspectorTabs).toHaveLength(MAX_PERSISTED_INSPECTOR_TABS);
+    expect(back.inspectorTabs?.[0]).toEqual(rows(MAX_PERSISTED_INSPECTOR_TABS + 5)[5]);
+    expect(back.inspectorTabs?.at(-1)).toEqual(rows(MAX_PERSISTED_INSPECTOR_TABS + 5).at(-1));
+  });
+
+  it("only restores a selection that is still one of the remembered rows", () => {
+    const kept = parsePreferences(JSON.stringify({
+      version: 1, projectId: "p1", pinnedChannels: [], primaryWidth: 280, open: true,
+      inspectorTabs: [{ path: "/workspace/a.ts", name: "a.ts" }],
+      activeInspectorId: "file:p1:/workspace/a.ts",
+    }), "p1");
+    expect(initialRightPanelState(kept).activeInspectorId).toBe("file:p1:/workspace/a.ts");
+    expect(initialRightPanelState(kept).activeLane).toBe("inspector");
+
+    const stale = parsePreferences(JSON.stringify({
+      version: 1, projectId: "p1", pinnedChannels: [], primaryWidth: 280, open: true,
+      inspectorTabs: [{ path: "/workspace/a.ts", name: "a.ts" }],
+      activeInspectorId: "file:p1:/workspace/gone.ts",
+    }), "p1");
+    expect(initialRightPanelState(stale).activeInspectorId).toBeNull();
+    expect(initialRightPanelState(stale).activeLane).toBe("channel");
+  });
+
+  it("does not carry another Project's rows across a key", () => {
+    const written = serializePreferences(preferencesOf(withRows(rows(2))));
+    expect(parsePreferences(written, "p2")).toEqual(emptyPreferences("p2"));
   });
 });
 
@@ -245,6 +331,8 @@ describe("preferences", () => {
       pinnedChannels: ["graph"],
       primaryWidth: 280,
       open: true,
+      inspectorTabs: [],
+      activeInspectorId: null,
     });
   });
 });

@@ -95,14 +95,11 @@ test("the lane divider cannot starve the preview", async ({ page }) => {
   if (!inspector || !panel) throw new Error("lanes have no box");
   expect(panel.width - inspector.width).toBeGreaterThanOrEqual(264);
 
-  // The settled width survives a reload. The open file does not — inspector tabs
-  // are deliberately not persisted — so the file is reopened to get a split back.
+  // The settled width survives a reload, and so does the row it was measured with.
   const settled = inspector.width;
   await page.reload();
-  await expect(page.getByTestId("right-panel-lanes")).toHaveAttribute("data-mode", "single");
-  await page.locator('.file-tree-main[title="/workspace/src"]').click();
-  await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
   await expect(page.getByTestId("right-panel-lanes")).toHaveAttribute("data-mode", "wide");
+  await expect(page.getByRole("tab", { name: "main.ts" })).toBeVisible();
   const afterReload = await page.getByTestId("right-panel-primary").boundingBox();
   expect(Math.abs((afterReload?.width ?? 0) - settled)).toBeLessThanOrEqual(2);
 });
@@ -325,4 +322,39 @@ test("the tree scrolls inside its lane", async ({ page }) => {
   await list.evaluate((el) => { el.scrollTop = el.scrollHeight; });
   const lastVisible = await page.locator('.file-tree-main[title="/workspace/f59.txt"]').isVisible();
   expect(lastVisible).toBe(true);
+});
+
+test("the files a reader had open come back after a reload", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockLanes(page);
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+  await page.locator('.file-tree-main[title="/workspace/src"]').click();
+  await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
+  await expect(page.locator(".file-code")).toContainText("ready");
+
+  await page.reload();
+
+  // The row is back and it is still the selected one, so the lane draws its body.
+  await expect(page.getByRole("tab", { name: "main.ts" })).toBeVisible();
+  await expect(page.locator(".file-code")).toContainText("ready");
+  await expect(page.getByTestId("right-panel-lanes")).toHaveAttribute("data-mode", "wide");
+});
+
+test("a stored row does not leak into another project", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockLanes(page, { withSecondProject: true });
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+  await page.locator('.file-tree-main[title="/workspace/src"]').click();
+  await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
+  await expect(page.locator(".file-code")).toContainText("ready");
+
+  await page.reload();
+  await expect(page.getByRole("tab", { name: "main.ts" })).toBeVisible();
+
+  await selectProject(page, second.name);
+  await expect(page.getByRole("tab", { name: "main.ts" })).toHaveCount(0);
 });
