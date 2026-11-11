@@ -18,7 +18,7 @@ import { PANEL_CHANNELS, isPanelChannel } from "@/lib/right-panel-channels";
 import { statusNeedsHuman } from "@/lib/run-status-copy";
 import type { PermissionMode } from "@/lib/permission-mode";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { INSPECTOR_MIN_WIDTH, laneMode } from "@/lib/right-panel-width";
+import { PRIMARY_MIN_WIDTH, SPLIT_PANE_MIN_WIDTH, laneMode, resolvePrimaryLaneWidth } from "@/lib/right-panel-width";
 
 export function RightPanel(props: {
   open: boolean;
@@ -84,11 +84,27 @@ export function RightPanel(props: {
     if (state.navigatorHidden && tabId !== "files") panel.toggleNavigator();
   };
 
-  // Two panes need room for two readable files; below that the reader gets the
-  // one they were last in, and the offer to open beside it is withdrawn rather
-  // than accepted into a pane nothing can draw.
+  // Two panes need room for two readable files — measured in the inspector lane,
+  // which shares the panel with the tree, not in the panel. When the lane is too
+  // narrow but would be wide enough with the tree at its floor, the offer stands
+  // and opening gives the tree's room away.
+  const treeWidth = navigatorOpen && activeChannelId !== null
+    ? resolvePrimaryLaneWidth(state.primaryWidths[activeChannelId], resize.width)
+    : 0;
+  const laneWidth = resize.width - treeWidth - (treeWidth > 0 ? 8 : 0);
+  const splitNeeds = SPLIT_PANE_MIN_WIDTH * 2 + 8;
+  const laneWithTreeAtFloor = resize.width - PRIMARY_MIN_WIDTH - 8;
   const canSplit = !medium && laneMode(resize.width, drawer) === "wide"
-    && resize.width >= INSPECTOR_MIN_WIDTH * 2 + 8;
+    && (laneWidth >= splitNeeds || laneWithTreeAtFloor >= splitNeeds);
+  const openToSide = (path: string, name: string) => {
+    if (laneWidth < splitNeeds && treeWidth > PRIMARY_MIN_WIDTH) {
+      // One adjustment, only when asked for: the comparison is the point, and a
+      // tree at its floor is still usable.
+      panel.resizePrimaryBy(PRIMARY_MIN_WIDTH - treeWidth, resize.width);
+    }
+    onOpenFileToSide(path, name);
+    if (medium) setPeek(false);
+  };
 
   const channelBody = (
     <>
@@ -105,10 +121,7 @@ export function RightPanel(props: {
             // the way. This is not a preference: it costs one click to reopen.
             if (medium) setPeek(false);
           }}
-          onOpenFileToSide={(path, name) => {
-            onOpenFileToSide(path, name);
-            if (medium) setPeek(false);
-          }}
+          onOpenFileToSide={openToSide}
           canOpenToSide={canSplit}
           onPreviewFile={onPreviewFile}
         />
@@ -159,7 +172,7 @@ export function RightPanel(props: {
   const mainBody = bodyFor(panel.activePanes.main, panel.paneTabs.main);
   const sideBody = bodyFor(panel.activePanes.side, panel.paneTabs.side);
   const split = canSplit && panel.paneTabs.side.length > 0;
-  const focusedBody = bodyFor(panel.activePanes[panel.focusedPane], fileTabs);
+  const focusedBody = bodyFor(panel.activePanes[panel.focusedPane], panel.paneTabs[panel.focusedPane]);
   // The pane wrapper is always the container, split or not: turning the side pane
   // on must not move the main pane to a different place in the tree, or React
   // remounts the viewer and the reader loses the line they were on.
@@ -174,7 +187,9 @@ export function RightPanel(props: {
         <div
           key={index === 0 ? "main" : "side"}
           className="right-panel-pane"
-          data-testid={index === 0 ? "inspector-pane-main" : "inspector-pane-side"}
+          data-testid={split
+            ? (index === 0 ? "inspector-pane-main" : "inspector-pane-side")
+            : "inspector-pane-focused"}
         >
           {body}
         </div>
@@ -265,7 +280,7 @@ export function RightPanel(props: {
         ) : fileTabs.length > 0 ? (
           <TabBar
             tabs={fileTabs}
-            activeTabId={panel.activePanes.main ?? ""}
+            activeTabId={panel.activeInspectorId ?? ""}
             onSelectTab={selectTab}
             onCloseTab={panel.closeTab}
             onReorder={panel.reorderTabs}

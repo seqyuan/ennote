@@ -523,10 +523,17 @@ export function openInspectorTab(
     ...state.inspectorTabs.filter((tab) => tab.path !== row.path),
     { ...row, pane },
   ]);
+  // The cap drops the oldest row, which may be the one a pane has selected. A
+  // selection that points at a row nobody draws is worse than no selection.
+  const alive = new Set(inspectorTabs.map((tab) => fileTabId(state.projectId, tab.path)));
+  const activePanes = {
+    main: state.activePanes.main !== null && alive.has(state.activePanes.main) ? state.activePanes.main : null,
+    side: state.activePanes.side !== null && alive.has(state.activePanes.side) ? state.activePanes.side : null,
+  };
   return {
     ...state,
     inspectorTabs,
-    activePanes: { ...state.activePanes, [pane]: tabId },
+    activePanes: { ...activePanes, [pane]: tabId },
     focusedPane: pane,
     activeLane: "inspector",
     open: true,

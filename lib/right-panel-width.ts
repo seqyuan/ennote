@@ -38,6 +38,13 @@ export const LANE_DIVIDER_WIDTH = 8;
 /** The left lane opens at this width; `resolvePrimaryLaneWidth` clamps it to the shell. */
 export const PRIMARY_DEFAULT_WIDTH = 280;
 
+/**
+ * The floor for each half of a split inspector. It is below the single-pane
+ * floor on purpose: two files side by side are read as a comparison, and the
+ * point is that both are visible, not that either is comfortable alone.
+ */
+export const SPLIT_PANE_MIN_WIDTH = 220;
+
 /** Below this the two lanes cannot both be useful, so the panel shows one. */
 export const DUAL_LANE_MIN_WIDTH = 520;
 

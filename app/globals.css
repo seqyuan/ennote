@@ -253,11 +253,13 @@ button:disabled { cursor: default; }
 
 .right-panel-pane > * { flex: 1 1 auto; min-height: 0; }
 
+/* The strip above reserves the navigator toggle's width and the body row does
+   not. Both halves are padded, so the columns stay aligned with their strips
+   instead of only one of them being narrowed. */
+.right-panel-panes.is-split { padding-right: 28px; }
+
 .right-panel-panes.is-split .right-panel-pane + .right-panel-pane {
   border-left: 1px solid var(--border);
-  /* The strip above reserves the navigator toggle's width and the body row does
-     not, so the halves would be 14px apart without this. */
-  padding-right: 28px;
 }
 
 /* The channel strip: tabs take the room, the panel's own actions keep theirs. */

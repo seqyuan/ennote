@@ -818,4 +818,9 @@ test("the side pane comes back after a reload", async ({ page }) => {
   await page.reload();
   await expect(page.getByTestId("inspector-pane-main")).toContainText("const A = 1");
   await expect(page.getByTestId("inspector-pane-side")).toContainText("const B = 2");
+
+  // Turning the split off leaves one pane that keeps the file it was showing.
+  await page.getByRole("button", { name: "Close b.ts" }).click();
+  await expect(page.getByTestId("inspector-pane-side")).toHaveCount(0);
+  await expect(page.getByTestId("inspector-pane-focused")).toContainText("const A = 1");
 });
