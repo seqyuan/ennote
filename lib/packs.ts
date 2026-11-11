@@ -62,18 +62,40 @@ export function installPack(path: string, options: { dryRun: boolean; expectedDi
 
 /**
  * Uninstall a pack.
+ *
+ * The Worker answers 204 with no body, so this resolves to nothing: a failure
+ * throws like every other call, which is the only outcome worth branching on.
  * @param force - delete objects that were edited locally, or that another Graph
  *   still references. A locally edited Skill is always kept, with a warning.
  */
-export function removePack(publisher: string, name: string, force = false): Promise<{ removed: boolean }> {
+export function removePack(publisher: string, name: string, force = false): Promise<void> {
   const query = force ? "?force=true" : "";
-  return apiFetch<{ removed: boolean }>(
+  return apiFetch<void>(
     `/v1/packs/${encodeURIComponent(publisher)}/${encodeURIComponent(name)}${query}`,
     { method: "DELETE" },
   );
 }
 
-/** The issues worth showing: blockers first, then warnings. */
+/**
+ * Split a pack id into the two path segments the endpoints take.
+ * @returns the segments, or `null` when the id is not `publisher/name`.
+ */
+export function packSlug(packId: string): { publisher: string; name: string } | null {
+  const parts = packId.split("/");
+  if (parts.length !== 2 || parts[0] === "" || parts[1] === "") return null;
+  return { publisher: parts[0], name: parts[1] };
+}
+
+/**
+ * The issues worth showing, blockers first.
+ *
+ * `severity` is optional in the contract, so it is filled here rather than at
+ * the render: a blocker defaults to an error and a warning to a warning, which
+ * is what the two arrays mean.
+ */
 export function packIssues(plan: Pick<PackInstallPlan, "blockers" | "warnings">): PackIssue[] {
-  return [...plan.blockers, ...plan.warnings];
+  return [
+    ...plan.blockers.map((issue) => ({ ...issue, severity: issue.severity ?? "error" })),
+    ...plan.warnings.map((issue) => ({ ...issue, severity: issue.severity ?? "warning" })),
+  ];
 }

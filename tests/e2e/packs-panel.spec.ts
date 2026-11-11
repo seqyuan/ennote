@@ -78,7 +78,7 @@ async function mockPacks(page: Page, plan: { blocked: boolean }) {
     }
     if (path.startsWith("/v1/packs/") && request.method() === "DELETE") {
       installed = [];
-      return fulfill(route, { removed: true });
+      return route.fulfill({ status: 204, body: "" });
     }
     return route.abort();
   });
@@ -111,6 +111,7 @@ test("a pack is inspected and planned before it can be installed", async ({ page
   await expect(install).toBeEnabled();
 
   await install.click();
+  await page.getByRole("alertdialog", { name: /Install reviewer/ }).getByRole("button", { name: "Install" }).click();
   await expect(page.getByTestId("pack-row")).toContainText("reviewer");
   await expect(page.getByTestId("pack-row")).toContainText("1 heroes");
 });
@@ -126,4 +127,38 @@ test("a blocked plan is shown and the install stays unavailable", async ({ page 
   await expect(plan).toHaveAttribute("data-blocked", "true");
   await expect(plan).toContainText("hero reviewer already exists");
   await expect(page.getByRole("button", { name: "Install", exact: true })).toBeDisabled();
+});
+
+test("changing the path voids the plan that was approved for the old one", async ({ page }) => {
+  await mockPacks(page, { blocked: false });
+  await openPacksTab(page);
+
+  await page.getByLabel("Pack path on the Worker host").fill("/home/me/acme.enpack");
+  await page.getByRole("button", { name: "Check install" }).click();
+  const install = page.getByRole("button", { name: "Install", exact: true });
+  await expect(install).toBeEnabled();
+
+  await page.getByLabel("Pack path on the Worker host").fill("/home/me/other.enpack");
+  await expect(install).toBeDisabled();
+  await expect(page.getByTestId("pack-plan")).toHaveCount(0);
+});
+
+test("removing a pack asks first", async ({ page }) => {
+  await mockPacks(page, { blocked: false });
+  await openPacksTab(page);
+  await page.getByLabel("Pack path on the Worker host").fill("/home/me/acme.enpack");
+  await page.getByRole("button", { name: "Check install" }).click();
+  await page.getByRole("button", { name: "Install", exact: true }).click();
+  await page.getByRole("alertdialog", { name: /Install reviewer/ }).getByRole("button", { name: "Install" }).click();
+  await expect(page.getByTestId("pack-row")).toBeVisible();
+
+  await page.getByRole("button", { name: "Remove reviewer" }).click();
+  const confirm = page.getByRole("alertdialog", { name: /Remove reviewer/ });
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByTestId("pack-row")).toBeVisible();
+
+  await page.getByRole("button", { name: "Remove reviewer" }).click();
+  await page.getByRole("alertdialog", { name: /Remove reviewer/ }).getByRole("button", { name: "Remove" }).click();
+  await expect(page.getByTestId("pack-row")).toHaveCount(0);
 });

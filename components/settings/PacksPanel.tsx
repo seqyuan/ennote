@@ -8,11 +8,13 @@ import {
   inspectPack,
   listPacks,
   packIssues,
+  packSlug,
   removePack,
   type PackInstallPlan,
   type PackInspectResult,
   type PackStateSummary,
 } from "@/lib/packs";
+import { confirmAction } from "@/components/ui/confirm";
 import styles from "./PacksPanel.module.css";
 
 /**
@@ -30,7 +32,9 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
   const [busy, setBusy] = useState(false);
   const [inspected, setInspected] = useState<PackInspectResult | null>(null);
   const [plan, setPlan] = useState<PackInstallPlan | null>(null);
+  const [approvedPath, setApprovedPath] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [forceOffer, setForceOffer] = useState<string | null>(null);
 
   const load = async () => {
     try {
@@ -51,10 +55,11 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
   }, []);
 
   const run = async (work: () => Promise<void>) => {
+    if (busy) return;
     setBusy(true);
+    setError(null);
     try {
       await work();
-      setError(null);
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
@@ -62,38 +67,82 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
     }
   };
 
+  // Any edit to the path voids what was approved for the previous one: an
+  // approved plan must never be applied to a different pack.
+  const changePath = (next: string) => {
+    setPath(next);
+    setPlan(null);
+    setApprovedPath(null);
+    setInspected(null);
+    setForceOffer(null);
+  };
+
   const inspect = () => run(async () => {
     setPlan(null);
+    setApprovedPath(null);
     setInspected(await inspectPack(path.trim()));
   });
 
   const dryRun = () => run(async () => {
     setPlan(await installPack(path.trim(), { dryRun: true }));
+    setApprovedPath(path.trim());
   });
 
-  const apply = () => run(async () => {
-    const applied = await installPack(path.trim(), {
-      dryRun: false,
-      ...(inspected ? { expectedDigest: inspected.packDigest } : {}),
+  const apply = async () => {
+    if (!plan || approvedPath !== path.trim()) return;
+    const approved = await confirmAction({
+      title: `Install ${plan.pack.name} ${plan.pack.version}?`,
+      description: plan.willPublishFlowRevision
+        ? "This creates disabled draft objects and publishes an Agent Flow revision."
+        : "This creates disabled draft objects on this Worker. Nothing runs until a revision is published and bound.",
+      confirmLabel: "Install",
     });
-    setPlan(null);
-    setInspected(null);
-    setPath("");
-    await load();
-    setError(applied.blockers.length > 0 ? applied.blockers[0].message : null);
-  });
-
-  const uninstall = (pack: PackStateSummary, force: boolean) => run(async () => {
-    setRemoving(pack.pack.id);
-    try {
-      await removePack(publisherOf(pack.pack.id), pack.pack.name, force);
+    if (!approved) return;
+    await run(async () => {
+      // Approve the exact bytes that were planned, not whatever sits there now.
+      await installPack(path.trim(), { dryRun: false, expectedDigest: plan.packDigest });
+      setPlan(null);
+      setApprovedPath(null);
+      setInspected(null);
+      changePath("");
       await load();
-    } finally {
-      setRemoving(null);
-    }
-  });
+    });
+  };
 
-  const blocked = plan !== null && plan.blockers.length > 0;
+  const uninstall = async (pack: PackStateSummary, force: boolean) => {
+    const slug = packSlug(pack.pack.id);
+    if (!slug) {
+      setError(`"${pack.pack.id}" is not a publisher/name pack id.`);
+      return;
+    }
+    const approved = await confirmAction({
+      title: force ? `Force-remove ${pack.pack.name}?` : `Remove ${pack.pack.name}?`,
+      description: force
+        ? "This also deletes objects that were edited locally or still referenced by another Graph."
+        : "Every object this pack installed is deleted. A locally edited Skill is kept, with a warning.",
+      confirmLabel: force ? "Force remove" : "Remove",
+      tone: "danger",
+    });
+    if (!approved) return;
+    await run(async () => {
+      setRemoving(pack.pack.id);
+      try {
+        await removePack(slug.publisher, slug.name, force);
+        setForceOffer(null);
+        await load();
+      } catch (reason) {
+        // A refusal here is usually "still referenced" or "edited locally": both
+        // are what force exists for, so offer it instead of only printing.
+        setForceOffer(pack.pack.id);
+        throw reason;
+      } finally {
+        setRemoving(null);
+      }
+    });
+  };
+
+  const planApplies = plan !== null && approvedPath === path.trim();
+  const blocked = !planApplies || plan.blockers.length > 0;
 
   return (
     <section className="settings-tab-section" aria-labelledby="settings-packs-heading">
@@ -110,7 +159,7 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
             className={styles.pathInput}
             value={path}
             placeholder="/home/me/packs/example.enpack"
-            onChange={(event) => setPath(event.target.value)}
+            onChange={(event) => changePath(event.target.value)}
           />
         </label>
         <div className={styles.actions}>
@@ -123,7 +172,7 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
           <button
             type="button"
             className={`${styles.button} ${styles.primary}`}
-            disabled={busy || path.trim() === "" || plan === null || blocked}
+            disabled={busy || path.trim() === "" || blocked}
             onClick={apply}
           >
             Install
@@ -193,12 +242,22 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
                   {pack.flowCount} flows · {pack.heroCount} heroes · {pack.skillCount} skills
                 </div>
               </div>
+              {forceOffer === pack.pack.id && (
+                <button
+                  type="button"
+                  className={styles.button}
+                  disabled={busy || removing === pack.pack.id}
+                  onClick={() => void uninstall(pack, true)}
+                >
+                  Force remove
+                </button>
+              )}
               <button
                 type="button"
                 className={styles.iconButton}
                 aria-label={`Remove ${pack.pack.name}`}
                 disabled={busy || removing === pack.pack.id}
-                onClick={() => uninstall(pack, false)}
+                onClick={() => void uninstall(pack, false)}
               >
                 <Trash2 size={13} aria-hidden="true" />
               </button>
@@ -215,17 +274,11 @@ function IssueList({ issues }: { issues: { code: string; severity?: string; mess
   return (
     <ul className={styles.issueList}>
       {issues.map((issue) => (
-        <li key={`${issue.code}:${issue.message}`} className={styles.issueRow} data-severity={issue.severity ?? "error"}>
+        <li key={`${issue.code}:${issue.message}`} className={styles.issueRow} data-severity={issue.severity ?? "warning"}>
           <span className={styles.badge}>{issue.code}</span>
           <span>{issue.message}</span>
         </li>
       ))}
     </ul>
   );
-}
-
-/** A pack id is `<publisher>/<name>`; the endpoint wants the publisher alone. */
-function publisherOf(packId: string): string {
-  const index = packId.indexOf("/");
-  return index < 0 ? packId : packId.slice(0, index);
 }
