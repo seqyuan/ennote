@@ -1299,6 +1299,17 @@ button:disabled { cursor: default; }
 .file-tree-icon { display: flex; flex: 0 0 auto; }
 .file-tree-name { flex: 1; min-width: 0; overflow: hidden; color: var(--text-muted); font: var(--text-xs) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .file-tree-size, .file-tree-loading { flex: 0 0 auto; color: var(--text-dim); font: var(--text-xs) var(--font-mono); }
+.file-tree-error-mark {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--danger);
+  color: var(--bg);
+  font: 700 var(--text-xs) var(--font-mono);
+  line-height: 14px;
+  text-align: center;
+}
 .file-preview-action { display: grid; width: 24px; height: 24px; flex: 0 0 24px; place-items: center; padding: 0; border: 0; border-radius: var(--radius-xs); opacity: 0; background: transparent; color: var(--text-dim); cursor: pointer; }
 .file-tree-row:hover .file-preview-action, .file-preview-action:focus-visible { opacity: 1; }
 

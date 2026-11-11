@@ -41,6 +41,7 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
   const [entries, setEntries] = useState<WorkspaceFileEntry[]>([]);
   const [rootLoading, setRootLoading] = useState(Boolean(projectId));
   const [error, setError] = useState<string | null>(null);
+  const [dirErrors, setDirErrors] = useState<Map<string, string>>(new Map());
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set());
@@ -83,10 +84,17 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
     try {
       const children = await listProjectFiles(projectId, dirPath, controller.signal);
       setDirContents((previous) => new Map(previous).set(dirPath, children));
-      setError(null);
+      setDirErrors((previous) => {
+        if (!previous.has(dirPath)) return previous;
+        const next = new Map(previous);
+        next.delete(dirPath);
+        return next;
+      });
     } catch (reason) {
       if (!controller.signal.aborted) {
-        setError((reason as Error).message);
+        // The failure belongs to this directory, not to the tree: a banner would
+        // claim the workspace is broken when one listing is.
+        setDirErrors((previous) => new Map(previous).set(dirPath, (reason as Error).message));
         // A directory that could not be listed must not stay drawn open and
         // empty: collapse it so the row still says what it is.
         setExpandedDirs((previous) => {
@@ -145,7 +153,8 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
       for (const entry of items) {
         if (!matches(entry)) continue;
         drawn.push({ entry, depth, parentPath });
-        const open = query ? true : expandedDirs.has(entry.path);
+        const open = entry.isDir && !dirErrors.has(entry.path)
+          && (query ? true : expandedDirs.has(entry.path));
         if (!entry.isDir || !open) continue;
         const children = dirContents.get(entry.path);
         if (children) walk(children, depth + 1, entry.path);
@@ -154,7 +163,7 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
 
     walk(entries, 0, null);
     return drawn;
-  }, [entries, dirContents, expandedDirs, query]);
+  }, [entries, dirContents, expandedDirs, dirErrors, query]);
 
   // A filter has to see into directories it has not opened, so while one is typed
   // every directory the tree knows about is listed. It converges: each listing
@@ -209,7 +218,7 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
       case "End": event.preventDefault(); if (rows.length > 0) focusRow(rows[rows.length - 1].entry.path); break;
       case "ArrowRight":
         event.preventDefault();
-        if (!row.entry.isDir) break;
+        if (!row.entry.isDir || query) break;
         if (!expandedDirs.has(row.entry.path)) { expand(row.entry.path); break; }
         // Expanded but still listing: stepping in now would skip the subtree.
         if (!dirContents.has(row.entry.path)) break;
@@ -217,7 +226,7 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
         break;
       case "ArrowLeft": {
         event.preventDefault();
-        if (row.entry.isDir && expandedDirs.has(row.entry.path)) { collapse(row.entry.path); break; }
+        if (!query && row.entry.isDir && expandedDirs.has(row.entry.path)) { collapse(row.entry.path); break; }
         const parent = rows.findIndex((candidate) => candidate.entry.path === row.parentPath);
         if (parent >= 0) focusRow(rows[parent].entry.path);
         break;
@@ -245,7 +254,19 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
   const focusedIndex = focusedPath === null
     ? -1
     : rows.findIndex((row) => row.entry.path === focusedPath);
+  // The row that had the focus is gone (a filter narrowed under it, a directory
+  // collapsed). Put the focus somewhere real rather than leaving it on body.
   const staleFocus = focusedPath !== null && focusedIndex === -1;
+  useEffect(() => {
+    if (!staleFocus) return;
+    const timer = window.setTimeout(() => {
+      const held = listRef.current?.contains(document.activeElement) ?? false;
+      const first = rows[0]?.entry.path;
+      setFocusedPath(first ?? null);
+      if (held && first) focusRow(first);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [staleFocus, rows, focusRow]);
   const activeIndex = focusedIndex >= 0 ? focusedIndex : 0;
 
   return (
@@ -272,17 +293,7 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
         </label>
       </div>
 
-      <div
-        className="file-tree-list"
-        role="tree"
-        aria-label="Workspace files"
-        ref={listRef}
-        onScroll={() => setMenu(null)}
-        // An empty tree still has to be reachable: with no rows there is nothing
-        // to hold the focus otherwise.
-        tabIndex={rows.length === 0 ? 0 : undefined}
-        onFocus={() => { if (staleFocus) setFocusedPath(null); }}
-      >
+      <div className="file-tree-list" ref={listRef} onScroll={() => setMenu(null)}>
         {!projectId ? (
           <div className="file-tree-empty">Select a project to browse files.</div>
         ) : rootLoading ? (
@@ -292,8 +303,8 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
         ) : rows.length === 0 ? (
           <div className="file-tree-state">{query ? "No files match." : "No files found."}</div>
         ) : (
-          <>
-            {error && <div className="file-tree-inline-error" role="alert">{error}</div>}
+          <div role="tree" aria-label="Workspace files">
+            {error && <p className="file-tree-inline-error" role="alert">{error}</p>}
             {rows.map((row, index) => {
               const { entry, depth } = row;
               const isExpanded = query ? true : expandedDirs.has(entry.path);
@@ -323,7 +334,7 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
                   }}
                   onContextMenu={(event) => {
                     event.preventDefault();
-                    setFocusedPath(entry.path);
+                    focusRow(entry.path);
                     setMenu({ path: entry.path, x: event.clientX, y: event.clientY });
                   }}
                   onKeyDown={(event) => onKeyDown(event, index)}
@@ -335,6 +346,13 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
                     <span className="file-tree-name">{entry.name}</span>
                     {!entry.isDir && <span className="file-tree-size">{formatFileSize(entry.size)}</span>}
                     {loading && <span className="file-tree-loading">...</span>}
+                    {dirErrors.has(entry.path) && (
+                      <span
+                        className="file-tree-error-mark"
+                        title={dirErrors.get(entry.path)}
+                        aria-label={`Could not list ${entry.name}: ${dirErrors.get(entry.path)}`}
+                      >!</span>
+                    )}
                   </span>
                   {!entry.isDir && (
                     <button
@@ -343,7 +361,11 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
                       onClick={(event) => { event.stopPropagation(); onPreviewFile(entry.path, entry.name); }}
                       aria-label={`Preview ${entry.name} in a floating window`}
                       title="Open floating preview"
-                      onKeyDown={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => {
+                        // Enter/Space belong to the button; the arrows still walk
+                        // the tree, so the keyboard is never stuck inside a row.
+                        if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+                      }}
                     >
                       <Maximize2 size={12} aria-hidden="true" />
                     </button>
@@ -351,14 +373,18 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
                 </div>
               );
             })}
-          </>
+          </div>
         )}
       </div>
 
       {menu && <RowMenu
         row={rows.find((candidate) => candidate.entry.path === menu.path)}
         at={menu}
-        onClose={() => setMenu(null)}
+        onClose={() => {
+          const path = menu.path;
+          setMenu(null);
+          focusRow(path);
+        }}
         onOpenFile={onOpenFile}
         onPreviewFile={onPreviewFile}
       />}
@@ -380,14 +406,18 @@ function RowMenu(props: {
 }) {
   const { row, at, onClose, onOpenFile, onPreviewFile } = props;
   const menuRef = useRef<HTMLDivElement>(null);
+  const path = row?.entry.path ?? null;
 
+  // Keyed by path, not by the row object: every listing that lands recomputes
+  // `rows`, and a focus effect on the object would keep yanking the reader back
+  // to the first item while they are choosing.
   useEffect(() => {
-    if (!row) return;
+    if (path === null) return;
     const frame = window.requestAnimationFrame(() => {
       menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [row]);
+  }, [path]);
 
   if (!row) return null;
   const { entry } = row;
