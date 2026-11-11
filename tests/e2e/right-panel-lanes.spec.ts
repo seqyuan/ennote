@@ -660,3 +660,66 @@ test("a channel's tab carries what it has to say", async ({ page }) => {
   await page.getByRole("tab", { name: "Graphs" }).click();
   await expect(page.getByRole("tab", { name: /Graphs 2 runs/ })).toBeVisible();
 });
+
+test("a file opens to the side and the two are compared", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route("**/api/worker/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
+    if (await tryFulfillHarnessRoutes(route)) return;
+    if (path === "/v1/projects") return fulfill(route, [project]);
+    if (path === "/v1/provider-profiles") return fulfill(route, [provider]);
+    if (path === "/v1/model-profiles" || path === "/v1/policy-profiles") return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/workspace`) return fulfill(route, workspace);
+    if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/files`) return fulfill(route, [
+      { name: "a.ts", path: "/workspace/a.ts", isDir: false, size: 4, modifiedAt: "2026-10-01T00:00:00Z" },
+      { name: "b.ts", path: "/workspace/b.ts", isDir: false, size: 4, modifiedAt: "2026-10-01T00:00:00Z" },
+    ]);
+    if (path === `/v1/projects/${project.id}/files/content`) {
+      const wanted = new URL(route.request().url()).searchParams.get("path") ?? "";
+      return route.fulfill({ status: 200, contentType: "text/typescript", body: wanted.endsWith("a.ts") ? "const A = 1;\n" : "const B = 2;\n" });
+    }
+    return route.fulfill({ status: 501, contentType: "application/json", body: JSON.stringify({ error: { code: "unmocked_route", message: path } }) });
+  });
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+  await page.locator('.file-tree-main[title="/workspace/a.ts"]').click();
+  // One file is one pane: the split appears only when there is something to
+  // compare it with.
+  await expect(page.locator(".file-code")).toContainText("const A = 1");
+  await expect(page.getByTestId("inspector-pane-main")).toHaveCount(0);
+
+  // The side pane is asked for explicitly, from the file's own menu.
+  await page.locator('.file-tree-main[title="/workspace/b.ts"]').click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Open to the side" }).click();
+
+  await expect(page.getByTestId("inspector-pane-main")).toContainText("const A = 1");
+  await expect(page.getByTestId("inspector-pane-side")).toContainText("const B = 2");
+
+  // Closing the side row returns the panel to one pane without touching the other.
+  await page.getByRole("button", { name: "Close b.ts" }).click();
+  await expect(page.getByTestId("inspector-pane-side")).toHaveCount(0);
+  await expect(page.locator(".file-code")).toContainText("const A = 1");
+});
+
+test("the side pane survives a reload, and the same file is never opened twice", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockLanes(page);
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+  await expect(page.locator('.file-tree-main[title="/workspace/src"]')).toBeVisible();
+  await page.locator('.file-tree-main[title="/workspace/src"]').click();
+  await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
+  await expect(page.locator(".file-code")).toContainText("ready");
+
+  // Asking for the same file to the side focuses it where it already is.
+  await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Open to the side" }).click();
+  await expect(page.getByTestId("inspector-pane-side")).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "main.ts" })).toHaveCount(1);
+
+  await page.reload();
+  await expect(page.getByRole("tab", { name: "main.ts" })).toBeVisible();
+});

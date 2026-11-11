@@ -222,6 +222,26 @@ button:disabled { cursor: default; }
 
 .right-panel-channel-slot[hidden] { display: none; }
 
+/* Two files side by side: their strips share one row, their bodies share the
+   next, and the halves stay equal so the comparison is not skewed. */
+.right-panel-pane-strips,
+.right-panel-panes {
+  display: flex;
+  min-width: 0;
+}
+
+.right-panel-pane-strips > * { flex: 1 1 50%; min-width: 0; }
+.right-panel-panes { flex: 1; min-height: 0; }
+
+.right-panel-pane {
+  flex: 1 1 50%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.right-panel-pane + .right-panel-pane { border-left: 1px solid var(--border); }
+
 /* The channel strip: tabs take the room, the panel's own actions keep theirs. */
 .right-panel-strip {
   display: flex;

@@ -46,6 +46,12 @@ export function useProjectFiles({
     openInspector(filePath, fileName);
   }, [openInspector]);
 
+  // The side pane exists to compare: the file opens beside what is already
+  // there, not instead of it.
+  const handleOpenFileToSide = useCallback((filePath: string, fileName: string) => {
+    openInspector(filePath, fileName, "side");
+  }, [openInspector]);
+
   const handlePreviewFile = useCallback((filePath: string, fileName: string) => {
     if (!projectId) return;
     onPreviewFile({ projectId, path: filePath, name: fileName });
@@ -56,6 +62,7 @@ export function useProjectFiles({
     currentCwd,
     panel,
     handleOpenFile,
+    handleOpenFileToSide,
     handlePreviewFile,
     panelOpen: panel.open,
     openPanel: panel.openShell,

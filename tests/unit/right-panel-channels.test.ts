@@ -14,6 +14,7 @@ import {
   openChannel,
   openInspectorTab,
   parsePreferences,
+  reorderInspectorTabs,
   pinChannel,
   preferencesOf,
   rightPanelPreferencesKey,
@@ -117,7 +118,7 @@ describe("right panel channel contract", () => {
     const after = openInspectorTab(state(), "main.py", { path: "/workspace/main.py", name: "main.py" });
 
     expect(after.open).toBe(true);
-    expect(after.activeInspectorId).toBe("main.py");
+    expect(after.activePanes.main).toBe("main.py");
     expect(after.openChannels).toEqual(["files", "graph", "tools"]);
     expect(after.pinnedChannels).toEqual([]);
   });
@@ -129,7 +130,7 @@ describe("right panel channel contract", () => {
     // Selecting a channel keeps the tab open, it only hands the strip back.
     const back = openChannel(opened, "graph");
     expect(back.activeLane).toBe("channel");
-    expect(back.activeInspectorId).toBe(id("/workspace/main.py"));
+    expect(back.activePanes.main).toBe(id("/workspace/main.py"));
 
     expect(closeInspectorTab(back, id("/workspace/main.py")).activeLane).toBe("channel");
   });
@@ -140,7 +141,7 @@ describe("right panel channel contract", () => {
 
     expect(closed.openChannels).toEqual(["graph", "tools"]);
     expect(closed.activeLane).toBe("inspector");
-    expect(closed.activeInspectorId).toBe(id("/workspace/main.py"));
+    expect(closed.activePanes.main).toBe(id("/workspace/main.py"));
   });
 
   it("closes the last inspector tab without closing the shell", () => {
@@ -148,7 +149,8 @@ describe("right panel channel contract", () => {
     const closed = closeInspectorTab(opened, id("/workspace/main.py"));
 
     expect(closed.inspectorTabs).toEqual([]);
-    expect(closed.activeInspectorId).toBeNull();
+    expect(closed.activePanes.main).toBeNull();
+    expect(closed.activePanes.side).toBeNull();
     expect(closed.open).toBe(true);
     expect(closed.activeChannelId).toBe("files");
   });
@@ -156,13 +158,13 @@ describe("right panel channel contract", () => {
   it("selects the remaining tab when the active inspector tab is closed", () => {
     const first = openInspectorTab(state(), id("/workspace/a.py"), { path: "/workspace/a.py", name: "a.py" });
     const opened = openInspectorTab(first, id("/workspace/b.py"), { path: "/workspace/b.py", name: "b.py" });
-    expect(opened.activeInspectorId).toBe(id("/workspace/b.py"));
+    expect(opened.activePanes.main).toBe(id("/workspace/b.py"));
 
     const withoutB = closeInspectorTab(opened, id("/workspace/b.py"));
-    expect(withoutB.activeInspectorId).toBe(id("/workspace/a.py"));
+    expect(withoutB.activePanes.main).toBe(id("/workspace/a.py"));
     expect(withoutB.inspectorTabs.map((row) => row.path)).toEqual(["/workspace/a.py"]);
 
-    expect(closeInspectorTab(opened, id("/workspace/a.py")).activeInspectorId).toBe(id("/workspace/b.py"));
+    expect(closeInspectorTab(opened, id("/workspace/a.py")).activePanes.main).toBe(id("/workspace/b.py"));
   });
 
   it("moves a reopened row to the newest position", () => {
@@ -184,7 +186,7 @@ describe("right panel channel contract", () => {
 
 describe("remembered inspector rows", () => {
   const rows = (count: number) => Array.from({ length: count }, (_, index) => ({
-    path: `/workspace/f${index}.ts`, name: `f${index}.ts`,
+    path: `/workspace/f${index}.ts`, name: `f${index}.ts`, pane: "main" as const,
   }));
 
   const withRows = (all: ReturnType<typeof rows>) => all.reduce(
@@ -226,8 +228,8 @@ describe("remembered inspector rows", () => {
     const back = parsePreferences(raw, "p1");
 
     expect(back.inspectorTabs).toEqual([
-      { path: "/workspace/a.ts", name: "a.ts" },
-      { path: "/workspace/b.ts", name: "b.ts" }, // name filled from the path
+      { path: "/workspace/a.ts", name: "a.ts", pane: "main" },
+      { path: "/workspace/b.ts", name: "b.ts", pane: "main" }, // name filled from the path
     ]);
   });
 
@@ -248,7 +250,7 @@ describe("remembered inspector rows", () => {
       inspectorTabs: [{ path: "/workspace/a.ts", name: "a.ts" }],
       activeInspectorId: "file:p1:/workspace/a.ts",
     }), "p1");
-    expect(initialRightPanelState(kept).activeInspectorId).toBe("file:p1:/workspace/a.ts");
+    expect(initialRightPanelState(kept).activePanes.main).toBe("file:p1:/workspace/a.ts");
     expect(initialRightPanelState(kept).activeLane).toBe("inspector");
 
     const stale = parsePreferences(JSON.stringify({
@@ -256,7 +258,7 @@ describe("remembered inspector rows", () => {
       inspectorTabs: [{ path: "/workspace/a.ts", name: "a.ts" }],
       activeInspectorId: "file:p1:/workspace/gone.ts",
     }), "p1");
-    expect(initialRightPanelState(stale).activeInspectorId).toBeNull();
+    expect(initialRightPanelState(stale).activePanes.main).toBeNull();
     expect(initialRightPanelState(stale).activeLane).toBe("channel");
   });
 
@@ -287,6 +289,80 @@ describe("navigator visibility", () => {
     const shown = state();
     expect(setNavigatorHidden(shown, false)).toBe(shown);
     expect(setNavigatorHidden(setNavigatorHidden(shown, true), true)).not.toBe(shown);
+  });
+});
+
+describe("two panes", () => {
+  const openIn = (pane: "main" | "side", path: string, from = state()) =>
+    openInspectorTab(from, id(path), { path, name: path.split("/").pop() ?? path, pane });
+
+  it("draws a file in the pane that was asked for", () => {
+    const both = openIn("side", "/workspace/b.ts", openIn("main", "/workspace/a.ts"));
+
+    expect(both.inspectorTabs.map((row) => [row.path, row.pane])).toEqual([
+      ["/workspace/a.ts", "main"],
+      ["/workspace/b.ts", "side"],
+    ]);
+    expect(both.activePanes).toEqual({ main: id("/workspace/a.ts"), side: id("/workspace/b.ts") });
+    expect(both.focusedPane).toBe("side");
+    expect(both.activeLane).toBe("inspector");
+  });
+
+  it("keeps one row per file, and focuses the pane that already has it", () => {
+    const both = openIn("side", "/workspace/b.ts", openIn("main", "/workspace/a.ts"));
+    const again = openIn("main", "/workspace/b.ts", both);
+
+    expect(again.inspectorTabs.filter((row) => row.path === "/workspace/b.ts")).toHaveLength(1);
+    expect(again.inspectorTabs.find((row) => row.path === "/workspace/b.ts")?.pane).toBe("side");
+    expect(again.activePanes.side).toBe(id("/workspace/b.ts"));
+    expect(again.focusedPane).toBe("side");
+  });
+
+  it("hands the focus back to the other pane when one is emptied", () => {
+    const both = openIn("side", "/workspace/b.ts", openIn("main", "/workspace/a.ts"));
+    const closed = closeInspectorTab(both, id("/workspace/b.ts"));
+
+    expect(closed.activePanes).toEqual({ main: id("/workspace/a.ts"), side: null });
+    expect(closed.focusedPane).toBe("main");
+    expect(closed.activeLane).toBe("inspector");
+  });
+
+  it("leaves the channel lane only when both panes are empty", () => {
+    const both = openIn("side", "/workspace/b.ts", openIn("main", "/workspace/a.ts"));
+    const one = closeInspectorTab(both, id("/workspace/a.ts"));
+    expect(one.activeLane).toBe("inspector");
+    expect(closeInspectorTab(one, id("/workspace/b.ts")).activeLane).toBe("channel");
+  });
+
+  it("reorders inside a pane only", () => {
+    const rows = openIn("side", "/workspace/b.ts", openIn("main", "/workspace/a.ts"));
+    const moved = reorderInspectorTabs(rows, "/workspace/b.ts", "/workspace/a.ts");
+
+    // A cross-pane drop is not a move; nothing changes.
+    expect(moved).toBe(rows);
+  });
+
+  it("survives a write and a read, panes and all", () => {
+    const both = openIn("side", "/workspace/b.ts", openIn("main", "/workspace/a.ts"));
+    const back = parsePreferences(serializePreferences(preferencesOf(both)), "p1");
+
+    expect(back.inspectorTabs?.map((row) => [row.path, row.pane])).toEqual([
+      ["/workspace/a.ts", "main"],
+      ["/workspace/b.ts", "side"],
+    ]);
+    expect(back.activeInspectorIds).toEqual({ main: id("/workspace/a.ts"), side: id("/workspace/b.ts") });
+  });
+
+  it("puts rows written before panes existed in the main pane", () => {
+    const legacy = parsePreferences(JSON.stringify({
+      version: 1, projectId: "p1", pinnedChannels: [], primaryWidth: 280, open: true,
+      inspectorTabs: [{ path: "/workspace/a.ts", name: "a.ts" }],
+      activeInspectorId: id("/workspace/a.ts"),
+    }), "p1");
+
+    expect(legacy.inspectorTabs).toEqual([{ path: "/workspace/a.ts", name: "a.ts", pane: "main" }]);
+    expect(legacy.activeInspectorIds).toEqual({ main: id("/workspace/a.ts"), side: null });
+    expect(initialRightPanelState(legacy).activePanes.main).toBe(id("/workspace/a.ts"));
   });
 });
 
@@ -330,7 +406,7 @@ describe("hydrate", () => {
     expect(hydrated.openChannels).toEqual(["files", "graph", "tools"]);
     expect(hydrated.activeChannelId).toBe("files");
     expect(hydrated.open).toBe(false);
-    expect(hydrated.activeInspectorId).toBeNull();
+    expect(hydrated.activePanes).toEqual({ main: null, side: null });
   });
 });
 
@@ -378,6 +454,7 @@ describe("preferences", () => {
       primaryWidths: { files: 280, graph: 280, tools: 280 },
       open: true,
       inspectorTabs: [],
+      activeInspectorIds: { main: null, side: null },
       activeInspectorId: null,
       navigatorHidden: false,
     });

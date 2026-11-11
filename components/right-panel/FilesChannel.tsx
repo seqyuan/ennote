@@ -13,6 +13,7 @@ export function FilesChannel(props: {
   projectId: string | null;
   displayPath: string | null;
   onOpenFile: (path: string, name: string) => void;
+  onOpenFileToSide: (path: string, name: string) => void;
   onPreviewFile: (path: string, name: string) => void;
 }) {
   return (
@@ -21,6 +22,7 @@ export function FilesChannel(props: {
       projectId={props.projectId}
       displayPath={props.displayPath}
       onOpenFile={props.onOpenFile}
+      onOpenFileToSide={props.onOpenFileToSide}
       onPreviewFile={props.onPreviewFile}
     />
   );

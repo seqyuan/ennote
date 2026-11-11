@@ -69,8 +69,10 @@ export interface RightPanelState {
    * remembers its own.
    */
   primaryWidths: Record<PanelChannel, number>;
-  /** The selected inspector tab, or `null` when the lane is empty. */
-  activeInspectorId: string | null;
+  /** The selected row in each pane, or `null` when that pane is empty. */
+  activePanes: Record<InspectorPane, string | null>;
+  /** The pane the reader last touched; `activeInspectorId` follows it. */
+  focusedPane: InspectorPane;
   /**
    * The files this Project has open, oldest first. They belong to the Project,
    * not to the session, so they are persisted with the rest of its preferences —
@@ -85,12 +87,20 @@ export interface RightPanelState {
   navigatorHidden: boolean;
 }
 
+/** Which half of the inspector lane a row lives in. */
+export type InspectorPane = "main" | "side";
+
+/** The two halves, in the order they are drawn. */
+export const INSPECTOR_PANES: readonly InspectorPane[] = ["main", "side"];
+
 /** A file the panel had open, as it is remembered between visits. */
 export interface PersistedInspectorTab {
   /** Project-relative file path under /workspace. */
   path: string;
   /** What the row shows; the path's last segment when it was opened. */
   name: string;
+  /** Which pane it sits in. Absent on rows written before panes existed. */
+  pane?: InspectorPane;
 }
 
 /** How many inspector rows one Project keeps. localStorage is not a repository. */
@@ -113,6 +123,8 @@ export interface RightPanelPreferencesV1 {
   inspectorTabs?: PersistedInspectorTab[];
   /** The row that was selected, when it is still among `inspectorTabs`. */
   activeInspectorId?: string | null;
+  /** The selected row per pane; `activeInspectorId` is the pre-pane field. */
+  activeInspectorIds?: Partial<Record<InspectorPane, string | null>>;
   /** The reader chose to hide the navigator; it stays hidden on the next visit. */
   navigatorHidden?: boolean;
 }
@@ -185,10 +197,22 @@ export function parsePreferences(raw: string | null, projectId: string): RightPa
     tools: widthOf(storedWidths.tools, legacyWidth),
   };
   const inspectorTabs = readInspectorTabs(row.inspectorTabs);
-  const activeInspectorId = typeof row.activeInspectorId === "string"
-    && inspectorTabs.some((tab) => `file:${projectId}:${tab.path}` === row.activeInspectorId)
-    ? row.activeInspectorId
-    : null;
+  const legacyActive = typeof row.activeInspectorId === "string" ? row.activeInspectorId : null;
+  const storedActive = (typeof row.activeInspectorIds === "object" && row.activeInspectorIds !== null)
+    ? row.activeInspectorIds
+    : {};
+  const activeIn = (pane: InspectorPane, value: unknown): string | null => {
+    const candidate = typeof value === "string" ? value : pane === "main" ? legacyActive : null;
+    if (candidate === null) return null;
+    const owned = inspectorTabs.some((tab) => (tab.pane ?? "main") === pane
+      && `file:${projectId}:${tab.path}` === candidate);
+    return owned ? candidate : null;
+  };
+  const activePanes = {
+    main: activeIn("main", storedActive.main),
+    side: activeIn("side", storedActive.side),
+  };
+  const activeInspectorId = activePanes.main ?? activePanes.side;
   return {
     version: 1,
     projectId,
@@ -197,6 +221,7 @@ export function parsePreferences(raw: string | null, projectId: string): RightPa
     open: row.open === true,
     inspectorTabs,
     activeInspectorId,
+    activeInspectorIds: activePanes,
     navigatorHidden: row.navigatorHidden === true,
   };
 }
@@ -218,7 +243,11 @@ function readInspectorTabs(value: unknown): PersistedInspectorTab[] {
     if (typeof row.path !== "string" || row.path.length === 0) continue;
     if (seen.has(row.path)) continue;
     seen.add(row.path);
-    rows.push({ path: row.path, name: typeof row.name === "string" && row.name.length > 0 ? row.name : lastSegment(row.path) });
+    rows.push({
+      path: row.path,
+      name: typeof row.name === "string" && row.name.length > 0 ? row.name : lastSegment(row.path),
+      pane: row.pane === "side" ? "side" : "main",
+    });
   }
   return rows.slice(-MAX_PERSISTED_INSPECTOR_TABS);
 }
@@ -242,7 +271,11 @@ export function serializePreferences(preferences: RightPanelPreferencesV1): stri
     open: preferences.open,
     inspectorTabs: readInspectorTabs(preferences.inspectorTabs),
     navigatorHidden: preferences.navigatorHidden === true,
-    activeInspectorId: preferences.activeInspectorId ?? null,
+    activeInspectorIds: {
+      main: preferences.activeInspectorIds?.main ?? preferences.activeInspectorId ?? null,
+      side: preferences.activeInspectorIds?.side ?? null,
+    },
+    activeInspectorId: preferences.activeInspectorIds?.main ?? preferences.activeInspectorId ?? null,
   });
 }
 
@@ -286,8 +319,16 @@ export function initialRightPanelState(preferences: RightPanelPreferencesV1): Ri
       tools: widthOf(preferences.primaryWidths?.tools, widthOf(preferences.primaryWidth, PRIMARY_DEFAULT_WIDTH)),
     },
     navigatorHidden: preferences.navigatorHidden === true,
-    activeInspectorId: preferences.activeInspectorId ?? null,
-    activeLane: preferences.activeInspectorId ? "inspector" : "channel",
+    activePanes: {
+      main: preferences.activeInspectorIds?.main ?? preferences.activeInspectorId ?? null,
+      side: preferences.activeInspectorIds?.side ?? null,
+    },
+    focusedPane: preferences.activeInspectorIds?.side
+      && !(preferences.activeInspectorIds?.main ?? preferences.activeInspectorId)
+      ? "side"
+      : "main",
+    activeLane: (preferences.activeInspectorIds?.main ?? preferences.activeInspectorId
+      ?? preferences.activeInspectorIds?.side) ? "inspector" : "channel",
     inspectorTabs: readInspectorTabs(preferences.inspectorTabs),
   };
 }
@@ -312,7 +353,8 @@ export function preferencesOf(state: RightPanelState): RightPanelPreferencesV1 {
     },
     open: state.open,
     inspectorTabs: readInspectorTabs(state.inspectorTabs),
-    activeInspectorId: state.activeInspectorId,
+    activeInspectorIds: state.activePanes,
+    activeInspectorId: state.activePanes[state.focusedPane],
     navigatorHidden: state.navigatorHidden,
   };
 }
@@ -322,7 +364,7 @@ export function setNavigatorHidden(state: RightPanelState, hidden: boolean): Rig
   return state.navigatorHidden === hidden ? state : { ...state, navigatorHidden: hidden };
 }
 
-/** Reorder the remembered rows, so the strip's order survives a reload too. */
+/** Reorder one pane's rows, so the strip's order survives a reload too. */
 export function reorderInspectorTabs(
   state: RightPanelState,
   fromPath: string,
@@ -331,6 +373,9 @@ export function reorderInspectorTabs(
   const from = state.inspectorTabs.findIndex((row) => row.path === fromPath);
   const to = state.inspectorTabs.findIndex((row) => row.path === toPath);
   if (from < 0 || to < 0 || from === to) return state;
+  // Rows only reorder within their own pane; a cross-pane drop is not a move, it
+  // is a different action this build does not offer.
+  if ((state.inspectorTabs[from].pane ?? "main") !== (state.inspectorTabs[to].pane ?? "main")) return state;
   const rows = [...state.inspectorTabs];
   const [moved] = rows.splice(from, 1);
   rows.splice(to, 0, moved);
@@ -422,21 +467,35 @@ function widthOf(value: unknown, fallback: number): number {
 }
 
 /**
- * Open a file in the inspector lane and show the shell.
+ * Open a file in one pane of the inspector lane and show the shell.
+ *
+ * A file is open at most once: asking for it again — in either pane — moves the
+ * focus to the pane that already holds it rather than drawing it twice. Two
+ * copies of the same file with independent scroll positions would be a bug
+ * wearing a feature's clothes.
  * @param state - the current state.
  * @param tabId - the row's id, derived from the Project and the path.
- * @param row - the file to remember; passing it again keeps its position.
+ * @param row - the file to remember; `row.pane` says which pane it belongs to.
  */
 export function openInspectorTab(
   state: RightPanelState,
   tabId: string,
   row: PersistedInspectorTab,
 ): RightPanelState {
+  const existing = state.inspectorTabs.find((tab) => tab.path === row.path);
+  const pane: InspectorPane = existing?.pane ?? row.pane ?? "main";
   const inspectorTabs = readInspectorTabs([
     ...state.inspectorTabs.filter((tab) => tab.path !== row.path),
-    row,
+    { ...row, pane },
   ]);
-  return { ...state, inspectorTabs, activeInspectorId: tabId, activeLane: "inspector", open: true };
+  return {
+    ...state,
+    inspectorTabs,
+    activePanes: { ...state.activePanes, [pane]: tabId },
+    focusedPane: pane,
+    activeLane: "inspector",
+    open: true,
+  };
 }
 
 /**
@@ -449,17 +508,31 @@ export function openInspectorTab(
  * @param tabId - the tab being closed.
  */
 export function closeInspectorTab(state: RightPanelState, tabId: string): RightPanelState {
-  const remaining = state.inspectorTabs
-    .filter((row) => row.path !== pathOf(tabId))
+  const path = pathOf(tabId);
+  const closing = state.inspectorTabs.find((row) => row.path === path);
+  const inspectorTabs = state.inspectorTabs.filter((row) => row.path !== path);
+  const pane: InspectorPane = closing?.pane ?? "main";
+
+  // What is left in the pane that lost the row, and in the other one.
+  const remainingIn = (which: InspectorPane) => inspectorTabs
+    .filter((row) => (row.pane ?? "main") === which)
     .map((row) => fileTabId(state.projectId, row.path));
-  const next = state.activeInspectorId === tabId
-    ? remaining[remaining.length - 1] ?? null
-    : state.activeInspectorId;
+  const remaining = remainingIn(pane);
+
+  const activePanes = { ...state.activePanes };
+  if (activePanes[pane] === tabId) {
+    activePanes[pane] = remaining[remaining.length - 1] ?? null;
+  }
+  const elsewhere: InspectorPane = pane === "main" ? "side" : "main";
+  const focusedPane = activePanes[pane] === null && activePanes[elsewhere] !== null ? elsewhere : state.focusedPane;
+  const anyLeft = activePanes.main !== null || activePanes.side !== null;
+
   return {
     ...state,
-    inspectorTabs: state.inspectorTabs.filter((row) => row.path !== pathOf(tabId)),
-    activeInspectorId: next,
+    inspectorTabs,
+    activePanes,
+    focusedPane,
     // An emptied lane hands the strip back to the channel; the tabs stay closed.
-    activeLane: next === null ? "channel" : state.activeLane,
+    activeLane: anyLeft ? state.activeLane : "channel",
   };
 }

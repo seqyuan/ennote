@@ -5,7 +5,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Tab } from "@/components/TabBar";
 import { resolvePrimaryLaneWidth as resolvePrimaryLaneWidthOf } from "@/lib/right-panel-width";
 import {
+  type InspectorPane,
   type PanelChannel,
+  type PersistedInspectorTab,
   type RightPanelPreferencesV1,
   type RightPanelState,
   closeChannel,
@@ -105,34 +107,47 @@ export function useRightPanel(projectId: string | null) {
       // A switch inside this session wins over what was stored: the reader was
       // just there. Otherwise the stored selection is the one to return to.
       const remembered = rememberedTab.current.get(key);
-      const wanted = remembered ?? next.activeInspectorId ?? undefined;
+      const wanted = remembered ?? next.activePanes[next.focusedPane] ?? undefined;
       const restored = wanted !== undefined && parked.includes(wanted) ? wanted : null;
+      if (restored === null) {
+        return { ...next, activePanes: { main: null, side: null }, activeLane: "channel" };
+      }
+      const pane = next.inspectorTabs.find((row) => fileTabId(projectId ?? "", row.path) === restored)?.pane ?? "main";
       return {
         ...next,
-        activeInspectorId: restored,
-        activeLane: restored === null ? "channel" : "inspector",
+        activePanes: { ...next.activePanes, [pane]: restored },
+        focusedPane: pane,
+        activeLane: "inspector",
       };
     });
     setHydratedFor(key);
   }, [key, projectId, hydratedFor, flush]);
 
-  // The strip's rows are the Project's remembered files, in their own order.
-  const fileTabs = useMemo<Tab[]>(() => (state.projectId === projectId ? state.inspectorTabs : [])
-    .map((row) => ({
+  // The strips' rows are the Project's remembered files, per pane.
+  const paneTabs = useMemo(() => {
+    const rows = state.projectId === projectId ? state.inspectorTabs : [];
+    const toTab = (row: PersistedInspectorTab): Tab => ({
       id: fileTabId(projectId ?? "", row.path),
       label: row.name,
       filePath: row.path,
       projectId: projectId ?? undefined,
-    })), [state.projectId, state.inspectorTabs, projectId]);
+    });
+    return {
+      main: rows.filter((row) => (row.pane ?? "main") === "main").map(toTab),
+      side: rows.filter((row) => row.pane === "side").map(toTab),
+    };
+  }, [state.projectId, state.inspectorTabs, projectId]);
+  const fileTabs = useMemo(() => [...paneTabs.main, ...paneTabs.side], [paneTabs]);
   const scopedIds = useMemo(() => fileTabs.map((tab) => tab.id), [fileTabs]);
 
   // The strip highlights whichever lane the user touched last. A tab that the
   // current Project does not own is not a candidate, so switching back cannot
   // show the previous Project's file.
+  const focusedSelection = state.activePanes[state.focusedPane];
   const activeInspectorId = state.activeLane === "inspector"
-    && state.activeInspectorId !== null
-    && scopedIds.includes(state.activeInspectorId)
-    ? state.activeInspectorId
+    && focusedSelection !== null
+    && scopedIds.includes(focusedSelection)
+    ? focusedSelection
     : null;
   const activeChannelId = isPanelChannel(state.activeChannelId)
     && state.openChannels.includes(state.activeChannelId)
@@ -158,11 +173,11 @@ export function useRightPanel(projectId: string | null) {
     outgoing.current = state;
   }, [state]);
 
-  const openInspector = useCallback((filePath: string, fileName: string) => {
+  const openInspector = useCallback((filePath: string, fileName: string, pane: InspectorPane = "main") => {
     if (!projectId) return;
     const id = fileTabId(projectId, filePath);
     rememberedTab.current.set(projectId, id);
-    setState((current) => openInspectorTab(current, id, { path: filePath, name: fileName }));
+    setState((current) => openInspectorTab(current, id, { path: filePath, name: fileName, pane }));
   }, [projectId]);
 
   // Selecting a row only moves the selection; its remembered row is already there.
@@ -233,6 +248,9 @@ export function useRightPanel(projectId: string | null) {
 
   return {
     fileTabs,
+    paneTabs,
+    activePanes: state.activePanes,
+    focusedPane: state.focusedPane,
     activeTabId,
     activeInspectorId,
     activeChannelId,

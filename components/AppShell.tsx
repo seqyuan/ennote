@@ -262,6 +262,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
     currentCwd,
     panel,
     handleOpenFile,
+    handleOpenFileToSide,
     handlePreviewFile,
     panelOpen,
     openPanel,
@@ -442,6 +443,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
             projectId={currentProjectId ?? null}
             displayPath={currentCwd}
             onOpenFile={handleOpenFile}
+            onOpenFileToSide={handleOpenFileToSide}
             onPreviewFile={handlePreviewFile}
             selectedSession={selectedSession}
             sessionTitle={selectedSessionRecord?.title || selectedSession || ""}

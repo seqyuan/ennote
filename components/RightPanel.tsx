@@ -28,6 +28,7 @@ export function RightPanel(props: {
   projectId: string | null;
   displayPath: string | null;
   onOpenFile: (path: string, name: string) => void;
+  onOpenFileToSide: (path: string, name: string) => void;
   onPreviewFile: (path: string, name: string) => void;
   selectedSession: string | null;
   sessionTitle: string;
@@ -38,7 +39,7 @@ export function RightPanel(props: {
   permissionMode: PermissionMode;
 }) {
   const {
-    open, onClose, resize, panel, projectId, displayPath, onOpenFile, onPreviewFile,
+    open, onClose, resize, panel, projectId, displayPath, onOpenFile, onOpenFileToSide, onPreviewFile,
     selectedSession, sessionTitle, activeRun, inspectorRunId, status, permissionMode,
   } = props;
   const t = useT();
@@ -98,6 +99,10 @@ export function RightPanel(props: {
             // the way. This is not a preference: it costs one click to reopen.
             if (medium) setPeek(false);
           }}
+          onOpenFileToSide={(path, name) => {
+            onOpenFileToSide(path, name);
+            if (medium) setPeek(false);
+          }}
           onPreviewFile={onPreviewFile}
         />
       </div>
@@ -135,12 +140,23 @@ export function RightPanel(props: {
     tools: { attention: statusNeedsHuman(status) },
   } as const;
 
-  const activeFileTab = fileTabs.find((tab) => tab.id === state.activeInspectorId);
-  const inspectorBody = activeFileTab?.projectId === projectId && activeFileTab.filePath ? (
-    // Never render a row the current Project does not own, even if a caller
-    // hands the panel a tab list that was not scoped (useRightPanel scopes it).
-    <FileViewer projectId={activeFileTab.projectId} filePath={activeFileTab.filePath} fileName={activeFileTab.label} />
-  ) : null;
+  // Each pane draws its own selection. A row the current Project does not own is
+  // never rendered, even if a caller hands the panel an unscoped list.
+  const bodyFor = (tabId: string | null) => {
+    const tab = fileTabs.find((candidate) => candidate.id === tabId);
+    if (!tab?.projectId || !tab.filePath || tab.projectId !== projectId) return null;
+    return <FileViewer projectId={tab.projectId} filePath={tab.filePath} fileName={tab.label} />;
+  };
+  const mainBody = bodyFor(panel.activePanes.main);
+  const sideBody = bodyFor(panel.activePanes.side);
+  const hasSide = panel.paneTabs.side.length > 0;
+  const focusedBody = bodyFor(panel.activePanes[panel.focusedPane]);
+  const inspectorBody = hasSide ? (
+    <div className="right-panel-panes">
+      <div className="right-panel-pane" data-testid="inspector-pane-main">{mainBody}</div>
+      <div className="right-panel-pane" data-testid="inspector-pane-side">{sideBody}</div>
+    </div>
+  ) : mainBody;
 
   return (
     <div
@@ -203,10 +219,29 @@ export function RightPanel(props: {
           </div>
         )}
         channelBody={channelBody}
-        inspectorStrip={fileTabs.length > 0 ? (
+        inspectorStrip={hasSide ? (
+          <div className="right-panel-pane-strips">
+            <TabBar
+              tabs={panel.paneTabs.main}
+              activeTabId={panel.activePanes.main ?? ""}
+              onSelectTab={selectTab}
+              onCloseTab={panel.closeTab}
+              onReorder={panel.reorderTabs}
+              closeLabel={closeLabel}
+            />
+            <TabBar
+              tabs={panel.paneTabs.side}
+              activeTabId={panel.activePanes.side ?? ""}
+              onSelectTab={selectTab}
+              onCloseTab={panel.closeTab}
+              onReorder={panel.reorderTabs}
+              closeLabel={closeLabel}
+            />
+          </div>
+        ) : fileTabs.length > 0 ? (
           <TabBar
             tabs={fileTabs}
-            activeTabId={state.activeInspectorId ?? ""}
+            activeTabId={panel.activePanes.main ?? ""}
             onSelectTab={selectTab}
             onCloseTab={panel.closeTab}
             onReorder={panel.reorderTabs}
@@ -228,7 +263,9 @@ export function RightPanel(props: {
         )}
         narrowBody={(
           <div className="right-panel-body">
-            {panel.activeTabId === state.activeInspectorId && inspectorBody ? inspectorBody : channelBody}
+            {panel.activeTabId === (panel.activePanes.main ?? panel.activePanes.side) && focusedBody
+              ? focusedBody
+              : channelBody}
           </div>
         )}
         primaryWidth={state.primaryWidths[activeChannelId ?? "files"]}

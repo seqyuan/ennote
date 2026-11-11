@@ -10,6 +10,8 @@ interface Props {
   projectId: string | null;
   displayPath?: string | null;
   onOpenFile: (filePath: string, fileName: string) => void;
+  /** Open a file in the inspector's side pane, beside what is already there. */
+  onOpenFileToSide: (filePath: string, fileName: string) => void;
   onPreviewFile: (filePath: string, fileName: string) => void;
 }
 
@@ -45,7 +47,7 @@ interface TreeRow {
  * Only loaded directories are walked. A filter therefore matches what has been
  * fetched so far — nothing here pretends to search the disk.
  */
-export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFile }: Props) {
+export function FileTreePanel({ projectId, displayPath, onOpenFile, onOpenFileToSide, onPreviewFile }: Props) {
   const [entries, setEntries] = useState<WorkspaceFileEntry[]>([]);
   const [rootLoading, setRootLoading] = useState(Boolean(projectId));
   const [error, setError] = useState<string | null>(null);
@@ -468,6 +470,10 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
           onOpen={() => {
             const target = rows.find((candidate) => candidate.entry.path === menu.path)?.entry;
             if (target && !target.isDir) onOpenFile(target.path, target.name);
+          }}
+          onOpenToSide={() => {
+            const target = rows.find((candidate) => candidate.entry.path === menu.path)?.entry;
+            if (target && !target.isDir) onOpenFileToSide(target.path, target.name);
           }}
           onPreview={() => {
             const target = rows.find((candidate) => candidate.entry.path === menu.path)?.entry;
