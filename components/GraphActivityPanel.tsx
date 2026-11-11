@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "@/components/LocaleProvider";
 import type { Translator } from "@/lib/messages";
+import { nextExpandedRun } from "@/lib/graph-runs";
 import { apiFetch } from "@/lib/worker-api.client";
 import { ChevronRight, Workflow } from "lucide-react";
 import styles from "./GraphActivityPanel.module.css";
@@ -36,6 +37,16 @@ export function GraphActivityPanel({ sessionId, onCount }: {
   const [nodes, setNodes] = useState<Record<string, RunAgentFlowNode[]>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * The run the reader closed, and the count callback, both by ref.
+   *
+   * A render must not restart the poll: the parent passes an inline callback, so a
+   * dependency on it meant every parent render refetched the list — and that refetch
+   * is what re-expanded a run the reader had just collapsed.
+   */
+  const dismissed = useRef<string | null>(null);
+  const onCountRef = useRef(onCount);
+  useEffect(() => { onCountRef.current = onCount; }, [onCount]);
 
   const load = useCallback(async () => {
     if (!sessionId) return;
@@ -43,24 +54,13 @@ export function GraphActivityPanel({ sessionId, onCount }: {
       const runs = await apiFetch<RunAgentFlow[]>(`/v1/sessions/${encodeURIComponent(sessionId)}/graph-runs`);
       const filtered = runs ?? [];
       setRuns(filtered);
-      onCount?.(filtered.length);
+      onCountRef.current?.(filtered.length);
       setError(null);
-      // Expand the newest run when the list changes (empty -> non-empty or a
-      // newer run appears).
-      setExpanded((current) => {
-        if (filtered.length === 0) return null;
-        const newest = filtered[0].runId ?? null;
-        if (newest === null) return null;
-        if (current === null || !filtered.some((run) => run.runId === current)) return newest;
-        const newestCreated = filtered[0].createdAt;
-        const currentCreated = filtered.find((run) => run.runId === current)?.createdAt;
-        if (newestCreated && currentCreated && currentCreated < newestCreated) return newest;
-        return current;
-      });
+      setExpanded((current) => nextExpandedRun(current, filtered, dismissed.current));
     } catch (reason) {
       setError((reason as Error).message);
     }
-  }, [sessionId, onCount]);
+  }, [sessionId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -126,7 +126,15 @@ export function GraphActivityPanel({ sessionId, onCount }: {
               run={run}
               nodes={nodes[run.runId ?? ""] ?? []}
               expanded={expanded === run.runId}
-              onToggle={() => setExpanded((current) => current === run.runId ? null : (run.runId ?? null))}
+              onToggle={() => setExpanded((current) => {
+                if (current === run.runId) {
+                  // Remember the choice so the next refresh does not undo it.
+                  dismissed.current = run.runId ?? null;
+                  return null;
+                }
+                dismissed.current = null;
+                return run.runId ?? null;
+              })}
               nodesLoading={expanded === run.runId && nodes[run.runId ?? ""] === undefined}
               t={t}
             />
