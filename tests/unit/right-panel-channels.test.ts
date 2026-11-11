@@ -206,7 +206,7 @@ describe("remembered inspector rows", () => {
     const back = parsePreferences(legacy, "p1");
 
     expect(back.pinnedChannels).toEqual(["files"]);
-    expect(back.primaryWidth).toBe(320);
+    expect(back.primaryWidths).toEqual({ files: 320, graph: 320, tools: 320 });
     expect(back.open).toBe(true);
     expect(back.inspectorTabs).toEqual([]);
     expect(back.activeInspectorId).toBeNull();
@@ -300,10 +300,14 @@ describe("shell and lane width", () => {
     expect(collapseShell(base)).toBe(base);   // already closed
   });
 
-  it("records the lane width and ignores a repeated value", () => {
-    const widened = setPrimaryWidth(state(), 320);
-    expect(widened.primaryWidth).toBe(320);
-    expect(setPrimaryWidth(widened, 320)).toBe(widened);
+  it("gives each channel its own lane width", () => {
+    const withFiles = setPrimaryWidth(state(), "files", 320);
+    expect(withFiles.primaryWidths.files).toBe(320);
+    expect(withFiles.primaryWidths.graph).toBe(280);
+
+    const withGraph = setPrimaryWidth(withFiles, "graph", 400);
+    expect(withGraph.primaryWidths).toEqual({ files: 320, graph: 400, tools: 280 });
+    expect(setPrimaryWidth(withGraph, "graph", 400)).toBe(withGraph);
   });
 });
 
@@ -313,7 +317,8 @@ describe("hydrate", () => {
       prefs({ pinnedChannels: ["tools", "files"], primaryWidth: 320, open: true }),
     );
 
-    expect(hydrated.primaryWidth).toBe(320);
+    // The width written before channels had their own becomes every channel's.
+    expect(hydrated.primaryWidths).toEqual({ files: 320, graph: 320, tools: 320 });
     expect(hydrated.openChannels).toEqual(["files", "tools"]);
     expect(hydrated.activeChannelId).toBe("files");
     expect(hydrated.open).toBe(true);
@@ -370,7 +375,7 @@ describe("preferences", () => {
       version: 1,
       projectId: "p1",
       pinnedChannels: ["graph"],
-      primaryWidth: 280,
+      primaryWidths: { files: 280, graph: 280, tools: 280 },
       open: true,
       inspectorTabs: [],
       activeInspectorId: null,

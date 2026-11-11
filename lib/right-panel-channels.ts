@@ -61,8 +61,14 @@ export interface RightPanelState {
   activeLane: "channel" | "inspector";
   /** Whether the shell is expanded. Persisted. */
   open: boolean;
-  /** The left lane's width while both lanes are drawn. Persisted. */
-  primaryWidth: number;
+  /**
+   * The left lane's width per channel. Persisted.
+   *
+   * A tree wants room for deep paths; a run inspector wants room for a table.
+   * One width for both means every channel switch re-drags it, so each channel
+   * remembers its own.
+   */
+  primaryWidths: Record<PanelChannel, number>;
   /** The selected inspector tab, or `null` when the lane is empty. */
   activeInspectorId: string | null;
   /**
@@ -95,7 +101,10 @@ export interface RightPanelPreferencesV1 {
   version: 1;
   projectId: string;
   pinnedChannels: PanelChannel[];
-  primaryWidth: number;
+  /** The lane width per channel; `primaryWidth` is the pre-per-channel field. */
+  primaryWidths?: Partial<Record<PanelChannel, number>>;
+  /** The single lane width written before channels had their own. */
+  primaryWidth?: number;
   open: boolean;
   /**
    * Files that were open, oldest first. Optional because rows written before
@@ -122,7 +131,7 @@ export function emptyPreferences(projectId: string): RightPanelPreferencesV1 {
     version: 1,
     projectId,
     pinnedChannels: [],
-    primaryWidth: PRIMARY_DEFAULT_WIDTH,
+    primaryWidths: { files: PRIMARY_DEFAULT_WIDTH, graph: PRIMARY_DEFAULT_WIDTH, tools: PRIMARY_DEFAULT_WIDTH },
     open: false,
     inspectorTabs: [],
     activeInspectorId: null,
@@ -162,9 +171,19 @@ export function parsePreferences(raw: string | null, projectId: string): RightPa
   const pinnedChannels = Array.isArray(row.pinnedChannels)
     ? normalizeChannels(row.pinnedChannels.filter(isPanelChannel))
     : [];
-  const primaryWidth = typeof row.primaryWidth === "number" && Number.isFinite(row.primaryWidth)
+  // The single width this Project used to carry becomes every channel's starting
+  // point; a channel absent from `primaryWidths` falls back to it.
+  const legacyWidth = typeof row.primaryWidth === "number" && Number.isFinite(row.primaryWidth)
     ? row.primaryWidth
     : PRIMARY_DEFAULT_WIDTH;
+  const storedWidths = (typeof row.primaryWidths === "object" && row.primaryWidths !== null)
+    ? row.primaryWidths
+    : {};
+  const primaryWidths = {
+    files: widthOf(storedWidths.files, legacyWidth),
+    graph: widthOf(storedWidths.graph, legacyWidth),
+    tools: widthOf(storedWidths.tools, legacyWidth),
+  };
   const inspectorTabs = readInspectorTabs(row.inspectorTabs);
   const activeInspectorId = typeof row.activeInspectorId === "string"
     && inspectorTabs.some((tab) => `file:${projectId}:${tab.path}` === row.activeInspectorId)
@@ -174,7 +193,7 @@ export function parsePreferences(raw: string | null, projectId: string): RightPa
     version: 1,
     projectId,
     pinnedChannels,
-    primaryWidth,
+    primaryWidths,
     open: row.open === true,
     inspectorTabs,
     activeInspectorId,
@@ -215,7 +234,11 @@ export function serializePreferences(preferences: RightPanelPreferencesV1): stri
     version: 1,
     projectId: preferences.projectId,
     pinnedChannels: normalizeChannels(preferences.pinnedChannels),
-    primaryWidth: preferences.primaryWidth,
+    primaryWidths: {
+      files: widthOf(preferences.primaryWidths?.files, PRIMARY_DEFAULT_WIDTH),
+      graph: widthOf(preferences.primaryWidths?.graph, PRIMARY_DEFAULT_WIDTH),
+      tools: widthOf(preferences.primaryWidths?.tools, PRIMARY_DEFAULT_WIDTH),
+    },
     open: preferences.open,
     inspectorTabs: readInspectorTabs(preferences.inspectorTabs),
     navigatorHidden: preferences.navigatorHidden === true,
@@ -255,7 +278,13 @@ export function initialRightPanelState(preferences: RightPanelPreferencesV1): Ri
     pinnedChannels,
     activeChannelId: openChannels[0] ?? null,
     open: preferences.open,
-    primaryWidth: preferences.primaryWidth,
+    primaryWidths: {
+      // A Project that predates per-channel widths has one number for all three;
+      // it is their starting point until each channel is dragged on its own.
+      files: widthOf(preferences.primaryWidths?.files, widthOf(preferences.primaryWidth, PRIMARY_DEFAULT_WIDTH)),
+      graph: widthOf(preferences.primaryWidths?.graph, widthOf(preferences.primaryWidth, PRIMARY_DEFAULT_WIDTH)),
+      tools: widthOf(preferences.primaryWidths?.tools, widthOf(preferences.primaryWidth, PRIMARY_DEFAULT_WIDTH)),
+    },
     navigatorHidden: preferences.navigatorHidden === true,
     activeInspectorId: preferences.activeInspectorId ?? null,
     activeLane: preferences.activeInspectorId ? "inspector" : "channel",
@@ -276,7 +305,11 @@ export function preferencesOf(state: RightPanelState): RightPanelPreferencesV1 {
     version: 1,
     projectId: state.projectId,
     pinnedChannels: normalizeChannels(state.pinnedChannels),
-    primaryWidth: state.primaryWidth,
+    primaryWidths: {
+      files: widthOf(state.primaryWidths.files, PRIMARY_DEFAULT_WIDTH),
+      graph: widthOf(state.primaryWidths.graph, PRIMARY_DEFAULT_WIDTH),
+      tools: widthOf(state.primaryWidths.tools, PRIMARY_DEFAULT_WIDTH),
+    },
     open: state.open,
     inspectorTabs: readInspectorTabs(state.inspectorTabs),
     activeInspectorId: state.activeInspectorId,
@@ -366,9 +399,19 @@ export function collapseShell(state: RightPanelState): RightPanelState {
   return state.open ? { ...state, open: false } : state;
 }
 
-/** Record the left lane's width. */
-export function setPrimaryWidth(state: RightPanelState, width: number): RightPanelState {
-  return state.primaryWidth === width ? state : { ...state, primaryWidth: width };
+/** Record one channel's lane width. */
+export function setPrimaryWidth(
+  state: RightPanelState,
+  channel: PanelChannel,
+  width: number,
+): RightPanelState {
+  if (state.primaryWidths[channel] === width) return state;
+  return { ...state, primaryWidths: { ...state.primaryWidths, [channel]: width } };
+}
+
+/** A stored width, when it is one. */
+function widthOf(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
 /**

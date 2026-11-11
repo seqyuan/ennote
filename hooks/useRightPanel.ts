@@ -211,10 +211,15 @@ export function useRightPanel(projectId: string | null) {
   // bound is the one the layout uses, so a drag cannot starve the other lane.
   const resizePrimaryBy = useCallback((delta: number, shellWidth: number) => {
     setState((current) => {
+      // The divider resizes the lane of the channel on screen, and each channel
+      // keeps its own width: the tree wants room the run inspector does not.
+      const channel = isPanelChannel(current.activeChannelId)
+        ? current.activeChannelId
+        : current.openChannels[0] ?? "files";
       // Start from what the lane is showing, not from what was stored: a width
       // saved on a wider panel would otherwise eat the first Npx of the drag.
-      const from = resolvePrimaryLaneWidthOf(current.primaryWidth, shellWidth);
-      return setPrimaryWidth(current, resolvePrimaryLaneWidthOf(from + delta, shellWidth));
+      const from = resolvePrimaryLaneWidthOf(current.primaryWidths[channel], shellWidth);
+      return setPrimaryWidth(current, channel, resolvePrimaryLaneWidthOf(from + delta, shellWidth));
     });
   }, []);
 

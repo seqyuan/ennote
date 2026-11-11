@@ -42,6 +42,24 @@
   text-overflow: ellipsis;
 }
 .tab[data-active="true"] .label { font-weight: 500; }
+.badge {
+  flex-shrink: 0;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-selected);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 16px;
+  text-align: center;
+}
+.dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
 .close {
   position: relative;
   display: flex;

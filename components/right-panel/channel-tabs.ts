@@ -26,12 +26,26 @@ export function channelLabel(channel: PanelChannel, t: Translator): string {
   return t(LABEL_KEYS[channel]);
 }
 
+/** What a channel has to say about itself, drawn on its tab. */
+export interface ChannelSignal {
+  /** A count, e.g. the runs this session has. */
+  count?: number;
+  /** Something is waiting for a human. */
+  attention?: boolean;
+}
+
 /** The channel rows for the strip, labelled for the active locale. */
-export function channelTabs(channels: readonly PanelChannel[], t: Translator): Tab[] {
+export function channelTabs(
+  channels: readonly PanelChannel[],
+  t: Translator,
+  signal: Partial<Record<PanelChannel, ChannelSignal>> = {},
+): Tab[] {
   return channels.map((channel) => ({
     id: channel,
     label: channelLabel(channel, t),
     closable: true,
     icon: ICONS[channel],
+    badge: signal[channel]?.count,
+    dot: signal[channel]?.attention,
   }));
 }

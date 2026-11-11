@@ -602,3 +602,61 @@ test("a refused create says why", async ({ page }) => {
   await page.getByLabel("New file name").press("Enter");
   await expect(page.getByText("A name cannot contain a slash")).toBeVisible();
 });
+
+test("each channel keeps its own lane width", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockLanes(page);
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+  await page.locator('.file-tree-main[title="/workspace/src"]').click();
+  await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
+  await expect(page.getByTestId("right-panel-lanes")).toHaveAttribute("data-mode", "wide");
+
+  const divider = page.getByRole("separator", { name: "Resize the file navigator" });
+  const box = await divider.boundingBox();
+  if (!box) throw new Error("divider has no box");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 90, box.y + box.height / 2, { steps: 6 });
+  await page.mouse.up();
+
+  const filesWidth = (await page.getByTestId("right-panel-primary").boundingBox())?.width ?? 0;
+  expect(filesWidth).toBeGreaterThan(300);
+
+  // Graphs gets its own width: switching channels must not inherit the tree's.
+  await page.getByRole("tab", { name: "Graphs" }).click();
+  await page.getByRole("tab", { name: "Files" }).click();
+  await expect.poll(async () => (await page.getByTestId("right-panel-primary").boundingBox())?.width ?? 0)
+    .toBeGreaterThan(300);
+});
+
+test("a channel's tab carries what it has to say", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route("**/api/worker/v1/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname.replace("/api/worker", "");
+    if (await tryFulfillHarnessRoutes(route)) return;
+    if (path === "/v1/projects") return fulfill(route, [project]);
+    if (path === "/v1/provider-profiles") return fulfill(route, [provider]);
+    if (path === "/v1/model-profiles") return fulfill(route, []);
+    if (path === "/v1/policy-profiles") return fulfill(route, policies);
+    if (path === `/v1/projects/${project.id}/workspace`) return fulfill(route, workspace);
+    if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/files`) return fulfill(route, []);
+    if (path.endsWith("/graph-runs")) {
+      return fulfill(route, [
+        { runId: "run-1", sessionId: "s", projectId: project.id, flowVersionId: "v1", manifestDigest: "a".repeat(64), state: "completed", totalTokensUsed: 1, inputs: {}, createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z" },
+        { runId: "run-2", sessionId: "s", projectId: project.id, flowVersionId: "v1", manifestDigest: "b".repeat(64), state: "running", totalTokensUsed: 1, inputs: {}, createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z" },
+      ]);
+    }
+    return route.fulfill({ status: 501, contentType: "application/json", body: JSON.stringify({ error: { code: "unmocked_route", message: path } }) });
+  });
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+
+  // The count comes from the channel itself, on the tab, in the strip.
+  await page.getByRole("tab", { name: "Graphs" }).click();
+  await expect(page.getByRole("tab", { name: /Graphs/ }).getByLabel("2")).toBeVisible();
+});

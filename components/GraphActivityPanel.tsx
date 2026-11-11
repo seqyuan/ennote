@@ -26,8 +26,10 @@ function catalogLabel(t: Translator, prefix: string, value: string | undefined):
  * card; the most recent run is expanded by default. Running runs poll while
  * active so task progress stays live without an SSE subscription.
  */
-export function GraphActivityPanel({ sessionId }: {
+export function GraphActivityPanel({ sessionId, onCount }: {
   sessionId: string | null;
+  /** How many runs this session has, reported so the tab can carry the number. */
+  onCount?: (count: number) => void;
 }) {
   const t = useT();
   const [runs, setRuns] = useState<RunAgentFlow[]>([]);
@@ -41,6 +43,7 @@ export function GraphActivityPanel({ sessionId }: {
       const runs = await apiFetch<RunAgentFlow[]>(`/v1/sessions/${encodeURIComponent(sessionId)}/graph-runs`);
       const filtered = runs ?? [];
       setRuns(filtered);
+      onCount?.(filtered.length);
       setError(null);
       // Expand the newest run when the list changes (empty -> non-empty or a
       // newer run appears).
@@ -57,7 +60,7 @@ export function GraphActivityPanel({ sessionId }: {
     } catch (reason) {
       setError((reason as Error).message);
     }
-  }, [sessionId]);
+  }, [sessionId, onCount]);
 
   useEffect(() => {
     const controller = new AbortController();

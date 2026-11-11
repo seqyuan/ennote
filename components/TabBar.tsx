@@ -12,6 +12,10 @@ export interface Tab {
   projectId?: string;
   closable?: boolean;
   icon?: "report" | "tools" | "files" | "graph";
+  /** A count worth showing on the tab itself, e.g. live runs. */
+  badge?: number;
+  /** Something needs a human here, with no number to put on it. */
+  dot?: boolean;
 }
 
 interface Props {
@@ -100,6 +104,10 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onReorder, 
             <span className={styles.label} title={tab.filePath ?? tab.label}>
               {tab.label}
             </span>
+            {tab.badge !== undefined && tab.badge > 0 && (
+              <span className={styles.badge} aria-label={`${tab.badge}`}>{tab.badge}</span>
+            )}
+            {tab.dot && <span className={styles.dot} aria-label="Needs attention" />}
             {closable && (
               <button
                 type="button"

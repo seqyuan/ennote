@@ -8,6 +8,25 @@ const SEP = "\u001f";
 
 export const RUN_STATUS_RECONNECTING = "reconnecting";
 
+/**
+ * The statuses that are waiting for a person, not for the model.
+ *
+ * They are the ones worth a dot on the channel's tab: a reader who is looking at
+ * the files still needs to know a run stopped to ask something.
+ */
+const STATUSES_NEEDING_A_HUMAN = new Set([
+  "waiting_answer",
+  "waiting_approval",
+  "waiting_delegation_admission",
+  "checkpoint_ready",
+]);
+
+/** Whether this status is blocked on a human. Accepts the wire form `code\u001Fdetail`. */
+export function statusNeedsHuman(status: string): boolean {
+  if (!status) return false;
+  return STATUSES_NEEDING_A_HUMAN.has(status.split(SEP)[0]);
+}
+
 /** Every status code the Worker can publish, mapped to its copy key. Exported
  *  so tests can pin one key per code and catch copy drift in either locale. */
 export const STATUS_KEYS: Record<string, string> = {

@@ -15,6 +15,7 @@ import { useT } from "@/components/LocaleProvider";
 import type { useRightPanel } from "@/hooks/useRightPanel";
 import type { useResizable } from "@/hooks/useResizable";
 import { PANEL_CHANNELS, isPanelChannel } from "@/lib/right-panel-channels";
+import { statusNeedsHuman } from "@/lib/run-status-copy";
 import type { PermissionMode } from "@/lib/permission-mode";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { laneMode } from "@/lib/right-panel-width";
@@ -50,6 +51,9 @@ export function RightPanel(props: {
   const drawer = useMediaQuery("(max-width: 960px)");
   const medium = laneMode(resize.width, drawer) === "medium";
   const [peek, setPeek] = useState(false);
+  // What each channel has to say about itself. The counts come from the channel
+  // that fetched them, so the strip never adds a request of its own.
+  const [graphRuns, setGraphRuns] = useState<number | undefined>(undefined);
   const navigatorOpen = medium ? peek : !state.navigatorHidden;
   const toggleNavigator = () => (medium ? setPeek((open) => !open) : panel.toggleNavigator());
   const closePanel = () => {
@@ -96,7 +100,7 @@ export function RightPanel(props: {
         />
       </div>
       {activeChannelId === "graph" && (
-        <GraphsChannel sessionId={selectedSession} />
+        <GraphsChannel sessionId={selectedSession} onCount={setGraphRuns} />
       )}
       {activeChannelId === "tools" && (
         <StatusChannel
@@ -118,6 +122,13 @@ export function RightPanel(props: {
       )}
     </>
   );
+
+  // What each channel has to say about itself. The count is reported by the
+  // channel that fetched it, so the strip adds no request of its own.
+  const signals = {
+    graph: { count: graphRuns },
+    tools: { attention: statusNeedsHuman(status) },
+  } as const;
 
   const activeFileTab = fileTabs.find((tab) => tab.id === state.activeInspectorId);
   const inspectorBody = activeFileTab?.projectId === projectId && activeFileTab.filePath ? (
@@ -146,7 +157,7 @@ export function RightPanel(props: {
         channelStrip={(
           <div className="right-panel-strip">
             <TabBar
-              tabs={channelTabs(openChannels, t)}
+              tabs={channelTabs(openChannels, t, signals)}
               activeTabId={activeChannelId ?? ""}
               onSelectTab={selectTab}
               onCloseTab={closeTab}
@@ -201,7 +212,7 @@ export function RightPanel(props: {
         narrowStrip={(
           <div className="right-panel-strip">
             <TabBar
-              tabs={[...channelTabs(openChannels, t), ...fileTabs]}
+              tabs={[...channelTabs(openChannels, t, signals), ...fileTabs]}
               activeTabId={panel.activeTabId}
               onSelectTab={selectTab}
               onCloseTab={closeTab}
@@ -215,7 +226,7 @@ export function RightPanel(props: {
             {panel.activeTabId === state.activeInspectorId && inspectorBody ? inspectorBody : channelBody}
           </div>
         )}
-        primaryWidth={state.primaryWidth}
+        primaryWidth={state.primaryWidths[activeChannelId ?? "files"]}
         onResizePrimary={(delta) => panel.resizePrimaryBy(delta, resize.width)}
         onResizePrimaryStart={panel.beginPrimaryResize}
         onResizePrimaryEnd={panel.endPrimaryResize}

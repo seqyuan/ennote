@@ -8,6 +8,9 @@ import { GraphActivityPanel } from "../GraphActivityPanel";
  * The panel polls while a run is live, so it is mounted only while this channel
  * is the one on screen.
  */
-export function GraphsChannel({ sessionId }: { sessionId: string | null }) {
-  return <GraphActivityPanel sessionId={sessionId} />;
+export function GraphsChannel({ sessionId, onCount }: {
+  sessionId: string | null;
+  onCount?: (count: number) => void;
+}) {
+  return <GraphActivityPanel sessionId={sessionId} onCount={onCount} />;
 }
