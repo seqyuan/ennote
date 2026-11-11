@@ -59,11 +59,34 @@ export function useRightPanel(projectId: string | null) {
   const rememberedTab = useRef(new Map<string, string>());
   const lastWritten = useRef<string | null>(null);
   const draggingPrimary = useRef(false);
+  // The state of the Project that is being left. A switch replaces the state
+  // wholesale, so anything the reader changed in the last commit would go
+  // unwritten unless it is flushed here first.
+  const outgoing = useRef<RightPanelState | null>(null);
   // Set when the stored preferences could not be read. Writing then would
   // replace real preferences with the defaults this session is running on.
   const storageUnreadable = useRef(false);
 
   const key = projectId ?? "";
+
+  /**
+   * Write one Project's preferences when they changed.
+   *
+   * Skips a state that does not belong to the Project being shown, a Project
+   * whose preferences were never read, a drag in flight, and storage that could
+   * not be read in the first place.
+   */
+  const flush = useCallback((candidate: RightPanelState | null) => {
+    if (!candidate || !candidate.projectId) return;
+    if (hydratedFor === null || storageUnreadable.current || draggingPrimary.current) return;
+    const serialized = serializePreferences(preferencesOf(candidate));
+    if (lastWritten.current === serialized) return;
+    try {
+      window.localStorage.setItem(rightPanelPreferencesKey(candidate.projectId), serialized);
+      lastWritten.current = serialized;
+    } catch { /* storage unavailable: the panel still works for this visit */ }
+  }, [hydratedFor]);
+
 
   // Every Project keeps its own preferences, the shell flag included, so a
   // switch applies the incoming Project's stored state as a whole. A null
@@ -71,6 +94,7 @@ export function useRightPanel(projectId: string | null) {
   // from defaults and writes nothing.
   useEffect(() => {
     if (hydratedFor === key) return;
+    flush(outgoing.current);
     const preferences = projectId
       ? readPreferences(projectId, storageUnreadable)
       : emptyPreferences("");
@@ -89,7 +113,7 @@ export function useRightPanel(projectId: string | null) {
       };
     });
     setHydratedFor(key);
-  }, [key, projectId, hydratedFor]);
+  }, [key, projectId, hydratedFor, flush]);
 
   // The strip's rows are the Project's remembered files, in their own order.
   const fileTabs = useMemo<Tab[]>(() => (state.projectId === projectId ? state.inspectorTabs : [])
@@ -125,13 +149,13 @@ export function useRightPanel(projectId: string | null) {
     // A drag writes once, when it ends: every intermediate width would
     // otherwise cost a synchronous localStorage write per pointer move.
     if (draggingPrimary.current || storageUnreadable.current) return;
-    const serialized = serializePreferences(preferencesOf(state));
-    if (lastWritten.current === serialized) return;
-    try {
-      window.localStorage.setItem(rightPanelPreferencesKey(projectId), serialized);
-      lastWritten.current = serialized;
-    } catch { /* storage unavailable: the panel still works for this visit */ }
-  }, [projectId, state, hydratedFor, writeTick]);
+    flush(state);
+  }, [projectId, state, hydratedFor, writeTick, flush]);
+
+  // Remember the state a commit settled on, so leaving the Project can flush it.
+  useEffect(() => {
+    outgoing.current = state;
+  }, [state]);
 
   const openInspector = useCallback((filePath: string, fileName: string) => {
     if (!projectId) return;
@@ -157,8 +181,8 @@ export function useRightPanel(projectId: string | null) {
     // strip's own × and this path stay distinct.
     if (isPanelChannel(tabId)) return;
     if (rememberedTab.current.get(projectId ?? "") === tabId) rememberedTab.current.delete(projectId ?? "");
-    setState((current) => closeInspectorTab(current, tabId, scopedIds));
-  }, [projectId, scopedIds]);
+    setState((current) => closeInspectorTab(current, tabId));
+  }, [projectId]);
 
   const reorderTabs = useCallback((fromId: string, toId: string) => {
     setState((current) => reorderInspectorTabs(current, pathOf(fromId), pathOf(toId)));

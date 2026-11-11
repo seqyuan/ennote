@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_PERSISTED_INSPECTOR_TABS,
+  fileTabId,
   type PanelChannel,
   type RightPanelPreferencesV1,
   type RightPanelState,
@@ -30,6 +31,9 @@ const prefs = (over: Partial<RightPanelPreferencesV1> = {}): RightPanelPreferenc
   open: false,
   ...over,
 });
+
+/** The row id the panel uses for a file in the fixture project. */
+const id = (path: string) => fileTabId("p1", path);
 
 /** A state as a fresh visit to a project with these pins produces it. */
 const state = (over: Partial<RightPanelState> = {}): RightPanelState => ({
@@ -118,42 +122,54 @@ describe("right panel channel contract", () => {
   });
 
   it("remembers which lane the user last activated", () => {
-    const opened = openInspectorTab(state(), "main.py", { path: "/workspace/main.py", name: "main.py" });
+    const opened = openInspectorTab(state(), id("/workspace/main.py"), { path: "/workspace/main.py", name: "main.py" });
     expect(opened.activeLane).toBe("inspector");
 
     // Selecting a channel keeps the tab open, it only hands the strip back.
     const back = openChannel(opened, "graph");
     expect(back.activeLane).toBe("channel");
-    expect(back.activeInspectorId).toBe("main.py");
+    expect(back.activeInspectorId).toBe(id("/workspace/main.py"));
 
-    expect(closeInspectorTab(back, "main.py", []).activeLane).toBe("channel");
+    expect(closeInspectorTab(back, id("/workspace/main.py")).activeLane).toBe("channel");
   });
 
   it("closing the selected channel does not steal the lane from an open file", () => {
-    const reading = openInspectorTab(state(), "main.py", { path: "/workspace/main.py", name: "main.py" });
+    const reading = openInspectorTab(state(), id("/workspace/main.py"), { path: "/workspace/main.py", name: "main.py" });
     const closed = closeChannel(reading, "files");
 
     expect(closed.openChannels).toEqual(["graph", "tools"]);
     expect(closed.activeLane).toBe("inspector");
-    expect(closed.activeInspectorId).toBe("main.py");
+    expect(closed.activeInspectorId).toBe(id("/workspace/main.py"));
   });
 
   it("closes the last inspector tab without closing the shell", () => {
-    const opened = openInspectorTab(state(), "main.py", { path: "/workspace/main.py", name: "main.py" });
-    const closed = closeInspectorTab(opened, "main.py", []);
+    const opened = openInspectorTab(state(), id("/workspace/main.py"), { path: "/workspace/main.py", name: "main.py" });
+    const closed = closeInspectorTab(opened, id("/workspace/main.py"));
 
+    expect(closed.inspectorTabs).toEqual([]);
     expect(closed.activeInspectorId).toBeNull();
     expect(closed.open).toBe(true);
     expect(closed.activeChannelId).toBe("files");
   });
 
   it("selects the remaining tab when the active inspector tab is closed", () => {
-    const first = openInspectorTab(state(), "a.py", { path: "/workspace/a.py", name: "a.py" });
-    const opened = openInspectorTab(first, "b.py", { path: "/workspace/b.py", name: "b.py" });
-    expect(opened.activeInspectorId).toBe("b.py");
+    const first = openInspectorTab(state(), id("/workspace/a.py"), { path: "/workspace/a.py", name: "a.py" });
+    const opened = openInspectorTab(first, id("/workspace/b.py"), { path: "/workspace/b.py", name: "b.py" });
+    expect(opened.activeInspectorId).toBe(id("/workspace/b.py"));
 
-    expect(closeInspectorTab(opened, "b.py", ["a.py"]).activeInspectorId).toBe("a.py");
-    expect(closeInspectorTab(opened, "a.py", ["b.py"]).activeInspectorId).toBe("b.py");
+    const withoutB = closeInspectorTab(opened, id("/workspace/b.py"));
+    expect(withoutB.activeInspectorId).toBe(id("/workspace/a.py"));
+    expect(withoutB.inspectorTabs.map((row) => row.path)).toEqual(["/workspace/a.py"]);
+
+    expect(closeInspectorTab(opened, id("/workspace/a.py")).activeInspectorId).toBe(id("/workspace/b.py"));
+  });
+
+  it("moves a reopened row to the newest position", () => {
+    let current = openInspectorTab(state(), id("/workspace/a.py"), { path: "/workspace/a.py", name: "a.py" });
+    current = openInspectorTab(current, id("/workspace/b.py"), { path: "/workspace/b.py", name: "b.py" });
+    current = openInspectorTab(current, id("/workspace/a.py"), { path: "/workspace/a.py", name: "a.py" });
+
+    expect(current.inspectorTabs.map((row) => row.path)).toEqual(["/workspace/b.py", "/workspace/a.py"]);
   });
 
   it("falls back to the next open channel when the active one is closed", () => {

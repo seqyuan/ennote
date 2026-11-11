@@ -342,6 +342,65 @@ test("the files a reader had open come back after a reload", async ({ page }) =>
   await expect(page.getByTestId("right-panel-lanes")).toHaveAttribute("data-mode", "wide");
 });
 
+test("two open files both come back, with the same one selected", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route("**/api/worker/v1/**", async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillHarnessRoutes(route)) return;
+    if (path === "/v1/projects") return fulfill(route, [project]);
+    if (path === "/v1/provider-profiles") return fulfill(route, [provider]);
+    if (path === "/v1/model-profiles") return fulfill(route, []);
+    if (path === "/v1/policy-profiles") return fulfill(route, policies);
+    if (path === `/v1/projects/${project.id}/workspace`) return fulfill(route, workspace);
+    if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/files`) {
+      return fulfill(route, [
+        { name: "main.ts", path: "/workspace/main.ts", isDir: false, size: 30, modifiedAt: "2026-10-01T00:00:00Z" },
+        { name: "util.ts", path: "/workspace/util.ts", isDir: false, size: 20, modifiedAt: "2026-10-01T00:00:00Z" },
+      ]);
+    }
+    if (path === `/v1/projects/${project.id}/files/content`) {
+      return route.fulfill({ status: 200, contentType: "text/typescript", body: "export const ready = true;\n" });
+    }
+    return route.abort();
+  });
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+  await page.locator('.file-tree-main[title="/workspace/main.ts"]').click();
+  await page.locator('.file-tree-main[title="/workspace/util.ts"]').click();
+  await expect(page.getByRole("tab", { name: "main.ts" })).toBeVisible();
+
+  await page.reload();
+
+  // Both rows are back, in the order they were opened, and util.ts is selected.
+  const rows = page.getByRole("tablist").last().getByRole("tab");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toHaveText(/main\.ts/);
+  await expect(rows.nth(1)).toHaveText(/util\.ts/);
+  await expect(rows.nth(1)).toHaveAttribute("aria-selected", "true");
+});
+
+test("returning to a project after a reload gives its files back", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockLanes(page, { withSecondProject: true });
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+  await page.locator('.file-tree-main[title="/workspace/src"]').click();
+  await page.locator('.file-tree-main[title="/workspace/src/main.ts"]').click();
+  await expect(page.locator(".file-code")).toContainText("ready");
+
+  await page.reload();
+  await selectProject(page, second.name);
+  await expect(page.getByRole("tab", { name: "main.ts" })).toHaveCount(0);
+
+  // A's rows came from disk, not from the session, so they are here again.
+  await selectProject(page, project.name);
+  await expect(page.getByRole("tab", { name: "main.ts" })).toBeVisible();
+});
+
 test("a stored row does not leak into another project", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockLanes(page, { withSecondProject: true });

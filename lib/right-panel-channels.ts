@@ -116,6 +116,8 @@ export function emptyPreferences(projectId: string): RightPanelPreferencesV1 {
     pinnedChannels: [],
     primaryWidth: PRIMARY_DEFAULT_WIDTH,
     open: false,
+    inspectorTabs: [],
+    activeInspectorId: null,
   };
 }
 
@@ -146,7 +148,11 @@ export function parsePreferences(raw: string | null, projectId: string): RightPa
   const row = parsed as Partial<RightPanelPreferencesV1>;
   if (row.version !== 1) return emptyPreferences(projectId);
   if (row.projectId !== projectId) return emptyPreferences(projectId);
-  if (!Array.isArray(row.pinnedChannels)) return emptyPreferences(projectId);
+  // A malformed field costs that field, not the row: discarding everything here
+  // would let one bad write take the Project's pins, width and shell with it.
+  const pinnedChannels = Array.isArray(row.pinnedChannels)
+    ? normalizeChannels(row.pinnedChannels.filter(isPanelChannel))
+    : [];
   const primaryWidth = typeof row.primaryWidth === "number" && Number.isFinite(row.primaryWidth)
     ? row.primaryWidth
     : PRIMARY_DEFAULT_WIDTH;
@@ -158,7 +164,7 @@ export function parsePreferences(raw: string | null, projectId: string): RightPa
   return {
     version: 1,
     projectId,
-    pinnedChannels: normalizeChannels(row.pinnedChannels.filter(isPanelChannel)),
+    pinnedChannels,
     primaryWidth,
     open: row.open === true,
     inspectorTabs,
@@ -358,24 +364,26 @@ export function openInspectorTab(
   tabId: string,
   row: PersistedInspectorTab,
 ): RightPanelState {
-  const inspectorTabs = state.inspectorTabs.some((tab) => tab.path === row.path)
-    ? state.inspectorTabs
-    : readInspectorTabs([...state.inspectorTabs, row]);
+  const inspectorTabs = readInspectorTabs([
+    ...state.inspectorTabs.filter((tab) => tab.path !== row.path),
+    row,
+  ]);
   return { ...state, inspectorTabs, activeInspectorId: tabId, activeLane: "inspector", open: true };
 }
 
 /**
  * Close an inspector tab. Closing the last one only empties the lane.
+ *
+ * The rows that remain are read from the state, not from the caller: a caller
+ * that passed a list one render stale could otherwise leave the selection
+ * pointing at a file the Project no longer has open.
  * @param state - the current state.
  * @param tabId - the tab being closed.
- * @param remainingIds - the ids still open after this one, in strip order.
  */
-export function closeInspectorTab(
-  state: RightPanelState,
-  tabId: string,
-  remainingIds: readonly string[],
-): RightPanelState {
-  const remaining = remainingIds.filter((id) => id !== tabId);
+export function closeInspectorTab(state: RightPanelState, tabId: string): RightPanelState {
+  const remaining = state.inspectorTabs
+    .filter((row) => row.path !== pathOf(tabId))
+    .map((row) => fileTabId(state.projectId, row.path));
   const next = state.activeInspectorId === tabId
     ? remaining[remaining.length - 1] ?? null
     : state.activeInspectorId;
