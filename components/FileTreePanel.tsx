@@ -1,7 +1,7 @@
 "use client";
 
-import { Maximize2, Search } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Copy, Maximize2, Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FolderIcon, getFileIcon } from "./FileIcons";
 import { listProjectFiles, type WorkspaceFileEntry } from "@/lib/project-files";
 
@@ -12,6 +12,25 @@ interface Props {
   onPreviewFile: (filePath: string, fileName: string) => void;
 }
 
+/** One drawn row: what it is, how deep it sits, and what it hangs under. */
+interface TreeRow {
+  entry: WorkspaceFileEntry;
+  depth: number;
+  parentPath: string | null;
+}
+
+/**
+ * The workspace tree.
+ *
+ * The tree is derived, not recursive: one depth-first walk of the loaded entries
+ * produces the rows in the order they are drawn, which is also the order the
+ * arrow keys move through. That keeps expansion, filtering, and keyboard
+ * navigation reading the same list instead of three separate traversals that can
+ * disagree.
+ *
+ * Only loaded directories are walked. A filter therefore matches what has been
+ * fetched so far — nothing here pretends to search the disk.
+ */
 export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFile }: Props) {
   const [entries, setEntries] = useState<WorkspaceFileEntry[]>([]);
   const [rootLoading, setRootLoading] = useState(Boolean(projectId));
@@ -20,7 +39,10 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set());
   const [dirContents, setDirContents] = useState<Map<string, WorkspaceFileEntry[]>>(new Map());
+  const [focusedPath, setFocusedPath] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ path: string; x: number; y: number } | null>(null);
   const nestedControllers = useRef<Map<string, AbortController>>(new Map());
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!projectId) return;
@@ -46,20 +68,8 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
     };
   }, [projectId]);
 
-  const toggleDir = useCallback(async (dirPath: string) => {
-    if (!projectId) return;
-    if (expandedDirs.has(dirPath)) {
-      setExpandedDirs((previous) => {
-        const next = new Set(previous);
-        next.delete(dirPath);
-        return next;
-      });
-      return;
-    }
-
-    setExpandedDirs((previous) => new Set(previous).add(dirPath));
-    if (dirContents.has(dirPath)) return;
-
+  const loadDir = useCallback(async (dirPath: string) => {
+    if (!projectId || dirContents.has(dirPath)) return;
     const controller = new AbortController();
     nestedControllers.current.set(dirPath, controller);
     setLoadingDirs((previous) => new Set(previous).add(dirPath));
@@ -77,49 +87,130 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
         return next;
       });
     }
-  }, [dirContents, expandedDirs, projectId]);
+  }, [dirContents, projectId]);
 
-  const normalizedQuery = searchQuery.trim().toLowerCase();
-  const filtered = entries.filter((entry) => !normalizedQuery || entry.name.toLowerCase().includes(normalizedQuery));
+  const collapse = useCallback((dirPath: string) => {
+    setExpandedDirs((previous) => {
+      if (!previous.has(dirPath)) return previous;
+      const next = new Set(previous);
+      next.delete(dirPath);
+      return next;
+    });
+  }, []);
 
-  const renderEntries = (items: WorkspaceFileEntry[], depth: number): React.ReactNode => items.map((entry) => {
-    const isExpanded = expandedDirs.has(entry.path);
-    const children = dirContents.get(entry.path);
-    const loading = loadingDirs.has(entry.path);
+  const expand = useCallback((dirPath: string) => {
+    setExpandedDirs((previous) => previous.has(dirPath) ? previous : new Set(previous).add(dirPath));
+    void loadDir(dirPath);
+  }, [loadDir]);
 
-    return (
-      <div key={entry.path}>
-        <div className="file-tree-row" style={{ paddingLeft: 8 + depth * 16 }}>
-          <button
-            type="button"
-            className="file-tree-main"
-            onClick={() => entry.isDir ? void toggleDir(entry.path) : onOpenFile(entry.path, entry.name)}
-            title={entry.path}
-            aria-expanded={entry.isDir ? isExpanded : undefined}
-          >
-            <span className="file-tree-icon">
-              {entry.isDir ? <FolderIcon size={14} open={isExpanded} /> : getFileIcon(entry.name, 14)}
-            </span>
-            <span className="file-tree-name">{entry.name}</span>
-            {!entry.isDir && <span className="file-tree-size">{formatFileSize(entry.size)}</span>}
-            {loading && <span className="file-tree-loading">...</span>}
-          </button>
-          {!entry.isDir && (
-            <button
-              type="button"
-              className="file-preview-action"
-              onClick={() => onPreviewFile(entry.path, entry.name)}
-              aria-label={`Preview ${entry.name} in a floating window`}
-              title="Open floating preview"
-            >
-              <Maximize2 size={12} aria-hidden="true" />
-            </button>
-          )}
-        </div>
-        {entry.isDir && isExpanded && children && renderEntries(children, depth + 1)}
-      </div>
-    );
-  });
+  const query = searchQuery.trim().toLowerCase();
+
+  const rows = useMemo<TreeRow[]>(() => {
+    const drawn: TreeRow[] = [];
+
+    // While filtering, a directory is drawn open if anything under it (at any
+    // loaded depth) matches, so the hit is reachable without expanding by hand.
+    const matches = (entry: WorkspaceFileEntry): boolean => {
+      if (!query) return true;
+      if (entry.name.toLowerCase().includes(query)) return true;
+      if (!entry.isDir) return false;
+      const children = dirContents.get(entry.path) ?? [];
+      return children.some(matches);
+    };
+
+    const walk = (items: WorkspaceFileEntry[], depth: number, parentPath: string | null) => {
+      for (const entry of items) {
+        if (!matches(entry)) continue;
+        drawn.push({ entry, depth, parentPath });
+        const open = query ? true : expandedDirs.has(entry.path);
+        if (!entry.isDir || !open) continue;
+        const children = dirContents.get(entry.path);
+        if (children) walk(children, depth + 1, entry.path);
+      }
+    };
+
+    walk(entries, 0, null);
+    return drawn;
+  }, [entries, dirContents, expandedDirs, query]);
+
+  // A filter has to see into directories it has not opened, so while one is typed
+  // every directory the tree knows about is listed. It converges: each listing
+  // reveals more names, the effect runs again, and it stops when nothing is left
+  // unlisted. The walk above only ever walks what is loaded, so this is what
+  // makes "filter matches nested files" true. Deferred a tick so the filtered
+  // first paint is not blocked by the fetches it starts.
+  useEffect(() => {
+    if (!query) return;
+    const timer = window.setTimeout(() => {
+      const known = new Set<string>();
+      for (const entry of entries) if (entry.isDir) known.add(entry.path);
+      for (const children of dirContents.values()) {
+        for (const entry of children) if (entry.isDir) known.add(entry.path);
+      }
+      for (const path of known) {
+        if (!dirContents.has(path)) void loadDir(path);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [query, entries, dirContents, loadDir]);
+
+  const focusRow = useCallback((path: string) => {
+    setFocusedPath(path);
+    const list = listRef.current;
+    if (!list) return;
+    const target = list.querySelector<HTMLElement>(`[data-path="${CSS.escape(path)}"]`);
+    target?.focus();
+  }, []);
+
+  const moveFocus = useCallback((from: number, delta: number) => {
+    const next = rows[from + delta];
+    if (next) focusRow(next.entry.path);
+  }, [rows, focusRow]);
+
+  const onKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>, index: number) => {
+    const row = rows[index];
+    if (!row) return;
+    switch (event.key) {
+      case "ArrowDown": event.preventDefault(); moveFocus(index, 1); break;
+      case "ArrowUp": event.preventDefault(); moveFocus(index, -1); break;
+      case "Home": event.preventDefault(); if (rows[0]) focusRow(rows[0].entry.path); break;
+      case "End": event.preventDefault(); if (rows.length > 0) focusRow(rows[rows.length - 1].entry.path); break;
+      case "ArrowRight":
+        event.preventDefault();
+        if (!row.entry.isDir) break;
+        if (!expandedDirs.has(row.entry.path)) expand(row.entry.path);
+        else moveFocus(index, 1);
+        break;
+      case "ArrowLeft": {
+        event.preventDefault();
+        if (row.entry.isDir && expandedDirs.has(row.entry.path)) { collapse(row.entry.path); break; }
+        const parent = rows.findIndex((candidate) => candidate.entry.path === row.parentPath);
+        if (parent >= 0) focusRow(rows[parent].entry.path);
+        break;
+      }
+      case "Enter":
+      case " ":
+        event.preventDefault();
+        if (row.entry.isDir) {
+          if (expandedDirs.has(row.entry.path)) collapse(row.entry.path);
+          else expand(row.entry.path);
+        } else {
+          onOpenFile(row.entry.path, row.entry.name);
+        }
+        break;
+      case "ContextMenu":
+        event.preventDefault();
+        setMenu({ path: row.entry.path, x: 0, y: 0 });
+        break;
+      default:
+        break;
+    }
+  }, [rows, expandedDirs, collapse, expand, moveFocus, focusRow, onOpenFile]);
+
+  const focusedIndex = focusedPath === null
+    ? -1
+    : rows.findIndex((row) => row.entry.path === focusedPath);
+  const activeIndex = focusedIndex >= 0 ? focusedIndex : 0;
 
   return (
     <div className="file-tree-panel">
@@ -134,29 +225,151 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
           <input
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowDown" || rows.length === 0) return;
+              event.preventDefault();
+              focusRow(rows[0].entry.path);
+            }}
             placeholder="Filter files..."
             disabled={!projectId}
           />
         </label>
       </div>
 
-      <div className="file-tree-list">
+      <div
+        className="file-tree-list"
+        role="tree"
+        aria-label="Workspace files"
+        ref={listRef}
+        onScroll={() => setMenu(null)}
+      >
         {!projectId ? (
           <div className="file-tree-empty">Select a project to browse files.</div>
         ) : rootLoading ? (
           <div className="file-tree-state">Loading...</div>
         ) : error && entries.length === 0 ? (
           <div className="file-tree-state is-error">{error}</div>
-        ) : filtered.length === 0 ? (
-          <div className="file-tree-state">{normalizedQuery ? "No files match." : "No files found."}</div>
+        ) : rows.length === 0 ? (
+          <div className="file-tree-state">{query ? "No files match." : "No files found."}</div>
         ) : (
           <>
             {error && <div className="file-tree-inline-error" role="alert">{error}</div>}
-            {renderEntries(filtered, 0)}
+            {rows.map((row, index) => {
+              const { entry, depth } = row;
+              const isExpanded = query ? true : expandedDirs.has(entry.path);
+              const loading = loadingDirs.has(entry.path);
+              return (
+                <div
+                  key={entry.path}
+                  className="file-tree-row"
+                  style={{ paddingLeft: 8 + depth * 16 }}
+                  role="treeitem"
+                  aria-level={depth + 1}
+                  aria-expanded={entry.isDir ? isExpanded : undefined}
+                  aria-selected={focusedPath === entry.path || undefined}
+                  tabIndex={index === activeIndex ? 0 : -1}
+                  data-path={entry.path}
+                  onClick={() => {
+                    setFocusedPath(entry.path);
+                    if (entry.isDir) {
+                      if (isExpanded) collapse(entry.path);
+                      else expand(entry.path);
+                    } else {
+                      onOpenFile(entry.path, entry.name);
+                    }
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setFocusedPath(entry.path);
+                    setMenu({ path: entry.path, x: event.clientX, y: event.clientY });
+                  }}
+                  onKeyDown={(event) => onKeyDown(event, index)}
+                >
+                  <span className="file-tree-main" title={entry.path}>
+                    <span className="file-tree-icon">
+                      {entry.isDir ? <FolderIcon size={14} open={isExpanded} /> : getFileIcon(entry.name, 14)}
+                    </span>
+                    <span className="file-tree-name">{entry.name}</span>
+                    {!entry.isDir && <span className="file-tree-size">{formatFileSize(entry.size)}</span>}
+                    {loading && <span className="file-tree-loading">...</span>}
+                  </span>
+                  {!entry.isDir && (
+                    <button
+                      type="button"
+                      className="file-preview-action"
+                      onClick={(event) => { event.stopPropagation(); onPreviewFile(entry.path, entry.name); }}
+                      aria-label={`Preview ${entry.name} in a floating window`}
+                      title="Open floating preview"
+                    >
+                      <Maximize2 size={12} aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </>
         )}
       </div>
+
+      {menu && <RowMenu
+        row={rows.find((candidate) => candidate.entry.path === menu.path)}
+        at={menu}
+        onClose={() => setMenu(null)}
+        onOpenFile={onOpenFile}
+        onPreviewFile={onPreviewFile}
+      />}
     </div>
+  );
+}
+
+/**
+ * The actions a row offers. All of them work on the path alone — the tree reads
+ * files, it never writes them — so the menu is the same for files and folders
+ * except for the actions that need a file.
+ */
+function RowMenu(props: {
+  row: TreeRow | undefined;
+  at: { path: string; x: number; y: number };
+  onClose: () => void;
+  onOpenFile: (path: string, name: string) => void;
+  onPreviewFile: (path: string, name: string) => void;
+}) {
+  const { row, at, onClose, onOpenFile, onPreviewFile } = props;
+  if (!row) return null;
+  const { entry } = row;
+  const anchored = at.x !== 0 || at.y !== 0;
+
+  const copyPath = async () => {
+    try {
+      await navigator.clipboard.writeText(entry.path);
+    } catch { /* clipboard unavailable: the menu still closes */ }
+    onClose();
+  };
+
+  return (
+    <>
+      <div className="file-tree-menu-backdrop" onPointerDown={onClose} aria-hidden="true" />
+      <div
+        className="file-tree-menu"
+        role="menu"
+        aria-label={`Actions for ${entry.name}`}
+        style={anchored ? { left: at.x, top: at.y } : undefined}
+      >
+        {!entry.isDir && (
+          <>
+            <button type="button" role="menuitem" onClick={() => { onOpenFile(entry.path, entry.name); onClose(); }}>
+              Open
+            </button>
+            <button type="button" role="menuitem" onClick={() => { onPreviewFile(entry.path, entry.name); onClose(); }}>
+              Open in floating window
+            </button>
+          </>
+        )}
+        <button type="button" role="menuitem" onClick={() => void copyPath()}>
+          <Copy size={12} aria-hidden="true" /> Copy path
+        </button>
+      </div>
+    </>
   );
 }
 

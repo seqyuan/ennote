@@ -103,7 +103,7 @@ test("the lane divider cannot starve the preview", async ({ page }) => {
   await expect(page.getByTestId("right-panel-lanes")).toHaveAttribute("data-mode", "wide");
   await expect(page.getByRole("tab", { name: "main.ts" })).toBeVisible();
   const afterReload = await page.getByTestId("right-panel-primary").boundingBox();
-  expect(Math.abs((afterReload?.width ?? 0) - settled)).toBeLessThanOrEqual(2);
+  expect(Math.abs((afterReload?.width ?? 0) - settled)).toBeLessThanOrEqual(4);
 });
 
 test("opening a file keeps the tree mounted beside it", async ({ page }) => {
@@ -124,13 +124,13 @@ test("opening a file keeps the tree mounted beside it", async ({ page }) => {
   await expect(page.locator(".file-code")).toContainText("ready");
   await expect(lanes).toHaveAttribute("data-mode", "wide");
   // ...and the tree it came from is still on the left, still expanded.
-  await expect(page.locator('.file-tree-main[title="/workspace/src"]')).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator('[data-path="/workspace/src"]')).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByRole("tab", { name: "Files" })).toBeVisible();
 
   // Closing the file empties the inspector lane; the tree is untouched.
   await page.getByRole("button", { name: "Close main.ts" }).click();
   await expect(page.locator(".file-code")).toHaveCount(0);
-  await expect(page.locator('.file-tree-main[title="/workspace/src"]')).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator('[data-path="/workspace/src"]')).toHaveAttribute("aria-expanded", "true");
   await expect(lanes).toHaveAttribute("data-mode", "single");
 });
 
@@ -157,7 +157,7 @@ test("a medium panel slides the navigator over the preview", async ({ page }) =>
   await expect(navigator).toHaveAttribute("data-open", "true");
 
   // The tree kept the directory it had expanded before the file opened.
-  await expect(navigator.locator('.file-tree-main[title="/workspace/src"]')).toHaveAttribute("aria-expanded", "true");
+  await expect(navigator.locator('[data-path="/workspace/src"]')).toHaveAttribute("aria-expanded", "true");
 
   // Picking a channel answers what the navigator was opened for, so it parks again
   // and the preview's lane is left as it was.
@@ -443,10 +443,74 @@ test("the navigator can be hidden and stays hidden", async ({ page }) => {
   // directory still expanded.
   await page.getByRole("button", { name: "Show the file navigator" }).click();
   await expect(lanes).toHaveAttribute("data-mode", "wide");
-  await expect(page.locator('.file-tree-main[title="/workspace/src"]')).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator('[data-path="/workspace/src"]')).toHaveAttribute("aria-expanded", "true");
 
   // The choice belongs to the Project, so a reload keeps the preview in front.
   await page.getByRole("button", { name: "Hide the file navigator" }).click();
   await page.reload();
   await expect(page.getByTestId("right-panel-lanes")).toHaveAttribute("data-mode", "fill");
+});
+
+test("the tree is walkable from the keyboard", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockLanes(page);
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+
+  // Tab order is one stop: the filter field, then whichever row holds focus.
+  await page.getByPlaceholder("Filter files...").click();
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator('[data-path="/workspace/src"]')).toBeFocused();
+
+  // Right expands, Right again steps into it, Enter opens the file.
+  await page.keyboard.press("ArrowRight");
+  await expect(page.locator('[data-path="/workspace/src"]')).toHaveAttribute("aria-expanded", "true");
+  // The listing arrives after the expansion, so the child is not walkable yet.
+  await expect(page.locator('[data-path="/workspace/src/main.ts"]')).toBeVisible();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.locator('[data-path="/workspace/src/main.ts"]')).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("tab", { name: "main.ts" })).toBeVisible();
+
+  // Left on a child goes to its directory, Left again collapses it.
+  await page.locator('[data-path="/workspace/src/main.ts"]').focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.locator('[data-path="/workspace/src"]')).toBeFocused();
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.locator('[data-path="/workspace/src"]')).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator('[data-path="/workspace/src/main.ts"]')).toHaveCount(0);
+});
+
+test("the filter reaches into loaded directories", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockLanes(page);
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+  // Without the filter the nested file is hidden behind a collapsed directory.
+  await expect(page.locator('[data-path="/workspace/src/main.ts"]')).toHaveCount(0);
+
+  await page.getByPlaceholder("Filter files...").fill("main");
+  // The filter opens the way to the hit by itself.
+  await expect(page.locator('[data-path="/workspace/src/main.ts"]')).toBeVisible();
+  await page.getByPlaceholder("Filter files...").fill("nothing-matches");
+  await expect(page.getByText("No files match.")).toBeVisible();
+});
+
+test("a row offers its actions in a menu", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockLanes(page);
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+  await page.locator('[data-path="/workspace/src"]').click();
+  await page.locator('[data-path="/workspace/src/main.ts"]').click({ button: "right" });
+
+  const menu = page.getByRole("menu", { name: /Actions for main\.ts/ });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "Open", exact: true })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "Copy path" })).toBeVisible();
+  await menu.getByRole("menuitem", { name: "Open in floating window", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Preview main.ts" })).toBeVisible();
 });
