@@ -12,6 +12,12 @@ interface Props {
   onPreviewFile: (filePath: string, fileName: string) => void;
 }
 
+/** How long a filter waits before it starts listing directories. */
+const FILTER_DEBOUNCE_MS = 250;
+
+/** How many directories one filter pass may start listing. */
+const MAX_FILTER_LOADS = 12;
+
 /** One drawn row: what it is, how deep it sits, and what it hangs under. */
 interface TreeRow {
   entry: WorkspaceFileEntry;
@@ -69,7 +75,8 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
   }, [projectId]);
 
   const loadDir = useCallback(async (dirPath: string) => {
-    if (!projectId || dirContents.has(dirPath)) return;
+    // In flight already: one listing per directory, whoever asked first.
+    if (!projectId || dirContents.has(dirPath) || nestedControllers.current.has(dirPath)) return;
     const controller = new AbortController();
     nestedControllers.current.set(dirPath, controller);
     setLoadingDirs((previous) => new Set(previous).add(dirPath));
@@ -78,9 +85,21 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
       setDirContents((previous) => new Map(previous).set(dirPath, children));
       setError(null);
     } catch (reason) {
-      if (!controller.signal.aborted) setError((reason as Error).message);
+      if (!controller.signal.aborted) {
+        setError((reason as Error).message);
+        // A directory that could not be listed must not stay drawn open and
+        // empty: collapse it so the row still says what it is.
+        setExpandedDirs((previous) => {
+          if (!previous.has(dirPath)) return previous;
+          const next = new Set(previous);
+          next.delete(dirPath);
+          return next;
+        });
+      }
     } finally {
-      nestedControllers.current.delete(dirPath);
+      if (nestedControllers.current.get(dirPath) === controller) {
+        nestedControllers.current.delete(dirPath);
+      }
       setLoadingDirs((previous) => {
         const next = new Set(previous);
         next.delete(dirPath);
@@ -110,12 +129,16 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
 
     // While filtering, a directory is drawn open if anything under it (at any
     // loaded depth) matches, so the hit is reachable without expanding by hand.
+    // Answers are cached: the walk asks about the same subtree once per ancestor.
+    const answers = new Map<string, boolean>();
     const matches = (entry: WorkspaceFileEntry): boolean => {
       if (!query) return true;
-      if (entry.name.toLowerCase().includes(query)) return true;
-      if (!entry.isDir) return false;
-      const children = dirContents.get(entry.path) ?? [];
-      return children.some(matches);
+      const cached = answers.get(entry.path);
+      if (cached !== undefined) return cached;
+      const verdict = entry.name.toLowerCase().includes(query)
+        || (entry.isDir && (dirContents.get(entry.path) ?? []).some(matches));
+      answers.set(entry.path, verdict);
+      return verdict;
     };
 
     const walk = (items: WorkspaceFileEntry[], depth: number, parentPath: string | null) => {
@@ -147,10 +170,17 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
       for (const children of dirContents.values()) {
         for (const entry of children) if (entry.isDir) known.add(entry.path);
       }
+      // Bounded: a filter is typed a character at a time, and each listing costs
+      // a directory walk on the Worker. Whatever does not fit trickles in on the
+      // next pass, which the growing `dirContents` schedules by itself.
+      let started = 0;
       for (const path of known) {
-        if (!dirContents.has(path)) void loadDir(path);
+        if (started >= MAX_FILTER_LOADS) break;
+        if (dirContents.has(path) || nestedControllers.current.has(path)) continue;
+        void loadDir(path);
+        started += 1;
       }
-    }, 0);
+    }, FILTER_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [query, entries, dirContents, loadDir]);
 
@@ -168,6 +198,8 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
   }, [rows, focusRow]);
 
   const onKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>, index: number) => {
+    // The preview button inside the row is its own control: its keys stay its own.
+    if (event.target !== event.currentTarget) return;
     const row = rows[index];
     if (!row) return;
     switch (event.key) {
@@ -178,8 +210,10 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
       case "ArrowRight":
         event.preventDefault();
         if (!row.entry.isDir) break;
-        if (!expandedDirs.has(row.entry.path)) expand(row.entry.path);
-        else moveFocus(index, 1);
+        if (!expandedDirs.has(row.entry.path)) { expand(row.entry.path); break; }
+        // Expanded but still listing: stepping in now would skip the subtree.
+        if (!dirContents.has(row.entry.path)) break;
+        moveFocus(index, 1);
         break;
       case "ArrowLeft": {
         event.preventDefault();
@@ -192,6 +226,7 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
       case " ":
         event.preventDefault();
         if (row.entry.isDir) {
+          if (query) break;
           if (expandedDirs.has(row.entry.path)) collapse(row.entry.path);
           else expand(row.entry.path);
         } else {
@@ -200,16 +235,17 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
         break;
       case "ContextMenu":
         event.preventDefault();
-        setMenu({ path: row.entry.path, x: 0, y: 0 });
+        setMenu({ path: row.entry.path, ...anchorOf(event.currentTarget) });
         break;
       default:
         break;
     }
-  }, [rows, expandedDirs, collapse, expand, moveFocus, focusRow, onOpenFile]);
+  }, [rows, expandedDirs, dirContents, query, collapse, expand, moveFocus, focusRow, onOpenFile]);
 
   const focusedIndex = focusedPath === null
     ? -1
     : rows.findIndex((row) => row.entry.path === focusedPath);
+  const staleFocus = focusedPath !== null && focusedIndex === -1;
   const activeIndex = focusedIndex >= 0 ? focusedIndex : 0;
 
   return (
@@ -242,6 +278,10 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
         aria-label="Workspace files"
         ref={listRef}
         onScroll={() => setMenu(null)}
+        // An empty tree still has to be reachable: with no rows there is nothing
+        // to hold the focus otherwise.
+        tabIndex={rows.length === 0 ? 0 : undefined}
+        onFocus={() => { if (staleFocus) setFocusedPath(null); }}
       >
         {!projectId ? (
           <div className="file-tree-empty">Select a project to browse files.</div>
@@ -272,6 +312,9 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
                   onClick={() => {
                     setFocusedPath(entry.path);
                     if (entry.isDir) {
+                      // While filtering the walk decides what is open, so a
+                      // toggle here would change nothing the reader can see.
+                      if (query) return;
                       if (isExpanded) collapse(entry.path);
                       else expand(entry.path);
                     } else {
@@ -300,6 +343,7 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
                       onClick={(event) => { event.stopPropagation(); onPreviewFile(entry.path, entry.name); }}
                       aria-label={`Preview ${entry.name} in a floating window`}
                       title="Open floating preview"
+                      onKeyDown={(event) => event.stopPropagation()}
                     >
                       <Maximize2 size={12} aria-hidden="true" />
                     </button>
@@ -335,9 +379,18 @@ function RowMenu(props: {
   onPreviewFile: (path: string, name: string) => void;
 }) {
   const { row, at, onClose, onOpenFile, onPreviewFile } = props;
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!row) return;
+    const frame = window.requestAnimationFrame(() => {
+      menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [row]);
+
   if (!row) return null;
   const { entry } = row;
-  const anchored = at.x !== 0 || at.y !== 0;
 
   const copyPath = async () => {
     try {
@@ -350,10 +403,20 @@ function RowMenu(props: {
     <>
       <div className="file-tree-menu-backdrop" onPointerDown={onClose} aria-hidden="true" />
       <div
+        ref={menuRef}
         className="file-tree-menu"
         role="menu"
         aria-label={`Actions for ${entry.name}`}
-        style={anchored ? { left: at.x, top: at.y } : undefined}
+        style={{ left: at.x, top: at.y }}
+        onKeyDown={(event) => {
+          const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []);
+          const current = items.indexOf(document.activeElement as HTMLButtonElement);
+          if (event.key === "Escape") { event.preventDefault(); onClose(); return; }
+          if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+          event.preventDefault();
+          const delta = event.key === "ArrowDown" ? 1 : -1;
+          items[(current + delta + items.length) % items.length]?.focus();
+        }}
       >
         {!entry.isDir && (
           <>
@@ -371,6 +434,12 @@ function RowMenu(props: {
       </div>
     </>
   );
+}
+
+/** Where to hang a menu that was opened from the keyboard: the row's own corner. */
+function anchorOf(element: Element): { x: number; y: number } {
+  const box = element.getBoundingClientRect();
+  return { x: box.left + 12, y: box.bottom };
 }
 
 function formatFileSize(bytes: number): string {

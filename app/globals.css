@@ -1329,7 +1329,7 @@ button:disabled { cursor: default; }
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-panel);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-menu);
 }
 
 .file-tree-menu button {
