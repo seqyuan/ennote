@@ -111,7 +111,11 @@ jobs:
             if curl -sf http://127.0.0.1:45131/api/health > /dev/null; then break; fi
             sleep 1
           done
-          npx playwright test
+          # Declared rather than implied: the live-worker specs write rows into
+          # whichever Worker they reach, so they only run when the target is
+          # explicitly named. The default port is the one an operator's own instance
+          # lives on, and a scratch gate is what this job starts.
+          PLAYWRIGHT_BASE_URL=http://127.0.0.1:45131 npx playwright test
           STATUS=$?
           kill $GATE_PID 2>/dev/null || true
           exit $STATUS

@@ -108,10 +108,12 @@ async function openSession(page: Page, sessionId: string, projectName: string) {
 }
 
 test("a published widget runs inside the Worker's own envelope", async ({ page, request }) => {
-  // This one writes provider/model/project rows into the Worker it runs against, so
-  // it refuses to run against an instance nobody chose. `playwright.config.ts` falls
-  // back to the published default port, where an operator's real instance lives.
-  test.skip(!process.env.PLAYWRIGHT_BASE_URL, "set PLAYWRIGHT_BASE_URL=http://127.0.0.1:45331 (a scratch gate)");
+  // This one writes rows into the Worker it runs against, so it refuses to run
+  // against an instance nobody named. `playwright.config.ts` falls back to the
+  // published default port, where an operator's own instance lives; CI names its
+  // throwaway gate explicitly, so the real-envelope test does run there.
+  test.skip(!process.env.PLAYWRIGHT_BASE_URL,
+    "set PLAYWRIGHT_BASE_URL=http://127.0.0.1:45331 (a scratch gate)");
   // A live run: provider handshake, one tool round, three frames booting.
   test.setTimeout(180_000);
   const llm = await startFakeOpenAI();
