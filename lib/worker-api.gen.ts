@@ -784,7 +784,13 @@ export interface paths {
         get: operations["listProjectFiles"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete one file or directory inside the project workspace
+         * @description A directory is only deleted when it is empty, unless `recursive` is set,
+         *     and the workspace root itself is never a target. Deletion is permanent:
+         *     there is no trash.
+         */
+        delete: operations["deleteProjectFileEntry"];
         options?: never;
         head?: never;
         patch?: never;
@@ -802,6 +808,56 @@ export interface paths {
         get: operations["readProjectFile"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/files/create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create one file or directory inside the project workspace
+         * @description Writes only inside the project's `/workspace` mount. The parent directory
+         *     must already exist, and an existing target is a conflict rather than an
+         *     overwrite: overwriting a file the reader cannot see is not something a
+         *     create call should be able to do. A file may be created with initial
+         *     content, bounded by the same preview limit as reading one.
+         */
+        post: operations["createProjectFileEntry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectID}/files/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rename or move one entry inside the project workspace
+         * @description A move is a rename with a path: it never copies across mounts, never
+         *     overwrites an existing target, and refuses to place a directory inside
+         *     itself. Both ends must resolve inside `/workspace`.
+         */
+        post: operations["moveProjectFileEntry"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2769,6 +2825,20 @@ export interface components {
             crumbs: components["schemas"]["HostDirectoryEntry"][];
             entries: components["schemas"]["HostDirectoryEntry"][];
             truncated: boolean;
+        };
+        WorkspaceFileCreateRequest: {
+            /** @description Path of the entry to create, inside /workspace */
+            path: string;
+            /** @enum {string} */
+            kind: "file" | "directory";
+            /** @description Initial content for a file; ignored for a directory */
+            content?: string;
+        };
+        WorkspaceFileMoveRequest: {
+            /** @description Existing path to move */
+            from: string;
+            /** @description Destination path; must not exist */
+            to: string;
         };
         WorkspaceFileEntry: {
             name: string;
@@ -5984,6 +6054,35 @@ export interface operations {
             404: components["responses"]["Error"];
         };
     };
+    deleteProjectFileEntry: {
+        parameters: {
+            query: {
+                /** @description Project-relative virtual path rooted at /workspace */
+                path: string;
+                /** @description Delete a directory and everything under it */
+                recursive?: boolean;
+            };
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The entry was deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
     readProjectFile: {
         parameters: {
             query: {
@@ -6021,6 +6120,71 @@ export interface operations {
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];
             413: components["responses"]["Error"];
+        };
+    };
+    createProjectFileEntry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceFileCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The entry that was created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["WorkspaceFileEntry"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+        };
+    };
+    moveProjectFileEntry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceFileMoveRequest"];
+            };
+        };
+        responses: {
+            /** @description The entry at its new path */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["WorkspaceFileEntry"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     listMCPServerProfiles: {

@@ -1182,6 +1182,30 @@ paths:
                         items: { $ref: "#/components/schemas/WorkspaceFileEntry" }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteProjectFileEntry
+      summary: Delete one file or directory inside the project workspace
+      description: |
+        A directory is only deleted when it is empty, unless `recursive` is set,
+        and the workspace root itself is never a target. Deletion is permanent:
+        there is no trash.
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Project-relative virtual path rooted at /workspace
+          schema: { type: string, minLength: 1 }
+        - name: recursive
+          in: query
+          description: Delete a directory and everything under it
+          schema: { type: boolean, default: false }
+      responses:
+        "204":
+          description: The entry was deleted
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /v1/projects/{projectID}/files/content:
     parameters:
       - $ref: "#/components/parameters/ProjectID"
@@ -1212,6 +1236,71 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "413": { $ref: "#/components/responses/Error" }
+  /v1/projects/{projectID}/files/create:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    post:
+      operationId: createProjectFileEntry
+      summary: Create one file or directory inside the project workspace
+      description: |
+        Writes only inside the project's `/workspace` mount. The parent directory
+        must already exist, and an existing target is a conflict rather than an
+        overwrite: overwriting a file the reader cannot see is not something a
+        create call should be able to do. A file may be created with initial
+        content, bounded by the same preview limit as reading one.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WorkspaceFileCreateRequest" }
+      responses:
+        "201":
+          description: The entry that was created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/WorkspaceFileEntry" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+
+  /v1/projects/{projectID}/files/move:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    post:
+      operationId: moveProjectFileEntry
+      summary: Rename or move one entry inside the project workspace
+      description: |
+        A move is a rename with a path: it never copies across mounts, never
+        overwrites an existing target, and refuses to place a directory inside
+        itself. Both ends must resolve inside `/workspace`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WorkspaceFileMoveRequest" }
+      responses:
+        "200":
+          description: The entry at its new path
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/WorkspaceFileEntry" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
   /v1/mcp/server-profiles:
     get:
       operationId: listMCPServerProfiles
@@ -4142,6 +4231,32 @@ components:
           type: array
           items: { $ref: "#/components/schemas/HostDirectoryEntry" }
         truncated: { type: boolean }
+    WorkspaceFileCreateRequest:
+      type: object
+      required: [path, kind]
+      additionalProperties: false
+      properties:
+        path:
+          type: string
+          pattern: ^/workspace(?:/|$)
+          description: Path of the entry to create, inside /workspace
+        kind: { type: string, enum: [file, directory] }
+        content:
+          type: string
+          description: Initial content for a file; ignored for a directory
+    WorkspaceFileMoveRequest:
+      type: object
+      required: [from, to]
+      additionalProperties: false
+      properties:
+        from:
+          type: string
+          pattern: ^/workspace(?:/|$)
+          description: Existing path to move
+        to:
+          type: string
+          pattern: ^/workspace(?:/|$)
+          description: Destination path; must not exist
     WorkspaceFileEntry:
       type: object
       required: [name, path, isDir, size, modifiedAt]

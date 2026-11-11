@@ -4,7 +4,7 @@
 # ErrorCode constants, and literal envelope codes. Do not edit by hand: run
 # `npm run generate:error-codes` and commit the diff, which makes a vocabulary
 # change visible in review instead of at runtime.
-# 252 codes.
+# 261 codes.
 active_runs_unavailable
 approval_checkpoint_invalid
 approval_conflict
@@ -60,6 +60,7 @@ delegation_retry_budget_approval_required
 delegation_retry_ineligible
 delegation_retry_snapshot_mismatch
 delegation_unavailable
+directory_not_empty
 event_persistence_failed
 expanded_prompt_empty
 expanded_prompt_too_large
@@ -113,6 +114,7 @@ invalid_answer
 invalid_approval_decision
 invalid_body
 invalid_decision
+invalid_entry_kind
 invalid_file_path
 invalid_filter
 invalid_host_directory
@@ -127,11 +129,13 @@ invalid_mcp_version
 invalid_message_cursor
 invalid_message_limit
 invalid_model_profile
+invalid_move_target
 invalid_page
 invalid_policy_profile
 invalid_project
 invalid_provider_profile
 invalid_request
+invalid_request_body
 invalid_scope
 invalid_session
 invalid_session_search
@@ -166,6 +170,7 @@ not_a_directory
 not_a_regular_file
 pack_install_unavailable
 package_required
+parent_not_found
 payload_too_large
 policy_profile_not_found
 project_invalid
@@ -254,6 +259,10 @@ vision_fallback_failed
 vision_unsupported
 workspace_not_found
 workspace_path_escape
+workspace_path_exists
 workspace_path_not_found
+workspace_permission_denied
+workspace_read_only
+workspace_root_immutable
 workspace_trust_unavailable
 workspace_unavailable

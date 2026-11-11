@@ -1299,6 +1299,38 @@ button:disabled { cursor: default; }
 .file-tree-icon { display: flex; flex: 0 0 auto; }
 .file-tree-name { flex: 1; min-width: 0; overflow: hidden; color: var(--text-muted); font: var(--text-xs) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .file-tree-size, .file-tree-loading { flex: 0 0 auto; color: var(--text-dim); font: var(--text-xs) var(--font-mono); }
+.file-tree-actions { display: flex; flex: 0 0 auto; gap: 2px; margin-left: auto; }
+
+.file-tree-action {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.file-tree-action:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.file-tree-action:disabled { cursor: default; color: var(--text-dim); opacity: 0.5; }
+
+.file-tree-row-editing { background: var(--bg-selected); }
+
+.file-tree-editor {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-xs);
+  background: var(--bg-panel);
+  color: var(--text);
+  font: var(--text-xs) var(--font-mono);
+}
+
 .file-tree-error-mark {
   flex: 0 0 auto;
   width: 14px;

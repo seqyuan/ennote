@@ -1,8 +1,9 @@
 "use client";
 
-import { Copy, Maximize2, Search } from "lucide-react";
+import { FilePlus, FolderPlus, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FolderIcon, getFileIcon } from "./FileIcons";
+import { FileTreeEditor, FileTreeMenu, FileTreeRow, rowAnchor } from "./FileTreeView";
+import { useProjectTreeWrites } from "@/hooks/useProjectTreeWrites";
 import { listProjectFiles, type WorkspaceFileEntry } from "@/lib/project-files";
 
 interface Props {
@@ -204,6 +205,34 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
     return () => window.clearTimeout(timer);
   }, [query, entries, dirContents, dirErrors, loadDir]);
 
+  /** Re-read one directory the panel already has open (or the root). */
+  const refreshDir = useCallback(async (dirPath: string) => {
+    if (!projectId) return;
+    try {
+      const children = await listProjectFiles(projectId, dirPath);
+      if (dirPath === "/workspace") {
+        setEntries(children ?? []);
+      } else {
+        setDirContents((previous) => new Map(previous).set(dirPath, children ?? []));
+      }
+      setError(null);
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }, [projectId]);
+
+  const writes = useProjectTreeWrites({
+    projectId,
+    rows,
+    focusedPath,
+    menuPath: menu?.path ?? null,
+    expand,
+    focusRow: (path) => focusRow(path),
+    refreshDir,
+    setError,
+  });
+  const { pending, setPending, beginCreate, beginRename, createDepth, submitCreate, submitRename, requestDelete } = writes;
+
   const focusRow = useCallback((path: string) => {
     setFocusedPath(path);
     const list = listRef.current;
@@ -257,7 +286,7 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
         break;
       case "ContextMenu":
         event.preventDefault();
-        setMenu({ path: row.entry.path, ...anchorOf(event.currentTarget) });
+        setMenu({ path: row.entry.path, ...rowAnchor(event.currentTarget) });
         break;
       default:
         break;
@@ -289,6 +318,28 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
         <div className="file-tree-path" title={displayPath ?? "/workspace"}>
           {projectId ? displayPath ?? "/workspace" : "No project selected"}
         </div>
+        <div className="file-tree-actions">
+          <button
+            type="button"
+            className="file-tree-action"
+            aria-label="New file"
+            title="New file"
+            disabled={!projectId}
+            onClick={() => beginCreate("file")}
+          >
+            <FilePlus size={13} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="file-tree-action"
+            aria-label="New folder"
+            title="New folder"
+            disabled={!projectId}
+            onClick={() => beginCreate("directory")}
+          >
+            <FolderPlus size={13} aria-hidden="true" />
+          </button>
+        </div>
         <label className="file-filter">
           <Search size={12} aria-hidden="true" />
           <span className="sr-only">Filter files</span>
@@ -319,181 +370,97 @@ export function FileTreePanel({ projectId, displayPath, onOpenFile, onPreviewFil
           <>
             {error && <p className="file-tree-inline-error" role="alert">{error}</p>}
             <div role="tree" aria-label="Workspace files">
-            {rows.map((row, index) => {
-              const { entry, depth } = row;
-              // A directory is only drawn as expanded if it really shows children:
-              // while filtering, claiming otherwise would announce a subtree that
-              // is not there.
-              const isExpanded = query
-                ? (dirContents.get(entry.path)?.length ?? 0) > 0
-                : expandedDirs.has(entry.path);
-              const loading = loadingDirs.has(entry.path);
-              return (
-                <div
-                  key={entry.path}
-                  className="file-tree-row"
-                  style={{ paddingLeft: 8 + depth * 16 }}
-                  role="treeitem"
-                  aria-level={depth + 1}
-                  aria-expanded={entry.isDir ? isExpanded : undefined}
-                  aria-selected={focusedPath === entry.path || undefined}
-                  tabIndex={index === activeIndex ? 0 : -1}
-                  data-path={entry.path}
-                  onClick={() => {
-                    setFocusedPath(entry.path);
-                    if (entry.isDir) {
-                      // While filtering the walk decides what is open, so a
-                      // toggle here would change nothing the reader can see.
-                      if (query) return;
-                      if (isExpanded) collapse(entry.path);
-                      else expand(entry.path);
-                    } else {
-                      onOpenFile(entry.path, entry.name);
-                    }
-                  }}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    focusRow(entry.path);
-                    setMenu({ path: entry.path, x: event.clientX, y: event.clientY });
-                  }}
-                  onKeyDown={(event) => onKeyDown(event, index)}
-                >
-                  <span className="file-tree-main" title={entry.path}>
-                    <span className="file-tree-icon">
-                      {entry.isDir ? <FolderIcon size={14} open={isExpanded} /> : getFileIcon(entry.name, 14)}
-                    </span>
-                    <span className="file-tree-name">{entry.name}</span>
-                    {!entry.isDir && <span className="file-tree-size">{formatFileSize(entry.size)}</span>}
-                    {loading && <span className="file-tree-loading">...</span>}
-                    {dirErrors.has(entry.path) && (
-                      <span
-                        className="file-tree-error-mark"
-                        title={dirErrors.get(entry.path)}
-                        aria-label={`Could not list ${entry.name}: ${dirErrors.get(entry.path)}`}
-                      >!</span>
-                    )}
-                  </span>
-                  {!entry.isDir && (
-                    <button
-                      type="button"
-                      className="file-preview-action"
-                      onClick={(event) => { event.stopPropagation(); onPreviewFile(entry.path, entry.name); }}
-                      aria-label={`Preview ${entry.name} in a floating window`}
-                      title="Open floating preview"
-                      onKeyDown={(event) => {
-                        // Enter/Space belong to the button; the arrows still walk
-                        // the tree, so the keyboard is never stuck inside a row.
-                        if (event.key === "Enter" || event.key === " ") event.stopPropagation();
-                      }}
-                    >
-                      <Maximize2 size={12} aria-hidden="true" />
-                    </button>
-                  )}
-                </div>
-              );
-            })}
+              {rows.map((row, index) => {
+                const { entry, depth } = row;
+                // A directory is only drawn as expanded if it really shows children:
+                // while filtering, claiming otherwise would announce a subtree that
+                // is not there.
+                const isExpanded = query
+                  ? (dirContents.get(entry.path)?.length ?? 0) > 0
+                  : expandedDirs.has(entry.path);
+                if (pending && pending.kind === "rename" && pending.path === entry.path) {
+                  return (
+                    <FileTreeEditor
+                      key="editor"
+                      depth={depth}
+                      label={`Rename ${entry.name}`}
+                      initialValue={entry.name}
+                      onCommit={(value) => void submitRename(entry, value)}
+                      onCancel={() => setPending(null)}
+                    />
+                  );
+                }
+                return (
+                  <FileTreeRow
+                    key={entry.path}
+                    entry={entry}
+                    depth={depth}
+                    expanded={isExpanded}
+                    loading={loadingDirs.has(entry.path)}
+                    errorText={dirErrors.get(entry.path)}
+                    tabbable={index === activeIndex}
+                    selected={focusedPath === entry.path}
+                    onClick={() => {
+                      setFocusedPath(entry.path);
+                      if (entry.isDir) {
+                        // While filtering the walk decides what is open, so a
+                        // toggle here would change nothing the reader can see.
+                        if (query) return;
+                        if (isExpanded) collapse(entry.path);
+                        else expand(entry.path);
+                      } else {
+                        onOpenFile(entry.path, entry.name);
+                      }
+                    }}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      focusRow(entry.path);
+                      setMenu({ path: entry.path, x: event.clientX, y: event.clientY });
+                    }}
+                    onKeyDown={(event) => onKeyDown(event, index)}
+                    onPreview={() => onPreviewFile(entry.path, entry.name)}
+                  />
+                );
+              })}
+              {pending && pending.kind === "create" && (
+                <FileTreeEditor
+                  key="creator"
+                  depth={createDepth()}
+                  label={pending.entryKind === "directory" ? "New folder name" : "New file name"}
+                  initialValue=""
+                  onCommit={(value) => void submitCreate(value)}
+                  onCancel={() => setPending(null)}
+                />
+              )}
             </div>
           </>
         )}
       </div>
 
-      {menu && <RowMenu
-        row={rows.find((candidate) => candidate.entry.path === menu.path)}
-        at={menu}
-        onClose={() => {
-          const path = menu.path;
-          setMenu(null);
-          focusRow(path);
-        }}
-        onOpenFile={onOpenFile}
-        onPreviewFile={onPreviewFile}
-      />}
+      {menu && (
+        <FileTreeMenu
+          entry={rows.find((candidate) => candidate.entry.path === menu.path)?.entry}
+          at={menu}
+          onClose={() => {
+            const path = menu.path;
+            setMenu(null);
+            focusRow(path);
+          }}
+          onOpen={() => {
+            const target = rows.find((candidate) => candidate.entry.path === menu.path)?.entry;
+            if (target && !target.isDir) onOpenFile(target.path, target.name);
+          }}
+          onPreview={() => {
+            const target = rows.find((candidate) => candidate.entry.path === menu.path)?.entry;
+            if (target && !target.isDir) onPreviewFile(target.path, target.name);
+          }}
+          onNewFile={() => beginCreate("file")}
+          onNewFolder={() => beginCreate("directory")}
+          onRename={() => beginRename()}
+          onDelete={() => void requestDelete()}
+          onError={(message) => setError(message)}
+        />
+      )}
     </div>
   );
-}
-
-/**
- * The actions a row offers. All of them work on the path alone — the tree reads
- * files, it never writes them — so the menu is the same for files and folders
- * except for the actions that need a file.
- */
-function RowMenu(props: {
-  row: TreeRow | undefined;
-  at: { path: string; x: number; y: number };
-  onClose: () => void;
-  onOpenFile: (path: string, name: string) => void;
-  onPreviewFile: (path: string, name: string) => void;
-}) {
-  const { row, at, onClose, onOpenFile, onPreviewFile } = props;
-  const menuRef = useRef<HTMLDivElement>(null);
-  const path = row?.entry.path ?? null;
-
-  // Keyed by path, not by the row object: every listing that lands recomputes
-  // `rows`, and a focus effect on the object would keep yanking the reader back
-  // to the first item while they are choosing.
-  useEffect(() => {
-    if (path === null) return;
-    const frame = window.requestAnimationFrame(() => {
-      menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [path]);
-
-  if (!row) return null;
-  const { entry } = row;
-
-  const copyPath = async () => {
-    try {
-      await navigator.clipboard.writeText(entry.path);
-    } catch { /* clipboard unavailable: the menu still closes */ }
-    onClose();
-  };
-
-  return (
-    <>
-      <div className="file-tree-menu-backdrop" onPointerDown={onClose} aria-hidden="true" />
-      <div
-        ref={menuRef}
-        className="file-tree-menu"
-        role="menu"
-        aria-label={`Actions for ${entry.name}`}
-        style={{ left: at.x, top: at.y }}
-        onKeyDown={(event) => {
-          const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []);
-          const current = items.indexOf(document.activeElement as HTMLButtonElement);
-          if (event.key === "Escape") { event.preventDefault(); onClose(); return; }
-          if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-          event.preventDefault();
-          const delta = event.key === "ArrowDown" ? 1 : -1;
-          items[(current + delta + items.length) % items.length]?.focus();
-        }}
-      >
-        {!entry.isDir && (
-          <>
-            <button type="button" role="menuitem" onClick={() => { onOpenFile(entry.path, entry.name); onClose(); }}>
-              Open
-            </button>
-            <button type="button" role="menuitem" onClick={() => { onPreviewFile(entry.path, entry.name); onClose(); }}>
-              Open in floating window
-            </button>
-          </>
-        )}
-        <button type="button" role="menuitem" onClick={() => void copyPath()}>
-          <Copy size={12} aria-hidden="true" /> Copy path
-        </button>
-      </div>
-    </>
-  );
-}
-
-/** Where to hang a menu that was opened from the keyboard: the row's own corner. */
-function anchorOf(element: Element): { x: number; y: number } {
-  const box = element.getBoundingClientRect();
-  return { x: box.left + 12, y: box.bottom };
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} K`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} M`;
 }

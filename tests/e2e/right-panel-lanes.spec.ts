@@ -522,3 +522,83 @@ test("a row offers its actions in a menu", async ({ page }) => {
   await menu.getByRole("menuitem", { name: "Open in floating window", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Preview main.ts" })).toBeVisible();
 });
+
+test("a reader can create, rename and delete from the tree", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // The write endpoints are stateful here: the mock keeps one directory listing.
+  let listing = [{ name: "notes.txt", path: "/workspace/notes.txt", isDir: false, size: 3, modifiedAt: "2026-10-01T00:00:00Z" }];
+  await page.route("**/api/worker/v1/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const path = url.pathname.replace("/api/worker", "");
+    if (await tryFulfillHarnessRoutes(route)) return;
+    if (path === "/v1/projects") return fulfill(route, [project]);
+    if (path === "/v1/provider-profiles") return fulfill(route, [provider]);
+    if (path === "/v1/model-profiles") return fulfill(route, []);
+    if (path === "/v1/policy-profiles") return fulfill(route, policies);
+    if (path === `/v1/projects/${project.id}/workspace`) return fulfill(route, workspace);
+    if (path === `/v1/projects/${project.id}/sessions`) return fulfill(route, []);
+    if (path === `/v1/projects/${project.id}/files` && request.method() === "GET") return fulfill(route, listing);
+    if (path === `/v1/projects/${project.id}/files/create`) {
+      const body = JSON.parse(request.postData() ?? "{}");
+      const name = String(body.path).split("/").filter(Boolean).pop() ?? String(body.path);
+      listing = [...listing, { name, path: body.path, isDir: body.kind === "directory", size: 0, modifiedAt: "2026-10-01T00:00:00Z" }];
+      return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ data: listing.at(-1) }) });
+    }
+    if (path === `/v1/projects/${project.id}/files/move`) {
+      const body = JSON.parse(request.postData() ?? "{}");
+      listing = listing.map((entry) => entry.path === body.from
+        ? { ...entry, name: body.to.split("/").pop(), path: body.to }
+        : entry);
+      return fulfill(route, listing.find((entry) => entry.path === body.to));
+    }
+    if (path === `/v1/projects/${project.id}/files` && request.method() === "DELETE") {
+      const target = url.searchParams.get("path");
+      listing = listing.filter((entry) => entry.path !== target);
+      return route.fulfill({ status: 204, body: "" });
+    }
+    return route.abort();
+  });
+
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+  await expect(page.locator('[data-path="/workspace/notes.txt"]')).toBeVisible();
+
+  // New file, typed in the tree.
+  await page.getByRole("button", { name: "New file" }).click();
+  await page.getByLabel("New file name").fill("analysis.py");
+  await page.getByLabel("New file name").press("Enter");
+  await expect(page.locator('[data-path="/workspace/analysis.py"]')).toBeVisible();
+
+  // Rename it from its row.
+  await page.locator('[data-path="/workspace/analysis.py"]').click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Rename" }).click();
+  await page.getByLabel("Rename analysis.py").fill("run.py");
+  await page.getByLabel("Rename analysis.py").press("Enter");
+  await expect(page.locator('[data-path="/workspace/run.py"]')).toBeVisible();
+  await expect(page.locator('[data-path="/workspace/analysis.py"]')).toHaveCount(0);
+
+  // Delete asks first, then actually removes it.
+  await page.locator('[data-path="/workspace/run.py"]').click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Delete" }).click();
+  const confirm = page.getByRole("alertdialog", { name: /Delete run\.py/ });
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole("button", { name: "Delete" }).click();
+  await expect(page.locator('[data-path="/workspace/run.py"]')).toHaveCount(0);
+  await expect(page.locator('[data-path="/workspace/notes.txt"]')).toBeVisible();
+});
+
+test("a refused create says why", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockLanes(page);
+  await page.goto("/");
+  await selectProject(page, project.name);
+  await page.getByTitle("Show panel").click();
+
+  // A name is a segment: the panel refuses a slash before the Worker has to.
+  await page.getByRole("button", { name: "New file" }).click();
+  await page.getByLabel("New file name").fill("a/b.txt");
+  await page.getByLabel("New file name").press("Enter");
+  await expect(page.getByText("A name cannot contain a slash")).toBeVisible();
+});
