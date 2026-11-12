@@ -4,6 +4,16 @@ on:
   push:
     tags:
       - "v*"
+  # Re-running this workflow by hand is how a release is finished after the CI gate
+  # or a registry step failed: pick the tag as the ref, so the tag/version/main
+  # checks below still apply. The input is the one-off half of the CI gate's escape
+  # hatch — see "Require ennote CI To Be Green".
+  workflow_dispatch:
+    inputs:
+      skip_ci_gate:
+        description: "Publish even though ennote CI is not green for this commit (recorded exception, see AGENTS.md)"
+        type: boolean
+        default: false
 
 env:
   ENNOTE_NPM_PACKAGE: "@seqyuan/ennote"
@@ -15,6 +25,10 @@ jobs:
     environment: npm-publish
     permissions:
       contents: write
+      # The CI gate below reads workflow runs for the tagged commit; without this the
+      # release can only see the tag, which is how v0.15.0 shipped while the CI run
+      # for the same commit was red.
+      actions: read
       # Keyless Sigstore attestation: the release assets are signed with the
       # workflow identity, so a downloader can verify what produced them without
       # the project holding a signing key.
@@ -25,6 +39,131 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # First step that does anything, and first step for a reason: a tag push says
+      # nothing about whether the commit is green, and v0.15.0 published npm and a
+      # GitHub Release while its CI run for the same SHA was red — the js-e2e job
+      # never ran a single test because apt could not resolve DNS. The release must
+      # not produce artifacts for a commit the project's own CI rejected.
+      - name: Require ennote CI To Be Green
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          REF_NAME: ${{ github.ref_name }}
+          # Escape hatch, and only that: an infrastructure outage that stops CI from
+          # running at all is a maintainer decision, not a red build to ignore. Set
+          # the repository variable for that decision, or tick the dispatch input for
+          # one run, and say why in the release notes. Unset means the gate applies.
+          SKIP_REASON_VARIABLE: ${{ vars.ENNOTE_SKIP_CI_GATE }}
+          SKIP_REASON_INPUT: ${{ github.event.inputs.skip_ci_gate }}
+        run: |
+          set -euo pipefail
+
+          # `workflow_dispatch` may be run on a branch. A branch named like a tag whose
+          # commit happens to carry the same version would satisfy every later check and
+          # publish a Release under that tag name, so the ref type is asserted rather
+          # than assumed — the workflow comment says "pick the tag", this makes it true.
+          if [ "${GITHUB_REF_TYPE:-}" != "tag" ]; then
+            echo "::error::release must run on a tag ref; got ref_type='${GITHUB_REF_TYPE:-unknown}' for ref '${GITHUB_REF_NAME}'. Re-run the workflow with the tag selected."
+            exit 1
+          fi
+
+          skip_reason=""
+          if [ -n "${SKIP_REASON_VARIABLE:-}" ]; then
+            skip_reason="repository variable ENNOTE_SKIP_CI_GATE=${SKIP_REASON_VARIABLE}"
+          elif [ "${SKIP_REASON_INPUT:-}" = "true" ]; then
+            skip_reason="workflow_dispatch input skip_ci_gate=true"
+          fi
+          if [ -n "$skip_reason" ]; then
+            echo "########################################################################"
+            echo "# CI GATE SKIPPED: ${skip_reason}"
+            echo "# Publishing ${REF_NAME} (${SHA}) WITHOUT a green ennote CI run."
+            echo "# This is the recorded exception for CI that cannot run at all, not the"
+            echo "# normal path (AGENTS.md, Release Pipeline)."
+            echo "########################################################################"
+            echo "::warning::CI gate skipped via ${skip_reason}; ${REF_NAME} ships without a green ennote CI run for ${SHA}."
+            exit 0
+          fi
+
+          workflow_id="$(gh api --paginate "repos/${REPO}/actions/workflows" \
+            --jq '.workflows[] | select(.name == "ennote CI") | .id')"
+          if [ -z "$workflow_id" ]; then
+            echo "::error::no workflow named 'ennote CI' is registered on ${REPO}; the gate has nothing to check and refuses to publish."
+            echo "Workflows this token can see (a deleted definition can still be listed as active; only the id above matters):"
+            gh api --paginate "repos/${REPO}/actions/workflows" --jq '.workflows[] | "  \(.id) \(.name) (\(.path))"'
+            exit 1
+          fi
+          echo "ennote CI workflow id ${workflow_id}; looking for an event=push run for ${SHA}"
+
+          polls=60
+          interval=30
+          last_observation="(nothing observed)"
+
+          # A rate limit or a 5xx is not a verdict about the commit. Three tries with a
+          # short pause, then fail closed with the API's own words: the difference
+          # between "CI is red" and "I could not ask" is the whole point of this step.
+          runs_json=""
+          fetch_runs() {
+            local try
+            for try in 1 2 3; do
+              if runs_json="$(gh api "repos/${REPO}/actions/workflows/${workflow_id}/runs?head_sha=${SHA}&per_page=100" 2>&1)"; then
+                return 0
+              fi
+              echo "  could not read runs (attempt ${try}/3): ${runs_json}"
+              sleep 10
+            done
+            return 1
+          }
+          for attempt in $(seq 1 "$polls"); do
+            if ! fetch_runs; then
+              echo "::error::could not read ennote CI runs for ${SHA} after 3 attempts, so whether it is green is unknown; refusing to publish."
+              echo "Last answer from the API: ${runs_json}"
+              echo "decided: do not publish"
+              exit 1
+            fi
+            total="$(jq '.workflow_runs | length' <<<"$runs_json")"
+            # A pull_request run carries a synthetic merge SHA and never describes this
+            # commit, so only a push run is the CI that gated it. Filtering on both
+            # fields states that instead of trusting the query parameter.
+            # `head_branch == "main"` is redundant with ci.yml's `push: branches: [main]`
+            # today; it is here so this step does not depend on another file staying
+            # that way.
+            push_runs="$(jq --arg sha "$SHA" '[.workflow_runs[] | select(.event == "push" and .head_branch == "main" and .head_sha == $sha)]' <<<"$runs_json")"
+            push_count="$(jq 'length' <<<"$push_runs")"
+            observation="$(jq -r 'if length == 0 then "  no event=push run for this SHA" else (.[] | "  id=\(.id) status=\(.status) conclusion=\(.conclusion // "null") attempt=\(.run_attempt) started=\(.run_started_at) url=\(.html_url)") end' <<<"$push_runs")"
+            last_observation="$observation"
+            echo "attempt ${attempt}/${polls}: ${total} run(s) returned for head_sha=${SHA}; ${push_count} with event=push"
+            echo "$observation"
+
+            # Any completed green push run satisfies the gate: a re-run after an
+            # infrastructure failure replaces the red conclusion, and every run that
+            # was looked at is printed above, so the decision is auditable.
+            # `first(...) // empty`, not `[...] | first`: filtered to nothing, the
+            # latter yields null and a "null null" decision would end the poll on the
+            # first attempt instead of waiting for the run to appear.
+            green_run="$(jq -r 'first(.[] | select(.status == "completed" and .conclusion == "success") | .id) // empty' <<<"$push_runs")"
+            if [ -n "$green_run" ]; then
+              echo "decided: publish — ennote CI run ${green_run} concluded success for ${SHA}"
+              exit 0
+            fi
+            red_run="$(jq -r 'first(.[] | select(.status == "completed" and .conclusion != "success") | "\(.id) \(.conclusion)") // empty' <<<"$push_runs")"
+            if [ -n "$red_run" ]; then
+              echo "::error::ennote CI run ${red_run%% *} concluded ${red_run#* } for ${SHA}; refusing to publish. Fix CI, then re-run this workflow on ${REF_NAME}."
+              exit 1
+            fi
+            if [ "$attempt" -lt "$polls" ]; then
+              echo "  no push run for ${SHA} has finished yet; checking again in ${interval}s"
+              sleep "$interval"
+            fi
+          done
+
+          # Named from what was observed, not from a guess about why it happened.
+          echo "::error::gave up after ${polls} polls ${interval}s apart ($(( (polls - 1) * interval ))s of waiting, none after the last poll): no event=push run of ennote CI for ${SHA} reached conclusion=success."
+          echo "Last observation:"
+          echo "$last_observation"
+          echo "decided: do not publish"
+          exit 1
 
       - name: Setup Go
         uses: actions/setup-go@v5
