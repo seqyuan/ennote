@@ -18,10 +18,8 @@ import {
   initialRightPanelState,
   isPanelChannel,
   openChannel,
-  fileTabId,
   openInspectorTab,
   parsePreferences,
-  pathOf,
   pinChannel,
   preferencesOf,
   reorderInspectorTabs,
@@ -31,6 +29,7 @@ import {
   setPrimaryWidth,
   unpinChannel,
 } from "@/lib/right-panel-channels";
+import { inspectorTabId, rowMatchesId } from "@/lib/inspector-tabs";
 
 /**
  * Where the right panel's tabs are and what they show.
@@ -103,7 +102,7 @@ export function useRightPanel(projectId: string | null) {
       : emptyPreferences("");
     setState(() => {
       const next = initialRightPanelState(preferences);
-      const parked = next.inspectorTabs.map((row) => fileTabId(projectId ?? "", row.path));
+      const parked = next.inspectorTabs.map((row) => inspectorTabId(projectId ?? "", row));
       // A switch inside this session wins over what was stored: the reader was
       // just there. Otherwise the stored selection is the one to return to.
       const remembered = rememberedTab.current.get(key);
@@ -114,8 +113,8 @@ export function useRightPanel(projectId: string | null) {
         // lane stays with the inspector and the first row takes the focus.
         const fallback = next.inspectorTabs[0];
         if (!fallback) return { ...next, activePanes: { main: null, side: null }, activeLane: "channel" };
-        const fallbackId = fileTabId(projectId ?? "", fallback.path);
-        const fallbackPane = fallback.pane ?? "main";
+        const fallbackId = inspectorTabId(projectId ?? "", fallback);
+        const fallbackPane = fallback.pane;
         return {
           ...next,
           activePanes: { ...next.activePanes, [fallbackPane]: fallbackId },
@@ -123,7 +122,7 @@ export function useRightPanel(projectId: string | null) {
           activeLane: "inspector",
         };
       }
-      const pane = next.inspectorTabs.find((row) => fileTabId(projectId ?? "", row.path) === restored)?.pane ?? "main";
+      const pane = next.inspectorTabs.find((row) => rowMatchesId(projectId ?? "", row, restored))?.pane ?? "main";
       return {
         ...next,
         activePanes: { ...next.activePanes, [pane]: restored },
@@ -138,13 +137,15 @@ export function useRightPanel(projectId: string | null) {
   const paneTabs = useMemo(() => {
     const rows = state.projectId === projectId ? state.inspectorTabs : [];
     const toTab = (row: PersistedInspectorTab): Tab => ({
-      id: fileTabId(projectId ?? "", row.path),
+      id: inspectorTabId(projectId ?? "", row),
       label: row.name,
-      filePath: row.path,
+      // Only a file row has a path to preview; an artifact row carries none and
+      // is drawn by its own surface rather than the file viewer.
+      filePath: row.kind === "file" ? row.path : undefined,
       projectId: projectId ?? undefined,
     });
     return {
-      main: rows.filter((row) => (row.pane ?? "main") === "main").map(toTab),
+      main: rows.filter((row) => row.pane === "main").map(toTab),
       side: rows.filter((row) => row.pane === "side").map(toTab),
     };
   }, [state.projectId, state.inspectorTabs, projectId]);
@@ -186,21 +187,27 @@ export function useRightPanel(projectId: string | null) {
 
   const openInspector = useCallback((filePath: string, fileName: string, pane: InspectorPane = "main") => {
     if (!projectId) return;
-    const id = fileTabId(projectId, filePath);
-    rememberedTab.current.set(projectId, id);
-    setState((current) => openInspectorTab(current, id, { path: filePath, name: fileName, pane }));
+    const row: PersistedInspectorTab = { kind: "file", path: filePath, name: fileName, pane };
+    rememberedTab.current.set(projectId, inspectorTabId(projectId, row));
+    setState((current) => openInspectorTab(current, row));
   }, [projectId]);
 
-  // Selecting a row only moves the selection; its remembered row is already there.
-  const rowOf = (current: RightPanelState, tabId: string) => current.inspectorTabs
-    .find((row) => fileTabId(current.projectId, row.path) === tabId)
-    ?? { path: pathOf(tabId), name: pathOf(tabId).split("/").filter(Boolean).pop() ?? tabId };
+  // Selecting a row only moves the selection; its remembered row is already
+  // there. An id that names no remembered row cannot be opened — the id comes
+  // from the strip, and the strip draws remembered rows — so there is nothing to
+  // synthesise a row from the id for: a selection nothing draws is worse than
+  // none.
+  const rowOf = (current: RightPanelState, tabId: string): PersistedInspectorTab | null => current.inspectorTabs
+    .find((row) => rowMatchesId(current.projectId, row, tabId))
+    ?? null;
 
   const setActiveTabId = useCallback((tabId: string) => {
     if (!isPanelChannel(tabId)) rememberedTab.current.set(projectId ?? "", tabId);
-    setState((current) => (isPanelChannel(tabId)
-      ? openChannel(current, tabId as PanelChannel)
-      : openInspectorTab(current, tabId, rowOf(current, tabId))));
+    setState((current) => {
+      if (isPanelChannel(tabId)) return openChannel(current, tabId as PanelChannel);
+      const row = rowOf(current, tabId);
+      return row === null ? current : openInspectorTab(current, row);
+    });
   }, [projectId]);
 
   const closeTab = useCallback((tabId: string) => {
@@ -212,7 +219,7 @@ export function useRightPanel(projectId: string | null) {
   }, [projectId]);
 
   const reorderTabs = useCallback((fromId: string, toId: string) => {
-    setState((current) => reorderInspectorTabs(current, pathOf(fromId), pathOf(toId)));
+    setState((current) => reorderInspectorTabs(current, fromId, toId));
   }, []);
 
   const toggleNavigator = useCallback(() => {

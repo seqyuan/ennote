@@ -24,6 +24,12 @@ import {
   setPrimaryWidth,
   unpinChannel,
 } from "@/lib/right-panel-channels";
+import {
+  inspectorTabId,
+  type ArtifactInspectorRow,
+  type FileInspectorRow,
+  type InspectorTabRow,
+} from "@/lib/inspector-tabs";
 
 const prefs = (over: Partial<RightPanelPreferencesV1> = {}): RightPanelPreferencesV1 => ({
   version: 1,
@@ -36,6 +42,31 @@ const prefs = (over: Partial<RightPanelPreferencesV1> = {}): RightPanelPreferenc
 
 /** The row id the panel uses for a file in the fixture project. */
 const id = (path: string) => fileTabId("p1", path);
+
+/** A file row, as the panel stores it. Named apart from the row-model suite's
+ * fixture because the two files are separate suites: a shared name for two
+ * definitions is how the wrong one gets edited.
+ */
+const fileRowIn = (path: string, pane: "main" | "side" = "main"): FileInspectorRow =>
+  ({ kind: "file", path, name: path.split("/").pop() ?? path, pane });
+
+/** An artifact row, opened into the same strip as a file. The label is a
+ * placeholder for the test only; the panel draws `row.name`.
+ */
+const artifactRowIn = (artifactId: string, sessionId = "s1", pane: "main" | "side" = "main"): ArtifactInspectorRow =>
+  ({ kind: "artifact", artifactId, sessionId, name: `widget ${artifactId}`, pane });
+
+/** The row id the panel selects for an artifact in the fixture project. */
+const artifactId = (artifact: string, sessionId = "s1") =>
+  inspectorTabId("p1", artifactRowIn(artifact, sessionId));
+
+/** The file halves of a row list; artifact rows have their own suite. */
+const fileRows = (rows: readonly InspectorTabRow[] | undefined): FileInspectorRow[] =>
+  (rows ?? []).filter((row): row is FileInspectorRow => row.kind === "file");
+
+/** The artifact halves of a row list. */
+const artifactRows = (rows: readonly InspectorTabRow[] | undefined): ArtifactInspectorRow[] =>
+  (rows ?? []).filter((row): row is ArtifactInspectorRow => row.kind === "artifact");
 
 /** A state as a fresh visit to a project with these pins produces it. */
 const state = (over: Partial<RightPanelState> = {}): RightPanelState => ({
@@ -115,16 +146,30 @@ describe("right panel channel contract", () => {
   });
 
   it("opens the shell when a file is opened from the tree or a message", () => {
-    const after = openInspectorTab(state(), "main.py", { path: "/workspace/main.py", name: "main.py" });
+    const after = openInspectorTab(state(), fileRowIn("/workspace/main.py"));
 
     expect(after.open).toBe(true);
-    expect(after.activePanes.main).toBe("main.py");
+    expect(after.activePanes.main).toBe(id("/workspace/main.py"));
     expect(after.openChannels).toEqual(["files", "graph", "tools"]);
     expect(after.pinnedChannels).toEqual([]);
   });
 
+  it("puts a row that arrived without a pane in the main pane", () => {
+    // `row` is an argument, so its pane is a runtime value: the type promises
+    // one, the caller is what may not deliver it. Resolving it here is what
+    // keeps `{ undefined: id }` out of `activePanes` — a key no pane reads, so
+    // the row would be stored and the selection silently lost.
+    const paneLess = { kind: "file", path: "/workspace/a.ts", name: "a.ts" } as unknown as FileInspectorRow;
+    const after = openInspectorTab(state(), paneLess);
+
+    expect(after.activePanes).toEqual({ main: id("/workspace/a.ts"), side: null });
+    expect(Object.keys(after.activePanes)).toEqual(["main", "side"]);
+    expect(after.inspectorTabs).toEqual([fileRowIn("/workspace/a.ts")]);
+    expect(after.focusedPane).toBe("main");
+  });
+
   it("remembers which lane the user last activated", () => {
-    const opened = openInspectorTab(state(), id("/workspace/main.py"), { path: "/workspace/main.py", name: "main.py" });
+    const opened = openInspectorTab(state(), fileRowIn("/workspace/main.py"));
     expect(opened.activeLane).toBe("inspector");
 
     // Selecting a channel keeps the tab open, it only hands the strip back.
@@ -136,7 +181,7 @@ describe("right panel channel contract", () => {
   });
 
   it("closing the selected channel does not steal the lane from an open file", () => {
-    const reading = openInspectorTab(state(), id("/workspace/main.py"), { path: "/workspace/main.py", name: "main.py" });
+    const reading = openInspectorTab(state(), fileRowIn("/workspace/main.py"));
     const closed = closeChannel(reading, "files");
 
     expect(closed.openChannels).toEqual(["graph", "tools"]);
@@ -145,7 +190,7 @@ describe("right panel channel contract", () => {
   });
 
   it("closes the last inspector tab without closing the shell", () => {
-    const opened = openInspectorTab(state(), id("/workspace/main.py"), { path: "/workspace/main.py", name: "main.py" });
+    const opened = openInspectorTab(state(), fileRowIn("/workspace/main.py"));
     const closed = closeInspectorTab(opened, id("/workspace/main.py"));
 
     expect(closed.inspectorTabs).toEqual([]);
@@ -156,23 +201,23 @@ describe("right panel channel contract", () => {
   });
 
   it("selects the remaining tab when the active inspector tab is closed", () => {
-    const first = openInspectorTab(state(), id("/workspace/a.py"), { path: "/workspace/a.py", name: "a.py" });
-    const opened = openInspectorTab(first, id("/workspace/b.py"), { path: "/workspace/b.py", name: "b.py" });
+    const first = openInspectorTab(state(), fileRowIn("/workspace/a.py"));
+    const opened = openInspectorTab(first, fileRowIn("/workspace/b.py"));
     expect(opened.activePanes.main).toBe(id("/workspace/b.py"));
 
     const withoutB = closeInspectorTab(opened, id("/workspace/b.py"));
     expect(withoutB.activePanes.main).toBe(id("/workspace/a.py"));
-    expect(withoutB.inspectorTabs.map((row) => row.path)).toEqual(["/workspace/a.py"]);
+    expect(fileRows(withoutB.inspectorTabs).map((row) => row.path)).toEqual(["/workspace/a.py"]);
 
     expect(closeInspectorTab(opened, id("/workspace/a.py")).activePanes.main).toBe(id("/workspace/b.py"));
   });
 
   it("moves a reopened row to the newest position", () => {
-    let current = openInspectorTab(state(), id("/workspace/a.py"), { path: "/workspace/a.py", name: "a.py" });
-    current = openInspectorTab(current, id("/workspace/b.py"), { path: "/workspace/b.py", name: "b.py" });
-    current = openInspectorTab(current, id("/workspace/a.py"), { path: "/workspace/a.py", name: "a.py" });
+    let current = openInspectorTab(state(), fileRowIn("/workspace/a.py"));
+    current = openInspectorTab(current, fileRowIn("/workspace/b.py"));
+    current = openInspectorTab(current, fileRowIn("/workspace/a.py"));
 
-    expect(current.inspectorTabs.map((row) => row.path)).toEqual(["/workspace/b.py", "/workspace/a.py"]);
+    expect(fileRows(current.inspectorTabs).map((row) => row.path)).toEqual(["/workspace/b.py", "/workspace/a.py"]);
   });
 
   it("falls back to the next open channel when the active one is closed", () => {
@@ -185,12 +230,10 @@ describe("right panel channel contract", () => {
 });
 
 describe("remembered inspector rows", () => {
-  const rows = (count: number) => Array.from({ length: count }, (_, index) => ({
-    path: `/workspace/f${index}.ts`, name: `f${index}.ts`, pane: "main" as const,
-  }));
+  const rows = (count: number) => Array.from({ length: count }, (_, index) => fileRowIn(`/workspace/f${index}.ts`));
 
   const withRows = (all: ReturnType<typeof rows>) => all.reduce(
-    (current, row) => openInspectorTab(current, `file:p1:${row.path}`, row),
+    (current, row) => openInspectorTab(current, row),
     state(),
   );
 
@@ -228,8 +271,8 @@ describe("remembered inspector rows", () => {
     const back = parsePreferences(raw, "p1");
 
     expect(back.inspectorTabs).toEqual([
-      { path: "/workspace/a.ts", name: "a.ts", pane: "main" },
-      { path: "/workspace/b.ts", name: "b.ts", pane: "main" }, // name filled from the path
+      { kind: "file", path: "/workspace/a.ts", name: "a.ts", pane: "main" },
+      { kind: "file", path: "/workspace/b.ts", name: "b.ts", pane: "main" }, // name filled from the path
     ]);
   });
 
@@ -296,12 +339,12 @@ describe("navigator visibility", () => {
 
 describe("two panes", () => {
   const openIn = (pane: "main" | "side", path: string, from = state()) =>
-    openInspectorTab(from, id(path), { path, name: path.split("/").pop() ?? path, pane });
+    openInspectorTab(from, fileRowIn(path, pane));
 
   it("draws a file in the pane that was asked for", () => {
     const both = openIn("side", "/workspace/b.ts", openIn("main", "/workspace/a.ts"));
 
-    expect(both.inspectorTabs.map((row) => [row.path, row.pane])).toEqual([
+    expect(fileRows(both.inspectorTabs).map((row) => [row.path, row.pane])).toEqual([
       ["/workspace/a.ts", "main"],
       ["/workspace/b.ts", "side"],
     ]);
@@ -314,8 +357,9 @@ describe("two panes", () => {
     const both = openIn("side", "/workspace/b.ts", openIn("main", "/workspace/a.ts"));
     const again = openIn("main", "/workspace/b.ts", both);
 
-    expect(again.inspectorTabs.filter((row) => row.path === "/workspace/b.ts")).toHaveLength(1);
-    expect(again.inspectorTabs.find((row) => row.path === "/workspace/b.ts")?.pane).toBe("side");
+    const drawn = fileRows(again.inspectorTabs);
+    expect(drawn.filter((row) => row.path === "/workspace/b.ts")).toHaveLength(1);
+    expect(drawn.find((row) => row.path === "/workspace/b.ts")?.pane).toBe("side");
     expect(again.activePanes.side).toBe(id("/workspace/b.ts"));
     expect(again.focusedPane).toBe("side");
   });
@@ -338,7 +382,7 @@ describe("two panes", () => {
 
   it("reorders inside a pane only", () => {
     const rows = openIn("side", "/workspace/b.ts", openIn("main", "/workspace/a.ts"));
-    const moved = reorderInspectorTabs(rows, "/workspace/b.ts", "/workspace/a.ts");
+    const moved = reorderInspectorTabs(rows, id("/workspace/b.ts"), id("/workspace/a.ts"));
 
     // A cross-pane drop is not a move; nothing changes.
     expect(moved).toBe(rows);
@@ -348,7 +392,7 @@ describe("two panes", () => {
     const both = openIn("side", "/workspace/b.ts", openIn("main", "/workspace/a.ts"));
     const back = parsePreferences(serializePreferences(preferencesOf(both)), "p1");
 
-    expect(back.inspectorTabs?.map((row) => [row.path, row.pane])).toEqual([
+    expect(fileRows(back.inspectorTabs).map((row) => [row.path, row.pane])).toEqual([
       ["/workspace/a.ts", "main"],
       ["/workspace/b.ts", "side"],
     ]);
@@ -388,9 +432,75 @@ describe("two panes", () => {
       activeInspectorId: id("/workspace/a.ts"),
     }), "p1");
 
-    expect(legacy.inspectorTabs).toEqual([{ path: "/workspace/a.ts", name: "a.ts", pane: "main" }]);
+    expect(legacy.inspectorTabs).toEqual([{ kind: "file", path: "/workspace/a.ts", name: "a.ts", pane: "main" }]);
     expect(legacy.activeInspectorIds).toEqual({ main: id("/workspace/a.ts"), side: null });
     expect(initialRightPanelState(legacy).activePanes.main).toBe(id("/workspace/a.ts"));
+  });
+});
+
+describe("artifact rows in the inspector lane", () => {
+  // Artifact rows travel through the same state functions as files. A second
+  // path for them would be the duplication the tagged union exists to avoid,
+  // and an untested path is where the next bug lives.
+  it("selects an artifact row by an id that carries its session", () => {
+    const opened = openInspectorTab(state(), artifactRowIn("art_1"));
+
+    expect(opened.activePanes).toEqual({ main: "artifact:p1:s1:art_1", side: null });
+    expect(opened.focusedPane).toBe("main");
+    expect(opened.activeLane).toBe("inspector");
+    expect(opened.open).toBe(true);
+    expect(opened.inspectorTabs).toEqual([artifactRowIn("art_1")]);
+  });
+
+  it("keeps one row when the same artifact is opened again, and leaves it in its pane", () => {
+    const opened = openInspectorTab(state(), artifactRowIn("art_1", "s1", "side"));
+    const again = openInspectorTab(opened, artifactRowIn("art_1", "s1", "main"));
+
+    expect(artifactRows(again.inspectorTabs)).toEqual([artifactRowIn("art_1", "s1", "side")]);
+    // Asking for it in the other pane moves the focus, not the row: two copies
+    // with independent state would be two surfaces, not one row.
+    expect(again.activePanes).toEqual({ main: null, side: artifactId("art_1") });
+    expect(again.focusedPane).toBe("side");
+  });
+
+  it("falls back to the row left in the pane when an artifact is closed", () => {
+    const withFile = openInspectorTab(state(), fileRowIn("/workspace/a.ts"));
+    const both = openInspectorTab(withFile, artifactRowIn("art_1"));
+
+    const closed = closeInspectorTab(both, artifactId("art_1"));
+    expect(closed.activePanes).toEqual({ main: id("/workspace/a.ts"), side: null });
+    expect(closed.inspectorTabs).toEqual([fileRowIn("/workspace/a.ts")]);
+    expect(closed.focusedPane).toBe("main");
+
+    // The last row in the lane: nothing is left to select, and the strip goes
+    // back to the channel lane.
+    const alone = closeInspectorTab(
+      openInspectorTab(state(), artifactRowIn("art_2", "s1", "side")),
+      artifactId("art_2"),
+    );
+    expect(alone.activePanes).toEqual({ main: null, side: null });
+    expect(alone.inspectorTabs).toEqual([]);
+    expect(alone.activeLane).toBe("channel");
+  });
+
+  it("keeps the session through a write and a read, and caps the mixed list", () => {
+    const mixed = Array.from({ length: MAX_PERSISTED_INSPECTOR_TABS + 2 }, (_, index) => (index % 2 === 0
+      ? artifactRowIn(`art_${index}`, `s${index}`)
+      : fileRowIn(`/workspace/f${index}.ts`)));
+    const opened = mixed.reduce((current, row) => openInspectorTab(current, row), state());
+    const back = parsePreferences(serializePreferences(preferencesOf(opened)), "p1");
+
+    expect(back.inspectorTabs).toHaveLength(MAX_PERSISTED_INSPECTOR_TABS);
+    const artifacts = artifactRows(back.inspectorTabs);
+    // Both ids survive the trip, and the id a selection is compared against is
+    // rebuilt from the pair rather than from the artifact id alone.
+    expect(artifacts[0]).toEqual(artifactRowIn("art_2", "s2"));
+    expect(artifacts.map((row) => row.sessionId))
+      .toEqual(artifacts.map((row) => `s${row.artifactId.split("_")[1]}`));
+    // The session is part of the id this state will compare against, not just a
+    // field that happened to be carried along.
+    expect(artifacts.map((row) => inspectorTabId("p1", row)))
+      .toEqual(artifacts.map((row) => `artifact:p1:${row.sessionId}:${row.artifactId}`));
   });
 });
 

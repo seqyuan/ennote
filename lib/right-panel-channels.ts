@@ -17,6 +17,21 @@
  * caller's business; that keeps the contract testable and the rules in one file.
  */
 import { PRIMARY_DEFAULT_WIDTH, PRIMARY_MIN_WIDTH } from "./right-panel-width";
+import {
+  type InspectorPane,
+  type InspectorTabRow,
+  inspectorTabId,
+  parseInspectorTabRows,
+  rowMatchesId,
+} from "./inspector-tabs";
+
+// The row ids, the row cap and the pane model are owned by the row module: a
+// row and the half it is drawn in are one thing, and every existing caller
+// imports them from here. Re-exported rather than redefined, so there is
+// exactly one definition and no type cycle to erase.
+export { MAX_PERSISTED_INSPECTOR_TABS, fileTabId, pathOf } from "./inspector-tabs";
+export { INSPECTOR_PANES } from "./inspector-tabs";
+export type { InspectorPane } from "./inspector-tabs";
 
 /** A channel the panel keeps open beside the inspector lane. */
 export type PanelChannel = "files" | "graph" | "tools";
@@ -87,24 +102,14 @@ export interface RightPanelState {
   navigatorHidden: boolean;
 }
 
-/** Which half of the inspector lane a row lives in. */
-export type InspectorPane = "main" | "side";
-
-/** The two halves, in the order they are drawn. */
-export const INSPECTOR_PANES: readonly InspectorPane[] = ["main", "side"];
-
-/** A file the panel had open, as it is remembered between visits. */
-export interface PersistedInspectorTab {
-  /** Project-relative file path under /workspace. */
-  path: string;
-  /** What the row shows; the path's last segment when it was opened. */
-  name: string;
-  /** Which pane it sits in. Absent on rows written before panes existed. */
-  pane?: InspectorPane;
-}
-
-/** How many inspector rows one Project keeps. localStorage is not a repository. */
-export const MAX_PERSISTED_INSPECTOR_TABS = 20;
+/**
+ * A row the panel had open, as it is remembered between visits.
+ *
+ * It is the same tagged union the reader parses, so a caller cannot write a row
+ * this build would refuse to read back. The name is kept from the pre-artifact
+ * model because every caller spells it that way.
+ */
+export type PersistedInspectorTab = InspectorTabRow;
 
 /** What the browser keeps for one Project. */
 export interface RightPanelPreferencesV1 {
@@ -196,7 +201,7 @@ export function parsePreferences(raw: string | null, projectId: string): RightPa
     graph: widthOf(storedWidths.graph, legacyWidth),
     tools: widthOf(storedWidths.tools, legacyWidth),
   };
-  const inspectorTabs = readInspectorTabs(row.inspectorTabs);
+  const inspectorTabs = parseInspectorTabRows(row.inspectorTabs, projectId);
   const legacyActive = typeof row.activeInspectorId === "string" ? row.activeInspectorId : null;
   const storedActive = (typeof row.activeInspectorIds === "object" && row.activeInspectorIds !== null)
     ? row.activeInspectorIds
@@ -204,8 +209,8 @@ export function parsePreferences(raw: string | null, projectId: string): RightPa
   const activeIn = (pane: InspectorPane, value: unknown): string | null => {
     const candidate = typeof value === "string" ? value : pane === "main" ? legacyActive : null;
     if (candidate === null) return null;
-    const owned = inspectorTabs.some((tab) => (tab.pane ?? "main") === pane
-      && `file:${projectId}:${tab.path}` === candidate);
+    const owned = inspectorTabs.some((tab) => tab.pane === pane
+      && rowMatchesId(projectId, tab, candidate));
     return owned ? candidate : null;
   };
   const activePanes = {
@@ -226,37 +231,6 @@ export function parsePreferences(raw: string | null, projectId: string): RightPa
   };
 }
 
-/**
- * Read the remembered file rows, keeping the newest and dropping junk.
- *
- * The array is written oldest-first, so trimming drops from the front: a Project
- * that has opened hundreds of files over months must not carry all of them, and
- * the ones the reader is likely to want back are the recent ones.
- */
-function readInspectorTabs(value: unknown): PersistedInspectorTab[] {
-  if (!Array.isArray(value)) return [];
-  const rows: PersistedInspectorTab[] = [];
-  const seen = new Set<string>();
-  for (const entry of value) {
-    if (typeof entry !== "object" || entry === null) continue;
-    const row = entry as Partial<PersistedInspectorTab>;
-    if (typeof row.path !== "string" || row.path.length === 0) continue;
-    if (seen.has(row.path)) continue;
-    seen.add(row.path);
-    rows.push({
-      path: row.path,
-      name: typeof row.name === "string" && row.name.length > 0 ? row.name : lastSegment(row.path),
-      pane: row.pane === "side" ? "side" : "main",
-    });
-  }
-  return rows.slice(-MAX_PERSISTED_INSPECTOR_TABS);
-}
-
-function lastSegment(path: string): string {
-  const parts = path.split("/").filter(Boolean);
-  return parts[parts.length - 1] ?? path;
-}
-
 /** Write one Project's preferences, normalised. */
 export function serializePreferences(preferences: RightPanelPreferencesV1): string {
   return JSON.stringify({
@@ -269,7 +243,7 @@ export function serializePreferences(preferences: RightPanelPreferencesV1): stri
       tools: widthOf(preferences.primaryWidths?.tools, PRIMARY_DEFAULT_WIDTH),
     },
     open: preferences.open,
-    inspectorTabs: readInspectorTabs(preferences.inspectorTabs),
+    inspectorTabs: parseInspectorTabRows(preferences.inspectorTabs, preferences.projectId),
     navigatorHidden: preferences.navigatorHidden === true,
     // Explicit nulls stay nulls: `??` would substitute the focused row — which
     // may live in the side pane — into main's slot, and the next read would
@@ -341,11 +315,11 @@ export function initialRightPanelState(preferences: RightPanelPreferencesV1): Ri
  */
 function seedPanes(preferences: RightPanelPreferencesV1): Pick<RightPanelState,
   "inspectorTabs" | "activePanes" | "focusedPane" | "activeLane"> {
-  const inspectorTabs = readInspectorTabs(preferences.inspectorTabs);
+  const inspectorTabs = parseInspectorTabRows(preferences.inspectorTabs, preferences.projectId);
   const stored = preferences.activeInspectorIds;
   const owned = (pane: InspectorPane, value: string | null): string | null =>
-    value !== null && inspectorTabs.some((row) => (row.pane ?? "main") === pane
-      && fileTabId(preferences.projectId, row.path) === value)
+    value !== null && inspectorTabs.some((row) => row.pane === pane
+      && rowMatchesId(preferences.projectId, row, value))
       ? value
       : null;
 
@@ -356,7 +330,7 @@ function seedPanes(preferences: RightPanelPreferencesV1): Pick<RightPanelState,
 
   if (activePanes.main === null && activePanes.side === null && inspectorTabs.length > 0) {
     const first = inspectorTabs[0];
-    activePanes[first.pane ?? "main"] = fileTabId(preferences.projectId, first.path);
+    activePanes[first.pane] = inspectorTabId(preferences.projectId, first);
   }
 
   const focusedPane: InspectorPane = activePanes.side !== null && activePanes.main === null ? "side" : "main";
@@ -387,7 +361,7 @@ export function preferencesOf(state: RightPanelState): RightPanelPreferencesV1 {
       tools: widthOf(state.primaryWidths.tools, PRIMARY_DEFAULT_WIDTH),
     },
     open: state.open,
-    inspectorTabs: readInspectorTabs(state.inspectorTabs),
+    inspectorTabs: parseInspectorTabRows(state.inspectorTabs, state.projectId),
     activeInspectorIds: state.activePanes,
     activeInspectorId: state.activePanes[state.focusedPane],
     navigatorHidden: state.navigatorHidden,
@@ -399,33 +373,27 @@ export function setNavigatorHidden(state: RightPanelState, hidden: boolean): Rig
   return state.navigatorHidden === hidden ? state : { ...state, navigatorHidden: hidden };
 }
 
-/** Reorder one pane's rows, so the strip's order survives a reload too. */
+/**
+ * Reorder one pane's rows, so the strip's order survives a reload too.
+ *
+ * Rows are named by id rather than by path: a row can also be an artifact now,
+ * and "the row with this path" is not a question that answers for both kinds.
+ */
 export function reorderInspectorTabs(
   state: RightPanelState,
-  fromPath: string,
-  toPath: string,
+  fromId: string,
+  toId: string,
 ): RightPanelState {
-  const from = state.inspectorTabs.findIndex((row) => row.path === fromPath);
-  const to = state.inspectorTabs.findIndex((row) => row.path === toPath);
+  const from = state.inspectorTabs.findIndex((row) => rowMatchesId(state.projectId, row, fromId));
+  const to = state.inspectorTabs.findIndex((row) => rowMatchesId(state.projectId, row, toId));
   if (from < 0 || to < 0 || from === to) return state;
   // Rows only reorder within their own pane; a cross-pane drop is not a move, it
   // is a different action this build does not offer.
-  if ((state.inspectorTabs[from].pane ?? "main") !== (state.inspectorTabs[to].pane ?? "main")) return state;
+  if (state.inspectorTabs[from].pane !== state.inspectorTabs[to].pane) return state;
   const rows = [...state.inspectorTabs];
   const [moved] = rows.splice(from, 1);
   rows.splice(to, 0, moved);
   return { ...state, inspectorTabs: rows };
-}
-
-/** The file a row id names. The id is `file:<projectId>:<path>`. */
-export function pathOf(tabId: string): string {
-  const parts = tabId.split(":");
-  return parts.length < 3 ? tabId : parts.slice(2).join(":");
-}
-
-/** The row id for a file in a Project. */
-export function fileTabId(projectId: string, path: string): string {
-  return `file:${projectId}:${path}`;
 }
 
 /** Show a channel: used by a channel tab, the add menu, and the launcher alike. */
@@ -502,30 +470,39 @@ function widthOf(value: unknown, fallback: number): number {
 }
 
 /**
- * Open a file in one pane of the inspector lane and show the shell.
+ * Open a row in one pane of the inspector lane and show the shell.
  *
- * A file is open at most once: asking for it again — in either pane — moves the
+ * A row is open at most once: asking for it again — in either pane — moves the
  * focus to the pane that already holds it rather than drawing it twice. Two
- * copies of the same file with independent scroll positions would be a bug
+ * copies of the same row with independent scroll positions would be a bug
  * wearing a feature's clothes.
  * @param state - the current state.
- * @param tabId - the row's id, derived from the Project and the path.
- * @param row - the file to remember; `row.pane` says which pane it belongs to.
+ * @param row - the row to remember; `row.pane` says which pane it belongs to.
  */
 export function openInspectorTab(
   state: RightPanelState,
-  tabId: string,
   row: PersistedInspectorTab,
 ): RightPanelState {
-  const existing = state.inspectorTabs.find((tab) => tab.path === row.path);
-  const pane: InspectorPane = existing?.pane ?? row.pane ?? "main";
-  const inspectorTabs = readInspectorTabs([
-    ...state.inspectorTabs.filter((tab) => tab.path !== row.path),
+  // Identity is the row's id, not its path: an artifact row has no path, and the
+  // id is what the selection in `activePanes` will refer to anyway. There is no
+  // second id parameter for the same reason: two sources for one fact only
+  // disagree, and the disagreement is a selection pointing at nothing.
+  const rowId = inspectorTabId(state.projectId, row);
+  const same = (tab: PersistedInspectorTab) => inspectorTabId(state.projectId, tab) === rowId;
+  const existing = state.inspectorTabs.find(same);
+  // A row is an argument, and an argument is a runtime value: the type says
+  // every row has a pane, the caller is what does not. Resolving it here — the
+  // way the reader resolves a stored row — keeps `activePanes` from gaining an
+  // `undefined` key, which would silently lose the selection.
+  const requested: InspectorPane = row.pane === "side" ? "side" : "main";
+  const pane: InspectorPane = existing?.pane ?? requested;
+  const inspectorTabs = parseInspectorTabRows([
+    ...state.inspectorTabs.filter((tab) => !same(tab)),
     { ...row, pane },
-  ]);
+  ], state.projectId);
   // The cap drops the oldest row, which may be the one a pane has selected. A
   // selection that points at a row nobody draws is worse than no selection.
-  const alive = new Set(inspectorTabs.map((tab) => fileTabId(state.projectId, tab.path)));
+  const alive = new Set(inspectorTabs.map((tab) => inspectorTabId(state.projectId, tab)));
   const activePanes = {
     main: state.activePanes.main !== null && alive.has(state.activePanes.main) ? state.activePanes.main : null,
     side: state.activePanes.side !== null && alive.has(state.activePanes.side) ? state.activePanes.side : null,
@@ -533,7 +510,7 @@ export function openInspectorTab(
   return {
     ...state,
     inspectorTabs,
-    activePanes: { ...activePanes, [pane]: tabId },
+    activePanes: { ...activePanes, [pane]: rowId },
     focusedPane: pane,
     activeLane: "inspector",
     open: true,
@@ -550,15 +527,14 @@ export function openInspectorTab(
  * @param tabId - the tab being closed.
  */
 export function closeInspectorTab(state: RightPanelState, tabId: string): RightPanelState {
-  const path = pathOf(tabId);
-  const closing = state.inspectorTabs.find((row) => row.path === path);
-  const inspectorTabs = state.inspectorTabs.filter((row) => row.path !== path);
+  const closing = state.inspectorTabs.find((row) => rowMatchesId(state.projectId, row, tabId));
+  const inspectorTabs = state.inspectorTabs.filter((row) => !rowMatchesId(state.projectId, row, tabId));
   const pane: InspectorPane = closing?.pane ?? "main";
 
   // What is left in the pane that lost the row, and in the other one.
   const remainingIn = (which: InspectorPane) => inspectorTabs
-    .filter((row) => (row.pane ?? "main") === which)
-    .map((row) => fileTabId(state.projectId, row.path));
+    .filter((row) => row.pane === which)
+    .map((row) => inspectorTabId(state.projectId, row));
   const remaining = remainingIn(pane);
 
   const activePanes = { ...state.activePanes };
