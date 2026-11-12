@@ -143,7 +143,10 @@ test("opens a message widget in the inspector lane inside the sandboxed frame", 
   await expect(frame).toBeVisible();
   await expect(frame).toHaveAttribute("sandbox", "allow-scripts");
   await expect(frame).not.toHaveAttribute("sandbox", /same-origin/);
-  await expect(pane.locator(".artifact-widget")).toHaveAttribute("data-widget-state", "ready");
+  // 15s, not the 5s default: `WIDGET_READY_TIMEOUT_MS` is also 5s, so a default
+  // timeout would turn a slightly late handshake into a "stalled" state at the same
+  // instant the assertion gave up, and the failure would name the wrong thing.
+  await expect(pane.locator(".artifact-widget")).toHaveAttribute("data-widget-state", "ready", { timeout: 15_000 });
   // The body is inside the frame, so it is asked of the frame. Parent text queries
   // stop at the iframe boundary: the frame is an opaque origin, and that is the point.
   await expect(frame.contentFrame().locator('[data-canvas-body="chart"]')).toBeVisible();
