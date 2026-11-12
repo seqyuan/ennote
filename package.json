@@ -1,6 +1,6 @@
 {
   "name": "@seqyuan/ennote",
-  "version": "0.15.1",
+  "version": "0.16.0",
   "description": "Auditable local agent runtime built around Agent Flow",
   "repository": {
     "type": "git",
