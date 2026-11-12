@@ -172,3 +172,39 @@ func TestMigrationElevenBackfillsAttributionValues(t *testing.T) {
 	_, err = db.Exec(`UPDATE messages SET speaker_kind='role' WHERE id='m1'`)
 	require.Error(t, err, "the rebuilt attribution trigger must reject the retired value")
 }
+
+// Migration 0012 pins artifacts with a column rather than a table, so the state
+// belongs to the one row that has it: `pinned_at` on the artifact, inside the
+// Session database that owns that artifact row.
+//
+// Pinned here because the Go layer reads `pinned_at` unconditionally: a database
+// that skipped this step would fail every artifact read, not only the pin routes,
+// and the failure would surface as an internal error rather than as a missing
+// feature.
+func TestMigrationTwelveAddsThePinColumn(t *testing.T) {
+	db := openTestDB(t)
+	require.NoError(t, Apply(db))
+
+	var columns int
+	require.NoError(t, db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('artifacts') WHERE name='pinned_at'`).Scan(&columns))
+	assert.Equal(t, 1, columns, "artifact reads scan pinned_at")
+
+	var indexes int
+	require.NoError(t, db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_index_list('artifacts') WHERE name='idx_artifacts_pinned_at'`).Scan(&indexes))
+	assert.Equal(t, 1, indexes, "the pinned list is read per Session and needs its index")
+
+	// The column is nullable, so every artifact published before the pin existed
+	// keeps reading as "not pinned" instead of needing a backfill.
+	const now = "2026-11-11T00:00:00Z"
+	_, err := db.Exec(`INSERT INTO sessions(id,project_id,created_at,updated_at) VALUES('s1','p1',?,?)`, now, now)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO artifacts(id,project_id,session_id,name,storage_path,created_at)
+		VALUES('a1','p1','s1','note.txt','blobs/a1',?)`, now)
+	require.NoError(t, err)
+
+	var pinnedAt sql.NullString
+	require.NoError(t, db.QueryRow(`SELECT pinned_at FROM artifacts WHERE id='a1'`).Scan(&pinnedAt))
+	assert.False(t, pinnedAt.Valid, "a pre-existing artifact must read as unpinned")
+}

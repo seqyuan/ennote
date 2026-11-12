@@ -1757,6 +1757,36 @@ paths:
                       data: { $ref: "#/components/schemas/ProjectActiveRuns" }
         "500": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /v1/projects/{projectID}/pinned-artifacts:
+    parameters:
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: listPinnedArtifacts
+      description: |
+        The Project canvas: every pinned artifact of every Session in the Project,
+        newest pin first. Pin state lives in each Session's own database, so the
+        answer is an aggregation over them; a Session that cannot be read is
+        skipped (logged) rather than failing the whole list.
+
+        Archived Sessions are included on purpose: archiving a Session hides it from
+        the sidebar, it does not delete the artifacts the reader chose to keep. A
+        pinned artifact whose bytes are gone stays listed — the artifact row is still
+        the fact; opening it reports the loss through the preview route.
+      responses:
+        "200":
+          description: Pinned artifacts, globally sorted by pinnedAt descending
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/Artifact" }
+        "500": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /v1/sessions/{sessionID}:
     parameters:
       - $ref: "#/components/parameters/SessionID"
@@ -1967,6 +1997,51 @@ paths:
                     properties:
                       data: { $ref: "#/components/schemas/Artifact" }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{sessionID}/artifacts/{artifactID}/pin:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+      - name: artifactID
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: pinArtifact
+      description: |
+        Pin the artifact to the Project canvas. Idempotent: pinning an already
+        pinned artifact keeps the first `pinnedAt`, so a repeated tap cannot
+        reorder the canvas.
+      responses:
+        "200":
+          description: The refreshed artifact, now carrying `pinnedAt`
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Artifact" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: unpinArtifact
+      description: |
+        Remove the artifact from the Project canvas. Idempotent, and it answers 200
+        with the refreshed artifact rather than 204: the client shows the artifact's
+        state, so an empty body would force a second fetch or a guess.
+      responses:
+        "200":
+          description: The refreshed artifact, without `pinnedAt`
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Artifact" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /v1/sessions/{sessionID}/artifacts/{artifactID}/preview:
     parameters:
       - $ref: "#/components/parameters/SessionID"
@@ -4116,6 +4191,10 @@ components:
         sourceKind: { type: string }
         retentionClass: { type: string, enum: [project] }
         createdAt: { type: string, format: date-time }
+        # When the user pinned this artifact to the Project canvas. Absent means "not
+        # pinned": the pin is Worker state (canvas design §3.3), not a client
+        # preference, so a phone without a right panel still reads the same set.
+        pinnedAt: { type: string, format: date-time }
     TablePreview:
       type: object
       required: [format, columns, rows, truncatedRows, truncatedColumns, rowLimit, columnLimit]

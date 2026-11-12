@@ -337,6 +337,26 @@ export const listGraphs200: WorkerOperationResponse<"listGraphs", 200> = {
   ]
 };
 
+/** listPinnedArtifacts answering 200. */
+export const listPinnedArtifacts200: WorkerOperationResponse<"listPinnedArtifacts", 200> = {
+  "data": [
+    {
+      "createdAt": "2026-01-01T00:00:06Z",
+      "id": "00000000-0000-0000-0000-000000000013",
+      "kind": "widget",
+      "mimeType": "text/html; charset=utf-8",
+      "name": "canvas.html",
+      "pinnedAt": "2026-01-01T00:00:07Z",
+      "projectId": "00000000-0000-0000-0000-000000000002",
+      "retentionClass": "project",
+      "sessionId": "00000000-0000-0000-0000-000000000005",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000004",
+      "sizeBytes": 75,
+      "sourceKind": "workspace_publish"
+    }
+  ]
+};
+
 /** listProjectActiveRuns answering 200. */
 export const listProjectActiveRuns200: WorkerOperationResponse<"listProjectActiveRuns", 200> = {
   "data": {
@@ -448,6 +468,24 @@ export const moveProjectFileEntry200: WorkerOperationResponse<"moveProjectFileEn
   }
 };
 
+/** pinArtifact answering 200. */
+export const pinArtifact200: WorkerOperationResponse<"pinArtifact", 200> = {
+  "data": {
+    "createdAt": "2026-01-01T00:00:06Z",
+    "id": "00000000-0000-0000-0000-000000000013",
+    "kind": "widget",
+    "mimeType": "text/html; charset=utf-8",
+    "name": "canvas.html",
+    "pinnedAt": "2026-01-01T00:00:07Z",
+    "projectId": "00000000-0000-0000-0000-000000000002",
+    "retentionClass": "project",
+    "sessionId": "00000000-0000-0000-0000-000000000005",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000004",
+    "sizeBytes": 75,
+    "sourceKind": "workspace_publish"
+  }
+};
+
 /** previewArtifact answering 200. */
 export const previewArtifact200: WorkerOperationResponse<"previewArtifact", 200> = {
   "data": {
@@ -531,5 +569,22 @@ export const submitTurn202: WorkerOperationResponse<"submitTurn", 202> = {
     },
     "turnId": "00000000-0000-0000-0000-000000000008",
     "userMessageId": "00000000-0000-0000-0000-000000000006"
+  }
+};
+
+/** unpinArtifact answering 200. */
+export const unpinArtifact200: WorkerOperationResponse<"unpinArtifact", 200> = {
+  "data": {
+    "createdAt": "2026-01-01T00:00:06Z",
+    "id": "00000000-0000-0000-0000-000000000013",
+    "kind": "widget",
+    "mimeType": "text/html; charset=utf-8",
+    "name": "canvas.html",
+    "projectId": "00000000-0000-0000-0000-000000000002",
+    "retentionClass": "project",
+    "sessionId": "00000000-0000-0000-0000-000000000005",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000004",
+    "sizeBytes": 75,
+    "sourceKind": "workspace_publish"
   }
 };

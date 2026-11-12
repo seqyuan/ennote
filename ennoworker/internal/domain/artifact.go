@@ -45,6 +45,13 @@ type Artifact struct {
 	SourceWorkspacePath string    `json:"-"`
 	RetentionClass      string    `json:"retentionClass"`
 	CreatedAt           time.Time `json:"createdAt"`
+	// PinnedAt is when the user pinned this artifact to the Project canvas
+	// (canvas design §3.3). It is contract state, not a client preference: the
+	// Web UI and any future native shell read the same pinned set from the
+	// Worker, and a phone has no right panel but still has a canvas. Nil means
+	// "not pinned", and `omitempty` keeps the field out of an unpinned answer
+	// instead of sending null for it.
+	PinnedAt *time.Time `json:"pinnedAt,omitempty"`
 	// PreviewDrops names the kinds of content the static HTML preview will
 	// strip (svg, script, an inline on* handler, ...). It is `json:"-"` because
 	// it is a hint derived from stored metadata, not part of the artifact

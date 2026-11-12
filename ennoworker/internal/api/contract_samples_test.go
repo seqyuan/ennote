@@ -668,6 +668,36 @@ func TestContractSamples(t *testing.T) {
 		status: http.StatusOK,
 	})
 
+	// The pin surface: two verbs that write `pinnedAt` and one Project-scoped read
+	// that merges the pinned sets of every Session. All three shapes are new, and
+	// `pinnedAt` is the first optional field on `Artifact`, so the samples are what
+	// proves the field is present after a pin, absent (not null) after an unpin, and
+	// inside the array element of the canvas list.
+	//
+	// Recorded last, after `previewArtifact`, for the same reason every addition
+	// before it was: the normaliser numbers its stand-ins in encounter order, so a
+	// new id or timestamp introduced earlier would renumber the ids of every sample
+	// recorded after it and turn these three files into a diff across the directory.
+	//
+	// The order among the three is load-bearing too. Pin first, so the timestamp gets
+	// its number in the pin sample and the list reuses it; then the list, which has
+	// to contain an element because an empty array validates no element type; then
+	// the unpin, which is the only sample that can show the field gone. The Session
+	// is left unpinned afterward, so the fixture ends in the state it started in.
+	pinRoute := map[string]string{"sessionID": session.ID, "artifactID": storedWidget.ID}
+	samples.record(contractSampleRequest{
+		method: http.MethodPost, route: "/v1/sessions/{sessionID}/artifacts/{artifactID}/pin", auth: true,
+		values: pinRoute, status: http.StatusOK,
+	})
+	samples.record(contractSampleRequest{
+		method: http.MethodGet, route: "/v1/projects/{projectID}/pinned-artifacts", auth: true,
+		values: projectRoute, status: http.StatusOK,
+	})
+	samples.record(contractSampleRequest{
+		method: http.MethodDelete, route: "/v1/sessions/{sessionID}/artifacts/{artifactID}/pin", auth: true,
+		values: pinRoute, status: http.StatusOK,
+	})
+
 	if os.Getenv(contractSampleUpdateEnv) != "1" {
 		samples.assertNoOrphans()
 	}

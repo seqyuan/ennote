@@ -227,24 +227,47 @@ func (s *Service) Store(ctx context.Context, input PublishInput, source io.Reade
 	return artifact, nil
 }
 
-func (s *Service) GetForSession(ctx context.Context, artifactID, sessionID string) (*domain.Artifact, error) {
-	row := s.DB.QueryRowContext(ctx, `SELECT a.id,a.project_id,COALESCE(a.session_id,''),COALESCE(a.message_id,''),
-		COALESCE(a.run_id,''),a.name,a.kind,a.mime_type,a.storage_path,a.size_bytes,a.sha256,a.metadata_json,
-		a.created_at,a.source_tool_call_id,a.source_kind,a.source_workspace_path,a.retention_class
-		FROM artifacts a JOIN sessions s ON s.id=?
-		WHERE a.id=? AND a.project_id=s.project_id AND (a.session_id IS NULL OR a.session_id=s.id)`, sessionID, artifactID)
+// pinnedAtLayout is how a pin timestamp is stored. SQLite has no datetime type,
+// so "newest first" is a string comparison: time.RFC3339Nano trims trailing zeros
+// in the fraction, which would order "12:00:00.1Z" after "12:00:00.12Z". A fixed
+// width keeps the lexical order chronological. Readers still parse it with
+// time.RFC3339Nano, which accepts this shape.
+//
+// It records when the pin happened, not a sequence number, so the order is wall
+// clock rather than monotonic: a machine whose clock jumps backwards will place the
+// next pin inside the list instead of on top. That is acceptable for a canvas — the
+// alternative is a counter that has to be assigned somewhere and read back — but it
+// is worth knowing before reading a surprising order as a bug.
+const pinnedAtLayout = "2006-01-02T15:04:05.000000000Z"
+
+// artifactProjection is the column list every artifact read scans. One constant
+// means a column added to the row cannot be returned by one read and forgotten by
+// the other; explicit names plus COALESCE (never SELECT *) is what lets a NULL
+// session_id or run_id scan into a string.
+const artifactProjection = `a.id,a.project_id,COALESCE(a.session_id,''),COALESCE(a.message_id,''),
+	COALESCE(a.run_id,''),a.name,a.kind,a.mime_type,a.storage_path,a.size_bytes,a.sha256,a.metadata_json,
+	a.created_at,a.source_tool_call_id,a.source_kind,a.source_workspace_path,a.retention_class,
+	COALESCE(a.pinned_at,'')`
+
+func scanArtifact(row interface{ Scan(...any) error }) (*domain.Artifact, error) {
 	var artifact domain.Artifact
-	var metadataJSON, createdAt string
+	var metadataJSON, createdAt, pinnedAt string
 	if err := row.Scan(&artifact.ID, &artifact.ProjectID, &artifact.SessionID, &artifact.MessageID,
 		&artifact.RunID, &artifact.Name, &artifact.Kind, &artifact.MIMEType, &artifact.StoragePath,
 		&artifact.SizeBytes, &artifact.SHA256, &metadataJSON, &createdAt, &artifact.SourceToolCallID,
-		&artifact.SourceKind, &artifact.SourceWorkspacePath, &artifact.RetentionClass); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrArtifactNotFound
-		}
+		&artifact.SourceKind, &artifact.SourceWorkspacePath, &artifact.RetentionClass, &pinnedAt); err != nil {
 		return nil, err
 	}
 	artifact.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	if pinnedAt != "" {
+		// A timestamp the column cannot parse is left as "not pinned" rather than
+		// failing the read: the row is still readable, and the client's answer to a
+		// broken pin is a pin operation, not an unreadable artifact.
+		if parsed, err := time.Parse(time.RFC3339Nano, pinnedAt); err == nil {
+			pinned := parsed.UTC()
+			artifact.PinnedAt = &pinned
+		}
+	}
 	var metadata struct {
 		Width             int      `json:"width"`
 		Height            int      `json:"height"`
@@ -255,6 +278,97 @@ func (s *Service) GetForSession(ctx context.Context, artifactID, sessionID strin
 	artifact.Width, artifact.Height = metadata.Width, metadata.Height
 	artifact.PreviewDrops, artifact.PreviewDropsTotal = metadata.PreviewDrops, metadata.PreviewDropsTotal
 	return &artifact, nil
+}
+
+func (s *Service) GetForSession(ctx context.Context, artifactID, sessionID string) (*domain.Artifact, error) {
+	row := s.DB.QueryRowContext(ctx, `SELECT `+artifactProjection+`
+		FROM artifacts a JOIN sessions s ON s.id=?
+		WHERE a.id=? AND a.project_id=s.project_id AND (a.session_id IS NULL OR a.session_id=s.id)`, sessionID, artifactID)
+	artifact, err := scanArtifact(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrArtifactNotFound
+		}
+		return nil, err
+	}
+	return artifact, nil
+}
+
+// SetPinned pins or unpins one artifact and answers the refreshed row, so a
+// client that just changed the state does not have to fetch it again.
+//
+// The Session-scoped read first is the authorization, and it is the same read
+// GET /artifacts/{id} serves: an artifact of another Session or another Project is
+// ErrArtifactNotFound here too, so pinning cannot become a way to address a row the
+// caller could not read.
+//
+// Idempotent on purpose. Pinning twice keeps the first timestamp and unpinning
+// twice is a no-op: a repeated tap on a phone must not reorder the canvas.
+func (s *Service) SetPinned(ctx context.Context, artifactID, sessionID string, pinned bool) (*domain.Artifact, error) {
+	if _, err := s.GetForSession(ctx, artifactID, sessionID); err != nil {
+		return nil, err
+	}
+	var err error
+	if pinned {
+		// `pinned_at IS NULL` is what makes the repeat a no-op without a
+		// read-modify-write window: the second UPDATE matches no row.
+		_, err = s.DB.ExecContext(ctx, `UPDATE artifacts SET pinned_at=?
+			WHERE id=? AND (session_id IS NULL OR session_id=?) AND pinned_at IS NULL`,
+			time.Now().UTC().Format(pinnedAtLayout), artifactID, sessionID)
+	} else {
+		// Unpinning needs no predicate on the current value: writing NULL over NULL
+		// leaves the same state, so the operation is idempotent by construction.
+		_, err = s.DB.ExecContext(ctx, `UPDATE artifacts SET pinned_at=NULL
+			WHERE id=? AND (session_id IS NULL OR session_id=?)`, artifactID, sessionID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	// Read back through GetForSession instead of assembling the answer from the
+	// values at hand: a second hand-built SELECT would be a second place that knows
+	// the row shape, and it would skip the metadata decode that fills width/height.
+	return s.GetForSession(ctx, artifactID, sessionID)
+}
+
+// ListPinned returns the pinned artifacts of one Session database, newest first.
+//
+// It takes the database rather than using s.DB because the Project-level canvas
+// has to ask every Session's file, and the caller is the only one that opened them.
+// Merging across Sessions deliberately does not happen here: this layer does not
+// know which Sessions a Project has (that index belongs to the session store), and
+// a merge that knew it would be a second project-wide authority.
+func (s *Service) ListPinned(ctx context.Context, db *sql.DB) ([]domain.Artifact, error) {
+	if db == nil {
+		return nil, fmt.Errorf("artifact list scope is required")
+	}
+	rows, err := db.QueryContext(ctx, `SELECT `+artifactProjection+`
+		FROM artifacts a WHERE a.pinned_at IS NOT NULL ORDER BY a.pinned_at DESC, a.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	// Non-nil even when empty: the contract declares an array, and a nil slice
+	// marshals as null, which the generated types do not accept.
+	pinned := make([]domain.Artifact, 0, 4)
+	for rows.Next() {
+		artifact, err := scanArtifact(rows)
+		if err != nil {
+			return nil, err
+		}
+		if artifact.PinnedAt == nil {
+			// The column says pinned and the value does not parse. Listing it would
+			// put a canvas entry on screen that no client can call "pinned" (the JSON
+			// omits the field) and that sorts to the bottom of a list ordered by it;
+			// skipping is the only reading that stays self-consistent. Only a hand
+			// edit can produce this, which is why it is skipped rather than fatal.
+			continue
+		}
+		pinned = append(pinned, *artifact)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return pinned, nil
 }
 
 func (s *Service) ReadForSession(ctx context.Context, artifactID, sessionID string) (*domain.Artifact, []byte, error) {

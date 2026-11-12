@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -13,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"mime"
 	"net/http"
 	"os"
 	"strconv"
@@ -230,6 +228,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("DELETE /v1/projects/{projectID}/graph-bindings/{graphID}", s.deleteProjectGraphBinding)
 	mux.HandleFunc("GET /v1/projects/{projectID}/sessions", s.listSessions)
 	mux.HandleFunc("GET /v1/projects/{projectID}/active-runs", s.listProjectActiveRuns)
+	mux.HandleFunc("GET /v1/projects/{projectID}/pinned-artifacts", s.listPinnedArtifacts)
 	mux.HandleFunc("POST /v1/projects/{projectID}/sessions", s.createSession)
 	mux.HandleFunc("POST /v1/projects/{projectID}/attachments/images", s.uploadImage)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}", s.getSession)
@@ -244,6 +243,11 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/artifacts/{artifactID}", s.getArtifact)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/artifacts/{artifactID}/preview", s.previewArtifact)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/artifacts/{artifactID}/download", s.downloadArtifact)
+	// Pinning is a Session-scoped write feeding the Project-scoped canvas above: the
+	// artifact row (and its `pinned_at`) lives in the Session's own database, while
+	// the canvas is what every Session of the Project contributes to.
+	mux.HandleFunc("POST /v1/sessions/{sessionID}/artifacts/{artifactID}/pin", s.pinArtifact)
+	mux.HandleFunc("DELETE /v1/sessions/{sessionID}/artifacts/{artifactID}/pin", s.unpinArtifact)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/branches", s.listSessionBranches)
 	mux.HandleFunc("POST /v1/sessions/{sessionID}/branches", s.createSessionBranch)
 	mux.HandleFunc("POST /v1/sessions/{sessionID}/branches/{branchID}/activate", s.activateSessionBranch)
@@ -1073,123 +1077,6 @@ func (s *Server) listSessionMessages(w http.ResponseWriter, r *http.Request) {
 		HasMore             bool             `json:"hasMore"`
 		ActiveLeafMessageID string           `json:"activeLeafMessageId,omitempty"`
 	}{page.Messages, nextCursor, page.HasMore, leafID})
-}
-
-func (s *Server) getArtifact(w http.ResponseWriter, r *http.Request) {
-	if s.Artifacts == nil {
-		writeError(w, r, http.StatusServiceUnavailable, "artifact_service_unavailable", "artifact service is unavailable", true)
-		return
-	}
-	artifact, err := s.Artifacts.GetForSession(r.Context(), r.PathValue("artifactID"), r.PathValue("sessionID"))
-	if err != nil {
-		s.writeArtifactError(w, r, err)
-		return
-	}
-	writeData(w, http.StatusOK, artifact)
-}
-
-func (s *Server) previewArtifact(w http.ResponseWriter, r *http.Request) {
-	if s.Artifacts == nil {
-		writeError(w, r, http.StatusServiceUnavailable, "artifact_service_unavailable", "artifact service is unavailable", true)
-		return
-	}
-	artifact, err := s.Artifacts.GetForSession(r.Context(), r.PathValue("artifactID"), r.PathValue("sessionID"))
-	if err != nil {
-		s.writeArtifactError(w, r, err)
-		return
-	}
-	setArtifactHeaders(w)
-	switch artifact.Kind {
-	case domain.ArtifactKindImage, "image_attachment":
-		artifact, data, err := s.Artifacts.ReadForSession(r.Context(), artifact.ID, r.PathValue("sessionID"))
-		if err != nil {
-			s.writeArtifactError(w, r, err)
-			return
-		}
-		w.Header().Set("Content-Type", artifact.MIMEType)
-		w.Header().Set("Content-Disposition", contentDisposition("inline", artifact.Name))
-		http.ServeContent(w, r, artifact.Name, artifact.CreatedAt, bytes.NewReader(data))
-	case domain.ArtifactKindTable:
-		_, preview, err := s.Artifacts.PreviewTable(r.Context(), artifact.ID, r.PathValue("sessionID"), r.URL.Query().Get("sheet"))
-		if err != nil {
-			s.writeArtifactError(w, r, err)
-			return
-		}
-		writeData(w, http.StatusOK, preview)
-	case domain.ArtifactKindStaticHTML:
-		_, preview, err := s.Artifacts.PreviewHTML(r.Context(), artifact.ID, r.PathValue("sessionID"))
-		if err != nil {
-			s.writeArtifactError(w, r, err)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Content-Disposition", contentDisposition("inline", artifact.Name))
-		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'; frame-ancestors 'self'")
-		w.WriteHeader(http.StatusOK)
-		_, _ = io.WriteString(w, preview)
-	case domain.ArtifactKindWidget:
-		_, preview, err := s.Artifacts.PreviewWidget(r.Context(), artifact.ID, r.PathValue("sessionID"))
-		if err != nil {
-			s.writeArtifactError(w, r, err)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Content-Disposition", contentDisposition("inline", artifact.Name))
-		w.Header().Set("Content-Security-Policy", artifacts.WidgetContentSecurityPolicy)
-		w.WriteHeader(http.StatusOK)
-		_, _ = io.WriteString(w, preview)
-	case domain.ArtifactKindText:
-		_, preview, err := s.Artifacts.PreviewText(r.Context(), artifact.ID, r.PathValue("sessionID"))
-		if err != nil {
-			s.writeArtifactError(w, r, err)
-			return
-		}
-		writeData(w, http.StatusOK, preview)
-	default:
-		writeError(w, r, http.StatusUnsupportedMediaType, "artifact_preview_unsupported", "artifact does not have a safe preview", false)
-	}
-}
-
-func (s *Server) downloadArtifact(w http.ResponseWriter, r *http.Request) {
-	if s.Artifacts == nil {
-		writeError(w, r, http.StatusServiceUnavailable, "artifact_service_unavailable", "artifact service is unavailable", true)
-		return
-	}
-	artifact, data, err := s.Artifacts.ReadForSession(r.Context(), r.PathValue("artifactID"), r.PathValue("sessionID"))
-	if err != nil {
-		s.writeArtifactError(w, r, err)
-		return
-	}
-	setArtifactHeaders(w)
-	w.Header().Set("Content-Type", artifact.MIMEType)
-	w.Header().Set("Content-Disposition", contentDisposition("attachment", artifact.Name))
-	http.ServeContent(w, r, artifact.Name, artifact.CreatedAt, bytes.NewReader(data))
-}
-
-func setArtifactHeaders(w http.ResponseWriter) {
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Cache-Control", "private, no-store")
-}
-
-func contentDisposition(disposition, name string) string {
-	value := mime.FormatMediaType(disposition, map[string]string{"filename": name})
-	if value == "" {
-		return disposition
-	}
-	return value
-}
-
-func (s *Server) writeArtifactError(w http.ResponseWriter, r *http.Request, err error) {
-	switch {
-	case errors.Is(err, artifacts.ErrArtifactNotFound):
-		writeError(w, r, http.StatusNotFound, "artifact_not_found", "artifact not found", false)
-	case errors.Is(err, artifacts.ErrArtifactCorrupt):
-		writeError(w, r, http.StatusConflict, "artifact_corrupt", "artifact content is missing or corrupt", false)
-	case errors.Is(err, artifacts.ErrPreviewUnsupported):
-		writeError(w, r, http.StatusUnsupportedMediaType, "artifact_preview_unsupported", "artifact does not have a safe preview", false)
-	default:
-		writeInternal(w, r, err)
-	}
 }
 
 func (s *Server) listSessionBranches(w http.ResponseWriter, r *http.Request) {

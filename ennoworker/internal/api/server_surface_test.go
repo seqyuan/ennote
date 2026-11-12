@@ -41,6 +41,10 @@ import (
 // fields — so the cheapest real step is a route-registration seam per group
 // (`func (s *Server) mcpRoutes(mux)`), which is what narrows a fixture.
 var serverSurface = map[string][]string{
+	// artifacts.go owns the artifact routes, including the ones that read across a
+	// Project's Session databases: `Artifacts` is the service it scopes per Session,
+	// `SessionStores` the manager it fans out through.
+	"artifacts.go":              {"Artifacts", "SessionStores"},
 	"approvals.go":              {"Approvals", "Control", "Runs", "Sessions", "StandingApprovals"},
 	"attention.go":              {"Attention", "DB", "SessionStores", "Sessions"},
 	"delegation_approvals.go":   {"DelegationApprovals"},

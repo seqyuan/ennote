@@ -59,7 +59,7 @@ export const RECORDED_CEILINGS = {
   "ennoworker/internal/skills/snapshot.go": 800,
   "ennoworker/internal/skillsmgmt/exec.go": 560,
   "ennoworker/internal/skillsmgmt/service.go": 560,
-  "ennoworker/internal/api/server.go": 1745, // turn `skills` decode + replay fast path + target-kind guard + widget preview branch
+  "ennoworker/internal/api/server.go": 1632, // the artifact routes moved to artifacts.go; ceiling lowered with the file
   "ennoworker/internal/agentflow/orchestrator.go": 1570,
   "ennoworker/internal/packinstall/plan.go": 1300,
   "ennoworker/internal/agent/loop.go": 1320,

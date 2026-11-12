@@ -1182,6 +1182,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/projects/{projectID}/pinned-artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * @description The Project canvas: every pinned artifact of every Session in the Project,
+         *     newest pin first. Pin state lives in each Session's own database, so the
+         *     answer is an aggregation over them; a Session that cannot be read is
+         *     skipped (logged) rather than failing the whole list.
+         *
+         *     Archived Sessions are included on purpose: archiving a Session hides it from
+         *     the sidebar, it does not delete the artifacts the reader chose to keep. A
+         *     pinned artifact whose bytes are gone stays listed — the artifact row is still
+         *     the fact; opening it reports the loss through the preview route.
+         */
+        get: operations["listPinnedArtifacts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sessions/{sessionID}": {
         parameters: {
             query?: never;
@@ -1340,6 +1369,35 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{sessionID}/artifacts/{artifactID}/pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+                artifactID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description Pin the artifact to the Project canvas. Idempotent: pinning an already
+         *     pinned artifact keeps the first `pinnedAt`, so a repeated tap cannot
+         *     reorder the canvas.
+         */
+        post: operations["pinArtifact"];
+        /**
+         * @description Remove the artifact from the Project canvas. Idempotent, and it answers 200
+         *     with the refreshed artifact rather than 204: the client shows the artifact's
+         *     state, so an empty body would force a second fetch or a guess.
+         */
+        delete: operations["unpinArtifact"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2741,6 +2799,8 @@ export interface components {
             retentionClass: "project";
             /** Format: date-time */
             createdAt: string;
+            /** Format: date-time */
+            pinnedAt?: string;
         };
         TablePreview: {
             /** @enum {string} */
@@ -6796,6 +6856,32 @@ export interface operations {
             503: components["responses"]["Error"];
         };
     };
+    listPinnedArtifacts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["ProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pinned artifacts, globally sorted by pinnedAt descending */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Artifact"][];
+                    };
+                };
+            };
+            500: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
     getSession: {
         parameters: {
             query?: never;
@@ -7065,6 +7151,60 @@ export interface operations {
                 };
             };
             404: components["responses"]["Error"];
+        };
+    };
+    pinArtifact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+                artifactID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The refreshed artifact, now carrying `pinnedAt` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Artifact"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    unpinArtifact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionID: components["parameters"]["SessionID"];
+                artifactID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The refreshed artifact, without `pinnedAt` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Artifact"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
     previewArtifact: {
