@@ -4,6 +4,7 @@ import { MAX_PERSISTED_INSPECTOR_TABS } from "@/lib/inspector-tabs";
 import {
   fileTabId,
   inspectorTabId,
+  nextFreePane,
   parseInspectorTabRows,
   pathOf,
   rowMatchesId,
@@ -171,5 +172,15 @@ describe("reading persisted rows", () => {
 
     expect(rows).toHaveLength(MAX_PERSISTED_INSPECTOR_TABS);
     expect(idsOf(rows)[0]).toBe("artifact:p1:s1:art_2");
+  });
+});
+
+describe("nextFreePane", () => {
+  it("fills the empty pane, then falls to the side", () => {
+    expect(nextFreePane({ main: null, side: null })).toBe("main");
+    expect(nextFreePane({ main: "artifact:p:s:a", side: null })).toBe("side");
+    // Both taken: the side pane is the one that rotates. The row it displaces stays
+    // in the strip, so the choice is reversible rather than destructive.
+    expect(nextFreePane({ main: "artifact:p:s:a", side: "artifact:p:s:b" })).toBe("side");
   });
 });

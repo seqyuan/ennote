@@ -10,6 +10,15 @@ export interface Tab {
   label: string;
   filePath?: string;
   projectId?: string;
+  /**
+   * The artifact this tab draws, when it is one.
+   *
+   * The pair is what the body needs: `artifactId` says which bytes to fetch and
+   * `sessionId` is the authorization for them, since every artifact URL is
+   * Session-scoped. A tab carrying this is drawn by the canvas surface and not
+   * by `FileViewer` — it has no path to give one.
+   */
+  artifact?: { artifactId: string; sessionId: string };
   closable?: boolean;
   icon?: "report" | "tools" | "files" | "graph";
   /** A count worth showing on the tab itself, e.g. live runs. */

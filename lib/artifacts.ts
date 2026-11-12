@@ -1,6 +1,7 @@
 import type { components } from "@/lib/worker-api.gen";
 
 export type ArtifactReference = components["schemas"]["ArtifactReference"];
+export type ArtifactRecord = components["schemas"]["Artifact"];
 export type TablePreview = components["schemas"]["TablePreview"];
 export type TextPreview = components["schemas"]["TextPreview"];
 
@@ -26,6 +27,28 @@ export function artifactDownloadURL(sessionId: string, artifactId: string): stri
  */
 export function isWidgetArtifact(artifact: { kind: string }): boolean {
   return artifact.kind === "widget";
+}
+
+/**
+ * Read the `getArtifact` answer as the reference a message carries.
+ *
+ * The two shapes differ by more than their key for the id: a stored row also
+ * knows its Project, Run and retention class, which the renderer neither needs
+ * nor may be told — the pane draws the artifact, not its provenance. The
+ * attachment kind is folded into `image` because only a message can publish a
+ * reference, and an attached image is drawn by the same image branch.
+ */
+export function artifactReferenceOf(record: ArtifactRecord): ArtifactReference {
+  return {
+    artifactId: record.id,
+    name: record.name,
+    kind: record.kind === "image_attachment" ? "image" : record.kind,
+    mimeType: record.mimeType,
+    sizeBytes: record.sizeBytes,
+    sha256: record.sha256,
+    width: record.width,
+    height: record.height,
+  };
 }
 
 export function formatArtifactSize(bytes: number): string {

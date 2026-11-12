@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { useT } from "@/components/LocaleProvider";
 import type { Tab } from "@/components/TabBar";
 import { resolvePrimaryLaneWidth as resolvePrimaryLaneWidthOf } from "@/lib/right-panel-width";
 import {
@@ -45,6 +46,7 @@ import { inspectorTabId, rowMatchesId } from "@/lib/inspector-tabs";
  * which tab list the panel should draw.
  */
 export function useRightPanel(projectId: string | null) {
+  const t = useT();
   const [state, setState] = useState<RightPanelState>(() =>
     initialRightPanelState(emptyPreferences(projectId ?? "")),
   );
@@ -138,17 +140,26 @@ export function useRightPanel(projectId: string | null) {
     const rows = state.projectId === projectId ? state.inspectorTabs : [];
     const toTab = (row: PersistedInspectorTab): Tab => ({
       id: inspectorTabId(projectId ?? "", row),
-      label: row.name,
+      // A stored artifact row may carry no name: storage keeps what the reader
+      // was shown, and an artifact published without one has nothing to store.
+      // The label is a surface decision, so the fallback lives here rather than
+      // in the row, where it would be written back as if it were the name.
+      label: row.kind === "artifact" ? row.name || t("rightPanel.artifact.untitled") : row.name,
       // Only a file row has a path to preview; an artifact row carries none and
-      // is drawn by its own surface rather than the file viewer.
+      // is drawn by its own surface rather than the file viewer. Its two ids
+      // travel instead, because the body has to fetch the artifact and check
+      // that the row it is drawing is still the one it was given.
       filePath: row.kind === "file" ? row.path : undefined,
+      artifact: row.kind === "artifact"
+        ? { artifactId: row.artifactId, sessionId: row.sessionId }
+        : undefined,
       projectId: projectId ?? undefined,
     });
     return {
       main: rows.filter((row) => row.pane === "main").map(toTab),
       side: rows.filter((row) => row.pane === "side").map(toTab),
     };
-  }, [state.projectId, state.inspectorTabs, projectId]);
+  }, [state.projectId, state.inspectorTabs, projectId, t]);
   const fileTabs = useMemo(() => [...paneTabs.main, ...paneTabs.side], [paneTabs]);
   const scopedIds = useMemo(() => fileTabs.map((tab) => tab.id), [fileTabs]);
 
@@ -191,6 +202,26 @@ export function useRightPanel(projectId: string | null) {
     rememberedTab.current.set(projectId, inspectorTabId(projectId, row));
     setState((current) => openInspectorTab(current, row));
   }, [projectId]);
+
+  // The reader pressed "open in the canvas" on an artifact in the transcript.
+  // Unlike a click in the tree — a panel that is already in front of them —
+  // this can arrive with the shell collapsed or with a channel on screen, so it
+  // has to claim the lane: `openInspectorTab` expands the shell, switches the
+  // active lane to the inspector and focuses the pane it landed in. That is the
+  // whole reason it is not routed through `openInspector`'s file row.
+  const openArtifact = useCallback((
+    input: { sessionId: string; artifactId: string; name: string },
+    pane: InspectorPane = "main",
+  ) => {
+    if (!projectId) return;
+    // Before hydration the state still belongs to the previous Project, and the
+    // hydrate effect replaces it wholesale: a row added now would be erased a frame
+    // later. Refusing is honest — the caller's click is lost, not misfiled.
+    if (hydratedFor !== projectId) return;
+    const row: PersistedInspectorTab = { kind: "artifact", ...input, pane };
+    rememberedTab.current.set(projectId, inspectorTabId(projectId, row));
+    setState((current) => openInspectorTab(current, row));
+  }, [hydratedFor, projectId]);
 
   // Selecting a row only moves the selection; its remembered row is already
   // there. An id that names no remembered row cannot be opened — the id comes
@@ -274,6 +305,7 @@ export function useRightPanel(projectId: string | null) {
     activeChannelId,
     setActiveTabId,
     openInspector,
+    openArtifact,
     closeTab,
     reorderTabs,
     closeChannelTab,

@@ -684,18 +684,22 @@ button:disabled { cursor: default; }
 .artifact-result { min-width: 0; background: var(--bg); }
 .artifact-result + .artifact-result { border-top: 1px solid var(--border); }
 .artifact-result-header {
-  display: grid; grid-template-columns: 22px minmax(120px, 1fr) minmax(120px, auto) 30px;
+  display: grid; grid-template-columns: 22px minmax(120px, 1fr) minmax(120px, auto) 30px 30px;
   min-height: 40px; align-items: center; gap: 8px; padding: 5px 10px;
 }
 .artifact-result-icon { display: grid; place-items: center; color: var(--accent); }
 .artifact-result-name { min-width: 0; overflow: hidden; color: var(--text); font-size: var(--text-sm); font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .artifact-result-meta { min-width: 0; overflow: hidden; color: var(--text-muted); font: var(--text-xs) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
-.artifact-download {
+.artifact-download, .artifact-canvas-open {
   display: grid; width: 30px; height: 30px; place-items: center;
   border: 1px solid transparent; border-radius: var(--radius-xs);
   color: var(--text-muted); text-decoration: none;
 }
-.artifact-download:hover, .artifact-download:focus-visible { border-color: var(--border); background: var(--bg-hover); color: var(--text); }
+/* A button, not a link: the same box, minus the user-agent chrome that would
+   otherwise give it its own background and padding. */
+.artifact-canvas-open { padding: 0; background: none; cursor: pointer; }
+.artifact-download:hover, .artifact-download:focus-visible,
+.artifact-canvas-open:hover, .artifact-canvas-open:focus-visible { border-color: var(--border); background: var(--bg-hover); color: var(--text); }
 .artifact-preview-state { min-height: 76px; display: grid; place-items: center; padding: 12px; border-top: 1px solid var(--border); color: var(--text-muted); font: var(--text-xs) var(--font-mono); }
 .artifact-preview-state.is-error { color: var(--danger); }
 .artifact-image-preview { position: relative; min-height: 180px; margin: 0; padding: 12px; overflow: auto; border-top: 1px solid var(--border); background: var(--bg-panel); }
@@ -734,6 +738,25 @@ button:disabled { cursor: default; }
 .artifact-text-preview { border-top: 1px solid var(--border); }
 .artifact-text-preview pre { max-height: 360px; margin: 0; padding: 10px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-muted); font: var(--text-xs)/1.5 var(--font-mono); }
 .artifact-text-preview span { display: block; min-height: 28px; padding: 6px 10px; border-top: 1px solid var(--border); color: var(--warning); font-size: var(--text-xs); }
+
+/* An artifact drawn in the inspector lane. The pane scrolls, not the frame: a
+   widget reports its own height and must not also be given a scrollbar inside a
+   scrollbar. */
+.artifact-canvas { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.artifact-canvas > * { min-width: 0; }
+/* The lane is far narrower than a message, so the header keeps the name and the
+   download action on one row and drops the mime line under the name. There is no
+   "open in the canvas" column here: this section is already in the canvas. */
+.artifact-canvas .artifact-result-header { grid-template-columns: 22px minmax(0, 1fr) 30px; }
+.artifact-canvas .artifact-result-meta { grid-column: 2; grid-row: 2; padding-bottom: 5px; white-space: normal; overflow-wrap: anywhere; }
+.artifact-canvas .artifact-download { grid-column: 3; grid-row: 1 / span 2; }
+.artifact-canvas-state {
+  display: grid; flex: 1 1 auto; place-items: center; align-content: center; gap: 6px;
+  min-height: 120px; padding: 16px;
+  color: var(--text-muted); font: var(--text-xs) var(--font-mono); text-align: center;
+}
+.artifact-canvas-state.is-error { color: var(--danger); }
+.artifact-canvas-detail { max-width: 100%; overflow-wrap: anywhere; color: var(--text-dim); }
 
 /* Run status */
 .steer-message {
@@ -1141,9 +1164,10 @@ button:disabled { cursor: default; }
   .checkpoint-separator { gap: 7px; }
   .checkpoint-separator details { max-width: 78vw; }
   .checkpoint-separator summary span { display: none; }
-  .artifact-result-header { grid-template-columns: 20px minmax(0, 1fr) 30px; padding-inline: 7px; }
+  .artifact-result-header { grid-template-columns: 20px minmax(0, 1fr) 30px 30px; padding-inline: 7px; }
   .artifact-result-meta { grid-column: 2; grid-row: 2; padding-bottom: 5px; white-space: normal; overflow-wrap: anywhere; }
-  .artifact-download { grid-column: 3; grid-row: 1 / span 2; }
+  .artifact-canvas-open { grid-column: 3; grid-row: 1 / span 2; }
+  .artifact-download { grid-column: 4; grid-row: 1 / span 2; }
   .artifact-image-preview { min-height: 140px; padding: 8px; }
   .approval-heading > div { align-items: flex-start; flex-direction: column; gap: 1px; }
   .approval-actions { display: grid; grid-template-columns: 1fr 1fr; }

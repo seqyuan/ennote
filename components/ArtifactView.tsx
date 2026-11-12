@@ -1,24 +1,49 @@
 "use client";
 
-import { Download, FileCode2, FileText, Image as ImageIcon, Sparkles, Table2 } from "lucide-react";
+import { Download, FileCode2, FileText, Image as ImageIcon, PanelRight, Sparkles, Table2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ArtifactTablePreview } from "@/components/ArtifactTablePreview";
 import { ArtifactWidget } from "@/components/ArtifactWidget";
+import { useT } from "@/components/LocaleProvider";
 import {
   artifactDownloadURL, artifactPreviewURL, formatArtifactSize, isWidgetArtifact,
   type ArtifactReference, type TextPreview,
 } from "@/lib/artifacts";
+import { requestOpenArtifact } from "@/lib/canvas-intent";
 import { apiFetch } from "@/lib/worker-api.client";
 
-export function ArtifactView({ sessionId, artifact }: { sessionId: string; artifact: ArtifactReference }) {
+/**
+ * One artifact row: header, preview, download.
+ *
+ * `inCanvas` is set by the inspector lane, which draws this same section for the
+ * artifact it already contains. The "open in the canvas" action is suppressed
+ * there: a control that re-opens the surface it sits in does nothing, and a
+ * button that does nothing is worse than no button.
+ */
+export function ArtifactView({ sessionId, artifact, inCanvas = false }: {
+  sessionId: string;
+  artifact: ArtifactReference;
+  inCanvas?: boolean;
+}) {
+  const t = useT();
   const previewURL = artifactPreviewURL(sessionId, artifact.artifactId);
   const downloadURL = artifactDownloadURL(sessionId, artifact.artifactId);
+  const openLabel = t("conversation.artifact.openInCanvas", { name: artifact.name });
   return <section className="artifact-result" aria-label={`Artifact ${artifact.name}`}
     data-artifact-kind={artifact.kind} data-artifact-id={artifact.artifactId}>
     <header className="artifact-result-header">
       <span className="artifact-result-icon">{artifactIcon(artifact.kind)}</span>
       <span className="artifact-result-name" title={artifact.name}>{artifact.name}</span>
       <span className="artifact-result-meta">{artifact.mimeType} · {formatArtifactSize(artifact.sizeBytes)}</span>
+      {/* Every kind opens, not just widgets: the lane draws an artifact with the
+          same surface this section uses, so there is no kind left over with
+          nowhere to go. The click only states the intent — the panel decides
+          whether it can honour it. */}
+      {!inCanvas && <button type="button" className="artifact-canvas-open"
+        onClick={() => requestOpenArtifact({ sessionId, artifactId: artifact.artifactId, name: artifact.name })}
+        aria-label={openLabel} title={openLabel}>
+        <PanelRight size={15} aria-hidden="true" />
+      </button>}
       <a className="artifact-download" href={downloadURL} download={artifact.name}
         aria-label={`Download ${artifact.name}`} title={`Download ${artifact.name}`}>
         <Download size={15} aria-hidden="true" />

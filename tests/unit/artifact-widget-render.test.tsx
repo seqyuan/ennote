@@ -36,7 +36,7 @@ describe("artifact widget frame", () => {
     expect(html).not.toContain("allow-top-navigation");
     expect(html).toContain('referrerPolicy="no-referrer"');
     expect(html).toContain("/api/worker/v1/sessions/session-1/artifacts/artifact-widget/preview");
-    expect(html).toContain('data-artifact-id="artifact-widget"');
+    expect(html).toContain('data-widget-artifact="artifact-widget"');
     expect(html).toContain('data-widget-state="loading"');
   });
 
@@ -54,6 +54,18 @@ describe("artifact widget frame", () => {
     }
     const html = renderToStaticMarkup(<ArtifactView sessionId="session-1" artifact={widget()} />);
     expect(html).toContain("lucide-sparkles");
+  });
+
+  it("offers no way to open the canvas from inside the canvas", () => {
+    // The lane draws this same section for the artifact it already contains; a
+    // second "open in the canvas" there would be a control that does nothing.
+    const inMessage = renderToStaticMarkup(<ArtifactView sessionId="session-1" artifact={widget()} />);
+    const inCanvas = renderToStaticMarkup(<ArtifactView sessionId="session-1" artifact={widget()} inCanvas />);
+    expect(inMessage).toContain("artifact-canvas-open");
+    expect(inCanvas).not.toContain("artifact-canvas-open");
+    // Everything else is the same surface, so the lane and the message cannot drift.
+    expect(inCanvas).toContain('sandbox="allow-scripts"');
+    expect(inCanvas).toContain("artifact-download");
   });
 
   it("carries the sandbox constant the Worker's CSP expects", () => {

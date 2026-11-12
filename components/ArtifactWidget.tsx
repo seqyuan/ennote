@@ -147,7 +147,9 @@ export function ArtifactWidget({ sessionId, artifact }: { sessionId: string; art
       key={attempt}
       ref={iframeRef}
       className="artifact-widget-frame"
-      data-artifact-id={artifact.artifactId}
+      // Not `data-artifact-id`: that marks an artifact row, and every spec that
+      // counts rows queries it. A frame is a frame.
+      data-widget-artifact={artifact.artifactId}
       data-widget-attempt={attempt}
       src={previewURL}
       title={t("conversation.artifact.widget.aria", { name: artifact.name })}

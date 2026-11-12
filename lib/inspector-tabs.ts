@@ -92,6 +92,19 @@ export function rowMatchesId(projectId: string, row: InspectorTabRow, tabId: str
 }
 
 /**
+ * Where a newly opened row should go when the caller did not say.
+ *
+ * The side pane exists to compare, and an artifact opened from a transcript has
+ * no other way to reach it: a reader who opens a second canvas wants the first
+ * one still on screen. So the free half wins, and with both taken the new row
+ * lands in the side — main stays the baseline being compared against.
+ * @param active - the selected row per pane.
+ */
+export function nextFreePane(active: Record<InspectorPane, string | null>): InspectorPane {
+  return active.main === null ? "main" : "side";
+}
+
+/**
  * Read a persisted row array, keeping the newest rows and dropping junk.
  *
  * The array is written oldest-first, so trimming drops from the front: a Project

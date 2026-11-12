@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ArrowLeft, Pin, PinOff, Plus } from "lucide-react";
 
+import { ArtifactCanvasTab } from "./ArtifactCanvasTab";
 import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
 import { RightPanelLanes } from "./RightPanelLanes";
@@ -166,7 +167,21 @@ export function RightPanel(props: {
   // one file ends up drawn twice after a stale selection.
   const bodyFor = (tabId: string | null, tabs: typeof fileTabs) => {
     const tab = tabs.find((candidate) => candidate.id === tabId);
-    if (!tab?.projectId || !tab.filePath || tab.projectId !== projectId) return null;
+    if (!tab?.projectId || tab.projectId !== projectId) return null;
+    // An artifact row carries no path, so it must be branched on before the
+    // path check: keeping the old `!tab.filePath` bail first would leave every
+    // artifact tab permanently blank. The key is the tab id, so switching from
+    // one artifact to another remounts instead of showing the previous one's
+    // bytes while the next fetch is in flight.
+    if (tab.artifact) {
+      return <ArtifactCanvasTab
+        key={tab.id}
+        sessionId={tab.artifact.sessionId}
+        artifactId={tab.artifact.artifactId}
+        name={tab.label}
+      />;
+    }
+    if (!tab.filePath) return null;
     return <FileViewer projectId={tab.projectId} filePath={tab.filePath} fileName={tab.label} />;
   };
   const mainBody = bodyFor(panel.activePanes.main, panel.paneTabs.main);

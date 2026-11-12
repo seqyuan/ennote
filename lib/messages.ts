@@ -474,6 +474,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "conversation.artifact.widget.timeout": "Interactive preview did not respond. The frame is still there; retrying reloads it.",
     "conversation.artifact.widget.retry": "Retry",
     "conversation.artifact.widget.viewSource": "Download source",
+    "conversation.artifact.openInCanvas": "Open {name} in the canvas",
     "conversation.thinking.reasoning": "Reasoning",
     "conversation.attention.title": "Attention",
     "conversation.attention.aria": "Attention ({count})",
@@ -548,6 +549,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     "rightPanel.resizeNavigator": "Resize the file navigator",
     "rightPanel.runsCount": "{count} runs",
     "rightPanel.needsAttention": "Waiting for you",
+    "rightPanel.artifact.untitled": "Artifact",
+    "rightPanel.artifact.loading": "Loading artifact…",
+    "rightPanel.artifact.loadFailed": "{name} could not be loaded.",
   },
   "zh-CN": {
     "general.title": "通用",
@@ -1017,6 +1021,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     "conversation.artifact.widget.timeout": "交互预览没有响应。画布仍在原处，重试会重新加载。",
     "conversation.artifact.widget.retry": "重试",
     "conversation.artifact.widget.viewSource": "下载源码",
+    "conversation.artifact.openInCanvas": "在画布中打开 {name}",
     "conversation.thinking.reasoning": "推理过程",
     "conversation.attention.title": "待处理",
     "conversation.attention.aria": "待处理（{count}）",
@@ -1089,6 +1094,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     "rightPanel.resizeNavigator": "调整文件导航宽度",
     "rightPanel.runsCount": "{count} 个运行",
     "rightPanel.needsAttention": "等待你处理",
+    "rightPanel.artifact.untitled": "产物",
+    "rightPanel.artifact.loading": "正在加载产物…",
+    "rightPanel.artifact.loadFailed": "{name} 加载失败，它可能已被删除。",
   },
 };
 
