@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/artifacts"
@@ -127,6 +128,44 @@ func TestPublishArtifactKeepsItsExecutionAndRiskClass(t *testing.T) {
 	definition := tool.Definition()
 	assert.Equal(t, domain.RiskLocalWrite, definition.RiskClass)
 	assert.Contains(t, string(definition.Parameters), `"widget"`)
+}
+
+// Publishing an .html as static_html is a lossy preview, and the model — the only
+// actor that can still fix it — is the one told about it. A clean page says
+// nothing extra, because a warning on every publish is a warning on none.
+func TestPublishArtifactWarnsWhenThePreviewWillDropContent(t *testing.T) {
+	manager, sink := setupArtifactTool(t)
+	tool := &PublishArtifactTool{Jail: manager.Jail, Sink: sink}
+	publish := func(name string, body string) domain.ToolResult {
+		require.NoError(t, os.WriteFile(filepath.Join(manager.Jail.Root(), name), []byte(body), 0o600))
+		result, err := tool.Execute(context.Background(), domain.ToolCall{ID: "call-" + name, Name: "publish_artifact",
+			Arguments: json.RawMessage(`{"path":"/workspace/` + name + `"}`)})
+		require.NoError(t, err)
+		require.False(t, result.IsError, result.Content)
+		return result
+	}
+
+	chart := publish("chart.html", `<svg viewBox="0 0 10 10"></svg><script>void 0</script>`)
+	assert.Contains(t, chart.Content, "warning: the preview drops svg, script")
+	assert.Contains(t, chart.Content, `publish with kind "widget" to keep them interactive`)
+	// The content still leads with the published-artifact line: the warning is an
+	// addition, not a replacement.
+	assert.True(t, strings.HasPrefix(chart.Content, `published artifact "chart.html"`), chart.Content)
+
+	single := publish("plot.html", `<canvas id="c"></canvas>`)
+	assert.Contains(t, single.Content, "warning: the preview drops canvas; publish with kind \"widget\" to keep it interactive")
+
+	clean := publish("table.html", `<table><tr><td>A</td></tr></table>`)
+	assert.NotContains(t, clean.Content, "warning:")
+
+	// A widget keeps the same bytes, so there is nothing to warn about.
+	require.NoError(t, os.WriteFile(filepath.Join(manager.Jail.Root(), "canvas.html"),
+		[]byte(`<svg viewBox="0 0 10 10"></svg><script>void 0</script>`), 0o600))
+	widget, err := tool.Execute(context.Background(), domain.ToolCall{ID: "call-w", Name: "publish_artifact",
+		Arguments: json.RawMessage(`{"path":"/workspace/canvas.html","kind":"widget"}`)})
+	require.NoError(t, err)
+	require.False(t, widget.IsError, widget.Content)
+	assert.NotContains(t, widget.Content, "warning:")
 }
 
 func TestExecRetainsCompleteStdoutWhenPreviewTruncates(t *testing.T) {

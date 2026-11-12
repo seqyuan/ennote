@@ -19,15 +19,24 @@ type ArtifactSink struct {
 
 func (s *ArtifactSink) Publish(ctx context.Context, toolCallID, name, sourceKind, workspacePath string,
 	source io.Reader) (domain.ArtifactReference, error) {
-	return s.PublishAs(ctx, toolCallID, name, sourceKind, workspacePath, "", source)
+	artifact, err := s.PublishAs(ctx, toolCallID, name, sourceKind, workspacePath, "", source)
+	if err != nil {
+		return domain.ArtifactReference{}, err
+	}
+	return artifact.Reference(), nil
 }
 
 // PublishAs is Publish with an asserted kind. Only `publish_artifact` asks for one;
 // command output and every other sink caller keeps the inferred behaviour.
+//
+// It returns the stored artifact rather than its reference because publish_artifact
+// also has to tell the model what the preview will drop, and that hint is not part
+// of ArtifactReference (which is the message contract). The reference stays the
+// only thing the other callers see, through Publish.
 func (s *ArtifactSink) PublishAs(ctx context.Context, toolCallID, name, sourceKind, workspacePath, kind string,
-	source io.Reader) (domain.ArtifactReference, error) {
+	source io.Reader) (*domain.Artifact, error) {
 	if s == nil || s.Service == nil {
-		return domain.ArtifactReference{}, fmt.Errorf("artifact service is unavailable")
+		return nil, fmt.Errorf("artifact service is unavailable")
 	}
 	artifact, err := s.Service.Store(ctx, artifacts.PublishInput{
 		ProjectID: s.ProjectID, SessionID: s.SessionID, RunID: s.RunID, ToolCallID: toolCallID,
@@ -35,9 +44,9 @@ func (s *ArtifactSink) PublishAs(ctx context.Context, toolCallID, name, sourceKi
 		Kind: kind,
 	}, source)
 	if err != nil {
-		return domain.ArtifactReference{}, err
+		return nil, err
 	}
-	return artifact.Reference(), nil
+	return artifact, nil
 }
 
 func describeArtifacts(references []domain.ArtifactReference) string {

@@ -45,6 +45,17 @@ type Artifact struct {
 	SourceWorkspacePath string    `json:"-"`
 	RetentionClass      string    `json:"retentionClass"`
 	CreatedAt           time.Time `json:"createdAt"`
+	// PreviewDrops names the kinds of content the static HTML preview will
+	// strip (svg, script, an inline on* handler, ...). It is `json:"-"` because
+	// it is a hint derived from stored metadata, not part of the artifact
+	// contract: GET /artifacts/{id} keeps its exact shape, the web client learns
+	// about drops from the preview document itself, and only the publishing tool
+	// and the preview need the list on the server side.
+	PreviewDrops []string `json:"-"`
+	// PreviewDropsTotal is how many kinds were found before PreviewDrops was
+	// capped, so a notice can say "and 3 more" instead of stating a total that
+	// is only the part it had room for.
+	PreviewDropsTotal int `json:"-"`
 }
 
 func (a Artifact) Reference() ArtifactReference {

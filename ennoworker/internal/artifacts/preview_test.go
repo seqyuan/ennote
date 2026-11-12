@@ -96,11 +96,16 @@ func TestStaticHTMLPreviewRemovesActiveContent(t *testing.T) {
 	_, preview, err := service.PreviewHTML(context.Background(), artifact.ID, "s")
 	require.NoError(t, err)
 	assert.Contains(t, preview, "Report")
-	assert.NotContains(t, preview, "script")
+	// Asserted on markup, not on words: the drop notice legitimately names "script",
+	// "form" and "on*" in its sentence, so only the tags themselves can show that
+	// the sanitizer worked.
+	assert.NotContains(t, preview, "<script")
 	assert.NotContains(t, preview, "onclick")
-	assert.NotContains(t, preview, "form")
+	assert.NotContains(t, preview, "<form")
+	assert.NotContains(t, preview, "<input")
 	assert.NotContains(t, preview, "https://example.test")
 	assert.Contains(t, preview, "data:image/png")
+	assert.Contains(t, preview, "This preview drops 4 kinds of content: script, on*, form, input.")
 }
 
 func TestArtifactServiceSerializesQuotaAndReconcilesOrphans(t *testing.T) {

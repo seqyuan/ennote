@@ -219,8 +219,23 @@ func TestArtifactMetadataPreviewDownloadAndSessionScope(t *testing.T) {
 	require.Equal(t, http.StatusOK, htmlPreview.Code, htmlPreview.Body.String())
 	assert.Contains(t, htmlPreview.Header().Get("Content-Security-Policy"), "default-src 'none'")
 	assert.Contains(t, htmlPreview.Header().Get("Content-Security-Policy"), "sandbox")
-	assert.NotContains(t, htmlPreview.Body.String(), "script")
+	// Asserted on markup, not on words: the notice below names "on*" and "script".
+	assert.NotContains(t, htmlPreview.Body.String(), "<script")
 	assert.NotContains(t, htmlPreview.Body.String(), "onclick")
+	assert.Contains(t, htmlPreview.Body.String(), "This preview drops",
+		"the reader is told what the preview dropped")
+
+	// The hint is server-side only. GET /artifacts/{id} keeps its exact shape: no
+	// hint key may appear, or every generated client type would change and the
+	// contract sample would drift. Asserted on the field's own spelling — dropping
+	// `json:"-"` renders the Go name, so a lower-case check would miss exactly the
+	// regression it is here for.
+	htmlMetadata := request(t, handler, http.MethodGet,
+		"/v1/sessions/"+session.ID+"/artifacts/"+htmlArtifact.ID, nil, true)
+	require.Equal(t, http.StatusOK, htmlMetadata.Code, htmlMetadata.Body.String())
+	assert.NotContains(t, htmlMetadata.Body.String(), "PreviewDrops")
+	assert.NotContains(t, htmlMetadata.Body.String(), "previewDropped")
+	assert.NotContains(t, htmlMetadata.Body.String(), "previewDrops")
 
 	// A widget is the same route with the opposite policy: bytes served verbatim
 	// under a script-allowing sandbox, because sanitizing it would delete the SVG it

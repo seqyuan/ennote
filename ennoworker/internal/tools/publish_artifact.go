@@ -96,13 +96,40 @@ func (t *PublishArtifactTool) Execute(ctx context.Context, call domain.ToolCall)
 	if name == "" {
 		name = filepath.Base(resolved)
 	}
-	reference, err := t.Sink.PublishAs(ctx, call.ID, name, "workspace_publish", displayPath, kind, file)
+	artifact, err := t.Sink.PublishAs(ctx, call.ID, name, "workspace_publish", displayPath, kind, file)
 	if err != nil {
 		return errorResult(call, err), nil
 	}
+	content := describeArtifacts([]domain.ArtifactReference{artifact.Reference()})
+	if note := previewDropWarning(artifact.PreviewDrops, artifact.PreviewDropsTotal); note != "" {
+		content += "\n" + note
+	}
 	return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name,
-		Content:   describeArtifacts([]domain.ArtifactReference{reference}),
-		Artifacts: []domain.ArtifactReference{reference}}, nil
+		Content:   content,
+		Artifacts: []domain.ArtifactReference{artifact.Reference()}}, nil
+}
+
+// previewDropWarning is what turns a silent loss into a decision the model can
+// still reverse: the same bytes published as a widget keep the SVG, the script
+// and the interactivity, because a widget is served verbatim in a sandboxed
+// frame. Empty drops produce no line at all, so a clean publish reads exactly as
+// before.
+func previewDropWarning(drops []string, total int) string {
+	if len(drops) == 0 {
+		return ""
+	}
+	listed := strings.Join(drops, ", ")
+	if total > len(drops) {
+		// The list is capped, and the model must not read the cap as the whole
+		// answer: fixing only the shown kinds and republishing drops the rest again.
+		listed = fmt.Sprintf("%s (and %d more)", listed, total-len(drops))
+	}
+	pronoun := "them"
+	if total == 1 {
+		pronoun = "it"
+	}
+	return fmt.Sprintf("warning: the preview drops %s; publish with kind %q to keep %s interactive",
+		listed, domain.ArtifactKindWidget, pronoun)
 }
 
 func openedWorkspacePath(jail *workspace.Jail, file *os.File) (string, error) {

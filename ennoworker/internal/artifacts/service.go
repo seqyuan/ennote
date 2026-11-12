@@ -190,6 +190,7 @@ func (s *Service) Store(ctx context.Context, input PublishInput, source io.Reade
 		return nil, err
 	}
 
+	drops, dropsTotal := previewDropsFromMetadata(metadata)
 	now := time.Now().UTC()
 	retention := strings.TrimSpace(input.RetentionClass)
 	if retention == "" {
@@ -205,6 +206,11 @@ func (s *Service) Store(ctx context.Context, input PublishInput, source io.Reade
 		SHA256: hex.EncodeToString(hash.Sum(nil)), Width: width, Height: height,
 		SourceToolCallID: input.ToolCallID, SourceKind: sourceKind,
 		SourceWorkspacePath: input.SourceWorkspacePath, RetentionClass: retention, CreatedAt: now,
+		// Filled from the classification metadata so the publishing tool can warn
+		// about drops on a freshly stored artifact, without a round trip through
+		// the row it just wrote.
+		PreviewDrops:      drops,
+		PreviewDropsTotal: dropsTotal,
 	}
 	metadataJSON, _ := json.Marshal(metadata)
 	_, err = s.DB.ExecContext(ctx, `INSERT INTO artifacts
@@ -240,11 +246,14 @@ func (s *Service) GetForSession(ctx context.Context, artifactID, sessionID strin
 	}
 	artifact.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
 	var metadata struct {
-		Width  int `json:"width"`
-		Height int `json:"height"`
+		Width             int      `json:"width"`
+		Height            int      `json:"height"`
+		PreviewDrops      []string `json:"previewDrops"`
+		PreviewDropsTotal int      `json:"previewDropsTotal"`
 	}
 	_ = json.Unmarshal([]byte(metadataJSON), &metadata)
 	artifact.Width, artifact.Height = metadata.Width, metadata.Height
+	artifact.PreviewDrops, artifact.PreviewDropsTotal = metadata.PreviewDrops, metadata.PreviewDropsTotal
 	return &artifact, nil
 }
 
@@ -374,6 +383,13 @@ func classifyArtifact(path, name string, size, maxPixels int64, wantKind string)
 	case ".html", ".htm":
 		if !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
 			return "", "", 0, 0, nil, fmt.Errorf("%w: HTML must be UTF-8 text", ErrArtifactInvalid)
+		}
+		// Record what the preview will drop, so the loss is announced instead of
+		// silent. The document itself is stored untouched — the artifact is still
+		// the user's file; only the preview narrows it.
+		if drops, total := scanPreviewDrops(data); len(drops) > 0 {
+			metadata[previewDropsMetadataKey] = drops
+			metadata[previewDropsTotalKey] = total
 		}
 		return domain.ArtifactKindStaticHTML, "text/html; charset=utf-8", 0, 0, metadata, nil
 	case ".txt", ".log", ".out", ".err":

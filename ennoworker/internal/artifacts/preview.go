@@ -8,6 +8,7 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"strings"
 	"unicode/utf8"
@@ -109,7 +110,10 @@ func (s *Service) PreviewHTML(ctx context.Context, artifactID, sessionID string)
 	if artifact.Kind != domain.ArtifactKindStaticHTML || !utf8.Valid(data) {
 		return artifact, "", ErrPreviewUnsupported
 	}
-	return artifact, sanitizeStaticHTML(string(data)), nil
+	// The notice is concatenated after sanitizing, never through the policy: it is
+	// Worker-authored markup, and a sanitizer pass over it would only prove that
+	// the allowlist still allows the tags the Worker itself emits.
+	return artifact, sanitizeStaticHTML(string(data), artifact.PreviewDrops, artifact.PreviewDropsTotal), nil
 }
 
 // PreviewWidget is the opposite of PreviewHTML on purpose. A static page is
@@ -274,7 +278,41 @@ func validateXLSXArchive(data []byte) error {
 	return nil
 }
 
-func sanitizeStaticHTML(input string) string {
+// previewDropNotice is the reader-facing half of the previewDrops hint. It is
+// built here rather than in the client because the preview document is served on
+// its own with no locale and no script; the sentence has to travel with it.
+// Everything interpolated is escaped — the tag names come from a fixed allowlist
+// today, but this is the only place they meet a document.
+func previewDropNotice(drops []string, total int) string {
+	if len(drops) == 0 {
+		return ""
+	}
+	if total < len(drops) {
+		total = len(drops)
+	}
+	more := total - len(drops)
+	noun := "kinds"
+	if total == 1 {
+		noun = "kind"
+	}
+	andMore := ""
+	if more > 0 {
+		andMore = fmt.Sprintf(" (and %d more)", more)
+	}
+	// Inline with `!important` on the two properties that decide visibility: the
+	// sanitizer keeps the document's own <style>, and it comes after ours, so a
+	// `display:none` rule in the published file would hide this notice. A report
+	// that can hide its own warning is a report the reader cannot trust.
+	return fmt.Sprintf(`<p class="ennote-preview-notice" role="note" `+
+		`style="display:block!important;visibility:visible!important;margin:0 0 12px;`+
+		`padding:8px 10px;border:1px solid #d1d5db;border-left:3px solid #6b7280;`+
+		`background:#f9fafb;color:#111827;font:13px/1.45 system-ui,sans-serif">`+
+		`This preview drops %d %s of content: %s%s. The published file is unchanged.`+
+		`</p>`,
+		total, noun, html.EscapeString(strings.Join(drops, ", ")), andMore)
+}
+
+func sanitizeStaticHTML(input string, drops []string, total int) string {
 	policy := bluemonday.NewPolicy()
 	policy.AllowElements(
 		"html", "head", "body", "title", "style", "main", "section", "article", "header", "footer",
@@ -290,6 +328,7 @@ func sanitizeStaticHTML(input string) string {
 	clean := policy.Sanitize(input)
 	return "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
 		"<style>html{color-scheme:light}body{margin:0;padding:16px;background:#fff;color:#111827;font:14px system-ui,sans-serif;overflow-wrap:anywhere}" +
-		"img{max-width:100%;height:auto}table{border-collapse:collapse;max-width:100%}th,td{border:1px solid #d1d5db;padding:4px 6px;text-align:left}</style>" +
-		"</head><body>" + clean + "</body></html>"
+		"img{max-width:100%;height:auto}table{border-collapse:collapse;max-width:100%}th,td{border:1px solid #d1d5db;padding:4px 6px;text-align:left}" +
+		"</style>" +
+		"</head><body>" + previewDropNotice(drops, total) + clean + "</body></html>"
 }
