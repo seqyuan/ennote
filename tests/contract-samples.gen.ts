@@ -448,6 +448,32 @@ export const moveProjectFileEntry200: WorkerOperationResponse<"moveProjectFileEn
   }
 };
 
+/** previewArtifact answering 200. */
+export const previewArtifact200: WorkerOperationResponse<"previewArtifact", 200> = {
+  "data": {
+    "columnLimit": 30,
+    "columns": [
+      "gene",
+      "value"
+    ],
+    "format": "xlsx",
+    "rowLimit": 100,
+    "rows": [
+      [
+        "TP53",
+        "7"
+      ]
+    ],
+    "sheet": "summary",
+    "sheets": [
+      "summary",
+      "details"
+    ],
+    "truncatedColumns": false,
+    "truncatedRows": false
+  }
+};
+
 /** submitInvocation answering 202. */
 export const submitInvocation202: WorkerOperationResponse<"submitInvocation", 202> = {
   "data": {

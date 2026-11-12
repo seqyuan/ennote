@@ -22,6 +22,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
 	"github.com/stretchr/testify/require"
+	"github.com/xuri/excelize/v2"
 )
 
 // Contract samples: the JSON the Worker answers for a route, stored per
@@ -608,6 +609,62 @@ func TestContractSamples(t *testing.T) {
 	samples.record(contractSampleRequest{
 		method: http.MethodGet, route: "/v1/sessions/{sessionID}/artifacts/{artifactID}", auth: true,
 		values: map[string]string{"sessionID": session.ID, "artifactID": storedWidget.ID},
+		status: http.StatusOK,
+	})
+
+	// `previewArtifact` declares 200 as JSON for two kinds — `TablePreview` and
+	// `TextPreview` — and as bytes or sanitized HTML for the rest. Neither JSON
+	// shape had a sample, so `sheets`/`sheet`, the two limits and the truncation
+	// flags were never checked against the type the contract promises.
+	//
+	// One record can pin one branch: the sample is named after the operation and the
+	// status, not the kind that produced the body, so `previewArtifact-200.json` is a
+	// single artifact. The XLSX answer is the widest one — `sheets` and `sheet` are
+	// `omitempty` in TablePreview and only a workbook populates them — so the sample
+	// is a workbook with two worksheets rather than a CSV. The TextPreview branch
+	// (`text`, `truncated`) is therefore still uncovered; the declared `oneOf` means
+	// tsc accepts either member at this status — and, because both members are closed
+	// objects rather than exhaustively discriminated, it also accepts a mixture — so
+	// no single sample can prove the branch chosen. `truncatedRows` is covered only as
+	// `false`: `true` needs 101 rows, which is a fixture dump rather than a shape.
+	// `truncatedColumns` could be covered cheaply (31 columns) and is not, deliberately
+	// — a wide workbook would stop being the shape an ordinary preview answers with.
+	//
+	// The worksheet is not chosen through `?sheet=`: the helper resolves the
+	// operation from the route as the contract spells it, and a query string in that
+	// string would stop resolving. The default worksheet fills both fields anyway,
+	// so the query parameter stays what it is — behaviour pinned by
+	// TestServicePreviewsCSVTSVAndXLSX, not by a shape sample.
+	//
+	// Recorded after `getArtifact`, like every addition before it: the normaliser
+	// numbers its stand-ins in encounter order, so an artifact seeded earlier would
+	// renumber the ids of the samples recorded after it and turn one added sample
+	// into a diff across the directory.
+	workbook := excelize.NewFile()
+	defer func() { _ = workbook.Close() }()
+	firstSheet := workbook.GetSheetName(0)
+	require.NoError(t, workbook.SetSheetName(firstSheet, "summary"))
+	for _, cell := range []struct {
+		at    string
+		value any
+	}{{"A1", "gene"}, {"B1", "value"}, {"A2", "TP53"}, {"B2", 7}} {
+		require.NoError(t, workbook.SetCellValue("summary", cell.at, cell.value))
+	}
+	_, err = workbook.NewSheet("details")
+	require.NoError(t, err)
+	require.NoError(t, workbook.SetCellValue("details", "A1", "sample"))
+	require.NoError(t, workbook.SetCellValue("details", "A2", "S1"))
+	var encodedWorkbook bytes.Buffer
+	require.NoError(t, workbook.Write(&encodedWorkbook))
+	storedWorkbook, err := server.Artifacts.ForScope(sessionDB, filepath.Join(sessionPath, "artifacts")).Store(
+		context.Background(), artifacts.PublishInput{
+			ProjectID: project.Project.ID, SessionID: session.ID, Name: "results.xlsx",
+			SourceKind: "workspace_publish", RetentionClass: "project", Kind: domain.ArtifactKindTable,
+		}, bytes.NewReader(encodedWorkbook.Bytes()))
+	require.NoError(t, err)
+	samples.record(contractSampleRequest{
+		method: http.MethodGet, route: "/v1/sessions/{sessionID}/artifacts/{artifactID}/preview", auth: true,
+		values: map[string]string{"sessionID": session.ID, "artifactID": storedWorkbook.ID},
 		status: http.StatusOK,
 	})
 

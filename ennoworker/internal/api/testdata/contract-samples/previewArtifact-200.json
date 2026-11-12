@@ -1,0 +1,24 @@
+{
+  "data": {
+    "columnLimit": 30,
+    "columns": [
+      "gene",
+      "value"
+    ],
+    "format": "xlsx",
+    "rowLimit": 100,
+    "rows": [
+      [
+        "TP53",
+        "7"
+      ]
+    ],
+    "sheet": "summary",
+    "sheets": [
+      "summary",
+      "details"
+    ],
+    "truncatedColumns": false,
+    "truncatedRows": false
+  }
+}
