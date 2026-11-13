@@ -33,6 +33,22 @@ type globalGraphDetail struct {
 	Document      *graphsource.Document `json:"document"`
 }
 
+// graphDetailFor builds the detail response every Graph endpoint returns. The
+// caller supplies the digest it just computed, but latestVersion always comes from
+// the published revisions so create, read, update and builder-apply agree: a
+// Graph with no revision answers 0, and a listing failure is reported as 0 rather
+// than failing a response that already succeeded.
+func (s *Server) graphDetailFor(sources *globalsource.Store, document *graphsource.Document, digest string) globalGraphDetail {
+	detail := globalGraphDetail{
+		ID: document.ID, Name: document.Name, Digest: digest, Document: document,
+		Path: sources.GraphsDir() + "/" + document.ID + "/graph.yaml",
+	}
+	if revisions, err := sources.ListGraphRevisions(document.ID); err == nil && len(revisions) > 0 {
+		detail.LatestVersion = revisions[len(revisions)-1].Version
+	}
+	return detail
+}
+
 // errGraphValidationUnavailable reports that the publish could not be validated
 // because a dependency the Worker needs is missing, which is a 503 and not the
 // author's 422.
@@ -99,9 +115,7 @@ func (s *Server) createGlobalGraph(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusUnprocessableEntity, "graph_create_failed", err.Error(), false)
 		return
 	}
-	writeData(w, http.StatusCreated, globalGraphDetail{
-		ID: document.ID, Name: document.Name, Path: sources.GraphsDir() + "/" + document.ID + "/graph.yaml", Digest: digest, Document: document,
-	})
+	writeData(w, http.StatusCreated, s.graphDetailFor(sources, document, digest))
 }
 
 func (s *Server) getGlobalGraph(w http.ResponseWriter, r *http.Request) {
@@ -115,14 +129,7 @@ func (s *Server) getGlobalGraph(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusNotFound, "graph_not_found", err.Error(), false)
 		return
 	}
-	latestVersion := 0
-	if revisions, revisionErr := sources.ListGraphRevisions(id); revisionErr == nil && len(revisions) > 0 {
-		latestVersion = revisions[len(revisions)-1].Version
-	}
-	writeData(w, http.StatusOK, globalGraphDetail{
-		ID: id, Name: document.Name, Path: sources.GraphsDir() + "/" + id + "/graph.yaml",
-		Digest: digest, LatestVersion: latestVersion, Document: document,
-	})
+	writeData(w, http.StatusOK, s.graphDetailFor(sources, document, digest))
 }
 
 func (s *Server) publishGlobalGraph(w http.ResponseWriter, r *http.Request) {
@@ -328,7 +335,9 @@ func (s *Server) updateGlobalGraph(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if body.Dependencies != nil {
-			document.Graph[body.Dependencies.TaskID] = append([]string(nil), body.Dependencies.Depends...)
+			// A supplied but empty dependency list must answer [] and not null, so
+			// the mutation response matches the array type the contract declares.
+			document.Graph[body.Dependencies.TaskID] = append([]string{}, body.Dependencies.Depends...)
 		}
 		return nil
 	})
@@ -340,9 +349,7 @@ func (s *Server) updateGlobalGraph(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusUnprocessableEntity, "graph_invalid", err.Error(), false)
 		return
 	}
-	writeData(w, http.StatusOK, globalGraphDetail{
-		ID: document.ID, Name: document.Name, Path: sources.GraphsDir() + "/" + document.ID + "/graph.yaml", Digest: digest, Document: document,
-	})
+	writeData(w, http.StatusOK, s.graphDetailFor(sources, document, digest))
 }
 
 // GraphRunStarter starts one file-native Graph Run. graphrun.Service implements

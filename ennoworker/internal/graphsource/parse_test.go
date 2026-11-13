@@ -130,3 +130,48 @@ func TestDigestIsStableAcrossMapAndDependencyOrder(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, firstDigest, secondDigest)
 }
+
+// emptyDependencyDocument is one Task whose Graph entry is dependencies, which
+// keeps the nil-versus-empty distinction the digest and encoder tests are about.
+func emptyDependencyDocument(dependencies []string) *Document {
+	return &Document{
+		SchemaVersion: 1, ID: "rna-seq", Name: "RNA-seq",
+		Tasks: map[string]Task{"align": {Name: "Align", Model: "anthropic/claude-sonnet-4", Goal: "Align reads."}},
+		Graph: map[string][]string{"align": dependencies},
+	}
+}
+
+// A Graph with no dependencies is the same Graph whether its in-memory list is nil
+// or empty: the digest hashes both alike. That is why the empty slice is
+// materialised in the encoder, not in clone or normalizeAndValidate.
+func TestSourceDigestTreatsNilAndEmptyDependencyListsAlike(t *testing.T) {
+	nilDigest, err := SourceDigest(emptyDependencyDocument(nil))
+	require.NoError(t, err)
+	emptyDigest, err := SourceDigest(emptyDependencyDocument([]string{}))
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(nilDigest, "sha256:"))
+	assert.Equal(t, nilDigest, emptyDigest)
+}
+
+// An empty dependency list is an empty array in the file, not null, so every
+// reader of graph.yaml gets the array type the contract declares.
+func TestEncodeWritesEmptyDependencyListAsArray(t *testing.T) {
+	encoded, err := Encode(emptyDependencyDocument(nil))
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), "align: []")
+	assert.NotContains(t, string(encoded), "null")
+
+	reparsed, err := Parse(encoded)
+	require.NoError(t, err)
+	require.Contains(t, reparsed.Graph, "align")
+	assert.Empty(t, reparsed.Graph["align"])
+	assert.NotNil(t, reparsed.Graph["align"], "the encoded Graph must parse back to an empty list, not nil")
+
+	// A file that carried null before this change keeps its digest when it is
+	// rewritten as an array, so no client has to reload over a phantom conflict.
+	originalDigest, err := SourceDigest(emptyDependencyDocument(nil))
+	require.NoError(t, err)
+	reparsedDigest, err := SourceDigest(reparsed)
+	require.NoError(t, err)
+	assert.Equal(t, originalDigest, reparsedDigest)
+}

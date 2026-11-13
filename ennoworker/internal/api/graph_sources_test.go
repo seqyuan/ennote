@@ -11,6 +11,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
+	"github.com/seqyuan/ennote/ennoworker/internal/graphbuilder"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
@@ -275,6 +276,100 @@ func TestGlobalGraphPublishReportsMissingSkillCatalogAsUnavailable(t *testing.T)
 	assert.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
 	assert.Contains(t, response.Body.String(), "unknown skill")
 	assert.NotContains(t, response.Body.String(), "graph_validation_unavailable")
+}
+
+// A Graph with no dependency on anything still has to answer an array. A nil
+// slice would encode as null, which the contract's array type does not allow, and
+// the null would then stick for every later read because the file carries it too.
+func TestGlobalGraphEmptyDependenciesStayAnArray(t *testing.T) {
+	_, handler, home := setupGlobalGraphServer(t)
+
+	response := request(t, handler, http.MethodPost, "/v1/graphs", map[string]any{"id": "rna-seq", "name": "RNA-seq"}, true)
+	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+	var created globalGraphDetail
+	decodeData(t, response, &created)
+
+	response = request(t, handler, http.MethodPatch, "/v1/graphs/rna-seq", map[string]any{
+		"expectedDigest": created.Digest,
+		"task": map[string]any{"id": "align", "value": map[string]any{
+			"name": "Align", "model": "anthropic/claude-sonnet-4", "goal": "Align reads.",
+		}},
+	}, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	decodeData(t, response, &created)
+
+	response = request(t, handler, http.MethodPatch, "/v1/graphs/rna-seq", map[string]any{
+		"expectedDigest": created.Digest,
+		"dependencies":   map[string]any{"taskId": "align", "depends": []string{}},
+	}, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), `"graph":{"align":[]}`)
+
+	contents, err := os.ReadFile(filepath.Join(home, "agents", "graphs", "rna-seq", "graph.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(contents), "align: []")
+
+	written, err := graphsource.Parse(contents)
+	require.NoError(t, err)
+	require.Contains(t, written.Graph, "align")
+	assert.Empty(t, written.Graph["align"])
+	assert.NotNil(t, written.Graph["align"], "the written Graph must parse back to an empty dependency list, not nil")
+
+	// The response after the write has to agree with the response that wrote it.
+	response = request(t, handler, http.MethodGet, "/v1/graphs/rna-seq", nil, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), `"graph":{"align":[]}`)
+}
+
+// Every Graph detail response reports latestVersion from the same published
+// revisions, so a create, a builder apply, a read and an update cannot disagree
+// about which version is current.
+func TestGlobalGraphResponsesReportLatestVersion(t *testing.T) {
+	server := &Server{Token: "test-token", GlobalSources: &globalsource.Store{HomeDir: t.TempDir()}}
+	server.GraphBuilder = &graphbuilder.Service{
+		Sources: server.GlobalSources,
+		Completer: graphbuilder.CompleteFunc(func(context.Context, string, string, string) (string, error) {
+			return `{"message":"Add a merge Task.","operations":[{"kind":"upsert_task","taskId":"merge",` +
+				`"task":{"name":"Merge","model":"anthropic/claude-sonnet-4","goal":"Merge results."}}]}`, nil
+		}),
+	}
+	handler := server.Handler()
+
+	response := request(t, handler, http.MethodPost, "/v1/graphs", map[string]any{"id": "qc", "name": "QC"}, true)
+	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+	var created globalGraphDetail
+	decodeData(t, response, &created)
+	assert.Zero(t, created.LatestVersion, "a Graph without a revision has no latest version")
+
+	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/builder/messages",
+		map[string]any{"modelProfileId": "model-1", "instruction": "Add a merge Task."}, true)
+	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+	var thread graphbuilder.Thread
+	decodeData(t, response, &thread)
+	require.NotNil(t, thread.Proposal)
+
+	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/builder/proposals/"+thread.Proposal.ID+"/apply", nil, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var applied globalGraphDetail
+	decodeData(t, response, &applied)
+	assert.Zero(t, applied.LatestVersion)
+	require.Contains(t, applied.Document.Tasks, "merge")
+
+	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
+	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+
+	response = request(t, handler, http.MethodGet, "/v1/graphs/qc", nil, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var read globalGraphDetail
+	decodeData(t, response, &read)
+	assert.Equal(t, 1, read.LatestVersion)
+
+	response = request(t, handler, http.MethodPatch, "/v1/graphs/qc",
+		map[string]any{"expectedDigest": read.Digest, "name": "QC 2"}, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var updated globalGraphDetail
+	decodeData(t, response, &updated)
+	assert.Equal(t, read.LatestVersion, updated.LatestVersion)
 }
 
 // graphHeroCatalog wires a file-backed Model catalog into a Graph test server

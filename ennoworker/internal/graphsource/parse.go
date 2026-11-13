@@ -99,6 +99,15 @@ func Encode(document *Document) ([]byte, error) {
 	if err := normalizeAndValidate(copy); err != nil {
 		return nil, err
 	}
+	// SourceDigest must keep hashing a nil and an empty dependency list alike, so
+	// neither clone nor normalizeAndValidate may materialise the empty slice. The
+	// YAML writer is the one place the array type is required on disk, so spell
+	// out the empty list here, after validation and immediately before encoding.
+	for id, dependencies := range copy.Graph {
+		if dependencies == nil {
+			copy.Graph[id] = []string{}
+		}
+	}
 	encoded, err := yaml.Marshal(copy)
 	if err != nil {
 		return nil, fmt.Errorf("encode Graph YAML: %w", err)
