@@ -63,6 +63,11 @@ func validSourceKind(kind string) bool {
 }
 
 func (s Store) PublishHeroRevision(id string) (*Revision, error) {
+	// Publishing reads the drafts and then appends the next revision, so it is a
+	// read-then-write on one object: serialise it or two concurrent publishes
+	// both compute the same next version and one fails on the rename.
+	unlock := lockSource(filepath.Join(s.HeroesDir(), id))
+	defer unlock()
 	document, digest, err := s.ReadHero(id)
 	if err != nil {
 		return nil, err
@@ -76,6 +81,9 @@ func (s Store) PublishHeroRevision(id string) (*Revision, error) {
 }
 
 func (s Store) PublishGraphRevision(id string) (*Revision, error) {
+	// See PublishHeroRevision: freezing reads drafts and appends a revision.
+	unlock := lockSource(filepath.Join(s.GraphsDir(), id))
+	defer unlock()
 	document, digest, err := s.ReadGraph(id)
 	if err != nil {
 		return nil, err
@@ -187,6 +195,8 @@ func (s Store) PublishGraphRevision(id string) (*Revision, error) {
 // publish therefore cannot change that revision; the next publish writes a new
 // revision (even when the definition digest is unchanged).
 func (s Store) PublishFlowRevision(id string) (*Revision, error) {
+	unlock := lockSource(filepath.Join(s.GraphsDir(), id))
+	defer unlock()
 	definition, digest, err := s.ReadFlow(id)
 	if err != nil {
 		return nil, err

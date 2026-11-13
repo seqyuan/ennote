@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
@@ -19,6 +20,29 @@ import (
 var objectIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,63}$`)
 
 var ErrConflict = errors.New("source digest conflict")
+
+// sourceLocks serialises mutations per source object directory. It is package
+// level rather than a Store field because Store is a value type with value
+// receivers: sources.UpdateGraph copies Store into its receiver, so a mutex
+// field would be copied per call and each call would lock its own copy,
+// serialising nothing. A keyed registry keeps distinct objects concurrent
+// while forcing mutations of the same object through one mutex.
+//
+// The lock only serialises within this Worker process. An external editor that
+// rewrites a source file concurrently is still governed by the digest
+// comparison, not this registry.
+var sourceLocks sync.Map // map[string]*sync.Mutex
+
+// lockSource acquires the per-key mutex for the source object directory and
+// returns the function that releases it. The returned function must be deferred
+// before a mutate callback runs: a mutate callback must never re-enter a locked
+// method on the same key or it will deadlock.
+func lockSource(key string) func() {
+	value, _ := sourceLocks.LoadOrStore(key, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
 
 // Source kinds share one agent object directory. Exactly one of graph.yaml and
 // flow.yaml exists below an object; revisions record the kind so a graph
@@ -314,6 +338,10 @@ func (s Store) ReadFlow(id string) (*domain.FlowDefinition, string, error) {
 func (s Store) CreateGraph(id, name string) (*graphsource.Document, string, error) {
 	id = strings.TrimSpace(id)
 	name = strings.TrimSpace(name)
+	// Lock after trimming so every caller that names the same object takes the
+	// same key, and before the existence check that the write depends on.
+	unlock := lockSource(filepath.Join(s.GraphsDir(), id))
+	defer unlock()
 	document := &graphsource.Document{SchemaVersion: 1, ID: id, Name: name, Tasks: map[string]graphsource.Task{}, Graph: map[string][]string{}}
 	encoded, err := graphsource.Encode(document)
 	if err != nil {
@@ -340,6 +368,8 @@ func (s Store) CreateGraphFromDocument(document *graphsource.Document) (string, 
 	if document == nil {
 		return "", fmt.Errorf("Graph source document is required")
 	}
+	unlock := lockSource(filepath.Join(s.GraphsDir(), document.ID))
+	defer unlock()
 	encoded, err := graphsource.Encode(document)
 	if err != nil {
 		return "", err
@@ -367,6 +397,8 @@ func (s Store) CreateFlowFromDefinition(definition *domain.FlowDefinition) (stri
 	if !objectIDPattern.MatchString(definition.ID) {
 		return "", fmt.Errorf("invalid flow id %q", definition.ID)
 	}
+	unlock := lockSource(filepath.Join(s.GraphsDir(), definition.ID))
+	defer unlock()
 	if _, err := s.SourceKind(definition.ID); err == nil {
 		return "", fmt.Errorf("source object %q already exists", definition.ID)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -390,6 +422,8 @@ func (s Store) CreateFlowFromDefinition(definition *domain.FlowDefinition) (stri
 // UpdateFlow applies one whole-document CAS update to a Flow draft. The ID is
 // the directory identity and can never change in place.
 func (s Store) UpdateFlow(id, expectedDigest string, mutate func(*domain.FlowDefinition) error) (*domain.FlowDefinition, string, error) {
+	unlock := lockSource(filepath.Join(s.GraphsDir(), id))
+	defer unlock()
 	definition, digest, err := s.ReadFlow(id)
 	if err != nil {
 		return nil, "", err
@@ -419,6 +453,8 @@ func (s Store) UpdateFlow(id, expectedDigest string, mutate func(*domain.FlowDef
 }
 
 func (s Store) UpdateGraph(id, expectedDigest string, mutate func(*graphsource.Document) error) (*graphsource.Document, string, error) {
+	unlock := lockSource(filepath.Join(s.GraphsDir(), id))
+	defer unlock()
 	document, digest, err := s.ReadGraph(id)
 	if err != nil {
 		return nil, "", err
@@ -505,6 +541,11 @@ func (s Store) ReadHero(id string) (*heroesource.Document, string, error) {
 }
 
 func (s Store) CreateHero(document *heroesource.Document) (*heroesource.Document, string, error) {
+	if document == nil {
+		return nil, "", fmt.Errorf("Hero source document is required")
+	}
+	unlock := lockSource(filepath.Join(s.HeroesDir(), document.Handle))
+	defer unlock()
 	encoded, err := heroesource.Encode(document)
 	if err != nil {
 		return nil, "", err
@@ -535,6 +576,8 @@ func (s Store) CreateGraphHero(graphID string, document *heroesource.Document) (
 	if handle == "" || handle != document.Handle {
 		return "", fmt.Errorf("Hero handle %q must match directory %q", document.Handle, handle)
 	}
+	unlock := lockSource(filepath.Join(s.GraphsDir(), graphID, "heroes", handle))
+	defer unlock()
 	encoded, err := heroesource.Encode(document)
 	if err != nil {
 		return "", err
@@ -559,6 +602,8 @@ func (s Store) CreateGraphHero(graphID string, document *heroesource.Document) (
 }
 
 func (s Store) UpdateHero(id, expectedDigest string, mutate func(*heroesource.Document) error) (*heroesource.Document, string, error) {
+	unlock := lockSource(filepath.Join(s.HeroesDir(), id))
+	defer unlock()
 	document, digest, err := s.ReadHero(id)
 	if err != nil {
 		return nil, "", err
@@ -600,6 +645,8 @@ func objectPath(root, id, filename string) (string, error) {
 // the object for every later read. The same call removes a flow-source object
 // because both kinds share one object directory.
 func (s Store) DeleteGraph(graphID string) error {
+	unlock := lockSource(filepath.Join(s.GraphsDir(), graphID))
+	defer unlock()
 	return deleteObjectDir(s.GraphsDir(), graphID)
 }
 
@@ -608,12 +655,16 @@ func (s Store) DeleteGraphHero(graphID, handle string) error {
 	if !objectIDPattern.MatchString(graphID) {
 		return fmt.Errorf("invalid object id %q", graphID)
 	}
+	unlock := lockSource(filepath.Join(s.GraphsDir(), graphID, "heroes", handle))
+	defer unlock()
 	return deleteObjectDir(filepath.Join(s.GraphsDir(), graphID, "heroes"), handle)
 }
 
 // DeleteHero removes the whole Worker-global Hero directory, including every
 // published revision.
 func (s Store) DeleteHero(handle string) error {
+	unlock := lockSource(filepath.Join(s.HeroesDir(), handle))
+	defer unlock()
 	return deleteObjectDir(s.HeroesDir(), handle)
 }
 
