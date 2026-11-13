@@ -89,16 +89,6 @@ func (d *HeroDiscovery) resolveDefinition(ctx context.Context, document *heroeso
 	return definition, diagnostics
 }
 
-// heroToolRequiresMutation reports whether a tool can mutate the workspace.
-func heroToolRequiresMutation(name string) bool {
-	switch name {
-	case "write", "edit", "exec", "bash", "publish_artifact":
-		return true
-	default:
-		return false
-	}
-}
-
 // heroTime formats a timestamp for the Session run/flow tables.
 func heroTime(value time.Time) string { return value.Format(time.RFC3339Nano) }
 

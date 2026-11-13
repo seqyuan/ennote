@@ -33,6 +33,19 @@ func IsReadOnlySchedulingTool(tool string) bool {
 	return ok
 }
 
+// HeroToolRequiresMutation reports whether a tool can mutate the workspace. It
+// is the single list behind the read-only-Hero authority check at Run freeze
+// and at Hero publish, so the two paths never disagree about which tools a
+// read_only Hero may not carry.
+func HeroToolRequiresMutation(name string) bool {
+	switch name {
+	case "write", "edit", "exec", "bash", "publish_artifact":
+		return true
+	default:
+		return false
+	}
+}
+
 // HeroDefinitionIsReadOnly reports whether a frozen Hero definition is fully
 // read-only: read_only authority plus an allowlist made entirely of read-only
 // scheduling tools. It is the shared classification behind fan_out safety,

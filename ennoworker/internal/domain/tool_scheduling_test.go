@@ -34,6 +34,17 @@ func TestIsReadOnlySchedulingTool(t *testing.T) {
 	}
 }
 
+func TestHeroToolRequiresMutation(t *testing.T) {
+	mutating := []string{"write", "edit", "exec", "bash", "publish_artifact"}
+	for _, tool := range mutating {
+		assert.True(t, HeroToolRequiresMutation(tool), "%q must require mutation", tool)
+	}
+	readOnly := []string{"read", "ls", "grep", "find", "git_readonly", "web_fetch", "http", "delegate_tasks", "", "mcp__server__write"}
+	for _, tool := range readOnly {
+		assert.False(t, HeroToolRequiresMutation(tool), "%q must not require mutation", tool)
+	}
+}
+
 func TestHeroDefinitionIsReadOnly(t *testing.T) {
 	cases := []struct {
 		name string

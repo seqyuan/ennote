@@ -65,7 +65,7 @@ var serverSurface = map[string][]string{
 	"prompt_templates.go":       {"Prompts"},
 	"provider_doctor.go":        {"Doctor"},
 	"provider_models.go":        {"Doctor", "Providers"},
-	"hero_sources.go":           {"Models"},
+	"hero_sources.go":           {"GlobalSources", "Models", "SkillCatalog"},
 	"run_mcp.go":                {"DB"},
 	"run_messages.go":           {"DB"},
 	"run_prompt.go":             {"DB"},

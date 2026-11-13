@@ -4,7 +4,7 @@
 # ErrorCode constants, and literal envelope codes. Do not edit by hand: run
 # `npm run generate:error-codes` and commit the diff, which makes a vocabulary
 # change visible in review instead of at runtime.
-# 265 codes.
+# 266 codes.
 active_runs_unavailable
 approval_checkpoint_invalid
 approval_conflict
@@ -101,6 +101,7 @@ hero_not_found
 hero_publish_failed
 hero_revisions_failed
 hero_validation_failed
+hero_validation_unavailable
 history_lookup_forbidden
 history_lookup_out_of_range
 host_directory_create_failed

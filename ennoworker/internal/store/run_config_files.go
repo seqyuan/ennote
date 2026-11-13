@@ -264,7 +264,7 @@ func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.Ag
 			}
 			if heroDefinition.Authority == domain.HeroAuthorityReadOnly {
 				for _, tool := range heroDefinition.AllowedTools {
-					if heroToolRequiresMutation(tool) {
+					if domain.HeroToolRequiresMutation(tool) {
 						return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
 							fmt.Errorf("read-only Hero revision contains mutation tool %s", tool))
 					}
@@ -320,7 +320,7 @@ func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.Ag
 			}
 			if heroDefinition.Authority == domain.HeroAuthorityReadOnly {
 				for _, tool := range heroDefinition.AllowedTools {
-					if heroToolRequiresMutation(tool) {
+					if domain.HeroToolRequiresMutation(tool) {
 						return nil, domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
 							fmt.Errorf("read-only Hero revision contains mutation tool %s", tool))
 					}

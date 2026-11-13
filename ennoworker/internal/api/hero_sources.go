@@ -2,10 +2,14 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 
+	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/store"
 )
 
 type globalHeroSummary struct {
@@ -22,6 +26,62 @@ type globalHeroDetail struct {
 	Path     string                `json:"path"`
 	Digest   string                `json:"digest"`
 	Document *heroesource.Document `json:"document"`
+}
+
+// errHeroValidationUnavailable reports that the Hero publish could not be
+// validated because a dependency the Worker needs is missing, which is a 503
+// and not the author's 422.
+var errHeroValidationUnavailable = errors.New("hero validation is unavailable")
+
+// heroNeedsSkillCatalog reports whether any Skill binding must resolve through
+// the live global catalog. A global Hero has no graph-local Skills, so a
+// local/<id> binding is rejected as a structural error before this is
+// consulted.
+func heroNeedsSkillCatalog(document *heroesource.Document) bool {
+	for _, skill := range document.Skills {
+		if !strings.HasPrefix(skill.ID, "local/") {
+			return true
+		}
+	}
+	return false
+}
+
+// validateHeroPublish runs the two checks that belong at publish, not save: a
+// read-only Hero must not carry a mutation tool, and every Skill binding must
+// resolve through the same resolver Graph publish uses.
+func (s *Server) validateHeroPublish(r *http.Request, document *heroesource.Document) error {
+	if document.Authority.Domain() == domain.HeroAuthorityReadOnly {
+		for _, tool := range document.AllowedTools {
+			if domain.HeroToolRequiresMutation(tool) {
+				return fmt.Errorf("read-only Hero cannot include mutation tool %q", tool)
+			}
+		}
+	}
+
+	// A global Hero has no owning Graph directory, so a graph-local Skill can
+	// never resolve. Reject it as a structural error independent of the catalog.
+	for _, skill := range document.Skills {
+		if strings.HasPrefix(skill.ID, "local/") {
+			return fmt.Errorf("global Hero cannot reference graph-local Skill %q", skill.ID)
+		}
+	}
+	if s.SkillCatalog == nil && heroNeedsSkillCatalog(document) {
+		return fmt.Errorf("%w: the Skill catalog is missing, so Skill references cannot be resolved",
+			errHeroValidationUnavailable)
+	}
+
+	// Skill resolution goes through the same resolver Graph publish uses, so
+	// local/<id> and global/<id> mean one thing across both formats. FlowID is
+	// empty because a global Hero has no owning Graph.
+	resolver := store.NewFlowValidator(store.FlowPublishOptions{
+		FlowID: "", Sources: s.GlobalSources, Models: s.Models, SkillCatalog: s.SkillCatalog,
+	}).Resolver
+	for _, skill := range document.Skills {
+		if !resolver.KnownSkill(r.Context(), skill.ID) {
+			return fmt.Errorf("Hero references unknown skill %q", skill.ID)
+		}
+	}
+	return nil
 }
 
 func (s *Server) listGlobalHeroes(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +117,10 @@ func (s *Server) createGlobalHero(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "hero_document_required", "Hero document is required", false)
 		return
 	}
+	if err := heroesource.ValidateForWrite(body.Document); err != nil {
+		writeError(w, r, http.StatusUnprocessableEntity, "hero_validation_failed", err.Error(), false)
+		return
+	}
 	document, digest, err := sources.CreateHero(body.Document)
 	if err != nil {
 		writeError(w, r, http.StatusUnprocessableEntity, "hero_create_failed", err.Error(), false)
@@ -89,6 +153,10 @@ func (s *Server) publishGlobalHero(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusNotFound, "hero_not_found", err.Error(), false)
 		return
 	}
+	if err := heroesource.ValidateForWrite(document); err != nil {
+		writeError(w, r, http.StatusUnprocessableEntity, "hero_validation_failed", err.Error(), false)
+		return
+	}
 	if s.Models != nil {
 		refs := append([]string{document.Model.Ref}, document.Model.Fallbacks...)
 		for _, ref := range refs {
@@ -97,6 +165,14 @@ func (s *Server) publishGlobalHero(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+	if err := s.validateHeroPublish(r, document); err != nil {
+		if errors.Is(err, errHeroValidationUnavailable) {
+			writeError(w, r, http.StatusServiceUnavailable, "hero_validation_unavailable", err.Error(), true)
+			return
+		}
+		writeError(w, r, http.StatusUnprocessableEntity, "hero_publish_failed", err.Error(), false)
+		return
 	}
 	// V2: publishing a global Hero is a pure file operation (immutable
 	// revision). The legacy SQL Hero repo was removed.
@@ -156,6 +232,10 @@ func (s *Server) updateGlobalHero(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Document == nil {
 		writeError(w, r, http.StatusBadRequest, "hero_document_required", "Hero document is required", false)
+		return
+	}
+	if err := heroesource.ValidateForWrite(body.Document); err != nil {
+		writeError(w, r, http.StatusUnprocessableEntity, "hero_validation_failed", err.Error(), false)
 		return
 	}
 	document, digest, err := sources.UpdateHero(r.PathValue("heroID"), body.ExpectedDigest, func(current *heroesource.Document) error {
