@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/seqyuan/ennote/ennoworker/internal/artifacts"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -268,4 +269,40 @@ func TestListPinnedArtifactsPartialFailureCarriesSkippedCount(t *testing.T) {
 	require.Len(t, answer.Artifacts, 1)
 	assert.Equal(t, artifactID, answer.Artifacts[0].ID)
 	assert.Equal(t, 1, answer.SkippedSessionCount)
+}
+
+// Archiving a Session hides it from the sidebar; it does not remove the artifacts
+// the reader pinned to the canvas. listPinnedArtifacts must therefore keep
+// returning a pinned artifact from an archived Session. This test pins that
+// decision so a future change to the archive route or the canvas aggregation
+// cannot silently flip it. The archive is asserted first so the test proves the
+// archive actually happened, not that it was a no-op.
+func TestListPinnedArtifactsKeepsArchivedSessionPins(t *testing.T) {
+	ctx := context.Background()
+	server, handler := setupServer(t, nil)
+	project, _, err := server.Projects.CreateWithWorkspace(ctx, domain.CreateProjectInput{
+		Name: "canvas", HostPath: t.TempDir(),
+	})
+	require.NoError(t, err)
+
+	sessionID, db, root := pinTestSession(t, server, project.ID)
+	artifactID := pinTestStore(t, server, db, root, project.ID, sessionID, "keep.txt")
+
+	pinned := request(t, handler, http.MethodPost,
+		"/v1/sessions/"+sessionID+"/artifacts/"+artifactID+"/pin", nil, true)
+	require.Equal(t, http.StatusOK, pinned.Code, pinned.Body.String())
+
+	archived := request(t, handler, http.MethodPost, "/v1/sessions/"+sessionID+"/archive", map[string]any{}, true)
+	require.Equal(t, http.StatusOK, archived.Code, archived.Body.String())
+	var archivedSession domain.Session
+	decodeData(t, archived, &archivedSession)
+	assert.Equal(t, store.SessionStatusArchived, archivedSession.Status)
+
+	canvas := request(t, handler, http.MethodGet, "/v1/projects/"+project.ID+"/pinned-artifacts", nil, true)
+	require.Equal(t, http.StatusOK, canvas.Code, canvas.Body.String())
+	var answer pinnedArtifactsAnswer
+	decodeData(t, canvas, &answer)
+	require.Len(t, answer.Artifacts, 1)
+	assert.Equal(t, artifactID, answer.Artifacts[0].ID)
+	assert.Zero(t, answer.SkippedSessionCount)
 }
