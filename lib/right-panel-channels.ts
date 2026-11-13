@@ -34,10 +34,10 @@ export { INSPECTOR_PANES } from "./inspector-tabs";
 export type { InspectorPane } from "./inspector-tabs";
 
 /** A channel the panel keeps open beside the inspector lane. */
-export type PanelChannel = "files" | "graph" | "tools";
+export type PanelChannel = "files" | "graph" | "tools" | "canvas";
 
 /** Every channel, in tab-strip order. */
-export const PANEL_CHANNELS: readonly PanelChannel[] = ["files", "graph", "tools"];
+export const PANEL_CHANNELS: readonly PanelChannel[] = ["files", "graph", "tools", "canvas"];
 
 /** Whether a persisted value names a channel this build knows. */
 export function isPanelChannel(value: unknown): value is PanelChannel {
@@ -148,7 +148,7 @@ export function emptyPreferences(projectId: string): RightPanelPreferencesV1 {
     version: 1,
     projectId,
     pinnedChannels: [],
-    primaryWidths: { files: PRIMARY_DEFAULT_WIDTH, graph: PRIMARY_DEFAULT_WIDTH, tools: PRIMARY_DEFAULT_WIDTH },
+    primaryWidths: { files: PRIMARY_DEFAULT_WIDTH, graph: PRIMARY_DEFAULT_WIDTH, tools: PRIMARY_DEFAULT_WIDTH, canvas: PRIMARY_DEFAULT_WIDTH },
     open: false,
     inspectorTabs: [],
     activeInspectorId: null,
@@ -200,6 +200,9 @@ export function parsePreferences(raw: string | null, projectId: string): RightPa
     files: widthOf(storedWidths.files, legacyWidth),
     graph: widthOf(storedWidths.graph, legacyWidth),
     tools: widthOf(storedWidths.tools, legacyWidth),
+    // A payload written before the canvas channel existed has no canvas width;
+    // it falls back to the same legacy/default width as the other three.
+    canvas: widthOf(storedWidths.canvas, legacyWidth),
   };
   const inspectorTabs = parseInspectorTabRows(row.inspectorTabs, projectId);
   const legacyActive = typeof row.activeInspectorId === "string" ? row.activeInspectorId : null;
@@ -241,6 +244,7 @@ export function serializePreferences(preferences: RightPanelPreferencesV1): stri
       files: widthOf(preferences.primaryWidths?.files, PRIMARY_DEFAULT_WIDTH),
       graph: widthOf(preferences.primaryWidths?.graph, PRIMARY_DEFAULT_WIDTH),
       tools: widthOf(preferences.primaryWidths?.tools, PRIMARY_DEFAULT_WIDTH),
+      canvas: widthOf(preferences.primaryWidths?.canvas, PRIMARY_DEFAULT_WIDTH),
     },
     open: preferences.open,
     inspectorTabs: parseInspectorTabRows(preferences.inspectorTabs, preferences.projectId),
@@ -298,6 +302,7 @@ export function initialRightPanelState(preferences: RightPanelPreferencesV1): Ri
       files: widthOf(preferences.primaryWidths?.files, widthOf(preferences.primaryWidth, PRIMARY_DEFAULT_WIDTH)),
       graph: widthOf(preferences.primaryWidths?.graph, widthOf(preferences.primaryWidth, PRIMARY_DEFAULT_WIDTH)),
       tools: widthOf(preferences.primaryWidths?.tools, widthOf(preferences.primaryWidth, PRIMARY_DEFAULT_WIDTH)),
+      canvas: widthOf(preferences.primaryWidths?.canvas, widthOf(preferences.primaryWidth, PRIMARY_DEFAULT_WIDTH)),
     },
     navigatorHidden: preferences.navigatorHidden === true,
     ...seedPanes(preferences),
@@ -359,6 +364,7 @@ export function preferencesOf(state: RightPanelState): RightPanelPreferencesV1 {
       files: widthOf(state.primaryWidths.files, PRIMARY_DEFAULT_WIDTH),
       graph: widthOf(state.primaryWidths.graph, PRIMARY_DEFAULT_WIDTH),
       tools: widthOf(state.primaryWidths.tools, PRIMARY_DEFAULT_WIDTH),
+      canvas: widthOf(state.primaryWidths.canvas, PRIMARY_DEFAULT_WIDTH),
     },
     open: state.open,
     inspectorTabs: parseInspectorTabRows(state.inspectorTabs, state.projectId),

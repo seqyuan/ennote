@@ -1,6 +1,6 @@
 "use client";
 
-import { Files, Workflow, Wrench } from "lucide-react";
+import { Files, LayoutGrid, Workflow, Wrench } from "lucide-react";
 
 import type { PanelChannel } from "@/lib/right-panel-channels";
 import type { Translator } from "@/lib/messages";
@@ -10,12 +10,13 @@ const ICONS: Record<PanelChannel, typeof Files> = {
   files: Files,
   graph: Workflow,
   tools: Wrench,
+  canvas: LayoutGrid,
 };
 
 /**
  * What the channel lane shows when the reader has closed every channel.
  *
- * It lists all three rather than a hint, because "you closed everything" is a
+ * It lists every channel rather than a hint, because "you closed everything" is a
  * dead end otherwise: the strip has nothing left to click.
  */
 export function ChannelLauncher(props: {

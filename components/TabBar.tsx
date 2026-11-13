@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { FileText, Folder, Wrench, Workflow, X } from "lucide-react";
+import { FileText, Folder, LayoutGrid, Wrench, Workflow, X } from "lucide-react";
 import styles from "./TabBar.module.css";
 import { getFileIcon } from "./FileIcons";
 
@@ -20,7 +20,7 @@ export interface Tab {
    */
   artifact?: { artifactId: string; sessionId: string };
   closable?: boolean;
-  icon?: "report" | "tools" | "files" | "graph";
+  icon?: "report" | "tools" | "files" | "graph" | "canvas";
   /** A count worth showing on the tab itself, e.g. live runs. */
   badge?: number;
   /** Something needs a human here, with no number to put on it. */
@@ -112,6 +112,8 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onReorder, 
                 <Wrench size={13} aria-hidden="true" />
               ) : tab.icon === "graph" ? (
                 <Workflow size={13} aria-hidden="true" />
+              ) : tab.icon === "canvas" ? (
+                <LayoutGrid size={13} aria-hidden="true" />
               ) : (
                 getFileIcon(tab.filePath ?? tab.label, 13)
               )}

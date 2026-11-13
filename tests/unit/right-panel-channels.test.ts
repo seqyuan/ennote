@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_PERSISTED_INSPECTOR_TABS,
+  PANEL_CHANNELS,
   fileTabId,
   type PanelChannel,
   type RightPanelPreferencesV1,
@@ -11,6 +12,7 @@ import {
   collapseShell,
   emptyPreferences,
   initialRightPanelState,
+  isPanelChannel,
   openChannel,
   openInspectorTab,
   parsePreferences,
@@ -95,7 +97,7 @@ describe("right panel channel contract", () => {
   it("reopens a channel the user had closed, without pinning it", () => {
     const after = openChannel(closeChannel(state(), "tools"), "tools");
 
-    expect(after.openChannels).toEqual(["files", "graph", "tools"]);
+    expect(after.openChannels).toEqual(["files", "graph", "canvas", "tools"]);
     expect(after.pinnedChannels).toEqual([]);
     expect(after.activeChannelId).toBe("tools");
   });
@@ -114,7 +116,7 @@ describe("right panel channel contract", () => {
     const unpinned = unpinChannel(pinned, "graph");
 
     expect(unpinned.pinnedChannels).toEqual([]);
-    expect(unpinned.openChannels).toEqual(["files", "graph", "tools"]);
+    expect(unpinned.openChannels).toEqual(["files", "graph", "tools", "canvas"]);
     expect(unpinned.activeChannelId).toBe("graph");
   });
 
@@ -122,7 +124,7 @@ describe("right panel channel contract", () => {
     const pinned = pinChannel(state(), "graph");
     const closed = closeChannel(pinned, "graph");
 
-    expect(closed.openChannels).toEqual(["files", "tools"]);
+    expect(closed.openChannels).toEqual(["files", "tools", "canvas"]);
     expect(closed.pinnedChannels).toEqual(["graph"]);
     expect(closed.open).toBe(true);
   });
@@ -150,7 +152,7 @@ describe("right panel channel contract", () => {
 
     expect(after.open).toBe(true);
     expect(after.activePanes.main).toBe(id("/workspace/main.py"));
-    expect(after.openChannels).toEqual(["files", "graph", "tools"]);
+    expect(after.openChannels).toEqual(["files", "graph", "tools", "canvas"]);
     expect(after.pinnedChannels).toEqual([]);
   });
 
@@ -184,7 +186,7 @@ describe("right panel channel contract", () => {
     const reading = openInspectorTab(state(), fileRowIn("/workspace/main.py"));
     const closed = closeChannel(reading, "files");
 
-    expect(closed.openChannels).toEqual(["graph", "tools"]);
+    expect(closed.openChannels).toEqual(["graph", "tools", "canvas"]);
     expect(closed.activeLane).toBe("inspector");
     expect(closed.activePanes.main).toBe(id("/workspace/main.py"));
   });
@@ -251,7 +253,7 @@ describe("remembered inspector rows", () => {
     const back = parsePreferences(legacy, "p1");
 
     expect(back.pinnedChannels).toEqual(["files"]);
-    expect(back.primaryWidths).toEqual({ files: 320, graph: 320, tools: 320 });
+    expect(back.primaryWidths).toEqual({ files: 320, graph: 320, tools: 320, canvas: 320 });
     expect(back.open).toBe(true);
     expect(back.inspectorTabs).toEqual([]);
     expect(back.activeInspectorId).toBeNull();
@@ -520,7 +522,7 @@ describe("shell and lane width", () => {
     expect(withFiles.primaryWidths.graph).toBe(280);
 
     const withGraph = setPrimaryWidth(withFiles, "graph", 400);
-    expect(withGraph.primaryWidths).toEqual({ files: 320, graph: 400, tools: 280 });
+    expect(withGraph.primaryWidths).toEqual({ files: 320, graph: 400, tools: 280, canvas: 280 });
     expect(setPrimaryWidth(withGraph, "graph", 400)).toBe(withGraph);
   });
 });
@@ -532,7 +534,7 @@ describe("hydrate", () => {
     );
 
     // The width written before channels had their own becomes every channel's.
-    expect(hydrated.primaryWidths).toEqual({ files: 320, graph: 320, tools: 320 });
+    expect(hydrated.primaryWidths).toEqual({ files: 320, graph: 320, tools: 320, canvas: 320 });
     expect(hydrated.openChannels).toEqual(["files", "tools"]);
     expect(hydrated.activeChannelId).toBe("files");
     expect(hydrated.open).toBe(true);
@@ -541,7 +543,7 @@ describe("hydrate", () => {
   it("shows every channel when a project has no pins and no shell state", () => {
     const hydrated = initialRightPanelState(prefs());
 
-    expect(hydrated.openChannels).toEqual(["files", "graph", "tools"]);
+    expect(hydrated.openChannels).toEqual(["files", "graph", "tools", "canvas"]);
     expect(hydrated.activeChannelId).toBe("files");
     expect(hydrated.open).toBe(false);
     expect(hydrated.activePanes).toEqual({ main: null, side: null });
@@ -589,12 +591,57 @@ describe("preferences", () => {
       version: 1,
       projectId: "p1",
       pinnedChannels: ["graph"],
-      primaryWidths: { files: 280, graph: 280, tools: 280 },
+      primaryWidths: { files: 280, graph: 280, tools: 280, canvas: 280 },
       open: true,
       inspectorTabs: [],
       activeInspectorIds: { main: null, side: null },
       activeInspectorId: null,
       navigatorHidden: false,
     });
+  });
+});
+
+describe("canvas channel", () => {
+  it("defaults the canvas width like the other channels", () => {
+    expect(emptyPreferences("p1").primaryWidths).toEqual({
+      files: 280, graph: 280, tools: 280, canvas: 280,
+    });
+    expect(initialRightPanelState(prefs()).primaryWidths).toEqual({
+      files: 280, graph: 280, tools: 280, canvas: 280,
+    });
+  });
+
+  it("reads a payload written before the canvas channel existed", () => {
+    // A pre-canvas payload carries widths for the original three but none for
+    // canvas; canvas falls back to the legacy/default width like the rest.
+    const back = parsePreferences(JSON.stringify({
+      version: 1, projectId: "p1", pinnedChannels: [], primaryWidth: 300, open: false,
+      primaryWidths: { files: 320, graph: 340, tools: 360 },
+    }), "p1");
+
+    expect(back.primaryWidths).toEqual({ files: 320, graph: 340, tools: 360, canvas: 300 });
+  });
+
+  it("round-trips a canvas width through serialise", () => {
+    const withCanvas = setPrimaryWidth(state(), "canvas", 400);
+    const back = parsePreferences(serializePreferences(preferencesOf(withCanvas)), "p1");
+
+    expect(back.primaryWidths?.canvas).toBe(400);
+  });
+
+  it("recognises canvas and lets it pass through open, close, pin and unpin", () => {
+    expect(isPanelChannel("canvas")).toBe(true);
+    expect(PANEL_CHANNELS).toContain("canvas");
+
+    const opened = openChannel(state(), "canvas");
+    expect(opened.openChannels).toContain("canvas");
+    expect(opened.activeChannelId).toBe("canvas");
+
+    const pinned = pinChannel(opened, "canvas");
+    expect(pinned.pinnedChannels).toEqual(["canvas"]);
+    const unpinned = unpinChannel(pinned, "canvas");
+    expect(unpinned.pinnedChannels).toEqual([]);
+    const closed = closeChannel(unpinned, "canvas");
+    expect(closed.openChannels).not.toContain("canvas");
   });
 });

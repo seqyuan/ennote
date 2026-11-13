@@ -3,7 +3,7 @@ import type { PanelChannel } from "@/lib/right-panel-channels";
 import type { Translator } from "@/lib/messages";
 
 /**
- * The three channels that live in the left lane, in strip order.
+ * The channels that live in the left lane, in strip order.
  *
  * They are not file rows: they belong to the workspace, so no `projectId` is
  * attached. Each carries its own close button — closing a channel narrows the
@@ -13,12 +13,14 @@ const LABEL_KEYS: Record<PanelChannel, string> = {
   files: "rightPanel.files",
   graph: "rightPanel.graphs",
   tools: "rightPanel.status",
+  canvas: "rightPanel.canvas",
 };
 
 const ICONS: Record<PanelChannel, Tab["icon"]> = {
   files: "files",
   graph: "graph",
   tools: "tools",
+  canvas: "canvas",
 };
 
 /** One channel's strip label in the reader's language. */

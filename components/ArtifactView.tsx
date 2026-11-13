@@ -1,13 +1,13 @@
 "use client";
 
-import { Download, FileCode2, FileText, Image as ImageIcon, PanelRight, Sparkles, Table2 } from "lucide-react";
+import { Download, FileCode2, FileText, Image as ImageIcon, PanelRight, Pin, PinOff, Sparkles, Table2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ArtifactTablePreview } from "@/components/ArtifactTablePreview";
 import { ArtifactWidget } from "@/components/ArtifactWidget";
 import { useT } from "@/components/LocaleProvider";
 import {
-  artifactDownloadURL, artifactPreviewURL, formatArtifactSize, isWidgetArtifact,
-  type ArtifactReference, type TextPreview,
+  artifactDownloadURL, artifactMetadataURL, artifactPreviewURL, formatArtifactSize, isWidgetArtifact,
+  type ArtifactRecord, type ArtifactReference, type TextPreview,
 } from "@/lib/artifacts";
 import { requestOpenArtifact } from "@/lib/canvas-intent";
 import { apiFetch } from "@/lib/worker-api.client";
@@ -29,6 +29,39 @@ export function ArtifactView({ sessionId, artifact, inCanvas = false }: {
   const previewURL = artifactPreviewURL(sessionId, artifact.artifactId);
   const downloadURL = artifactDownloadURL(sessionId, artifact.artifactId);
   const openLabel = t("conversation.artifact.openInCanvas", { name: artifact.name });
+
+  // Pin state is Worker state, not panel state: the canvas channel re-fetches on
+  // its own mount, so there is no shared store to keep in step. The reference a
+  // message carries has no `pinnedAt`, so the full record is read once here and
+  // the toggle writes straight to the Worker and adopts the refreshed record's
+  // answer. `null` means "not known yet", which disables the toggle rather than
+  // let a click before the fetch resolve double-pin.
+  const [pinned, setPinned] = useState<boolean | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    void apiFetch<ArtifactRecord>(artifactMetadataURL(sessionId, artifact.artifactId), { signal: controller.signal })
+      .then((record) => {
+        if (!controller.signal.aborted) setPinned(record.pinnedAt != null);
+      })
+      .catch(() => { /* leave unknown: the toggle stays disabled until the Worker answers */ });
+    return () => controller.abort();
+  }, [artifact.artifactId, sessionId]);
+
+  const togglePin = async () => {
+    // Both pin and unpin answer 200 with the refreshed artifact; adopt its
+    // `pinnedAt` rather than flip optimistically, so a rejected write cannot
+    // leave the button asserting a state the Worker does not have.
+    const path = `${artifactMetadataURL(sessionId, artifact.artifactId)}/pin`;
+    const method = pinned ? "DELETE" : "POST";
+    try {
+      const refreshed = await apiFetch<ArtifactRecord>(path, { method });
+      setPinned(refreshed.pinnedAt != null);
+    } catch { /* leave the state the Worker last reported */ }
+  };
+  const pinLabel = pinned
+    ? t("conversation.artifact.unpin", { name: artifact.name })
+    : t("conversation.artifact.pin", { name: artifact.name });
+
   return <section className="artifact-result" aria-label={`Artifact ${artifact.name}`}
     data-artifact-kind={artifact.kind} data-artifact-id={artifact.artifactId}>
     <header className="artifact-result-header">
@@ -43,6 +76,11 @@ export function ArtifactView({ sessionId, artifact, inCanvas = false }: {
         onClick={() => requestOpenArtifact({ sessionId, artifactId: artifact.artifactId, name: artifact.name })}
         aria-label={openLabel} title={openLabel}>
         <PanelRight size={15} aria-hidden="true" />
+      </button>}
+      {!inCanvas && <button type="button" className="artifact-pin-toggle"
+        onClick={() => void togglePin()} disabled={pinned === null}
+        aria-pressed={pinned === true} aria-label={pinLabel} title={pinLabel}>
+        {pinned ? <Pin size={15} aria-hidden="true" /> : <PinOff size={15} aria-hidden="true" />}
       </button>}
       <a className="artifact-download" href={downloadURL} download={artifact.name}
         aria-label={`Download ${artifact.name}`} title={`Download ${artifact.name}`}>

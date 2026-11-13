@@ -12,6 +12,7 @@ import { ChannelLauncher } from "./right-panel/ChannelLauncher";
 import { FilesChannel } from "./right-panel/FilesChannel";
 import { GraphsChannel } from "./right-panel/GraphsChannel";
 import { StatusChannel } from "./right-panel/StatusChannel";
+import { CanvasChannel } from "./right-panel/CanvasChannel";
 import { useT } from "@/components/LocaleProvider";
 import type { useRightPanel } from "@/hooks/useRightPanel";
 import type { useResizable } from "@/hooks/useResizable";
@@ -142,6 +143,9 @@ export function RightPanel(props: {
           status={status}
           permissionMode={permissionMode}
         />
+      )}
+      {activeChannelId === "canvas" && (
+        <CanvasChannel key={projectId ?? "no-project"} projectId={projectId} onOpen={panel.openArtifact} />
       )}
       {activeChannelId === null && (
         <ChannelLauncher

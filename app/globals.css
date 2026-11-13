@@ -326,6 +326,87 @@ button:disabled { cursor: default; }
   font-size: var(--text-xs);
 }
 
+/* The Canvas channel: one card per pinned artifact. The card opens the artifact
+   in the inspector lane; the unpin control is a sibling button, so unpinning
+   never also opens. */
+.right-panel-canvas-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  overflow-y: auto;
+  list-style: none;
+}
+.right-panel-canvas-card {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+.right-panel-canvas-card-main {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 9px 11px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.right-panel-canvas-card-main:hover:not(:disabled) { background: var(--bg-hover); }
+.right-panel-canvas-card-main:disabled { opacity: 0.6; cursor: default; }
+.right-panel-canvas-card-name {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.right-panel-canvas-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  gap: 4px 8px;
+  color: var(--text-muted);
+  font: var(--text-xs) var(--font-mono);
+}
+.right-panel-canvas-unpin {
+  display: grid;
+  flex: 0 0 auto;
+  width: 32px;
+  place-items: center;
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.right-panel-canvas-unpin:hover { color: var(--text); background: var(--bg-hover); }
+.right-panel-canvas-state {
+  display: grid;
+  flex: 1 1 auto;
+  place-items: center;
+  align-content: center;
+  gap: 6px;
+  min-height: 120px;
+  padding: 16px;
+  color: var(--text-muted);
+  font: var(--text-xs) var(--font-mono);
+  text-align: center;
+}
+.right-panel-canvas-state.is-error { color: var(--danger); }
+.right-panel-canvas-detail { max-width: 100%; overflow-wrap: anywhere; color: var(--text-dim); }
+
 @media (min-width: 641px) {
   .right-panel-container {
     overflow: hidden;
@@ -684,22 +765,25 @@ button:disabled { cursor: default; }
 .artifact-result { min-width: 0; background: var(--bg); }
 .artifact-result + .artifact-result { border-top: 1px solid var(--border); }
 .artifact-result-header {
-  display: grid; grid-template-columns: 22px minmax(120px, 1fr) minmax(120px, auto) 30px 30px;
+  display: grid; grid-template-columns: 22px minmax(120px, 1fr) minmax(120px, auto) 30px 30px 30px;
   min-height: 40px; align-items: center; gap: 8px; padding: 5px 10px;
 }
 .artifact-result-icon { display: grid; place-items: center; color: var(--accent); }
 .artifact-result-name { min-width: 0; overflow: hidden; color: var(--text); font-size: var(--text-sm); font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .artifact-result-meta { min-width: 0; overflow: hidden; color: var(--text-muted); font: var(--text-xs) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
-.artifact-download, .artifact-canvas-open {
+.artifact-download, .artifact-canvas-open, .artifact-pin-toggle {
   display: grid; width: 30px; height: 30px; place-items: center;
   border: 1px solid transparent; border-radius: var(--radius-xs);
   color: var(--text-muted); text-decoration: none;
 }
-/* A button, not a link: the same box, minus the user-agent chrome that would
-   otherwise give it its own background and padding. */
-.artifact-canvas-open { padding: 0; background: none; cursor: pointer; }
+/* Buttons, not links: the same box, minus the user-agent chrome that would
+   otherwise give each its own background and padding. */
+.artifact-canvas-open, .artifact-pin-toggle { padding: 0; background: none; cursor: pointer; }
 .artifact-download:hover, .artifact-download:focus-visible,
-.artifact-canvas-open:hover, .artifact-canvas-open:focus-visible { border-color: var(--border); background: var(--bg-hover); color: var(--text); }
+.artifact-canvas-open:hover, .artifact-canvas-open:focus-visible,
+.artifact-pin-toggle:hover, .artifact-pin-toggle:focus-visible { border-color: var(--border); background: var(--bg-hover); color: var(--text); }
+.artifact-pin-toggle[aria-pressed="true"] { color: var(--accent); border-color: var(--border); }
+.artifact-pin-toggle:disabled { opacity: 0.4; cursor: default; }
 .artifact-preview-state { min-height: 76px; display: grid; place-items: center; padding: 12px; border-top: 1px solid var(--border); color: var(--text-muted); font: var(--text-xs) var(--font-mono); }
 .artifact-preview-state.is-error { color: var(--danger); }
 .artifact-image-preview { position: relative; min-height: 180px; margin: 0; padding: 12px; overflow: auto; border-top: 1px solid var(--border); background: var(--bg-panel); }

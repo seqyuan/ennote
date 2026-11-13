@@ -32,7 +32,7 @@ describe("right-panel file tab scoping", () => {
   });
 
   it("keeps the workspace panels selected across a project switch", () => {
-    for (const panel of ["files", "graph", "tools"]) {
+    for (const panel of ["files", "graph", "tools", "canvas"]) {
       expect(resolveActiveTabId(panel, [])).toBe(panel);
     }
   });
