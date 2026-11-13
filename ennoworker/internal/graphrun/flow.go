@@ -244,7 +244,7 @@ func (s *Service) freezeFlowHero(ctx context.Context, flowID, taskID string, tas
 		}
 		document, versionID, digest = doc, handle+"@"+revision.ID(), revision.Digest
 	}
-	definition, err := s.resolveLocalHero(ctx, flowID, document)
+	definition, err := s.resolveLocalHero(ctx, nil, flowID, document)
 	if err != nil {
 		return nil, nil, fmt.Errorf("Hero %q: %w", handle, err)
 	}
@@ -293,7 +293,7 @@ func (s *Service) applyFlowTaskSkills(ctx context.Context, flowID string, defini
 		scope, id, scoped := strings.Cut(strings.TrimSpace(ref), "/")
 		if !scoped {
 			// Bare refs resolve flow-local first, exactly like task Heroes.
-			if loaded, err := s.loadLocalSkill(flowID, id); err == nil {
+			if loaded, err := s.loadLocalSkill(nil, flowID, id); err == nil {
 				definition.HeroPrompt += "\n\n<graph_local_skill id=\"" + id + "\" digest=\"" + loaded.ContentHash + "\">\n" + loaded.PromptText + "\n</graph_local_skill>"
 				continue
 			}
@@ -301,7 +301,7 @@ func (s *Service) applyFlowTaskSkills(ctx context.Context, flowID string, defini
 		}
 		switch scope {
 		case "local":
-			loaded, err := s.loadLocalSkill(flowID, id)
+			loaded, err := s.loadLocalSkill(nil, flowID, id)
 			if err != nil {
 				return nil, fmt.Errorf("local Skill %q: %w", id, err)
 			}

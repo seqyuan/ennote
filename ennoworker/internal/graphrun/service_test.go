@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
@@ -444,4 +445,247 @@ func TestServiceLiveCatalogRejectsSkillDeletedFromDisk(t *testing.T) {
 	require.NoError(t, os.RemoveAll(filepath.Join(skillsDir, "go-dev")))
 	_, err = fixture.service.Start(ctx, fixture.projectID, "pinned", 0, fixture.sessionID, nil, nil)
 	require.ErrorContains(t, err, `global Skill "go-dev" is not available`)
+}
+
+// localGraphRunFixture wires the file stores, one Session, and a ready Service
+// for the graph-local Hero/Skill freeze tests.
+type localGraphRunFixture struct {
+	ctx       context.Context
+	home      string
+	sources   *globalsource.Store
+	files     *fileconfig.ModelStore
+	sessions  *sessionstore.Manager
+	projectID string
+	sessionID string
+	modelID   string
+}
+
+func newLocalGraphRunFixture(t *testing.T) *localGraphRunFixture {
+	t.Helper()
+	ctx := context.Background()
+	home := t.TempDir()
+	files := fileconfig.NewModelStore(
+		filepath.Join(home, "config", "models.json"),
+		filepath.Join(home, "config", "provider-auth.json"),
+		filepath.Join(home, "config", "settings.json"),
+	)
+	_, err := files.CreateProvider(ctx, fileconfig.CreateProviderInput{
+		Key: "provider", Name: "Provider", ProviderType: domain.ProviderOpenAICompatible,
+		BaseURL: "https://provider.test/v1", APIKey: "sk-local-secret",
+	})
+	require.NoError(t, err)
+	model, err := files.CreateModel(ctx, fileconfig.CreateModelInput{
+		ProviderID: "provider", ModelName: "local-model", ContextWindow: 32768, MaxOutputTokens: 4096,
+		SupportsToolUse: true, ThinkingDialect: domain.ThinkingDialectNone,
+		SupportedThinkingEfforts: []domain.ThinkingEffort{domain.ThinkingDefault}, IsDefault: true,
+	})
+	require.NoError(t, err)
+
+	sources := &globalsource.Store{HomeDir: home}
+	projects := &projectstore.Store{Root: filepath.Join(home, "projects")}
+	project, _, err := projects.CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: "Project", HostPath: t.TempDir()})
+	require.NoError(t, err)
+	sessions := sessionstore.NewManager(projects.Root, projects)
+	t.Cleanup(func() { require.NoError(t, sessions.Close()) })
+	session, err := sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID, Title: "Session"})
+	require.NoError(t, err)
+
+	return &localGraphRunFixture{
+		ctx: ctx, home: home, sources: sources, files: files, sessions: sessions,
+		projectID: project.ID, sessionID: session.ID, modelID: model.ID,
+	}
+}
+
+func (f *localGraphRunFixture) service() *graphrun.Service {
+	return &graphrun.Service{Sources: f.sources, Models: &store.ModelRepo{Files: f.files}, Sessions: f.sessions}
+}
+
+func (f *localGraphRunFixture) localHero(handle, prompt string) *heroesource.Document {
+	return &heroesource.Document{
+		SchemaVersion: 1, Handle: handle, Name: handle,
+		Positioning: "Review", Icon: "bot", Color: "neutral",
+		Model:  heroesource.ModelBinding{Ref: f.modelID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills: []heroesource.SkillBinding{}, Authority: heroesource.AuthorityReadOnly,
+		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read", "grep"},
+		Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextTask,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextTask}, OwnExecutionContinuity: domain.HeroContinuityNone},
+		Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
+			MaxInvocationsPerParentRun: 4, MaxConcurrentInstances: 1,
+			BudgetCeiling: heroesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
+				MaxTotalTokens: 20000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 120000}},
+		OutputContract: "text-v1", MaxLoopIterations: 8, Prompt: prompt,
+	}
+}
+
+// overwriteLocalHero edits the mutable draft of a graph-local Hero in place.
+func (f *localGraphRunFixture) overwriteLocalHero(t *testing.T, graphID, handle, prompt string) {
+	t.Helper()
+	doc, _, err := f.sources.ReadGraphHero(graphID, handle)
+	require.NoError(t, err)
+	doc.Prompt = prompt
+	encoded, err := heroesource.Encode(doc)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(f.home, "agents", "graphs", graphID, "heroes", handle, "hero.md"), encoded, 0o600))
+}
+
+// rewriteRevisionJSON rewrites one revision's metadata in place so tests can
+// simulate pre-freeze revisions or corrupt bundles.
+func (f *localGraphRunFixture) rewriteRevisionJSON(t *testing.T, graphID, revisionID string, mutate func(map[string]any)) {
+	t.Helper()
+	path := filepath.Join(f.home, "agents", "graphs", graphID, "revisions", revisionID, "revision.json")
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var metadata map[string]any
+	require.NoError(t, json.Unmarshal(data, &metadata))
+	mutate(metadata)
+	encoded, err := json.MarshalIndent(metadata, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, append(encoded, '\n'), 0o600))
+}
+
+// frozenNodeHero reads the task_index 0 frozen Hero back out of the Session DB.
+func (f *localGraphRunFixture) frozenNodeHero(t *testing.T, runID string) (string, domain.HeroDefinition) {
+	t.Helper()
+	db, err := f.sessions.OpenSession(f.ctx, f.sessionID)
+	require.NoError(t, err)
+	var versionID, definitionJSON string
+	require.NoError(t, db.QueryRow(`SELECT hero_version_id, hero_definition_json FROM run_agent_flow_nodes
+		WHERE run_id=? AND task_index=0`, runID).Scan(&versionID, &definitionJSON))
+	var def domain.HeroDefinition
+	require.NoError(t, json.Unmarshal([]byte(definitionJSON), &def))
+	return versionID, def
+}
+
+func writeLocalSkill(t *testing.T, home, graphID, skillID, body string) string {
+	t.Helper()
+	dir := filepath.Join(home, "agents", "graphs", graphID, "skills", skillID)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "skill.json"),
+		[]byte(`{"id":"`+skillID+`","version":"0.1.0","prompt":"SKILL.md"}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o600))
+	return dir
+}
+
+func TestServiceFreezesPublishedLocalHeroAgainstDraftEdit(t *testing.T) {
+	f := newLocalGraphRunFixture(t)
+	_, digest, err := f.sources.CreateGraph("pipeline", "Pipeline")
+	require.NoError(t, err)
+	publishedDigest, err := f.sources.CreateGraphHero("pipeline", f.localHero("reviewer", "Published prompt."))
+	require.NoError(t, err)
+	_, _, err = f.sources.UpdateGraph("pipeline", digest, func(document *graphsource.Document) error {
+		document.Tasks = map[string]graphsource.Task{
+			"review": {Name: "Review", Hero: "local/reviewer", Goal: "Review"},
+		}
+		document.Graph = map[string][]string{"review": {}}
+		return nil
+	})
+	require.NoError(t, err)
+	revision, err := f.sources.PublishGraphRevision("pipeline")
+	require.NoError(t, err)
+	require.Equal(t, publishedDigest, revision.HeroDigests["reviewer"])
+
+	// Edit the mutable draft after publishing; the frozen revision must win.
+	f.overwriteLocalHero(t, "pipeline", "reviewer", "Edited draft prompt.")
+
+	run, err := f.service().Start(f.ctx, f.projectID, "pipeline", 0, f.sessionID, nil, nil)
+	require.NoError(t, err)
+
+	versionID, def := f.frozenNodeHero(t, run.RunID)
+	assert.Equal(t, "graph:pipeline/reviewer@"+publishedDigest, versionID)
+	assert.Equal(t, "Published prompt.", def.HeroPrompt)
+}
+
+func TestServiceFreezesPublishedLocalSkillAgainstDraftEdit(t *testing.T) {
+	f := newLocalGraphRunFixture(t)
+	_, digest, err := f.sources.CreateGraph("pipeline", "Pipeline")
+	require.NoError(t, err)
+	skillDir := writeLocalSkill(t, f.home, "pipeline", "tools", "Published tools.")
+	_, _, err = f.sources.UpdateGraph("pipeline", digest, func(document *graphsource.Document) error {
+		document.Tasks = map[string]graphsource.Task{
+			"build": {Name: "Build", Model: f.modelID, Goal: "Build", Skills: []string{"local/tools"}},
+		}
+		document.Graph = map[string][]string{"build": {}}
+		return nil
+	})
+	require.NoError(t, err)
+	revision, err := f.sources.PublishGraphRevision("pipeline")
+	require.NoError(t, err)
+	require.Contains(t, revision.SkillDigests, "tools")
+
+	// Edit the mutable draft SKILL.md after publishing.
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("Edited draft skill."), 0o600))
+
+	run, err := f.service().Start(f.ctx, f.projectID, "pipeline", 0, f.sessionID, nil, nil)
+	require.NoError(t, err)
+
+	_, def := f.frozenNodeHero(t, run.RunID)
+	assert.Contains(t, def.HeroPrompt, "Published tools.")
+	assert.NotContains(t, def.HeroPrompt, "Edited draft skill.")
+}
+
+func TestServiceLegacyRevisionStillReadsLocalDraft(t *testing.T) {
+	f := newLocalGraphRunFixture(t)
+	_, digest, err := f.sources.CreateGraph("pipeline", "Pipeline")
+	require.NoError(t, err)
+	_, err = f.sources.CreateGraphHero("pipeline", f.localHero("reviewer", "Published prompt."))
+	require.NoError(t, err)
+	_, _, err = f.sources.UpdateGraph("pipeline", digest, func(document *graphsource.Document) error {
+		document.Tasks = map[string]graphsource.Task{
+			"review": {Name: "Review", Hero: "local/reviewer", Goal: "Review"},
+		}
+		document.Graph = map[string][]string{"review": {}}
+		return nil
+	})
+	require.NoError(t, err)
+	revision, err := f.sources.PublishGraphRevision("pipeline")
+	require.NoError(t, err)
+	require.Contains(t, revision.HeroDigests, "reviewer")
+
+	// Rewrite the metadata into the pre-freeze shape: no Hero/Skill digests.
+	f.rewriteRevisionJSON(t, "pipeline", revision.ID(), func(metadata map[string]any) {
+		delete(metadata, "heroDigests")
+		delete(metadata, "skillDigests")
+	})
+
+	f.overwriteLocalHero(t, "pipeline", "reviewer", "Edited draft prompt.")
+
+	run, err := f.service().Start(f.ctx, f.projectID, "pipeline", 0, f.sessionID, nil, nil)
+	require.NoError(t, err)
+
+	versionID, def := f.frozenNodeHero(t, run.RunID)
+	assert.Equal(t, "Edited draft prompt.", def.HeroPrompt)
+	assert.True(t, strings.HasPrefix(versionID, "graph:pipeline/reviewer@"), versionID)
+}
+
+func TestServiceFrozenRevisionMissingLocalHeroFailsClosed(t *testing.T) {
+	f := newLocalGraphRunFixture(t)
+	_, digest, err := f.sources.CreateGraph("pipeline", "Pipeline")
+	require.NoError(t, err)
+	_, err = f.sources.CreateGraphHero("pipeline", f.localHero("reviewer", "Published prompt."))
+	require.NoError(t, err)
+	writeLocalSkill(t, f.home, "pipeline", "tools", "Published tools.")
+	_, _, err = f.sources.UpdateGraph("pipeline", digest, func(document *graphsource.Document) error {
+		document.Tasks = map[string]graphsource.Task{
+			"review": {Name: "Review", Hero: "local/reviewer", Goal: "Review"},
+			"build":  {Name: "Build", Model: f.modelID, Goal: "Build", Skills: []string{"local/tools"}},
+		}
+		document.Graph = map[string][]string{"review": {}, "build": {}}
+		return nil
+	})
+	require.NoError(t, err)
+	revision, err := f.sources.PublishGraphRevision("pipeline")
+	require.NoError(t, err)
+	require.Contains(t, revision.HeroDigests, "reviewer")
+	require.Contains(t, revision.SkillDigests, "tools")
+
+	// Drop only the Hero digest: the Skill keeps the revision frozen, but the
+	// referenced local Hero is absent from the bundle and must fail closed.
+	f.rewriteRevisionJSON(t, "pipeline", revision.ID(), func(metadata map[string]any) {
+		delete(metadata, "heroDigests")
+	})
+
+	_, err = f.service().Start(f.ctx, f.projectID, "pipeline", 0, f.sessionID, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `revision v000001 local Hero "reviewer" missing from frozen bundle`)
 }

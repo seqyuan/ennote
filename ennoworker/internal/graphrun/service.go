@@ -2,8 +2,14 @@
 // immutable Graph revision, resolves every Task's Hero/Model/Skill, and
 // freezes the complete execution plan (FlowDefinition + per-Task Hero
 // definitions) into the owning Session database before any Provider call.
-// Execution never re-reads mutable Hero/Graph files or the removed global
-// agent_profile_versions / agent_flow_versions tables.
+//
+// A frozen Graph revision carries its graph-local Heroes and Skills inside the
+// revision directory, so execution re-reads no mutable Hero/Graph/Skill file
+// for it. A legacy revision published before local resources were frozen still
+// resolves local drafts at Run start; such a Run is identifiable by its
+// FlowVersionID (graphID@vNNNNNN), which pins the exact revision an auditor can
+// open to see whether it recorded frozen content. The removed global
+// agent_profile_versions / agent_flow_versions tables are never consulted.
 package graphrun
 
 import (
@@ -75,16 +81,16 @@ func (s *Service) Start(ctx context.Context, projectID, graphID string, version 
 	if err != nil {
 		return nil, err
 	}
-	document, revision, err := s.Sources.ReadGraphRevision(graphID, revisionID)
+	bundle, err := s.Sources.ReadGraphRevisionBundle(graphID, revisionID)
 	if err != nil {
 		return nil, err
 	}
-	definition := definitionFromDocument(document)
+	definition := definitionFromDocument(bundle.Document)
 	inputsJSON, err := freezeInputsJSON(inputs, vars)
 	if err != nil {
 		return nil, err
 	}
-	freeze, err := s.freezeTasks(ctx, document)
+	freeze, err := s.freezeTasks(ctx, bundle)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +106,7 @@ func (s *Service) Start(ctx context.Context, projectID, graphID string, version 
 	run, err := runRepo.CreateFlowRun(ctx, store.CreateFlowRunInput{
 		SessionID: sessionID, ProjectID: projectID,
 		FlowVersionID:  FlowVersionID(graphID, revisionID),
-		DefinitionJSON: definitionJSON, ConfigDigest: revision.Digest,
+		DefinitionJSON: definitionJSON, ConfigDigest: bundle.Revision.Digest,
 		InputsJSON: inputsJSON,
 	}, freeze)
 	if err != nil {
@@ -254,12 +260,12 @@ func (s *Service) skillDigests() map[string]string {
 
 // freezeTasks resolves every Task into its frozen node snapshot in topological
 // order. Any failure aborts the whole Run (fail-closed; nothing is persisted).
-func (s *Service) freezeTasks(ctx context.Context, document *graphsource.Document) ([]store.FlowNodeFreeze, error) {
+func (s *Service) freezeTasks(ctx context.Context, bundle *globalsource.GraphRevisionBundle) ([]store.FlowNodeFreeze, error) {
 	// Read the Skill digest catalog once per Run freeze, straight from the
 	// current on-disk catalog, so a Skill created or edited after startup is
 	// usable without restarting the Worker.
 	skillCatalog := s.skillDigests()
-	order, err := agentflow.TopologicalOrder(definitionFromDocument(document).Tasks)
+	order, err := agentflow.TopologicalOrder(definitionFromDocument(bundle.Document).Tasks)
 	if err != nil {
 		return nil, err
 	}
@@ -269,8 +275,8 @@ func (s *Service) freezeTasks(ctx context.Context, document *graphsource.Documen
 	}
 	freeze := make([]store.FlowNodeFreeze, 0, len(order))
 	for _, name := range order {
-		task := document.Tasks[name]
-		hero, globalSkills, err := s.resolveTaskHero(ctx, document, name, task, skillCatalog)
+		task := bundle.Document.Tasks[name]
+		hero, globalSkills, err := s.resolveTaskHero(ctx, bundle, name, task, skillCatalog)
 		if err != nil {
 			return nil, fmt.Errorf("Task %q: %w", name, err)
 		}
@@ -319,8 +325,10 @@ func (s *Service) freezeTasks(ctx context.Context, document *graphsource.Documen
 //
 // Global Task Skills are validated, resolved to their current content digest,
 // and returned as additive preload refs; local Task Skills are inlined into the
-// Hero prompt and tool allowlist.
-func (s *Service) resolveTaskHero(ctx context.Context, document *graphsource.Document,
+// Hero prompt and tool allowlist. For a frozen revision the local Hero and any
+// local Skills it references are resolved from the revision bundle only; a
+// legacy (non-frozen) revision keeps reading the mutable drafts.
+func (s *Service) resolveTaskHero(ctx context.Context, bundle *globalsource.GraphRevisionBundle,
 	taskID string, task graphsource.Task, skillCatalog map[string]string) (*frozenTaskHero, domain.FrozenSkillRefs, error) {
 	if task.Hero != "" {
 		scope, id, _ := strings.Cut(task.Hero, "/")
@@ -340,15 +348,26 @@ func (s *Service) resolveTaskHero(ctx context.Context, document *graphsource.Doc
 				ConfigDigest: revision.Digest, Definition: *definition,
 			}, nil, nil
 		case "local":
-			heroDoc, digest, err := s.Sources.ReadGraphHero(document.ID, id)
+			var heroDoc *heroesource.Document
+			var digest string
+			if bundle.Frozen {
+				heroDoc = bundle.Heroes[id]
+				if heroDoc == nil {
+					return nil, nil, fmt.Errorf("revision %s local Hero %q missing from frozen bundle", bundle.Revision.ID(), id)
+				}
+				digest = bundle.Revision.HeroDigests[id]
+			} else {
+				var err error
+				heroDoc, digest, err = s.Sources.ReadGraphHero(bundle.Document.ID, id)
+				if err != nil {
+					return nil, nil, fmt.Errorf("local Hero %q: %w", id, err)
+				}
+			}
+			definition, err := s.resolveLocalHero(ctx, bundle, bundle.Document.ID, heroDoc)
 			if err != nil {
 				return nil, nil, fmt.Errorf("local Hero %q: %w", id, err)
 			}
-			definition, err := s.resolveLocalHero(ctx, document.ID, heroDoc)
-			if err != nil {
-				return nil, nil, fmt.Errorf("local Hero %q: %w", id, err)
-			}
-			objectID := "graph:" + document.ID + "/" + id
+			objectID := "graph:" + bundle.Document.ID + "/" + id
 			return &frozenTaskHero{
 				ObjectID: objectID, VersionID: objectID + "@" + digest,
 				Handle: id, DisplayName: heroDoc.Name,
@@ -383,7 +402,7 @@ func (s *Service) resolveTaskHero(ctx context.Context, document *graphsource.Doc
 			}
 			globalSkills = append(globalSkills, domain.FrozenSkillRef{ID: id, Digest: digest})
 		case "local":
-			loaded, loadErr := s.loadLocalSkill(document.ID, id)
+			loaded, loadErr := s.loadLocalSkill(bundle, bundle.Document.ID, id)
 			if loadErr != nil {
 				return nil, nil, fmt.Errorf("local Skill %q: %w", id, loadErr)
 			}
@@ -408,8 +427,9 @@ func (s *Service) resolveTaskHero(ctx context.Context, document *graphsource.Doc
 
 // resolveLocalHero resolves a Graph-private Hero document, inlining local
 // Skills into the prompt and tool allowlist (global Skills keep their catalog
-// binding).
-func (s *Service) resolveLocalHero(ctx context.Context, graphID string, document *heroesource.Document) (*domain.HeroDefinition, error) {
+// binding). For a frozen revision local Skills are loaded from the bundle; for
+// a legacy revision they come from the mutable draft directories.
+func (s *Service) resolveLocalHero(ctx context.Context, bundle *globalsource.GraphRevisionBundle, graphID string, document *heroesource.Document) (*domain.HeroDefinition, error) {
 	encoded, _ := json.Marshal(document)
 	var copy heroesource.Document
 	_ = json.Unmarshal(encoded, &copy)
@@ -426,7 +446,7 @@ func (s *Service) resolveLocalHero(ctx context.Context, graphID string, document
 		if scope != "local" {
 			return nil, fmt.Errorf("Skill %q must use local/ or global/", binding.ID)
 		}
-		loaded, err := s.loadLocalSkill(graphID, id)
+		loaded, err := s.loadLocalSkill(bundle, graphID, id)
 		if err != nil {
 			return nil, err
 		}
@@ -440,7 +460,26 @@ func (s *Service) resolveLocalHero(ctx context.Context, graphID string, document
 	return definition, nil
 }
 
-func (s *Service) loadLocalSkill(graphID, id string) (*skills.LoadedSkill, error) {
+func (s *Service) loadLocalSkill(bundle *globalsource.GraphRevisionBundle, graphID, id string) (*skills.LoadedSkill, error) {
+	if bundle != nil && bundle.Frozen {
+		directory, ok := bundle.SkillDirs[id]
+		if !ok {
+			return nil, fmt.Errorf("revision %s local Skill %q missing from frozen bundle", bundle.Revision.ID(), id)
+		}
+		loaded, err := skills.Load(directory)
+		if err != nil {
+			return nil, fmt.Errorf("revision %s local Skill %q: %w", bundle.Revision.ID(), id, err)
+		}
+		digest, ok := bundle.Revision.SkillDigests[id]
+		if !ok {
+			return nil, fmt.Errorf("revision %s local Skill %q has no recorded digest", bundle.Revision.ID(), id)
+		}
+		expected, hasPrefix := strings.CutPrefix(digest, "sha256:")
+		if !hasPrefix || expected != loaded.ContentHash {
+			return nil, fmt.Errorf("revision %s local Skill %q failed integrity validation", bundle.Revision.ID(), id)
+		}
+		return loaded, nil
+	}
 	directory, err := s.Sources.GraphResourceDir(graphID, "skills", id)
 	if err != nil {
 		return nil, err
