@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
@@ -250,8 +251,19 @@ func (s *Server) validateGraphPublish(r *http.Request, document *graphsource.Doc
 		var refs []string
 		switch scope {
 		case "global":
-			hero, _, err := s.GlobalSources.ReadHero(id)
+			hero, _, err := s.GlobalSources.LatestHeroRevision(id)
 			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					// LatestHeroRevision reports os.ErrNotExist both for a Hero
+					// that was never published and for one that does not exist at
+					// all. Distinguish the two so the author can tell "you never
+					// published it" from "it does not exist".
+					_, _, draftErr := s.GlobalSources.ReadHero(id)
+					if draftErr == nil {
+						return fmt.Errorf("Task %q global Hero %q has no published revision", taskID, id)
+					}
+					return fmt.Errorf("Task %q global Hero %q: %w", taskID, id, draftErr)
+				}
 				return fmt.Errorf("Task %q global Hero %q: %w", taskID, id, err)
 			}
 			refs = append([]string{hero.Model.Ref}, hero.Model.Fallbacks...)

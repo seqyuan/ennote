@@ -9,8 +9,10 @@ import (
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
@@ -273,4 +275,145 @@ func TestGlobalGraphPublishReportsMissingSkillCatalogAsUnavailable(t *testing.T)
 	assert.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
 	assert.Contains(t, response.Body.String(), "unknown skill")
 	assert.NotContains(t, response.Body.String(), "graph_validation_unavailable")
+}
+
+// graphHeroCatalog wires a file-backed Model catalog into a Graph test server
+// and returns the underlying store so a test can add or remove models.
+func graphHeroCatalog(t *testing.T, server *Server, home string) *fileconfig.ModelStore {
+	t.Helper()
+	models := fileconfig.NewModelStore(
+		filepath.Join(home, "config", "models.json"),
+		filepath.Join(home, "config", "provider-auth.json"),
+		filepath.Join(home, "config", "settings.json"),
+	)
+	_, err := models.CreateProvider(context.Background(), fileconfig.CreateProviderInput{
+		Key: "provider", Name: "Provider", ProviderType: domain.ProviderOpenAICompatible,
+		BaseURL: "https://provider.test/v1", APIKey: "sk-graph-secret",
+	})
+	require.NoError(t, err)
+	server.Models = &store.ModelRepo{Files: models}
+	return models
+}
+
+// graphHeroDocument is a minimal portable Hero whose only model is modelRef.
+func graphHeroDocument(handle, modelRef string) *heroesource.Document {
+	return &heroesource.Document{
+		SchemaVersion: 1, Handle: handle, Name: "Hero",
+		Model:  heroesource.ModelBinding{Ref: modelRef, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills: []heroesource.SkillBinding{}, Authority: heroesource.AuthorityReadOnly,
+		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read"},
+		Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextTask,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextTask}, OwnExecutionContinuity: domain.HeroContinuityNone},
+		Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
+			MaxInvocationsPerParentRun: 2, MaxConcurrentInstances: 1,
+			BudgetCeiling: heroesource.DelegationBudgetCeiling{MaxModelCalls: 2, MaxToolCalls: 4,
+				MaxTotalTokens: 20000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 120000}},
+		OutputContract: "text-v1", MaxLoopIterations: 4, Prompt: "Do the work.",
+	}
+}
+
+// createHeroGraph builds a one-Task Graph whose Task runs through heroRef, so a
+// later publish exercises the Hero model-reference check.
+func createHeroGraph(t *testing.T, handler http.Handler, heroRef string) {
+	t.Helper()
+	response := request(t, handler, http.MethodPost, "/v1/graphs", map[string]any{"id": "qc", "name": "QC"}, true)
+	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+	var created globalGraphDetail
+	decodeData(t, response, &created)
+
+	response = request(t, handler, http.MethodPatch, "/v1/graphs/qc", map[string]any{
+		"expectedDigest": created.Digest,
+		"task": map[string]any{"id": "align", "value": map[string]any{
+			"name": "Align", "hero": heroRef, "goal": "Align reads",
+		}},
+	}, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+}
+
+// A global Hero that exists only as a draft was never resolvable at Run time
+// (graphrun reads the published revision), so publishing a Graph that references
+// it must fail up front with a message that names the difference.
+func TestGlobalGraphPublishRejectsUnpublishedGlobalHero(t *testing.T) {
+	server, handler, home := setupGlobalGraphServer(t)
+	models := graphHeroCatalog(t, server, home)
+	_, err := models.CreateModel(context.Background(), fileconfig.CreateModelInput{
+		ProviderID: "provider", ModelName: "stable", ContextWindow: 32768, MaxOutputTokens: 4096,
+		SupportsToolUse: true, ThinkingDialect: domain.ThinkingDialectNone,
+		SupportedThinkingEfforts: []domain.ThinkingEffort{domain.ThinkingDefault},
+	})
+	require.NoError(t, err)
+
+	_, _, err = server.GlobalSources.CreateHero(graphHeroDocument("reviewer", "provider/stable"))
+	require.NoError(t, err)
+
+	createHeroGraph(t, handler, "global/reviewer")
+
+	response := request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
+	assert.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "has no published revision")
+	assert.Contains(t, response.Body.String(), "reviewer")
+	assert.Contains(t, response.Body.String(), "align")
+}
+
+// A published Hero is the document a Run actually resolves, so publish-time model
+// validation must read the published revision, not the draft. When the draft has
+// moved to a still-valid model but the published revision points at a model that
+// no longer resolves, publishing must fail.
+func TestGlobalGraphPublishValidatesPublishedHeroRevisionNotDraft(t *testing.T) {
+	server, handler, home := setupGlobalGraphServer(t)
+	models := graphHeroCatalog(t, server, home)
+	for _, name := range []string{"published", "draft"} {
+		_, err := models.CreateModel(context.Background(), fileconfig.CreateModelInput{
+			ProviderID: "provider", ModelName: name, ContextWindow: 32768, MaxOutputTokens: 4096,
+			SupportsToolUse: true, ThinkingDialect: domain.ThinkingDialectNone,
+			SupportedThinkingEfforts: []domain.ThinkingEffort{domain.ThinkingDefault},
+		})
+		require.NoError(t, err)
+	}
+
+	_, heroDigest, err := server.GlobalSources.CreateHero(graphHeroDocument("reviewer", "provider/published"))
+	require.NoError(t, err)
+	_, err = server.GlobalSources.PublishHeroRevision("reviewer")
+	require.NoError(t, err)
+
+	// Move only the draft to a different, still-resolvable model.
+	_, _, err = server.GlobalSources.UpdateHero("reviewer", heroDigest, func(document *heroesource.Document) error {
+		document.Model.Ref = "provider/draft"
+		return nil
+	})
+	require.NoError(t, err)
+
+	// The published revision still references provider/published, which is gone.
+	err = models.DeleteModel(context.Background(), "provider/published")
+	require.NoError(t, err)
+
+	createHeroGraph(t, handler, "global/reviewer")
+
+	response := request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
+	assert.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "provider/published")
+}
+
+// The normal path stays intact: a published global Hero with a resolvable model
+// lets the Graph publish.
+func TestGlobalGraphPublishSucceedsWithPublishedGlobalHero(t *testing.T) {
+	server, handler, home := setupGlobalGraphServer(t)
+	models := graphHeroCatalog(t, server, home)
+	_, err := models.CreateModel(context.Background(), fileconfig.CreateModelInput{
+		ProviderID: "provider", ModelName: "stable", ContextWindow: 32768, MaxOutputTokens: 4096,
+		SupportsToolUse: true, ThinkingDialect: domain.ThinkingDialectNone,
+		SupportedThinkingEfforts: []domain.ThinkingEffort{domain.ThinkingDefault},
+	})
+	require.NoError(t, err)
+
+	_, _, err = server.GlobalSources.CreateHero(graphHeroDocument("reviewer", "provider/stable"))
+	require.NoError(t, err)
+	_, err = server.GlobalSources.PublishHeroRevision("reviewer")
+	require.NoError(t, err)
+
+	createHeroGraph(t, handler, "global/reviewer")
+
+	response := request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
+	assert.Equal(t, http.StatusCreated, response.Code, response.Body.String())
 }
