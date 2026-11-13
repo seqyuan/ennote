@@ -61,6 +61,15 @@ export function useRightPanel(projectId: string | null) {
   // The tab each Project was last showing, so leaving and coming back returns
   // the reader to it instead of leaving an empty lane behind.
   const rememberedTab = useRef(new Map<string, string>());
+  // An "open in the canvas" click that lands before this Project's preferences
+  // have hydrated cannot be applied yet — the hydrate effect replaces the state
+  // wholesale a frame later and would erase the row. Park it here and replay it
+  // once hydration lands, rather than dropping the click.
+  const pendingArtifactRef = useRef<{
+    projectId: string;
+    input: { sessionId: string; artifactId: string; name: string };
+    pane: InspectorPane;
+  } | null>(null);
   const lastWritten = useRef<string | null>(null);
   const draggingPrimary = useRef(false);
   // The state of the Project that is being left. A switch replaces the state
@@ -134,6 +143,24 @@ export function useRightPanel(projectId: string | null) {
     });
     setHydratedFor(key);
   }, [key, projectId, hydratedFor, flush]);
+
+  // Replay an artifact intent parked while this Project's preferences were still
+  // hydrating. It sits after the hydrate effect so it observes the render where
+  // `hydratedFor` has already landed. Clearing the ref before `setState` is what
+  // makes it fire exactly once: the next render finds the ref empty.
+  useEffect(() => {
+    if (!projectId || hydratedFor !== key) return;
+    const pending = pendingArtifactRef.current;
+    if (!pending) return;
+    pendingArtifactRef.current = null;
+    // A Project switch before hydration makes the parked intent stale: it named
+    // the Project that was opening, not the one now on screen. Drop it rather
+    // than open a row under the wrong owner (AGENTS.md scopes every action).
+    if (pending.projectId !== projectId) return;
+    const row: PersistedInspectorTab = { kind: "artifact", ...pending.input, pane: pending.pane };
+    rememberedTab.current.set(projectId, inspectorTabId(projectId, row));
+    setState((current) => openInspectorTab(current, row));
+  }, [key, projectId, hydratedFor]);
 
   // The strips' rows are the Project's remembered files, per pane.
   const paneTabs = useMemo(() => {
@@ -216,8 +243,12 @@ export function useRightPanel(projectId: string | null) {
     if (!projectId) return;
     // Before hydration the state still belongs to the previous Project, and the
     // hydrate effect replaces it wholesale: a row added now would be erased a frame
-    // later. Refusing is honest — the caller's click is lost, not misfiled.
-    if (hydratedFor !== projectId) return;
+    // later. Park the intent and replay it once hydration lands, so the click is
+    // deferred rather than lost.
+    if (hydratedFor !== projectId) {
+      pendingArtifactRef.current = { projectId, input, pane };
+      return;
+    }
     const row: PersistedInspectorTab = { kind: "artifact", ...input, pane };
     rememberedTab.current.set(projectId, inspectorTabId(projectId, row));
     setState((current) => openInspectorTab(current, row));
