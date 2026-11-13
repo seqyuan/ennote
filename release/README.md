@@ -5,13 +5,14 @@
 The binaries users download live in the **public** repository
 [`seqyuan/ennote-bin`](https://github.com/seqyuan/ennote-bin), not here.
 
-Why: a release asset in a private repository is authenticated, so the launcher
-(`bin/ennote.js`) cannot fetch it on a first `npx` run, and GitHub only produces
-build attestations for workflows in a public repository.
+Why: the launcher (`bin/ennote.js`) defaults to `seqyuan/ennote-bin` for first-run
+downloads, so the binaries are mirrored there and attested there. The source
+repository is public (since 2026-11-13), so it is also attested directly by
+`release.yml`.
 
 `release.yml` therefore does two things after building and testing:
 
-1. creates the release here (private audit trail: tag, commit, bytes), and
+1. creates the release here (the tag, commit, and bytes), and
 2. mirrors the binaries + `SHA256SUMS` into `ennote-bin` and dispatches
    `ennote-release` there.
 
@@ -21,15 +22,10 @@ attests them, and records the source revision in the release notes.
 
 ## npm provenance
 
-`npm publish` runs **without** `--provenance` while this source repository is
-private: the registry rejects a Sigstore bundle whose source repository is not
-public (`E422 … Unsupported GitHub Actions source repository visibility`). The
-npm tarball is therefore unsigned; the binaries it downloads are attested in
-`ennote-bin`, which is what a user actually executes.
-
-To restore npm provenance, make `seqyuan/ennote` public (or move to GHEC) and put
-`--provenance` back on the publish step. AGENTS.md records this as the one allowed
-gap and not a precedent.
+`npm publish` runs **with** `--provenance` (since 2026-11-13, when
+`seqyuan/ennote` was made public): the registry accepts a Sigstore bundle for the
+tarball, so the npm tarball and the binaries it downloads are both signed — the
+binaries here and in `ennote-bin`, the tarball via npm provenance.
 
 Setup (once):
 

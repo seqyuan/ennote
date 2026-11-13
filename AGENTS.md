@@ -109,17 +109,13 @@ constraints, not a replacement for the local roadmap or detailed design plans.
   worker binaries and `SHA256SUMS`, npm provenance covers the tarball. Verify a
   downloaded artifact against the repository before trusting it. Do not weaken
   these steps to make a release go through.
-- **Recorded exception (2026-11-09).** The source repository is private, and GitHub
-  only signs attestations for workflows in a public repository; npm rejects
-  `--provenance` from a private source with `E422` ("Unsupported … source
-  repository visibility"). The release therefore splits the guarantee instead of
-  dropping it: the worker binaries and `SHA256SUMS` are mirrored to the public
-  repository `seqyuan/ennote-bin` and attested there (verify with
-  `gh attestation verify <file> --repo seqyuan/ennote-bin`), while the npm tarball
-  is published **unsigned**. This is the single allowed gap; it is not a precedent
-  for weakening other steps. Restore npm provenance by making the source public (or
-  moving to GHEC) and deleting `--access public`'s unsigned publish path — see
-  `release/README.md`.
+- **Resolved (2026-11-13).** The source repository is now public, so GitHub signs
+  provenance for workflows here. `npm publish` runs with `--provenance` (the
+  tarball is signed), and the worker binaries + `SHA256SUMS` are attested in this
+  repository directly. The `seqyuan/ennote-bin` mirror is kept because the
+  launcher's first-run download defaults there (`bin/ennote.js`), and it is
+  attested there too (verify with `gh attestation verify <file> --repo
+  seqyuan/ennote-bin`).
 - A pipeline message that names a cause must derive it from observed state. A
   diagnostic that guesses — "probably staged 2FA" — sends the maintainer down the
   wrong path. Print the registry's answer and what was actually attempted.

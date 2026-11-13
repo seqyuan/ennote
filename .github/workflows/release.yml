@@ -257,12 +257,12 @@ jobs:
           if npm view "$ENNOTE_NPM_PACKAGE@${{ steps.pkg.outputs.version }}" version >/dev/null 2>&1; then
             echo "Package $ENNOTE_NPM_PACKAGE@${{ steps.pkg.outputs.version }} already published, nothing to do."
           else
-            # No --provenance: the registry refuses a Sigstore bundle whose source
-            # repository is private ("E422 … Unsupported GitHub Actions source
-            # repository visibility"), and this repository is private by design.
-            # The binaries users run are still attested — in the public repository
-            # they are published from (see AGENTS.md, "Recorded exception").
-            npm publish --access public
+            # --provenance signs the tarball with the workflow's keyless Sigstore
+            # identity. The registry accepts it only when the source repository is
+            # public (E422 "Unsupported … source repository visibility" otherwise),
+            # which it now is. Keep repository/homepage/bugs in package.json
+            # populated: provenance matches repository.url against this repo.
+            npm publish --provenance --access public
           fi
           # Accounts with 2FA may leave the publish staged instead of live.
           # If the verification step below fails, approve the staged release
@@ -294,11 +294,10 @@ jobs:
           npm view "$ENNOTE_NPM_PACKAGE@${{ steps.pkg.outputs.version }}" --json || true
           exit 1
 
-      # Attestation is a public-repository feature: GitHub refuses to create one
-      # for a workflow running in a private repository (unless the org is on
-      # GHEC). This repository is private, so the binaries are attested where
-      # they are published — `seqyuan/ennote-bin` — by the dispatch below. When
-      # this repository becomes public the step runs here instead.
+      # Attestation is a public-repository feature, and this repository is now
+      # public, so the binaries and SHA256SUMS are attested here directly. The
+      # `seqyuan/ennote-bin` mirror below stays for the launcher's first-run
+      # download (bin/ennote.js defaults there) and is attested there too.
       - name: Attest Release Provenance (public source only)
         if: ${{ github.event.repository.visibility == 'public' }}
         uses: actions/attest-build-provenance@v2
@@ -308,8 +307,7 @@ jobs:
             worker/ennoworker-*
             worker/SHA256SUMS
 
-      # Kept as the private audit trail: the tag, the commit, and the bytes that
-      # were produced for it, readable by the maintainer without a public repo.
+      # The audit trail: the tag, the commit, and the bytes produced for it.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
