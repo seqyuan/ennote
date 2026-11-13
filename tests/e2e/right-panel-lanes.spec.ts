@@ -236,7 +236,7 @@ test("closing every channel leaves a launcher instead of an empty lane", async (
   await selectProject(page, project.name);
   await page.getByTitle("Show panel").click();
 
-  for (const name of ["Files", "Graphs", "Status"]) {
+  for (const name of ["Files", "Graphs", "Status", "Canvas"]) {
     await page.getByRole("button", { name: `Close ${name}` }).click();
   }
 
