@@ -103,7 +103,33 @@ func TestApplyFailsClosedOnAnUnknownAppliedVersion(t *testing.T) {
 	err := Apply(db, sqlSet("demo", fstest.MapFS{
 		"0001_table.sql": {Data: []byte(`CREATE TABLE t (id TEXT PRIMARY KEY);`)},
 	}))
-	require.ErrorContains(t, err, "records migration 2, which this build does not carry")
+	require.ErrorContains(t, err, "demo database records migration 2")
+	require.ErrorContains(t, err, "this binary is older than the database")
+	require.ErrorContains(t, err, "downgrade")
+	require.ErrorContains(t, err, "backup")
+}
+
+// A pre-versioning version table that records a version this build does not
+// carry is the same future-schema situation as the main path, reached through
+// legacy adoption: the downgrade must say so rather than silently dropping it.
+func TestApplyFailsClosedOnAnUnknownLegacyVersion(t *testing.T) {
+	db := openTestDB(t)
+	_, err := db.Exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (2, '2026-01-01T00:00:00Z')`)
+	require.NoError(t, err)
+
+	set := Set{
+		Prefix: "session", FS: fstest.MapFS{
+			"0001_table.sql": {Data: []byte(`CREATE TABLE t (id TEXT PRIMARY KEY);`)},
+		},
+		LegacyVersionTable: "schema_migrations",
+	}
+	err = Apply(db, set)
+	require.ErrorContains(t, err, "session database records migration 2")
+	require.ErrorContains(t, err, "this binary is older than the database")
+	require.ErrorContains(t, err, "downgrade")
+	require.ErrorContains(t, err, "backup")
 }
 
 // A lower-numbered migration that appears after a higher one was recorded is an

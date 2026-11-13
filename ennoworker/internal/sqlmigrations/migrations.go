@@ -139,7 +139,7 @@ func Apply(db *sql.DB, set Set) error {
 	maxApplied := 0
 	for version := range applied {
 		if _, ok := known[version]; !ok {
-			return fmt.Errorf("%s database records migration %d, which this build does not carry", set.Prefix, version)
+			return fmt.Errorf("%s database records migration %d, which is newer than this build carries: this binary is older than the database, and a downgrade requires restoring the database from a backup", set.Prefix, version)
 		}
 		if applied[version] != known[version].Checksum {
 			return fmt.Errorf("%s migration %d changed after it was applied: recorded %s, embedded %s",
@@ -250,7 +250,7 @@ func adoptLegacy(db *sql.DB, set Set, known map[int]Migration) error {
 	for _, version := range versions {
 		migration, ok := known[version]
 		if !ok {
-			return fmt.Errorf("%s database records migration %d, which this build does not carry", set.Prefix, version)
+			return fmt.Errorf("%s database records migration %d, which is newer than this build carries: this binary is older than the database, and a downgrade requires restoring the database from a backup", set.Prefix, version)
 		}
 		if err := record(tx, set.Prefix, migration); err != nil {
 			return err
