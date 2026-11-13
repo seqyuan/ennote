@@ -4780,6 +4780,9 @@ components:
         heroDigests:
           type: object
           additionalProperties: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+        skillDigests:
+          type: object
+          additionalProperties: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
         publishedAt: { type: string, format: date-time }
     GlobalHeroSummary:
       type: object

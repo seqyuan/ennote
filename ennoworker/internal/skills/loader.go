@@ -356,6 +356,16 @@ func sha256Hex(data []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
+// ContentDigest reports the sha256: prefixed digest of the same bytes Load's
+// ContentHash covers.
+func ContentDigest(dir string) (string, error) {
+	hash, err := dirHash(dir)
+	if err != nil {
+		return "", err
+	}
+	return "sha256:" + hash, nil
+}
+
 func dirHash(dir string) (string, error) {
 	h := sha256.New()
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {

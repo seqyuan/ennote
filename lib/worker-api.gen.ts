@@ -3206,6 +3206,9 @@ export interface components {
             heroDigests?: {
                 [key: string]: string;
             };
+            skillDigests?: {
+                [key: string]: string;
+            };
             /** Format: date-time */
             publishedAt: string;
         };

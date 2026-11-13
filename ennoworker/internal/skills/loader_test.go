@@ -24,6 +24,10 @@ func TestLoadAndSnapshotSkill(t *testing.T) {
 	assert.NotEmpty(t, skill.ContentHash)
 	assert.Contains(t, skill.PromptText, "Do the thing")
 
+	contentDigest, err := ContentDigest(dir)
+	require.NoError(t, err)
+	assert.Equal(t, "sha256:"+skill.ContentHash, contentDigest)
+
 	runDir := t.TempDir()
 	dest, err := skill.CopyToSnapshot(runDir)
 	require.NoError(t, err)

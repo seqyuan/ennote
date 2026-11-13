@@ -18,9 +18,15 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
+	"github.com/seqyuan/ennote/ennoworker/internal/skills"
 )
 
 const revisionSchemaVersion = 1
+
+// maxSkillDirBytes caps the total bytes of one graph-local Skill directory
+// frozen into a published revision, so a single oversized Skill cannot bloat the
+// immutable revision directory.
+const maxSkillDirBytes = 1 << 20 // 1 MiB
 
 var revisionDirPattern = regexp.MustCompile(`^v([0-9]{6})$`)
 
@@ -31,6 +37,7 @@ type Revision struct {
 	Version       int               `json:"version"`
 	Digest        string            `json:"digest"`
 	HeroDigests   map[string]string `json:"heroDigests,omitempty"`
+	SkillDigests  map[string]string `json:"skillDigests,omitempty"`
 	PublishedAt   time.Time         `json:"publishedAt"`
 }
 
@@ -65,7 +72,7 @@ func (s Store) PublishHeroRevision(id string) (*Revision, error) {
 		return nil, err
 	}
 	return publishRevision(filepath.Join(s.HeroesDir(), id), id, "",
-		[]revisionFile{{Path: "hero.md", Data: contents}}, digest, nil)
+		[]revisionFile{{Path: "hero.md", Data: contents}}, digest, nil, nil)
 }
 
 func (s Store) PublishGraphRevision(id string) (*Revision, error) {
@@ -77,8 +84,102 @@ func (s Store) PublishGraphRevision(id string) (*Revision, error) {
 	if err != nil {
 		return nil, err
 	}
-	return publishRevision(filepath.Join(s.GraphsDir(), id), id, SourceKindGraph,
-		[]revisionFile{{Path: graphSourceName, Data: contents}}, digest, nil)
+	files := []revisionFile{{Path: graphSourceName, Data: contents}}
+	var heroDigests map[string]string
+	var skillDigests map[string]string
+
+	// Collect every graph-local Hero and Skill the draft references, then freeze
+	// each into this revision so editing a draft later cannot change a published
+	// Run. Iterate Task ids in sorted order for deterministic output.
+	heroSeen := map[string]bool{}
+	skillSeen := map[string]bool{}
+	skillContext := map[string]string{}
+	taskIDs := make([]string, 0, len(document.Tasks))
+	for taskID := range document.Tasks {
+		taskIDs = append(taskIDs, taskID)
+	}
+	sort.Strings(taskIDs)
+	for _, taskID := range taskIDs {
+		task := document.Tasks[taskID]
+		if task.Hero != "" {
+			handle, local := strings.CutPrefix(task.Hero, "local/")
+			if !local {
+				continue
+			}
+			if heroSeen[handle] {
+				continue
+			}
+			heroSeen[handle] = true
+			heroDocument, heroDigest, err := s.ReadGraphHero(id, handle)
+			if err != nil {
+				return nil, fmt.Errorf("Task %q references local Hero %q: %w", taskID, handle, err)
+			}
+			encoded, err := heroesource.Encode(heroDocument)
+			if err != nil {
+				return nil, err
+			}
+			files = append(files, revisionFile{Path: filepath.Join("heroes", handle, "hero.md"), Data: encoded})
+			if heroDigests == nil {
+				heroDigests = map[string]string{}
+			}
+			heroDigests[handle] = heroDigest
+			// A graph-local Hero may itself reference graph-local Skills.
+			for _, binding := range heroDocument.Skills {
+				if skillID, ok := strings.CutPrefix(binding.ID, "local/"); ok {
+					if !skillSeen[skillID] {
+						skillContext[skillID] = fmt.Sprintf("Hero %q", handle)
+					}
+					skillSeen[skillID] = true
+				}
+			}
+			continue
+		}
+		// Inline (model-backed) Tasks declare Skills directly.
+		for _, ref := range task.Skills {
+			if skillID, ok := strings.CutPrefix(ref, "local/"); ok {
+				if !skillSeen[skillID] {
+					skillContext[skillID] = fmt.Sprintf("Task %q", taskID)
+				}
+				skillSeen[skillID] = true
+			}
+		}
+	}
+
+	skillIDs := make([]string, 0, len(skillSeen))
+	for skillID := range skillSeen {
+		skillIDs = append(skillIDs, skillID)
+	}
+	sort.Strings(skillIDs)
+	for _, skillID := range skillIDs {
+		directory, err := s.GraphResourceDir(id, "skills", skillID)
+		if err != nil {
+			return nil, fmt.Errorf("%s references local Skill %q: %w", skillContext[skillID], skillID, err)
+		}
+		skillFiles, err := collectSkillFiles(skillID, directory)
+		if err != nil {
+			return nil, err
+		}
+		// A Skill directory with no regular files still hashes (to the digest of
+		// nothing), but publishRevision only creates directories for files it
+		// writes, so recording such a digest would publish a revision whose
+		// skills/<id> directory does not exist and cannot be read back. Refuse it
+		// here instead: a Skill that skills.Load cannot load is not runnable
+		// either.
+		if len(skillFiles) == 0 {
+			return nil, fmt.Errorf("%s references local Skill %q, which contains no files", skillContext[skillID], skillID)
+		}
+		contentDigest, err := skills.ContentDigest(directory)
+		if err != nil {
+			return nil, fmt.Errorf("%s references local Skill %q: %w", skillContext[skillID], skillID, err)
+		}
+		if skillDigests == nil {
+			skillDigests = map[string]string{}
+		}
+		skillDigests[skillID] = contentDigest
+		files = append(files, skillFiles...)
+	}
+
+	return publishRevision(filepath.Join(s.GraphsDir(), id), id, SourceKindGraph, files, digest, heroDigests, skillDigests)
 }
 
 // PublishFlowRevision freezes the FlowDefinition AND every flow-local Hero it
@@ -112,7 +213,7 @@ func (s Store) PublishFlowRevision(id string) (*Revision, error) {
 		files = append(files, revisionFile{Path: filepath.Join("heroes", handle, "hero.md"), Data: encoded})
 		heroDigests[handle] = heroDigest
 	}
-	return publishRevision(filepath.Join(s.GraphsDir(), id), id, SourceKindFlow, files, digest, heroDigests)
+	return publishRevision(filepath.Join(s.GraphsDir(), id), id, SourceKindFlow, files, digest, heroDigests, nil)
 }
 
 // flowLocalHeroHandles returns every flow-local Hero a definition references: an
@@ -220,17 +321,15 @@ func (s Store) ReadHeroRevision(id, revisionID string) (*heroesource.Document, *
 	return document, revision, nil
 }
 
-// ReadGraphRevision loads and verifies one immutable Graph revision. The
-// returned document is the canonical graphsource form of the published
-// graph.yaml; callers convert it to a FlowDefinition at Run start and freeze
-// that definition into the owning Session database.
-func (s Store) ReadGraphRevision(id, revisionID string) (*graphsource.Document, *Revision, error) {
+// graphRevision locates and validates the metadata for one Graph revision. It
+// rejects flow revisions so a Graph reader can never see a flow source.
+func (s Store) graphRevision(id, revisionID string) (*Revision, error) {
 	if !objectIDPattern.MatchString(id) || !revisionDirPattern.MatchString(revisionID) {
-		return nil, nil, fmt.Errorf("invalid Graph revision %q/%q", id, revisionID)
+		return nil, fmt.Errorf("invalid Graph revision %q/%q", id, revisionID)
 	}
 	revisions, err := s.ListGraphRevisions(id)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	var revision *Revision
 	for index := range revisions {
@@ -241,10 +340,22 @@ func (s Store) ReadGraphRevision(id, revisionID string) (*graphsource.Document, 
 		}
 	}
 	if revision == nil {
-		return nil, nil, os.ErrNotExist
+		return nil, os.ErrNotExist
 	}
 	if revision.SourceKind == SourceKindFlow {
-		return nil, nil, fmt.Errorf("revision %s is a flow revision, not a Graph revision", revisionID)
+		return nil, fmt.Errorf("revision %s is a flow revision, not a Graph revision", revisionID)
+	}
+	return revision, nil
+}
+
+// ReadGraphRevision loads and verifies one immutable Graph revision. The
+// returned document is the canonical graphsource form of the published
+// graph.yaml; callers convert it to a FlowDefinition at Run start and freeze
+// that definition into the owning Session database.
+func (s Store) ReadGraphRevision(id, revisionID string) (*graphsource.Document, *Revision, error) {
+	revision, err := s.graphRevision(id, revisionID)
+	if err != nil {
+		return nil, nil, err
 	}
 	contents, err := readRegular(filepath.Join(s.GraphsDir(), id, "revisions", revisionID, graphSourceName))
 	if err != nil {
@@ -262,6 +373,98 @@ func (s Store) ReadGraphRevision(id, revisionID string) (*graphsource.Document, 
 		return nil, nil, fmt.Errorf("Graph revision %s failed integrity validation", revisionID)
 	}
 	return document, revision, nil
+}
+
+// GraphRevisionBundle is one immutable Graph revision plus every graph-local
+// resource frozen with it.
+type GraphRevisionBundle struct {
+	Document  *graphsource.Document
+	Heroes    map[string]*heroesource.Document
+	SkillDirs map[string]string
+	Revision  *Revision
+	// Frozen reports whether the revision recorded at least one local Hero or
+	// Skill digest. A revision that referenced local resources always records
+	// them, so an empty set means either a legacy revision (fall back to draft)
+	// or a Graph with no local resources at all (nothing to freeze) — the two are
+	// indistinguishable and behave identically.
+	Frozen bool
+}
+
+// ReadGraphRevisionBundle loads and verifies one immutable Graph revision plus
+// every frozen graph-local Hero and Skill. The graph digest and every bundled
+// resource digest are verified; any drift fails closed.
+func (s Store) ReadGraphRevisionBundle(id, revisionID string) (*GraphRevisionBundle, error) {
+	revision, err := s.graphRevision(id, revisionID)
+	if err != nil {
+		return nil, err
+	}
+	revisionDir := filepath.Join(s.GraphsDir(), id, "revisions", revisionID)
+	contents, err := readRegular(filepath.Join(revisionDir, graphSourceName))
+	if err != nil {
+		return nil, err
+	}
+	document, err := graphsource.Parse(contents)
+	if err != nil {
+		return nil, err
+	}
+	digest, err := graphsource.SourceDigest(document)
+	if err != nil {
+		return nil, err
+	}
+	if document.ID != id || digest != revision.Digest {
+		return nil, fmt.Errorf("Graph revision %s failed integrity validation", revisionID)
+	}
+
+	heroes := make(map[string]*heroesource.Document, len(revision.HeroDigests))
+	for handle, expected := range revision.HeroDigests {
+		heroContents, err := readRegular(filepath.Join(revisionDir, "heroes", handle, "hero.md"))
+		if err != nil {
+			return nil, fmt.Errorf("Graph revision %s Hero %q: %w", revisionID, handle, err)
+		}
+		heroDocument, err := heroesource.Parse(heroContents)
+		if err != nil {
+			return nil, err
+		}
+		heroDigest, err := heroesource.SourceDigest(heroDocument)
+		if err != nil {
+			return nil, err
+		}
+		if heroDocument.Handle != handle || heroDigest != expected {
+			return nil, fmt.Errorf("Graph revision %s Hero %q failed integrity validation", revisionID, handle)
+		}
+		heroes[handle] = heroDocument
+	}
+
+	skillDirs := make(map[string]string, len(revision.SkillDigests))
+	for skillID, expected := range revision.SkillDigests {
+		directory := filepath.Join(revisionDir, "skills", skillID)
+		info, err := os.Lstat(directory)
+		if err != nil {
+			return nil, fmt.Errorf("Graph revision %s Skill %q: %w", revisionID, skillID, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return nil, fmt.Errorf("Graph revision %s Skill %q failed integrity validation", revisionID, skillID)
+		}
+		if err := validateSkillTree(skillID, directory); err != nil {
+			return nil, fmt.Errorf("Graph revision %s Skill %q: %w", revisionID, skillID, err)
+		}
+		actual, err := skills.ContentDigest(directory)
+		if err != nil {
+			return nil, fmt.Errorf("Graph revision %s Skill %q: %w", revisionID, skillID, err)
+		}
+		if actual != expected {
+			return nil, fmt.Errorf("Graph revision %s Skill %q failed integrity validation", revisionID, skillID)
+		}
+		skillDirs[skillID] = directory
+	}
+
+	return &GraphRevisionBundle{
+		Document:  document,
+		Heroes:    heroes,
+		SkillDirs: skillDirs,
+		Revision:  revision,
+		Frozen:    len(revision.HeroDigests) > 0 || len(revision.SkillDigests) > 0,
+	}, nil
 }
 
 // ReadFlowRevision loads one immutable flow revision: the FlowDefinition, plus
@@ -366,7 +569,7 @@ type revisionFile struct {
 	Data []byte
 }
 
-func publishRevision(objectDir, resourceID, sourceKind string, files []revisionFile, digest string, heroDigests map[string]string) (*Revision, error) {
+func publishRevision(objectDir, resourceID, sourceKind string, files []revisionFile, digest string, heroDigests, skillDigests map[string]string) (*Revision, error) {
 	if len(files) == 0 {
 		return nil, fmt.Errorf("revision source files are required")
 	}
@@ -384,7 +587,8 @@ func publishRevision(objectDir, resourceID, sourceKind string, files []revisionF
 	for index := range revisions {
 		if revisions[index].Digest == digest &&
 			normalizedSourceKind(revisions[index].SourceKind) == normalizedSourceKind(sourceKind) &&
-			sameHeroDigests(revisions[index].HeroDigests, heroDigests) {
+			sameHeroDigests(revisions[index].HeroDigests, heroDigests) &&
+			sameHeroDigests(revisions[index].SkillDigests, skillDigests) {
 			copy := revisions[index]
 			return &copy, nil
 		}
@@ -400,6 +604,7 @@ func publishRevision(objectDir, resourceID, sourceKind string, files []revisionF
 		Version:       version,
 		Digest:        digest,
 		HeroDigests:   heroDigests,
+		SkillDigests:  skillDigests,
 		PublishedAt:   time.Now().UTC(),
 	}
 	temporaryDir, err := os.MkdirTemp(objectDir, ".revision-*")
@@ -460,6 +665,73 @@ func sameHeroDigests(left, right map[string]string) bool {
 	return true
 }
 
+// collectSkillFiles returns the revision files for every regular file below dir,
+// rooted at skills/<skillID>/<rel>. It rejects any symlink or non-regular file
+// entry so a frozen Skill tree can never follow a symlink out of the source
+// directory, and it aborts as soon as the running total exceeds
+// maxSkillDirBytes so an oversized Skill is refused before its bytes are read
+// into memory rather than after.
+func collectSkillFiles(skillID, dir string) ([]revisionFile, error) {
+	var files []revisionFile
+	var total int64
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("skill %q contains a symlink at %q", skillID, path)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("skill %q contains a non-regular file %q", skillID, path)
+		}
+		total += info.Size()
+		if total > maxSkillDirBytes {
+			return fmt.Errorf("skill %q exceeds the %d-byte freeze limit", skillID, maxSkillDirBytes)
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("skill %q: read %q: %w", skillID, rel, err)
+		}
+		files = append(files, revisionFile{
+			Path: filepath.Join("skills", skillID, filepath.ToSlash(rel)),
+			Data: data,
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+// validateSkillTree rejects any symlink or non-regular file entry below dir. It
+// is run before skills.ContentDigest, whose dirHash would otherwise follow a
+// symlinked file through os.Open.
+func validateSkillTree(skillID, dir string) error {
+	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("skill %q contains a symlink at %q", skillID, path)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("skill %q contains a non-regular file %q", skillID, path)
+		}
+		return nil
+	})
+}
+
 func listRevisions(objectDir, resourceID string) ([]Revision, error) {
 	revisionsDir := filepath.Join(objectDir, "revisions")
 	entries, err := os.ReadDir(revisionsDir)
@@ -502,6 +774,11 @@ func listRevisions(objectDir, resourceID string) ([]Revision, error) {
 		}
 		for handle, digest := range revision.HeroDigests {
 			if !objectIDPattern.MatchString(handle) || !validDigest(digest) {
+				return nil, fmt.Errorf("revision %s metadata is invalid", entry.Name())
+			}
+		}
+		for skillID, digest := range revision.SkillDigests {
+			if !objectIDPattern.MatchString(skillID) || !validDigest(digest) {
 				return nil, fmt.Errorf("revision %s metadata is invalid", entry.Name())
 			}
 		}
