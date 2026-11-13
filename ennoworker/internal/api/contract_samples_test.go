@@ -698,6 +698,20 @@ func TestContractSamples(t *testing.T) {
 		values: pinRoute, status: http.StatusOK,
 	})
 
+	// The 503 answer for the canvas: every Session of a non-empty Project failing
+	// to open is fail-closed, not an empty 200. It must be the very last record so
+	// its normaliser stand-ins do not renumber the ids of the samples above. The
+	// two Sessions the fixture created in this Project are both corrupted, and the
+	// manager's open handles are dropped so the next read re-opens (and re-verifies)
+	// them; the project list cache was already primed by the 200 sample above.
+	require.NoError(t, server.SessionStores.Close())
+	corruptSessionManifest(t, server, session.ID)
+	corruptSessionManifest(t, server, invocationSessionBody.ID)
+	samples.record(contractSampleRequest{
+		method: http.MethodGet, route: "/v1/projects/{projectID}/pinned-artifacts", auth: true,
+		values: projectRoute, status: http.StatusServiceUnavailable,
+	})
+
 	if os.Getenv(contractSampleUpdateEnv) != "1" {
 		samples.assertNoOrphans()
 	}

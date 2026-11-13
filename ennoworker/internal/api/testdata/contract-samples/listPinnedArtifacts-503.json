@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "artifacts_unavailable",
+    "message": "the project canvas could not be read because every Session in the project failed to open",
+    "requestId": "00000000000000000000000000000005",
+    "retryable": true
+  }
+}

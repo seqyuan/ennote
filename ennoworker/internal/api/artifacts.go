@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/artifacts"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
@@ -170,6 +171,14 @@ func (s *Server) setArtifactPinned(w http.ResponseWriter, r *http.Request, pinne
 	writeData(w, http.StatusOK, artifact)
 }
 
+// listPinnedArtifactsResponse is the Project canvas answer. It is an object, not a
+// bare array, so a partial failure can say how many Sessions it skipped alongside
+// the artifacts that did answer. SkippedSessionCount is omitted while it is zero.
+type listPinnedArtifactsResponse struct {
+	Artifacts           []domain.Artifact `json:"artifacts"`
+	SkippedSessionCount int               `json:"skippedSessionCount,omitempty"`
+}
+
 // listPinnedArtifacts is the Project canvas: every pinned artifact of every Session
 // in the Project, newest pin first.
 //
@@ -195,6 +204,7 @@ func (s *Server) listPinnedArtifacts(w http.ResponseWriter, r *http.Request) {
 	// Non-nil even when nothing is pinned: the contract declares an array, and null
 	// would fail every strict consumer of it.
 	pinned := make([]domain.Artifact, 0, 4)
+	var skipped atomic.Int64
 	if len(sessions) > 0 {
 		var mu sync.Mutex
 		var wg sync.WaitGroup
@@ -208,17 +218,15 @@ func (s *Server) listPinnedArtifacts(w http.ResponseWriter, r *http.Request) {
 				defer func() { <-sem }()
 				db, openErr := s.SessionStores.OpenSession(r.Context(), sessionID)
 				if openErr != nil {
-					// Best effort, the rule listProjectActiveRuns already follows: a
-					// Session whose file cannot be opened is not a reason to answer
-					// "nothing is pinned" for the whole Project, and it is not a reason
-					// to fail the request either. Dropping the one Session and saying so
-					// in the log keeps the rest of the canvas visible, which is what the
-					// user asked for; the next poll retries the missing Session.
+					// Count, don't silently drop: the answer must be able to tell
+					// "nothing is pinned" from "I could not read this Session".
+					skipped.Add(1)
 					logPinnedArtifactSkip(r, sessionID, "open Session database", openErr)
 					return
 				}
 				rows, listErr := s.Artifacts.ListPinned(r.Context(), db)
 				if listErr != nil {
+					skipped.Add(1)
 					logPinnedArtifactSkip(r, sessionID, "list pinned artifacts", listErr)
 					return
 				}
@@ -252,13 +260,27 @@ func (s *Server) listPinnedArtifacts(w http.ResponseWriter, r *http.Request) {
 		// answer in one order instead of whatever the goroutines happened to do.
 		return pinned[i].ID < pinned[j].ID
 	})
-	writeData(w, http.StatusOK, pinned)
+
+	// Fail closed only when there was something to read: a Project with no
+	// Sessions answers 200 with an empty list, but when every Session of a
+	// non-empty Project failed to open, an empty answer would be indistinguishable
+	// from "you have nothing pinned" and would paint the canvas as lost.
+	if len(sessions) > 0 && skipped.Load() == int64(len(sessions)) {
+		writeError(w, r, http.StatusServiceUnavailable, "artifacts_unavailable",
+			"the project canvas could not be read because every Session in the project failed to open", true)
+		return
+	}
+	writeData(w, http.StatusOK, listPinnedArtifactsResponse{
+		Artifacts:           pinned,
+		SkippedSessionCount: int(skipped.Load()),
+	})
 }
 
 // logPinnedArtifactSkip records a Session the canvas aggregation could not read.
-// The answer is still served (the rest of the Project's pin state is correct), so
-// the log is the only place the omission is visible — it has to say which Session
-// and which step, not just that something went wrong.
+// The log has to say which Session and which step failed, not just that something
+// went wrong: a partial skip is otherwise visible only as a number in the 200
+// answer (skippedSessionCount says how many, not which), and an all-Session
+// failure is a 503 whose cause only this log names.
 func logPinnedArtifactSkip(r *http.Request, sessionID, step string, err error) {
 	requestID, _ := r.Context().Value(requestIDKey{}).(string)
 	slog.Warn("skipped a Session while aggregating pinned artifacts",

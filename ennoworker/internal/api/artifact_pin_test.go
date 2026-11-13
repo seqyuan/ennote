@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/seqyuan/ennote/ennoworker/internal/artifacts"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/stretchr/testify/assert"
@@ -40,6 +42,28 @@ func pinTestStore(t *testing.T, server *Server, db *sql.DB, root, projectID, ses
 	}, strings.NewReader("payload of "+name))
 	require.NoError(t, err)
 	return artifact.ID
+}
+
+// pinnedArtifactsAnswer is the wire shape of the 200 answer: an object carrying the
+// merged artifact list plus, only when a Session was skipped, how many.
+type pinnedArtifactsAnswer struct {
+	Artifacts           []domain.Artifact `json:"artifacts"`
+	SkippedSessionCount int               `json:"skippedSessionCount"`
+}
+
+// corruptSessionManifest rewrites a Session's manifest with a different identity so
+// the next OpenSession fails closed ("session manifest identity does not match
+// directory"). It is the same corruption TestSessionManifestIdentityMismatchFailsClosed
+// uses; the first occurrence of the id is the manifest's own sessionId field.
+func corruptSessionManifest(t *testing.T, server *Server, sessionID string) {
+	t.Helper()
+	path, err := server.SessionStores.SessionPath(sessionID)
+	require.NoError(t, err)
+	manifestPath := filepath.Join(path, "session.json")
+	contents, err := os.ReadFile(manifestPath)
+	require.NoError(t, err)
+	contents = []byte(strings.Replace(string(contents), sessionID, uuid.NewString(), 1))
+	require.NoError(t, os.WriteFile(manifestPath, contents, 0o600))
 }
 
 // The pin is Worker state on the artifact, so the two routes and the artifact read
@@ -151,34 +175,97 @@ func TestListPinnedArtifactsMergesSessionsOfOneProject(t *testing.T) {
 	foreign := pinTestStore(t, server, foreignDB, foreignRoot, otherProject.ID, foreignSession, "foreign.txt")
 	pin(foreignSession, foreign)
 
-	list := func(projectID string) []domain.Artifact {
+	list := func(projectID string) pinnedArtifactsAnswer {
 		t.Helper()
 		response := request(t, handler, http.MethodGet, "/v1/projects/"+projectID+"/pinned-artifacts", nil, true)
 		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-		var answer []domain.Artifact
+		var answer pinnedArtifactsAnswer
 		decodeData(t, response, &answer)
 		return answer
 	}
 
 	canvas := list(project.ID)
-	require.Len(t, canvas, 3, "two Sessions, three pinned artifacts, no other Project")
+	require.Len(t, canvas.Artifacts, 3, "two Sessions, three pinned artifacts, no other Project")
+	assert.Zero(t, canvas.SkippedSessionCount, "a fully readable canvas carries no skipped count")
 	assert.Equal(t, []string{third, second, first},
-		[]string{canvas[0].ID, canvas[1].ID, canvas[2].ID}, "newest pin first, across Sessions")
-	assert.Equal(t, firstSession, canvas[0].SessionID)
-	assert.Equal(t, secondSession, canvas[1].SessionID)
-	for _, artifact := range canvas {
+		[]string{canvas.Artifacts[0].ID, canvas.Artifacts[1].ID, canvas.Artifacts[2].ID}, "newest pin first, across Sessions")
+	assert.Equal(t, firstSession, canvas.Artifacts[0].SessionID)
+	assert.Equal(t, secondSession, canvas.Artifacts[1].SessionID)
+	for _, artifact := range canvas.Artifacts {
 		require.NotNil(t, artifact.PinnedAt)
 		assert.NotEqual(t, unpinned, artifact.ID, "an unpinned artifact is not on the canvas")
 		assert.NotEqual(t, foreign, artifact.ID)
 	}
 
-	// A Project with nothing pinned answers an empty array, not null: the contract
-	// declares an array and the generated types reject null.
+	// A Project with nothing pinned answers an empty array inside the object, not
+	// null: the contract declares an array and the generated types reject null.
 	empty := request(t, handler, http.MethodGet,
 		"/v1/projects/00000000-0000-0000-0000-000000000000/pinned-artifacts", nil, true)
 	require.Equal(t, http.StatusOK, empty.Code, empty.Body.String())
-	assert.Contains(t, empty.Body.String(), `"data":[]`)
+	assert.Contains(t, empty.Body.String(), `"data":{"artifacts":[]}`)
 
 	unauthenticated := request(t, handler, http.MethodGet, "/v1/projects/"+project.ID+"/pinned-artifacts", nil, false)
 	assert.Equal(t, http.StatusUnauthorized, unauthenticated.Code)
+}
+
+// Every Session failing to open must not look like "nothing is pinned": the canvas
+// answers 503 with artifacts_unavailable instead of an empty 200. A Project with no
+// Sessions is the one case that stays 200 with an empty list.
+func TestListPinnedArtifactsAllSessionsUnreadableAnswers503(t *testing.T) {
+	ctx := context.Background()
+	server, handler := setupServer(t, nil)
+	project, _, err := server.Projects.CreateWithWorkspace(ctx, domain.CreateProjectInput{
+		Name: "canvas", HostPath: t.TempDir(),
+	})
+	require.NoError(t, err)
+	session, err := server.Sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID})
+	require.NoError(t, err)
+
+	// Prime the per-project session list cache while the Session is still readable,
+	// then drop the open handle so the next read has to re-open (and re-verify) the
+	// manifest. Without the cache, ListByProject itself would fail closed first.
+	_, err = server.SessionStores.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	require.NoError(t, server.SessionStores.Close())
+	corruptSessionManifest(t, server, session.ID)
+
+	response := request(t, handler, http.MethodGet, "/v1/projects/"+project.ID+"/pinned-artifacts", nil, true)
+	require.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), `"code":"artifacts_unavailable"`)
+}
+
+// One unreadable Session among several must not hide the rest: the answer stays 200,
+// carries skippedSessionCount=1, and still lists the healthy Session's pinned
+// artifact.
+func TestListPinnedArtifactsPartialFailureCarriesSkippedCount(t *testing.T) {
+	ctx := context.Background()
+	server, handler := setupServer(t, nil)
+	project, _, err := server.Projects.CreateWithWorkspace(ctx, domain.CreateProjectInput{
+		Name: "canvas", HostPath: t.TempDir(),
+	})
+	require.NoError(t, err)
+
+	healthySession, healthyDB, healthyRoot := pinTestSession(t, server, project.ID)
+	artifactID := pinTestStore(t, server, healthyDB, healthyRoot, project.ID, healthySession, "healthy.txt")
+	pin := request(t, handler, http.MethodPost,
+		"/v1/sessions/"+healthySession+"/artifacts/"+artifactID+"/pin", nil, true)
+	require.Equal(t, http.StatusOK, pin.Code, pin.Body.String())
+
+	corruptedSession, err := server.Sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID})
+	require.NoError(t, err)
+
+	// Prime the cache with both Sessions, then drop the handles so the corrupted
+	// one is re-opened and fails while the healthy one re-opens and succeeds.
+	_, err = server.SessionStores.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	require.NoError(t, server.SessionStores.Close())
+	corruptSessionManifest(t, server, corruptedSession.ID)
+
+	response := request(t, handler, http.MethodGet, "/v1/projects/"+project.ID+"/pinned-artifacts", nil, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var answer pinnedArtifactsAnswer
+	decodeData(t, response, &answer)
+	require.Len(t, answer.Artifacts, 1)
+	assert.Equal(t, artifactID, answer.Artifacts[0].ID)
+	assert.Equal(t, 1, answer.SkippedSessionCount)
 }

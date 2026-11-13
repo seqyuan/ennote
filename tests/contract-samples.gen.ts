@@ -339,22 +339,34 @@ export const listGraphs200: WorkerOperationResponse<"listGraphs", 200> = {
 
 /** listPinnedArtifacts answering 200. */
 export const listPinnedArtifacts200: WorkerOperationResponse<"listPinnedArtifacts", 200> = {
-  "data": [
-    {
-      "createdAt": "2026-01-01T00:00:06Z",
-      "id": "00000000-0000-0000-0000-000000000013",
-      "kind": "widget",
-      "mimeType": "text/html; charset=utf-8",
-      "name": "canvas.html",
-      "pinnedAt": "2026-01-01T00:00:07Z",
-      "projectId": "00000000-0000-0000-0000-000000000002",
-      "retentionClass": "project",
-      "sessionId": "00000000-0000-0000-0000-000000000005",
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000004",
-      "sizeBytes": 75,
-      "sourceKind": "workspace_publish"
-    }
-  ]
+  "data": {
+    "artifacts": [
+      {
+        "createdAt": "2026-01-01T00:00:06Z",
+        "id": "00000000-0000-0000-0000-000000000013",
+        "kind": "widget",
+        "mimeType": "text/html; charset=utf-8",
+        "name": "canvas.html",
+        "pinnedAt": "2026-01-01T00:00:07Z",
+        "projectId": "00000000-0000-0000-0000-000000000002",
+        "retentionClass": "project",
+        "sessionId": "00000000-0000-0000-0000-000000000005",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000004",
+        "sizeBytes": 75,
+        "sourceKind": "workspace_publish"
+      }
+    ]
+  }
+};
+
+/** listPinnedArtifacts answering 503. */
+export const listPinnedArtifacts503: WorkerOperationResponse<"listPinnedArtifacts", 503> = {
+  "error": {
+    "code": "artifacts_unavailable",
+    "message": "the project canvas could not be read because every Session in the project failed to open",
+    "requestId": "00000000000000000000000000000005",
+    "retryable": true
+  }
 };
 
 /** listProjectActiveRuns answering 200. */

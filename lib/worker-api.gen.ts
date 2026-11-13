@@ -1194,8 +1194,11 @@ export interface paths {
         /**
          * @description The Project canvas: every pinned artifact of every Session in the Project,
          *     newest pin first. Pin state lives in each Session's own database, so the
-         *     answer is an aggregation over them; a Session that cannot be read is
-         *     skipped (logged) rather than failing the whole list.
+         *     answer is an aggregation over them. When every Session of a non-empty
+         *     Project fails to open, the whole list answers 503 with
+         *     `artifacts_unavailable` instead of silently reporting an empty canvas; a
+         *     partial failure answers 200 and carries `skippedSessionCount` naming how
+         *     many Sessions could not be read.
          *
          *     Archived Sessions are included on purpose: archiving a Session hides it from
          *     the sidebar, it does not delete the artifacts the reader chose to keep. A
@@ -6874,7 +6877,10 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["Artifact"][];
+                        data?: {
+                            artifacts: components["schemas"]["Artifact"][];
+                            skippedSessionCount?: number;
+                        };
                     };
                 };
             };
