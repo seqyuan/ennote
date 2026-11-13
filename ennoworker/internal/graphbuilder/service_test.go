@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
+	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -51,4 +52,29 @@ func TestBuilderRetainsInvalidCycleProposalWithoutWriting(t *testing.T) {
 	_, currentDigest, err := sources.ReadGraph("cycle")
 	require.NoError(t, err)
 	assert.Equal(t, digest, currentDigest)
+}
+
+func TestBuilderDeleteTaskPrunesDependencies(t *testing.T) {
+	document := &graphsource.Document{
+		SchemaVersion: 1, ID: "rna-seq", Name: "RNA-seq",
+		Tasks: map[string]graphsource.Task{
+			"aa": {Name: "A", Model: "p/m", Goal: "A"},
+			"bb": {Name: "B", Model: "p/m", Goal: "B"},
+		},
+		Graph: map[string][]string{
+			"aa": {"bb"},
+			"bb": {},
+		},
+	}
+
+	applyOperations(document, []Operation{{Kind: "delete_task", TaskID: "bb"}})
+
+	assert.NotContains(t, document.Tasks, "bb")
+	assert.NotContains(t, document.Graph, "bb")
+	require.Contains(t, document.Graph, "aa")
+	assert.Empty(t, document.Graph["aa"])
+	assert.NotNil(t, document.Graph["aa"], "the mutation response must return an empty dependency list, not null")
+
+	_, err := graphsource.Encode(document)
+	require.NoError(t, err)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -117,6 +118,69 @@ func TestGlobalGraphMutationRejectsUnknownDependencyWithoutWriting(t *testing.T)
 	decodeData(t, response, &current)
 	assert.Equal(t, created.Digest, current.Digest)
 	assert.Empty(t, current.Document.Tasks)
+}
+
+func TestGlobalGraphDeleteTaskPrunesDependencies(t *testing.T) {
+	_, handler, home := setupGlobalGraphServer(t)
+
+	response := request(t, handler, http.MethodPost, "/v1/graphs", map[string]any{"id": "rna-seq", "name": "RNA-seq"}, true)
+	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+	var created globalGraphDetail
+	decodeData(t, response, &created)
+
+	patch := func(patch map[string]any) globalGraphDetail {
+		t.Helper()
+		response = request(t, handler, http.MethodPatch, "/v1/graphs/rna-seq", patch, true)
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		var updated globalGraphDetail
+		decodeData(t, response, &updated)
+		created = updated
+		return updated
+	}
+
+	task := func(id, name string) map[string]any {
+		return map[string]any{"name": name, "model": "anthropic/claude-sonnet-4", "goal": "Do the work."}
+	}
+
+	patch(map[string]any{"expectedDigest": created.Digest, "task": map[string]any{"id": "aa", "value": task("aa", "A")}})
+	patch(map[string]any{"expectedDigest": created.Digest, "task": map[string]any{"id": "bb", "value": task("bb", "B")}})
+	patch(map[string]any{"expectedDigest": created.Digest, "dependencies": map[string]any{"taskId": "aa", "depends": []string{"bb"}}})
+
+	updated := patch(map[string]any{"expectedDigest": created.Digest, "task": map[string]any{"id": "bb", "value": nil}})
+	assert.NotContains(t, updated.Document.Tasks, "bb")
+	assert.NotContains(t, updated.Document.Graph, "bb")
+	require.Contains(t, updated.Document.Graph, "aa")
+	assert.Empty(t, updated.Document.Graph["aa"])
+	assert.NotNil(t, updated.Document.Graph["aa"], "the mutation response must return an empty dependency list, not null")
+
+	// The written graph.yaml must re-parse cleanly with the same pruned shape.
+	contents, err := os.ReadFile(filepath.Join(home, "agents", "graphs", "rna-seq", "graph.yaml"))
+	require.NoError(t, err)
+	document, err := graphsource.Parse(contents)
+	require.NoError(t, err)
+	assert.NotContains(t, document.Tasks, "bb")
+	assert.NotContains(t, document.Graph, "bb")
+	require.Contains(t, document.Graph, "aa")
+	assert.Empty(t, document.Graph["aa"])
+}
+
+func TestGlobalGraphDeleteMissingTaskKeepsDocument(t *testing.T) {
+	_, handler, _ := setupGlobalGraphServer(t)
+	response := request(t, handler, http.MethodPost, "/v1/graphs", map[string]any{"id": "rna-seq", "name": "RNA-seq"}, true)
+	require.Equal(t, http.StatusCreated, response.Code)
+	var created globalGraphDetail
+	decodeData(t, response, &created)
+
+	response = request(t, handler, http.MethodPatch, "/v1/graphs/rna-seq", map[string]any{
+		"expectedDigest": created.Digest,
+		"task":           map[string]any{"id": "missing", "value": nil},
+	}, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var updated globalGraphDetail
+	decodeData(t, response, &updated)
+	assert.Equal(t, created.Digest, updated.Digest)
+	assert.Empty(t, updated.Document.Tasks)
+	assert.Empty(t, updated.Document.Graph)
 }
 
 // A Graph is a draft format, but publishing one must not be a way around the

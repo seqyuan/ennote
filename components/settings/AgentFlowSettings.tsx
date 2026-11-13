@@ -123,9 +123,20 @@ export function AgentFlowSettings({ setError }: { setError: (value: string | nul
 
   const saveTask = (id: string, task: GraphTask) => patchGraph({ task: { id, value: task } });
   const removeTask = async (id: string) => {
+    const name = detail?.document.tasks[id]?.name ?? id;
+    const downstream = Object.entries(detail?.document.graph ?? {})
+      // A dependency list round-trips as null once it is written and re-read, so
+      // the stored shape is not always the array the contract declares.
+      .filter(([, depends]) => (depends ?? []).includes(id))
+      .map(([taskId]) => detail?.document.tasks[taskId]?.name ?? taskId);
+    const listed = downstream.slice(0, 3).map((taskName) => `“${taskName}”`).join(", ")
+      + (downstream.length > 3 ? ` and ${downstream.length - 3} more` : "");
+    const description = downstream.length > 0
+      ? `Removing “${name}” also removes it from the dependencies of ${listed}. Published versions are unaffected.`
+      : "This removes the task from the graph draft. Published versions are unaffected.";
     if (!(await confirmAction({
-      title: `Remove Task “${detail?.document.tasks[id]?.name ?? id}”?`,
-      description: "This removes the task from the graph draft. Published versions are unaffected.",
+      title: `Remove Task “${name}”?`,
+      description,
       confirmLabel: "Remove task",
       tone: "danger",
     }))) return;

@@ -205,8 +205,7 @@ func applyOperations(document *graphsource.Document, operations []Operation) {
 				}
 			}
 		case "delete_task":
-			delete(document.Tasks, operation.TaskID)
-			delete(document.Graph, operation.TaskID)
+			graphsource.RemoveTask(document, operation.TaskID)
 		case "set_dependencies":
 			document.Graph[operation.TaskID] = append([]string(nil), operation.Depends...)
 		case "update_graph":

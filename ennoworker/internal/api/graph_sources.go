@@ -307,8 +307,7 @@ func (s *Server) updateGlobalGraph(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.Task != nil {
 			if body.Task.Value == nil {
-				delete(document.Tasks, body.Task.ID)
-				delete(document.Graph, body.Task.ID)
+				graphsource.RemoveTask(document, body.Task.ID)
 			} else {
 				document.Tasks[body.Task.ID] = *body.Task.Value
 				if _, exists := document.Graph[body.Task.ID]; !exists {

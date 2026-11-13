@@ -294,3 +294,32 @@ func clone(document *Document) *Document {
 	}
 	return &copy
 }
+
+// RemoveTask deletes a Task and drops it from every remaining Task's
+// dependency list so the document keeps validating. A dependency list that
+// becomes empty stays a non-nil empty slice, so the mutation response returns it
+// as [] instead of null. It reports false (and mutates nothing) when the Task
+// does not exist.
+func RemoveTask(document *Document, taskID string) bool {
+	if document == nil {
+		return false
+	}
+	if _, ok := document.Tasks[taskID]; !ok {
+		return false
+	}
+	delete(document.Tasks, taskID)
+	delete(document.Graph, taskID)
+	for id, dependencies := range document.Graph {
+		if len(dependencies) == 0 {
+			continue
+		}
+		filtered := dependencies[:0]
+		for _, dependency := range dependencies {
+			if dependency != taskID {
+				filtered = append(filtered, dependency)
+			}
+		}
+		document.Graph[id] = filtered
+	}
+	return true
+}
