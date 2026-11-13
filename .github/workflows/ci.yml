@@ -55,6 +55,27 @@ jobs:
         with: { go-version: "1.25" }
       - run: cd ennoworker && go build ./cmd/ennogate && go build ./cmd/ennoworker
 
+  # AGENTS.md "Repository Hygiene": formatting drift is invisible until someone
+  # runs gofmt by hand, so it accumulates (26 files by v0.17.0). Fail on any Go
+  # file gofmt would rewrite, so the tree stays mechanically clean instead of
+  # needing a later mechanical sweep.
+  go-fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.25" }
+      - name: Check Go formatting
+        run: |
+          cd ennoworker
+          files="$(gofmt -l .)"
+          if [ -n "$files" ]; then
+            echo "::error::go fmt is not clean; run 'gofmt -w' on:" >&2
+            echo "$files" >&2
+            exit 1
+          fi
+          echo "gofmt clean"
+
   js-lint-typecheck:
     runs-on: ubuntu-latest
     steps:
