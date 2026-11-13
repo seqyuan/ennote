@@ -7,7 +7,7 @@ import { confirmAction } from "@/components/ui/confirm";
 import { GraphDependencies } from "@/components/graphs/GraphDependencies";
 import { GraphTabs } from "@/components/graphs/GraphTabs";
 import { TaskAccordion } from "@/components/graphs/TaskAccordion";
-import { modelOptions, type GraphDetail, type GraphSummary, type GraphTask } from "@/components/graphs/types";
+import { modelOptions, type GraphDetail, type GraphSummary, type GraphTask, type ImmutableFileRevision } from "@/components/graphs/types";
 import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { apiFetch } from "@/lib/worker-api.client";
@@ -44,7 +44,7 @@ export function AgentFlowSettings({ setError }: { setError: (value: string | nul
     try {
       const [next, versions] = await Promise.all([
         apiFetch<GraphDetail>(`/v1/graphs/${encodeURIComponent(id)}`),
-        apiFetch<Array<{ version: number }>>(`/v1/graphs/${encodeURIComponent(id)}/versions`),
+        apiFetch<ImmutableFileRevision[]>(`/v1/graphs/${encodeURIComponent(id)}/versions`),
       ]);
       setDetail(next);
       setLatestVersion(versions.reduce((latest, version) => Math.max(latest, version.version), 0));
@@ -111,7 +111,7 @@ export function AgentFlowSettings({ setError }: { setError: (value: string | nul
     if (!detail || busy) return;
     setBusy("publishing");
     try {
-      const version = await apiFetch<{ version: number }>(`/v1/graphs/${encodeURIComponent(detail.id)}/publish`, { method: "POST" });
+      const version = await apiFetch<ImmutableFileRevision>(`/v1/graphs/${encodeURIComponent(detail.id)}/publish`, { method: "POST" });
       setLatestVersion(version.version);
       setError(null);
     } catch (reason) {

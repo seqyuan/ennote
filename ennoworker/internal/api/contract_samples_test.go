@@ -491,10 +491,14 @@ func TestContractSamples(t *testing.T) {
 		"outputContract": "text-v1", "maxLoopIterations": 8,
 		"prompt": "You review a diff and report what is wrong with it.",
 	}
-	samples.record(contractSampleRequest{
+	createdHero := samples.record(contractSampleRequest{
 		method: http.MethodPost, route: "/v1/global-heroes", auth: true,
 		body: map[string]any{"document": heroDocument}, status: http.StatusCreated,
 	})
+	var heroDetail struct {
+		Digest string `json:"digest"`
+	}
+	decodeData(t, createdHero, &heroDetail)
 	samples.record(contractSampleRequest{
 		method: http.MethodGet, route: "/v1/global-heroes", auth: true, status: http.StatusOK,
 	})
@@ -502,10 +506,14 @@ func TestContractSamples(t *testing.T) {
 		method: http.MethodGet, route: "/v1/global-heroes/{heroID}", auth: true,
 		values: map[string]string{"heroID": "reviewer"}, status: http.StatusOK,
 	})
-	samples.record(contractSampleRequest{
+	createdGraph := samples.record(contractSampleRequest{
 		method: http.MethodPost, route: "/v1/graphs", auth: true,
 		body: map[string]any{"id": "qc", "name": "QC"}, status: http.StatusCreated,
 	})
+	var graphDetail struct {
+		Digest string `json:"digest"`
+	}
+	decodeData(t, createdGraph, &graphDetail)
 	// Recorded after the create: an empty array would validate no element type, so
 	// the summary shape would stay unverified in the one sample that shows it.
 	samples.record(contractSampleRequest{
@@ -710,6 +718,60 @@ func TestContractSamples(t *testing.T) {
 	samples.record(contractSampleRequest{
 		method: http.MethodGet, route: "/v1/projects/{projectID}/pinned-artifacts", auth: true,
 		values: projectRoute, status: http.StatusServiceUnavailable,
+	})
+
+	// The Graph version and Hero publish responses had no sample, which is why the
+	// contract could still point `publishGraph`/`listGraphVersions` at
+	// `AgentFlowVersion` and `publishGlobalHero` at a bare `Envelope` while the
+	// handlers answered `ImmutableFileRevision` and `{heroId, revision, version}`.
+	// These additions pin those shapes, reusing the "reviewer" Hero and "qc" Graph
+	// created above so their digests line up with the samples already recorded.
+	//
+	// Publish validation resolves model references through the live catalog. The
+	// fixture catalog is empty, so publication would answer 422 for the legal
+	// "anthropic/claude-sonnet-4" reference; a sample pins the response shape, not
+	// the validation behaviour, so the catalog is detached here the same way the
+	// Graph test server leaves Models nil. The published revision digests still
+	// equal the digests recorded above.
+	server.Models = nil
+
+	// Recorded last, for the same reason every addition above was: the normaliser
+	// numbers its stand-ins in encounter order, so an id or timestamp introduced
+	// earlier would renumber the samples recorded after it. The Hero update and
+	// publish come before the Graph update, publish and list to mirror the order
+	// the two objects were created in.
+	samples.record(contractSampleRequest{
+		method: http.MethodPatch, route: "/v1/global-heroes/{heroID}", auth: true,
+		values: map[string]string{"heroID": "reviewer"},
+		body:   map[string]any{"expectedDigest": heroDetail.Digest, "document": heroDocument},
+		status: http.StatusOK,
+	})
+	samples.record(contractSampleRequest{
+		method: http.MethodPost, route: "/v1/global-heroes/{heroID}/publish", auth: true,
+		values: map[string]string{"heroID": "reviewer"}, status: http.StatusCreated,
+	})
+	samples.record(contractSampleRequest{
+		method: http.MethodPatch, route: "/v1/graphs/{graphID}", auth: true,
+		values: map[string]string{"graphID": "qc"},
+		body: map[string]any{
+			"expectedDigest": graphDetail.Digest,
+			"task": map[string]any{
+				"id": "qc-check",
+				"value": map[string]any{
+					"name": "QC check", "model": "anthropic/claude-sonnet-4",
+					"thinking": "default", "skills": []string{}, "goal": "Review the QC report.",
+				},
+			},
+		},
+		status: http.StatusOK,
+	})
+	samples.record(contractSampleRequest{
+		method: http.MethodPost, route: "/v1/graphs/{graphID}/publish", auth: true,
+		values: map[string]string{"graphID": "qc"}, status: http.StatusCreated,
+	})
+	samples.record(contractSampleRequest{
+		method: http.MethodGet, route: "/v1/graphs/{graphID}/versions", auth: true,
+		values: map[string]string{"graphID": "qc"}, status: http.StatusOK,
 	})
 
 	if os.Getenv(contractSampleUpdateEnv) != "1" {

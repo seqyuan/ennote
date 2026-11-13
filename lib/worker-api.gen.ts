@@ -2469,36 +2469,6 @@ export interface components {
             /** Format: date-time */
             updatedAt?: string;
         };
-        AgentFlowVersion: {
-            id?: string;
-            profileId?: string;
-            version?: number;
-            configDigest?: string;
-            /** @description The normalized flow definition (never contains secrets) */
-            definition?: {
-                schemaVersion?: number;
-                id?: string;
-                description?: string;
-                inputs?: {
-                    [key: string]: unknown;
-                };
-                outputs?: {
-                    [key: string]: unknown;
-                };
-                budget?: {
-                    maxTotalTokens?: number;
-                };
-                tasks?: {
-                    [key: string]: unknown;
-                };
-                convergence?: {
-                    from?: string;
-                    to?: string;
-                    maxRounds?: number;
-                }[];
-            };
-            publishedAt?: string;
-        };
         RunAgentFlow: {
             runId?: string;
             sessionId?: string;
@@ -3306,6 +3276,11 @@ export interface components {
             source: string;
             revision: components["schemas"]["ImmutableFileRevision"];
             document: components["schemas"]["PortableHeroDocument"];
+        };
+        PublishGlobalHeroResult: {
+            heroId: string;
+            revision: components["schemas"]["ImmutableFileRevision"];
+            version: number;
         };
         /** @description Hero-backed Tasks declare a hero only; inline Tasks declare model with optional thinking and skills. The modes are mutually exclusive and enforced by the Worker. */
         GraphTask: {
@@ -4917,7 +4892,9 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Envelope"];
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["PublishGlobalHeroResult"];
+                    };
                 };
             };
             422: components["responses"]["Error"];
@@ -4991,7 +4968,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["AgentFlowVersion"];
+                        data?: components["schemas"]["ImmutableFileRevision"];
                     };
                 };
             };
@@ -5018,7 +4995,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["AgentFlowVersion"][];
+                        data?: components["schemas"]["ImmutableFileRevision"][];
                     };
                 };
             };

@@ -1,0 +1,55 @@
+{
+  "data": {
+    "digest": "sha256:684b6f74a10205543d577f85a4bc64d0d11b1de7d5fdaf092929b064e9ddeb34",
+    "document": {
+      "allowedTools": [],
+      "authority": "read_only",
+      "color": "blue",
+      "context": {
+        "allowedModes": [
+          "room"
+        ],
+        "defaultMode": "room",
+        "ownExecutionContinuity": "none"
+      },
+      "delegation": {
+        "admission": "deny",
+        "allowedCallerKinds": [
+          "host"
+        ],
+        "allowedStrategies": [
+          "single"
+        ],
+        "budgetCeiling": {
+          "maxCostUsdMicros": 0,
+          "maxModelCalls": 4,
+          "maxOutputTokens": 4000,
+          "maxToolCalls": 16,
+          "maxTotalTokens": 20000,
+          "maxWallTimeMs": 120000
+        },
+        "maxConcurrentInstances": 1,
+        "maxInvocationsPerParentRun": 1
+      },
+      "description": "reviews",
+      "handle": "reviewer",
+      "icon": "user",
+      "maxLoopIterations": 8,
+      "model": {
+        "fallbacks": [],
+        "ref": "anthropic/claude-sonnet-4",
+        "thinkingEffort": "default"
+      },
+      "name": "Reviewer",
+      "outputContract": "text-v1",
+      "permissionCeiling": "ask",
+      "positioning": "review",
+      "prompt": "You review a diff and report what is wrong with it.",
+      "schemaVersion": 1,
+      "skills": []
+    },
+    "id": "reviewer",
+    "name": "Reviewer",
+    "path": "<temp-path>"
+  }
+}

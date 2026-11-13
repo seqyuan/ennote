@@ -238,7 +238,11 @@ paths:
           description: Global Hero source published as an immutable runtime version
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Envelope" }
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/PublishGlobalHeroResult" } }
         "422": { $ref: "#/components/responses/Error" }
   /v1/global-heroes/{heroID}/versions:
     parameters:
@@ -296,7 +300,7 @@ paths:
                 allOf:
                   - $ref: "#/components/schemas/Envelope"
                   - type: object
-                    properties: { data: { $ref: "#/components/schemas/AgentFlowVersion" } }
+                    properties: { data: { $ref: "#/components/schemas/ImmutableFileRevision" } }
         "404": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
@@ -314,7 +318,7 @@ paths:
                 allOf:
                   - $ref: "#/components/schemas/Envelope"
                   - type: object
-                    properties: { data: { type: array, items: { $ref: "#/components/schemas/AgentFlowVersion" } } }
+                    properties: { data: { type: array, items: { $ref: "#/components/schemas/ImmutableFileRevision" } } }
   /v1/graphs/{graphID}/runs:
     parameters:
       - { name: graphID, in: path, required: true, schema: { type: string } }
@@ -3835,36 +3839,6 @@ components:
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
-    AgentFlowVersion:
-      type: object
-      properties:
-        id: { type: string }
-        profileId: { type: string }
-        version: { type: integer }
-        configDigest: { type: string }
-        definition:
-          type: object
-          description: The normalized flow definition (never contains secrets)
-          properties:
-            schemaVersion: { type: integer }
-            id: { type: string }
-            description: { type: string }
-            inputs: { type: object, additionalProperties: true }
-            outputs: { type: object, additionalProperties: true }
-            budget:
-              type: object
-              properties:
-                maxTotalTokens: { type: integer }
-            tasks: { type: object, additionalProperties: true }
-            convergence:
-              type: array
-              items:
-                type: object
-                properties:
-                  from: { type: string }
-                  to: { type: string }
-                  maxRounds: { type: integer }
-        publishedAt: { type: string }
     RunAgentFlow:
       type: object
       properties:
@@ -4901,6 +4875,14 @@ components:
         source: { type: string }
         revision: { $ref: "#/components/schemas/ImmutableFileRevision" }
         document: { $ref: "#/components/schemas/PortableHeroDocument" }
+    PublishGlobalHeroResult:
+      type: object
+      additionalProperties: false
+      required: [heroId, revision, version]
+      properties:
+        heroId: { type: string }
+        revision: { $ref: "#/components/schemas/ImmutableFileRevision" }
+        version: { type: integer }
     GraphTask:
       type: object
       additionalProperties: false

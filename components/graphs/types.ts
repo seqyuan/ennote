@@ -10,6 +10,7 @@ export type GraphTask = components["schemas"]["GraphTask"];
 export type GraphDocument = components["schemas"]["GraphDocument"];
 export type GraphSummary = components["schemas"]["GraphSummary"];
 export type GraphDetail = components["schemas"]["GraphDetail"];
+export type ImmutableFileRevision = components["schemas"]["ImmutableFileRevision"];
 
 export interface ModelOption {
   ref: string;

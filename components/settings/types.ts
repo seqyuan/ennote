@@ -10,8 +10,6 @@ export type HeroSummary = components["schemas"]["HeroSummary"];
 export type MCPServerProfile = components["schemas"]["MCPServerProfile"];
 export type MCPServerProfileVersion = components["schemas"]["MCPServerProfileVersion"];
 
-export type AgentFlowVersion = components["schemas"]["AgentFlowVersion"];
-
 export type RunAgentFlow = components["schemas"]["RunAgentFlow"];
 export type RunAgentFlowNode = components["schemas"]["RunAgentFlowNode"];
 

@@ -324,6 +324,20 @@ export const listGlobalHeroes200: WorkerOperationResponse<"listGlobalHeroes", 20
   ]
 };
 
+/** listGraphVersions answering 200. */
+export const listGraphVersions200: WorkerOperationResponse<"listGraphVersions", 200> = {
+  "data": [
+    {
+      "digest": "sha256:ab63cd740a1f9af83ba3366ee0598143c59ab332e96ebc32f521adf91d1eafc5",
+      "publishedAt": "2026-01-01T00:00:09Z",
+      "resourceId": "qc",
+      "schemaVersion": 1,
+      "sourceKind": "graph",
+      "version": 1
+    }
+  ]
+};
+
 /** listGraphs answering 200. */
 export const listGraphs200: WorkerOperationResponse<"listGraphs", 200> = {
   "data": [
@@ -524,6 +538,33 @@ export const previewArtifact200: WorkerOperationResponse<"previewArtifact", 200>
   }
 };
 
+/** publishGlobalHero answering 201. */
+export const publishGlobalHero201: WorkerOperationResponse<"publishGlobalHero", 201> = {
+  "data": {
+    "heroId": "reviewer",
+    "revision": {
+      "digest": "sha256:684b6f74a10205543d577f85a4bc64d0d11b1de7d5fdaf092929b064e9ddeb34",
+      "publishedAt": "2026-01-01T00:00:08Z",
+      "resourceId": "reviewer",
+      "schemaVersion": 1,
+      "version": 1
+    },
+    "version": 1
+  }
+};
+
+/** publishGraph answering 201. */
+export const publishGraph201: WorkerOperationResponse<"publishGraph", 201> = {
+  "data": {
+    "digest": "sha256:ab63cd740a1f9af83ba3366ee0598143c59ab332e96ebc32f521adf91d1eafc5",
+    "publishedAt": "2026-01-01T00:00:09Z",
+    "resourceId": "qc",
+    "schemaVersion": 1,
+    "sourceKind": "graph",
+    "version": 1
+  }
+};
+
 /** submitInvocation answering 202. */
 export const submitInvocation202: WorkerOperationResponse<"submitInvocation", 202> = {
   "data": {
@@ -598,5 +639,89 @@ export const unpinArtifact200: WorkerOperationResponse<"unpinArtifact", 200> = {
     "sha256": "0000000000000000000000000000000000000000000000000000000000000004",
     "sizeBytes": 75,
     "sourceKind": "workspace_publish"
+  }
+};
+
+/** updateGlobalHero answering 200. */
+export const updateGlobalHero200: WorkerOperationResponse<"updateGlobalHero", 200> = {
+  "data": {
+    "digest": "sha256:684b6f74a10205543d577f85a4bc64d0d11b1de7d5fdaf092929b064e9ddeb34",
+    "document": {
+      "allowedTools": [],
+      "authority": "read_only",
+      "color": "blue",
+      "context": {
+        "allowedModes": [
+          "room"
+        ],
+        "defaultMode": "room",
+        "ownExecutionContinuity": "none"
+      },
+      "delegation": {
+        "admission": "deny",
+        "allowedCallerKinds": [
+          "host"
+        ],
+        "allowedStrategies": [
+          "single"
+        ],
+        "budgetCeiling": {
+          "maxCostUsdMicros": 0,
+          "maxModelCalls": 4,
+          "maxOutputTokens": 4000,
+          "maxToolCalls": 16,
+          "maxTotalTokens": 20000,
+          "maxWallTimeMs": 120000
+        },
+        "maxConcurrentInstances": 1,
+        "maxInvocationsPerParentRun": 1
+      },
+      "description": "reviews",
+      "handle": "reviewer",
+      "icon": "user",
+      "maxLoopIterations": 8,
+      "model": {
+        "fallbacks": [],
+        "ref": "anthropic/claude-sonnet-4",
+        "thinkingEffort": "default"
+      },
+      "name": "Reviewer",
+      "outputContract": "text-v1",
+      "permissionCeiling": "ask",
+      "positioning": "review",
+      "prompt": "You review a diff and report what is wrong with it.",
+      "schemaVersion": 1,
+      "skills": []
+    },
+    "id": "reviewer",
+    "name": "Reviewer",
+    "path": "<temp-path>"
+  }
+};
+
+/** updateGraph answering 200. */
+export const updateGraph200: WorkerOperationResponse<"updateGraph", 200> = {
+  "data": {
+    "digest": "sha256:ab63cd740a1f9af83ba3366ee0598143c59ab332e96ebc32f521adf91d1eafc5",
+    "document": {
+      "graph": {
+        "qc-check": []
+      },
+      "id": "qc",
+      "name": "QC",
+      "schemaVersion": 1,
+      "tasks": {
+        "qc-check": {
+          "goal": "Review the QC report.",
+          "model": "anthropic/claude-sonnet-4",
+          "name": "QC check",
+          "thinking": "default"
+        }
+      }
+    },
+    "id": "qc",
+    "latestVersion": 0,
+    "name": "QC",
+    "path": "<temp-path>"
   }
 };

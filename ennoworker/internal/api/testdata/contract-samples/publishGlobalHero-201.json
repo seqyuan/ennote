@@ -1,0 +1,13 @@
+{
+  "data": {
+    "heroId": "reviewer",
+    "revision": {
+      "digest": "sha256:684b6f74a10205543d577f85a4bc64d0d11b1de7d5fdaf092929b064e9ddeb34",
+      "publishedAt": "2026-01-01T00:00:08Z",
+      "resourceId": "reviewer",
+      "schemaVersion": 1,
+      "version": 1
+    },
+    "version": 1
+  }
+}

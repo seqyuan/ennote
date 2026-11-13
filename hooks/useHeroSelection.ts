@@ -7,7 +7,7 @@ import type { components } from "@/lib/worker-api.gen";
 
 type GlobalHeroSummary = components["schemas"]["GlobalHeroSummary"];
 type GlobalHeroDetail = components["schemas"]["GlobalHeroDetail"];
-type FileRevision = { version: number; publishedAt: string };
+type FileRevision = components["schemas"]["ImmutableFileRevision"];
 
 /**
  * Hero catalog + selection for the composer. Loads published global Heroes.

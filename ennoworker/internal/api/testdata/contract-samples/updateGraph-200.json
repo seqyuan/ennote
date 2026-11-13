@@ -1,0 +1,25 @@
+{
+  "data": {
+    "digest": "sha256:ab63cd740a1f9af83ba3366ee0598143c59ab332e96ebc32f521adf91d1eafc5",
+    "document": {
+      "graph": {
+        "qc-check": []
+      },
+      "id": "qc",
+      "name": "QC",
+      "schemaVersion": 1,
+      "tasks": {
+        "qc-check": {
+          "goal": "Review the QC report.",
+          "model": "anthropic/claude-sonnet-4",
+          "name": "QC check",
+          "thinking": "default"
+        }
+      }
+    },
+    "id": "qc",
+    "latestVersion": 0,
+    "name": "QC",
+    "path": "<temp-path>"
+  }
+}
