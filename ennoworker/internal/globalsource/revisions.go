@@ -176,6 +176,13 @@ func (s Store) PublishGraphRevision(id string) (*Revision, error) {
 		if len(skillFiles) == 0 {
 			return nil, fmt.Errorf("%s references local Skill %q, which contains no files", skillContext[skillID], skillID)
 		}
+		// Freezing only copies the tree; the Run loads it with skills.Load, so a
+		// directory that hashes but does not load would publish cleanly and fail
+		// every Run. Refuse it at publish instead. Load runs after collectSkillFiles
+		// because Load follows symlinked files while the copy rejects them.
+		if _, err := skills.Load(directory); err != nil {
+			return nil, fmt.Errorf("%s references local Skill %q: %w", skillContext[skillID], skillID, err)
+		}
 		contentDigest, err := skills.ContentDigest(directory)
 		if err != nil {
 			return nil, fmt.Errorf("%s references local Skill %q: %w", skillContext[skillID], skillID, err)

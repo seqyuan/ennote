@@ -8,12 +8,15 @@ import (
 )
 
 // ValidateForWrite enforces the PortableHeroDocument write-time constraints
-// declared by contracts/openapi.yaml. It is deliberately separate from
-// normalizeAndValidate: normalizeAndValidate runs on the READ path (Parse,
-// SourceDigest, Encode, and every revision reader depend on it), so it must
-// stay lenient enough to keep loading pre-existing Hero files and already
-// published revisions. Rejecting these values there would make a legacy file
-// unopenable and break the "published revisions stay runnable" guarantee.
+// declared by contracts/openapi.yaml, except the authority spelling: the parsers
+// deliberately keep accepting the legacy "mutation" alias and an omitted value
+// (see normalizeAndValidate), and tightening that here would reject Hero files
+// that already exist. It is deliberately separate from normalizeAndValidate:
+// normalizeAndValidate runs on the READ path (Parse, SourceDigest, Encode, and
+// every revision reader depend on it), so it must stay lenient enough to keep
+// loading pre-existing Hero files and already published revisions. Rejecting
+// these values there would make a legacy file unopenable and break the
+// "published revisions stay runnable" guarantee.
 //
 // ValidateForWrite calls normalizeAndValidate first so a document that passes
 // here encodes exactly as it would have before this check existed; it then

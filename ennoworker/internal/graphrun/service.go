@@ -4,9 +4,11 @@
 // definitions) into the owning Session database before any Provider call.
 //
 // A frozen Graph revision carries its graph-local Heroes and Skills inside the
-// revision directory, so execution re-reads no mutable Hero/Graph/Skill file
-// for it. A legacy revision published before local resources were frozen still
-// resolves local drafts at Run start; such a Run is identifiable by its
+// revision directory, so execution re-reads no mutable Hero/Graph file and no
+// mutable graph-local Skill file for it. Global Skills are the exception: they
+// still resolve through the live catalog at Run start and are pinned by digest
+// at freeze. A legacy revision published before local resources were frozen
+// still resolves local drafts at Run start; such a Run is identifiable by its
 // FlowVersionID (graphID@vNNNNNN), which pins the exact revision an auditor can
 // open to see whether it recorded frozen content. The removed global
 // agent_profile_versions / agent_flow_versions tables are never consulted.

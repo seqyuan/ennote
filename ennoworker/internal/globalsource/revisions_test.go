@@ -352,3 +352,27 @@ func TestPublishGraphRejectsFilelessSkill(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "contains no files")
 }
+
+// Freezing only copies a Skill tree; the Run loads it with skills.Load. A
+// directory that hashes but does not load would publish cleanly and fail every
+// Run, so publish must refuse it.
+func TestPublishGraphRejectsUnloadableSkill(t *testing.T) {
+	store := Store{HomeDir: t.TempDir()}
+	_, digest, err := store.CreateGraph("rna-seq", "RNA-seq")
+	require.NoError(t, err)
+	// Files exist, so the "no files" guard passes, but there is no skill.json or
+	// SKILL.md, so skills.Load rejects it.
+	dir := filepath.Join(store.GraphsDir(), "rna-seq", "skills", "notes-tools")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("loose notes"), 0o600))
+	_, _, err = store.UpdateGraph("rna-seq", digest, func(document *graphsource.Document) error {
+		document.Tasks["review"] = graphsource.Task{Name: "Review", Model: "openai-main/gpt-5", Goal: "Review", Skills: []string{"local/notes-tools"}}
+		document.Graph["review"] = []string{}
+		return nil
+	})
+	require.NoError(t, err)
+
+	_, err = store.PublishGraphRevision("rna-seq")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "notes-tools")
+}

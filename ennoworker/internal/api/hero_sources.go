@@ -153,6 +153,10 @@ func (s *Server) publishGlobalHero(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusNotFound, "hero_not_found", err.Error(), false)
 		return
 	}
+	// Validation runs on this unlocked read, and PublishHeroRevision re-reads under
+	// the per-object lock, so a write landing between the two could freeze a
+	// document that was never validated. The gap fails closed at Run start rather
+	// than corrupting a revision; see the same note in publishGlobalGraph.
 	if err := heroesource.ValidateForWrite(document); err != nil {
 		writeError(w, r, http.StatusUnprocessableEntity, "hero_validation_failed", err.Error(), false)
 		return

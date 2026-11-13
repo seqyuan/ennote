@@ -142,6 +142,12 @@ func (s *Server) publishGlobalGraph(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusNotFound, "graph_not_found", err.Error(), false)
 		return
 	}
+	// Validation runs on this unlocked read, and PublishGraphRevision re-reads under
+	// the per-object lock. A write landing between the two could therefore freeze a
+	// draft that was never validated. Closing that window means publishing the
+	// document that was validated, which needs a publish variant that accepts it;
+	// until then the gap fails closed at Run start rather than corrupting a
+	// revision.
 	if len(document.Tasks) == 0 {
 		writeError(w, r, http.StatusUnprocessableEntity, "graph_publish_failed", "Graph requires at least one Task before publication", false)
 		return
