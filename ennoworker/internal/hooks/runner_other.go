@@ -6,5 +6,5 @@ import (
 	"syscall"
 )
 
-func isLinux() bool { return false }
+func isLinux() bool                           { return false }
 func linuxProcessGroup() *syscall.SysProcAttr { return nil }

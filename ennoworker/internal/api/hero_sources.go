@@ -17,10 +17,10 @@ type globalHeroSummary struct {
 }
 
 type globalHeroDetail struct {
-	ID       string               `json:"id"`
-	Name     string               `json:"name"`
-	Path     string               `json:"path"`
-	Digest   string               `json:"digest"`
+	ID       string                `json:"id"`
+	Name     string                `json:"name"`
+	Path     string                `json:"path"`
+	Digest   string                `json:"digest"`
 	Document *heroesource.Document `json:"document"`
 }
 
@@ -148,7 +148,7 @@ func (s *Server) updateGlobalHero(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		ExpectedDigest string               `json:"expectedDigest"`
+		ExpectedDigest string                `json:"expectedDigest"`
 		Document       *heroesource.Document `json:"document"`
 	}
 	if !decodeJSON(w, r, &body) {

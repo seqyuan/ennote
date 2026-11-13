@@ -49,17 +49,17 @@ type GraphEntry struct {
 }
 
 type HeroEntry struct {
-	ID       string               `json:"id"`
-	Name     string               `json:"name"`
-	Path     string               `json:"path"`
-	Digest   string               `json:"digest,omitempty"`
+	ID       string                `json:"id"`
+	Name     string                `json:"name"`
+	Path     string                `json:"path"`
+	Digest   string                `json:"digest,omitempty"`
 	Document *heroesource.Document `json:"document,omitempty"`
-	Error    string               `json:"error,omitempty"`
+	Error    string                `json:"error,omitempty"`
 }
 
 func (s Store) AgentsDir() string { return filepath.Join(s.HomeDir, "agents") }
 func (s Store) GraphsDir() string { return filepath.Join(s.AgentsDir(), "graphs") }
-func (s Store) HeroesDir() string  { return filepath.Join(s.AgentsDir(), "heroes") }
+func (s Store) HeroesDir() string { return filepath.Join(s.AgentsDir(), "heroes") }
 
 // ListGraphs returns graph-source objects only. Flow objects share the same
 // parent directory but are reported by ListFlows, so the live Graph UI is never

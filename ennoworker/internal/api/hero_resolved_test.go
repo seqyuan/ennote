@@ -37,7 +37,7 @@ func TestResolvedGlobalHeroEndpoint(t *testing.T) {
 		HeroID   string                `json:"heroId"`
 		Source   string                `json:"source"`
 		Revision globalsource.Revision `json:"revision"`
-		Document *heroesource.Document  `json:"document"`
+		Document *heroesource.Document `json:"document"`
 	}
 	decodeData(t, response, &resolved)
 	assert.Equal(t, "researcher", resolved.HeroID)

@@ -92,7 +92,7 @@ type Manifest struct {
 	ModelRequirements *ModelRequirements    `yaml:"model_requirements"`
 	Inputs            map[string]Input      `yaml:"inputs"`
 	Flows             []FlowEntry           `yaml:"flows"`
-	Heroes             []HeroEntry           `yaml:"heroes"`
+	Heroes            []HeroEntry           `yaml:"heroes"`
 	Skills            []SkillEntry          `yaml:"skills"`
 	MCP               []MCPEntry            `yaml:"mcp"`
 	Requires          []string              `yaml:"requires"`
@@ -104,7 +104,7 @@ type Manifest struct {
 // name concrete model ids; the reviewer maps capabilities onto local models.
 type ModelRequirements struct {
 	Defaults CapabilityRequirements            `yaml:"defaults"`
-	Heroes    map[string]CapabilityRequirements `yaml:"heroes"`
+	Heroes   map[string]CapabilityRequirements `yaml:"heroes"`
 }
 
 // CapabilityRequirements is one capability request.
@@ -125,7 +125,7 @@ type FlowEntry struct {
 	ID     string   `yaml:"id"`
 	Path   string   `yaml:"path"`
 	Format string   `yaml:"format"`
-	Heroes  []string `yaml:"heroes"`
+	Heroes []string `yaml:"heroes"`
 }
 
 // HeroEntry declares one hero shipped by the pack.

@@ -21,7 +21,7 @@ type packInstallRequest struct {
 // packRenames changes the installed store ids only. Pack-internal references are
 // never rewritten, so a rename is a collision workaround, not a refactor.
 type packRenames struct {
-	Flows map[string]string `json:"flows"`
+	Flows  map[string]string `json:"flows"`
 	Heroes map[string]string `json:"heroes"`
 }
 

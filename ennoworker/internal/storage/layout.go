@@ -24,7 +24,7 @@ type Layout struct {
 	Policies     string
 	MCP          string
 	Agents       string
-	Heroes        string
+	Heroes       string
 	Graphs       string
 	Skills       string
 	Projects     string
@@ -60,7 +60,7 @@ func ForHome(home string) Layout {
 		Policies:     filepath.Join(configDir, "policies.json"),
 		MCP:          filepath.Join(configDir, "mcp.json"),
 		Agents:       agentsDir,
-		Heroes:        filepath.Join(agentsDir, "heroes"),
+		Heroes:       filepath.Join(agentsDir, "heroes"),
 		Graphs:       filepath.Join(agentsDir, "graphs"),
 		Skills:       filepath.Join(home, "skills"),
 		Projects:     filepath.Join(home, "projects"),

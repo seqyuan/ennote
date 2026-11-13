@@ -74,7 +74,7 @@ const (
 // never rewritten: a rename is for avoiding collisions with what is already on
 // the Worker, not for restructuring a pack.
 type Renames struct {
-	Flows map[string]string `json:"flows,omitempty"`
+	Flows  map[string]string `json:"flows,omitempty"`
 	Heroes map[string]string `json:"heroes,omitempty"`
 }
 
@@ -126,7 +126,7 @@ type Plan struct {
 type installPlan struct {
 	manifest          []byte
 	flows             []*flowTarget
-	heroes             []*heroTarget
+	heroes            []*heroTarget
 	skills            []*skillTarget
 	externalRefs      ExternalRefs
 	modelRequirements agentpack.ModelEnvelope

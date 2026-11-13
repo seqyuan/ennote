@@ -71,7 +71,7 @@ type builder struct {
 	manifest *Manifest
 
 	flows  []FlowSummary
-	heroes  []HeroSummary
+	heroes []HeroSummary
 	skills []SkillSummary
 	// heroSet avoids a second pass over heroes while checking references.
 	heroSet map[string]bool
@@ -127,7 +127,7 @@ func (b *builder) analyseFlows() error {
 			ID:         entry.ID,
 			Path:       path,
 			Format:     entry.Format,
-			Heroes:      append([]string{}, entry.Heroes...),
+			Heroes:     append([]string{}, entry.Heroes...),
 			PathDigest: fileDigest(file.Data),
 		}
 		for _, handle := range entry.Heroes {
@@ -530,7 +530,7 @@ func (b *builder) result(source Source, includeDocuments bool) *Result {
 		Signature:          b.signature(),
 		Signed:             false,
 		Flows:              nonNilFlows(b.flows),
-		Heroes:              nonNilHeroes(b.heroes),
+		Heroes:             nonNilHeroes(b.heroes),
 		Skills:             nonNilSkills(b.skills),
 		MCP:                nonNilMCP(b.manifest.MCP),
 		Requires:           append([]string{}, b.manifest.Requires...),
@@ -596,7 +596,7 @@ func (b *builder) capabilityEnvelope() CapabilityEnvelope {
 		HeroCount:   len(b.heroes),
 		SkillCount:  len(b.skills),
 		TaskCount:   taskCount,
-		Heroes:       sortedUnique(heroes),
+		Heroes:      sortedUnique(heroes),
 		Skills:      sortedUnique(skillRefs),
 		RequiresMCP: sortedUnique(requiresMCP),
 		ModelRequirements: ModelEnvelope{

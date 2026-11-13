@@ -47,7 +47,7 @@ func TestDependencyManifest(t *testing.T) {
 }
 
 type stubDepResolver struct {
-	heroes  map[string]bool
+	heroes map[string]bool
 	skills map[string]bool
 }
 

@@ -93,7 +93,7 @@ type State struct {
 	InstallState      string                  `json:"installState"`
 	Source            SourceRef               `json:"source"`
 	Flows             []FlowState             `json:"flows"`
-	Heroes             []HeroState             `json:"heroes"`
+	Heroes            []HeroState             `json:"heroes"`
 	Skills            []SkillState            `json:"skills"`
 	ExternalRefs      ExternalRefs            `json:"externalRefs"`
 	ModelRequirements agentpack.ModelEnvelope `json:"modelRequirements"`

@@ -133,7 +133,7 @@ func (s *Service) apply(plan *Plan, request Request, staging string, record *jou
 		InstallState:      InstallStateDraft,
 		Source:            SourceRef{Kind: "path", Path: strings.TrimSpace(request.SourcePath)},
 		Flows:             []FlowState{},
-		Heroes:             []HeroState{},
+		Heroes:            []HeroState{},
 		Skills:            []SkillState{},
 		ExternalRefs:      install.externalRefs,
 		ModelRequirements: install.modelRequirements,

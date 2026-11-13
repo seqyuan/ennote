@@ -66,7 +66,7 @@ type Result struct {
 	Signature          Signature          `json:"signature"`
 	Signed             bool               `json:"signed"`
 	Flows              []FlowSummary      `json:"flows"`
-	Heroes              []HeroSummary      `json:"heroes"`
+	Heroes             []HeroSummary      `json:"heroes"`
 	Skills             []SkillSummary     `json:"skills"`
 	MCP                []MCPSummary       `json:"mcp"`
 	Requires           []string           `json:"requires"`
@@ -113,7 +113,7 @@ type FlowSummary struct {
 	Format         string   `json:"format"`
 	TaskCount      int      `json:"taskCount"`
 	EntryTask      string   `json:"entryTask,omitempty"`
-	Heroes          []string `json:"heroes"`
+	Heroes         []string `json:"heroes"`
 	CheckTasks     int      `json:"checkTasks"`
 	FanOutTasks    int      `json:"fanOutTasks"`
 	MaxTotalTokens int64    `json:"maxTotalTokens"`
@@ -162,7 +162,7 @@ type CapabilityEnvelope struct {
 	HeroCount          int           `json:"heroCount"`
 	SkillCount         int           `json:"skillCount"`
 	TaskCount          int           `json:"taskCount"`
-	Heroes              []string      `json:"heroes"`
+	Heroes             []string      `json:"heroes"`
 	Skills             []string      `json:"skills"`
 	RequiresMCP        []string      `json:"requiresMcp"`
 	ModelRequirements  ModelEnvelope `json:"modelRequirements"`

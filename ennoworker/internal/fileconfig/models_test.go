@@ -343,7 +343,6 @@ func TestRejectsMismatchedTypeAndAPI(t *testing.T) {
 	assert.Contains(t, err.Error(), "incompatible with type")
 }
 
-
 func TestListModelsInheritsCatalogWhenProviderListEmpty(t *testing.T) {
 	store := newModelStore(t)
 	ctx := context.Background()
