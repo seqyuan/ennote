@@ -26,13 +26,12 @@ import { useChatController } from "@/hooks/useChatController";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useProjectFiles } from "@/hooks/useProjectFiles";
 import { useProjectSelector } from "@/hooks/useProjectSelector";
-import { useOpenArtifactIntent } from "@/hooks/useOpenArtifactIntent";
+import { useCanvasArtifactIntent } from "@/hooks/useCanvasArtifactIntent";
 import { SettingsView } from "./SettingsView";
 import type { WorkspaceView } from "./workspace-view";
 import { useWorkspaceSessionConnect } from "@/hooks/useWorkspaceSessionConnect";
 import { useWorkerReachability } from "@/hooks/useWorkerReachability";
 import { reuseOrCreateBlankSession, SELECTED_SESSION_KEY, writeStoredId } from "@/lib/ensure-blank-session";
-import { nextFreePane } from "@/lib/inspector-tabs";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { SettingsTab, Session } from "@/components/settings/types";
 
@@ -276,15 +275,7 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
     onPreviewFile: setPreviewFile,
   });
 
-  // The transcript asks for the canvas through an event rather than a prop: the
-  // button sits five components below the state that can satisfy it. The hook
-  // drops intents from any session but the one on screen; the pane is the free
-  // half, so a second canvas sits beside the first instead of replacing it.
-  const { openArtifact, state: panelState } = panel;
-  useOpenArtifactIntent(selectedSession, useCallback(
-    (intent) => openArtifact(intent, nextFreePane(panelState.activePanes)),
-    [openArtifact, panelState.activePanes],
-  ));
+  useCanvasArtifactIntent(selectedSession, panel);
 
   // Title editing
   const titleEdit = useSessionTitle({ session: selectedSessionRecord, replaceSession: sessionNavigation.replaceSession });
