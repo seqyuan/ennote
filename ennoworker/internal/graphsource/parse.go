@@ -259,8 +259,7 @@ func validateScopedRef(ref string) error {
 }
 
 func validateModelRef(ref string) error {
-	parts := strings.Split(ref, "/")
-	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+	if _, _, err := domain.SplitPortableModelRef(ref); err != nil {
 		return fmt.Errorf("must use provider-name/model-name")
 	}
 	return nil

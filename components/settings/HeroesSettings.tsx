@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { modelOptions } from "@/components/graphs/types";
 import { useT } from "@/components/LocaleProvider";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
-import type { ModelProfile, ProviderProfile } from "@/components/settings/types";
+import type { ModelProfile } from "@/components/settings/types";
 import { apiFetch } from "@/lib/worker-api.client";
 
 type ThinkingEffort = "default" | "low" | "medium" | "high";
@@ -68,13 +68,12 @@ function defaultHero(handle: string, name: string, model: string): HeroDocument 
   };
 }
 
-export function HeroesSettings({ models, providers, setError }: {
+export function HeroesSettings({ models, setError }: {
   models: ModelProfile[];
-  providers: ProviderProfile[];
   setError: (value: string | null) => void;
 }) {
   const t = useT();
-  const options = useMemo(() => modelOptions(models, providers), [models, providers]);
+  const options = useMemo(() => modelOptions(models), [models]);
   const [heroes, setHeroes] = useState<HeroSummary[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<HeroDetail | null>(null);

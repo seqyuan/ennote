@@ -805,14 +805,18 @@ func validateThinking(enabled bool, dialect domain.ThinkingDialect, efforts []do
 	return nil
 }
 
+// SplitModelRef splits a portable model reference on its first slash and, on
+// top of the shared syntax rule (domain.SplitPortableModelRef), requires the
+// provider part to be a real provider key. This is an intentional difference
+// from the source parsers: a source file must stay parseable so the UI can
+// open it and the user can fix an unresolvable ref, whereas resolution rejects
+// anything that cannot name a real provider. It keeps the model part's slashes
+// intact, so provider-qualified model ids such as
+// "openai-main/org/gpt-5.4" resolve to provider "openai-main" and model
+// "org/gpt-5.4".
 func SplitModelRef(ref string) (string, string, error) {
-	ref = strings.TrimSpace(ref)
-	separator := strings.IndexByte(ref, '/')
-	if separator <= 0 || separator == len(ref)-1 {
-		return "", "", fmt.Errorf("model reference must use provider-name/model-name")
-	}
-	provider, model := ref[:separator], ref[separator+1:]
-	if !providerKeyPattern.MatchString(provider) || strings.ContainsAny(model, " \t\r\n") {
+	provider, model, err := domain.SplitPortableModelRef(ref)
+	if err != nil || !providerKeyPattern.MatchString(provider) {
 		return "", "", fmt.Errorf("model reference must use provider-name/model-name")
 	}
 	return provider, model, nil

@@ -14,7 +14,7 @@ import { apiFetch } from "@/lib/worker-api.client";
 
 export function AgentFlowSettings({ setError }: { setError: (value: string | null) => void }) {
   const settings = useSettingsProfiles();
-  const models = useMemo(() => modelOptions(settings.models, settings.providers), [settings.models, settings.providers]);
+  const models = useMemo(() => modelOptions(settings.models), [settings.models]);
   const [graphs, setGraphs] = useState<GraphSummary[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<GraphDetail | null>(null);

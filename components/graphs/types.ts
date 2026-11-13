@@ -1,5 +1,5 @@
 import type { components } from "@/lib/worker-api.gen";
-import type { ModelProfile, ProviderProfile } from "@/components/settings/types";
+import type { ModelProfile } from "@/components/settings/types";
 
 // The Graph surface reads the contract's own types. It used to restate them, and
 // the copies had already drifted: `GraphSummary.latestVersion` was optional here
@@ -18,12 +18,11 @@ export interface ModelOption {
   model: ModelProfile;
 }
 
-export function modelOptions(models: ModelProfile[], providers: ProviderProfile[]): ModelOption[] {
-  const providerNames = new Map(providers.map((provider) => [provider.id, provider.name]));
+export function modelOptions(models: ModelProfile[]): ModelOption[] {
   return models
     .filter((model) => model.status === "active")
     .map((model) => ({
-      ref: `${providerNames.get(model.providerId) ?? model.providerId}/${model.modelName}`,
+      ref: `${model.providerId}/${model.modelName}`,
       label: model.displayName || model.modelName,
       model,
     }));

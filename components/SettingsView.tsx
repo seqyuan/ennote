@@ -4,7 +4,7 @@ import { ArrowLeft, Menu, X } from "lucide-react";
 import { useState, type RefObject } from "react";
 import { HeroesSettings } from "@/components/settings/HeroesSettings";
 import { AgentFlowSettings } from "@/components/settings/AgentFlowSettings";
-import type { ModelProfile, ProviderProfile } from "@/components/settings/types";
+import type { ModelProfile } from "@/components/settings/types";
 import type { WorkspaceView } from "@/components/workspace-view";
 
 /**
@@ -18,14 +18,12 @@ import type { WorkspaceView } from "@/components/workspace-view";
 export function SettingsView({
   view,
   models,
-  providers,
   onBackToChat,
   onOpenMobileNav,
   menuTriggerRef,
 }: {
   view: Exclude<WorkspaceView, "chat">;
   models: ModelProfile[];
-  providers: ProviderProfile[];
   onBackToChat: () => void;
   onOpenMobileNav: () => void;
   menuTriggerRef: RefObject<HTMLButtonElement | null>;
@@ -63,7 +61,7 @@ export function SettingsView({
 
       <div className="workspace-page-body">
         {view === "heroes"
-          ? <HeroesSettings models={models} providers={providers} setError={setError} />
+          ? <HeroesSettings models={models} setError={setError} />
           : <AgentFlowSettings setError={setError} />}
       </div>
     </div>

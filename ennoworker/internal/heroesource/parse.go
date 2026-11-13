@@ -297,8 +297,7 @@ var heroContextModes = map[domain.HeroContextMode]bool{
 }
 
 func validateModelRef(ref string) error {
-	separator := strings.IndexByte(ref, '/')
-	if separator <= 0 || separator == len(ref)-1 {
+	if _, _, err := domain.SplitPortableModelRef(ref); err != nil {
 		return fmt.Errorf("must use provider-name/model-name")
 	}
 	return nil

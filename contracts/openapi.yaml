@@ -4811,7 +4811,7 @@ components:
           additionalProperties: false
           required: [ref, thinkingEffort, fallbacks]
           properties:
-            ref: { type: string, pattern: "^[^/]+/[^/]+$" }
+            ref: { type: string, pattern: '^[^/\s]+/\S+$' }
             thinkingEffort: { $ref: "#/components/schemas/ThinkingEffort" }
             fallbacks: { type: array, uniqueItems: true, items: { type: string } }
         skills:
@@ -4894,7 +4894,7 @@ components:
       properties:
         name: { type: string, minLength: 1 }
         hero: { type: string, pattern: "^(local|global)/[a-z][a-z0-9_-]{1,63}$" }
-        model: { type: string, pattern: "^[^/]+/[^/]+$" }
+        model: { type: string, pattern: '^[^/\s]+/\S+$' }
         thinking: { $ref: "#/components/schemas/ThinkingEffort" }
         skills: { type: array, uniqueItems: true, items: { type: string, pattern: "^(local|global)/[a-z][a-z0-9_-]{1,63}$" } }
         goal: { type: string, minLength: 1 }

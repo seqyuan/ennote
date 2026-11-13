@@ -425,7 +425,6 @@ export function AppShell({ initialView = "chat" }: { initialView?: WorkspaceView
             <SettingsView
               view={view}
               models={settings.models}
-              providers={settings.providers}
               onBackToChat={() => changeView("chat")}
               onOpenMobileNav={() => setSidebarOpen(true)}
               menuTriggerRef={settingsMenuTriggerRef}
