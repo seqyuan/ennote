@@ -22,6 +22,8 @@ const ROLE_CONTEXT_LABELS: Record<HeroContextMode, string> = {
 // by strictness so the tightest option is the first one read.
 const PERMISSION_CEILINGS = ["discuss", "ask", "auto"] as const;
 
+export type SkillBinding = { id: string; mode: "preload" | "available" };
+
 interface HeroDocument {
   schemaVersion: number;
   handle: string;
@@ -31,7 +33,7 @@ interface HeroDocument {
   icon: string;
   color: string;
   model: { ref: string; thinkingEffort: ThinkingEffort; fallbacks: string[] };
-  skills: Array<{ id: string; mode: "preload" | "available" }>;
+  skills: SkillBinding[];
   authority: "read_only" | "write_workspace";
   permissionCeiling: "discuss" | "auto" | "ask";
   allowedTools: string[];
@@ -66,6 +68,14 @@ function defaultHero(handle: string, name: string, model: string): HeroDocument 
     outputContract: "text-v1", maxLoopIterations: 8,
     prompt: "Perform the requested work independently. Distinguish evidence from assumptions and report a concise result.",
   };
+}
+
+// Merges a re-typed skill list back onto the existing bindings so that editing
+// the Skills field keeps each skill's mode. Ids the user kept take their previous
+// mode; ids that are genuinely new default to "available"; removed ids disappear.
+export function mergeSkillBindings(next: string[], previous: SkillBinding[]): SkillBinding[] {
+  const previousById = new Map(previous.map((binding) => [binding.id, binding]));
+  return next.map((id) => previousById.get(id) ?? { id, mode: "available" as const });
 }
 
 export function HeroesSettings({ models, setError }: {
@@ -248,7 +258,7 @@ export function HeroesSettings({ models, setError }: {
               {/* Ordered by strictness, and labelled with the same names the composer chip uses:
                 a Hero's ceiling and a Run's mode are the same three values. */}
               <label>Permission ceiling<select value={detail.document.permissionCeiling} onChange={(event) => updateAndSave((document) => ({ ...document, permissionCeiling: event.target.value as HeroDocument["permissionCeiling"] }))}>{PERMISSION_CEILINGS.map((mode) => <option key={mode} value={mode}>{t(`permission.${mode}`)}</option>)}</select></label>
-              <label className="wide">Skills<input value={detail.document.skills.map((skill) => skill.id).join(", ")} onChange={(event) => updateLocal((document) => ({ ...document, skills: event.target.value.split(",").map((id) => id.trim()).filter(Boolean).map((id) => ({ id, mode: "available" as const })) }))} onBlur={() => void save(detail.document)} placeholder="report-writing, code-review" /></label>
+              <label className="wide">Skills<input value={detail.document.skills.map((skill) => skill.id).join(", ")} onChange={(event) => updateLocal((document) => ({ ...document, skills: mergeSkillBindings(event.target.value.split(",").map((id) => id.trim()).filter(Boolean), document.skills) }))} onBlur={() => void save(detail.document)} placeholder="report-writing, code-review" /></label>
             </div></section>
             <section><h3>Execution context</h3><div className="global-hero-grid">
               <label>Default mode<select aria-label="Default context mode" value={detail.document.context.defaultMode} onChange={(event) => updateAndSave((document) => ({ ...document, context: { ...document.context, defaultMode: event.target.value as HeroContextMode } }))}>{detail.document.context.allowedModes.map((mode) => <option key={mode} value={mode}>{ROLE_CONTEXT_LABELS[mode]}</option>)}</select></label>
