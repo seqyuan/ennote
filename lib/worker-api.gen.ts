@@ -3336,6 +3336,8 @@ export interface components {
             name: string;
             path: string;
             digest?: string;
+            /** @enum {string} */
+            legacyFile?: "flow" | "graph-v1";
             error?: string;
             latestVersion: number;
         };

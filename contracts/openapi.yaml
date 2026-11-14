@@ -4945,6 +4945,10 @@ components:
         name: { type: string }
         path: { type: string }
         digest: { type: string }
+        # Names the file a directory still holds when it is not a current
+        # definition: "flow" for a legacy flow.yaml, "graph-v1" for a legacy
+        # graphsource.Document. A current graph.yaml omits it.
+        legacyFile: { type: string, enum: [flow, graph-v1] }
         error: { type: string }
         latestVersion: { type: integer, minimum: 0 }
     GraphDetail:
