@@ -2,7 +2,7 @@ export const WORKER_GENERATION_CHANGED_EVENT = "ennote:worker-generation-changed
 
 interface APIEnvelope<T = unknown> {
   data?: T;
-  error?: { message?: string };
+  error?: { code?: string; message?: string; retryable?: boolean };
 }
 
 export interface WorkerSSEEvent<T> {
@@ -27,6 +27,31 @@ export class WorkerUnreachableError extends Error {
     super("The Worker is unreachable. Ennote is read-only until it returns.");
     this.name = "WorkerUnreachableError";
   }
+}
+
+/**
+ * A Worker request that was answered with an error. `message` stays the whole
+ * story for callers that only display it, but `status` and `code` let a caller
+ * tell a digest conflict apart from a validation failure -- without them every
+ * non-2xx looked the same and the editors reported a stale-file conflict for
+ * ordinary 422 validation errors.
+ */
+export class WorkerRequestError extends Error {
+  readonly status: number;
+  readonly code?: string;
+
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = "WorkerRequestError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+/** Whether a failed request was the "this file changed under you" case. */
+export function isSourceDigestConflict(reason: unknown): boolean {
+  return reason instanceof WorkerRequestError
+    && (reason.status === 409 || reason.code === "source_digest_conflict");
 }
 
 /** Whether the last Worker exchange actually reached the process. */
@@ -240,7 +265,11 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   const response = await apiResponse(path, init);
   const body = await response.json().catch(() => ({})) as APIEnvelope<T>;
   if (!response.ok || body.error) {
-    throw new Error(body.error?.message ?? `HTTP ${response.status}`);
+    throw new WorkerRequestError(
+      body.error?.message ?? `HTTP ${response.status}`,
+      response.status,
+      body.error?.code,
+    );
   }
   return body.data as T;
 }
