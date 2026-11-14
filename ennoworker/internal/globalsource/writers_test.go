@@ -141,13 +141,14 @@ func TestDeleteGraphHeroAndHeroRemoveWholeDirectories(t *testing.T) {
 func TestDeleteGraphRemovesRevisionsHeroesAndSkills(t *testing.T) {
 	home := t.TempDir()
 	store := Store{HomeDir: home}
-	_, err := store.CreateGraphFromDocument(writerTestGraph("pack-graph"))
+	_, _, err := store.CreateGraphDefinition("pack-graph", "Pack Graph")
 	require.NoError(t, err)
 	_, err = store.CreateGraphHero("pack-graph", writerTestHero("reviewer"))
 	require.NoError(t, err)
 	skillDir := filepath.Join(home, "agents", "graphs", "pack-graph", "skills", "tables")
 	require.NoError(t, os.MkdirAll(skillDir, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("prompt\n"), 0o600))
+	writeDefinitionDraft(t, store, definitionWithSkill("pack-graph", "", "local/reviewer"))
 	_, err = store.PublishGraphRevision("pack-graph")
 	require.NoError(t, err)
 

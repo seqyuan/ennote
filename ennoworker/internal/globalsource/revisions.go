@@ -80,121 +80,51 @@ func (s Store) PublishHeroRevision(id string) (*Revision, error) {
 		[]revisionFile{{Path: "hero.md", Data: contents}}, digest, nil, nil)
 }
 
+// PublishGraphRevision freezes a definition-shaped graph.yaml into one
+// revision with sourceKind=graph. A legacy graphsource.Document draft is refused
+// with graph_legacy_source and writes nothing: the author rewrites it, publish
+// does not translate it.
 func (s Store) PublishGraphRevision(id string) (*Revision, error) {
-	// See PublishHeroRevision: freezing reads drafts and appends a revision.
 	unlock := lockSource(filepath.Join(s.GraphsDir(), id))
 	defer unlock()
-	document, digest, err := s.ReadGraph(id)
+	definition, digest, err := s.readGraphDefinitionLocked(id)
 	if err != nil {
 		return nil, err
 	}
-	contents, err := graphsource.Encode(document)
+	return s.publishDefinitionRevision(id, SourceKindGraph, graphSourceName, definition, digest)
+}
+
+// readGraphDefinitionLocked reads graph.yaml without taking the source lock. The
+// caller holds it. A legacy document is an error, never a parsed document.
+func (s Store) readGraphDefinitionLocked(id string) (*domain.FlowDefinition, string, error) {
+	kind, err := s.SourceKind(id)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	files := []revisionFile{{Path: graphSourceName, Data: contents}}
-	var heroDigests map[string]string
-	var skillDigests map[string]string
-
-	// Collect every graph-local Hero and Skill the draft references, then freeze
-	// each into this revision so editing a draft later cannot change a published
-	// Run. Iterate Task ids in sorted order for deterministic output.
-	heroSeen := map[string]bool{}
-	skillSeen := map[string]bool{}
-	skillContext := map[string]string{}
-	taskIDs := make([]string, 0, len(document.Tasks))
-	for taskID := range document.Tasks {
-		taskIDs = append(taskIDs, taskID)
+	if kind != SourceKindGraph {
+		return nil, "", fmt.Errorf("source %q is a flow, not a Graph", id)
 	}
-	sort.Strings(taskIDs)
-	for _, taskID := range taskIDs {
-		task := document.Tasks[taskID]
-		if task.Hero != "" {
-			handle, local := strings.CutPrefix(task.Hero, "local/")
-			if !local {
-				continue
-			}
-			if heroSeen[handle] {
-				continue
-			}
-			heroSeen[handle] = true
-			heroDocument, heroDigest, err := s.ReadGraphHero(id, handle)
-			if err != nil {
-				return nil, fmt.Errorf("Task %q references local Hero %q: %w", taskID, handle, err)
-			}
-			encoded, err := heroesource.Encode(heroDocument)
-			if err != nil {
-				return nil, err
-			}
-			files = append(files, revisionFile{Path: filepath.Join("heroes", handle, "hero.md"), Data: encoded})
-			if heroDigests == nil {
-				heroDigests = map[string]string{}
-			}
-			heroDigests[handle] = heroDigest
-			// A graph-local Hero may itself reference graph-local Skills.
-			for _, binding := range heroDocument.Skills {
-				if skillID, ok := strings.CutPrefix(binding.ID, "local/"); ok {
-					if !skillSeen[skillID] {
-						skillContext[skillID] = fmt.Sprintf("Hero %q", handle)
-					}
-					skillSeen[skillID] = true
-				}
-			}
-			continue
-		}
-		// Inline (model-backed) Tasks declare Skills directly.
-		for _, ref := range task.Skills {
-			if skillID, ok := strings.CutPrefix(ref, "local/"); ok {
-				if !skillSeen[skillID] {
-					skillContext[skillID] = fmt.Sprintf("Task %q", taskID)
-				}
-				skillSeen[skillID] = true
-			}
-		}
+	path, err := objectPath(s.GraphsDir(), id, graphSourceName)
+	if err != nil {
+		return nil, "", err
 	}
-
-	skillIDs := make([]string, 0, len(skillSeen))
-	for skillID := range skillSeen {
-		skillIDs = append(skillIDs, skillID)
+	data, err := readRegular(path)
+	if err != nil {
+		return nil, "", err
 	}
-	sort.Strings(skillIDs)
-	for _, skillID := range skillIDs {
-		directory, err := s.GraphResourceDir(id, "skills", skillID)
-		if err != nil {
-			return nil, fmt.Errorf("%s references local Skill %q: %w", skillContext[skillID], skillID, err)
-		}
-		skillFiles, err := collectSkillFiles(skillID, directory)
-		if err != nil {
-			return nil, err
-		}
-		// A Skill directory with no regular files still hashes (to the digest of
-		// nothing), but publishRevision only creates directories for files it
-		// writes, so recording such a digest would publish a revision whose
-		// skills/<id> directory does not exist and cannot be read back. Refuse it
-		// here instead: a Skill that skills.Load cannot load is not runnable
-		// either.
-		if len(skillFiles) == 0 {
-			return nil, fmt.Errorf("%s references local Skill %q, which contains no files", skillContext[skillID], skillID)
-		}
-		// Freezing only copies the tree; the Run loads it with skills.Load, so a
-		// directory that hashes but does not load would publish cleanly and fail
-		// every Run. Refuse it at publish instead. Load runs after collectSkillFiles
-		// because Load follows symlinked files while the copy rejects them.
-		if _, err := skills.Load(directory); err != nil {
-			return nil, fmt.Errorf("%s references local Skill %q: %w", skillContext[skillID], skillID, err)
-		}
-		contentDigest, err := skills.ContentDigest(directory)
-		if err != nil {
-			return nil, fmt.Errorf("%s references local Skill %q: %w", skillContext[skillID], skillID, err)
-		}
-		if skillDigests == nil {
-			skillDigests = map[string]string{}
-		}
-		skillDigests[skillID] = contentDigest
-		files = append(files, skillFiles...)
+	fileKind, err := ClassifyGraphSource(data)
+	if err != nil || fileKind != GraphFileDefinition {
+		return nil, "", fmt.Errorf("graph_legacy_source: %s is a legacy graph document, not a FlowDefinition", id)
 	}
-
-	return publishRevision(filepath.Join(s.GraphsDir(), id), id, SourceKindGraph, files, digest, heroDigests, skillDigests)
+	definition, err := agentflow.ParseDefinition(data)
+	if err != nil {
+		return nil, "", err
+	}
+	if definition.ID != id {
+		return nil, "", fmt.Errorf("Graph id %q must match directory %q", definition.ID, id)
+	}
+	digest, err := AgentFlowDigest(definition)
+	return definition, digest, err
 }
 
 // PublishFlowRevision freezes the FlowDefinition AND every flow-local Hero it
@@ -208,29 +138,118 @@ func (s Store) PublishFlowRevision(id string) (*Revision, error) {
 	if err != nil {
 		return nil, err
 	}
+	return s.publishDefinitionRevision(id, SourceKindFlow, flowSourceName, definition, digest)
+}
+
+// publishDefinitionRevision is the one writer behind both publish entry points.
+// It freezes the definition, every local Hero it references, and every local
+// Skill a hero task or a bundled Hero names. A check task has no skills.
+// The caller holds the per-object lock.
+func (s Store) publishDefinitionRevision(id, sourceKind, fileName string, definition *domain.FlowDefinition, digest string) (*Revision, error) {
 	contents, err := agentflow.DefinitionToYAML(definition)
 	if err != nil {
 		return nil, err
 	}
-	files := []revisionFile{{Path: flowSourceName, Data: contents}}
-	heroDigests := map[string]string{}
+	files := []revisionFile{{Path: fileName, Data: contents}}
 	handles, err := s.flowLocalHeroHandles(definition)
 	if err != nil {
 		return nil, err
 	}
+	var heroDigests map[string]string
+	heroDocuments := map[string]*heroesource.Document{}
 	for _, handle := range handles {
 		document, heroDigest, err := s.ReadGraphHero(id, handle)
 		if err != nil {
-			return nil, fmt.Errorf("flow-local Hero %q: %w", handle, err)
+			return nil, fmt.Errorf("local Hero %q: %w", handle, err)
 		}
 		encoded, err := heroesource.Encode(document)
 		if err != nil {
 			return nil, err
 		}
 		files = append(files, revisionFile{Path: filepath.Join("heroes", handle, "hero.md"), Data: encoded})
+		if heroDigests == nil {
+			heroDigests = map[string]string{}
+		}
 		heroDigests[handle] = heroDigest
+		heroDocuments[handle] = document
 	}
-	return publishRevision(filepath.Join(s.GraphsDir(), id), id, SourceKindFlow, files, digest, heroDigests, nil)
+	skillDigests, skillFiles, err := s.definitionSkillFiles(id, definition, heroDocuments)
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, skillFiles...)
+	return publishRevision(filepath.Join(s.GraphsDir(), id), id, sourceKind, files, digest, heroDigests, skillDigests)
+}
+
+// definitionSkillFiles freezes every local Skill a hero task declares and every
+// local Skill a bundled Hero binds. Check tasks have no skills.
+func (s Store) definitionSkillFiles(id string, definition *domain.FlowDefinition, heroes map[string]*heroesource.Document) (map[string]string, []revisionFile, error) {
+	skillSeen := map[string]bool{}
+	skillContext := map[string]string{}
+	taskIDs := make([]string, 0, len(definition.Tasks))
+	for taskID := range definition.Tasks {
+		taskIDs = append(taskIDs, taskID)
+	}
+	sort.Strings(taskIDs)
+	for _, taskID := range taskIDs {
+		task := definition.Tasks[taskID]
+		if task.Type == domain.FlowTaskCheck {
+			continue
+		}
+		for _, ref := range task.Skills {
+			if skillID, ok := strings.CutPrefix(ref, "local/"); ok && !skillSeen[skillID] {
+				skillSeen[skillID] = true
+				skillContext[skillID] = fmt.Sprintf("Task %q", taskID)
+			}
+		}
+	}
+	for handle, document := range heroes {
+		for _, binding := range document.Skills {
+			if skillID, ok := strings.CutPrefix(binding.ID, "local/"); ok && !skillSeen[skillID] {
+				skillSeen[skillID] = true
+				skillContext[skillID] = fmt.Sprintf("Hero %q", handle)
+			}
+		}
+	}
+	skillIDs := make([]string, 0, len(skillSeen))
+	for skillID := range skillSeen {
+		skillIDs = append(skillIDs, skillID)
+	}
+	sort.Strings(skillIDs)
+	var skillDigests map[string]string
+	var files []revisionFile
+	for _, skillID := range skillIDs {
+		directory, err := s.GraphResourceDir(id, "skills", skillID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s references local Skill %q: %w", skillContext[skillID], skillID, err)
+		}
+		skillFiles, err := collectSkillFiles(skillID, directory)
+		if err != nil {
+			return nil, nil, err
+		}
+		// A Skill directory with no regular files still hashes, but publishRevision
+		// only creates directories for files it writes, so recording such a digest
+		// would publish a revision that cannot be read back. Refuse it here.
+		if len(skillFiles) == 0 {
+			return nil, nil, fmt.Errorf("%s references local Skill %q, which contains no files", skillContext[skillID], skillID)
+		}
+		// Freezing only copies the tree; the Run loads it with skills.Load, so a
+		// directory that hashes but does not load would publish cleanly and fail
+		// every Run. Refuse it at publish instead.
+		if _, err := skills.Load(directory); err != nil {
+			return nil, nil, fmt.Errorf("%s references local Skill %q: %w", skillContext[skillID], skillID, err)
+		}
+		contentDigest, err := skills.ContentDigest(directory)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s references local Skill %q: %w", skillContext[skillID], skillID, err)
+		}
+		if skillDigests == nil {
+			skillDigests = map[string]string{}
+		}
+		skillDigests[skillID] = contentDigest
+		files = append(files, skillFiles...)
+	}
+	return skillDigests, files, nil
 }
 
 // flowLocalHeroHandles returns every flow-local Hero a definition references: an
@@ -420,6 +439,25 @@ func (s Store) ReadGraphRevisionBundle(id, revisionID string) (*GraphRevisionBun
 	if err != nil {
 		return nil, err
 	}
+	// A definition-shaped revision has no graphsource document. The frozen flag
+	// and the bundled resources are what callers check; the document stays nil.
+	if kind, classErr := ClassifyGraphSource(contents); classErr == nil && kind == GraphFileDefinition {
+		digest, err := definitionRevisionDigest(contents)
+		if err != nil {
+			return nil, err
+		}
+		if digest != revision.Digest {
+			return nil, fmt.Errorf("Graph revision %s failed integrity validation", revisionID)
+		}
+		heroes, skillDirs, err := s.verifyRevisionResources(revisionID, revisionDir, revision)
+		if err != nil {
+			return nil, err
+		}
+		return &GraphRevisionBundle{
+			Heroes: heroes, SkillDirs: skillDirs, Revision: revision,
+			Frozen: len(revision.HeroDigests) > 0 || len(revision.SkillDigests) > 0,
+		}, nil
+	}
 	document, err := graphsource.Parse(contents)
 	if err != nil {
 		return nil, err
@@ -431,57 +469,163 @@ func (s Store) ReadGraphRevisionBundle(id, revisionID string) (*GraphRevisionBun
 	if document.ID != id || digest != revision.Digest {
 		return nil, fmt.Errorf("Graph revision %s failed integrity validation", revisionID)
 	}
+	heroes, skillDirs, err := s.verifyRevisionResources(revisionID, revisionDir, revision)
+	if err != nil {
+		return nil, err
+	}
+	return &GraphRevisionBundle{
+		Document: document, Heroes: heroes, SkillDirs: skillDirs, Revision: revision,
+		Frozen: len(revision.HeroDigests) > 0 || len(revision.SkillDigests) > 0,
+	}, nil
+}
 
+func definitionRevisionDigest(contents []byte) (string, error) {
+	definition, err := agentflow.ParseDefinition(contents)
+	if err != nil {
+		return "", err
+	}
+	return AgentFlowDigest(definition)
+}
+
+// verifyRevisionResources checks every frozen Hero and Skill digest. Any drift
+// fails closed.
+func (s Store) verifyRevisionResources(revisionID, revisionDir string, revision *Revision) (map[string]*heroesource.Document, map[string]string, error) {
 	heroes := make(map[string]*heroesource.Document, len(revision.HeroDigests))
 	for handle, expected := range revision.HeroDigests {
 		heroContents, err := readRegular(filepath.Join(revisionDir, "heroes", handle, "hero.md"))
 		if err != nil {
-			return nil, fmt.Errorf("Graph revision %s Hero %q: %w", revisionID, handle, err)
+			return nil, nil, fmt.Errorf("Graph revision %s Hero %q: %w", revisionID, handle, err)
 		}
 		heroDocument, err := heroesource.Parse(heroContents)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		heroDigest, err := heroesource.SourceDigest(heroDocument)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if heroDocument.Handle != handle || heroDigest != expected {
-			return nil, fmt.Errorf("Graph revision %s Hero %q failed integrity validation", revisionID, handle)
+			return nil, nil, fmt.Errorf("Graph revision %s Hero %q failed integrity validation", revisionID, handle)
 		}
 		heroes[handle] = heroDocument
 	}
-
 	skillDirs := make(map[string]string, len(revision.SkillDigests))
 	for skillID, expected := range revision.SkillDigests {
 		directory := filepath.Join(revisionDir, "skills", skillID)
 		info, err := os.Lstat(directory)
 		if err != nil {
-			return nil, fmt.Errorf("Graph revision %s Skill %q: %w", revisionID, skillID, err)
+			return nil, nil, fmt.Errorf("Graph revision %s Skill %q: %w", revisionID, skillID, err)
 		}
 		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-			return nil, fmt.Errorf("Graph revision %s Skill %q failed integrity validation", revisionID, skillID)
+			return nil, nil, fmt.Errorf("Graph revision %s Skill %q failed integrity validation", revisionID, skillID)
 		}
 		if err := validateSkillTree(skillID, directory); err != nil {
-			return nil, fmt.Errorf("Graph revision %s Skill %q: %w", revisionID, skillID, err)
+			return nil, nil, fmt.Errorf("Graph revision %s Skill %q: %w", revisionID, skillID, err)
 		}
 		actual, err := skills.ContentDigest(directory)
 		if err != nil {
-			return nil, fmt.Errorf("Graph revision %s Skill %q: %w", revisionID, skillID, err)
+			return nil, nil, fmt.Errorf("Graph revision %s Skill %q: %w", revisionID, skillID, err)
 		}
 		if actual != expected {
-			return nil, fmt.Errorf("Graph revision %s Skill %q failed integrity validation", revisionID, skillID)
+			return nil, nil, fmt.Errorf("Graph revision %s Skill %q failed integrity validation", revisionID, skillID)
 		}
 		skillDirs[skillID] = directory
 	}
+	return heroes, skillDirs, nil
+}
 
-	return &GraphRevisionBundle{
-		Document:  document,
-		Heroes:    heroes,
-		SkillDirs: skillDirs,
-		Revision:  revision,
-		Frozen:    len(revision.HeroDigests) > 0 || len(revision.SkillDigests) > 0,
-	}, nil
+// ReadGraphDefinitionRevision loads one immutable definition revision, whether the
+// frozen file is graph.yaml or flow.yaml. Both are the same document. A revision
+// directory holding a legacy graphsource document is rejected; ReadGraphRevision
+// keeps that reader.
+func (s Store) ReadGraphDefinitionRevision(id, revisionID string) (*domain.FlowDefinition, map[string]*heroesource.Document, *Revision, error) {
+	if !objectIDPattern.MatchString(id) || !revisionDirPattern.MatchString(revisionID) {
+		return nil, nil, nil, fmt.Errorf("invalid Graph revision %q/%q", id, revisionID)
+	}
+	revisions, err := s.ListGraphRevisions(id)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	var revision *Revision
+	for index := range revisions {
+		if revisions[index].ID() == revisionID {
+			copy := revisions[index]
+			revision = &copy
+			break
+		}
+	}
+	if revision == nil {
+		return nil, nil, nil, os.ErrNotExist
+	}
+	revisionDir := filepath.Join(s.GraphsDir(), id, "revisions", revisionID)
+	contents, fileName, err := readRevisionDefinition(revisionDir)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if kind, classErr := ClassifyGraphSource(contents); classErr != nil || kind != GraphFileDefinition {
+		return nil, nil, nil, fmt.Errorf("graph_legacy_source: revision %s is a legacy graph document", revisionID)
+	}
+	definition, err := agentflow.ParseDefinition(contents)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	digest, err := AgentFlowDigest(definition)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if definition.ID != id || digest != revision.Digest {
+		return nil, nil, nil, fmt.Errorf("Graph revision %s failed integrity validation", revisionID)
+	}
+	heroes := make(map[string]*heroesource.Document, len(revision.HeroDigests))
+	for handle, expected := range revision.HeroDigests {
+		if !objectIDPattern.MatchString(handle) {
+			return nil, nil, nil, fmt.Errorf("Graph revision %s has an invalid Hero handle %q", revisionID, handle)
+		}
+		heroContents, err := readRegular(filepath.Join(revisionDir, "heroes", handle, "hero.md"))
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("Graph revision %s Hero %q: %w", revisionID, handle, err)
+		}
+		document, err := heroesource.Parse(heroContents)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		heroDigest, err := heroesource.SourceDigest(document)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if document.Handle != handle || heroDigest != expected {
+			return nil, nil, nil, fmt.Errorf("Graph revision %s Hero %q failed integrity validation", revisionID, handle)
+		}
+		heroes[handle] = document
+	}
+	_ = fileName
+	return definition, heroes, revision, nil
+}
+
+// readRevisionDefinition returns the definition bytes from whichever of
+// graph.yaml and flow.yaml the revision froze. A directory holding both, or
+// neither, is corrupt.
+func readRevisionDefinition(revisionDir string) ([]byte, string, error) {
+	graphExists, err := regularFileExists(filepath.Join(revisionDir, graphSourceName))
+	if err != nil {
+		return nil, "", err
+	}
+	flowExists, err := regularFileExists(filepath.Join(revisionDir, flowSourceName))
+	if err != nil {
+		return nil, "", err
+	}
+	switch {
+	case graphExists && flowExists:
+		return nil, "", fmt.Errorf("revision contains both %s and %s", graphSourceName, flowSourceName)
+	case graphExists:
+		contents, err := readRegular(filepath.Join(revisionDir, graphSourceName))
+		return contents, graphSourceName, err
+	case flowExists:
+		contents, err := readRegular(filepath.Join(revisionDir, flowSourceName))
+		return contents, flowSourceName, err
+	default:
+		return nil, "", fmt.Errorf("revision contains neither %s nor %s", graphSourceName, flowSourceName)
+	}
 }
 
 // ReadFlowRevision loads one immutable flow revision: the FlowDefinition, plus

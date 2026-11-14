@@ -7,6 +7,7 @@ import (
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -129,19 +130,30 @@ func TestGraphAndFlowCatalogsAreSeparated(t *testing.T) {
 
 func TestLegacyRevisionWithoutSourceKindReadsAsGraph(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
-	_, digest, err := store.CreateGraph("legacy", "Legacy")
+	document := &graphsource.Document{SchemaVersion: 1, ID: "legacy", Name: "Legacy",
+		Tasks: map[string]graphsource.Task{}, Graph: map[string][]string{}}
+	digest, err := store.CreateGraphFromDocument(document)
 	require.NoError(t, err)
-	revision, err := store.PublishGraphRevision("legacy")
+	_, err = store.PublishGraphRevision("legacy")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "graph_legacy_source")
+
+	// The revision exists because it was frozen before this change. A revision
+	// without sourceKind still reads as a graph document.
+	contents, err := graphsource.Encode(document)
 	require.NoError(t, err)
-	metadataPath := filepath.Join(store.GraphsDir(), "legacy", "revisions", revision.ID(), "revision.json")
+	_, err = publishRevision(filepath.Join(store.GraphsDir(), "legacy"), "legacy", "",
+		[]revisionFile{{Path: graphSourceName, Data: contents}}, digest, nil, nil)
+	require.NoError(t, err)
+	metadataPath := filepath.Join(store.GraphsDir(), "legacy", "revisions", "v000001", "revision.json")
 	require.NoError(t, os.WriteFile(metadataPath, []byte(`{"schemaVersion":1,"resourceId":"legacy","version":1,"digest":"`+digest+`","publishedAt":"2026-08-10T00:00:00Z"}`), 0o600))
 
-	document, read, err := store.ReadGraphRevision("legacy", revision.ID())
+	read, revisionMeta, err := store.ReadGraphRevision("legacy", "v000001")
 	require.NoError(t, err)
-	assert.Equal(t, "Legacy", document.Name)
-	assert.Empty(t, read.SourceKind)
+	assert.Equal(t, "Legacy", read.Name)
+	assert.Empty(t, revisionMeta.SourceKind)
 
-	_, _, _, err = store.ReadFlowRevision("legacy", revision.ID())
+	_, _, _, err = store.ReadFlowRevision("legacy", "v000001")
 	require.Error(t, err)
 }
 

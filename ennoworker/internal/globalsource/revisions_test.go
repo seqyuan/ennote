@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
-	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/skills"
 	"github.com/stretchr/testify/assert"
@@ -23,7 +23,7 @@ func TestAgentSourcesUseSharedAgentsRoot(t *testing.T) {
 
 func TestGraphRevisionsAreImmutableAndDigestIdempotent(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
-	_, digest, err := store.CreateGraph("rna-seq", "RNA-seq")
+	definition, digest, err := store.CreateGraphDefinition("rna-seq", "RNA-seq")
 	require.NoError(t, err)
 
 	first, err := store.PublishGraphRevision("rna-seq")
@@ -37,11 +37,8 @@ func TestGraphRevisionsAreImmutableAndDigestIdempotent(t *testing.T) {
 	revisionSource := filepath.Join(store.GraphsDir(), "rna-seq", "revisions", "v000001", "graph.yaml")
 	original, err := os.ReadFile(revisionSource)
 	require.NoError(t, err)
-	_, nextDigest, err := store.UpdateGraph("rna-seq", digest, func(document *graphsource.Document) error {
-		document.Description = "Updated source"
-		return nil
-	})
-	require.NoError(t, err)
+	definition.Description = "Updated source"
+	nextDigest := writeDefinitionDraft(t, store, definition)
 	second, err := store.PublishGraphRevision("rna-seq")
 	require.NoError(t, err)
 	assert.Equal(t, "v000002", second.ID())
@@ -81,7 +78,7 @@ func TestHeroRevisionPublishesCanonicalHeroMarkdown(t *testing.T) {
 
 func TestRevisionMetadataRejectsTampering(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
-	_, _, err := store.CreateGraph("rna-seq", "RNA-seq")
+	_, _, err := store.CreateGraphDefinition("rna-seq", "RNA-seq")
 	require.NoError(t, err)
 	_, err = store.PublishGraphRevision("rna-seq")
 	require.NoError(t, err)
@@ -123,19 +120,43 @@ func writeGraphSkill(t *testing.T, store Store, graphID, skillID, body string) s
 
 func setupGraphWithLocalHero(t *testing.T, store Store, graphID string) string {
 	t.Helper()
-	_, digest, err := store.CreateGraph(graphID, graphID)
+	_, _, err := store.CreateGraphDefinition(graphID, graphID)
 	require.NoError(t, err)
 	heroDigest, err := store.CreateGraphHero(graphID, graphLocalHero("reviewer"))
 	require.NoError(t, err)
-	_, _, err = store.UpdateGraph(graphID, digest, func(document *graphsource.Document) error {
-		document.Tasks["review"] = graphsource.Task{Name: "Review", Hero: "local/reviewer", Goal: "Review"}
-		document.Graph["review"] = []string{}
-		return nil
+	writeDefinitionDraft(t, store, &domain.FlowDefinition{
+		SchemaVersion: domain.FlowSchemaVersion, ID: graphID, Name: graphID,
+		Budget: domain.FlowBudget{MaxTotalTokens: 100000},
+		Tasks: map[string]domain.FlowTask{
+			"review": {Type: domain.FlowTaskHero, Hero: "local/reviewer", Goal: "Review"},
+		},
 	})
-	require.NoError(t, err)
 	_, err = store.PublishGraphRevision(graphID)
 	require.NoError(t, err)
 	return heroDigest
+}
+
+func writeDefinitionDraft(t *testing.T, store Store, definition *domain.FlowDefinition) string {
+	t.Helper()
+	encoded, err := agentflow.DefinitionToYAML(definition)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(store.GraphsDir(), definition.ID, graphSourceName), encoded, 0o600))
+	digest, err := AgentFlowDigest(definition)
+	require.NoError(t, err)
+	return digest
+}
+
+func definitionWithSkill(id, skillRef, hero string) *domain.FlowDefinition {
+	task := domain.FlowTask{Type: domain.FlowTaskHero, Goal: "Review", Skills: []string{skillRef}}
+	if hero != "" {
+		task.Hero = hero
+		task.Skills = nil
+	}
+	return &domain.FlowDefinition{
+		SchemaVersion: domain.FlowSchemaVersion, ID: id, Name: id,
+		Budget: domain.FlowBudget{MaxTotalTokens: 100000},
+		Tasks:  map[string]domain.FlowTask{"review": task},
+	}
 }
 
 func TestPublishGraphFreezesLocalHeroAndSurvivesDraftEdits(t *testing.T) {
@@ -189,15 +210,10 @@ func TestReadGraphRevisionBundleRejectsTamperedHero(t *testing.T) {
 
 func TestPublishGraphFreezesLocalSkillAndRejectsTamper(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
-	_, digest, err := store.CreateGraph("rna-seq", "RNA-seq")
+	_, _, err := store.CreateGraphDefinition("rna-seq", "RNA-seq")
 	require.NoError(t, err)
 	skillDir := writeGraphSkill(t, store, "rna-seq", "review-tools", "Review tools prompt.")
-	_, _, err = store.UpdateGraph("rna-seq", digest, func(document *graphsource.Document) error {
-		document.Tasks["review"] = graphsource.Task{Name: "Review", Model: "openai-main/gpt-5", Goal: "Review", Skills: []string{"local/review-tools"}}
-		document.Graph["review"] = []string{}
-		return nil
-	})
-	require.NoError(t, err)
+	writeDefinitionDraft(t, store, definitionWithSkill("rna-seq", "local/review-tools", ""))
 
 	revision, err := store.PublishGraphRevision("rna-seq")
 	require.NoError(t, err)
@@ -224,15 +240,10 @@ func TestPublishGraphFreezesLocalSkillAndRejectsTamper(t *testing.T) {
 
 func TestPublishGraphVersionBumpsWhenOnlySkillChanges(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
-	_, digest, err := store.CreateGraph("rna-seq", "RNA-seq")
+	_, _, err := store.CreateGraphDefinition("rna-seq", "RNA-seq")
 	require.NoError(t, err)
 	skillDir := writeGraphSkill(t, store, "rna-seq", "review-tools", "v1")
-	_, _, err = store.UpdateGraph("rna-seq", digest, func(document *graphsource.Document) error {
-		document.Tasks["review"] = graphsource.Task{Name: "Review", Model: "openai-main/gpt-5", Goal: "Review", Skills: []string{"local/review-tools"}}
-		document.Graph["review"] = []string{}
-		return nil
-	})
-	require.NoError(t, err)
+	writeDefinitionDraft(t, store, definitionWithSkill("rna-seq", "local/review-tools", ""))
 
 	first, err := store.PublishGraphRevision("rna-seq")
 	require.NoError(t, err)
@@ -252,7 +263,7 @@ func TestPublishGraphVersionBumpsWhenOnlySkillChanges(t *testing.T) {
 
 func TestReadGraphRevisionBundleLegacyRevisionNotFrozen(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
-	_, _, err := store.CreateGraph("rna-seq", "RNA-seq")
+	_, _, err := store.CreateGraphDefinition("rna-seq", "RNA-seq")
 	require.NoError(t, err)
 	revision, err := store.PublishGraphRevision("rna-seq")
 	require.NoError(t, err)
@@ -268,16 +279,11 @@ func TestReadGraphRevisionBundleLegacyRevisionNotFrozen(t *testing.T) {
 
 func TestPublishGraphRejectsSymlinkedSkill(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
-	_, digest, err := store.CreateGraph("rna-seq", "RNA-seq")
+	_, _, err := store.CreateGraphDefinition("rna-seq", "RNA-seq")
 	require.NoError(t, err)
 	skillDir := writeGraphSkill(t, store, "rna-seq", "review-tools", "body")
 	require.NoError(t, os.Symlink(filepath.Join(skillDir, "SKILL.md"), filepath.Join(skillDir, "extra.md")))
-	_, _, err = store.UpdateGraph("rna-seq", digest, func(document *graphsource.Document) error {
-		document.Tasks["review"] = graphsource.Task{Name: "Review", Model: "openai-main/gpt-5", Goal: "Review", Skills: []string{"local/review-tools"}}
-		document.Graph["review"] = []string{}
-		return nil
-	})
-	require.NoError(t, err)
+	writeDefinitionDraft(t, store, definitionWithSkill("rna-seq", "local/review-tools", ""))
 
 	_, err = store.PublishGraphRevision("rna-seq")
 	require.Error(t, err)
@@ -286,16 +292,11 @@ func TestPublishGraphRejectsSymlinkedSkill(t *testing.T) {
 
 func TestPublishGraphRejectsOversizedSkill(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
-	_, digest, err := store.CreateGraph("rna-seq", "RNA-seq")
+	_, _, err := store.CreateGraphDefinition("rna-seq", "RNA-seq")
 	require.NoError(t, err)
 	skillDir := writeGraphSkill(t, store, "rna-seq", "review-tools", "body")
 	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "big.bin"), make([]byte, maxSkillDirBytes+1), 0o600))
-	_, _, err = store.UpdateGraph("rna-seq", digest, func(document *graphsource.Document) error {
-		document.Tasks["review"] = graphsource.Task{Name: "Review", Model: "openai-main/gpt-5", Goal: "Review", Skills: []string{"local/review-tools"}}
-		document.Graph["review"] = []string{}
-		return nil
-	})
-	require.NoError(t, err)
+	writeDefinitionDraft(t, store, definitionWithSkill("rna-seq", "local/review-tools", ""))
 
 	_, err = store.PublishGraphRevision("rna-seq")
 	require.Error(t, err)
@@ -307,17 +308,12 @@ func TestPublishGraphRejectsOversizedSkill(t *testing.T) {
 // froze only the Hero would resolve different content at Run time.
 func TestPublishGraphFreezesSkillReferencedByLocalHero(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
-	_, digest, err := store.CreateGraph("rna-seq", "RNA-seq")
+	_, _, err := store.CreateGraphDefinition("rna-seq", "RNA-seq")
 	require.NoError(t, err)
 	writeGraphSkill(t, store, "rna-seq", "review-tools", "Review tools prompt.")
 	_, err = store.CreateGraphHero("rna-seq", graphLocalHero("reviewer", "local/review-tools"))
 	require.NoError(t, err)
-	_, _, err = store.UpdateGraph("rna-seq", digest, func(document *graphsource.Document) error {
-		document.Tasks["review"] = graphsource.Task{Name: "Review", Hero: "local/reviewer", Goal: "Review"}
-		document.Graph["review"] = []string{}
-		return nil
-	})
-	require.NoError(t, err)
+	writeDefinitionDraft(t, store, definitionWithSkill("rna-seq", "", "local/reviewer"))
 
 	revision, err := store.PublishGraphRevision("rna-seq")
 	require.NoError(t, err)
@@ -338,15 +334,10 @@ func TestPublishGraphFreezesSkillReferencedByLocalHero(t *testing.T) {
 // exists. Reject it at publish instead of failing every later read.
 func TestPublishGraphRejectsFilelessSkill(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
-	_, digest, err := store.CreateGraph("rna-seq", "RNA-seq")
+	_, _, err := store.CreateGraphDefinition("rna-seq", "RNA-seq")
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Join(store.GraphsDir(), "rna-seq", "skills", "empty-tools"), 0o700))
-	_, _, err = store.UpdateGraph("rna-seq", digest, func(document *graphsource.Document) error {
-		document.Tasks["review"] = graphsource.Task{Name: "Review", Model: "openai-main/gpt-5", Goal: "Review", Skills: []string{"local/empty-tools"}}
-		document.Graph["review"] = []string{}
-		return nil
-	})
-	require.NoError(t, err)
+	writeDefinitionDraft(t, store, definitionWithSkill("rna-seq", "local/empty-tools", ""))
 
 	_, err = store.PublishGraphRevision("rna-seq")
 	require.Error(t, err)
@@ -358,21 +349,76 @@ func TestPublishGraphRejectsFilelessSkill(t *testing.T) {
 // Run, so publish must refuse it.
 func TestPublishGraphRejectsUnloadableSkill(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
-	_, digest, err := store.CreateGraph("rna-seq", "RNA-seq")
+	_, _, err := store.CreateGraphDefinition("rna-seq", "RNA-seq")
 	require.NoError(t, err)
 	// Files exist, so the "no files" guard passes, but there is no skill.json or
 	// SKILL.md, so skills.Load rejects it.
 	dir := filepath.Join(store.GraphsDir(), "rna-seq", "skills", "notes-tools")
 	require.NoError(t, os.MkdirAll(dir, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("loose notes"), 0o600))
-	_, _, err = store.UpdateGraph("rna-seq", digest, func(document *graphsource.Document) error {
-		document.Tasks["review"] = graphsource.Task{Name: "Review", Model: "openai-main/gpt-5", Goal: "Review", Skills: []string{"local/notes-tools"}}
-		document.Graph["review"] = []string{}
-		return nil
-	})
-	require.NoError(t, err)
+	writeDefinitionDraft(t, store, definitionWithSkill("rna-seq", "local/notes-tools", ""))
 
 	_, err = store.PublishGraphRevision("rna-seq")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "notes-tools")
+}
+
+func TestPublishGraphDefinition(t *testing.T) {
+	store := Store{HomeDir: t.TempDir()}
+	_, _, err := store.CreateGraphDefinition("qc", "QC")
+	require.NoError(t, err)
+	_, err = store.CreateGraphHero("qc", graphLocalHero("reviewer", "local/review-tools"))
+	require.NoError(t, err)
+	writeGraphSkill(t, store, "qc", "review-tools", "Review tools prompt.")
+	draft := &domain.FlowDefinition{
+		SchemaVersion: domain.FlowSchemaVersion, ID: "qc", Name: "QC",
+		Budget: domain.FlowBudget{MaxTotalTokens: 100000},
+		Tasks: map[string]domain.FlowTask{
+			"review": {Type: domain.FlowTaskHero, Hero: "local/reviewer", Goal: "Review"},
+		},
+	}
+	draftDigest := writeDefinitionDraft(t, store, draft)
+
+	revision, err := store.PublishGraphRevision("qc")
+	require.NoError(t, err)
+	assert.Equal(t, SourceKindGraph, revision.SourceKind)
+	assert.Equal(t, draftDigest, revision.Digest)
+	revisionDir := filepath.Join(store.GraphsDir(), "qc", "revisions", revision.ID())
+	_, err = os.Stat(filepath.Join(revisionDir, "graph.yaml"))
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Join(revisionDir, "flow.yaml"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+
+	_, _, err = store.ReadGraphRevision("qc", revision.ID())
+	require.Error(t, err)
+
+	definition, heroes, read, err := store.ReadGraphDefinitionRevision("qc", revision.ID())
+	require.NoError(t, err)
+	assert.Equal(t, draftDigest, read.Digest)
+	assert.Equal(t, "QC", definition.Name)
+	require.Contains(t, heroes, "reviewer")
+	_, err = os.Stat(filepath.Join(revisionDir, "skills", "review-tools", "SKILL.md"))
+	require.NoError(t, err)
+}
+
+func TestLegacyFlowRevisionUntouched(t *testing.T) {
+	store := Store{HomeDir: t.TempDir()}
+	definition := &domain.FlowDefinition{
+		SchemaVersion: domain.FlowSchemaVersion, ID: "qc-flow",
+		Budget: domain.FlowBudget{MaxTotalTokens: 100000},
+		Tasks: map[string]domain.FlowTask{
+			"review": {Type: domain.FlowTaskHero, Hero: "global/reviewer@v000001", Goal: "Review"},
+		},
+	}
+	digest, err := store.CreateFlowFromDefinition(definition)
+	require.NoError(t, err)
+	revision, err := store.PublishFlowRevision("qc-flow")
+	require.NoError(t, err)
+	assert.Equal(t, SourceKindFlow, revision.SourceKind)
+	assert.Equal(t, digest, revision.Digest)
+	revisionDir := filepath.Join(store.GraphsDir(), "qc-flow", "revisions", revision.ID())
+	_, err = os.Stat(filepath.Join(revisionDir, "flow.yaml"))
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Join(revisionDir, "graph.yaml"))
+	require.ErrorIs(t, err, os.ErrNotExist)
 }

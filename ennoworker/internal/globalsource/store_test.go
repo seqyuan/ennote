@@ -258,13 +258,7 @@ func TestConcurrentUpdatesOnDistinctGraphsBothSucceed(t *testing.T) {
 // rename. With it, concurrent publishes agree on one revision.
 func TestConcurrentPublishAgreesOnOneRevision(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
-	_, digest, err := store.CreateGraph("rna-seq", "RNA-seq")
-	require.NoError(t, err)
-	_, _, err = store.UpdateGraph("rna-seq", digest, func(document *graphsource.Document) error {
-		document.Tasks["review"] = graphsource.Task{Name: "Review", Model: "openai-main/gpt-5", Goal: "Review"}
-		document.Graph["review"] = []string{}
-		return nil
-	})
+	_, _, err := store.CreateGraphDefinition("rna-seq", "RNA-seq")
 	require.NoError(t, err)
 
 	const publishers = 8
