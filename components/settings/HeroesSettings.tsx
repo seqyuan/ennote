@@ -1,12 +1,12 @@
 "use client";
 
 import { ArrowLeft, Bot, Check, FileText, Loader2, Plus, Search } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { modelOptions } from "@/components/graphs/types";
 import { useT } from "@/components/LocaleProvider";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import type { ModelProfile } from "@/components/settings/types";
-import { apiFetch } from "@/lib/worker-api.client";
+import { apiFetch, isSourceDigestConflict } from "@/lib/worker-api.client";
 
 type ThinkingEffort = "default" | "low" | "medium" | "high";
 
@@ -78,6 +78,46 @@ export function mergeSkillBindings(next: string[], previous: SkillBinding[]): Sk
   return next.map((id) => previousById.get(id) ?? { id, mode: "available" as const });
 }
 
+// One save at a time, plus a "the user edited again while it was in flight"
+// flag. The previous code returned early when a save was running, which threw
+// the edit away while the header still said Saved.
+export function createSaveGate() {
+  let running = false;
+  let editedWhileSaving = false;
+  return {
+    /** false means a save is already in flight; the caller should just mark dirty. */
+    enter(): boolean {
+      if (running) return false;
+      running = true;
+      editedWhileSaving = false;
+      return true;
+    },
+    markEdited(): void {
+      if (running) editedWhileSaving = true;
+    },
+    /** Consumes the flag: true means another round is needed. */
+    takeEdited(): boolean {
+      const edited = editedWhileSaving;
+      editedWhileSaving = false;
+      return edited;
+    },
+    leave(): void {
+      running = false;
+      editedWhileSaving = false;
+    },
+    get running(): boolean {
+      return running;
+    },
+  };
+}
+
+// A save answers with the document the Worker normalised. When the user typed
+// during that round trip their text wins and only the new digest is adopted, so
+// the next round submits what they actually see.
+export function mergeSavedDetail(updated: HeroDetail, editedWhileSaving: HeroDocument | null): HeroDetail {
+  return editedWhileSaving ? { ...updated, document: editedWhileSaving } : updated;
+}
+
 export function HeroesSettings({ models, setError }: {
   models: ModelProfile[];
   setError: (value: string | null) => void;
@@ -93,6 +133,10 @@ export function HeroesSettings({ models, setError }: {
   const [newHero, setNewHero] = useState({ id: "", name: "" });
   const [conflict, setConflict] = useState(false);
   const [diskDetail, setDiskDetail] = useState<HeroDetail | null>(null);
+  // What the user currently sees. A save round trip adopts the Worker's digest but
+  // never overwrites this, so text typed mid-save is what the next round submits.
+  const latestDocument = useRef<HeroDocument | null>(null);
+  const saveGate = useRef(createSaveGate());
 
   useOverlayLayer(diskDetail !== null, () => setDiskDetail(null));
 
@@ -106,7 +150,10 @@ export function HeroesSettings({ models, setError }: {
     setBusy("loading");
     setSelected(id);
     try {
-      setDetail(await apiFetch<HeroDetail>(`/v1/global-heroes/${encodeURIComponent(id)}`));
+      const loaded = await apiFetch<HeroDetail>(`/v1/global-heroes/${encodeURIComponent(id)}`);
+      latestDocument.current = loaded.document;
+      saveGate.current = createSaveGate();
+      setDetail(loaded);
       setConflict(false);
       setDiskDetail(null);
       setError(null);
@@ -141,6 +188,8 @@ export function HeroesSettings({ models, setError }: {
       });
       setCreateOpen(false);
       setNewHero({ id: "", name: "" });
+      latestDocument.current = created.document;
+      saveGate.current = createSaveGate();
       setDetail(created);
       setSelected(created.id);
       await refresh();
@@ -152,22 +201,41 @@ export function HeroesSettings({ models, setError }: {
     }
   };
 
+  // Saves serially under one gate. An edit made while a save is in flight is not
+  // dropped: the gate records it and the loop submits the user's latest document
+  // with the digest the previous round returned.
   const save = async (document: HeroDocument) => {
-    if (!detail || busy) return;
+    if (!detail) return;
+    const gate = saveGate.current;
+    latestDocument.current = document;
+    if (!gate.enter()) {
+      gate.markEdited();
+      return;
+    }
     setBusy("saving");
     try {
-      const updated = await apiFetch<HeroDetail>(`/v1/global-heroes/${encodeURIComponent(detail.id)}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedDigest: detail.digest, document }),
-      });
-      setDetail(updated);
-      setHeroes((current) => current.map((hero) => hero.id === updated.id ? { ...hero, name: updated.name, digest: updated.digest, error: undefined } : hero));
-      setConflict(false);
-      setDiskDetail(null);
-      setError(null);
+      let expectedDigest = detail.digest;
+      let pending = document;
+      for (;;) {
+        const updated = await apiFetch<HeroDetail>(`/v1/global-heroes/${encodeURIComponent(detail.id)}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedDigest, document: pending }),
+        });
+        expectedDigest = updated.digest;
+        const editedWhileSaving = gate.takeEdited() ? latestDocument.current : null;
+        const merged = mergeSavedDetail(updated, editedWhileSaving);
+        setDetail(merged);
+        setHeroes((current) => current.map((hero) => hero.id === updated.id ? { ...hero, name: updated.name, digest: updated.digest, error: undefined } : hero));
+        setConflict(false);
+        setDiskDetail(null);
+        setError(null);
+        if (!editedWhileSaving) break;
+        pending = editedWhileSaving;
+      }
     } catch (reason) {
-      setConflict(true);
+      setConflict(isSourceDigestConflict(reason));
       setError((reason as Error).message);
     } finally {
+      gate.leave();
       setBusy(null);
     }
   };
@@ -196,11 +264,17 @@ export function HeroesSettings({ models, setError }: {
 
   const updateLocal = (update: (document: HeroDocument) => HeroDocument) => {
     if (!detail) return;
-    setDetail({ ...detail, document: update(detail.document) });
+    const document = update(detail.document);
+    latestDocument.current = document;
+    // Tell the in-flight save that the text on screen moved on.
+    saveGate.current.markEdited();
+    setDetail({ ...detail, document });
   };
   const updateAndSave = (update: (document: HeroDocument) => HeroDocument) => {
     if (!detail) return;
     const document = update(detail.document);
+    latestDocument.current = document;
+    saveGate.current.markEdited();
     setDetail({ ...detail, document });
     void save(document);
   };
