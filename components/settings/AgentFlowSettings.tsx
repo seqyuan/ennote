@@ -6,7 +6,7 @@ import { GraphBuilderPanel } from "@/components/graphs/GraphBuilderPanel";
 import { confirmAction } from "@/components/ui/confirm";
 import { GraphDependencies } from "@/components/graphs/GraphDependencies";
 import { GraphTabs } from "@/components/graphs/GraphTabs";
-import { TaskAccordion } from "@/components/graphs/TaskAccordion";
+import { TaskAccordion, taskFingerprint } from "@/components/graphs/TaskAccordion";
 import { modelOptions, type GraphDetail, type GraphSummary, type GraphTask, type ImmutableFileRevision } from "@/components/graphs/types";
 import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
@@ -209,7 +209,7 @@ export function AgentFlowSettings({ setError }: { setError: (value: string | nul
               {addTaskOpen && <div className="graph-add-task"><input value={newTask.id} onChange={(event) => setNewTask((value) => ({ ...value, id: event.target.value }))} placeholder="task_id" /><input value={newTask.name} onChange={(event) => setNewTask((value) => ({ ...value, name: event.target.value }))} placeholder="Task name" /><button type="button" onClick={() => void addTask()}>Add</button></div>}
               <div className="graph-task-list">
                 {Object.keys(detail.document.tasks).sort().map((id) => (
-                  <TaskAccordion key={id} id={id} task={detail.document.tasks[id]} expanded={expanded === id} busy={Boolean(busy)} models={models} onToggle={() => setExpanded((value) => value === id ? null : id)} onSave={(task) => void saveTask(id, task)} onRemove={() => void removeTask(id)} />
+                  <TaskAccordion key={`${id}:${taskFingerprint(detail.document.tasks[id])}`} id={id} task={detail.document.tasks[id]} expanded={expanded === id} busy={Boolean(busy)} models={models} onToggle={() => setExpanded((value) => value === id ? null : id)} onSave={(task) => void saveTask(id, task)} onRemove={() => void removeTask(id)} />
                 ))}
                 {Object.keys(detail.document.tasks).length === 0 && <div className="graph-empty-state">No Tasks yet. Add one or ask Builder to draft the Graph.</div>}
               </div>

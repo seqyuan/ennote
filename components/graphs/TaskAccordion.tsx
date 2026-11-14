@@ -3,6 +3,39 @@
 import { ChevronDown, ChevronRight, Trash2 } from "lucide-react";
 import type { GraphTask, ModelOption } from "@/components/graphs/types";
 
+// The form mounts on the Task's CONTENT, not on its id alone. Changing the id
+// would remount on every save and steal focus from the field being edited;
+// keying on the content remounts only when the stored Task really changed -- a
+// Builder apply, or the Worker normalising the document -- so the form shows the
+// new value instead of a stale defaultValue.
+export function taskFingerprint(task: GraphTask): string {
+  return JSON.stringify(task);
+}
+
+// A model may not offer the effort the previous model used. Falling back to
+// "default" keeps the saved Task runnable instead of hiding the selection and
+// failing at Run freeze.
+export function thinkingForModel(
+  supportsThinking: boolean,
+  efforts: readonly GraphTask["thinking"][],
+  current: GraphTask["thinking"],
+): GraphTask["thinking"] {
+  const offered: readonly GraphTask["thinking"][] = supportsThinking ? efforts : ["default"];
+  const value = current ?? "default";
+  return offered.includes(value) ? value : "default";
+}
+
+// A blur is not a request. Treat an unchanged value, and an empty list that was
+// already absent, as no change so the editor stops sending a PATCH per field tab.
+export function taskFieldChanged(before: unknown, after: unknown): boolean {
+  if (Array.isArray(before) || Array.isArray(after)) {
+    const left = Array.isArray(before) ? before : [];
+    const right = Array.isArray(after) ? after : [];
+    return left.length !== right.length || left.some((value, index) => value !== right[index]);
+  }
+  return before !== after;
+}
+
 export function TaskAccordion({ id, task, expanded, busy, models, onToggle, onSave, onRemove }: {
   id: string;
   task: GraphTask;
@@ -18,7 +51,22 @@ export function TaskAccordion({ id, task, expanded, busy, models, onToggle, onSa
   const thinkingOptions = selectedModel?.model.supportsThinking
     ? selectedModel.model.supportedThinkingEfforts
     : ["default"];
-  const saveField = <K extends keyof GraphTask>(key: K, value: GraphTask[K]) => onSave({ ...task, [key]: value });
+  const saveField = <K extends keyof GraphTask>(key: K, value: GraphTask[K]) => {
+    if (!taskFieldChanged(task[key], value)) return;
+    onSave({ ...task, [key]: value });
+  };
+  // Switching to a model that cannot honour the current effort would leave a
+  // selection the Worker hides and the Run then rejects at freeze time.
+  const changeModel = (ref: string) => {
+    const option = models.find((candidate) => candidate.ref === ref);
+    const thinking = thinkingForModel(
+      Boolean(option?.model.supportsThinking),
+      option?.model.supportedThinkingEfforts ?? [],
+      task.thinking,
+    );
+    if (!taskFieldChanged(task.model, ref) && !taskFieldChanged(task.thinking, thinking)) return;
+    onSave({ ...task, model: ref, thinking });
+  };
 
   return (
     <section className="graph-task" data-task-id={id}>
@@ -30,7 +78,7 @@ export function TaskAccordion({ id, task, expanded, busy, models, onToggle, onSa
       {expanded && (
         <div className="graph-task-form">
           <label>Task name
-            <input defaultValue={task.name} disabled={busy} onBlur={(event) => saveField("name", event.target.value)} />
+            <input defaultValue={task.name} onBlur={(event) => saveField("name", event.target.value)} />
           </label>
           <div className="graph-execution-mode" role="group" aria-label="Execution mode">
             <button
@@ -48,19 +96,19 @@ export function TaskAccordion({ id, task, expanded, busy, models, onToggle, onSa
           </div>
           {heroMode ? (
             <label>Hero
-              <input defaultValue={task.hero} disabled={busy} placeholder="local/alignment or global/reviewer" onBlur={(event) => saveField("hero", event.target.value)} />
+              <input defaultValue={task.hero} placeholder="local/alignment or global/reviewer" onBlur={(event) => saveField("hero", event.target.value)} />
               <span>Local Heroes belong only to this Graph. Global Heroes are shared and read-only here.</span>
             </label>
           ) : (
             <>
               <label>Model
-                <select value={task.model ?? ""} disabled={busy} onChange={(event) => saveField("model", event.target.value)}>
+                <select value={task.model ?? ""} onChange={(event) => changeModel(event.target.value)}>
                   {models.map((option) => <option key={option.ref} value={option.ref}>{option.label} · {option.ref}</option>)}
                 </select>
               </label>
               {selectedModel?.model.supportsThinking && (
                 <label>Thinking
-                  <select value={task.thinking ?? "default"} disabled={busy} onChange={(event) => saveField("thinking", event.target.value as GraphTask["thinking"])}>
+                  <select value={task.thinking ?? "default"} onChange={(event) => saveField("thinking", event.target.value as GraphTask["thinking"])}>
                     {thinkingOptions.map((effort) => <option key={effort} value={effort}>{effort}</option>)}
                   </select>
                 </label>
@@ -68,7 +116,6 @@ export function TaskAccordion({ id, task, expanded, busy, models, onToggle, onSa
               <label>Skills
                 <input
                   defaultValue={(task.skills ?? []).join(", ")}
-                  disabled={busy}
                   placeholder="local/alignment, global/report-writing"
                   onBlur={(event) => saveField("skills", event.target.value.split(",").map((value) => value.trim()).filter(Boolean))}
                 />
@@ -77,12 +124,12 @@ export function TaskAccordion({ id, task, expanded, busy, models, onToggle, onSa
             </>
           )}
           <label className="graph-task-goal">Goal
-            <textarea defaultValue={task.goal} disabled={busy} onBlur={(event) => saveField("goal", event.target.value)} />
+            <textarea defaultValue={task.goal} onBlur={(event) => saveField("goal", event.target.value)} />
           </label>
           <details>
             <summary>Advanced</summary>
             <label>Writes
-              <input defaultValue={(task.writes ?? []).join(", ")} disabled={busy} onBlur={(event) => saveField("writes", event.target.value.split(",").map((value) => value.trim()).filter(Boolean))} />
+              <input defaultValue={(task.writes ?? []).join(", ")} onBlur={(event) => saveField("writes", event.target.value.split(",").map((value) => value.trim()).filter(Boolean))} />
             </label>
           </details>
           <button type="button" className="graph-task-remove" onClick={onRemove} disabled={busy}>
