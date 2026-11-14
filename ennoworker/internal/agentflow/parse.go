@@ -26,6 +26,7 @@ func ParseDefinition(data []byte) (*domain.FlowDefinition, error) {
 	var raw struct {
 		SchemaVersion *int                       `yaml:"schemaVersion"`
 		ID            string                     `yaml:"id"`
+		Name          string                     `yaml:"name"`
 		Version       int                        `yaml:"version"`
 		Description   string                     `yaml:"description"`
 		Inputs        map[string]domain.FlowPort `yaml:"inputs"`
@@ -64,11 +65,17 @@ func ParseDefinition(data []byte) (*domain.FlowDefinition, error) {
 		return nil, fmt.Errorf("flow definition requires an id")
 	}
 	if len(raw.Tasks) == 0 {
-		return nil, fmt.Errorf("flow definition requires at least one task")
+		// A freshly created graph.yaml has no tasks yet; the author fills them in.
+		// A published definition still needs tasks, which the validator enforces.
+		if raw.Name == "" {
+			return nil, fmt.Errorf("flow definition requires at least one task")
+		}
+		raw.Tasks = map[string]yaml.Node{}
 	}
 	def := &domain.FlowDefinition{
 		SchemaVersion: *raw.SchemaVersion,
 		ID:            raw.ID,
+		Name:          strings.TrimSpace(raw.Name),
 		Version:       raw.Version,
 		Description:   strings.TrimSpace(raw.Description),
 		Inputs:        raw.Inputs,

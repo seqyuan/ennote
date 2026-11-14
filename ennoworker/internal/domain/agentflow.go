@@ -161,15 +161,18 @@ type FlowParallelism struct {
 // store publishes immutable versions from it and computes a config digest over
 // its canonical JSON form.
 type FlowDefinition struct {
-	SchemaVersion int                 `json:"schemaVersion" yaml:"schemaVersion"`
-	ID            string              `json:"id" yaml:"id"`
-	Version       int                 `json:"version,omitempty" yaml:"version,omitempty"`
-	Description   string              `json:"description,omitempty" yaml:"description,omitempty"`
-	Inputs        map[string]FlowPort `json:"inputs,omitempty" yaml:"inputs,omitempty"`
-	Outputs       map[string]FlowPort `json:"outputs,omitempty" yaml:"outputs,omitempty"`
-	Budget        FlowBudget          `json:"budget" yaml:"budget"`
-	Tasks         map[string]FlowTask `json:"tasks" yaml:"tasks"`
-	Convergence   []ConvergenceRule   `json:"convergence,omitempty" yaml:"convergence,omitempty"`
+	SchemaVersion int    `json:"schemaVersion" yaml:"schemaVersion"`
+	ID            string `json:"id" yaml:"id"`
+	// Name is the catalog label. Optional: a legacy flow.yaml omits it and
+	// readers display ID. A new graph.yaml must carry one before it publishes.
+	Name        string              `json:"name,omitempty" yaml:"name,omitempty"`
+	Version     int                 `json:"version,omitempty" yaml:"version,omitempty"`
+	Description string              `json:"description,omitempty" yaml:"description,omitempty"`
+	Inputs      map[string]FlowPort `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+	Outputs     map[string]FlowPort `json:"outputs,omitempty" yaml:"outputs,omitempty"`
+	Budget      FlowBudget          `json:"budget" yaml:"budget"`
+	Tasks       map[string]FlowTask `json:"tasks" yaml:"tasks"`
+	Convergence []ConvergenceRule   `json:"convergence,omitempty" yaml:"convergence,omitempty"`
 	// Parallelism controls ready-set parallel dispatch (defaults: max 10,
 	// allowDisjointWriters false). Optional; nil means defaults.
 	Parallelism *FlowParallelism `json:"parallelism,omitempty" yaml:"parallelism,omitempty"`

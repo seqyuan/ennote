@@ -447,6 +447,27 @@ tasks:
 	assert.Contains(t, err.Error(), "schemaVersion")
 }
 
+func TestParseDefinitionName(t *testing.T) {
+	named, err := ParseDefinition([]byte(`schemaVersion: 1
+id: qc
+name: QC
+budget: {max_total_tokens: 10000}
+tasks:
+  review: {hero: writer@1, goal: "review"}
+`))
+	require.NoError(t, err)
+	assert.Equal(t, "QC", named.Name)
+
+	unnamed, err := ParseDefinition([]byte(`schemaVersion: 1
+id: qc
+budget: {max_total_tokens: 10000}
+tasks:
+  review: {hero: writer@1, goal: "review"}
+`))
+	require.NoError(t, err)
+	assert.Empty(t, unnamed.Name)
+}
+
 // Digest stability: same YAML (different key order) -> same digest.
 func TestConfigDigestStability(t *testing.T) {
 	def1 := parseValid(t)

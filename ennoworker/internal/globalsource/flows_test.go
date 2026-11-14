@@ -144,3 +144,49 @@ func TestLegacyRevisionWithoutSourceKindReadsAsGraph(t *testing.T) {
 	_, _, _, err = store.ReadFlowRevision("legacy", revision.ID())
 	require.Error(t, err)
 }
+
+func TestReadGraphDefinition(t *testing.T) {
+	store := Store{HomeDir: t.TempDir()}
+	dir := filepath.Join(store.GraphsDir(), "qc")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "graph.yaml"), []byte(`schemaVersion: 1
+id: qc
+name: QC
+budget: {max_total_tokens: 100000}
+tasks:
+  review: {hero: local/reviewer, goal: "Review the workspace"}
+`), 0o600))
+
+	definition, digest, err := store.ReadGraphDefinition("qc")
+	require.NoError(t, err)
+	assert.Equal(t, "QC", definition.Name)
+	assert.Equal(t, "sha256:"+mustConfigDigest(t, definition), digest)
+
+	_, _, err = store.ReadGraph("qc")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "graph_legacy_source")
+
+	legacy := Store{HomeDir: t.TempDir()}
+	_, _, err = legacy.CreateGraph("old", "Old")
+	require.NoError(t, err)
+	document, _, err := legacy.ReadGraph("old")
+	require.NoError(t, err)
+	assert.Equal(t, "Old", document.Name)
+	_, _, err = legacy.ReadGraphDefinition("old")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "graph_legacy_source")
+}
+
+func TestCreateGraphWritesDefinition(t *testing.T) {
+	store := Store{HomeDir: t.TempDir()}
+	definition, _, err := store.CreateGraphDefinition("qc", "QC")
+	require.NoError(t, err)
+	assert.Equal(t, "QC", definition.Name)
+	assert.Empty(t, definition.Tasks)
+	assert.Equal(t, int64(200000), definition.Budget.MaxTotalTokens)
+	data, err := os.ReadFile(filepath.Join(store.GraphsDir(), "qc", "graph.yaml"))
+	require.NoError(t, err)
+	kind, err := ClassifyGraphSource(data)
+	require.NoError(t, err)
+	assert.Equal(t, GraphFileDefinition, kind)
+}

@@ -295,6 +295,10 @@ func (s Store) ReadGraph(id string) (*graphsource.Document, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+	fileKind, err := ClassifyGraphSource(data)
+	if err != nil || fileKind != GraphFileLegacy {
+		return nil, "", fmt.Errorf("graph_legacy_source: %s is a FlowDefinition, not a legacy graph document", id)
+	}
 	document, err := graphsource.Parse(data)
 	if err != nil {
 		return nil, "", err
@@ -304,6 +308,40 @@ func (s Store) ReadGraph(id string) (*graphsource.Document, string, error) {
 	}
 	digest, err := graphsource.SourceDigest(document)
 	return document, digest, err
+}
+
+// ReadGraphDefinition reads agents/graphs/<id>/graph.yaml when it is a
+// FlowDefinition. A legacy graphsource.Document is an error, not a fallback,
+// and a flow.yaml is never consulted; ReadFlow keeps that job.
+func (s Store) ReadGraphDefinition(id string) (*domain.FlowDefinition, string, error) {
+	kind, err := s.SourceKind(id)
+	if err != nil {
+		return nil, "", err
+	}
+	if kind != SourceKindGraph {
+		return nil, "", fmt.Errorf("source %q is a flow, not a Graph", id)
+	}
+	path, err := objectPath(s.GraphsDir(), id, graphSourceName)
+	if err != nil {
+		return nil, "", err
+	}
+	data, err := readRegular(path)
+	if err != nil {
+		return nil, "", err
+	}
+	fileKind, err := ClassifyGraphSource(data)
+	if err != nil || fileKind != GraphFileDefinition {
+		return nil, "", fmt.Errorf("graph_legacy_source: %s is a legacy graph document, not a FlowDefinition", id)
+	}
+	definition, err := agentflow.ParseDefinition(data)
+	if err != nil {
+		return nil, "", err
+	}
+	if definition.ID != id {
+		return nil, "", fmt.Errorf("Graph id %q must match directory %q", definition.ID, id)
+	}
+	digest, err := AgentFlowDigest(definition)
+	return definition, digest, err
 }
 
 // ReadFlow reads the editable FlowDefinition draft at
@@ -357,6 +395,42 @@ func (s Store) CreateGraph(id, name string) (*graphsource.Document, string, erro
 	}
 	digest, err := graphsource.SourceDigest(document)
 	return document, digest, err
+}
+
+// CreateGraphDefinition writes a new graph.yaml as a FlowDefinition: schemaVersion,
+// a name, no tasks, and an explicit budget. A Graph created this way classifies as
+// GraphFileDefinition, so publish can accept it. It never writes the legacy
+// schema_version/graph document.
+func (s Store) CreateGraphDefinition(id, name string) (*domain.FlowDefinition, string, error) {
+	id = strings.TrimSpace(id)
+	name = strings.TrimSpace(name)
+	if !objectIDPattern.MatchString(id) {
+		return nil, "", fmt.Errorf("invalid graph id %q", id)
+	}
+	if name == "" {
+		return nil, "", fmt.Errorf("graph name is required")
+	}
+	unlock := lockSource(filepath.Join(s.GraphsDir(), id))
+	defer unlock()
+	definition := &domain.FlowDefinition{
+		SchemaVersion: domain.FlowSchemaVersion, ID: id, Name: name,
+		Budget: domain.FlowBudget{MaxTotalTokens: 200000},
+		Tasks:  map[string]domain.FlowTask{},
+	}
+	encoded, err := agentflow.DefinitionToYAML(definition)
+	if err != nil {
+		return nil, "", err
+	}
+	path, err := createObjectDir(s.GraphsDir(), id, graphSourceName)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := atomicWrite(path, encoded, true); err != nil {
+		_ = os.Remove(filepath.Dir(path))
+		return nil, "", err
+	}
+	digest, err := AgentFlowDigest(definition)
+	return definition, digest, err
 }
 
 // CreateGraphFromDocument publishes a fully authored Graph source document as a
