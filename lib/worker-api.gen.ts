@@ -247,11 +247,11 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List file-native full Agent Flow drafts
-         * @description Flow sources share the agent object store with Graphs but use
-         *     `flow.yaml` and the full Agent Flow contract (check, fan-out, terminal,
-         *     next). They are listed separately so the Graph editor never receives a
-         *     document it cannot represent.
+         * Deprecated; delegates to listGraphs
+         * @deprecated
+         * @description Deprecated. This route delegates to `GET /v1/graphs`, which lists every
+         *     object under `agents/graphs/`, including a legacy `flow.yaml` object
+         *     (labelled `legacyFile: flow`).
          */
         get: operations["listFlows"];
         put?: never;
@@ -271,7 +271,10 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** Read one editable FlowDefinition draft */
+        /**
+         * Deprecated; delegates to getGraph
+         * @deprecated
+         */
         get: operations["getFlow"];
         put?: never;
         post?: never;
@@ -293,11 +296,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Validate and publish one immutable Flow revision
-         * @description Runs the real `agentflow.Validator` (heroes, skills, check allowlist,
-         *     fan-out read-only, budget, secrets) and then freezes the FlowDefinition
-         *     plus every flow-local Hero into one immutable revision. Publishing never
-         *     enables the flow; project binding is a separate explicit action.
+         * Deprecated; delegates to publishGraph
+         * @deprecated
+         * @description Deprecated. This route delegates to `POST /v1/graphs/{id}/publish`,
+         *     which runs `agentflow.Validator` and writes one immutable revision.
          */
         post: operations["publishFlow"];
         delete?: never;
@@ -315,7 +317,10 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** List immutable Flow revisions */
+        /**
+         * Deprecated; delegates to listGraphVersions
+         * @deprecated
+         */
         get: operations["listFlowVersions"];
         put?: never;
         post?: never;
@@ -337,10 +342,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Run a project-bound published Flow revision
-         * @description The Project binding pins the revision. An unpublished, unbound, or
-         *     disabled flow is rejected instead of falling back to the latest
-         *     revision.
+         * Deprecated; delegates to runGraph
+         * @deprecated
+         * @description Deprecated. This route delegates to `POST /v1/graphs/{id}/runs`. The
+         *     Project binding pins the revision; an unpublished, unbound, or disabled
+         *     Graph is rejected instead of falling back to the latest revision.
          */
         post: operations["runFlow"];
         delete?: never;
@@ -3335,7 +3341,11 @@ export interface components {
         };
         GraphDetail: components["schemas"]["GraphSummary"] & {
             digest: string;
-            document: components["schemas"]["GraphDocument"];
+            document?: components["schemas"]["GraphDocument"];
+            /** @description The canonical Agent Flow FlowDefinition (schemaVersion, id, budget, tasks, convergence, parallelism) */
+            definition?: {
+                [key: string]: unknown;
+            };
         };
         GraphMutation: {
             expectedDigest: string;

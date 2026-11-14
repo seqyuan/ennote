@@ -146,9 +146,6 @@ type Server struct {
 	// GraphRunResume restarts the orchestrator for a resumed Graph Run on the
 	// Worker lifetime context.
 	GraphRunResume func(ctx context.Context, db *sql.DB, sessionID, runID string) error
-	// FlowRuns starts a full Agent Flow from a project-bound immutable revision.
-	// Nil disables the /v1/flows run surface with a 503.
-	FlowRuns FlowRunStarter
 	// SkillCatalog is the live global Skill id -> digest catalog used by flow
 	// publish validation. Nil falls back to no global Skills.
 	SkillCatalog func() map[string]string
@@ -292,7 +289,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/graphs/{graphID}/publish", s.publishGlobalGraph)
 	mux.HandleFunc("GET /v1/graphs/{graphID}/versions", s.listGlobalGraphVersions)
 	mux.HandleFunc("POST /v1/graphs/{graphID}/runs", s.runGlobalGraph)
-	// File-native full Agent Flow catalog and immutable revisions.
+	// Deprecated Agent Flow surface; each route delegates to the unified Graph handler.
 	mux.HandleFunc("GET /v1/flows", s.listGlobalFlows)
 	mux.HandleFunc("GET /v1/flows/{flowID}", s.getGlobalFlow)
 	mux.HandleFunc("POST /v1/flows/{flowID}/publish", s.publishGlobalFlow)

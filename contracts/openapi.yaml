@@ -353,12 +353,12 @@ paths:
   /v1/flows:
     get:
       operationId: listFlows
-      summary: List file-native full Agent Flow drafts
+      summary: Deprecated; delegates to listGraphs
+      deprecated: true
       description: |
-        Flow sources share the agent object store with Graphs but use
-        `flow.yaml` and the full Agent Flow contract (check, fan-out, terminal,
-        next). They are listed separately so the Graph editor never receives a
-        document it cannot represent.
+        Deprecated. This route delegates to `GET /v1/graphs`, which lists every
+        object under `agents/graphs/`, including a legacy `flow.yaml` object
+        (labelled `legacyFile: flow`).
       responses:
         "200":
           description: Flow catalog
@@ -374,7 +374,8 @@ paths:
       - { name: flowID, in: path, required: true, schema: { type: string } }
     get:
       operationId: getFlow
-      summary: Read one editable FlowDefinition draft
+      summary: Deprecated; delegates to getGraph
+      deprecated: true
       responses:
         "200":
           description: Parsed Flow draft
@@ -391,12 +392,11 @@ paths:
       - { name: flowID, in: path, required: true, schema: { type: string } }
     post:
       operationId: publishFlow
-      summary: Validate and publish one immutable Flow revision
+      summary: Deprecated; delegates to publishGraph
+      deprecated: true
       description: |
-        Runs the real `agentflow.Validator` (heroes, skills, check allowlist,
-        fan-out read-only, budget, secrets) and then freezes the FlowDefinition
-        plus every flow-local Hero into one immutable revision. Publishing never
-        enables the flow; project binding is a separate explicit action.
+        Deprecated. This route delegates to `POST /v1/graphs/{id}/publish`,
+        which runs `agentflow.Validator` and writes one immutable revision.
       responses:
         "201":
           description: Immutable Flow revision
@@ -415,7 +415,8 @@ paths:
       - { name: flowID, in: path, required: true, schema: { type: string } }
     get:
       operationId: listFlowVersions
-      summary: List immutable Flow revisions
+      summary: Deprecated; delegates to listGraphVersions
+      deprecated: true
       responses:
         "200":
           description: Flow revisions
@@ -432,11 +433,12 @@ paths:
       - { name: flowID, in: path, required: true, schema: { type: string } }
     post:
       operationId: runFlow
-      summary: Run a project-bound published Flow revision
+      summary: Deprecated; delegates to runGraph
+      deprecated: true
       description: |
-        The Project binding pins the revision. An unpublished, unbound, or
-        disabled flow is rejected instead of falling back to the latest
-        revision.
+        Deprecated. This route delegates to `POST /v1/graphs/{id}/runs`. The
+        Project binding pins the revision; an unpublished, unbound, or disabled
+        Graph is rejected instead of falling back to the latest revision.
       requestBody:
         required: true
         content:
@@ -4949,10 +4951,15 @@ components:
       allOf:
         - $ref: "#/components/schemas/GraphSummary"
         - type: object
-          required: [digest, document]
+          required: [digest]
+          description: Exactly one of document (a legacy graph-v1 read) and definition (a current FlowDefinition) is set; the reader decides by the file the directory holds.
           properties:
             digest: { type: string }
             document: { $ref: "#/components/schemas/GraphDocument" }
+            definition:
+              type: object
+              additionalProperties: true
+              description: The canonical Agent Flow FlowDefinition (schemaVersion, id, budget, tasks, convergence, parallelism)
     GraphMutation:
       type: object
       additionalProperties: false

@@ -1,9 +1,8 @@
 {
   "data": {
-    "digest": "sha256:ab63cd740a1f9af83ba3366ee0598143c59ab332e96ebc32f521adf91d1eafc5",
-    "document": {
-      "graph": {
-        "qc-check": []
+    "definition": {
+      "budget": {
+        "maxTotalTokens": 200000
       },
       "id": "qc",
       "name": "QC",
@@ -11,12 +10,12 @@
       "tasks": {
         "qc-check": {
           "goal": "Review the QC report.",
-          "model": "anthropic/claude-sonnet-4",
-          "name": "QC check",
-          "thinking": "default"
+          "hero": "global/reviewer",
+          "type": "hero"
         }
       }
     },
+    "digest": "sha256:d83b9f826c046d30fe62b796498093795b01729344f048c1aa39e2eb950f6d16",
     "id": "qc",
     "latestVersion": 0,
     "name": "QC",

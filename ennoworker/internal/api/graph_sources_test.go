@@ -8,11 +8,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
-	"github.com/seqyuan/ennote/ennoworker/internal/graphbuilder"
-	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
@@ -38,7 +37,7 @@ func TestGlobalGraphCatalogAndSemanticMutation(t *testing.T) {
 	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
 	var created globalGraphDetail
 	decodeData(t, response, &created)
-	assert.Empty(t, created.Document.Tasks)
+	assert.Empty(t, created.Definition.Tasks)
 	assert.Equal(t, filepath.Join(home, "agents", "graphs", "rna-seq", "graph.yaml"), created.Path)
 
 	response = request(t, handler, http.MethodGet, "/v1/graphs", nil, true)
@@ -52,15 +51,14 @@ func TestGlobalGraphCatalogAndSemanticMutation(t *testing.T) {
 		"expectedDigest": created.Digest,
 		"task": map[string]any{
 			"id":    "align",
-			"value": graphsource.Task{Name: "Align", Model: "anthropic/claude-sonnet-4", Thinking: "high", Goal: "Align reads"},
+			"value": domain.FlowTask{Hero: "global/reviewer", Goal: "Align reads"},
 		},
 	}
 	response = request(t, handler, http.MethodPatch, "/v1/graphs/rna-seq", patch, true)
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	var updated globalGraphDetail
 	decodeData(t, response, &updated)
-	assert.Contains(t, updated.Document.Tasks, "align")
-	assert.Contains(t, updated.Document.Graph, "align")
+	assert.Contains(t, updated.Definition.Tasks, "align")
 
 	response = request(t, handler, http.MethodPatch, "/v1/graphs/rna-seq", patch, true)
 	assert.Equal(t, http.StatusConflict, response.Code)
@@ -104,6 +102,33 @@ func (s *stubGraphRunner) Start(ctx context.Context, projectID, graphID string, 
 	return s.start(ctx, projectID, graphID, version, sessionID, inputs, vars)
 }
 
+// TestGlobalGraphRunSurfacesBindingErrors pins that a missing binding or a
+// revision pin mismatch is reported with its own code, not flattened to
+// graph_run_failed.
+func TestGlobalGraphRunSurfacesBindingErrors(t *testing.T) {
+	for _, code := range []string{"graph_binding_required", "graph_binding_revision_mismatch"} {
+		t.Run(code, func(t *testing.T) {
+			ctx := context.Background()
+			projects := &projectstore.Store{Root: filepath.Join(t.TempDir(), "projects")}
+			project, _, err := projects.CreateWithWorkspace(ctx, domain.CreateProjectInput{Name: "Runtime Project", HostPath: t.TempDir()})
+			require.NoError(t, err)
+			projectSessions := sessionstore.NewManager(projects.Root, projects)
+			t.Cleanup(func() { _ = projectSessions.Close() })
+			session, err := projectSessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID, Title: "Runtime Session"})
+			require.NoError(t, err)
+			server := &Server{Token: "test-token", Sessions: &store.SessionRepo{Files: projectSessions}}
+			server.GraphRuns = &stubGraphRunner{start: func(context.Context, string, string, int, string, map[string]any, map[string]any) (*domain.RunAgentFlow, error) {
+				return nil, fmt.Errorf("%s: refused", code)
+			}}
+			handler := server.Handler()
+			response := request(t, handler, http.MethodPost, "/v1/graphs/qc/runs", map[string]any{"sessionId": session.ID}, true)
+			assert.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
+			assert.Contains(t, response.Body.String(), code)
+			assert.NotContains(t, response.Body.String(), "graph_run_failed")
+		})
+	}
+}
+
 func TestGlobalGraphMutationRejectsUnknownDependencyWithoutWriting(t *testing.T) {
 	_, handler, _ := setupGlobalGraphServer(t)
 	response := request(t, handler, http.MethodPost, "/v1/graphs", map[string]any{"id": "rna-seq", "name": "RNA-seq"}, true)
@@ -120,7 +145,7 @@ func TestGlobalGraphMutationRejectsUnknownDependencyWithoutWriting(t *testing.T)
 	var current globalGraphDetail
 	decodeData(t, response, &current)
 	assert.Equal(t, created.Digest, current.Digest)
-	assert.Empty(t, current.Document.Tasks)
+	assert.Empty(t, current.Definition.Tasks)
 }
 
 func TestGlobalGraphDeleteTaskPrunesDependencies(t *testing.T) {
@@ -141,30 +166,25 @@ func TestGlobalGraphDeleteTaskPrunesDependencies(t *testing.T) {
 		return updated
 	}
 
-	task := func(id, name string) map[string]any {
-		return map[string]any{"name": name, "model": "anthropic/claude-sonnet-4", "goal": "Do the work."}
-	}
+	task := func() domain.FlowTask { return domain.FlowTask{Hero: "global/reviewer", Goal: "Do the work."} }
 
-	patch(map[string]any{"expectedDigest": created.Digest, "task": map[string]any{"id": "aa", "value": task("aa", "A")}})
-	patch(map[string]any{"expectedDigest": created.Digest, "task": map[string]any{"id": "bb", "value": task("bb", "B")}})
+	patch(map[string]any{"expectedDigest": created.Digest, "task": map[string]any{"id": "aa", "value": task()}})
+	patch(map[string]any{"expectedDigest": created.Digest, "task": map[string]any{"id": "bb", "value": task()}})
 	patch(map[string]any{"expectedDigest": created.Digest, "dependencies": map[string]any{"taskId": "aa", "depends": []string{"bb"}}})
 
 	updated := patch(map[string]any{"expectedDigest": created.Digest, "task": map[string]any{"id": "bb", "value": nil}})
-	assert.NotContains(t, updated.Document.Tasks, "bb")
-	assert.NotContains(t, updated.Document.Graph, "bb")
-	require.Contains(t, updated.Document.Graph, "aa")
-	assert.Empty(t, updated.Document.Graph["aa"])
-	assert.NotNil(t, updated.Document.Graph["aa"], "the mutation response must return an empty dependency list, not null")
+	assert.NotContains(t, updated.Definition.Tasks, "bb")
+	require.Contains(t, updated.Definition.Tasks, "aa")
+	assert.NotContains(t, updated.Definition.Tasks["aa"].Depends, "bb")
 
 	// The written graph.yaml must re-parse cleanly with the same pruned shape.
 	contents, err := os.ReadFile(filepath.Join(home, "agents", "graphs", "rna-seq", "graph.yaml"))
 	require.NoError(t, err)
-	document, err := graphsource.Parse(contents)
+	definition, err := agentflow.ParseDefinition(contents)
 	require.NoError(t, err)
-	assert.NotContains(t, document.Tasks, "bb")
-	assert.NotContains(t, document.Graph, "bb")
-	require.Contains(t, document.Graph, "aa")
-	assert.Empty(t, document.Graph["aa"])
+	assert.NotContains(t, definition.Tasks, "bb")
+	require.Contains(t, definition.Tasks, "aa")
+	assert.NotContains(t, definition.Tasks["aa"].Depends, "bb")
 }
 
 func TestGlobalGraphDeleteMissingTaskKeepsDocument(t *testing.T) {
@@ -182,194 +202,7 @@ func TestGlobalGraphDeleteMissingTaskKeepsDocument(t *testing.T) {
 	var updated globalGraphDetail
 	decodeData(t, response, &updated)
 	assert.Equal(t, created.Digest, updated.Digest)
-	assert.Empty(t, updated.Document.Tasks)
-	assert.Empty(t, updated.Document.Graph)
-}
-
-// A Graph is a draft format, but publishing one must not be a way around the
-// checks Flow publish already performs: an unresolved Skill reference or a writes
-// scope the scheduler cannot parse fails the Run at freeze time, so the draft is
-// rejected at publish instead of at the moment someone starts it.
-func TestGlobalGraphPublishRejectsUnresolvedSkillAndBadWritesScope(t *testing.T) {
-	server, handler, _ := setupGlobalGraphServer(t)
-	server.SkillCatalog = func() map[string]string { return map[string]string{"bio-workspace": "digest"} }
-
-	response := request(t, handler, http.MethodPost, "/v1/graphs", map[string]any{"id": "qc", "name": "QC"}, true)
-	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
-	var created globalGraphDetail
-	decodeData(t, response, &created)
-
-	putTask := func(task map[string]any) globalGraphDetail {
-		t.Helper()
-		response = request(t, handler, http.MethodPatch, "/v1/graphs/qc",
-			map[string]any{"expectedDigest": created.Digest, "task": map[string]any{"id": "align", "value": task}}, true)
-		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-		var updated globalGraphDetail
-		decodeData(t, response, &updated)
-		created = updated
-		return updated
-	}
-
-	putTask(map[string]any{
-		"name": "Align", "model": "anthropic/claude-sonnet-4", "goal": "Align reads",
-		"skills": []string{"global/missing-skill"},
-	})
-	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
-	assert.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
-	assert.Contains(t, response.Body.String(), "unknown skill")
-
-	putTask(map[string]any{
-		"name": "Align", "model": "anthropic/claude-sonnet-4", "goal": "Align reads",
-		"skills": []string{"global/bio-workspace"}, "writes": []string{"../escape.md"},
-	})
-	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
-	assert.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
-	assert.Contains(t, response.Body.String(), "writes scope")
-
-	putTask(map[string]any{
-		"name": "Align", "model": "anthropic/claude-sonnet-4", "goal": "Align reads",
-		"skills": []string{"global/bio-workspace"}, "writes": []string{"qc/**"},
-	})
-	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
-	assert.Equal(t, http.StatusCreated, response.Code, response.Body.String())
-}
-
-// A Worker without a Skill catalog cannot decide whether a Skill reference is
-// real. That is the Worker's missing dependency, not the author's mistake, so it
-// must answer 503 like Flow publish does rather than 422 "unknown skill".
-func TestGlobalGraphPublishReportsMissingSkillCatalogAsUnavailable(t *testing.T) {
-	server, handler, _ := setupGlobalGraphServer(t)
-	require.Nil(t, server.SkillCatalog)
-
-	response := request(t, handler, http.MethodPost, "/v1/graphs", map[string]any{"id": "qc", "name": "QC"}, true)
-	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
-	var created globalGraphDetail
-	decodeData(t, response, &created)
-
-	response = request(t, handler, http.MethodPatch, "/v1/graphs/qc", map[string]any{
-		"expectedDigest": created.Digest,
-		"task": map[string]any{"id": "align", "value": map[string]any{
-			"name": "Align", "model": "anthropic/claude-sonnet-4", "goal": "Align reads",
-			"skills": []string{"global/bio-workspace"},
-		}},
-	}, true)
-	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	decodeData(t, response, &created)
-
-	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
-	assert.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
-	assert.Contains(t, response.Body.String(), "graph_validation_unavailable")
-
-	// A local/<id> Skill is read from the Graph's own directory, so the missing
-	// catalog says nothing about it: the publish is judged on the document, not on
-	// a dependency this reference never needed.
-	response = request(t, handler, http.MethodPatch, "/v1/graphs/qc", map[string]any{
-		"expectedDigest": created.Digest,
-		"task": map[string]any{"id": "align", "value": map[string]any{
-			"name": "Align", "model": "anthropic/claude-sonnet-4", "goal": "Align reads",
-			"skills": []string{"local/missing-local-skill"},
-		}},
-	}, true)
-	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-
-	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
-	assert.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
-	assert.Contains(t, response.Body.String(), "unknown skill")
-	assert.NotContains(t, response.Body.String(), "graph_validation_unavailable")
-}
-
-// A Graph with no dependency on anything still has to answer an array. A nil
-// slice would encode as null, which the contract's array type does not allow, and
-// the null would then stick for every later read because the file carries it too.
-func TestGlobalGraphEmptyDependenciesStayAnArray(t *testing.T) {
-	_, handler, home := setupGlobalGraphServer(t)
-
-	response := request(t, handler, http.MethodPost, "/v1/graphs", map[string]any{"id": "rna-seq", "name": "RNA-seq"}, true)
-	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
-	var created globalGraphDetail
-	decodeData(t, response, &created)
-
-	response = request(t, handler, http.MethodPatch, "/v1/graphs/rna-seq", map[string]any{
-		"expectedDigest": created.Digest,
-		"task": map[string]any{"id": "align", "value": map[string]any{
-			"name": "Align", "model": "anthropic/claude-sonnet-4", "goal": "Align reads.",
-		}},
-	}, true)
-	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	decodeData(t, response, &created)
-
-	response = request(t, handler, http.MethodPatch, "/v1/graphs/rna-seq", map[string]any{
-		"expectedDigest": created.Digest,
-		"dependencies":   map[string]any{"taskId": "align", "depends": []string{}},
-	}, true)
-	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	assert.Contains(t, response.Body.String(), `"graph":{"align":[]}`)
-
-	contents, err := os.ReadFile(filepath.Join(home, "agents", "graphs", "rna-seq", "graph.yaml"))
-	require.NoError(t, err)
-	assert.Contains(t, string(contents), "align: []")
-
-	written, err := graphsource.Parse(contents)
-	require.NoError(t, err)
-	require.Contains(t, written.Graph, "align")
-	assert.Empty(t, written.Graph["align"])
-	assert.NotNil(t, written.Graph["align"], "the written Graph must parse back to an empty dependency list, not nil")
-
-	// The response after the write has to agree with the response that wrote it.
-	response = request(t, handler, http.MethodGet, "/v1/graphs/rna-seq", nil, true)
-	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	assert.Contains(t, response.Body.String(), `"graph":{"align":[]}`)
-}
-
-// Every Graph detail response reports latestVersion from the same published
-// revisions, so a create, a builder apply, a read and an update cannot disagree
-// about which version is current.
-func TestGlobalGraphResponsesReportLatestVersion(t *testing.T) {
-	server := &Server{Token: "test-token", GlobalSources: &globalsource.Store{HomeDir: t.TempDir()}}
-	server.GraphBuilder = &graphbuilder.Service{
-		Sources: server.GlobalSources,
-		Completer: graphbuilder.CompleteFunc(func(context.Context, string, string, string) (string, error) {
-			return `{"message":"Add a merge Task.","operations":[{"kind":"upsert_task","taskId":"merge",` +
-				`"task":{"name":"Merge","model":"anthropic/claude-sonnet-4","goal":"Merge results."}}]}`, nil
-		}),
-	}
-	handler := server.Handler()
-
-	response := request(t, handler, http.MethodPost, "/v1/graphs", map[string]any{"id": "qc", "name": "QC"}, true)
-	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
-	var created globalGraphDetail
-	decodeData(t, response, &created)
-	assert.Zero(t, created.LatestVersion, "a Graph without a revision has no latest version")
-
-	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/builder/messages",
-		map[string]any{"modelProfileId": "model-1", "instruction": "Add a merge Task."}, true)
-	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
-	var thread graphbuilder.Thread
-	decodeData(t, response, &thread)
-	require.NotNil(t, thread.Proposal)
-
-	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/builder/proposals/"+thread.Proposal.ID+"/apply", nil, true)
-	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	var applied globalGraphDetail
-	decodeData(t, response, &applied)
-	assert.Zero(t, applied.LatestVersion)
-	require.Contains(t, applied.Document.Tasks, "merge")
-
-	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
-	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
-
-	response = request(t, handler, http.MethodGet, "/v1/graphs/qc", nil, true)
-	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	var read globalGraphDetail
-	decodeData(t, response, &read)
-	assert.Equal(t, 1, read.LatestVersion)
-
-	response = request(t, handler, http.MethodPatch, "/v1/graphs/qc",
-		map[string]any{"expectedDigest": read.Digest, "name": "QC 2"}, true)
-	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	var updated globalGraphDetail
-	decodeData(t, response, &updated)
-	assert.Equal(t, read.LatestVersion, updated.LatestVersion)
+	assert.Empty(t, updated.Definition.Tasks)
 }
 
 // graphHeroCatalog wires a file-backed Model catalog into a Graph test server
@@ -408,6 +241,15 @@ func graphHeroDocument(handle, modelRef string) *heroesource.Document {
 	}
 }
 
+// graphWriterHeroDocument is graphHeroDocument but with mutation authority, so a
+// Graph referencing it is a writer for the flow validator's writes-scope checks.
+func graphWriterHeroDocument(handle, modelRef string) *heroesource.Document {
+	document := graphHeroDocument(handle, modelRef)
+	document.Authority = heroesource.AuthorityWriteWorkspace
+	document.AllowedTools = []string{"read", "write"}
+	return document
+}
+
 // createHeroGraph builds a one-Task Graph whose Task runs through heroRef, so a
 // later publish exercises the Hero model-reference check.
 func createHeroGraph(t *testing.T, handler http.Handler, heroRef string) {
@@ -419,16 +261,113 @@ func createHeroGraph(t *testing.T, handler http.Handler, heroRef string) {
 
 	response = request(t, handler, http.MethodPatch, "/v1/graphs/qc", map[string]any{
 		"expectedDigest": created.Digest,
-		"task": map[string]any{"id": "align", "value": map[string]any{
-			"name": "Align", "hero": heroRef, "goal": "Align reads",
-		}},
+		"task": map[string]any{"id": "align", "value": domain.FlowTask{Hero: heroRef, Goal: "Align reads"}},
 	}, true)
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 }
 
-// A global Hero that exists only as a draft was never resolvable at Run time
-// (graphrun reads the published revision), so publishing a Graph that references
-// it must fail up front with a message that names the difference.
+// graphPublishFixture wires a published global "reviewer" Hero and a stable
+// model so a definition-shaped Graph can publish.
+func graphPublishFixture(t *testing.T) (*Server, http.Handler, string) {
+	t.Helper()
+	server, handler, home := setupGlobalGraphServer(t)
+	models := graphHeroCatalog(t, server, home)
+	_, err := models.CreateModel(context.Background(), fileconfig.CreateModelInput{
+		ProviderID: "provider", ModelName: "stable", ContextWindow: 32768, MaxOutputTokens: 4096,
+		SupportsToolUse: true, ThinkingDialect: domain.ThinkingDialectNone,
+		SupportedThinkingEfforts: []domain.ThinkingEffort{domain.ThinkingDefault},
+	})
+	require.NoError(t, err)
+	_, _, err = server.GlobalSources.CreateHero(graphHeroDocument("reviewer", "provider/stable"))
+	require.NoError(t, err)
+	_, err = server.GlobalSources.PublishHeroRevision("reviewer")
+	require.NoError(t, err)
+	return server, handler, home
+}
+
+// A Graph publish must run the same validator as a flow publish: an unresolved
+// Skill reference or a writes scope the scheduler cannot parse fails at publish,
+// not at Run start.
+func TestGlobalGraphPublishRejectsUnresolvedSkillAndBadWritesScope(t *testing.T) {
+	server, handler, home := graphPublishFixture(t)
+	server.SkillCatalog = func() map[string]string { return map[string]string{"bio-workspace": "digest"} }
+	_, _, err := server.GlobalSources.CreateHero(graphWriterHeroDocument("writer", "provider/stable"))
+	require.NoError(t, err)
+	_, err = server.GlobalSources.PublishHeroRevision("writer")
+	require.NoError(t, err)
+
+	response := request(t, handler, http.MethodPost, "/v1/graphs", map[string]any{"id": "qc", "name": "QC"}, true)
+	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+	var created globalGraphDetail
+	decodeData(t, response, &created)
+
+	putTask := func(task domain.FlowTask) globalGraphDetail {
+		t.Helper()
+		response = request(t, handler, http.MethodPatch, "/v1/graphs/qc",
+			map[string]any{"expectedDigest": created.Digest, "task": map[string]any{"id": "align", "value": task}}, true)
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		var updated globalGraphDetail
+		decodeData(t, response, &updated)
+		created = updated
+		return updated
+	}
+
+	putTask(domain.FlowTask{Hero: "global/reviewer", Goal: "Align reads", Skills: []string{"global/missing-skill"}})
+	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
+	assert.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "flow_validation_failed")
+	assert.Contains(t, response.Body.String(), "unknown skill")
+
+	putTask(domain.FlowTask{Hero: "global/writer", Goal: "Align reads", Skills: []string{"global/bio-workspace"}, Writes: []string{"../escape.md"}})
+	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
+	assert.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "flow_validation_failed")
+	assert.Contains(t, response.Body.String(), "writes scope")
+
+	putTask(domain.FlowTask{Hero: "global/writer", Goal: "Align reads", Skills: []string{"global/bio-workspace"}, Writes: []string{"qc/**"}})
+	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
+	assert.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+	_ = home
+}
+
+// A Worker without a model catalog cannot resolve Hero references, so publish
+// answers 503 flow_validation_unavailable like the flow handler, not a 422 that
+// blames the author.
+func TestGlobalGraphPublishReportsMissingModelsAsUnavailable(t *testing.T) {
+	server, handler, _ := setupGlobalGraphServer(t)
+	require.Nil(t, server.Models)
+
+	createHeroGraph(t, handler, "global/reviewer")
+
+	response := request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
+	assert.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "flow_validation_unavailable")
+}
+
+// A Graph without a name is refused at publish so the catalog never falls back
+// to a raw id for an object created after this change.
+func TestGlobalGraphPublishRequiresName(t *testing.T) {
+	server, handler, home := graphPublishFixture(t)
+	_ = server
+	_ = home
+
+	createHeroGraph(t, handler, "global/reviewer")
+
+	response := request(t, handler, http.MethodGet, "/v1/graphs/qc", nil, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var detail globalGraphDetail
+	decodeData(t, response, &detail)
+	response = request(t, handler, http.MethodPatch, "/v1/graphs/qc",
+		map[string]any{"expectedDigest": detail.Digest, "name": ""}, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+
+	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
+	assert.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "graph_name_required")
+}
+
+// A global Hero that exists only as a draft was never resolvable at Run time,
+// so publishing a Graph that references it must fail up front.
 func TestGlobalGraphPublishRejectsUnpublishedGlobalHero(t *testing.T) {
 	server, handler, home := setupGlobalGraphServer(t)
 	models := graphHeroCatalog(t, server, home)
@@ -446,7 +385,7 @@ func TestGlobalGraphPublishRejectsUnpublishedGlobalHero(t *testing.T) {
 
 	response := request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
 	assert.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
-	assert.Contains(t, response.Body.String(), "has no published revision")
+	assert.Contains(t, response.Body.String(), "is not published")
 	assert.Contains(t, response.Body.String(), "reviewer")
 	assert.Contains(t, response.Body.String(), "align")
 }
@@ -491,24 +430,56 @@ func TestGlobalGraphPublishValidatesPublishedHeroRevisionNotDraft(t *testing.T) 
 }
 
 // The normal path stays intact: a published global Hero with a resolvable model
-// lets the Graph publish.
+// lets the Graph publish as a graph revision.
 func TestGlobalGraphPublishSucceedsWithPublishedGlobalHero(t *testing.T) {
-	server, handler, home := setupGlobalGraphServer(t)
-	models := graphHeroCatalog(t, server, home)
-	_, err := models.CreateModel(context.Background(), fileconfig.CreateModelInput{
-		ProviderID: "provider", ModelName: "stable", ContextWindow: 32768, MaxOutputTokens: 4096,
-		SupportsToolUse: true, ThinkingDialect: domain.ThinkingDialectNone,
-		SupportedThinkingEfforts: []domain.ThinkingEffort{domain.ThinkingDefault},
-	})
-	require.NoError(t, err)
-
-	_, _, err = server.GlobalSources.CreateHero(graphHeroDocument("reviewer", "provider/stable"))
-	require.NoError(t, err)
-	_, err = server.GlobalSources.PublishHeroRevision("reviewer")
-	require.NoError(t, err)
+	server, handler, home := graphPublishFixture(t)
+	_ = server
+	_ = home
 
 	createHeroGraph(t, handler, "global/reviewer")
 
 	response := request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
 	assert.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+	var revision globalsource.Revision
+	decodeData(t, response, &revision)
+	assert.Equal(t, globalsource.SourceKindGraph, revision.SourceKind)
+}
+
+// Every Graph detail response reports latestVersion from the same published
+// revisions, so a create, an update, a read and a publish cannot disagree.
+func TestGlobalGraphResponsesReportLatestVersion(t *testing.T) {
+	server, handler, home := graphPublishFixture(t)
+	_ = server
+	_ = home
+
+	response := request(t, handler, http.MethodPost, "/v1/graphs", map[string]any{"id": "qc", "name": "QC"}, true)
+	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+	var created globalGraphDetail
+	decodeData(t, response, &created)
+	assert.Zero(t, created.LatestVersion, "a Graph without a revision has no latest version")
+
+	response = request(t, handler, http.MethodPatch, "/v1/graphs/qc",
+		map[string]any{"expectedDigest": created.Digest,
+			"task": map[string]any{"id": "merge", "value": domain.FlowTask{Hero: "global/reviewer", Goal: "Merge results."}}}, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var applied globalGraphDetail
+	decodeData(t, response, &applied)
+	assert.Zero(t, applied.LatestVersion)
+	require.Contains(t, applied.Definition.Tasks, "merge")
+
+	response = request(t, handler, http.MethodPost, "/v1/graphs/qc/publish", nil, true)
+	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+
+	response = request(t, handler, http.MethodGet, "/v1/graphs/qc", nil, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var read globalGraphDetail
+	decodeData(t, response, &read)
+	assert.Equal(t, 1, read.LatestVersion)
+
+	response = request(t, handler, http.MethodPatch, "/v1/graphs/qc",
+		map[string]any{"expectedDigest": read.Digest, "name": "QC 2"}, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var updated globalGraphDetail
+	decodeData(t, response, &updated)
+	assert.Equal(t, read.LatestVersion, updated.LatestVersion)
 }

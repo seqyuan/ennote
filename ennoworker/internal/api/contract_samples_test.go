@@ -19,6 +19,7 @@ import (
 
 	"github.com/seqyuan/ennote/ennoworker/internal/artifacts"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
 	"github.com/stretchr/testify/require"
@@ -727,13 +728,21 @@ func TestContractSamples(t *testing.T) {
 	// These additions pin those shapes, reusing the "reviewer" Hero and "qc" Graph
 	// created above so their digests line up with the samples already recorded.
 	//
-	// Publish validation resolves model references through the live catalog. The
-	// fixture catalog is empty, so publication would answer 422 for the legal
-	// "anthropic/claude-sonnet-4" reference; a sample pins the response shape, not
-	// the validation behaviour, so the catalog is detached here the same way the
-	// Graph test server leaves Models nil. The published revision digests still
-	// equal the digests recorded above.
-	server.Models = nil
+	// Publish validation resolves the Hero's model through the live catalog, so the
+	// fixture must contain the "anthropic/claude-sonnet-4" reference the reviewer
+	// Hero declares. A sample pins the response shape, not the validation
+	// behaviour, but the publish still has to succeed to record the 201.
+	_, err = server.Models.Files.CreateProvider(context.Background(), fileconfig.CreateProviderInput{
+		Key: "anthropic", Name: "Anthropic", ProviderType: domain.ProviderOpenAICompatible,
+		BaseURL: "https://anthropic.test/v1", APIKey: "sk-contract",
+	})
+	require.NoError(t, err)
+	_, err = server.Models.Files.CreateModel(context.Background(), fileconfig.CreateModelInput{
+		ProviderID: "anthropic", ModelName: "claude-sonnet-4", ContextWindow: 32768, MaxOutputTokens: 4096,
+		SupportsToolUse: true, ThinkingDialect: domain.ThinkingDialectNone,
+		SupportedThinkingEfforts: []domain.ThinkingEffort{domain.ThinkingDefault},
+	})
+	require.NoError(t, err)
 
 	// Recorded last, for the same reason every addition above was: the normaliser
 	// numbers its stand-ins in encounter order, so an id or timestamp introduced
@@ -758,8 +767,7 @@ func TestContractSamples(t *testing.T) {
 			"task": map[string]any{
 				"id": "qc-check",
 				"value": map[string]any{
-					"name": "QC check", "model": "anthropic/claude-sonnet-4",
-					"thinking": "default", "skills": []string{}, "goal": "Review the QC report.",
+					"hero": "global/reviewer", "goal": "Review the QC report.",
 				},
 			},
 		},

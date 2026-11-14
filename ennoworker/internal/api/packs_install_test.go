@@ -13,7 +13,6 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
-	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/packinstall"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
@@ -254,7 +253,7 @@ func TestPackInstallCreatesDraftAndState(t *testing.T) {
 	assert.Equal(t, "cell-qc-tables", state.Skills[0].StoreID)
 
 	// The Graph exists as an ordinary draft and has no published revision.
-	_, _, err := fixture.sources.ReadGraph("qc-review")
+	_, _, err := fixture.sources.ReadGraphDefinition("qc-review")
 	require.NoError(t, err)
 	revisions, err := fixture.sources.ListGraphRevisions("qc-review")
 	require.NoError(t, err)
@@ -361,9 +360,9 @@ tasks:
 	require.Len(t, plan.State.Flows, 1)
 	assert.Equal(t, "flow", plan.State.Flows[0].Format)
 	assert.Nil(t, plan.State.Flows[0].PublishedRevision)
-	_, _, err := fixture.sources.ReadFlow("qc-review")
+	_, _, err := fixture.sources.ReadGraphDefinition("qc-review")
 	require.NoError(t, err)
-	revisions, err := fixture.sources.ListFlowRevisions("qc-review")
+	revisions, err := fixture.sources.ListGraphRevisions("qc-review")
 	require.NoError(t, err)
 	assert.Empty(t, revisions)
 
@@ -403,12 +402,12 @@ func TestPackListAndRemove(t *testing.T) {
 
 	// Editing the installed Graph draft makes an unforced remove refuse, and
 	// force deletes it anyway.
-	_, digest, err := fixture.sources.ReadGraph("qc-review")
+	_, digest, err := fixture.sources.ReadGraphDefinition("qc-review")
 	require.NoError(t, err)
-	updated, _, err := fixture.sources.UpdateGraph("qc-review", digest, func(document *graphsource.Document) error {
-		task := document.Tasks["load"]
+	updated, _, err := fixture.sources.UpdateGraphDefinition("qc-review", digest, func(definition *domain.FlowDefinition) error {
+		task := definition.Tasks["load"]
 		task.Goal = "Load a different samplesheet"
-		document.Tasks["load"] = task
+		definition.Tasks["load"] = task
 		return nil
 	})
 	require.NoError(t, err)
@@ -418,12 +417,12 @@ func TestPackListAndRemove(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, blocked.Code, blocked.Body.String())
 	assert.Contains(t, blocked.Body.String(), packinstall.CodeInstallBlocked)
 
-	_, _, err = fixture.sources.ReadGraph("qc-review")
+	_, _, err = fixture.sources.ReadGraphDefinition("qc-review")
 	require.NoError(t, err, "a refused removal must not delete anything")
 
 	forced := request(t, fixture.handler, http.MethodDelete, "/v1/packs/seqyuan/cell-qc-review?force=1", nil, true)
 	assert.Equal(t, http.StatusNoContent, forced.Code, forced.Body.String())
-	_, _, err = fixture.sources.ReadGraph("qc-review")
+	_, _, err = fixture.sources.ReadGraphDefinition("qc-review")
 	assert.ErrorIs(t, err, os.ErrNotExist)
 	_, _, err = fixture.sources.ReadHero("qc-reviewer")
 	assert.ErrorIs(t, err, os.ErrNotExist)

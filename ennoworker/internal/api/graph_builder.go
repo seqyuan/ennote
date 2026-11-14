@@ -61,5 +61,5 @@ func (s *Server) applyGraphBuilderProposal(w http.ResponseWriter, r *http.Reques
 		writeError(w, r, http.StatusConflict, "graph_builder_apply_failed", err.Error(), false)
 		return
 	}
-	writeData(w, http.StatusOK, s.graphDetailFor(s.GlobalSources, document, digest))
+	writeData(w, http.StatusOK, s.graphDocumentDetailFor(s.GlobalSources, document, digest))
 }

@@ -309,7 +309,6 @@ func run() error {
 		Packs:          packInstaller,
 		HostRoots:      cfg.HostRoots,
 		GraphRuns:      graphRuns,
-		FlowRuns:       graphRuns,
 		SkillCatalog:   skillCatalog,
 		CheckRunner:    &store.CheckTaskRunner{PolicyResolver: store.FlowCheckPolicyResolver(policyFiles)},
 		CheckAllowlist: checkAllowlist, CheckAllowlistAllowsAll: checkUnrestricted,

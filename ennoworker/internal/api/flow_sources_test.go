@@ -72,6 +72,9 @@ func flowWithHero(id string) *domain.FlowDefinition {
 	}
 }
 
+// The deprecated /v1/flows surface delegates to /v1/graphs: listing is the one
+// catalog, publishing a flow.yaml through the delegate keeps sourceKind=flow and
+// lands the same revision the graph route would, and running is the one starter.
 func TestGlobalFlowPublishAndVersions(t *testing.T) {
 	_, handler, sources := flowAPIFixture(t)
 	_, err := sources.CreateFlowFromDefinition(flowWithHero("review-flow"))
@@ -79,14 +82,18 @@ func TestGlobalFlowPublishAndVersions(t *testing.T) {
 
 	list := request(t, handler, http.MethodGet, "/v1/flows", nil, true)
 	require.Equal(t, http.StatusOK, list.Code, list.Body.String())
-	var summaries []globalFlowSummary
+	var summaries []globalGraphSummary
 	decodeData(t, list, &summaries)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "review-flow", summaries[0].ID)
-	assert.Equal(t, 2, summaries[0].TaskCount)
+	assert.Equal(t, globalsource.LegacyFileFlow, summaries[0].LegacyFile)
 
 	detail := request(t, handler, http.MethodGet, "/v1/flows/review-flow", nil, true)
 	require.Equal(t, http.StatusOK, detail.Code, detail.Body.String())
+	var flowDetail globalGraphDetail
+	decodeData(t, detail, &flowDetail)
+	require.NotNil(t, flowDetail.Definition)
+	assert.Equal(t, "review-flow", flowDetail.Definition.ID)
 
 	published := request(t, handler, http.MethodPost, "/v1/flows/review-flow/publish", nil, true)
 	require.Equal(t, http.StatusCreated, published.Code, published.Body.String())
@@ -99,6 +106,15 @@ func TestGlobalFlowPublishAndVersions(t *testing.T) {
 	assert.Equal(t, 1, revision.Version)
 	assert.Equal(t, globalsource.SourceKindFlow, revision.SourceKind)
 	assert.Contains(t, revision.Digest, "sha256:")
+
+	// The graph route on the same object delegates to the same publish and dedups.
+	again := request(t, handler, http.MethodPost, "/v1/graphs/review-flow/publish", nil, true)
+	require.Equal(t, http.StatusCreated, again.Code, again.Body.String())
+	var againRevision struct {
+		Version int `json:"version"`
+	}
+	decodeData(t, again, &againRevision)
+	assert.Equal(t, revision.Version, againRevision.Version)
 
 	versions := request(t, handler, http.MethodGet, "/v1/flows/review-flow/versions", nil, true)
 	require.Equal(t, http.StatusOK, versions.Code, versions.Body.String())
@@ -130,9 +146,11 @@ func TestGlobalFlowPublishRejectsInvalidDefinition(t *testing.T) {
 	assert.Contains(t, response.Body.String(), "flow_budget_required")
 }
 
-func TestFlowCatalogDoesNotLeakIntoGraphList(t *testing.T) {
+// The unified /v1/graphs catalog lists both a graph.yaml and a legacy flow.yaml
+// object; the flow row is labelled by legacyFile.
+func TestFlowCatalogAppearsInUnifiedGraphList(t *testing.T) {
 	_, handler, sources := flowAPIFixture(t)
-	_, _, err := sources.CreateGraph("graph-one", "Graph One")
+	_, _, err := sources.CreateGraphDefinition("graph-one", "Graph One")
 	require.NoError(t, err)
 	_, err = sources.CreateFlowFromDefinition(flowWithHero("flow-one"))
 	require.NoError(t, err)
@@ -141,6 +159,14 @@ func TestFlowCatalogDoesNotLeakIntoGraphList(t *testing.T) {
 	require.Equal(t, http.StatusOK, response.Code)
 	var summaries []globalGraphSummary
 	decodeData(t, response, &summaries)
-	require.Len(t, summaries, 1)
-	assert.Equal(t, "graph-one", summaries[0].ID)
+	require.Len(t, summaries, 2)
+
+	byID := map[string]globalGraphSummary{}
+	for _, summary := range summaries {
+		byID[summary.ID] = summary
+	}
+	require.Contains(t, byID, "graph-one")
+	assert.Empty(t, byID["graph-one"].LegacyFile)
+	require.Contains(t, byID, "flow-one")
+	assert.Equal(t, globalsource.LegacyFileFlow, byID["flow-one"].LegacyFile)
 }

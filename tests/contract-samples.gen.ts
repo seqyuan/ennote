@@ -71,14 +71,16 @@ export const createGlobalHero201: WorkerOperationResponse<"createGlobalHero", 20
 /** createGraph answering 201. */
 export const createGraph201: WorkerOperationResponse<"createGraph", 201> = {
   "data": {
-    "digest": "sha256:8a41fdf05eb99737cb3f5e13b8160011d82a9fa08b0966761a892cf4fe3268b4",
-    "document": {
-      "graph": {},
+    "definition": {
+      "budget": {
+        "maxTotalTokens": 200000
+      },
       "id": "qc",
       "name": "QC",
       "schemaVersion": 1,
       "tasks": {}
     },
+    "digest": "sha256:6574f51ae35ca6e305eb29db30a43215f0663983fe8b230467819e0fd27c3bae",
     "id": "qc",
     "latestVersion": 0,
     "name": "QC",
@@ -328,7 +330,7 @@ export const listGlobalHeroes200: WorkerOperationResponse<"listGlobalHeroes", 20
 export const listGraphVersions200: WorkerOperationResponse<"listGraphVersions", 200> = {
   "data": [
     {
-      "digest": "sha256:ab63cd740a1f9af83ba3366ee0598143c59ab332e96ebc32f521adf91d1eafc5",
+      "digest": "sha256:d83b9f826c046d30fe62b796498093795b01729344f048c1aa39e2eb950f6d16",
       "publishedAt": "2026-01-01T00:00:09Z",
       "resourceId": "qc",
       "schemaVersion": 1,
@@ -342,7 +344,7 @@ export const listGraphVersions200: WorkerOperationResponse<"listGraphVersions", 
 export const listGraphs200: WorkerOperationResponse<"listGraphs", 200> = {
   "data": [
     {
-      "digest": "sha256:8a41fdf05eb99737cb3f5e13b8160011d82a9fa08b0966761a892cf4fe3268b4",
+      "digest": "sha256:6574f51ae35ca6e305eb29db30a43215f0663983fe8b230467819e0fd27c3bae",
       "id": "qc",
       "latestVersion": 0,
       "name": "QC",
@@ -556,7 +558,7 @@ export const publishGlobalHero201: WorkerOperationResponse<"publishGlobalHero", 
 /** publishGraph answering 201. */
 export const publishGraph201: WorkerOperationResponse<"publishGraph", 201> = {
   "data": {
-    "digest": "sha256:ab63cd740a1f9af83ba3366ee0598143c59ab332e96ebc32f521adf91d1eafc5",
+    "digest": "sha256:d83b9f826c046d30fe62b796498093795b01729344f048c1aa39e2eb950f6d16",
     "publishedAt": "2026-01-01T00:00:09Z",
     "resourceId": "qc",
     "schemaVersion": 1,
@@ -702,10 +704,9 @@ export const updateGlobalHero200: WorkerOperationResponse<"updateGlobalHero", 20
 /** updateGraph answering 200. */
 export const updateGraph200: WorkerOperationResponse<"updateGraph", 200> = {
   "data": {
-    "digest": "sha256:ab63cd740a1f9af83ba3366ee0598143c59ab332e96ebc32f521adf91d1eafc5",
-    "document": {
-      "graph": {
-        "qc-check": []
+    "definition": {
+      "budget": {
+        "maxTotalTokens": 200000
       },
       "id": "qc",
       "name": "QC",
@@ -713,12 +714,12 @@ export const updateGraph200: WorkerOperationResponse<"updateGraph", 200> = {
       "tasks": {
         "qc-check": {
           "goal": "Review the QC report.",
-          "model": "anthropic/claude-sonnet-4",
-          "name": "QC check",
-          "thinking": "default"
+          "hero": "global/reviewer",
+          "type": "hero"
         }
       }
     },
+    "digest": "sha256:d83b9f826c046d30fe62b796498093795b01729344f048c1aa39e2eb950f6d16",
     "id": "qc",
     "latestVersion": 0,
     "name": "QC",

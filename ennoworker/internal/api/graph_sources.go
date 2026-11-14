@@ -5,10 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
-	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
@@ -20,25 +18,40 @@ type globalGraphSummary struct {
 	Name          string `json:"name"`
 	Path          string `json:"path"`
 	Digest        string `json:"digest,omitempty"`
+	LegacyFile    string `json:"legacyFile,omitempty"`
 	Error         string `json:"error,omitempty"`
 	LatestVersion int    `json:"latestVersion"`
 }
 
+// globalGraphDetail is the detail projection of one Graph object. Exactly one of
+// Document (a legacy graph-v1 graphsource.Document) and Definition (a current
+// FlowDefinition) is set; the reader decides by which file the directory holds.
 type globalGraphDetail struct {
-	ID            string                `json:"id"`
-	Name          string                `json:"name"`
-	Path          string                `json:"path"`
-	Digest        string                `json:"digest"`
-	LatestVersion int                   `json:"latestVersion"`
-	Document      *graphsource.Document `json:"document"`
+	ID            string                 `json:"id"`
+	Name          string                 `json:"name"`
+	Path          string                 `json:"path"`
+	Digest        string                 `json:"digest"`
+	LatestVersion int                    `json:"latestVersion"`
+	Document      *graphsource.Document  `json:"document,omitempty"`
+	Definition    *domain.FlowDefinition `json:"definition,omitempty"`
 }
 
-// graphDetailFor builds the detail response every Graph endpoint returns. The
-// caller supplies the digest it just computed, but latestVersion always comes from
-// the published revisions so create, read, update and builder-apply agree: a
-// Graph with no revision answers 0, and a listing failure is reported as 0 rather
-// than failing a response that already succeeded.
-func (s *Server) graphDetailFor(sources *globalsource.Store, document *graphsource.Document, digest string) globalGraphDetail {
+// graphDefinitionDetailFor builds the detail response for a definition-shaped
+// draft. The caller supplies the digest it just computed; latestVersion always
+// comes from the published revisions so create, read and update agree.
+func (s *Server) graphDefinitionDetailFor(sources *globalsource.Store, definition *domain.FlowDefinition, digest string) globalGraphDetail {
+	detail := globalGraphDetail{
+		ID: definition.ID, Name: definition.Name, Digest: digest, Definition: definition,
+		Path: sources.GraphsDir() + "/" + definition.ID + "/graph.yaml",
+	}
+	if revisions, err := sources.ListGraphRevisions(definition.ID); err == nil && len(revisions) > 0 {
+		detail.LatestVersion = revisions[len(revisions)-1].Version
+	}
+	return detail
+}
+
+// graphDocumentDetailFor builds the detail response for a legacy graph-v1 draft.
+func (s *Server) graphDocumentDetailFor(sources *globalsource.Store, document *graphsource.Document, digest string) globalGraphDetail {
 	detail := globalGraphDetail{
 		ID: document.ID, Name: document.Name, Digest: digest, Document: document,
 		Path: sources.GraphsDir() + "/" + document.ID + "/graph.yaml",
@@ -47,25 +60,6 @@ func (s *Server) graphDetailFor(sources *globalsource.Store, document *graphsour
 		detail.LatestVersion = revisions[len(revisions)-1].Version
 	}
 	return detail
-}
-
-// errGraphValidationUnavailable reports that the publish could not be validated
-// because a dependency the Worker needs is missing, which is a 503 and not the
-// author's 422.
-var errGraphValidationUnavailable = errors.New("graph validation is unavailable")
-
-// graphNeedsSkillCatalog reports whether any Task references a global Skill, which
-// is the only case that resolves through the live catalog. A local/<id> Skill is
-// read from the Graph's own directory, so a missing catalog cannot invalidate it.
-func graphNeedsSkillCatalog(document *graphsource.Document) bool {
-	for _, task := range document.Tasks {
-		for _, skill := range task.Skills {
-			if strings.HasPrefix(skill, "global/") {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func (s *Server) sourceStore(w http.ResponseWriter, r *http.Request) *globalsource.Store {
@@ -89,7 +83,10 @@ func (s *Server) listGlobalGraphs(w http.ResponseWriter, r *http.Request) {
 	globalsource.SortGraphEntries(entries)
 	result := make([]globalGraphSummary, 0, len(entries))
 	for _, entry := range entries {
-		summary := globalGraphSummary{ID: entry.ID, Name: entry.Name, Path: entry.Path, Digest: entry.Digest, Error: entry.Error}
+		summary := globalGraphSummary{
+			ID: entry.ID, Name: entry.Name, Path: entry.Path, Digest: entry.Digest,
+			LegacyFile: entry.LegacyFile, Error: entry.Error,
+		}
 		if revisions, revisionErr := sources.ListGraphRevisions(entry.ID); revisionErr == nil && len(revisions) > 0 {
 			summary.LatestVersion = revisions[len(revisions)-1].Version
 		}
@@ -110,57 +107,107 @@ func (s *Server) createGlobalGraph(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	document, digest, err := sources.CreateGraph(body.ID, body.Name)
+	definition, digest, err := sources.CreateGraphDefinition(body.ID, body.Name)
 	if err != nil {
 		writeError(w, r, http.StatusUnprocessableEntity, "graph_create_failed", err.Error(), false)
 		return
 	}
-	writeData(w, http.StatusCreated, s.graphDetailFor(sources, document, digest))
+	writeData(w, http.StatusCreated, s.graphDefinitionDetailFor(sources, definition, digest))
 }
 
+// getGlobalGraph reads whichever file the object holds: a definition-shaped
+// graph.yaml, a legacy graph-v1 document, or a legacy flow.yaml (through the
+// deprecated /v1/flows delegate). The response projects exactly the fields that
+// file carries.
 func (s *Server) getGlobalGraph(w http.ResponseWriter, r *http.Request) {
 	sources := s.sourceStore(w, r)
 	if sources == nil {
 		return
 	}
 	id := r.PathValue("graphID")
-	document, digest, err := sources.ReadGraph(id)
-	if err != nil {
-		writeError(w, r, http.StatusNotFound, "graph_not_found", err.Error(), false)
+	if definition, digest, err := sources.ReadGraphDefinition(id); err == nil {
+		writeData(w, http.StatusOK, s.graphDefinitionDetailFor(sources, definition, digest))
 		return
 	}
-	writeData(w, http.StatusOK, s.graphDetailFor(sources, document, digest))
+	if document, digest, err := sources.ReadGraph(id); err == nil {
+		writeData(w, http.StatusOK, s.graphDocumentDetailFor(sources, document, digest))
+		return
+	}
+	// A legacy flow.yaml is still a definition; the flow delegate reads it here.
+	if definition, digest, err := sources.ReadFlow(id); err == nil {
+		writeData(w, http.StatusOK, s.graphDefinitionDetailFor(sources, definition, digest))
+		return
+	}
+	writeError(w, r, http.StatusNotFound, "graph_not_found", "graph not found", false)
 }
 
+// publishGlobalGraph validates the draft with the Agent Flow validator and writes
+// one immutable revision. A definition-shaped graph.yaml is the only authorable
+// draft; a legacy graph-v1 document is refused. A legacy flow.yaml published
+// through the deprecated /v1/flows delegate keeps its sourceKind=flow revision
+// and may omit name.
 func (s *Server) publishGlobalGraph(w http.ResponseWriter, r *http.Request) {
 	sources := s.sourceStore(w, r)
 	if sources == nil {
 		return
 	}
-	document, _, err := sources.ReadGraph(r.PathValue("graphID"))
+	id := r.PathValue("graphID")
+	kind, err := sources.SourceKind(id)
 	if err != nil {
 		writeError(w, r, http.StatusNotFound, "graph_not_found", err.Error(), false)
 		return
 	}
-	// Validation runs on this unlocked read, and PublishGraphRevision re-reads under
-	// the per-object lock. A write landing between the two could therefore freeze a
-	// draft that was never validated. Closing that window means publishing the
-	// document that was validated, which needs a publish variant that accepts it;
-	// until then the gap fails closed at Run start rather than corrupting a
-	// revision.
-	if len(document.Tasks) == 0 {
-		writeError(w, r, http.StatusUnprocessableEntity, "graph_publish_failed", "Graph requires at least one Task before publication", false)
-		return
-	}
-	if err := s.validateGraphPublish(r, document); err != nil {
-		if errors.Is(err, errGraphValidationUnavailable) {
-			writeError(w, r, http.StatusServiceUnavailable, "graph_validation_unavailable", err.Error(), true)
+	requireName := false
+	var definition *domain.FlowDefinition
+	switch kind {
+	case globalsource.SourceKindGraph:
+		definition, _, err = sources.ReadGraphDefinition(id)
+		if err != nil {
+			// A legacy graph-v1 document is refused; the author rewrites it.
+			writeError(w, r, http.StatusUnprocessableEntity, "graph_legacy_source", err.Error(), false)
 			return
 		}
-		writeError(w, r, http.StatusUnprocessableEntity, "graph_publish_failed", err.Error(), false)
+		requireName = true
+	case globalsource.SourceKindFlow:
+		definition, _, err = sources.ReadFlow(id)
+		if err != nil {
+			writeError(w, r, http.StatusUnprocessableEntity, "graph_invalid", err.Error(), false)
+			return
+		}
+	}
+	if requireName && strings.TrimSpace(definition.Name) == "" {
+		writeError(w, r, http.StatusUnprocessableEntity, "graph_name_required",
+			"graph.yaml must declare a name before it can be published", false)
 		return
 	}
-	revision, err := sources.PublishGraphRevision(document.ID)
+	if s.Models == nil {
+		writeError(w, r, http.StatusServiceUnavailable, "flow_validation_unavailable", "model catalog is unavailable", true)
+		return
+	}
+	validator := store.NewFlowValidator(store.FlowPublishOptions{
+		FlowID:                  id,
+		Sources:                 sources,
+		Models:                  s.Models,
+		SkillCatalog:            s.SkillCatalog,
+		CheckAllowlist:          s.CheckAllowlist,
+		CheckAllowlistAllowsAll: s.CheckAllowlistAllowsAll,
+	})
+	result := validator.Validate(r.Context(), definition)
+	if !result.Valid {
+		messages := make([]string, 0, len(result.Diagnostics))
+		for _, diagnostic := range result.Diagnostics {
+			messages = append(messages, diagnostic.Code+": "+diagnostic.Message)
+		}
+		writeError(w, r, http.StatusUnprocessableEntity, "flow_validation_failed",
+			strings.Join(messages, "; "), false)
+		return
+	}
+	var revision *globalsource.Revision
+	if kind == globalsource.SourceKindFlow {
+		revision, err = sources.PublishFlowRevision(id)
+	} else {
+		revision, err = sources.PublishGraphRevision(id)
+	}
 	if err != nil {
 		writeError(w, r, http.StatusUnprocessableEntity, "graph_publish_failed", err.Error(), false)
 		return
@@ -207,95 +254,24 @@ func (s *Server) runGlobalGraph(w http.ResponseWriter, r *http.Request) {
 	run, err := s.GraphRuns.Start(r.Context(), session.ProjectID, r.PathValue("graphID"), body.Version,
 		body.SessionID, body.Inputs, body.Vars)
 	if err != nil {
-		writeError(w, r, http.StatusUnprocessableEntity, "graph_run_failed", err.Error(), false)
+		message := err.Error()
+		// Surface the starter's binding errors with their own codes instead of
+		// flattening every failure into graph_run_failed.
+		switch {
+		case strings.Contains(message, "graph_binding_required"), strings.Contains(message, "flow_binding_required"):
+			writeError(w, r, http.StatusUnprocessableEntity, "graph_binding_required", message, false)
+		case strings.Contains(message, "graph_binding_revision_mismatch"), strings.Contains(message, "flow_binding_revision_mismatch"):
+			writeError(w, r, http.StatusUnprocessableEntity, "graph_binding_revision_mismatch", message, false)
+		case strings.Contains(message, "graph_binding_disabled"), strings.Contains(message, "flow_binding_disabled"):
+			writeError(w, r, http.StatusUnprocessableEntity, "graph_binding_disabled", message, false)
+		case strings.Contains(message, "graph_binding_revision_missing"), strings.Contains(message, "flow_binding_revision_missing"):
+			writeError(w, r, http.StatusUnprocessableEntity, "graph_binding_revision_missing", message, false)
+		default:
+			writeError(w, r, http.StatusUnprocessableEntity, "graph_run_failed", message, false)
+		}
 		return
 	}
 	writeData(w, http.StatusCreated, run)
-}
-
-// validateGraphPublish is the Graph authoring format's share of Flow publish
-// validation. A Graph is a draft (it runs straight from its revision, with no
-// project binding and a synthetic budget), so it cannot adopt the Flow checks
-// that need a frozen hero, a declared budget or an enabled binding. Two checks
-// do carry over, and they are not the same kind of check:
-//
-//   - An unresolved Skill reference already fails the Run when it freezes
-//     (graphrun.resolveTaskHero), so rejecting it at publish only moves an
-//     existing failure earlier. It cannot reject a Graph that would have run.
-//   - A writes scope is scheduling-only: the planner reads it as a literal
-//     prefix and nothing enforces it at Run time, so a scope the parser cannot
-//     read is not a Run-time failure today. Rejecting it at publish is a
-//     deliberate tightening — it catches a typo at the moment the author can fix
-//     it, at the cost of refusing a Graph that would technically have run.
-func (s *Server) validateGraphPublish(r *http.Request, document *graphsource.Document) error {
-	// Resolving Skills needs the live catalog; Flow publish answers 503 for the same
-	// missing dependency (flow_validation_unavailable) instead of reporting it as a
-	// node-level unknown Skill.
-	if s.SkillCatalog == nil && graphNeedsSkillCatalog(document) {
-		return fmt.Errorf("%w: the Skill catalog is missing, so Skill references cannot be resolved",
-			errGraphValidationUnavailable)
-	}
-	// Skill resolution goes through the same resolver Flow publish uses, so
-	// local/<id> and global/<id> mean one thing across both formats.
-	resolver := store.NewFlowValidator(store.FlowPublishOptions{
-		FlowID: document.ID, Sources: s.GlobalSources, Models: s.Models, SkillCatalog: s.SkillCatalog,
-	}).Resolver
-
-	for taskID, task := range document.Tasks {
-		for _, scope := range task.Writes {
-			if err := agentflow.ValidateWritesScope(scope); err != nil {
-				return fmt.Errorf("Task %q writes scope %q: %w", taskID, scope, err)
-			}
-		}
-		for _, skill := range task.Skills {
-			if !resolver.KnownSkill(r.Context(), skill) {
-				return fmt.Errorf("Task %q references unknown skill %q", taskID, skill)
-			}
-		}
-		if task.Model != "" && s.Models != nil {
-			if _, err := s.Models.ResolvePortableRef(r.Context(), task.Model); err != nil {
-				return fmt.Errorf("Task %q: %w", taskID, err)
-			}
-		}
-		if task.Hero == "" {
-			continue
-		}
-		scope, id, _ := strings.Cut(task.Hero, "/")
-		var refs []string
-		switch scope {
-		case "global":
-			hero, _, err := s.GlobalSources.LatestHeroRevision(id)
-			if err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					// LatestHeroRevision reports os.ErrNotExist both for a Hero
-					// that was never published and for one that does not exist at
-					// all. Distinguish the two so the author can tell "you never
-					// published it" from "it does not exist".
-					_, _, draftErr := s.GlobalSources.ReadHero(id)
-					if draftErr == nil {
-						return fmt.Errorf("Task %q global Hero %q has no published revision", taskID, id)
-					}
-					return fmt.Errorf("Task %q global Hero %q: %w", taskID, id, draftErr)
-				}
-				return fmt.Errorf("Task %q global Hero %q: %w", taskID, id, err)
-			}
-			refs = append([]string{hero.Model.Ref}, hero.Model.Fallbacks...)
-		case "local":
-			hero, _, err := s.GlobalSources.ReadGraphHero(document.ID, id)
-			if err != nil {
-				return fmt.Errorf("Task %q local Hero %q: %w", taskID, id, err)
-			}
-			refs = append([]string{hero.Model.Ref}, hero.Model.Fallbacks...)
-		}
-		if s.Models != nil {
-			for _, ref := range refs {
-				if _, err := s.Models.ResolvePortableRef(r.Context(), ref); err != nil {
-					return fmt.Errorf("Task %q Hero model: %w", taskID, err)
-				}
-			}
-		}
-	}
-	return nil
 }
 
 func (s *Server) updateGlobalGraph(w http.ResponseWriter, r *http.Request) {
@@ -308,8 +284,8 @@ func (s *Server) updateGlobalGraph(w http.ResponseWriter, r *http.Request) {
 		Name           *string `json:"name"`
 		Description    *string `json:"description"`
 		Task           *struct {
-			ID    string            `json:"id"`
-			Value *graphsource.Task `json:"value"`
+			ID    string           `json:"id"`
+			Value *domain.FlowTask `json:"value"`
 		} `json:"task"`
 		Dependencies *struct {
 			TaskID  string   `json:"taskId"`
@@ -323,27 +299,31 @@ func (s *Server) updateGlobalGraph(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "graph_mutation_required", "at least one semantic Graph change is required", false)
 		return
 	}
-	document, digest, err := sources.UpdateGraph(r.PathValue("graphID"), body.ExpectedDigest, func(document *graphsource.Document) error {
+	definition, digest, err := sources.UpdateGraphDefinition(r.PathValue("graphID"), body.ExpectedDigest, func(definition *domain.FlowDefinition) error {
 		if body.Name != nil {
-			document.Name = strings.TrimSpace(*body.Name)
+			definition.Name = strings.TrimSpace(*body.Name)
 		}
 		if body.Description != nil {
-			document.Description = strings.TrimSpace(*body.Description)
+			definition.Description = strings.TrimSpace(*body.Description)
 		}
 		if body.Task != nil {
 			if body.Task.Value == nil {
-				graphsource.RemoveTask(document, body.Task.ID)
-			} else {
-				document.Tasks[body.Task.ID] = *body.Task.Value
-				if _, exists := document.Graph[body.Task.ID]; !exists {
-					document.Graph[body.Task.ID] = []string{}
+				delete(definition.Tasks, body.Task.ID)
+				for id, task := range definition.Tasks {
+					task.Depends = pruneTaskDependency(task.Depends, body.Task.ID)
+					definition.Tasks[id] = task
 				}
+			} else {
+				definition.Tasks[body.Task.ID] = *body.Task.Value
 			}
 		}
 		if body.Dependencies != nil {
-			// A supplied but empty dependency list must answer [] and not null, so
-			// the mutation response matches the array type the contract declares.
-			document.Graph[body.Dependencies.TaskID] = append([]string{}, body.Dependencies.Depends...)
+			if _, ok := definition.Tasks[body.Dependencies.TaskID]; !ok {
+				return fmt.Errorf("Task %q does not exist", body.Dependencies.TaskID)
+			}
+			task := definition.Tasks[body.Dependencies.TaskID]
+			task.Depends = append([]string{}, body.Dependencies.Depends...)
+			definition.Tasks[body.Dependencies.TaskID] = task
 		}
 		return nil
 	})
@@ -355,7 +335,19 @@ func (s *Server) updateGlobalGraph(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusUnprocessableEntity, "graph_invalid", err.Error(), false)
 		return
 	}
-	writeData(w, http.StatusOK, s.graphDetailFor(sources, document, digest))
+	writeData(w, http.StatusOK, s.graphDefinitionDetailFor(sources, definition, digest))
+}
+
+// pruneTaskDependency removes one task id from a dependency list, preserving a
+// non-nil empty slice so a task whose dependencies emptied still encodes as [].
+func pruneTaskDependency(depends []string, taskID string) []string {
+	filtered := depends[:0]
+	for _, dependency := range depends {
+		if dependency != taskID {
+			filtered = append(filtered, dependency)
+		}
+	}
+	return filtered
 }
 
 // GraphRunStarter starts one file-native Graph Run. graphrun.Service implements

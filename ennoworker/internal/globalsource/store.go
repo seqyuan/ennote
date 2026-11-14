@@ -651,6 +651,65 @@ func (s Store) UpdateFlow(id, expectedDigest string, mutate func(*domain.FlowDef
 	return definition, newDigest, err
 }
 
+// UpdateGraphDefinition applies one whole-document CAS update to a
+// definition-shaped graph.yaml draft. The ID is the directory identity and can
+// never change in place. It is the unified Graph editor's write path: a legacy
+// graphsource.Document never passes through it.
+func (s Store) UpdateGraphDefinition(id, expectedDigest string, mutate func(*domain.FlowDefinition) error) (*domain.FlowDefinition, string, error) {
+	unlock := lockSource(filepath.Join(s.GraphsDir(), id))
+	defer unlock()
+	definition, digest, err := s.ReadGraphDefinition(id)
+	if err != nil {
+		return nil, "", err
+	}
+	if expectedDigest == "" || expectedDigest != digest {
+		return nil, digest, ErrConflict
+	}
+	if mutate == nil {
+		return nil, digest, fmt.Errorf("Graph mutation is required")
+	}
+	if err := mutate(definition); err != nil {
+		return nil, digest, err
+	}
+	if definition.ID != id {
+		return nil, digest, fmt.Errorf("Graph id cannot be changed")
+	}
+	canonicalizeTaskTypes(definition)
+	encoded, err := agentflow.DefinitionToYAML(definition)
+	if err != nil {
+		return nil, digest, err
+	}
+	path, _ := objectPath(s.GraphsDir(), id, graphSourceName)
+	if err := atomicWrite(path, encoded, false); err != nil {
+		return nil, digest, err
+	}
+	newDigest, err := AgentFlowDigest(definition)
+	return definition, newDigest, err
+}
+
+// canonicalizeTaskTypes applies the same task-type defaulting the parser does,
+// so a caller-supplied task whose type is omitted (the editor spells the default
+// hero task without it) writes and hashes identically to its re-parsed form. The
+// unsupported-type rejection stays a publish-time concern: a draft may carry a
+// type the validator later refuses.
+func canonicalizeTaskTypes(definition *domain.FlowDefinition) {
+	for name, task := range definition.Tasks {
+		task.Type = strings.TrimSpace(task.Type)
+		if task.Type == "" {
+			task.Type = domain.FlowTaskHero
+		}
+		switch task.Type {
+		case domain.FlowTaskCheck:
+			task.Hero = ""
+			task.Skills = nil
+			task.Budget = nil
+		default:
+			task.Command = ""
+		}
+		definition.Tasks[name] = task
+	}
+}
+
 func (s Store) UpdateGraph(id, expectedDigest string, mutate func(*graphsource.Document) error) (*graphsource.Document, string, error) {
 	unlock := lockSource(filepath.Join(s.GraphsDir(), id))
 	defer unlock()

@@ -40,16 +40,15 @@ skills:
   - id: cell-qc-tables
     path: skills/cell-qc-tables/
 `,
-		"flows/qc-review/graph.yaml": `schema_version: 1
+		"flows/qc-review/graph.yaml": `schemaVersion: 1
 id: qc-review
 name: QC Review
+budget:
+  max_total_tokens: 20000
 tasks:
   load:
-    name: Load
     hero: local/qc-reviewer
     goal: Load the samplesheet
-graph:
-  load: []
 `,
 		"heroes/qc-reviewer/hero.md": `---
 schemaVersion: 1
