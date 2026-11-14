@@ -731,7 +731,7 @@ func TestServiceFrozenRevisionMissingLocalHeroFailsClosed(t *testing.T) {
 }
 
 func TestStartFreezesDefinition(t *testing.T) {
-	fixture := newFlowRunFixture(t)
+	fixture := newGraphRunFixture(t)
 	definition := &domain.FlowDefinition{
 		SchemaVersion: domain.FlowSchemaVersion, ID: "qc", Name: "QC",
 		Budget: domain.FlowBudget{MaxTotalTokens: 1000},
@@ -773,7 +773,7 @@ func TestStartFreezesDefinition(t *testing.T) {
 }
 
 func TestStartRequiresBinding(t *testing.T) {
-	fixture := newFlowRunFixture(t)
+	fixture := newGraphRunFixture(t)
 	_, _, err := fixture.sources.CreateGraphDefinition("qc", "QC")
 	require.NoError(t, err)
 	_, err = fixture.sources.PublishGraphRevision("qc")

@@ -3,14 +3,14 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Build an RNA-seq Graph with three parallel alignment Tasks after reference preparation, then merge the outputs. Use inline Claude tasks for alignment and a local reference-preparer Role for the first Task.",
-      "expected_output": "JSON-only proposal that creates all five Tasks before assigning an acyclic prepare -> align_1/2/3 -> merge dependency graph, with mutually exclusive Role and inline execution fields.",
+      "prompt": "Build an RNA-seq Graph with three parallel alignment Tasks after reference preparation, then merge the outputs. Use local heroes for every task.",
+      "expected_output": "JSON-only proposal that creates all five Tasks before assigning an acyclic prepare -> align_1/2/3 -> merge dependency graph. Each task sets hero and goal; dependencies live on task.depends.",
       "files": []
     },
     {
       "id": 2,
       "prompt": "Change the existing merge Task to use global/bioinformatics-reviewer. Keep its goal and dependencies unchanged.",
-      "expected_output": "A minimal upsert_task operation using role: global/bioinformatics-reviewer with no model, thinking, or skills fields and no dependency operation.",
+      "expected_output": "A minimal upsert_task operation using hero: global/bioinformatics-reviewer and the existing goal, with no dependency operation.",
       "files": []
     },
     {

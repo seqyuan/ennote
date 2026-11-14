@@ -283,10 +283,10 @@ name: QC Flow
 version: 0.1.0
 flows:
   - id: qc-review
-    path: flows/qc-review/flow.yaml
-    format: flow
+    path: flows/qc-review/graph.yaml
+    format: graph
 `,
-		"flows/qc-review/flow.yaml": `schemaVersion: 1
+		"flows/qc-review/graph.yaml": `schemaVersion: 1
 id: qc-review
 budget:
   max_total_tokens: 1000
@@ -303,7 +303,7 @@ tasks:
 	decodeData(t, response, &flowResult)
 	assert.Empty(t, flowResult.Heroes)
 	require.Len(t, flowResult.Flows, 1)
-	assert.Equal(t, agentpack.FlowFormatFlow, flowResult.Flows[0].Format)
+	assert.Equal(t, agentpack.FlowFormatGraph, flowResult.Flows[0].Format)
 	assert.Equal(t, int64(1000), flowResult.Flows[0].MaxTotalTokens)
 }
 

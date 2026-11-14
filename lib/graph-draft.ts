@@ -1,13 +1,13 @@
-// Agent Flow editor pure logic: form draft <-> YAML contract and budget
+// Graph editor pure logic: form draft <-> YAML contract and budget
 // suggestions. Kept dependency-free so the UI, unit tests, and e2e mocks
 // share one canonical YAML serializer.
 
-export type FlowTaskKind = "hero" | "check" | "terminal";
+export type GraphTaskKind = "hero" | "check" | "terminal";
 
 export interface TaskDraft {
   id: string;
   name: string;
-  kind: FlowTaskKind;
+  kind: GraphTaskKind;
   hero: string;
   skills: string[];
   goal: string;
@@ -20,7 +20,7 @@ export interface TaskDraft {
   writes: string[];
 }
 
-export interface FlowDraft {
+export interface GraphDraft {
   id: string;
   description: string;
   inputs: { name: string; type: string; required: boolean }[];
@@ -50,7 +50,7 @@ export function emptyTask(name: string): TaskDraft {
   };
 }
 
-export function emptyDraft(id: string): FlowDraft {
+export function emptyDraft(id: string): GraphDraft {
   return {
     id,
     description: "",
@@ -63,7 +63,7 @@ export function emptyDraft(id: string): FlowDraft {
   };
 }
 
-type RawFlowDefinition = {
+type RawGraphDefinition = {
   description?: string;
   inputs?: Record<string, { type?: string; required?: boolean }>;
   outputs?: Record<string, { type?: string }>;
@@ -84,10 +84,10 @@ type RawTask = {
   writes?: string[];
 };
 
-export function flowToDraft(def: RawFlowDefinition | undefined, id: string): FlowDraft {
+export function draftToGraph(def: RawGraphDefinition | undefined, id: string): GraphDraft {
   if (!def) return emptyDraft(id);
   const tasks = Object.entries(def.tasks ?? {}).map(([name, task]) => {
-    const kind: FlowTaskKind = task.terminal ? "terminal" : task.type === "check" ? "check" : "hero";
+    const kind: GraphTaskKind = task.terminal ? "terminal" : task.type === "check" ? "check" : "hero";
     return {
       id: `task-${Math.random().toString(36).slice(2)}`, name,
       kind, hero: task.hero ?? "", skills: task.skills ?? [], goal: task.goal ?? "",
@@ -114,7 +114,7 @@ export function flowToDraft(def: RawFlowDefinition | undefined, id: string): Flo
 const jsonQuote = (value: string) => JSON.stringify(value ?? "");
 
 /** Serializes the form draft to the snake_case YAML contract. */
-export function draftToYAML(draft: FlowDraft): string {
+export function draftToYAML(draft: GraphDraft): string {
   const lines: string[] = [];
   lines.push("schemaVersion: 1");
   lines.push(`id: ${draft.id || "unnamed-flow"}`);
@@ -168,7 +168,7 @@ export function draftToYAML(draft: FlowDraft): string {
 }
 
 /** Suggested flow budget = 1.25x sum of task token budgets (min 10,000). */
-export function suggestedBudget(draft: FlowDraft): number {
+export function suggestedBudget(draft: GraphDraft): number {
   const sum = draft.tasks.reduce((acc, task) => {
     const tokens = Number(task.budgetTokens);
     return acc + (Number.isFinite(tokens) ? tokens : 0);
@@ -178,7 +178,7 @@ export function suggestedBudget(draft: FlowDraft): number {
 }
 
 /** Variable insert helpers: the editor only offers in-scope variables. */
-export function variableChips(task: TaskDraft, draft: FlowDraft): string[] {
+export function variableChips(task: TaskDraft, draft: GraphDraft): string[] {
   const chips: string[] = [];
   for (const input of draft.inputs) chips.push(`{inputs.${input.name}}`);
   const index = draft.tasks.findIndex((t) => t.id === task.id);

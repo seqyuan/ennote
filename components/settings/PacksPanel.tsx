@@ -92,9 +92,7 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
     if (!plan || approvedPath !== path.trim()) return;
     const approved = await confirmAction({
       title: `Install ${plan.pack.name} ${plan.pack.version}?`,
-      description: plan.willPublishFlowRevision
-        ? "This creates disabled draft objects and publishes a Graph revision."
-        : "This creates disabled draft objects on this Worker. Nothing runs until a revision is published and bound.",
+      description: "This creates disabled draft objects on this Worker. Nothing runs until a revision is published and bound.",
       confirmLabel: "Install",
     });
     if (!approved) return;
@@ -203,7 +201,6 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
           <div className={styles.cardHead}>
             <span className={styles.cardName}>Install plan</span>
             <span className={styles.badge}>{plan.actions.length} actions</span>
-            {plan.willPublishFlowRevision && <span className={styles.badge}>publishes a revision</span>}
           </div>
           <ul className={styles.actionList}>
             {plan.actions.map((action) => (

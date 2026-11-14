@@ -38,7 +38,6 @@ type GraphBinding struct {
 
 const (
 	SourceKindGraph = "graph"
-	SourceKindFlow  = "flow"
 )
 
 var revisionIDPattern = regexp.MustCompile(`^v[0-9]{6}$`)
@@ -265,7 +264,7 @@ func validate(manifest Manifest, directoryID string) error {
 		if kind == "" {
 			kind = SourceKindGraph
 		}
-		if kind != SourceKindGraph && kind != SourceKindFlow {
+		if kind != SourceKindGraph {
 			return fmt.Errorf("graph binding has unsupported sourceKind %q", binding.SourceKind)
 		}
 		if strings.TrimSpace(binding.GraphID) == "" {

@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 )
 
@@ -135,10 +134,6 @@ func (b *builder) analyseFlows() error {
 		}
 		switch entry.Format {
 		case FlowFormatGraph:
-			if err := b.analyseGraphFlow(field, &summary, file); err != nil {
-				return err
-			}
-		case FlowFormatFlow:
 			if err := b.analyseAgentFlow(field, &summary, file); err != nil {
 				return err
 			}
@@ -149,14 +144,6 @@ func (b *builder) analyseFlows() error {
 	return nil
 }
 
-func (b *builder) analyseGraphFlow(field string, summary *FlowSummary, file File) error {
-	kind, err := globalsource.ClassifyGraphSource(file.Data)
-	if err != nil || kind != globalsource.GraphFileDefinition {
-		return fieldError(CodePackFlowInvalid, field+".path",
-			"graph_legacy_source: %s is a legacy graph document; a pack graph must be a FlowDefinition", summary.Path)
-	}
-	return b.analyseAgentFlow(field, summary, file)
-}
 
 func (b *builder) analyseAgentFlow(field string, summary *FlowSummary, file File) error {
 	definition, err := agentflowParse(file.Data)

@@ -289,12 +289,6 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/graphs/{graphID}/publish", s.publishGlobalGraph)
 	mux.HandleFunc("GET /v1/graphs/{graphID}/versions", s.listGlobalGraphVersions)
 	mux.HandleFunc("POST /v1/graphs/{graphID}/runs", s.runGlobalGraph)
-	// Deprecated Agent Flow surface; each route delegates to the unified Graph handler.
-	mux.HandleFunc("GET /v1/flows", s.listGlobalFlows)
-	mux.HandleFunc("GET /v1/flows/{flowID}", s.getGlobalFlow)
-	mux.HandleFunc("POST /v1/flows/{flowID}/publish", s.publishGlobalFlow)
-	mux.HandleFunc("GET /v1/flows/{flowID}/versions", s.listGlobalFlowVersions)
-	mux.HandleFunc("POST /v1/flows/{flowID}/runs", s.runGlobalFlow)
 	// V2 session-scoped Graph Run activity surface (list/detail/cancel/resume).
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/graph-runs", s.listSessionGraphRuns)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/graph-runs/{runID}", s.getSessionGraphRun)

@@ -210,7 +210,7 @@ func (s *Service) apply(plan *Plan, request Request, staging string, record *jou
 			PackHandle: target.packHandle, Scope: target.scope, StoreID: target.storeID, Digest: digest,
 		})
 	}
-	// 4. Source drafts. PublishGraphRevision/PublishFlowRevision are deliberately
+	// 4. Source drafts. PublishGraphRevision is deliberately
 	// never called: an installed source has no revision, so graphrun refuses it
 	// until a user publishes and binds one explicitly.
 	for _, target := range install.flows {

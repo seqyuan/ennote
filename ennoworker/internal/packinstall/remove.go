@@ -104,7 +104,7 @@ func (s *Service) enabledBindings(ctx context.Context, state *State) ([]string, 
 	}
 	owned := map[string]bool{}
 	for _, flow := range state.Flows {
-		if flow.Format == "flow" {
+		if flow.Format == "graph" {
 			owned[flow.StoreID] = true
 		}
 	}
@@ -126,7 +126,7 @@ func (s *Service) enabledBindings(ctx context.Context, state *State) ([]string, 
 			if kind == "" {
 				kind = projectstore.SourceKindGraph
 			}
-			if kind == projectstore.SourceKindFlow && binding.Enabled && owned[binding.GraphID] {
+			if kind == projectstore.SourceKindGraph && binding.Enabled && owned[binding.GraphID] {
 				enabled[binding.GraphID] = true
 			}
 		}
@@ -246,31 +246,16 @@ func (s *Service) heroesReferencedByOtherGraphs(state *State) ([]string, error) 
 	}
 	referenced := map[string]bool{}
 	for _, graph := range graphs {
-		if graph.Document == nil || owned[graph.ID] {
+		if graph.Flow == nil || owned[graph.ID] {
 			continue
 		}
-		for _, task := range graph.Document.Tasks {
-			handle, found := strings.CutPrefix(task.Hero, "global/")
-			if found && handles[handle] {
-				referenced[handle] = true
-			}
-		}
-	}
-	flows, err := s.Sources.ListFlows()
-	if err != nil {
-		return nil, err
-	}
-	for _, flow := range flows {
-		if flow.Flow == nil || owned[flow.ID] {
-			continue
-		}
-		for _, task := range flow.Flow.Tasks {
+		for _, task := range graph.Flow.Tasks {
 			ref := strings.TrimSpace(task.Hero)
 			handle := ""
 			if value, found := strings.CutPrefix(ref, "global/"); found {
 				handle = value
 			} else if ref != "" && !strings.Contains(ref, "/") && !strings.Contains(ref, "@") {
-				if _, _, heroErr := s.Sources.ReadGraphHero(flow.ID, ref); errors.Is(heroErr, os.ErrNotExist) {
+				if _, _, heroErr := s.Sources.ReadGraphHero(graph.ID, ref); errors.Is(heroErr, os.ErrNotExist) {
 					handle = ref
 				}
 			}

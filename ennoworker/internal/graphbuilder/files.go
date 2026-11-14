@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
+	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 )
 
 type fileThreadMetadata struct {
@@ -28,7 +28,7 @@ func (s *Service) getFileThread(graphID string) (*Thread, error) {
 	if s.Sources == nil {
 		return nil, fmt.Errorf("Graph source store is unavailable")
 	}
-	if _, _, err := s.Sources.ReadGraph(graphID); err != nil {
+	if _, _, err := s.Sources.ReadGraphDefinition(graphID); err != nil {
 		return nil, err
 	}
 	builderDir := filepath.Join(s.Sources.GraphsDir(), graphID, "builder")
@@ -88,7 +88,7 @@ func (s *Service) sendFile(ctx context.Context, graphID, modelProfileID, instruc
 	if s.Completer == nil {
 		return nil, fmt.Errorf("Graph Builder model service is unavailable")
 	}
-	document, digest, err := s.Sources.ReadGraph(graphID)
+	definition, digest, err := s.Sources.ReadGraphDefinition(graphID)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +120,7 @@ func (s *Service) sendFile(ctx context.Context, graphID, modelProfileID, instruc
 	}); err != nil {
 		return nil, err
 	}
-	graphJSON, _ := json.MarshalIndent(document, "", "  ")
+	graphJSON, _ := json.MarshalIndent(definition, "", "  ")
 	response, err := s.Completer.Complete(ctx, modelProfileID, skillPrompt,
 		"Current Graph:\n"+string(graphJSON)+"\n\nUser instruction:\n"+instruction)
 	if err != nil {
@@ -149,7 +149,7 @@ func (s *Service) sendFile(ctx context.Context, graphID, modelProfileID, instruc
 		proposal := Proposal{
 			ID: uuid.NewString(), GraphID: graphID, BaseDigest: digest,
 			Operations: output.Operations, Summary: output.Message, Status: "pending",
-			Diagnostics: validateOperations(document, output.Operations), CreatedAt: time.Now().UTC(),
+			Diagnostics: validateOperations(definition, output.Operations), CreatedAt: time.Now().UTC(),
 		}
 		if err := writeJSONAtomic(filepath.Join(builderDir, "proposals", proposal.ID+".json"), proposal); err != nil {
 			return nil, err
@@ -158,7 +158,7 @@ func (s *Service) sendFile(ctx context.Context, graphID, modelProfileID, instruc
 	return s.getFileThread(graphID)
 }
 
-func (s *Service) applyFile(_ context.Context, graphID, proposalID string) (*graphsource.Document, string, error) {
+func (s *Service) applyFile(_ context.Context, graphID, proposalID string) (*domain.FlowDefinition, string, error) {
 	proposal, err := s.pendingFileProposal(graphID)
 	if err != nil {
 		return nil, "", err
@@ -169,8 +169,8 @@ func (s *Service) applyFile(_ context.Context, graphID, proposalID string) (*gra
 	if len(proposal.Diagnostics) > 0 {
 		return nil, "", fmt.Errorf("proposal is invalid: %s", proposal.Diagnostics[0])
 	}
-	document, digest, err := s.Sources.UpdateGraph(graphID, proposal.BaseDigest, func(document *graphsource.Document) error {
-		applyOperations(document, proposal.Operations)
+	definition, digest, err := s.Sources.UpdateGraphDefinition(graphID, proposal.BaseDigest, func(definition *domain.FlowDefinition) error {
+		applyOperations(definition, proposal.Operations)
 		return nil
 	})
 	if err != nil {
@@ -180,7 +180,7 @@ func (s *Service) applyFile(_ context.Context, graphID, proposalID string) (*gra
 	if err := writeJSONAtomic(filepath.Join(s.Sources.GraphsDir(), graphID, "builder", "proposals", proposal.ID+".json"), proposal); err != nil {
 		return nil, digest, err
 	}
-	return document, digest, nil
+	return definition, digest, nil
 }
 
 func (s *Service) pendingFileProposal(graphID string) (*Proposal, error) {

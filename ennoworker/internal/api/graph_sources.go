@@ -9,7 +9,6 @@ import (
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
-	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 )
 
@@ -18,21 +17,17 @@ type globalGraphSummary struct {
 	Name          string `json:"name"`
 	Path          string `json:"path"`
 	Digest        string `json:"digest,omitempty"`
-	LegacyFile    string `json:"legacyFile,omitempty"`
 	Error         string `json:"error,omitempty"`
 	LatestVersion int    `json:"latestVersion"`
 }
 
-// globalGraphDetail is the detail projection of one Graph object. Exactly one of
-// Document (a legacy graph-v1 graphsource.Document) and Definition (a current
-// FlowDefinition) is set; the reader decides by which file the directory holds.
+// globalGraphDetail is the detail projection of one Graph object.
 type globalGraphDetail struct {
 	ID            string                 `json:"id"`
 	Name          string                 `json:"name"`
 	Path          string                 `json:"path"`
 	Digest        string                 `json:"digest"`
 	LatestVersion int                    `json:"latestVersion"`
-	Document      *graphsource.Document  `json:"document,omitempty"`
 	Definition    *domain.FlowDefinition `json:"definition,omitempty"`
 }
 
@@ -45,18 +40,6 @@ func (s *Server) graphDefinitionDetailFor(sources *globalsource.Store, definitio
 		Path: sources.GraphsDir() + "/" + definition.ID + "/graph.yaml",
 	}
 	if revisions, err := sources.ListGraphRevisions(definition.ID); err == nil && len(revisions) > 0 {
-		detail.LatestVersion = revisions[len(revisions)-1].Version
-	}
-	return detail
-}
-
-// graphDocumentDetailFor builds the detail response for a legacy graph-v1 draft.
-func (s *Server) graphDocumentDetailFor(sources *globalsource.Store, document *graphsource.Document, digest string) globalGraphDetail {
-	detail := globalGraphDetail{
-		ID: document.ID, Name: document.Name, Digest: digest, Document: document,
-		Path: sources.GraphsDir() + "/" + document.ID + "/graph.yaml",
-	}
-	if revisions, err := sources.ListGraphRevisions(document.ID); err == nil && len(revisions) > 0 {
 		detail.LatestVersion = revisions[len(revisions)-1].Version
 	}
 	return detail
@@ -84,8 +67,7 @@ func (s *Server) listGlobalGraphs(w http.ResponseWriter, r *http.Request) {
 	result := make([]globalGraphSummary, 0, len(entries))
 	for _, entry := range entries {
 		summary := globalGraphSummary{
-			ID: entry.ID, Name: entry.Name, Path: entry.Path, Digest: entry.Digest,
-			LegacyFile: entry.LegacyFile, Error: entry.Error,
+			ID: entry.ID, Name: entry.Name, Path: entry.Path, Digest: entry.Digest, Error: entry.Error,
 		}
 		if revisions, revisionErr := sources.ListGraphRevisions(entry.ID); revisionErr == nil && len(revisions) > 0 {
 			summary.LatestVersion = revisions[len(revisions)-1].Version
@@ -115,67 +97,35 @@ func (s *Server) createGlobalGraph(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusCreated, s.graphDefinitionDetailFor(sources, definition, digest))
 }
 
-// getGlobalGraph reads whichever file the object holds: a definition-shaped
-// graph.yaml, a legacy graph-v1 document, or a legacy flow.yaml (through the
-// deprecated /v1/flows delegate). The response projects exactly the fields that
-// file carries.
+// getGlobalGraph reads the definition-shaped graph.yaml the object holds.
 func (s *Server) getGlobalGraph(w http.ResponseWriter, r *http.Request) {
 	sources := s.sourceStore(w, r)
 	if sources == nil {
 		return
 	}
 	id := r.PathValue("graphID")
-	if definition, digest, err := sources.ReadGraphDefinition(id); err == nil {
-		writeData(w, http.StatusOK, s.graphDefinitionDetailFor(sources, definition, digest))
+	definition, digest, err := sources.ReadGraphDefinition(id)
+	if err != nil {
+		writeError(w, r, http.StatusNotFound, "graph_not_found", "graph not found", false)
 		return
 	}
-	if document, digest, err := sources.ReadGraph(id); err == nil {
-		writeData(w, http.StatusOK, s.graphDocumentDetailFor(sources, document, digest))
-		return
-	}
-	// A legacy flow.yaml is still a definition; the flow delegate reads it here.
-	if definition, digest, err := sources.ReadFlow(id); err == nil {
-		writeData(w, http.StatusOK, s.graphDefinitionDetailFor(sources, definition, digest))
-		return
-	}
-	writeError(w, r, http.StatusNotFound, "graph_not_found", "graph not found", false)
+	writeData(w, http.StatusOK, s.graphDefinitionDetailFor(sources, definition, digest))
 }
 
-// publishGlobalGraph validates the draft with the Agent Flow validator and writes
-// one immutable revision. A definition-shaped graph.yaml is the only authorable
-// draft; a legacy graph-v1 document is refused. A legacy flow.yaml published
-// through the deprecated /v1/flows delegate keeps its sourceKind=flow revision
-// and may omit name.
+// publishGlobalGraph validates the draft with the flow validator and writes one
+// immutable revision.
 func (s *Server) publishGlobalGraph(w http.ResponseWriter, r *http.Request) {
 	sources := s.sourceStore(w, r)
 	if sources == nil {
 		return
 	}
 	id := r.PathValue("graphID")
-	kind, err := sources.SourceKind(id)
+	definition, _, err := sources.ReadGraphDefinition(id)
 	if err != nil {
-		writeError(w, r, http.StatusNotFound, "graph_not_found", err.Error(), false)
+		writeError(w, r, http.StatusNotFound, "graph_not_found", "graph not found", false)
 		return
 	}
-	requireName := false
-	var definition *domain.FlowDefinition
-	switch kind {
-	case globalsource.SourceKindGraph:
-		definition, _, err = sources.ReadGraphDefinition(id)
-		if err != nil {
-			// A legacy graph-v1 document is refused; the author rewrites it.
-			writeError(w, r, http.StatusUnprocessableEntity, "graph_legacy_source", err.Error(), false)
-			return
-		}
-		requireName = true
-	case globalsource.SourceKindFlow:
-		definition, _, err = sources.ReadFlow(id)
-		if err != nil {
-			writeError(w, r, http.StatusUnprocessableEntity, "graph_invalid", err.Error(), false)
-			return
-		}
-	}
-	if requireName && strings.TrimSpace(definition.Name) == "" {
+	if strings.TrimSpace(definition.Name) == "" {
 		writeError(w, r, http.StatusUnprocessableEntity, "graph_name_required",
 			"graph.yaml must declare a name before it can be published", false)
 		return
@@ -202,12 +152,7 @@ func (s *Server) publishGlobalGraph(w http.ResponseWriter, r *http.Request) {
 			strings.Join(messages, "; "), false)
 		return
 	}
-	var revision *globalsource.Revision
-	if kind == globalsource.SourceKindFlow {
-		revision, err = sources.PublishFlowRevision(id)
-	} else {
-		revision, err = sources.PublishGraphRevision(id)
-	}
+	revision, err := sources.PublishGraphRevision(id)
 	if err != nil {
 		writeError(w, r, http.StatusUnprocessableEntity, "graph_publish_failed", err.Error(), false)
 		return
@@ -258,13 +203,13 @@ func (s *Server) runGlobalGraph(w http.ResponseWriter, r *http.Request) {
 		// Surface the starter's binding errors with their own codes instead of
 		// flattening every failure into graph_run_failed.
 		switch {
-		case strings.Contains(message, "graph_binding_required"), strings.Contains(message, "flow_binding_required"):
+		case strings.Contains(message, "graph_binding_required"):
 			writeError(w, r, http.StatusUnprocessableEntity, "graph_binding_required", message, false)
-		case strings.Contains(message, "graph_binding_revision_mismatch"), strings.Contains(message, "flow_binding_revision_mismatch"):
+		case strings.Contains(message, "graph_binding_revision_mismatch"):
 			writeError(w, r, http.StatusUnprocessableEntity, "graph_binding_revision_mismatch", message, false)
-		case strings.Contains(message, "graph_binding_disabled"), strings.Contains(message, "flow_binding_disabled"):
+		case strings.Contains(message, "graph_binding_disabled"):
 			writeError(w, r, http.StatusUnprocessableEntity, "graph_binding_disabled", message, false)
-		case strings.Contains(message, "graph_binding_revision_missing"), strings.Contains(message, "flow_binding_revision_missing"):
+		case strings.Contains(message, "graph_binding_revision_missing"):
 			writeError(w, r, http.StatusUnprocessableEntity, "graph_binding_revision_missing", message, false)
 		default:
 			writeError(w, r, http.StatusUnprocessableEntity, "graph_run_failed", message, false)

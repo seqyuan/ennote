@@ -20,12 +20,9 @@ const ManifestName = "pack.yaml"
 // reserved for S5 and is excluded from the payload digest.
 const SignatureName = "pack.sig"
 
-// Flow formats. Both values install as agents/graphs/<id>/graph.yaml carrying a
-// FlowDefinition. format: flow is accepted so existing packs parse; it is
-// deprecated and names no separate file. An omitted format means graph. A legacy
-// graphsource.Document is not a format: inspect rejects it.
+// Flow formats. A flow installs as agents/graphs/<id>/graph.yaml carrying a
+// FlowDefinition. An omitted format means graph.
 const (
-	FlowFormatFlow  = "flow"
 	FlowFormatGraph = "graph"
 )
 
@@ -246,12 +243,12 @@ func validateManifest(manifest *Manifest) error {
 			return fieldError(CodePackFlowInvalid, field+".path", "flow path is required")
 		}
 		switch flow.Format {
-		case FlowFormatFlow, FlowFormatGraph:
+		case FlowFormatGraph:
 		case "":
 			flow.Format = FlowFormatGraph
 		default:
 			return fieldError(CodePackFlowInvalid, field+".format",
-				"unsupported flow format %q (supported: %s, %s)", flow.Format, FlowFormatFlow, FlowFormatGraph)
+				"unsupported flow format %q (supported: %s)", flow.Format, FlowFormatGraph)
 		}
 		flow.Heroes = sortedUniqueHandles(flow.Heroes)
 	}

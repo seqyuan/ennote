@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func flowPackFiles(f *fixture, heroDocumentBody string) []packFile {
+func graphPackFiles(f *fixture, heroDocumentBody string) []packFile {
 	return []packFile{
 		{path: "pack.yaml", body: `schema_version: 1
 id: seqyuan/flow-pack
@@ -23,7 +23,7 @@ version: 1.0.0
 flows:
   - id: qc-flow
     path: flows/qc-flow/flow.yaml
-    format: flow
+    format: graph
     heroes: [qc-reviewer]
 heroes:
   - handle: qc-reviewer
@@ -66,7 +66,7 @@ func TestFlowPackValidationBlocksUnsafeFanOut(t *testing.T) {
 	hero.AllowedTools = []string{"read", "write"}
 	encoded, err := heroesource.Encode(hero)
 	require.NoError(t, err)
-	source := writePack(t, flowPackFiles(f, string(encoded)))
+	source := writePack(t, graphPackFiles(f, string(encoded)))
 	plan, err := f.service.Plan(context.Background(), packinstall.Request{SourcePath: source})
 	require.NoError(t, err)
 	assert.True(t, hasBlocker(plan, packinstall.CodeFlowValidationFailed), blockerCodes(plan))
@@ -76,7 +76,7 @@ func TestFlowPackValidationBlocksUnsafeFanOut(t *testing.T) {
 func TestInstallWritesGraphYAML(t *testing.T) {
 	f := newFixture(t)
 	f.service.CheckAllowlistAllowsAll = true
-	source := writePack(t, flowPackFiles(f, heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer")))
+	source := writePack(t, graphPackFiles(f, heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer")))
 	_, err := f.service.Install(context.Background(), packinstall.Request{SourcePath: source})
 	require.NoError(t, err)
 
@@ -93,7 +93,7 @@ func TestInstallWritesGraphYAML(t *testing.T) {
 func TestFlowPackValidationUsesCheckAllowlist(t *testing.T) {
 	f := newFixture(t)
 	f.service.CheckAllowlist = []string{"go"}
-	source := writePack(t, flowPackFiles(f, heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer")))
+	source := writePack(t, graphPackFiles(f, heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer")))
 	plan, err := f.service.Plan(context.Background(), packinstall.Request{SourcePath: source})
 	require.NoError(t, err)
 	assert.True(t, hasBlocker(plan, packinstall.CodeFlowValidationFailed), blockerCodes(plan))
@@ -104,7 +104,7 @@ func TestRemoveFlowPackRefusesEnabledBinding(t *testing.T) {
 	f := newFixture(t)
 	f.service.CheckAllowlistAllowsAll = true
 	f.service.Projects = f.projects
-	source := writePack(t, flowPackFiles(f, heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer")))
+	source := writePack(t, graphPackFiles(f, heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer")))
 	_, err := f.service.Install(context.Background(), packinstall.Request{SourcePath: source})
 	require.NoError(t, err)
 	project, _, err := f.projects.CreateWithWorkspace(context.Background(), domain.CreateProjectInput{
@@ -113,7 +113,7 @@ func TestRemoveFlowPackRefusesEnabledBinding(t *testing.T) {
 	require.NoError(t, err)
 	_, err = f.projects.UpdateGraphBindings(context.Background(), project.ID, func(bindings *[]projectstore.GraphBinding) error {
 		*bindings = append(*bindings, projectstore.GraphBinding{
-			SourceKind: projectstore.SourceKindFlow, GraphID: "qc-flow", Revision: "v000001", Enabled: true,
+			SourceKind: projectstore.SourceKindGraph, GraphID: "qc-flow", Revision: "v000001", Enabled: true,
 		})
 		return nil
 	})
@@ -125,7 +125,7 @@ func TestRemoveFlowPackRefusesEnabledBinding(t *testing.T) {
 	assert.Contains(t, err.Error(), "qc-flow")
 
 	require.NoError(t, f.service.Remove(context.Background(), "seqyuan/flow-pack", true))
-	_, _, err = f.sources.ReadFlow("qc-flow")
+	_, _, err = f.sources.ReadGraphDefinition("qc-flow")
 	require.Error(t, err)
 }
 
@@ -134,10 +134,10 @@ func TestFlowPackRollbackRemovesTheFlowDraft(t *testing.T) {
 	f.service.CheckAllowlistAllowsAll = true
 	manifestCopy := f.manifestCopyPath("seqyuan/flow-pack")
 	require.NoError(t, os.MkdirAll(filepath.Join(manifestCopy, "blocker"), 0o700))
-	source := writePack(t, flowPackFiles(f, heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer")))
+	source := writePack(t, graphPackFiles(f, heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer")))
 	_, err := f.service.Install(context.Background(), packinstall.Request{SourcePath: source})
 	require.Error(t, err)
-	_, _, err = f.sources.ReadFlow("qc-flow")
+	_, _, err = f.sources.ReadGraphDefinition("qc-flow")
 	require.Error(t, err)
 	_, err = os.Lstat(f.statePath("seqyuan/flow-pack"))
 	require.True(t, os.IsNotExist(err))

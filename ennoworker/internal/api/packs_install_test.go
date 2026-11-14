@@ -212,7 +212,6 @@ func TestPackInstallDryRunWritesNothing(t *testing.T) {
 	require.NotEmpty(t, plan.Actions)
 	assert.Empty(t, plan.Blockers)
 	assert.Equal(t, packinstall.CommitPointStateFile, plan.CommitPoint)
-	assert.False(t, plan.WillPublishFlowRevision)
 	assert.Nil(t, plan.State)
 	for _, action := range plan.Actions {
 		assert.Equal(t, packinstall.ActionCreate, action.Action, action.Kind+" "+action.StoreID)
@@ -311,7 +310,7 @@ version: 0.1.0
 flows:
   - id: qc-review
     path: flows/qc-review/flow.yaml
-    format: flow
+    format: graph
     heroes: [qc-reviewer]
 heroes:
   - handle: qc-reviewer
@@ -352,13 +351,12 @@ tasks:
 	var plan packinstall.Plan
 	decodeData(t, response, &plan)
 	require.Empty(t, plan.Blockers)
-	assert.False(t, plan.WillPublishFlowRevision)
-	flowAction, ok := findPlanAction(plan.Actions, packinstall.ActionKindFlow, "qc-review")
+	flowAction, ok := findPlanAction(plan.Actions, packinstall.ActionKindGraph, "qc-review")
 	require.True(t, ok)
 	assert.Equal(t, packinstall.ActionCreate, flowAction.Action)
 	require.NotNil(t, plan.State)
 	require.Len(t, plan.State.Flows, 1)
-	assert.Equal(t, "flow", plan.State.Flows[0].Format)
+	assert.Equal(t, "graph", plan.State.Flows[0].Format)
 	assert.Nil(t, plan.State.Flows[0].PublishedRevision)
 	_, _, err := fixture.sources.ReadGraphDefinition("qc-review")
 	require.NoError(t, err)

@@ -106,9 +106,8 @@ type Signature struct {
 type FlowSummary struct {
 	ID   string `json:"id"`
 	Path string `json:"path"`
-	// Format is always reported: format: flow is a full Agent Flow definition
-	// (check tasks, fan-out, terminal, next routing) while format: graph is the
-	// legacy graphsource.Document that can only express hero tasks. S1 never
+	// Format is always reported as graph: a flow is a full Graph definition
+	// (check tasks, fan-out, terminal, next routing). S1 never
 	// downgrades one into the other.
 	Format         string   `json:"format"`
 	TaskCount      int      `json:"taskCount"`

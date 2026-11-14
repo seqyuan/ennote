@@ -135,9 +135,6 @@ POST /v1/graphs/{graphID}/publish
 PUT /v1/projects/{projectID}/graph-bindings/{graphID}
 ```
 
-已废弃的 `/v1/flows/*` 路由仍然存在，并委托给 `/v1/graphs/*`。旧的 `flow.yaml` 草稿会与
-`graph.yaml` 草稿一起列出、仍可运行；在 Graph 编辑器里保存时会改名为 `graph.yaml`。
-
 发布时的校验是"失败即拒绝"，包括：`hero@version` 能否解析、Skill 是否存在、`check`/`fanOut`/
 `terminal`/`next` 的结构是否自洽、并行上限、回边是否成环且有上限。
 

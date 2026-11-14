@@ -12,7 +12,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
-	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
+	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
+	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 )
 
 //go:embed skill/SKILL.md
@@ -46,7 +47,7 @@ type Message struct {
 type Operation struct {
 	Kind        string            `json:"kind"`
 	TaskID      string            `json:"taskId,omitempty"`
-	Task        *graphsource.Task `json:"task,omitempty"`
+	Task        *domain.FlowTask `json:"task,omitempty"`
 	Depends     []string          `json:"depends,omitempty"`
 	Name        *string           `json:"name,omitempty"`
 	Description *string           `json:"description,omitempty"`
@@ -110,7 +111,7 @@ func (s *Service) Send(ctx context.Context, graphID, modelProfileID, instruction
 	if s.Completer == nil {
 		return nil, fmt.Errorf("Graph Builder model service is unavailable")
 	}
-	document, digest, err := s.Sources.ReadGraph(graphID)
+	definition, digest, err := s.Sources.ReadGraphDefinition(graphID)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +124,7 @@ func (s *Service) Send(ctx context.Context, graphID, modelProfileID, instruction
 	if err := s.appendMessage(ctx, graphID, "user", instruction, now); err != nil {
 		return nil, err
 	}
-	graphJSON, _ := json.MarshalIndent(document, "", "  ")
+	graphJSON, _ := json.MarshalIndent(definition, "", "  ")
 	response, err := s.Completer.Complete(ctx, modelProfileID, skillPrompt, "Current Graph:\n"+string(graphJSON)+"\n\nUser instruction:\n"+instruction)
 	if err != nil {
 		return nil, err
@@ -142,7 +143,7 @@ func (s *Service) Send(ctx context.Context, graphID, modelProfileID, instruction
 		return nil, err
 	}
 
-	diagnostics := validateOperations(document, output.Operations)
+	diagnostics := validateOperations(definition, output.Operations)
 	operationsJSON, _ := json.Marshal(output.Operations)
 	diagnosticsJSON, _ := json.Marshal(diagnostics)
 	if _, err := s.DB.ExecContext(ctx, `UPDATE graph_builder_proposals SET status='superseded' WHERE graph_id=? AND status='pending'`, graphID); err != nil {
@@ -158,7 +159,7 @@ func (s *Service) Send(ctx context.Context, graphID, modelProfileID, instruction
 	return s.GetThread(ctx, graphID)
 }
 
-func (s *Service) Apply(ctx context.Context, graphID, proposalID string) (*graphsource.Document, string, error) {
+func (s *Service) Apply(ctx context.Context, graphID, proposalID string) (*domain.FlowDefinition, string, error) {
 	if s.DB == nil {
 		return s.applyFile(ctx, graphID, proposalID)
 	}
@@ -172,8 +173,8 @@ func (s *Service) Apply(ctx context.Context, graphID, proposalID string) (*graph
 	if len(proposal.Diagnostics) > 0 {
 		return nil, "", fmt.Errorf("proposal is invalid: %s", proposal.Diagnostics[0])
 	}
-	document, digest, err := s.Sources.UpdateGraph(graphID, proposal.BaseDigest, func(document *graphsource.Document) error {
-		applyOperations(document, proposal.Operations)
+	definition, digest, err := s.Sources.UpdateGraphDefinition(graphID, proposal.BaseDigest, func(definition *domain.FlowDefinition) error {
+		applyOperations(definition, proposal.Operations)
 		return nil
 	})
 	if err != nil {
@@ -182,47 +183,72 @@ func (s *Service) Apply(ctx context.Context, graphID, proposalID string) (*graph
 	if _, err := s.DB.ExecContext(ctx, `UPDATE graph_builder_proposals SET status='applied',applied_at=? WHERE id=? AND status='pending'`, time.Now().UTC().Format(time.RFC3339Nano), proposalID); err != nil {
 		return nil, digest, err
 	}
-	return document, digest, nil
+	return definition, digest, nil
 }
 
-func validateOperations(document *graphsource.Document, operations []Operation) []string {
-	copy := cloneDocument(document)
+func validateOperations(definition *domain.FlowDefinition, operations []Operation) []string {
+	copy := cloneDefinition(definition)
 	applyOperations(copy, operations)
-	if _, err := graphsource.Encode(copy); err != nil {
+	if _, err := agentflow.DefinitionToYAML(copy); err != nil {
+		return []string{err.Error()}
+	}
+	if _, err := agentflow.TaskOrder(copy); err != nil {
 		return []string{err.Error()}
 	}
 	return []string{}
 }
 
-func applyOperations(document *graphsource.Document, operations []Operation) {
+func applyOperations(definition *domain.FlowDefinition, operations []Operation) {
+	if definition.Tasks == nil {
+		definition.Tasks = map[string]domain.FlowTask{}
+	}
 	for _, operation := range operations {
 		switch operation.Kind {
 		case "upsert_task":
 			if operation.Task != nil {
-				document.Tasks[operation.TaskID] = *operation.Task
-				if _, exists := document.Graph[operation.TaskID]; !exists {
-					document.Graph[operation.TaskID] = []string{}
+				task := *operation.Task
+				if existing, exists := definition.Tasks[operation.TaskID]; exists && task.Depends == nil {
+					task.Depends = existing.Depends
 				}
+				definition.Tasks[operation.TaskID] = task
 			}
 		case "delete_task":
-			graphsource.RemoveTask(document, operation.TaskID)
+			delete(definition.Tasks, operation.TaskID)
+			for id, task := range definition.Tasks {
+				if len(task.Depends) == 0 {
+					continue
+				}
+				kept := make([]string, 0, len(task.Depends))
+				for _, dependency := range task.Depends {
+					if dependency != operation.TaskID {
+						kept = append(kept, dependency)
+					}
+				}
+				task.Depends = kept
+				definition.Tasks[id] = task
+			}
 		case "set_dependencies":
-			document.Graph[operation.TaskID] = append([]string(nil), operation.Depends...)
+			task := definition.Tasks[operation.TaskID]
+			task.Depends = append([]string(nil), operation.Depends...)
+			definition.Tasks[operation.TaskID] = task
 		case "update_graph":
 			if operation.Name != nil {
-				document.Name = *operation.Name
+				definition.Name = *operation.Name
 			}
 			if operation.Description != nil {
-				document.Description = *operation.Description
+				definition.Description = *operation.Description
 			}
 		}
 	}
 }
 
-func cloneDocument(document *graphsource.Document) *graphsource.Document {
-	encoded, _ := json.Marshal(document)
-	var copy graphsource.Document
+func cloneDefinition(definition *domain.FlowDefinition) *domain.FlowDefinition {
+	encoded, _ := json.Marshal(definition)
+	var copy domain.FlowDefinition
 	_ = json.Unmarshal(encoded, &copy)
+	if copy.Tasks == nil {
+		copy.Tasks = map[string]domain.FlowTask{}
+	}
 	return &copy
 }
 

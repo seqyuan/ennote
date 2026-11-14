@@ -5,14 +5,14 @@ import (
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
-	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
+	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestBuilderPersistsValidatedProposalAndRequiresApply(t *testing.T) {
 	sources := &globalsource.Store{HomeDir: t.TempDir()}
-	_, originalDigest, err := sources.CreateGraph("rna-seq", "RNA-seq")
+	_, originalDigest, err := sources.CreateGraphDefinition("rna-seq", "RNA-seq")
 	require.NoError(t, err)
 	service := &Service{Sources: sources, Completer: CompleteFunc(func(context.Context, string, string, string) (string, error) {
 		return `{"message":"Add an alignment Task.","operations":[{"kind":"upsert_task","taskId":"align","task":{"name":"Align","model":"anthropic/claude-sonnet-4","thinking":"high","skills":[],"goal":"Align reads."}}]}`, nil
@@ -23,13 +23,13 @@ func TestBuilderPersistsValidatedProposalAndRequiresApply(t *testing.T) {
 	require.Len(t, thread.Messages, 2)
 	require.NotNil(t, thread.Proposal)
 	assert.Empty(t, thread.Proposal.Diagnostics)
-	_, currentDigest, err := sources.ReadGraph("rna-seq")
+	_, currentDigest, err := sources.ReadGraphDefinition("rna-seq")
 	require.NoError(t, err)
 	assert.Equal(t, originalDigest, currentDigest, "proposal must not write before Apply")
 
-	document, appliedDigest, err := service.Apply(context.Background(), "rna-seq", thread.Proposal.ID)
+	definition, appliedDigest, err := service.Apply(context.Background(), "rna-seq", thread.Proposal.ID)
 	require.NoError(t, err)
-	assert.Contains(t, document.Tasks, "align")
+	assert.Contains(t, definition.Tasks, "align")
 	assert.NotEqual(t, originalDigest, appliedDigest)
 	loaded, err := service.GetThread(context.Background(), "rna-seq")
 	require.NoError(t, err)
@@ -38,7 +38,7 @@ func TestBuilderPersistsValidatedProposalAndRequiresApply(t *testing.T) {
 
 func TestBuilderRetainsInvalidCycleProposalWithoutWriting(t *testing.T) {
 	sources := &globalsource.Store{HomeDir: t.TempDir()}
-	_, digest, err := sources.CreateGraph("cycle", "Cycle")
+	_, digest, err := sources.CreateGraphDefinition("cycle", "Cycle")
 	require.NoError(t, err)
 	service := &Service{Sources: sources, Completer: CompleteFunc(func(context.Context, string, string, string) (string, error) {
 		return `{"message":"Draft two Tasks.","operations":[{"kind":"upsert_task","taskId":"aa","task":{"name":"A","model":"p/m","goal":"A"}},{"kind":"upsert_task","taskId":"bb","task":{"name":"B","model":"p/m","goal":"B"}},{"kind":"set_dependencies","taskId":"aa","depends":["bb"]},{"kind":"set_dependencies","taskId":"bb","depends":["aa"]}]}`, nil
@@ -46,35 +46,27 @@ func TestBuilderRetainsInvalidCycleProposalWithoutWriting(t *testing.T) {
 	thread, err := service.Send(context.Background(), "cycle", "model-1", "Make a cycle")
 	require.NoError(t, err)
 	require.NotNil(t, thread.Proposal)
-	assert.Contains(t, thread.Proposal.Diagnostics[0], "dependency cycle")
+	assert.Contains(t, thread.Proposal.Diagnostics[0], "cycle")
 	_, _, err = service.Apply(context.Background(), "cycle", thread.Proposal.ID)
 	require.Error(t, err)
-	_, currentDigest, err := sources.ReadGraph("cycle")
+	_, currentDigest, err := sources.ReadGraphDefinition("cycle")
 	require.NoError(t, err)
 	assert.Equal(t, digest, currentDigest)
 }
 
 func TestBuilderDeleteTaskPrunesDependencies(t *testing.T) {
-	document := &graphsource.Document{
+	definition := &domain.FlowDefinition{
 		SchemaVersion: 1, ID: "rna-seq", Name: "RNA-seq",
-		Tasks: map[string]graphsource.Task{
-			"aa": {Name: "A", Model: "p/m", Goal: "A"},
-			"bb": {Name: "B", Model: "p/m", Goal: "B"},
-		},
-		Graph: map[string][]string{
-			"aa": {"bb"},
-			"bb": {},
+		Tasks: map[string]domain.FlowTask{
+			"aa": {Hero: "local/aa", Goal: "A", Depends: []string{"bb"}},
+			"bb": {Hero: "local/bb", Goal: "B"},
 		},
 	}
 
-	applyOperations(document, []Operation{{Kind: "delete_task", TaskID: "bb"}})
+	applyOperations(definition, []Operation{{Kind: "delete_task", TaskID: "bb"}})
 
-	assert.NotContains(t, document.Tasks, "bb")
-	assert.NotContains(t, document.Graph, "bb")
-	require.Contains(t, document.Graph, "aa")
-	assert.Empty(t, document.Graph["aa"])
-	assert.NotNil(t, document.Graph["aa"], "the mutation response must return an empty dependency list, not null")
-
-	_, err := graphsource.Encode(document)
-	require.NoError(t, err)
+	assert.NotContains(t, definition.Tasks, "bb")
+	require.Contains(t, definition.Tasks, "aa")
+	assert.Empty(t, definition.Tasks["aa"].Depends)
+	assert.NotNil(t, definition.Tasks["aa"].Depends, "the mutation must return an empty dependency list, not null")
 }

@@ -14,7 +14,7 @@ const (
 	flowTaskCheck = domain.FlowTaskCheck
 )
 
-// agentflowParse parses a full Agent Flow definition (format: flow).
+// agentflowParse parses a full Graph definition.
 func agentflowParse(data []byte) (*domain.FlowDefinition, error) {
 	definition, err := agentflow.ParseDefinition(data)
 	if err != nil {

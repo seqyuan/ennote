@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { diffText, draftToYAML, emptyTask, flowToDraft, suggestedBudget, variableChips, type FlowDraft } from "../../lib/agent-flow";
+import { diffText, draftToYAML, emptyTask, draftToGraph, suggestedBudget, variableChips, type GraphDraft } from "../../lib/graph-draft";
 
-function sampleDraft(): FlowDraft {
+function sampleDraft(): GraphDraft {
   const producer = { ...emptyTask("producer"), hero: "flow-worker@1", skills: ["go-dev"], goal: "Implement {inputs.target}", budgetTokens: "50000" };
   const reviewer = { ...emptyTask("reviewer"), hero: "flow-worker@1", goal: "Review {task.producer.output.changedFiles}", depends: ["producer"] };
   const accept = { ...emptyTask("accept"), kind: "terminal" as const, depends: ["reviewer"], outputPort: "report" };
@@ -42,8 +42,8 @@ describe("Agent Flow editor YAML contract", () => {
     expect(yaml).toContain('    command: "go test ./..."');
   });
 
-  it("round-trips a definition through flowToDraft", () => {
-    const draft = flowToDraft({
+  it("round-trips a definition through draftToGraph", () => {
+    const draft = draftToGraph({
       description: "x",
       inputs: { target: { type: "path", required: true } },
       outputs: { report: { type: "string" } },
@@ -71,7 +71,7 @@ describe("Agent Flow editor YAML contract", () => {
     draft.tasks[0].writes = [".docs/plan/design-a1.md"];
     const yaml = draftToYAML(draft);
     expect(yaml).toContain('writes: [".docs/plan/design-a1.md"]');
-    const back = flowToDraft({
+    const back = draftToGraph({
       tasks: { producer: { hero: "flow-worker@1", writes: [".docs/plan/x.md", ".docs/plan/y.md"] } },
     }, "w");
     expect(back.tasks[0].writes).toEqual([".docs/plan/x.md", ".docs/plan/y.md"]);

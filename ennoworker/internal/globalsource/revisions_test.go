@@ -261,7 +261,7 @@ func TestPublishGraphVersionBumpsWhenOnlySkillChanges(t *testing.T) {
 	assert.Equal(t, "v000002", third.ID())
 }
 
-func TestReadGraphRevisionBundleLegacyRevisionNotFrozen(t *testing.T) {
+func TestReadGraphRevisionBundleWithoutLocalResources(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
 	_, _, err := store.CreateGraphDefinition("rna-seq", "RNA-seq")
 	require.NoError(t, err)
@@ -389,9 +389,6 @@ func TestPublishGraphDefinition(t *testing.T) {
 	_, err = os.Stat(filepath.Join(revisionDir, "flow.yaml"))
 	require.ErrorIs(t, err, os.ErrNotExist)
 
-	_, _, err = store.ReadGraphRevision("qc", revision.ID())
-	require.Error(t, err)
-
 	definition, heroes, read, err := store.ReadGraphDefinitionRevision("qc", revision.ID())
 	require.NoError(t, err)
 	assert.Equal(t, draftDigest, read.Digest)
@@ -401,24 +398,3 @@ func TestPublishGraphDefinition(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestLegacyFlowRevisionUntouched(t *testing.T) {
-	store := Store{HomeDir: t.TempDir()}
-	definition := &domain.FlowDefinition{
-		SchemaVersion: domain.FlowSchemaVersion, ID: "qc-flow",
-		Budget: domain.FlowBudget{MaxTotalTokens: 100000},
-		Tasks: map[string]domain.FlowTask{
-			"review": {Type: domain.FlowTaskHero, Hero: "global/reviewer@v000001", Goal: "Review"},
-		},
-	}
-	digest, err := store.CreateFlowFromDefinition(definition)
-	require.NoError(t, err)
-	revision, err := store.PublishFlowRevision("qc-flow")
-	require.NoError(t, err)
-	assert.Equal(t, SourceKindFlow, revision.SourceKind)
-	assert.Equal(t, digest, revision.Digest)
-	revisionDir := filepath.Join(store.GraphsDir(), "qc-flow", "revisions", revision.ID())
-	_, err = os.Stat(filepath.Join(revisionDir, "flow.yaml"))
-	require.NoError(t, err)
-	_, err = os.Stat(filepath.Join(revisionDir, "graph.yaml"))
-	require.ErrorIs(t, err, os.ErrNotExist)
-}

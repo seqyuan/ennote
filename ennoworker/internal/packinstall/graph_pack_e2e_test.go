@@ -20,7 +20,7 @@ import (
 func TestFlowPackInstallPublishBindFreeze(t *testing.T) {
 	f := newFixture(t)
 	f.service.CheckAllowlistAllowsAll = true
-	source := writePack(t, flowPackFiles(f, heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer")))
+	source := writePack(t, graphPackFiles(f, heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer")))
 	_, err := f.service.Install(context.Background(), packinstall.Request{SourcePath: source})
 	require.NoError(t, err)
 
@@ -49,7 +49,7 @@ func TestFlowPackInstallPublishBindFreeze(t *testing.T) {
 		Sources: f.sources, Models: &store.ModelRepo{Files: f.models},
 		Sessions: f.sessions, Projects: f.projects,
 	}
-	run, err := service.StartFlow(context.Background(), project.ID, "qc-flow", 0, session.ID, nil, nil)
+	run, err := service.Start(context.Background(), project.ID, "qc-flow", 0, session.ID, nil, nil)
 	require.NoError(t, err)
 	db, err := f.sessions.OpenSession(context.Background(), session.ID)
 	require.NoError(t, err)

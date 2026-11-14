@@ -15,7 +15,7 @@ describe("Agent Pack inspect contract", () => {
     expectTypeOf(request.source.kind).toEqualTypeOf<"path">();
     expectTypeOf<InspectResult["signed"]>().toEqualTypeOf<boolean>();
     expectTypeOf<InspectResult["manifestDigest"]>().toEqualTypeOf<string>();
-    expectTypeOf<InspectResult["flows"][number]["format"]>().toEqualTypeOf<"flow" | "graph">();
+    expectTypeOf<InspectResult["flows"][number]["format"]>().toEqualTypeOf<"graph">();
     expectTypeOf<InspectResult["heroes"][number]["scope"]>().toEqualTypeOf<"flow" | "global">();
     // A vendored skill declares where it installs; an external ref has no
     // install target and therefore omits scope.
@@ -62,10 +62,8 @@ describe("Agent Pack install contract", () => {
       blockers: [{ code: "pack_flow_format_unsupported", severity: "error", message: "needs S2b" }],
       warnings: [{ code: "pack_flow_renamed", severity: "info", message: "renamed" }],
       commitPoint: "state_file",
-      willPublishFlowRevision: false,
-    };
+        };
     expectTypeOf(plan.commitPoint).toEqualTypeOf<"state_file">();
-    expectTypeOf(plan.willPublishFlowRevision).toEqualTypeOf<boolean>();
     expectTypeOf<components["schemas"]["PackAction"]["kind"]>().toEqualTypeOf<
       "graph" | "flow" | "graph_hero" | "hero" | "hero_revision" | "skill"
     >();

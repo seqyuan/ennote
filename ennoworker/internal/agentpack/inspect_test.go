@@ -352,14 +352,14 @@ name: Bare Hero
 version: 1.0.0
 flows:
   - id: qc-review
-    path: flows/qc-review/flow.yaml
-    format: flow
+    path: flows/qc-review/graph.yaml
+    format: graph
 heroes:
   - handle: qc-reviewer
     path: heroes/qc-reviewer/hero.md
     scope: flow
 `}
-	files[2] = entry{path: "flows/qc-review/flow.yaml", body: `schemaVersion: 1
+	files[2] = entry{path: "flows/qc-review/graph.yaml", body: `schemaVersion: 1
 id: qc-review
 budget: {max_total_tokens: 1000}
 tasks:
@@ -369,7 +369,7 @@ tasks:
 `}
 	result := inspectFiles(t, files)
 	require.Len(t, result.Flows, 1)
-	assert.Equal(t, FlowFormatFlow, result.Flows[0].Format)
+	assert.Equal(t, FlowFormatGraph, result.Flows[0].Format)
 	require.Len(t, result.Heroes, 1)
 	assert.Equal(t, HeroScopeFlow, result.Heroes[0].Scope)
 	assert.NotContains(t, warningCodes(result.Warnings), WarningFlowRefsGlobalHero)

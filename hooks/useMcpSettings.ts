@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
 import { confirmAction } from "@/components/ui/confirm";
 import { useSettingsStatus } from "@/components/settings/SettingsStatus";
-import { diffText } from "@/lib/agent-flow";
+import { diffText } from "@/lib/graph-draft";
 import type { MCPCatalogEntry, MCPCandidate, MCPProjectBinding, MCPServerProfile, MCPServerProfileVersion } from "@/components/settings/types";
 
 interface ProfileVersionPayload {

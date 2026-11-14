@@ -49,12 +49,12 @@ type Service struct {
 	// SkillCatalog, when non-nil, resolves the Skill digest catalog at freeze
 	// time instead of using the startup map in GlobalSkills. Production wires
 	// skills.DigestCatalog so a Skill created or edited on disk is usable by the
-	// next started Flow without restarting the Worker.
+	// next started Graph without restarting the Worker.
 	SkillCatalog func() map[string]string
 	// OnRunStarted wires the per-Session orchestrator for a freshly frozen
-	// flow run (enqueue child runs, events, recovery).
+	// Graph run (enqueue child runs, events, recovery).
 	OnRunStarted func(ctx context.Context, db *sql.DB, sessionPath, runID string) error
-	// Projects supplies the Project GraphBinding a full flow Run requires.
+	// Projects supplies the Project GraphBinding a full Graph Run requires.
 	// Graph-source Runs keep the historical behavior and do not consult it.
 	Projects *projectstore.Store
 }
@@ -67,9 +67,8 @@ func FlowVersionID(graphID, revisionID string) string {
 
 // Start freezes and starts one Graph Run from the Project's pinned binding.
 // version 0 selects the pinned revision; a positive version must match the pin.
-// A definition revision freezes as itself. A legacy graphsource revision has no
-// FlowDefinition and returns graph_legacy_revision. Runs already frozen into a
-// session database do not read the revision again.
+// The published definition freezes as itself. Runs already frozen into a session
+// database do not read the revision again.
 func (s *Service) Start(ctx context.Context, projectID, graphID string, version int, sessionID string,
 	inputs, vars map[string]any) (*domain.RunAgentFlow, error) {
 	if s.Sources == nil || s.Models == nil || s.Sessions == nil {
@@ -90,61 +89,40 @@ func (s *Service) Start(ctx context.Context, projectID, graphID string, version 
 	if err != nil {
 		return nil, fmt.Errorf("graph_legacy_revision: %w", err)
 	}
-	// ReadGraphRevisionBundle refuses a sourceKind=flow revision. Those revisions
-	// already returned their Heroes above; their local Skills keep resolving from
-	// the draft, which is what a flow Run did before the rename.
-	var bundle *globalsource.GraphRevisionBundle
-	if revision.SourceKind != globalsource.SourceKindFlow {
-		bundle, err = s.Sources.ReadGraphRevisionBundle(graphID, revisionID)
-		if err != nil {
-			return nil, err
-		}
+	bundle, err := s.Sources.ReadGraphRevisionBundle(graphID, revisionID)
+	if err != nil {
+		return nil, err
 	}
 	return s.freezeAndStart(ctx, projectID, sessionID, graphID, revision, definition, heroes, bundle, inputs, vars)
 }
 
-// bindingRevision resolves the revision a Project enabled. A graph binding wins;
-// a flow binding for the same id is the fallback so an object enabled before the
-// file was renamed keeps resolving. A missing, disabled, or mismatched binding
-// fails before any Run row is written.
+// bindingRevision resolves the revision a Project enabled. A missing, disabled,
+// or mismatched binding fails before any Run row is written.
 func (s *Service) bindingRevision(ctx context.Context, projectID, graphID string, version int) (string, error) {
 	if s.Projects == nil {
 		return "", fmt.Errorf("graph_binding_required: Project %s has no enabled binding for Graph %s", projectID, graphID)
 	}
-	// The error names the file that exists when neither binding does. A binding
-	// that does exist wins, graph first, so an object enabled under the old kind
-	// keeps resolving after the draft file is renamed.
-	kind := "graph"
-	if sourceKind, kindErr := s.Sources.SourceKind(graphID); kindErr == nil && sourceKind == globalsource.SourceKindFlow {
-		kind = "flow"
-	}
 	binding, err := s.Projects.FindGraphBinding(ctx, projectID, projectstore.SourceKindGraph, graphID)
-	if errors.Is(err, os.ErrNotExist) {
-		flowBinding, flowErr := s.Projects.FindGraphBinding(ctx, projectID, projectstore.SourceKindFlow, graphID)
-		if flowErr == nil {
-			binding, err, kind = flowBinding, nil, "flow"
-		}
-	}
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("%s_binding_required: Project %s has no enabled binding for %s %s", kind, projectID, kind, graphID)
+			return "", fmt.Errorf("graph_binding_required: Project %s has no enabled binding for graph %s", projectID, graphID)
 		}
 		return "", err
 	}
 	if !binding.Enabled {
-		return "", fmt.Errorf("%s_binding_disabled: Project %s binding for %s %s is disabled", kind, projectID, kind, graphID)
+		return "", fmt.Errorf("graph_binding_disabled: Project %s binding for graph %s is disabled", projectID, graphID)
 	}
 	if binding.Revision == "" {
-		return "", fmt.Errorf("%s_binding_revision_missing: %s %s has no pinned revision", kind, kind, graphID)
+		return "", fmt.Errorf("graph_binding_revision_missing: graph %s has no pinned revision", graphID)
 	}
 	if version > 0 && binding.Revision != fmt.Sprintf("v%06d", version) {
-		return "", fmt.Errorf("%s_binding_revision_mismatch: Project %s pins %s %s at %s, not v%06d", kind, projectID, kind, graphID, binding.Revision, version)
+		return "", fmt.Errorf("graph_binding_revision_mismatch: Project %s pins graph %s at %s, not v%06d", projectID, graphID, binding.Revision, version)
 	}
 	return binding.Revision, nil
 }
 
 // freezeAndStart is the one freeze shared by a definition-shaped Graph revision
-// and a flow revision. It writes the definition and the per-task snapshots into
+// and a Graph revision. It writes the definition and the per-task snapshots into
 // the owning Session database before any Provider call.
 func (s *Service) freezeAndStart(ctx context.Context, projectID, sessionID, sourceID string, revision *globalsource.Revision,
 	definition *domain.FlowDefinition, heroes map[string]*heroesource.Document, bundle *globalsource.GraphRevisionBundle,
@@ -186,7 +164,7 @@ func (s *Service) freezeAndStart(ctx context.Context, projectID, sessionID, sour
 	return run, nil
 }
 
-// RecoverSession resumes every non-terminal flow Run of a Session after a
+// RecoverSession resumes every non-terminal Graph Run of a Session after a
 // Worker restart. It is idempotent; the orchestrator reconciles crashed nodes.
 func (s *Service) RecoverSession(ctx context.Context, sessionID string) error {
 	if s.Sessions == nil || s.OnRunStarted == nil {

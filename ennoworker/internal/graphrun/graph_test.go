@@ -20,7 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type flowRunFixture struct {
+type graphRunFixture struct {
 	home      string
 	sources   *globalsource.Store
 	projects  *projectstore.Store
@@ -30,7 +30,7 @@ type flowRunFixture struct {
 	sessionID string
 }
 
-func newFlowRunFixture(t *testing.T) *flowRunFixture {
+func newGraphRunFixture(t *testing.T) *graphRunFixture {
 	t.Helper()
 	ctx := context.Background()
 	home := t.TempDir()
@@ -57,14 +57,14 @@ func newFlowRunFixture(t *testing.T) *flowRunFixture {
 	t.Cleanup(func() { require.NoError(t, sessions.Close()) })
 	session, err := sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID, Title: "Flow Session"})
 	require.NoError(t, err)
-	return &flowRunFixture{
+	return &graphRunFixture{
 		home: home, sources: &globalsource.Store{HomeDir: home}, projects: projects,
 		sessions: sessions, models: &store.ModelRepo{Files: modelFiles},
 		projectID: project.ID, sessionID: session.ID,
 	}
 }
 
-func (f *flowRunFixture) localHero(t *testing.T, handle string, authority heroesource.Authority, tools []string, prompt string) *heroesource.Document {
+func (f *graphRunFixture) localHero(t *testing.T, handle string, authority heroesource.Authority, tools []string, prompt string) *heroesource.Document {
 	t.Helper()
 	return &heroesource.Document{
 		SchemaVersion: 1, Handle: handle, Name: handle,
@@ -82,7 +82,7 @@ func (f *flowRunFixture) localHero(t *testing.T, handle string, authority heroes
 	}
 }
 
-func (f *flowRunFixture) flow(id string, fanOut bool) *domain.FlowDefinition {
+func (f *graphRunFixture) graph(id string, fanOut bool) *domain.FlowDefinition {
 	scan := domain.FlowTask{Type: domain.FlowTaskHero, Hero: "local/reviewer",
 		Goal: "Scan the workspace", Depends: []string{"gate"}, Budget: &domain.FlowTaskBudget{Tokens: 1000}}
 	if fanOut {
@@ -101,23 +101,23 @@ func (f *flowRunFixture) flow(id string, fanOut bool) *domain.FlowDefinition {
 	}
 }
 
-func (f *flowRunFixture) publish(t *testing.T, id string, fanOut bool, heroPrompt string) *globalsource.Revision {
+func (f *graphRunFixture) publish(t *testing.T, id string, fanOut bool, heroPrompt string) *globalsource.Revision {
 	t.Helper()
-	_, err := f.sources.CreateFlowFromDefinition(f.flow(id, fanOut))
+	_, err := f.sources.CreateGraphFromDefinition(f.graph(id, fanOut))
 	require.NoError(t, err)
 	_, err = f.sources.CreateGraphHero(id, f.localHero(t, "reviewer", heroesource.AuthorityReadOnly, []string{"read", "grep"}, heroPrompt))
 	require.NoError(t, err)
-	revision, err := f.sources.PublishFlowRevision(id)
+	revision, err := f.sources.PublishGraphRevision(id)
 	require.NoError(t, err)
 	return revision
 }
 
-func (f *flowRunFixture) bind(t *testing.T, id, revision string, enabled bool) {
+func (f *graphRunFixture) bind(t *testing.T, id, revision string, enabled bool) {
 	t.Helper()
-	f.bindKind(t, projectstore.SourceKindFlow, id, revision, enabled)
+	f.bindKind(t, projectstore.SourceKindGraph, id, revision, enabled)
 }
 
-func (f *flowRunFixture) bindKind(t *testing.T, kind string, id, revision string, enabled bool) {
+func (f *graphRunFixture) bindKind(t *testing.T, kind string, id, revision string, enabled bool) {
 	t.Helper()
 	_, err := f.projects.UpdateGraphBindings(context.Background(), f.projectID, func(bindings *[]projectstore.GraphBinding) error {
 		*bindings = append(*bindings, projectstore.GraphBinding{
@@ -129,11 +129,11 @@ func (f *flowRunFixture) bindKind(t *testing.T, kind string, id, revision string
 }
 
 func TestServiceFreezesFullFlowWithCheckFanOutTerminal(t *testing.T) {
-	fixture := newFlowRunFixture(t)
+	fixture := newGraphRunFixture(t)
 	revision := fixture.publish(t, "qc-flow", true, "Use the published prompt.")
 	fixture.bind(t, "qc-flow", revision.ID(), true)
 	service := &graphrun.Service{Sources: fixture.sources, Models: fixture.models, Sessions: fixture.sessions, Projects: fixture.projects}
-	run, err := service.StartFlow(context.Background(), fixture.projectID, "qc-flow", 0, fixture.sessionID, nil, nil)
+	run, err := service.Start(context.Background(), fixture.projectID, "qc-flow", 0, fixture.sessionID, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, graphrun.FlowVersionID("qc-flow", revision.ID()), run.FlowVersionID)
 
@@ -166,11 +166,11 @@ func TestServiceFreezesFullFlowWithCheckFanOutTerminal(t *testing.T) {
 	var reviewHero domain.HeroDefinition
 	require.NoError(t, json.Unmarshal(byHandle["review"].HeroDefinitionJSON, &reviewHero))
 	assert.Equal(t, "Use the published prompt.", reviewHero.HeroPrompt)
-	assert.True(t, strings.HasPrefix(byHandle["review"].HeroVersionID, "flow:qc-flow/reviewer@sha256:"), byHandle["review"].HeroVersionID)
+	assert.True(t, strings.HasPrefix(byHandle["review"].HeroVersionID, "graph:qc-flow/reviewer@sha256:"), byHandle["review"].HeroVersionID)
 }
 
 func TestServiceFlowFreezeUsesPublishedHeroBundle(t *testing.T) {
-	fixture := newFlowRunFixture(t)
+	fixture := newGraphRunFixture(t)
 	revision := fixture.publish(t, "immutable-flow", false, "published prompt")
 	fixture.bind(t, "immutable-flow", revision.ID(), true)
 
@@ -180,7 +180,7 @@ func TestServiceFlowFreezeUsesPublishedHeroBundle(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(fixture.sources.GraphsDir(), "immutable-flow", "heroes", "reviewer", "hero.md"), encoded, 0o600))
 
 	service := &graphrun.Service{Sources: fixture.sources, Models: fixture.models, Sessions: fixture.sessions, Projects: fixture.projects}
-	run, err := service.StartFlow(context.Background(), fixture.projectID, "immutable-flow", 0, fixture.sessionID, nil, nil)
+	run, err := service.Start(context.Background(), fixture.projectID, "immutable-flow", 0, fixture.sessionID, nil, nil)
 	require.NoError(t, err)
 	db, err := fixture.sessions.OpenSession(context.Background(), fixture.sessionID)
 	require.NoError(t, err)
@@ -196,19 +196,19 @@ func TestServiceFlowFreezeUsesPublishedHeroBundle(t *testing.T) {
 	}
 }
 
-func TestServiceStartFlowRequiresEnabledPinnedBinding(t *testing.T) {
-	fixture := newFlowRunFixture(t)
+func TestServiceStartRequiresEnabledPinnedBinding(t *testing.T) {
+	fixture := newGraphRunFixture(t)
 	revision := fixture.publish(t, "bound-flow", false, "prompt")
 	service := &graphrun.Service{Sources: fixture.sources, Models: fixture.models, Sessions: fixture.sessions, Projects: fixture.projects}
 
-	_, err := service.StartFlow(context.Background(), fixture.projectID, "bound-flow", 0, fixture.sessionID, nil, nil)
+	_, err := service.Start(context.Background(), fixture.projectID, "bound-flow", 0, fixture.sessionID, nil, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "flow_binding_required")
+	assert.Contains(t, err.Error(), "graph_binding_required")
 
 	fixture.bind(t, "bound-flow", revision.ID(), false)
-	_, err = service.StartFlow(context.Background(), fixture.projectID, "bound-flow", 0, fixture.sessionID, nil, nil)
+	_, err = service.Start(context.Background(), fixture.projectID, "bound-flow", 0, fixture.sessionID, nil, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "flow_binding_disabled")
+	assert.Contains(t, err.Error(), "graph_binding_disabled")
 
 	// Flip the same binding to enabled and request a different revision.
 	_, err = fixture.projects.UpdateGraphBindings(context.Background(), fixture.projectID, func(bindings *[]projectstore.GraphBinding) error {
@@ -216,22 +216,22 @@ func TestServiceStartFlowRequiresEnabledPinnedBinding(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	_, err = service.StartFlow(context.Background(), fixture.projectID, "bound-flow", 2, fixture.sessionID, nil, nil)
+	_, err = service.Start(context.Background(), fixture.projectID, "bound-flow", 2, fixture.sessionID, nil, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "flow_binding_revision_mismatch")
+	assert.Contains(t, err.Error(), "graph_binding_revision_mismatch")
 }
 
 func TestServiceRejectsFanOutOnWriterHero(t *testing.T) {
-	fixture := newFlowRunFixture(t)
-	_, err := fixture.sources.CreateFlowFromDefinition(fixture.flow("writer-fan", true))
+	fixture := newGraphRunFixture(t)
+	_, err := fixture.sources.CreateGraphFromDefinition(fixture.graph("writer-fan", true))
 	require.NoError(t, err)
 	_, err = fixture.sources.CreateGraphHero("writer-fan", fixture.localHero(t, "reviewer", heroesource.AuthorityWriteWorkspace, []string{"read", "write"}, "writer"))
 	require.NoError(t, err)
-	revision, err := fixture.sources.PublishFlowRevision("writer-fan")
+	revision, err := fixture.sources.PublishGraphRevision("writer-fan")
 	require.NoError(t, err)
 	fixture.bind(t, "writer-fan", revision.ID(), true)
 	service := &graphrun.Service{Sources: fixture.sources, Models: fixture.models, Sessions: fixture.sessions, Projects: fixture.projects}
-	_, err = service.StartFlow(context.Background(), fixture.projectID, "writer-fan", 0, fixture.sessionID, nil, nil)
+	_, err = service.Start(context.Background(), fixture.projectID, "writer-fan", 0, fixture.sessionID, nil, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "flow_fan_out_not_read_only")
+	assert.Contains(t, err.Error(), "graph_fan_out_not_read_only")
 }

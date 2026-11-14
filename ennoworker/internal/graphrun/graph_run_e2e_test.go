@@ -128,7 +128,7 @@ type e2eEvents struct{}
 func (e2eEvents) PublishFlow(context.Context, string, string, map[string]any) error { return nil }
 
 type e2eFlow struct {
-	fixture  *flowRunFixture
+	fixture  *graphRunFixture
 	children *e2eChildren
 	checker  *e2eChecker
 	ctx      context.Context
@@ -138,7 +138,7 @@ type e2eFlow struct {
 
 func newE2EFlow(t *testing.T, children *e2eChildren, checker *e2eChecker) *e2eFlow {
 	t.Helper()
-	fixture := newFlowRunFixture(t)
+	fixture := newGraphRunFixture(t)
 	flow := &e2eFlow{fixture: fixture, children: children, checker: checker}
 	flow.resetContext()
 	return flow
@@ -196,7 +196,7 @@ func TestE2EFullFlowCheckFanOutTerminal(t *testing.T) {
 	// The checker needs the session DB, which is opened by the service.
 	flow.checker.db = openFlowDB(t, flow.fixture)
 
-	run, err := flow.service().StartFlow(context.Background(), flow.fixture.projectID, "e2e-flow", 0, flow.fixture.sessionID, nil, nil)
+	run, err := flow.service().Start(context.Background(), flow.fixture.projectID, "e2e-flow", 0, flow.fixture.sessionID, nil, nil)
 	require.NoError(t, err)
 	final := waitFlowTerminal(t, flow.checker.db, run.RunID)
 	assert.Equal(t, domain.FlowStateCompleted, final.State, final.TerminalReason)
@@ -227,7 +227,7 @@ func TestE2EWorkerRestartResumesHeroTask(t *testing.T) {
 	flow.checker.db = openFlowDB(t, flow.fixture)
 
 	service := flow.service()
-	run, err := service.StartFlow(context.Background(), flow.fixture.projectID, "resume-flow", 0, flow.fixture.sessionID, nil, nil)
+	run, err := service.Start(context.Background(), flow.fixture.projectID, "resume-flow", 0, flow.fixture.sessionID, nil, nil)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { return children.count() > 0 }, 5*time.Second, 10*time.Millisecond)
 	// Simulate a Worker stop: cancel the orchestrator context, leaving the node
@@ -259,7 +259,7 @@ func TestE2ECheckApprovalSurvivesRestart(t *testing.T) {
 	flow.checker.db = openFlowDB(t, flow.fixture)
 
 	service := flow.service()
-	run, err := service.StartFlow(context.Background(), flow.fixture.projectID, "approval-flow", 0, flow.fixture.sessionID, nil, nil)
+	run, err := service.Start(context.Background(), flow.fixture.projectID, "approval-flow", 0, flow.fixture.sessionID, nil, nil)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		status, err := flow.checker.CheckApprovalStatus(context.Background(), run.RunID, 1)
@@ -277,7 +277,7 @@ func TestE2ECheckApprovalSurvivesRestart(t *testing.T) {
 	assert.Equal(t, 1, flow.checker.executionCount())
 }
 
-func openFlowDB(t *testing.T, fixture *flowRunFixture) *sql.DB {
+func openFlowDB(t *testing.T, fixture *graphRunFixture) *sql.DB {
 	t.Helper()
 	db, err := fixture.sessions.OpenSession(context.Background(), fixture.sessionID)
 	require.NoError(t, err)

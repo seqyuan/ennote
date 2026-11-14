@@ -15,7 +15,6 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/agentpack"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
-	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/skills"
 	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
@@ -28,7 +27,6 @@ const PlanVersion = 1
 // Action kinds.
 const (
 	ActionKindGraph        = "graph"
-	ActionKindFlow         = "flow"
 	ActionKindGraphHero    = "graph_hero"
 	ActionKindHero         = "hero"
 	ActionKindHeroRevision = "hero_revision"
@@ -113,7 +111,6 @@ type Plan struct {
 	Blockers                []Issue      `json:"blockers"`
 	Warnings                []Issue      `json:"warnings"`
 	CommitPoint             string       `json:"commitPoint"`
-	WillPublishFlowRevision bool         `json:"willPublishFlowRevision"`
 	Reinstall               string       `json:"reinstall,omitempty"`
 	State                   *State       `json:"state,omitempty"`
 
@@ -138,9 +135,7 @@ type flowTarget struct {
 	format          string
 	sourceDigest    string
 	installedDigest string
-	// Exactly one of document/definition is the installed form; its ID is
-	// storeID.
-	document   *graphsource.Document
+	// definition is the installed form; its ID is storeID.
 	definition *domain.FlowDefinition
 	action     string
 }
@@ -223,7 +218,6 @@ func (s *Service) plan(ctx context.Context, request Request) (*Plan, error) {
 		Blockers:                []Issue{},
 		Warnings:                []Issue{},
 		CommitPoint:             CommitPointStateFile,
-		WillPublishFlowRevision: false,
 	}
 	for _, warning := range result.Warnings {
 		planner.warn(warning.Code, warning.Severity, warning.Message)
@@ -421,14 +415,7 @@ func (p *planner) loadDocuments() error {
 			continue // inspect already reported the missing source
 		}
 		switch entry.Format {
-		case agentpack.FlowFormatGraph, agentpack.FlowFormatFlow:
-			if entry.Format == agentpack.FlowFormatGraph {
-				kind, classErr := globalsource.ClassifyGraphSource(file.Data)
-				if classErr != nil || kind != globalsource.GraphFileDefinition {
-					return newError(agentpack.CodePackFlowInvalid,
-						fmt.Sprintf("graph_legacy_source: %s is a legacy graph document; a pack graph must be a FlowDefinition", entry.Path))
-				}
-			}
+		case agentpack.FlowFormatGraph:
 			definition, err := agentflow.ParseDefinition(file.Data)
 			if err != nil {
 				return newError(agentpack.CodePackFlowInvalid,
@@ -628,7 +615,7 @@ func (p *planner) resolveReferences() {
 	// A flow-scoped Hero's local/ Skill bindings are Graph-local Skills too: the
 	// Hero is installed below the flow, so its Skill must be there as well.
 	for _, entry := range p.manifest.Flows {
-		if entry.Format != agentpack.FlowFormatGraph && entry.Format != agentpack.FlowFormatFlow {
+		if entry.Format != agentpack.FlowFormatGraph {
 			continue
 		}
 		for _, handle := range sortedKeys(p.flowHeroRefs[entry.ID]) {
@@ -780,7 +767,7 @@ func (p *planner) planFlows() error {
 	for _, entry := range p.manifest.Flows {
 		storeID := p.flowStoreIDs[entry.ID]
 		switch entry.Format {
-		case agentpack.FlowFormatGraph, agentpack.FlowFormatFlow:
+		case agentpack.FlowFormatGraph:
 			definition, ok := p.flowDefinitions[entry.ID]
 			if !ok {
 				continue
@@ -795,7 +782,7 @@ func (p *planner) planFlows() error {
 			if err != nil {
 				return fmt.Errorf("digest installed Graph %s: %w", storeID, err)
 			}
-			action := p.service.flowAction(storeID, digest)
+			action := p.service.graphAction(storeID, digest)
 			if action == ActionConflict {
 				p.blocker(CodeFlowIDConflict, fmt.Sprintf(
 					"source %q already exists with different content; the installer never overwrites a Graph", storeID))
@@ -809,10 +796,7 @@ func (p *planner) planFlows() error {
 				sourceDigest: sourceDigests[entry.ID], installedDigest: digest,
 				definition: &installed, action: action,
 			})
-			kind := ActionKindFlow
-			if entry.Format == agentpack.FlowFormatGraph {
-				kind = ActionKindGraph
-			}
+			kind := ActionKindGraph
 			p.plan.Actions = append(p.plan.Actions, Action{
 				Kind: kind, StoreID: storeID, Action: action,
 			})
@@ -957,7 +941,7 @@ func (p *planner) assignSkillAction(target *skillTarget) error {
 
 func (p *planner) sortActions() {
 	rank := map[string]int{
-		ActionKindGraph: 0, ActionKindFlow: 1, ActionKindGraphHero: 2, ActionKindHero: 3,
+		ActionKindGraph: 0, ActionKindGraphHero: 2, ActionKindHero: 3,
 		ActionKindHeroRevision: 4, ActionKindSkill: 5,
 	}
 	sort.SliceStable(p.plan.Actions, func(i, j int) bool {
@@ -1016,21 +1000,6 @@ func allActionsIdentical(actions []Action) bool {
 }
 
 func (s *Service) graphAction(storeID, digest string) string {
-	_, existing, err := s.Sources.ReadGraph(storeID)
-	switch {
-	case err == nil:
-		if existing == digest {
-			return ActionExistsIdentical
-		}
-		return ActionConflict
-	case errors.Is(err, os.ErrNotExist):
-		return ActionCreate
-	default:
-		return ActionConflict
-	}
-}
-
-func (s *Service) flowAction(storeID, digest string) string {
 	_, existing, err := s.Sources.ReadGraphDefinition(storeID)
 	switch {
 	case err == nil:
@@ -1159,7 +1128,7 @@ func sortedUniqueStrings(values []string) []string {
 	return result
 }
 
-// validFlowStoreID matches graphsource's Graph id contract.
+// validFlowStoreID matches the Graph id contract.
 func validFlowStoreID(value string) bool {
 	return graphIDPattern.MatchString(value)
 }

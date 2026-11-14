@@ -3,7 +3,7 @@
 import { ArrowLeft, Menu, X } from "lucide-react";
 import { useState, type RefObject } from "react";
 import { HeroesSettings } from "@/components/settings/HeroesSettings";
-import { AgentFlowSettings } from "@/components/settings/AgentFlowSettings";
+import { GraphSettings } from "@/components/settings/GraphSettings";
 import type { ModelProfile } from "@/components/settings/types";
 import type { WorkspaceView } from "@/components/workspace-view";
 
@@ -62,7 +62,7 @@ export function SettingsView({
       <div className="workspace-page-body">
         {view === "heroes"
           ? <HeroesSettings models={models} setError={setError} />
-          : <AgentFlowSettings setError={setError} />}
+          : <GraphSettings setError={setError} />}
       </div>
     </div>
   );

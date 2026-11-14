@@ -90,7 +90,7 @@ ennote pack inspect ~/Downloads/cell-qc.enpack --json      # 原始 inspect 结�
 ennote pack inspect ~/Downloads/cell-qc.enpack --documents # 附带 flow/hero/skill 正文
 ```
 
-输出包含 `manifestDigest`（`pack.yaml` 原始字节）和 `packDigest`（排序后的 payload 行，排除顶层 `pack.sig`）、flow/hero/skill 摘要、能力信封与 warnings。`format: flow` 与 `format: graph` 会如实标注，不会被悄悄降级。Worker 未启动时命令直接失败并提示 `ennote start`，不做离线降级。
+输出包含 `manifestDigest`（`pack.yaml` 原始字节）和 `packDigest`（排序后的 payload 行，排除顶层 `pack.sig`）、Graph/Hero/Skill 摘要、能力信封与 warnings。Worker 未启动时命令直接失败并提示 `ennote start`，不做离线降级。
 
 ### 安装 / 列出 / 卸载 Agent Pack
 
@@ -105,7 +105,7 @@ ennote pack remove seqyuan/cell-qc-review                 # 卸载
 ennote pack remove seqyuan/cell-qc-review --force          # 覆盖本地编辑 / 共享 Hero 的拒绝
 ```
 
-安装支持三种形态：Hero-only Pack（每个 Hero 变成 Worker 全局 Hero 并发布 revision）、以及 Graph Pack（未发布 revision 的 Graph draft + 其私有 Hero/Skill）。`format: graph` 与已废弃的 `format: flow` 都会安装为 `agents/graphs/<id>/graph.yaml`（内容为 FlowDefinition）；安装前用真实 `agentflow.Validator` 校验 check/fan-out/terminal/next。非空 `mcp`、非空 `requires` 仍会被明确拒绝并返回稳定错误码，不会降级安装。dry-run 恒返回计划（含 blockers），正式安装遇到 blocker/冲突返回 422。
+安装支持三种形态：Hero-only Pack（每个 Hero 变成 Worker 全局 Hero 并发布 revision）、以及 Graph Pack（未发布 revision 的 Graph draft + 其私有 Hero/Skill）。Graph Pack 安装为 `agents/graphs/<id>/graph.yaml`（内容为 FlowDefinition）；安装前用真实 `agentflow.Validator` 校验 check/fan-out/terminal/next。非空 `mcp`、非空 `requires` 仍会被明确拒绝并返回稳定错误码，不会降级安装。dry-run 恒返回计划（含 blockers），正式安装遇到 blocker/冲突返回 422。
 
 安装后的 source 默认不可运行：需要 `POST /v1/graphs/{id}/publish` 发布 Graph revision，再由 Project GraphBinding 显式启用。安装器永远不会自动发布或自动启用。
 

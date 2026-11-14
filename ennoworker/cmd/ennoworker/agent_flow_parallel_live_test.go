@@ -11,7 +11,6 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphrun"
-	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/runs"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
@@ -61,20 +60,14 @@ func TestLiveAgentFlowParallelConvergence(t *testing.T) {
 	require.NoError(t, err)
 
 	// ——— file-native Graph: a0 -> a1/a2/a3 (parallel readers) ———
-	_, digest, err := stack.Sources.CreateGraph("par-readers", "Parallel Readers")
+	_, digest, err := stack.Sources.CreateGraphDefinition("par-readers", "Parallel Readers")
 	require.NoError(t, err)
-	_, _, err = stack.Sources.UpdateGraph("par-readers", digest, func(d *graphsource.Document) error {
-		d.Tasks = map[string]graphsource.Task{
-			"a0": {Name: "dispatcher", Hero: "global/par-reader", Goal: "Inspect /workspace and report its top-level contents."},
-			"a1": {Name: "explore-a1", Hero: "global/par-reader", Goal: "Inspect /workspace and report its top-level contents."},
-			"a2": {Name: "explore-a2", Hero: "global/par-reader", Goal: "Inspect /workspace and report its top-level contents."},
-			"a3": {Name: "explore-a3", Hero: "global/par-reader", Goal: "Inspect /workspace and report its top-level contents."},
-		}
-		d.Graph = map[string][]string{
-			"a0": {},
-			"a1": {"a0"},
-			"a2": {"a0"},
-			"a3": {"a0"},
+	_, _, err = stack.Sources.UpdateGraphDefinition("par-readers", digest, func(d *domain.FlowDefinition) error {
+		d.Tasks = map[string]domain.FlowTask{
+			"a0": {Hero: "global/par-reader", Goal: "Inspect /workspace and report its top-level contents."},
+			"a1": {Hero: "global/par-reader", Goal: "Inspect /workspace and report its top-level contents.", Depends: []string{"a0"}},
+			"a2": {Hero: "global/par-reader", Goal: "Inspect /workspace and report its top-level contents.", Depends: []string{"a0"}},
+			"a3": {Hero: "global/par-reader", Goal: "Inspect /workspace and report its top-level contents.", Depends: []string{"a0"}},
 		}
 		return nil
 	})

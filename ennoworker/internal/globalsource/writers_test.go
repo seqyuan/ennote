@@ -6,19 +6,18 @@ import (
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
-	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func writerTestGraph(id string) *graphsource.Document {
-	return &graphsource.Document{
-		SchemaVersion: 1, ID: id, Name: "Pack Graph",
-		Tasks: map[string]graphsource.Task{
-			"load": {Name: "Load", Hero: "local/reviewer", Goal: "Load the input"},
+func writerTestGraph(id string) *domain.FlowDefinition {
+	return &domain.FlowDefinition{
+		SchemaVersion: domain.FlowSchemaVersion, ID: id, Name: "Pack Graph",
+		Budget: domain.FlowBudget{MaxTotalTokens: 100000},
+		Tasks: map[string]domain.FlowTask{
+			"load": {Type: domain.FlowTaskHero, Hero: "local/reviewer", Goal: "Load the input"},
 		},
-		Graph: map[string][]string{"load": {}},
 	}
 }
 
@@ -39,14 +38,14 @@ func writerTestHero(handle string) *heroesource.Document {
 	}
 }
 
-func TestCreateGraphFromDocumentWritesWholeDocument(t *testing.T) {
+func TestCreateGraphFromDefinitionWritesWholeDocument(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
-	document := writerTestGraph("pack-graph")
-	digest, err := store.CreateGraphFromDocument(document)
+	definition := writerTestGraph("pack-graph")
+	digest, err := store.CreateGraphFromDefinition(definition)
 	require.NoError(t, err)
 	assert.NotEmpty(t, digest)
 
-	read, readDigest, err := store.ReadGraph("pack-graph")
+	read, readDigest, err := store.ReadGraphDefinition("pack-graph")
 	require.NoError(t, err)
 	assert.Equal(t, digest, readDigest)
 	assert.Equal(t, "Pack Graph", read.Name)
@@ -61,7 +60,7 @@ func TestCreateGraphFromDocumentWritesWholeDocument(t *testing.T) {
 	assert.Equal(t, os.FileMode(0o700), dirInfo.Mode().Perm())
 
 	// An existing Graph is never overwritten.
-	_, err = store.CreateGraphFromDocument(document)
+	_, err = store.CreateGraphFromDefinition(definition)
 	require.Error(t, err)
 }
 
@@ -70,7 +69,7 @@ func TestCreateGraphHeroNestedDirectories(t *testing.T) {
 	store := Store{HomeDir: home}
 	// The Graph directory does not exist yet: an installer writes Graph-local
 	// Skills and Heroes before graph.yaml.
-	_, err := store.CreateGraphFromDocument(writerTestGraph("pack-graph"))
+	_, err := store.CreateGraphFromDefinition(writerTestGraph("pack-graph"))
 	require.NoError(t, err)
 
 	hero := writerTestHero("reviewer")

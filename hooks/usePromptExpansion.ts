@@ -33,7 +33,7 @@ export type PromptExpansionDeps = {
 /**
  * Command expansion + command panel: owns the versioned input setter, the
  * slash-template expansion gate, the command panel visibility, and the graph
- * catalog. Graph invocation (invokeAgentFlow) stays in the caller because it is
+ * catalog. Graph invocation (invokeGraph) stays in the caller because it is
  * a chat action, not expansion mechanics.
  */
 export function usePromptExpansion(deps: PromptExpansionDeps): {

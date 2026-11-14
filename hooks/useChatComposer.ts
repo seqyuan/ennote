@@ -230,7 +230,7 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
 
   // Graph invocation is global; the Worker derives Project and workspace from
   // the selected Session when it creates the Run.
-  const invokeAgentFlow = useCallback(async (name: string, version?: number, rawParams?: string) => {
+  const invokeGraph = useCallback(async (name: string, version?: number, rawParams?: string) => {
     if (!selectedSession) {
       agent.setError("Select a session before invoking a graph.");
       return false;
@@ -272,7 +272,7 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
     const invokeMatch = input.trim().match(/^\/invoke_agent_flow\s+(\S+)(?:\s+([\s\S]+))?$/);
     if (invokeMatch) {
       const [name, version] = invokeMatch[1].split("@");
-      void invokeAgentFlow(name, version ? Number(version) : undefined, invokeMatch[2]);
+      void invokeGraph(name, version ? Number(version) : undefined, invokeMatch[2]);
       return;
     }
     if (pendingGraph) {
@@ -283,14 +283,14 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
       const params = draft
         ? (/(^|\s)[A-Za-z_][\w-]*=/.test(draft) ? draft : `prompt=${JSON.stringify(draft)}`)
         : undefined;
-      void invokeAgentFlow(pendingGraph.name, pendingGraph.version, params).then((ok) => {
+      void invokeGraph(pendingGraph.name, pendingGraph.version, params).then((ok) => {
         if (ok) setPendingGraph(null);
       });
       return;
     }
-    const flowToken = input.trim().match(/^@graph:([\w.-]+)(?:@(\d+))?(?:\s+([\s\S]+))?$/);
-    if (flowToken) {
-      void invokeAgentFlow(flowToken[1], flowToken[2] ? Number(flowToken[2]) : undefined, flowToken[3]);
+    const graphToken = input.trim().match(/^@graph:([\w.-]+)(?:@(\d+))?(?:\s+([\s\S]+))?$/);
+    if (graphToken) {
+      void invokeGraph(graphToken[1], graphToken[2] ? Number(graphToken[2]) : undefined, graphToken[3]);
       return;
     }
 
@@ -320,7 +320,7 @@ export function useChatComposer(deps: ChatComposerDeps): { composer: ComposerVie
 
     void sendTurn(input, policyId ?? "");
   }, [selectedSession, input, pendingImage, textAttachments.length, policyId, permissionMode, pendingGraph,
-     agent, sendTurn, selectedProject, selectedHeroId, expandedVersion, draftVersion, invokeAgentFlow, expandDraftOrFallback, setExpandDiag]);
+     agent, sendTurn, selectedProject, selectedHeroId, expandedVersion, draftVersion, invokeGraph, expandDraftOrFallback, setExpandDiag]);
 
   const steer = useCallback(async () => {
     if (!agent.activeRunID || !input.trim()) return;

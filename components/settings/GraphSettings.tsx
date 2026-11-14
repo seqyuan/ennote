@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Check, Loader2, Plus, Workflow } from "lucide-react";
+import { Check, Loader2, Plus, Workflow } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GraphBuilderPanel } from "@/components/graphs/GraphBuilderPanel";
 import { confirmAction } from "@/components/ui/confirm";
@@ -12,7 +12,7 @@ import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { apiFetch } from "@/lib/worker-api.client";
 
-export function AgentFlowSettings({ setError }: { setError: (value: string | null) => void }) {
+export function GraphSettings({ setError }: { setError: (value: string | null) => void }) {
   const settings = useSettingsProfiles();
   const models = useMemo(() => modelOptions(settings.models), [settings.models]);
   const [graphs, setGraphs] = useState<GraphSummary[]>([]);
@@ -157,7 +157,6 @@ export function AgentFlowSettings({ setError }: { setError: (value: string | nul
   };
 
   const definition = detail?.definition;
-  const legacyDocument = detail && !detail.definition && detail.document ? detail.document : null;
 
   return (
     <div className="graph-workspace">
@@ -181,15 +180,6 @@ export function AgentFlowSettings({ setError }: { setError: (value: string | nul
       {!detail && busy === "loading" && <div className="graph-loading"><Loader2 className="spin" size={18} /> Loading Graph…</div>}
       {!detail && busy !== "loading" && graphs.length === 0 && (
         <div className="graph-welcome"><Workflow size={28} /><h2>Create your first Graph</h2><p>Compose reusable Tasks and their dependencies without choosing a Project.</p><button type="button" onClick={() => setCreateOpen(true)}><Plus size={16} /> Add Graph</button></div>
-      )}
-
-      {detail && legacyDocument && (
-        <div className="graph-document">
-          <div className="graph-legacy-banner" role="note">
-            <AlertTriangle size={16} />
-            <span>This Graph uses the legacy graph-v1 format and is read-only. Rewrite it to the current format to edit it.</span>
-          </div>
-        </div>
       )}
 
       {detail && definition && (

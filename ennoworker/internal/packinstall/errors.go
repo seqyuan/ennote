@@ -1,18 +1,15 @@
 // Package packinstall installs Agent Packs into the file-native Worker stores.
 //
-// S2a installs two pack shapes and nothing else:
+// The installer accepts two pack shapes:
 //
 //   - a Hero-only pack: every Hero is installed once as a Worker-global Hero and
 //     published as an immutable Hero revision; and
-//   - a pack Flow with format: graph: the flow becomes an ordinary file-native
-//     Graph draft (agents/graphs/<id>/graph.yaml) plus its Graph-private Heroes
-//     and Skills.
+//   - a pack Graph: the flow becomes an ordinary file-native Graph draft
+//     (agents/graphs/<id>/graph.yaml) plus its Graph-private Heroes and Skills.
 //
-// A full Agent Flow definition (format: flow) is refused: the Worker has no
-// file-native FlowDefinition source, no CheckTaskRunner assembly, and no check
-// approval API yet (S2b). The installer never calls PublishGraphRevision, so an
-// installed Graph is inert until a user publishes a revision through the
-// existing Graph path; that is the whole disabled-by-default mechanism.
+// The installer never calls PublishGraphRevision, so an installed Graph is inert
+// until a user publishes a revision through the existing Graph path; that is the
+// whole disabled-by-default mechanism.
 //
 // The commit point is the state file under packs/state/<publisher>/<name>.json,
 // written last with an atomic rename. A crash before it leaves the store objects
@@ -28,9 +25,6 @@ import (
 // Stable install error codes. They are wire codes: the API maps each one onto an
 // HTTP status and the CLI prints it verbatim. Every one is non-retryable.
 const (
-	// CodeFlowFormatUnsupported is retained for wire compatibility with S2a.
-	// S2b installs format: flow packs, so it is never emitted.
-	CodeFlowFormatUnsupported = "pack_flow_format_unsupported"
 	// CodeFlowValidationFailed reports a full-flow definition the real
 	// agentflow.Validator rejected before any write.
 	CodeFlowValidationFailed = "pack_flow_validation_failed"

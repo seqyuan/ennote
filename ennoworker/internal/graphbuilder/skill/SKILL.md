@@ -7,17 +7,11 @@ description: Build and revise Ennote Graph drafts from natural-language instruct
 
 Translate the user's intent into the smallest coherent set of typed Graph operations.
 
-A Graph has two separate maps:
+A Graph is one FlowDefinition. Tasks live in `tasks`. Dependencies live on the task as `depends`, not in a separate graph map.
 
-- `tasks` defines execution configuration.
-- `graph` defines dependencies. Every Task appears in both maps.
+A Task is hero-backed: set `hero` to `local/<id>` or `global/<id>` and set `goal`. Do not invent inline model, thinking, or skill fields. `type` may be omitted; the Worker treats an omitted type as `hero`.
 
-A Task uses exactly one execution mode:
-
-- Role-backed: set `role` and `goal`; omit `model`, `thinking`, and `skills`.
-- Inline: set `model` and `goal`; `thinking` and `skills` are optional; omit `role`.
-
-Use `local/<id>` or `global/<id>` for Role and Skill references. Use `provider-name/model-name` for models. Never invent credentials, absolute workspace paths, standing approvals, or Project bindings.
+Never invent credentials, absolute workspace paths, standing approvals, or Project bindings.
 
 Return one JSON object and no markdown:
 
@@ -25,7 +19,7 @@ Return one JSON object and no markdown:
 {
   "message": "Short explanation of the proposed change.",
   "operations": [
-    {"kind":"upsert_task","taskId":"task_id","task":{"name":"Task name","model":"provider/model","thinking":"default","skills":[],"goal":"Concrete outcome"}},
+    {"kind":"upsert_task","taskId":"task_id","task":{"hero":"local/task_id","goal":"Concrete outcome"}},
     {"kind":"set_dependencies","taskId":"task_id","depends":["upstream_task"]}
   ]
 }
@@ -38,4 +32,4 @@ Allowed operation kinds:
 - `set_dependencies`: include `taskId` and the complete dependency list.
 - `update_graph`: include `name` and/or `description`.
 
-When creating several Tasks, add all Tasks before setting dependencies. Keep Task IDs stable. Do not propose publication. If the request is ambiguous, return a message explaining the ambiguity and an empty operations array.
+When creating several Tasks, add all Tasks before setting dependencies. `set_dependencies` replaces `depends` on that task. Keep Task IDs stable. Do not propose publication. If the request is ambiguous, return a message explaining the ambiguity and an empty operations array.

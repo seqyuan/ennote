@@ -163,8 +163,8 @@ type FlowParallelism struct {
 type FlowDefinition struct {
 	SchemaVersion int    `json:"schemaVersion" yaml:"schemaVersion"`
 	ID            string `json:"id" yaml:"id"`
-	// Name is the catalog label. Optional: a legacy flow.yaml omits it and
-	// readers display ID. A new graph.yaml must carry one before it publishes.
+	// Name is the catalog label. Optional; a Graph must carry one before it
+	// publishes.
 	Name        string              `json:"name,omitempty" yaml:"name,omitempty"`
 	Version     int                 `json:"version,omitempty" yaml:"version,omitempty"`
 	Description string              `json:"description,omitempty" yaml:"description,omitempty"`

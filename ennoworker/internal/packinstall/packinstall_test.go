@@ -138,7 +138,6 @@ func TestPlanHeroOnlyPack(t *testing.T) {
 	assert.True(t, strings.HasPrefix(plan.PackDigest, "sha256:"))
 	assert.Empty(t, plan.Blockers)
 	assert.Equal(t, packinstall.CommitPointStateFile, plan.CommitPoint)
-	assert.False(t, plan.WillPublishFlowRevision)
 	assert.Empty(t, plan.Reinstall)
 	assert.Nil(t, plan.State)
 
@@ -289,7 +288,7 @@ func TestInstallRollsBackWhenTheCommitPointFails(t *testing.T) {
 	manifestCopy := f.manifestCopyPath("seqyuan/cell-qc-review")
 	require.NoError(t, os.MkdirAll(filepath.Join(manifestCopy, "blocker"), 0o700))
 	// An unrelated user Graph must survive the rollback untouched.
-	_, _, err := f.sources.CreateGraph("user-graph", "User Graph")
+	_, _, err := f.sources.CreateGraphDefinition("user-graph", "User Graph")
 	require.NoError(t, err)
 
 	_, err = f.service.Install(context.Background(), packinstall.Request{SourcePath: mixedPack(t, f)})
@@ -309,7 +308,7 @@ func TestInstallRollsBackWhenTheCommitPointFails(t *testing.T) {
 	staging, err := os.ReadDir(filepath.Join(f.home, "packs", "staging"))
 	require.NoError(t, err)
 	assert.Empty(t, staging)
-	_, _, err = f.sources.ReadGraph("user-graph")
+	_, _, err = f.sources.ReadGraphDefinition("user-graph")
 	require.NoError(t, err)
 }
 
@@ -340,7 +339,7 @@ version: 1.0.0
 flows:
   - id: qc-review
     path: flows/qc-review/flow.yaml
-    format: flow
+    format: graph
 heroes:
   - handle: qc-reviewer
     path: heroes/qc-reviewer/hero.md
@@ -357,11 +356,10 @@ heroes:
 		plan, err := f.service.Plan(context.Background(), packinstall.Request{SourcePath: source})
 		require.NoError(t, err)
 		require.Empty(t, plan.Blockers, blockerCodes(plan))
-		flowAction, ok := findAction(plan, packinstall.ActionKindFlow, "qc-review")
+		flowAction, ok := findAction(plan, packinstall.ActionKindGraph, "qc-review")
 		require.True(t, ok, plan.Actions)
 		assert.Equal(t, packinstall.ActionCreate, flowAction.Action)
-		assert.False(t, plan.WillPublishFlowRevision)
-
+	
 		source = writePack(t, []packFile{
 			{path: "pack.yaml", body: flowFormatManifest},
 			{path: "flows/qc-review/flow.yaml", body: agentFlowSource},
@@ -371,7 +369,7 @@ heroes:
 		require.NoError(t, err)
 		require.NotNil(t, installed.State)
 		require.Len(t, installed.State.Flows, 1)
-		assert.Equal(t, "flow", installed.State.Flows[0].Format)
+		assert.Equal(t, "graph", installed.State.Flows[0].Format)
 		assert.Nil(t, installed.State.Flows[0].PublishedRevision)
 		_, _, err = f.sources.ReadGraphDefinition("qc-review")
 		require.NoError(t, err)
@@ -476,7 +474,7 @@ func TestPlanConflictsAndVersionRules(t *testing.T) {
 	f := newFixture(t)
 
 	// An existing Graph with the same id but different bytes is a conflict.
-	_, _, err := f.sources.CreateGraph("qc-review", "Something Else")
+	_, _, err := f.sources.CreateGraphDefinition("qc-review", "Something Else")
 	require.NoError(t, err)
 	plan, err := f.service.Plan(context.Background(), packinstall.Request{SourcePath: mixedPack(t, f)})
 	require.NoError(t, err)

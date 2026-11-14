@@ -71,8 +71,7 @@ async function mockPacks(page: Page, plan: { blocked: boolean }) {
           : [],
         warnings: [],
         commitPoint: "after-staging",
-        willPublishFlowRevision: false,
-      });
+            });
       installed = [{ pack: packIdentity, manifestDigest: "a".repeat(64), packDigest: "b".repeat(64), installedAt: "2026-11-01T00:00:00Z", installState: "installed_draft", source: inspectResult.source, flowCount: 0, heroCount: 1, skillCount: 1, externalRefs: {} }];
       return;
     }

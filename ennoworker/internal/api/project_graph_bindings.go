@@ -76,14 +76,13 @@ func (s *Server) putProjectGraphBinding(w http.ResponseWriter, r *http.Request) 
 	}
 	kind := strings.TrimSpace(body.SourceKind)
 	if kind == "" {
-		kind = inferSourceKind(s.GlobalSources, graphID)
+		kind = globalsource.SourceKindGraph
 	}
-	if kind != globalsource.SourceKindGraph && kind != globalsource.SourceKindFlow {
-		writeError(w, r, http.StatusBadRequest, "source_kind_invalid", "sourceKind must be graph or flow", false)
+	if kind != globalsource.SourceKindGraph {
+		writeError(w, r, http.StatusBadRequest, "source_kind_invalid", "sourceKind must be graph", false)
 		return
 	}
-	actualKind, err := s.GlobalSources.SourceKind(graphID)
-	if err != nil {
+	if _, err := s.GlobalSources.SourceKind(graphID); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(w, r, http.StatusNotFound, "source_not_found", "source not found", false)
 			return
@@ -91,12 +90,7 @@ func (s *Server) putProjectGraphBinding(w http.ResponseWriter, r *http.Request) 
 		writeError(w, r, http.StatusBadRequest, "source_invalid", err.Error(), false)
 		return
 	}
-	if actualKind != kind {
-		writeError(w, r, http.StatusConflict, "source_kind_mismatch",
-			"binding sourceKind does not match the source object", false)
-		return
-	}
-	revisions, err := listSourceRevisions(s.GlobalSources, kind, graphID)
+	revisions, err := s.GlobalSources.ListGraphRevisions(graphID)
 	if err != nil {
 		writeError(w, r, http.StatusInternalServerError, "source_versions_failed", err.Error(), true)
 		return
@@ -185,11 +179,12 @@ func (s *Server) deleteProjectGraphBinding(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	kind := strings.TrimSpace(r.URL.Query().Get("sourceKind"))
-	if kind == "" && s.GlobalSources != nil {
-		kind = inferSourceKind(s.GlobalSources, r.PathValue("graphID"))
-	}
 	if kind == "" {
 		kind = globalsource.SourceKindGraph
+	}
+	if kind != globalsource.SourceKindGraph {
+		writeError(w, r, http.StatusBadRequest, "source_kind_invalid", "sourceKind must be graph", false)
+		return
 	}
 	graphID := r.PathValue("graphID")
 	_, err := store.UpdateGraphBindings(r.Context(), r.PathValue("projectID"), func(bindings *[]projectstore.GraphBinding) error {
@@ -218,20 +213,3 @@ func (s *Server) deleteProjectGraphBinding(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func inferSourceKind(sources *globalsource.Store, id string) string {
-	if sources == nil {
-		return ""
-	}
-	kind, err := sources.SourceKind(id)
-	if err != nil {
-		return ""
-	}
-	return kind
-}
-
-func listSourceRevisions(sources *globalsource.Store, kind, id string) ([]globalsource.Revision, error) {
-	if kind == globalsource.SourceKindFlow {
-		return sources.ListFlowRevisions(id)
-	}
-	return sources.ListGraphRevisions(id)
-}

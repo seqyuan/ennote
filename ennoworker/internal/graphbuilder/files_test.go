@@ -13,7 +13,7 @@ import (
 
 func TestFileBuilderPersistsThreadProposalAndApply(t *testing.T) {
 	sources := &globalsource.Store{HomeDir: t.TempDir()}
-	_, _, err := sources.CreateGraph("rna-seq", "RNA-seq")
+	_, _, err := sources.CreateGraphDefinition("rna-seq", "RNA-seq")
 	require.NoError(t, err)
 	service := &Service{
 		Sources: sources,
@@ -31,9 +31,9 @@ func TestFileBuilderPersistsThreadProposalAndApply(t *testing.T) {
 	require.FileExists(t, filepath.Join(builderDir, "messages.jsonl"))
 	require.FileExists(t, filepath.Join(builderDir, "proposals", thread.Proposal.ID+".json"))
 
-	document, _, err := service.Apply(context.Background(), "rna-seq", thread.Proposal.ID)
+	definition, _, err := service.Apply(context.Background(), "rna-seq", thread.Proposal.ID)
 	require.NoError(t, err)
-	assert.Contains(t, document.Tasks, "align")
+	assert.Contains(t, definition.Tasks, "align")
 	reloaded, err := service.GetThread(context.Background(), "rna-seq")
 	require.NoError(t, err)
 	assert.Nil(t, reloaded.Proposal)

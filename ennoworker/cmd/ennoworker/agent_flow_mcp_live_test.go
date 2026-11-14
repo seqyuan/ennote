@@ -17,7 +17,6 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphrun"
-	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/mcpclient"
 	"github.com/seqyuan/ennote/ennoworker/internal/runs"
@@ -125,14 +124,13 @@ func TestLiveAgentFlowChildCallsMCP(t *testing.T) {
 	require.NoError(t, err)
 
 	// ——— Graph: one Hero-backed Task ———
-	_, digest, err := stack.Sources.CreateGraph("mcp-flow", "MCP Flow")
+	_, digest, err := stack.Sources.CreateGraphDefinition("mcp-flow", "MCP Flow")
 	require.NoError(t, err)
-	_, _, err = stack.Sources.UpdateGraph("mcp-flow", digest, func(d *graphsource.Document) error {
-		d.Tasks = map[string]graphsource.Task{
-			"call": {Name: "call", Role: "global/mcp-caller",
+	_, _, err = stack.Sources.UpdateGraphDefinition("mcp-flow", digest, func(d *domain.FlowDefinition) error {
+		d.Tasks = map[string]domain.FlowTask{
+			"call": {Hero: "global/mcp-caller",
 				Goal: "Call test__echo with text \"hello\" and call submit_result with the echoed value."},
 		}
-		d.Graph = map[string][]string{"call": {}}
 		return nil
 	})
 	require.NoError(t, err)

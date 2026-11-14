@@ -19,7 +19,7 @@ func (s *Server) getGraphBuilderThread(w http.ResponseWriter, r *http.Request) {
 	if service == nil {
 		return
 	}
-	if _, _, err := s.GlobalSources.ReadGraph(r.PathValue("graphID")); err != nil {
+	if _, _, err := s.GlobalSources.ReadGraphDefinition(r.PathValue("graphID")); err != nil {
 		writeError(w, r, http.StatusNotFound, "graph_not_found", err.Error(), false)
 		return
 	}
@@ -56,10 +56,10 @@ func (s *Server) applyGraphBuilderProposal(w http.ResponseWriter, r *http.Reques
 	if service == nil {
 		return
 	}
-	document, digest, err := service.Apply(r.Context(), r.PathValue("graphID"), r.PathValue("proposalID"))
+	definition, digest, err := service.Apply(r.Context(), r.PathValue("graphID"), r.PathValue("proposalID"))
 	if err != nil {
 		writeError(w, r, http.StatusConflict, "graph_builder_apply_failed", err.Error(), false)
 		return
 	}
-	writeData(w, http.StatusOK, s.graphDocumentDetailFor(s.GlobalSources, document, digest))
+	writeData(w, http.StatusOK, s.graphDefinitionDetailFor(s.GlobalSources, definition, digest))
 }

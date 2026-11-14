@@ -6,8 +6,6 @@ import type { ModelProfile } from "@/components/settings/types";
 // while the Worker always answers it, so `tsc` could not flag a reader that
 // assumed the field might be missing.
 export type ThinkingEffort = components["schemas"]["ThinkingEffort"];
-export type GraphTask = components["schemas"]["GraphTask"];
-export type GraphDocument = components["schemas"]["GraphDocument"];
 export type GraphSummary = components["schemas"]["GraphSummary"];
 export type ImmutableFileRevision = components["schemas"]["ImmutableFileRevision"];
 
@@ -73,11 +71,8 @@ export interface FlowDefinition {
   parallelism?: FlowParallelism;
 }
 
-// GraphDetail carries an optional `definition` (the unified FlowDefinition) and
-// keeps `document` only for a legacy graph-v1 read. The editor reads `definition`
-// and treats a detail with only `document` as a read-only legacy object.
+// GraphDetail carries the unified Graph definition.
 export type GraphDetail = Omit<components["schemas"]["GraphDetail"], "definition"> & {
-  document?: components["schemas"]["GraphDocument"];
   definition?: FlowDefinition;
 };
 

@@ -14,7 +14,6 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/events"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphrun"
-	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/runs"
 	"github.com/seqyuan/ennote/ennoworker/internal/skills"
@@ -78,14 +77,13 @@ Your submit_result summary MUST begin with the exact token LIVE_SKILL_MARKER fol
 	require.NoError(t, err)
 
 	// ——— file-native Graph: one hero-backed Task (Skill preloaded via Hero) ———
-	_, digest, err := stack.Sources.CreateGraph("skill-flow", "Skill Flow")
+	_, digest, err := stack.Sources.CreateGraphDefinition("skill-flow", "Skill Flow")
 	require.NoError(t, err)
-	_, _, err = stack.Sources.UpdateGraph("skill-flow", digest, func(d *graphsource.Document) error {
-		d.Tasks = map[string]graphsource.Task{
-			"work": {Name: "work", Role: "global/skill-reader",
+	_, _, err = stack.Sources.UpdateGraphDefinition("skill-flow", digest, func(d *domain.FlowDefinition) error {
+		d.Tasks = map[string]domain.FlowTask{
+			"work": {Hero: "global/skill-reader",
 				Goal: "State the LIVE_SKILL_MARKER token value and call submit_result."},
 		}
-		d.Graph = map[string][]string{"work": {}}
 		return nil
 	})
 	require.NoError(t, err)

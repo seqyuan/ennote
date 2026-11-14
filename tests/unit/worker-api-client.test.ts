@@ -13,7 +13,7 @@ describe("worker API response formats", () => {
     })));
     const { apiText } = await import("@/lib/worker-api.client");
 
-    await expect(apiText("/v1/agent-flows/graph/export?source=draft"))
+    await expect(apiText("/v1/graphs/review/export?source=draft"))
       .resolves.toContain("id: review");
   });
 

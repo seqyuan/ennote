@@ -40,16 +40,10 @@ tasks:
     depends: [review]
 `
 
-func mixedManifestWithFlowFormat() string {
-	return strings.Replace(mixedManifest,
-		"    path: flows/qc-review/graph.yaml\n    format: graph",
-		"    path: flows/qc-review/flow.yaml\n    format: flow", 1)
-}
-
 func mixedFlowFiles() []entry {
 	files := mixedPackFiles()
-	files[0] = entry{path: "pack.yaml", body: mixedManifestWithFlowFormat()}
-	files[2] = entry{path: "flows/qc-review/flow.yaml", body: agentFlowSource}
+	files[0] = entry{path: "pack.yaml", body: mixedManifest}
+	files[2] = entry{path: "flows/qc-review/graph.yaml", body: agentFlowSource}
 	return files
 }
 
@@ -57,7 +51,7 @@ func TestInspectAgentFlowFormatKeepsChecksAndFanOut(t *testing.T) {
 	result := inspectFiles(t, mixedFlowFiles())
 	require.Len(t, result.Flows, 1)
 	flow := result.Flows[0]
-	assert.Equal(t, FlowFormatFlow, flow.Format)
+	assert.Equal(t, FlowFormatGraph, flow.Format)
 	assert.Equal(t, 4, flow.TaskCount)
 	assert.Equal(t, "load", flow.EntryTask)
 	assert.Equal(t, 1, flow.CheckTasks)
@@ -72,14 +66,14 @@ func TestInspectAgentFlowFormatKeepsChecksAndFanOut(t *testing.T) {
 
 func TestInspectAgentFlowWarnsAboutGlobalSkillRefs(t *testing.T) {
 	files := mixedFlowFiles()
-	files[2] = entry{path: "flows/qc-review/flow.yaml", body: strings.Replace(agentFlowSource, "skills: [local/cell-qc-tables]", "skills: [global/cell-qc-tables]", 1)}
+	files[2] = entry{path: "flows/qc-review/graph.yaml", body: strings.Replace(agentFlowSource, "skills: [local/cell-qc-tables]", "skills: [global/cell-qc-tables]", 1)}
 	result := inspectFiles(t, files)
 	assert.Contains(t, warningCodes(result.Warnings), WarningFlowRefsGlobalSkill)
 }
 
 func TestInspectAgentFlowRejectsUnknownLocalSkillRef(t *testing.T) {
 	files := mixedFlowFiles()
-	files[2] = entry{path: "flows/qc-review/flow.yaml", body: strings.Replace(agentFlowSource, "skills: [local/cell-qc-tables]", "skills: [local/ghost]", 1)}
+	files[2] = entry{path: "flows/qc-review/graph.yaml", body: strings.Replace(agentFlowSource, "skills: [local/cell-qc-tables]", "skills: [local/ghost]", 1)}
 	_, err := Inspect(Request{Source: Source{Path: writeDirectoryPack(t, files)}})
 	requireCode(t, err, CodePackRefUnknown)
 }
@@ -110,8 +104,8 @@ model_requirements:
     capabilities: [tool_use]
 flows:
   - id: qc-review
-    path: flows/qc-review/flow.yaml
-    format: flow
+    path: flows/qc-review/graph.yaml
+    format: graph
 skills:
   - id: cell-qc-tables
     path: skills/cell-qc-tables/
@@ -122,7 +116,7 @@ func TestInspectFlowOnlyPack(t *testing.T) {
 	// Heroes at freeze time, which is exactly what a Flow-only pack ships.
 	files := []entry{
 		{path: "pack.yaml", body: flowOnlyManifest},
-		{path: "flows/qc-review/flow.yaml", body: agentFlowSource},
+		{path: "flows/qc-review/graph.yaml", body: agentFlowSource},
 		{path: "skills/cell-qc-tables/skill.json", body: skillManifestJSON},
 		{path: "skills/cell-qc-tables/SKILL.md", body: "# Cell QC Tables\n"},
 	}
@@ -131,7 +125,7 @@ func TestInspectFlowOnlyPack(t *testing.T) {
 	assert.Contains(t, warningCodes(result.Warnings), WarningFlowOnlyPack)
 	assert.NotContains(t, warningCodes(result.Warnings), WarningHeroOnlyPack)
 	require.Len(t, result.Flows, 1)
-	assert.Equal(t, FlowFormatFlow, result.Flows[0].Format)
+	assert.Equal(t, FlowFormatGraph, result.Flows[0].Format)
 }
 
 func TestInspectHeroOnlyPack(t *testing.T) {
@@ -162,19 +156,6 @@ func TestFormatDefaultsToGraph(t *testing.T) {
 	result := inspectFiles(t, files)
 	require.Len(t, result.Flows, 1)
 	assert.Equal(t, FlowFormatGraph, result.Flows[0].Format)
-}
-
-func TestInspectRejectsLegacyGraphDocument(t *testing.T) {
-	files := mixedPackFiles()
-	files[2] = entry{path: "flows/qc-review/graph.yaml", body: `schema_version: 1
-id: qc-review
-name: QC Review
-tasks: {}
-graph: {}
-`}
-	_, err := Inspect(Request{Source: Source{Path: writeDirectoryPack(t, files)}})
-	requireCode(t, err, CodePackFlowInvalid)
-	assert.Contains(t, err.Error(), "graph_legacy_source")
 }
 
 func TestInspectHeroOnlyPackRejectsFlowScopedHero(t *testing.T) {

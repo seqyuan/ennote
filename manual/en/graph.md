@@ -141,10 +141,6 @@ POST /v1/graphs/{graphID}/publish
 PUT /v1/projects/{projectID}/graph-bindings/{graphID}
 ```
 
-The deprecated `/v1/flows/*` routes still exist and delegate to `/v1/graphs/*`. A legacy `flow.yaml`
-draft is listed alongside a `graph.yaml` draft and still runs; saving it through the Graph editor
-renames it to `graph.yaml`.
-
 Publishing fails loudly on: an unresolvable `hero@version`, an unknown skill, malformed
 `check`/`fanOut`/`terminal`/`next` structure, an out-of-range parallelism value, or a back-edge without
 a round ceiling.

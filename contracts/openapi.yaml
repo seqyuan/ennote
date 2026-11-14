@@ -350,122 +350,6 @@ paths:
                     properties: { data: { $ref: "#/components/schemas/RunAgentFlow" } }
         "404": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
-  /v1/flows:
-    get:
-      operationId: listFlows
-      summary: Deprecated; delegates to listGraphs
-      deprecated: true
-      description: |
-        Deprecated. This route delegates to `GET /v1/graphs`, which lists every
-        object under `agents/graphs/`, including a legacy `flow.yaml` object
-        (labelled `legacyFile: flow`).
-      responses:
-        "200":
-          description: Flow catalog
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties: { data: { type: array, items: { $ref: "#/components/schemas/GlobalFlowSummary" } } }
-  /v1/flows/{flowID}:
-    parameters:
-      - { name: flowID, in: path, required: true, schema: { type: string } }
-    get:
-      operationId: getFlow
-      summary: Deprecated; delegates to getGraph
-      deprecated: true
-      responses:
-        "200":
-          description: Parsed Flow draft
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties: { data: { $ref: "#/components/schemas/GlobalFlowDetail" } }
-        "404": { $ref: "#/components/responses/Error" }
-  /v1/flows/{flowID}/publish:
-    parameters:
-      - { name: flowID, in: path, required: true, schema: { type: string } }
-    post:
-      operationId: publishFlow
-      summary: Deprecated; delegates to publishGraph
-      deprecated: true
-      description: |
-        Deprecated. This route delegates to `POST /v1/graphs/{id}/publish`,
-        which runs `agentflow.Validator` and writes one immutable revision.
-      responses:
-        "201":
-          description: Immutable Flow revision
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties: { data: { $ref: "#/components/schemas/ImmutableFileRevision" } }
-        "404": { $ref: "#/components/responses/Error" }
-        "422": { $ref: "#/components/responses/Error" }
-        "503": { $ref: "#/components/responses/Error" }
-  /v1/flows/{flowID}/versions:
-    parameters:
-      - { name: flowID, in: path, required: true, schema: { type: string } }
-    get:
-      operationId: listFlowVersions
-      summary: Deprecated; delegates to listGraphVersions
-      deprecated: true
-      responses:
-        "200":
-          description: Flow revisions
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties: { data: { type: array, items: { $ref: "#/components/schemas/ImmutableFileRevision" } } }
-        "404": { $ref: "#/components/responses/Error" }
-  /v1/flows/{flowID}/runs:
-    parameters:
-      - { name: flowID, in: path, required: true, schema: { type: string } }
-    post:
-      operationId: runFlow
-      summary: Deprecated; delegates to runGraph
-      deprecated: true
-      description: |
-        Deprecated. This route delegates to `POST /v1/graphs/{id}/runs`. The
-        Project binding pins the revision; an unpublished, unbound, or disabled
-        Graph is rejected instead of falling back to the latest revision.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [sessionId]
-              properties:
-                sessionId: { type: string }
-                version: { type: integer, minimum: 1 }
-                inputs: { type: object, additionalProperties: true }
-                vars: { type: object, additionalProperties: true }
-      responses:
-        "201":
-          description: Durable Flow Run created
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties: { data: { $ref: "#/components/schemas/RunAgentFlow" } }
-        "404": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/Error" }
-        "422": { $ref: "#/components/responses/Error" }
-        "503": { $ref: "#/components/responses/Error" }
   /v1/sessions/{sessionID}/graph-runs:
     parameters:
       - { name: sessionID, in: path, required: true, schema: { type: string } }
@@ -1683,7 +1567,7 @@ paths:
       operationId: deleteProjectGraphBinding
       summary: Remove one Project source binding
       parameters:
-        - { name: sourceKind, in: query, required: false, schema: { type: string, enum: [graph, flow] } }
+        - { name: sourceKind, in: query, required: false, schema: { type: string, enum: [graph] } }
       responses:
         "204": { description: Binding removed }
         "404": { $ref: "#/components/responses/Error" }
@@ -3172,12 +3056,11 @@ paths:
       operationId: installPack
       summary: Plan or apply an Agent Pack install
       description: |
-        Installs Hero-only packs, `format: graph` packs (an unpublished Graph
-        draft plus its Graph-private Heroes and Skills), and `format: flow` packs
-        (an unpublished full Agent Flow draft plus bundled Heroes/Skills). The
-        full-flow draft is validated by the real agentflow.Validator before any
-        write. Non-empty `mcp` and `requires` are still refused with a stable
-        blocker code instead of being downgraded.
+        Installs Hero-only packs and Graph packs (an unpublished Graph
+        draft plus its Graph-private Heroes and Skills). The Graph draft is
+        validated by the real agentflow.Validator before any write. Non-empty
+        `mcp` and `requires` are still refused with a stable blocker code
+        instead of being downgraded.
 
         `dryRun: true` always answers 200 with the plan, blockers included, and
         never writes staging, store objects, or state. A real install answers
@@ -4743,32 +4626,6 @@ components:
           items: { $ref: "#/components/schemas/RunMessage" }
         hasMore: { type: boolean }
         nextBeforeOrdinal: { type: integer, minimum: 0 }
-    GlobalFlowSummary:
-      type: object
-      additionalProperties: false
-      required: [id, path, latestVersion, taskCount, checkTasks, fanOutTasks]
-      properties:
-        id: { type: string }
-        path: { type: string }
-        digest: { type: string }
-        latestVersion: { type: integer, minimum: 0 }
-        taskCount: { type: integer, minimum: 0 }
-        checkTasks: { type: integer, minimum: 0 }
-        fanOutTasks: { type: integer, minimum: 0 }
-        error: { type: string }
-    GlobalFlowDetail:
-      type: object
-      additionalProperties: false
-      required: [id, path, digest, latestVersion, definition]
-      properties:
-        id: { type: string }
-        path: { type: string }
-        digest: { type: string }
-        latestVersion: { type: integer, minimum: 0 }
-        definition:
-          type: object
-          additionalProperties: true
-          description: The canonical Agent Flow FlowDefinition (schemaVersion, id, budget, tasks, convergence, parallelism)
     ImmutableFileRevision:
       type: object
       additionalProperties: false
@@ -4776,7 +4633,7 @@ components:
       properties:
         schemaVersion: { type: integer, enum: [1] }
         resourceId: { type: string }
-        sourceKind: { type: string, enum: [graph, flow] }
+        sourceKind: { type: string, enum: [graph] }
         version: { type: integer, minimum: 1 }
         digest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
         heroDigests:
@@ -4891,39 +4748,25 @@ components:
     GraphTask:
       type: object
       additionalProperties: false
-      required: [name, goal]
-      description: Hero-backed Tasks declare a hero only; inline Tasks declare model with optional thinking and skills. The modes are mutually exclusive and enforced by the Worker.
+      description: One task of a Graph definition. An omitted type is a hero task. A hero task declares a hero; a check task declares a command and optional next routing.
       properties:
-        name: { type: string, minLength: 1 }
         hero: { type: string, pattern: "^(local|global)/[a-z][a-z0-9_-]{1,63}$" }
-        model: { type: string, pattern: '^[^/\s]+/\S+$' }
-        thinking: { $ref: "#/components/schemas/ThinkingEffort" }
         skills: { type: array, uniqueItems: true, items: { type: string, pattern: "^(local|global)/[a-z][a-z0-9_-]{1,63}$" } }
-        goal: { type: string, minLength: 1 }
-        writes: { type: array, uniqueItems: true, items: { type: string } }
+        goal: { type: string }
+        depends: { type: array, uniqueItems: true, items: { type: string } }
+        type: { type: string, enum: [hero, check] }
+        command: { type: string }
         budget:
           type: object
           additionalProperties: false
           properties: { tokens: { type: integer, minimum: 1 } }
-    GraphDocument:
-      type: object
-      additionalProperties: false
-      required: [schemaVersion, id, name, tasks, graph]
-      properties:
-        schemaVersion: { type: integer, enum: [1] }
-        id: { type: string }
-        name: { type: string }
-        description: { type: string }
-        tasks: { type: object, additionalProperties: { $ref: "#/components/schemas/GraphTask" } }
-        graph:
-          type: object
-          additionalProperties: { type: array, uniqueItems: true, items: { type: string } }
+        writes: { type: array, uniqueItems: true, items: { type: string } }
     ProjectGraphBinding:
       type: object
       additionalProperties: false
       required: [graphId, revision, enabled]
       properties:
-        sourceKind: { type: string, enum: [graph, flow] }
+        sourceKind: { type: string, enum: [graph] }
         graphId: { type: string }
         revision: { type: string, pattern: "^$|^v[0-9]{6}$" }
         enabled: { type: boolean }
@@ -4932,7 +4775,7 @@ components:
       additionalProperties: false
       required: [enabled]
       properties:
-        sourceKind: { type: string, enum: [graph, flow] }
+        sourceKind: { type: string, enum: [graph] }
         revision: { type: string, pattern: "^$|^v[0-9]{6}$" }
         enabled: { type: boolean }
         clientRequestId: { type: string }
@@ -4945,10 +4788,6 @@ components:
         name: { type: string }
         path: { type: string }
         digest: { type: string }
-        # Names the file a directory still holds when it is not a current
-        # definition: "flow" for a legacy flow.yaml, "graph-v1" for a legacy
-        # graphsource.Document. A current graph.yaml omits it.
-        legacyFile: { type: string, enum: [flow, graph-v1] }
         error: { type: string }
         latestVersion: { type: integer, minimum: 0 }
     GraphDetail:
@@ -4956,14 +4795,13 @@ components:
         - $ref: "#/components/schemas/GraphSummary"
         - type: object
           required: [digest]
-          description: Exactly one of document (a legacy graph-v1 read) and definition (a current FlowDefinition) is set; the reader decides by the file the directory holds.
+          description: The canonical Graph definition (schemaVersion, id, budget, tasks, convergence, parallelism).
           properties:
             digest: { type: string }
-            document: { $ref: "#/components/schemas/GraphDocument" }
             definition:
               type: object
               additionalProperties: true
-              description: The canonical Agent Flow FlowDefinition (schemaVersion, id, budget, tasks, convergence, parallelism)
+              description: The canonical Graph definition (schemaVersion, id, budget, tasks, convergence, parallelism)
     GraphMutation:
       type: object
       additionalProperties: false
@@ -6029,8 +5867,8 @@ components:
         path: { type: string }
         format:
           type: string
-          enum: [flow, graph]
-          description: "flow: full Agent Flow definition; graph: graphsource hero-task document"
+          enum: [graph]
+          description: "graph: a Graph definition (check tasks, fan-out, terminal, next routing)"
         taskCount: { type: integer }
         entryTask: { type: string }
         heroes:
@@ -6197,7 +6035,6 @@ components:
         - blockers
         - warnings
         - commitPoint
-        - willPublishFlowRevision
       properties:
         planVersion: { type: integer }
         pack: { $ref: "#/components/schemas/PackIdentity" }
@@ -6217,9 +6054,6 @@ components:
           type: string
           enum: [state_file]
           description: The install is observable only once its state file exists
-        willPublishFlowRevision:
-          type: boolean
-          description: Always false in S2a; an installed Graph stays an unpublished draft
         reinstall:
           type: string
           enum: [noop]

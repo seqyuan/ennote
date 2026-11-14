@@ -239,122 +239,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/flows": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Deprecated; delegates to listGraphs
-         * @deprecated
-         * @description Deprecated. This route delegates to `GET /v1/graphs`, which lists every
-         *     object under `agents/graphs/`, including a legacy `flow.yaml` object
-         *     (labelled `legacyFile: flow`).
-         */
-        get: operations["listFlows"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/flows/{flowID}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                flowID: string;
-            };
-            cookie?: never;
-        };
-        /**
-         * Deprecated; delegates to getGraph
-         * @deprecated
-         */
-        get: operations["getFlow"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/flows/{flowID}/publish": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                flowID: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Deprecated; delegates to publishGraph
-         * @deprecated
-         * @description Deprecated. This route delegates to `POST /v1/graphs/{id}/publish`,
-         *     which runs `agentflow.Validator` and writes one immutable revision.
-         */
-        post: operations["publishFlow"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/flows/{flowID}/versions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                flowID: string;
-            };
-            cookie?: never;
-        };
-        /**
-         * Deprecated; delegates to listGraphVersions
-         * @deprecated
-         */
-        get: operations["listFlowVersions"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/flows/{flowID}/runs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                flowID: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Deprecated; delegates to runGraph
-         * @deprecated
-         * @description Deprecated. This route delegates to `POST /v1/graphs/{id}/runs`. The
-         *     Project binding pins the revision; an unpublished, unbound, or disabled
-         *     Graph is rejected instead of falling back to the latest revision.
-         */
-        post: operations["runFlow"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/sessions/{sessionID}/graph-runs": {
         parameters: {
             query?: never;
@@ -2099,12 +1983,11 @@ export interface paths {
         put?: never;
         /**
          * Plan or apply an Agent Pack install
-         * @description Installs Hero-only packs, `format: graph` packs (an unpublished Graph
-         *     draft plus its Graph-private Heroes and Skills), and `format: flow` packs
-         *     (an unpublished full Agent Flow draft plus bundled Heroes/Skills). The
-         *     full-flow draft is validated by the real agentflow.Validator before any
-         *     write. Non-empty `mcp` and `requires` are still refused with a stable
-         *     blocker code instead of being downgraded.
+         * @description Installs Hero-only packs and Graph packs (an unpublished Graph
+         *     draft plus its Graph-private Heroes and Skills). The Graph draft is
+         *     validated by the real agentflow.Validator before any write. Non-empty
+         *     `mcp` and `requires` are still refused with a stable blocker code
+         *     instead of being downgraded.
          *
          *     `dryRun: true` always answers 200 with the plan, blockers included, and
          *     never writes staging, store objects, or state. A real install answers
@@ -3181,32 +3064,12 @@ export interface components {
             hasMore: boolean;
             nextBeforeOrdinal?: number;
         };
-        GlobalFlowSummary: {
-            id: string;
-            path: string;
-            digest?: string;
-            latestVersion: number;
-            taskCount: number;
-            checkTasks: number;
-            fanOutTasks: number;
-            error?: string;
-        };
-        GlobalFlowDetail: {
-            id: string;
-            path: string;
-            digest: string;
-            latestVersion: number;
-            /** @description The canonical Agent Flow FlowDefinition (schemaVersion, id, budget, tasks, convergence, parallelism) */
-            definition: {
-                [key: string]: unknown;
-            };
-        };
         ImmutableFileRevision: {
             /** @enum {integer} */
             schemaVersion: 1;
             resourceId: string;
             /** @enum {string} */
-            sourceKind?: "graph" | "flow";
+            sourceKind?: "graph";
             version: number;
             digest: string;
             heroDigests?: {
@@ -3291,42 +3154,30 @@ export interface components {
             revision: components["schemas"]["ImmutableFileRevision"];
             version: number;
         };
-        /** @description Hero-backed Tasks declare a hero only; inline Tasks declare model with optional thinking and skills. The modes are mutually exclusive and enforced by the Worker. */
+        /** @description One task of a Graph definition. An omitted type is a hero task. A hero task declares a hero; a check task declares a command and optional next routing. */
         GraphTask: {
-            name: string;
             hero?: string;
-            model?: string;
-            thinking?: components["schemas"]["ThinkingEffort"];
             skills?: string[];
-            goal: string;
-            writes?: string[];
+            goal?: string;
+            depends?: string[];
+            /** @enum {string} */
+            type?: "hero" | "check";
+            command?: string;
             budget?: {
                 tokens?: number;
             };
-        };
-        GraphDocument: {
-            /** @enum {integer} */
-            schemaVersion: 1;
-            id: string;
-            name: string;
-            description?: string;
-            tasks: {
-                [key: string]: components["schemas"]["GraphTask"];
-            };
-            graph: {
-                [key: string]: string[];
-            };
+            writes?: string[];
         };
         ProjectGraphBinding: {
             /** @enum {string} */
-            sourceKind?: "graph" | "flow";
+            sourceKind?: "graph";
             graphId: string;
             revision: string;
             enabled: boolean;
         };
         GraphBindingMutation: {
             /** @enum {string} */
-            sourceKind?: "graph" | "flow";
+            sourceKind?: "graph";
             revision?: string;
             enabled: boolean;
             clientRequestId?: string;
@@ -3336,15 +3187,12 @@ export interface components {
             name: string;
             path: string;
             digest?: string;
-            /** @enum {string} */
-            legacyFile?: "flow" | "graph-v1";
             error?: string;
             latestVersion: number;
         };
         GraphDetail: components["schemas"]["GraphSummary"] & {
             digest: string;
-            document?: components["schemas"]["GraphDocument"];
-            /** @description The canonical Agent Flow FlowDefinition (schemaVersion, id, budget, tasks, convergence, parallelism) */
+            /** @description The canonical Graph definition (schemaVersion, id, budget, tasks, convergence, parallelism) */
             definition?: {
                 [key: string]: unknown;
             };
@@ -4155,10 +4003,10 @@ export interface components {
             id: string;
             path: string;
             /**
-             * @description flow: full Agent Flow definition; graph: graphsource hero-task document
+             * @description graph: a Graph definition (check tasks, fan-out, terminal, next routing)
              * @enum {string}
              */
-            format: "flow" | "graph";
+            format: "graph";
             taskCount: number;
             entryTask?: string;
             heroes: string[];
@@ -4274,8 +4122,6 @@ export interface components {
              * @enum {string}
              */
             commitPoint: "state_file";
-            /** @description Always false in S2a; an installed Graph stays an unpublished draft */
-            willPublishFlowRevision: boolean;
             /**
              * @description Reported when the same pack bytes are already installed
              * @enum {string}
@@ -5053,146 +4899,6 @@ export interface operations {
             };
             404: components["responses"]["Error"];
             422: components["responses"]["Error"];
-        };
-    };
-    listFlows: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Flow catalog */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["GlobalFlowSummary"][];
-                    };
-                };
-            };
-        };
-    };
-    getFlow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                flowID: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Parsed Flow draft */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["GlobalFlowDetail"];
-                    };
-                };
-            };
-            404: components["responses"]["Error"];
-        };
-    };
-    publishFlow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                flowID: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Immutable Flow revision */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["ImmutableFileRevision"];
-                    };
-                };
-            };
-            404: components["responses"]["Error"];
-            422: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
-    listFlowVersions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                flowID: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Flow revisions */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["ImmutableFileRevision"][];
-                    };
-                };
-            };
-            404: components["responses"]["Error"];
-        };
-    };
-    runFlow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                flowID: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    sessionId: string;
-                    version?: number;
-                    inputs?: {
-                        [key: string]: unknown;
-                    };
-                    vars?: {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-        responses: {
-            /** @description Durable Flow Run created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope"] & {
-                        data?: components["schemas"]["RunAgentFlow"];
-                    };
-                };
-            };
-            404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            422: components["responses"]["Error"];
-            503: components["responses"]["Error"];
         };
     };
     listSessionGraphRuns: {
@@ -6741,7 +6447,7 @@ export interface operations {
     deleteProjectGraphBinding: {
         parameters: {
             query?: {
-                sourceKind?: "graph" | "flow";
+                sourceKind?: "graph";
             };
             header?: never;
             path: {

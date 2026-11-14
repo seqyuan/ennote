@@ -249,7 +249,6 @@ const installPlan = {
   blockers: [],
   warnings: [{ code: "pack_flow_renamed", severity: "info", message: "flow installed as another Graph" }],
   commitPoint: "state_file",
-  willPublishFlowRevision: false,
   state: {
     stateVersion: 1,
     pack: { id: "seqyuan/cell-qc-review", name: "Cell QC Review", version: "1.3.0" },
@@ -304,11 +303,11 @@ describe("ennote pack install", () => {
   it("surfaces the first install blocker code", async () => {
     const { port } = await startStubWorker(() => ({
       status: 422,
-      body: { error: { code: "pack_flow_format_unsupported", message: "flow \"qc-review\" uses format: flow" } },
+      body: { error: { code: "pack_flow_validation_failed", message: "Graph \"qc-review\" failed validation" } },
     }));
     const endpoint = { url: `http://127.0.0.1:${port}`, token: "secret-token", pid: process.pid };
     await expect(launcher.requestPackInstall(endpoint, "/home/me/sources/cell-qc"))
-      .rejects.toThrow(/format: flow \(pack_flow_format_unsupported\)/);
+      .rejects.toThrow(/failed validation \(pack_flow_validation_failed\)/);
   });
 
   it("lists installed packs over GET with the bearer token", async () => {
@@ -388,12 +387,12 @@ describe("ennote pack install", () => {
       ...installPlan,
       state: undefined,
       actions: [],
-      blockers: [{ code: "pack_flow_format_unsupported", severity: "error", message: "needs S2b" }],
+      blockers: [{ code: "pack_flow_validation_failed", severity: "error", message: "needs validation" }],
       warnings: [],
     }, { dryRun: true });
     expect(blocked).toContain("State:    not written (dry run)");
     expect(blocked).toContain("Blockers (1)");
-    expect(blocked).toContain("pack_flow_format_unsupported (error): needs S2b");
+    expect(blocked).toContain("pack_flow_validation_failed (error): needs validation");
   });
 
   it("prints installed pack summaries", () => {

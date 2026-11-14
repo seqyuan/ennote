@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
+	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,9 +15,9 @@ import (
 
 func TestGraphCreateListUpdateAndConflict(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
-	document, digest, err := store.CreateGraph("rna-seq", "RNA-seq")
+	definition, digest, err := store.CreateGraphDefinition("rna-seq", "RNA-seq")
 	require.NoError(t, err)
-	assert.Empty(t, document.Tasks)
+	assert.Empty(t, definition.Tasks)
 	assert.NotEmpty(t, digest)
 
 	entries, err := store.ListGraphs()
@@ -26,16 +26,15 @@ func TestGraphCreateListUpdateAndConflict(t *testing.T) {
 	assert.Equal(t, "RNA-seq", entries[0].Name)
 	assert.Empty(t, entries[0].Error)
 
-	updated, nextDigest, err := store.UpdateGraph("rna-seq", digest, func(document *graphsource.Document) error {
-		document.Tasks["align"] = graphsource.Task{Name: "Align", Model: "anthropic/claude-sonnet-4", Goal: "Align reads"}
-		document.Graph["align"] = []string{}
+	updated, nextDigest, err := store.UpdateGraphDefinition("rna-seq", digest, func(definition *domain.FlowDefinition) error {
+		definition.Tasks["align"] = domain.FlowTask{Goal: "Align reads"}
 		return nil
 	})
 	require.NoError(t, err)
 	assert.Contains(t, updated.Tasks, "align")
 	assert.NotEqual(t, digest, nextDigest)
 
-	_, currentDigest, err := store.UpdateGraph("rna-seq", digest, func(*graphsource.Document) error { return nil })
+	_, currentDigest, err := store.UpdateGraphDefinition("rna-seq", digest, func(*domain.FlowDefinition) error { return nil })
 	assert.ErrorIs(t, err, ErrConflict)
 	assert.Equal(t, nextDigest, currentDigest)
 }
@@ -43,7 +42,7 @@ func TestGraphCreateListUpdateAndConflict(t *testing.T) {
 func TestGlobalCatalogDoesNotReadGraphPrivateResources(t *testing.T) {
 	home := t.TempDir()
 	store := Store{HomeDir: home}
-	_, _, err := store.CreateGraph("rna-seq", "RNA-seq")
+	_, _, err := store.CreateGraphDefinition("rna-seq", "RNA-seq")
 	require.NoError(t, err)
 	privateHero := filepath.Join(home, "agents", "graphs", "rna-seq", "heroes", "private-hero")
 	require.NoError(t, os.MkdirAll(privateHero, 0o700))
@@ -70,22 +69,22 @@ func TestCatalogRejectsSymlinkedObjectAndSource(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
 	assert.NotEmpty(t, entries[0].Error)
-	assert.Nil(t, entries[0].Document)
+	assert.Nil(t, entries[0].Flow)
 }
 
 func TestStoreRejectsTraversalAndMismatchedDirectoryIdentity(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
-	_, _, err := store.CreateGraph("../escape", "Escape")
+	_, _, err := store.CreateGraphDefinition("../escape", "Escape")
 	require.Error(t, err)
 
-	_, _, err = store.CreateGraph("rna-seq", "RNA-seq")
+	_, _, err = store.CreateGraphDefinition("rna-seq", "RNA-seq")
 	require.NoError(t, err)
 	path := filepath.Join(store.GraphsDir(), "rna-seq", "graph.yaml")
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
-	data = []byte("schema_version: 1\nid: other-graph\nname: Other\ntasks: {}\ngraph: {}\n")
+	data = []byte("schemaVersion: 1\nid: other-graph\nname: Other\nbudget: {max_total_tokens: 1000}\ntasks: {}\n")
 	require.NoError(t, os.WriteFile(path, data, 0o600))
-	_, _, err = store.ReadGraph("rna-seq")
+	_, _, err = store.ReadGraphDefinition("rna-seq")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must match directory")
 }
@@ -125,7 +124,7 @@ func TestStoreReportsCorruptHeroAndGraphAsEntryErrors(t *testing.T) {
 func TestConcurrentUpdateGraphSameDigestSingleWinner(t *testing.T) {
 	const n = 16
 	store := Store{HomeDir: t.TempDir()}
-	_, digest, err := store.CreateGraph("rna-seq", "RNA-seq")
+	_, digest, err := store.CreateGraphDefinition("rna-seq", "RNA-seq")
 	require.NoError(t, err)
 
 	var start sync.WaitGroup
@@ -136,8 +135,8 @@ func TestConcurrentUpdateGraphSameDigestSingleWinner(t *testing.T) {
 		go func() {
 			start.Done()
 			start.Wait()
-			_, _, err := store.UpdateGraph("rna-seq", digest, func(document *graphsource.Document) error {
-				document.Name = fmt.Sprintf("Winner %d", i)
+			_, _, err := store.UpdateGraphDefinition("rna-seq", digest, func(definition *domain.FlowDefinition) error {
+				definition.Name = fmt.Sprintf("Winner %d", i)
 				return nil
 			})
 			results <- err
@@ -154,12 +153,12 @@ func TestConcurrentUpdateGraphSameDigestSingleWinner(t *testing.T) {
 	}
 	require.Equal(t, 1, successes, "exactly one same-digest update must win")
 
-	document, finalDigest, err := store.ReadGraph("rna-seq")
+	definition, finalDigest, err := store.ReadGraphDefinition("rna-seq")
 	require.NoError(t, err)
 	require.NotEqual(t, digest, finalDigest)
 	matched := false
 	for i := 0; i < n; i++ {
-		if document.Name == fmt.Sprintf("Winner %d", i) {
+		if definition.Name == fmt.Sprintf("Winner %d", i) {
 			matched = true
 			break
 		}
@@ -214,9 +213,9 @@ func TestConcurrentUpdateHeroSameDigestSingleWinner(t *testing.T) {
 
 func TestConcurrentUpdatesOnDistinctGraphsBothSucceed(t *testing.T) {
 	store := Store{HomeDir: t.TempDir()}
-	_, digestA, err := store.CreateGraph("graph-a", "A")
+	_, digestA, err := store.CreateGraphDefinition("graph-a", "A")
 	require.NoError(t, err)
-	_, digestB, err := store.CreateGraph("graph-b", "B")
+	_, digestB, err := store.CreateGraphDefinition("graph-b", "B")
 	require.NoError(t, err)
 
 	var start sync.WaitGroup
@@ -225,8 +224,8 @@ func TestConcurrentUpdatesOnDistinctGraphsBothSucceed(t *testing.T) {
 	go func() {
 		start.Done()
 		start.Wait()
-		_, _, err := store.UpdateGraph("graph-a", digestA, func(document *graphsource.Document) error {
-			document.Name = "A-renamed"
+		_, _, err := store.UpdateGraphDefinition("graph-a", digestA, func(definition *domain.FlowDefinition) error {
+			definition.Name = "A-renamed"
 			return nil
 		})
 		results <- err
@@ -234,8 +233,8 @@ func TestConcurrentUpdatesOnDistinctGraphsBothSucceed(t *testing.T) {
 	go func() {
 		start.Done()
 		start.Wait()
-		_, _, err := store.UpdateGraph("graph-b", digestB, func(document *graphsource.Document) error {
-			document.Name = "B-renamed"
+		_, _, err := store.UpdateGraphDefinition("graph-b", digestB, func(definition *domain.FlowDefinition) error {
+			definition.Name = "B-renamed"
 			return nil
 		})
 		results <- err
@@ -244,10 +243,10 @@ func TestConcurrentUpdatesOnDistinctGraphsBothSucceed(t *testing.T) {
 		require.NoError(t, <-results)
 	}
 
-	a, _, err := store.ReadGraph("graph-a")
+	a, _, err := store.ReadGraphDefinition("graph-a")
 	require.NoError(t, err)
 	require.Equal(t, "A-renamed", a.Name)
-	b, _, err := store.ReadGraph("graph-b")
+	b, _, err := store.ReadGraphDefinition("graph-b")
 	require.NoError(t, err)
 	require.Equal(t, "B-renamed", b.Name)
 }
