@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Loader2, Plus, Workflow } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GraphBuilderPanel } from "@/components/graphs/GraphBuilderPanel";
 import { confirmAction } from "@/components/ui/confirm";
 import { GraphDependencies } from "@/components/graphs/GraphDependencies";
@@ -28,6 +28,8 @@ export function AgentFlowSettings({ setError }: { setError: (value: string | nul
   const [addTaskOpen, setAddTaskOpen] = useState(false);
   const [newTask, setNewTask] = useState({ id: "", name: "" });
   const [mobileView, setMobileView] = useState<"tasks" | "graph" | "build">("tasks");
+  // Pairs with the sequence number in openGraph.
+  const openRequestId = useRef(0);
 
   const refreshCatalog = useCallback(async (preferred?: string) => {
     const next = await apiFetch<GraphSummary[]>("/v1/graphs");
@@ -38,6 +40,9 @@ export function AgentFlowSettings({ setError }: { setError: (value: string | nul
   }, []);
 
   const openGraph = useCallback(async (id: string) => {
+    // A tab switched quickly answers out of order; only the newest open may write
+    // the panel, or a stale Graph would replace the one the user selected.
+    const requestId = ++openRequestId.current;
     setBusy("loading");
     setSelected(id);
     setExpanded(null);
@@ -46,14 +51,16 @@ export function AgentFlowSettings({ setError }: { setError: (value: string | nul
         apiFetch<GraphDetail>(`/v1/graphs/${encodeURIComponent(id)}`),
         apiFetch<ImmutableFileRevision[]>(`/v1/graphs/${encodeURIComponent(id)}/versions`),
       ]);
+      if (openRequestId.current !== requestId) return;
       setDetail(next);
       setLatestVersion(versions.reduce((latest, version) => Math.max(latest, version.version), 0));
       setError(null);
     } catch (reason) {
+      if (openRequestId.current !== requestId) return;
       setDetail(null);
       setError((reason as Error).message);
     } finally {
-      setBusy(null);
+      if (openRequestId.current === requestId) setBusy(null);
     }
   }, [setError]);
 
