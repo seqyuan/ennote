@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphrun"
-	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
@@ -64,20 +64,35 @@ func TestServiceFreezesFileNativeGraphRun(t *testing.T) {
 	heroRevision, err := sources.PublishHeroRevision(heroDoc.Handle)
 	require.NoError(t, err)
 
-	_, digest, err := sources.CreateGraph("pipeline", "Pipeline")
+	_, _, err = sources.CreateGraphDefinition("pipeline", "Pipeline")
 	require.NoError(t, err)
-	_, _, err = sources.UpdateGraph("pipeline", digest, func(document *graphsource.Document) error {
-		document.Tasks = map[string]graphsource.Task{
-			"produce": {Name: "Produce", Model: model.ID, Goal: "Produce an artifact listing for {inputs.target}", Budget: &graphsource.TaskBudget{Tokens: 1000}},
-			"review":  {Name: "Review", Hero: "global/reviewer", Goal: "Review the produced artifact and submit a verdict"},
-		}
-		document.Graph = map[string][]string{
-			"produce": {},
-			"review":  {"produce"},
-		}
-		return nil
+	_, err = sources.CreateGraphHero("pipeline", &heroesource.Document{
+		SchemaVersion: 1, Handle: "producer", Name: "Producer",
+		Model:  heroesource.ModelBinding{Ref: model.ID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills: []heroesource.SkillBinding{}, Authority: heroesource.AuthorityReadOnly,
+		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read"},
+		Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextTask,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextTask}, OwnExecutionContinuity: domain.HeroContinuityNone},
+		Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
+			MaxInvocationsPerParentRun: 2, MaxConcurrentInstances: 1,
+			BudgetCeiling: heroesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
+				MaxTotalTokens: 20000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 120000}},
+		OutputContract: "text-v1", MaxLoopIterations: 8, Prompt: "Produce the listing.",
 	})
 	require.NoError(t, err)
+	definition := &domain.FlowDefinition{
+		SchemaVersion: domain.FlowSchemaVersion, ID: "pipeline", Name: "Pipeline",
+		Inputs: map[string]domain.FlowPort{"target": {Type: domain.PortTypeString, Required: true}},
+		Budget: domain.FlowBudget{MaxTotalTokens: 40000},
+		Tasks: map[string]domain.FlowTask{
+			"produce": {Type: domain.FlowTaskHero, Hero: "local/producer", Goal: "Produce an artifact listing for {inputs.target}", Budget: &domain.FlowTaskBudget{Tokens: 1000}},
+			"review":  {Type: domain.FlowTaskHero, Hero: "global/reviewer", Goal: "Review the produced artifact and submit a verdict", Depends: []string{"produce"}},
+		},
+	}
+	encoded, err := agentflow.DefinitionToYAML(definition)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(sources.GraphsDir(), "pipeline", "graph.yaml"), encoded, 0o600))
 	graphRevision, err := sources.PublishGraphRevision("pipeline")
 	require.NoError(t, err)
 
@@ -88,11 +103,16 @@ func TestServiceFreezesFileNativeGraphRun(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, sessions.Close()) })
 	session, err := sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID, Title: "Session"})
 	require.NoError(t, err)
+	_, err = projects.UpdateGraphBindings(ctx, project.ID, func(bindings *[]projectstore.GraphBinding) error {
+		*bindings = append(*bindings, projectstore.GraphBinding{SourceKind: projectstore.SourceKindGraph, GraphID: "pipeline", Revision: graphRevision.ID(), Enabled: true})
+		return nil
+	})
+	require.NoError(t, err)
 
 	var startedDB *sql.DB
 	var startedRunID string
 	service := &graphrun.Service{
-		Sources: sources, Models: &store.ModelRepo{Files: models}, Sessions: sessions,
+		Sources: sources, Models: &store.ModelRepo{Files: models}, Sessions: sessions, Projects: projects,
 		OnRunStarted: func(ctx context.Context, db *sql.DB, sessionPath, runID string) error {
 			startedDB = db
 			startedRunID = runID
@@ -125,7 +145,7 @@ func TestServiceFreezesFileNativeGraphRun(t *testing.T) {
 		FROM run_agent_flow_nodes WHERE run_id=? AND task_index=0`, run.RunID).
 		Scan(&handle, &heroVersionID, &heroDefJSON, &skillJSON))
 	assert.Equal(t, "produce", handle)
-	assert.Contains(t, heroVersionID, "inline:produce@")
+	assert.Contains(t, heroVersionID, "graph:pipeline/producer@sha256:")
 	var inlineDef domain.HeroDefinition
 	require.NoError(t, json.Unmarshal([]byte(heroDefJSON), &inlineDef))
 	assert.Equal(t, model.ID, inlineDef.ModelBinding.ModelProfileID)
@@ -170,7 +190,7 @@ func TestServiceFreezesGraphLocalHero(t *testing.T) {
 	})
 	require.NoError(t, err)
 	sources := &globalsource.Store{HomeDir: home}
-	_, _, err = sources.CreateGraph("pipeline", "Pipeline")
+	_, _, err = sources.CreateGraphDefinition("pipeline", "Pipeline")
 	require.NoError(t, err)
 	localHero := &heroesource.Document{
 		SchemaVersion: 1, Handle: "local_reviewer", Name: "Local Reviewer",
@@ -202,23 +222,23 @@ func TestServiceFreezesGraphLocalHero(t *testing.T) {
 	session, err := sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID, Title: "Session"})
 	require.NoError(t, err)
 
-	// Add a task referencing the graph-local hero, then publish a revision.
-	current, _, err := sources.ReadGraph("pipeline")
+	definition := &domain.FlowDefinition{
+		SchemaVersion: domain.FlowSchemaVersion, ID: "pipeline", Name: "Pipeline",
+		Budget: domain.FlowBudget{MaxTotalTokens: 20000},
+		Tasks:  map[string]domain.FlowTask{"local_check": {Type: domain.FlowTaskHero, Hero: "local/local_reviewer", Goal: "Verify locally"}},
+	}
+	definitionYAML, err := agentflow.DefinitionToYAML(definition)
 	require.NoError(t, err)
-	currentDigest, err := graphsource.SourceDigest(current)
+	require.NoError(t, os.WriteFile(filepath.Join(sources.GraphsDir(), "pipeline", "graph.yaml"), definitionYAML, 0o600))
+	revision, err := sources.PublishGraphRevision("pipeline")
 	require.NoError(t, err)
-	_, _, err = sources.UpdateGraph("pipeline", currentDigest, func(document *graphsource.Document) error {
-		document.Tasks = map[string]graphsource.Task{
-			"local_check": {Name: "Local Check", Hero: "local/local_reviewer", Goal: "Verify locally"},
-		}
-		document.Graph = map[string][]string{"local_check": {}}
+	_, err = projects.UpdateGraphBindings(ctx, project.ID, func(bindings *[]projectstore.GraphBinding) error {
+		*bindings = append(*bindings, projectstore.GraphBinding{SourceKind: projectstore.SourceKindGraph, GraphID: "pipeline", Revision: revision.ID(), Enabled: true})
 		return nil
 	})
 	require.NoError(t, err)
-	revision, err := sources.PublishGraphRevision("pipeline")
-	require.NoError(t, err)
 
-	service := &graphrun.Service{Sources: sources, Models: &store.ModelRepo{Files: models}, Sessions: sessions}
+	service := &graphrun.Service{Sources: sources, Models: &store.ModelRepo{Files: models}, Sessions: sessions, Projects: projects}
 	run, err := service.Start(ctx, project.ID, "pipeline", 0, session.ID, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, graphrun.FlowVersionID("pipeline", revision.ID()), run.FlowVersionID)
@@ -270,18 +290,32 @@ func newSkillGraphFixture(t *testing.T, globalSkills map[string]string) *skillGr
 	require.NoError(t, err)
 
 	sources := &globalsource.Store{HomeDir: home}
-	_, _, err = sources.CreateGraph("pinned", "Pinned")
+	_, _, err = sources.CreateGraphDefinition("pinned", "Pinned")
 	require.NoError(t, err)
-	_, _, err = sources.UpdateGraph("pinned", mustGraphDigest(t, sources), func(document *graphsource.Document) error {
-		document.Tasks = map[string]graphsource.Task{
-			"build": {Name: "Build", Model: model.ID, Goal: "Build it",
-				Skills: []string{"global/go-dev"}},
-		}
-		document.Graph = map[string][]string{"build": {}}
-		return nil
+	_, err = sources.CreateGraphHero("pinned", &heroesource.Document{
+		SchemaVersion: 1, Handle: "builder", Name: "Builder",
+		Model:  heroesource.ModelBinding{Ref: model.ID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
+		Skills: []heroesource.SkillBinding{}, Authority: heroesource.AuthorityReadOnly,
+		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read"},
+		Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextTask,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextTask}, OwnExecutionContinuity: domain.HeroContinuityNone},
+		Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
+			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
+			MaxInvocationsPerParentRun: 2, MaxConcurrentInstances: 1,
+			BudgetCeiling: heroesource.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
+				MaxTotalTokens: 20000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 120000}},
+		OutputContract: "text-v1", MaxLoopIterations: 8, Prompt: "Build it.",
 	})
 	require.NoError(t, err)
-	_, err = sources.PublishGraphRevision("pinned")
+	definition := &domain.FlowDefinition{
+		SchemaVersion: domain.FlowSchemaVersion, ID: "pinned", Name: "Pinned",
+		Budget: domain.FlowBudget{MaxTotalTokens: 20000},
+		Tasks:  map[string]domain.FlowTask{"build": {Type: domain.FlowTaskHero, Hero: "local/builder", Goal: "Build it", Skills: []string{"global/go-dev"}}},
+	}
+	encoded, err := agentflow.DefinitionToYAML(definition)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(sources.GraphsDir(), "pinned", "graph.yaml"), encoded, 0o600))
+	revision, err := sources.PublishGraphRevision("pinned")
 	require.NoError(t, err)
 
 	projects := &projectstore.Store{Root: filepath.Join(home, "projects")}
@@ -291,21 +325,17 @@ func newSkillGraphFixture(t *testing.T, globalSkills map[string]string) *skillGr
 	t.Cleanup(func() { require.NoError(t, sessions.Close()) })
 	session, err := sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID, Title: "Session"})
 	require.NoError(t, err)
+	_, err = projects.UpdateGraphBindings(ctx, project.ID, func(bindings *[]projectstore.GraphBinding) error {
+		*bindings = append(*bindings, projectstore.GraphBinding{SourceKind: projectstore.SourceKindGraph, GraphID: "pinned", Revision: revision.ID(), Enabled: true})
+		return nil
+	})
+	require.NoError(t, err)
 
 	return &skillGraphFixture{
 		service: &graphrun.Service{Sources: sources, Models: &store.ModelRepo{Files: models},
-			Sessions: sessions, GlobalSkills: globalSkills},
+			Sessions: sessions, Projects: projects, GlobalSkills: globalSkills},
 		sessions: sessions, projectID: project.ID, sessionID: session.ID,
 	}
-}
-
-func mustGraphDigest(t *testing.T, sources *globalsource.Store) string {
-	t.Helper()
-	current, _, err := sources.ReadGraph("pinned")
-	require.NoError(t, err)
-	digest, err := graphsource.SourceDigest(current)
-	require.NoError(t, err)
-	return digest
 }
 
 func TestServiceFreezesGlobalTaskSkillContentDigest(t *testing.T) {
@@ -455,6 +485,7 @@ type localGraphRunFixture struct {
 	sources   *globalsource.Store
 	files     *fileconfig.ModelStore
 	sessions  *sessionstore.Manager
+	projects  *projectstore.Store
 	projectID string
 	sessionID string
 	modelID   string
@@ -491,13 +522,41 @@ func newLocalGraphRunFixture(t *testing.T) *localGraphRunFixture {
 	require.NoError(t, err)
 
 	return &localGraphRunFixture{
-		ctx: ctx, home: home, sources: sources, files: files, sessions: sessions,
+		ctx: ctx, home: home, sources: sources, files: files, sessions: sessions, projects: projects,
 		projectID: project.ID, sessionID: session.ID, modelID: model.ID,
 	}
 }
 
 func (f *localGraphRunFixture) service() *graphrun.Service {
-	return &graphrun.Service{Sources: f.sources, Models: &store.ModelRepo{Files: f.files}, Sessions: f.sessions}
+	return &graphrun.Service{Sources: f.sources, Models: &store.ModelRepo{Files: f.files}, Sessions: f.sessions, Projects: f.projects}
+}
+
+// writeDefinition replaces the draft graph.yaml with one definition whose tasks
+// are the ones under test. The budget covers any of them.
+func (f *localGraphRunFixture) writeDefinition(t *testing.T, id string, tasks map[string]domain.FlowTask) {
+	t.Helper()
+	definition := &domain.FlowDefinition{
+		SchemaVersion: domain.FlowSchemaVersion, ID: id, Name: id,
+		Budget: domain.FlowBudget{MaxTotalTokens: 80000}, Tasks: tasks,
+	}
+	encoded, err := agentflow.DefinitionToYAML(definition)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(f.sources.GraphsDir(), id, "graph.yaml"), encoded, 0o600))
+}
+
+// publishBound publishes the draft and pins the Project binding to it.
+func (f *localGraphRunFixture) publishBound(t *testing.T, id string) *globalsource.Revision {
+	t.Helper()
+	revision, err := f.sources.PublishGraphRevision(id)
+	require.NoError(t, err)
+	_, err = f.projects.UpdateGraphBindings(f.ctx, f.projectID, func(bindings *[]projectstore.GraphBinding) error {
+		*bindings = append(*bindings, projectstore.GraphBinding{
+			SourceKind: projectstore.SourceKindGraph, GraphID: id, Revision: revision.ID(), Enabled: true,
+		})
+		return nil
+	})
+	require.NoError(t, err)
+	return revision
 }
 
 func (f *localGraphRunFixture) localHero(handle, prompt string) *heroesource.Document {
@@ -569,20 +628,14 @@ func writeLocalSkill(t *testing.T, home, graphID, skillID, body string) string {
 
 func TestServiceFreezesPublishedLocalHeroAgainstDraftEdit(t *testing.T) {
 	f := newLocalGraphRunFixture(t)
-	_, digest, err := f.sources.CreateGraph("pipeline", "Pipeline")
+	_, _, err := f.sources.CreateGraphDefinition("pipeline", "Pipeline")
 	require.NoError(t, err)
 	publishedDigest, err := f.sources.CreateGraphHero("pipeline", f.localHero("reviewer", "Published prompt."))
 	require.NoError(t, err)
-	_, _, err = f.sources.UpdateGraph("pipeline", digest, func(document *graphsource.Document) error {
-		document.Tasks = map[string]graphsource.Task{
-			"review": {Name: "Review", Hero: "local/reviewer", Goal: "Review"},
-		}
-		document.Graph = map[string][]string{"review": {}}
-		return nil
+	f.writeDefinition(t, "pipeline", map[string]domain.FlowTask{
+		"review": {Type: domain.FlowTaskHero, Hero: "local/reviewer", Goal: "Review"},
 	})
-	require.NoError(t, err)
-	revision, err := f.sources.PublishGraphRevision("pipeline")
-	require.NoError(t, err)
+	revision := f.publishBound(t, "pipeline")
 	require.Equal(t, publishedDigest, revision.HeroDigests["reviewer"])
 
 	// Edit the mutable draft after publishing; the frozen revision must win.
@@ -598,19 +651,15 @@ func TestServiceFreezesPublishedLocalHeroAgainstDraftEdit(t *testing.T) {
 
 func TestServiceFreezesPublishedLocalSkillAgainstDraftEdit(t *testing.T) {
 	f := newLocalGraphRunFixture(t)
-	_, digest, err := f.sources.CreateGraph("pipeline", "Pipeline")
+	_, _, err := f.sources.CreateGraphDefinition("pipeline", "Pipeline")
+	require.NoError(t, err)
+	_, err = f.sources.CreateGraphHero("pipeline", f.localHero("builder", "Build it."))
 	require.NoError(t, err)
 	skillDir := writeLocalSkill(t, f.home, "pipeline", "tools", "Published tools.")
-	_, _, err = f.sources.UpdateGraph("pipeline", digest, func(document *graphsource.Document) error {
-		document.Tasks = map[string]graphsource.Task{
-			"build": {Name: "Build", Model: f.modelID, Goal: "Build", Skills: []string{"local/tools"}},
-		}
-		document.Graph = map[string][]string{"build": {}}
-		return nil
+	f.writeDefinition(t, "pipeline", map[string]domain.FlowTask{
+		"build": {Type: domain.FlowTaskHero, Hero: "local/builder", Goal: "Build", Skills: []string{"local/tools"}},
 	})
-	require.NoError(t, err)
-	revision, err := f.sources.PublishGraphRevision("pipeline")
-	require.NoError(t, err)
+	revision := f.publishBound(t, "pipeline")
 	require.Contains(t, revision.SkillDigests, "tools")
 
 	// Edit the mutable draft SKILL.md after publishing.
@@ -626,20 +675,14 @@ func TestServiceFreezesPublishedLocalSkillAgainstDraftEdit(t *testing.T) {
 
 func TestServiceLegacyRevisionStillReadsLocalDraft(t *testing.T) {
 	f := newLocalGraphRunFixture(t)
-	_, digest, err := f.sources.CreateGraph("pipeline", "Pipeline")
+	_, _, err := f.sources.CreateGraphDefinition("pipeline", "Pipeline")
 	require.NoError(t, err)
 	_, err = f.sources.CreateGraphHero("pipeline", f.localHero("reviewer", "Published prompt."))
 	require.NoError(t, err)
-	_, _, err = f.sources.UpdateGraph("pipeline", digest, func(document *graphsource.Document) error {
-		document.Tasks = map[string]graphsource.Task{
-			"review": {Name: "Review", Hero: "local/reviewer", Goal: "Review"},
-		}
-		document.Graph = map[string][]string{"review": {}}
-		return nil
+	f.writeDefinition(t, "pipeline", map[string]domain.FlowTask{
+		"review": {Type: domain.FlowTaskHero, Hero: "local/reviewer", Goal: "Review"},
 	})
-	require.NoError(t, err)
-	revision, err := f.sources.PublishGraphRevision("pipeline")
-	require.NoError(t, err)
+	revision := f.publishBound(t, "pipeline")
 	require.Contains(t, revision.HeroDigests, "reviewer")
 
 	// Rewrite the metadata into the pre-freeze shape: no Hero/Skill digests.
@@ -660,32 +703,89 @@ func TestServiceLegacyRevisionStillReadsLocalDraft(t *testing.T) {
 
 func TestServiceFrozenRevisionMissingLocalHeroFailsClosed(t *testing.T) {
 	f := newLocalGraphRunFixture(t)
-	_, digest, err := f.sources.CreateGraph("pipeline", "Pipeline")
+	_, _, err := f.sources.CreateGraphDefinition("pipeline", "Pipeline")
 	require.NoError(t, err)
 	_, err = f.sources.CreateGraphHero("pipeline", f.localHero("reviewer", "Published prompt."))
 	require.NoError(t, err)
+	_, err = f.sources.CreateGraphHero("pipeline", f.localHero("builder", "Build it."))
+	require.NoError(t, err)
 	writeLocalSkill(t, f.home, "pipeline", "tools", "Published tools.")
-	_, _, err = f.sources.UpdateGraph("pipeline", digest, func(document *graphsource.Document) error {
-		document.Tasks = map[string]graphsource.Task{
-			"review": {Name: "Review", Hero: "local/reviewer", Goal: "Review"},
-			"build":  {Name: "Build", Model: f.modelID, Goal: "Build", Skills: []string{"local/tools"}},
-		}
-		document.Graph = map[string][]string{"review": {}, "build": {}}
-		return nil
+	f.writeDefinition(t, "pipeline", map[string]domain.FlowTask{
+		"review": {Type: domain.FlowTaskHero, Hero: "local/reviewer", Goal: "Review"},
+		"build":  {Type: domain.FlowTaskHero, Hero: "local/builder", Goal: "Build", Skills: []string{"local/tools"}},
 	})
-	require.NoError(t, err)
-	revision, err := f.sources.PublishGraphRevision("pipeline")
-	require.NoError(t, err)
+	revision := f.publishBound(t, "pipeline")
 	require.Contains(t, revision.HeroDigests, "reviewer")
 	require.Contains(t, revision.SkillDigests, "tools")
 
-	// Drop only the Hero digest: the Skill keeps the revision frozen, but the
+	// Drop only the reviewer digest: the Skill keeps the revision frozen, but the
 	// referenced local Hero is absent from the bundle and must fail closed.
 	f.rewriteRevisionJSON(t, "pipeline", revision.ID(), func(metadata map[string]any) {
-		delete(metadata, "heroDigests")
+		heroes, _ := metadata["heroDigests"].(map[string]any)
+		delete(heroes, "reviewer")
 	})
 
 	_, err = f.service().Start(f.ctx, f.projectID, "pipeline", 0, f.sessionID, nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `revision v000001 local Hero "reviewer" missing from frozen bundle`)
+}
+
+func TestStartFreezesDefinition(t *testing.T) {
+	fixture := newFlowRunFixture(t)
+	definition := &domain.FlowDefinition{
+		SchemaVersion: domain.FlowSchemaVersion, ID: "qc", Name: "QC",
+		Budget: domain.FlowBudget{MaxTotalTokens: 1000},
+		Tasks: map[string]domain.FlowTask{
+			"review": {Type: domain.FlowTaskHero, Hero: "local/reviewer", Goal: "Review"},
+			"gate":   {Type: domain.FlowTaskCheck, Command: "go test ./...", Depends: []string{"review"}},
+		},
+	}
+	_, _, err := fixture.sources.CreateGraphDefinition("qc", "QC")
+	require.NoError(t, err)
+	_, err = fixture.sources.CreateGraphHero("qc", fixture.localHero(t, "reviewer", heroesource.AuthorityReadOnly, []string{"read"}, "prompt"))
+	require.NoError(t, err)
+	encoded, err := agentflow.DefinitionToYAML(definition)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(fixture.sources.GraphsDir(), "qc", "graph.yaml"), encoded, 0o600))
+	revision, err := fixture.sources.PublishGraphRevision("qc")
+	require.NoError(t, err)
+	fixture.bindKind(t, projectstore.SourceKindGraph, "qc", revision.ID(), true)
+
+	service := &graphrun.Service{Sources: fixture.sources, Models: fixture.models, Sessions: fixture.sessions, Projects: fixture.projects}
+	run, err := service.Start(context.Background(), fixture.projectID, "qc", 1, fixture.sessionID, nil, nil)
+	require.NoError(t, err)
+
+	db, err := fixture.sessions.OpenSession(context.Background(), fixture.sessionID)
+	require.NoError(t, err)
+	var definitionJSON string
+	require.NoError(t, db.QueryRow(`SELECT definition_json FROM run_agent_flow WHERE run_id=?`, run.RunID).Scan(&definitionJSON))
+	var frozen domain.FlowDefinition
+	require.NoError(t, json.Unmarshal([]byte(definitionJSON), &frozen))
+	assert.Equal(t, int64(1000), frozen.Budget.MaxTotalTokens)
+
+	nodes, err := (&store.AgentFlowRunRepo{DB: db}).ListNodes(context.Background(), run.RunID)
+	require.NoError(t, err)
+	handles := map[string]bool{}
+	for _, node := range nodes {
+		handles[node.Handle] = true
+	}
+	assert.True(t, handles["gate"], "the check task must freeze a node")
+}
+
+func TestStartRequiresBinding(t *testing.T) {
+	fixture := newFlowRunFixture(t)
+	_, _, err := fixture.sources.CreateGraphDefinition("qc", "QC")
+	require.NoError(t, err)
+	_, err = fixture.sources.PublishGraphRevision("qc")
+	require.NoError(t, err)
+	service := &graphrun.Service{Sources: fixture.sources, Models: fixture.models, Sessions: fixture.sessions, Projects: fixture.projects}
+
+	_, err = service.Start(context.Background(), fixture.projectID, "qc", 0, fixture.sessionID, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "graph_binding_required")
+
+	fixture.bindKind(t, projectstore.SourceKindGraph, "qc", "v000001", true)
+	_, err = service.Start(context.Background(), fixture.projectID, "qc", 2, fixture.sessionID, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "graph_binding_revision_mismatch")
 }

@@ -3,14 +3,15 @@ package graphrun_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphrun"
-	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
@@ -74,12 +75,11 @@ func TestServiceFreezeMatchesSharedReadOnlyClassifier(t *testing.T) {
 	require.NoError(t, err)
 
 	sources := &globalsource.Store{HomeDir: home}
-	_, _, err = sources.CreateGraph("pipeline", "Pipeline")
+	_, _, err = sources.CreateGraphDefinition("pipeline", "Pipeline")
 	require.NoError(t, err)
 
 	// One read_only Hero per matrix row, each allowed exactly {read, <tool>}.
-	tasks := make(map[string]graphsource.Task, len(schedulingToolMatrix))
-	deps := make(map[string][]string, len(schedulingToolMatrix))
+	tasks := make(map[string]domain.FlowTask, len(schedulingToolMatrix))
 	for index, tc := range schedulingToolMatrix {
 		handle := fmt.Sprintf("sched_%02d", index)
 		allowed := []string{"read"}
@@ -107,23 +107,17 @@ func TestServiceFreezeMatchesSharedReadOnlyClassifier(t *testing.T) {
 		require.NoError(t, err)
 
 		taskName := fmt.Sprintf("task_%02d", index)
-		tasks[taskName] = graphsource.Task{
-			Name: taskName, Hero: "global/" + handle, Goal: "Classify " + tc.tool,
-		}
-		deps[taskName] = []string{}
+		tasks[taskName] = domain.FlowTask{Type: domain.FlowTaskHero, Hero: "global/" + handle, Goal: "Classify " + tc.tool}
 	}
 
-	current, _, err := sources.ReadGraph("pipeline")
+	definition := &domain.FlowDefinition{
+		SchemaVersion: domain.FlowSchemaVersion, ID: "pipeline", Name: "Pipeline",
+		Budget: domain.FlowBudget{MaxTotalTokens: 1000000}, Tasks: tasks,
+	}
+	encoded, err := agentflow.DefinitionToYAML(definition)
 	require.NoError(t, err)
-	digest, err := graphsource.SourceDigest(current)
-	require.NoError(t, err)
-	_, _, err = sources.UpdateGraph("pipeline", digest, func(document *graphsource.Document) error {
-		document.Tasks = tasks
-		document.Graph = deps
-		return nil
-	})
-	require.NoError(t, err)
-	_, err = sources.PublishGraphRevision("pipeline")
+	require.NoError(t, os.WriteFile(filepath.Join(sources.GraphsDir(), "pipeline", "graph.yaml"), encoded, 0o600))
+	revision, err := sources.PublishGraphRevision("pipeline")
 	require.NoError(t, err)
 
 	projects := &projectstore.Store{Root: filepath.Join(home, "projects")}
@@ -133,8 +127,13 @@ func TestServiceFreezeMatchesSharedReadOnlyClassifier(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, sessions.Close()) })
 	session, err := sessions.Create(ctx, domain.CreateSessionInput{ProjectID: project.ID, Title: "Session"})
 	require.NoError(t, err)
+	_, err = projects.UpdateGraphBindings(ctx, project.ID, func(bindings *[]projectstore.GraphBinding) error {
+		*bindings = append(*bindings, projectstore.GraphBinding{SourceKind: projectstore.SourceKindGraph, GraphID: "pipeline", Revision: revision.ID(), Enabled: true})
+		return nil
+	})
+	require.NoError(t, err)
 
-	service := &graphrun.Service{Sources: sources, Models: &store.ModelRepo{Files: models}, Sessions: sessions}
+	service := &graphrun.Service{Sources: sources, Models: &store.ModelRepo{Files: models}, Sessions: sessions, Projects: projects}
 	run, err := service.Start(ctx, project.ID, "pipeline", 0, session.ID, nil, nil)
 	require.NoError(t, err)
 

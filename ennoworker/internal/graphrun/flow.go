@@ -3,9 +3,7 @@ package graphrun
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,111 +12,35 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
-	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 )
 
-// StartFlow freezes and starts one full Agent Flow from the Project's pinned
-// binding revision. Publishing and enabling are separate: an unpublished,
-// unbound, disabled, or mismatched binding is rejected before any child Run.
+// localHeroVersionID names the frozen local Hero. A graph.yaml object uses the
+// graph prefix; a flow.yaml object keeps the historical flow prefix so a Run
+// frozen before the rename still identifies the same resource.
+func (s *Service) localHeroVersionID(sourceID, heroID, digest string) string {
+	kind := "graph"
+	if s.Sources != nil {
+		if sourceKind, err := s.Sources.SourceKind(sourceID); err == nil && sourceKind == globalsource.SourceKindFlow {
+			kind = "flow"
+		}
+	}
+	return kind + ":" + sourceID + "/" + heroID + "@" + digest
+}
+
+// StartFlow is the historical entry point for a flow revision. It uses the
+// same freeze as Start: a Project binding pinned to the revision, then the
+// published definition.
 func (s *Service) StartFlow(ctx context.Context, projectID, flowID string, version int, sessionID string,
 	inputs, vars map[string]any) (*domain.RunAgentFlow, error) {
-	if s.Sources == nil || s.Models == nil || s.Sessions == nil {
-		return nil, fmt.Errorf("Flow runner is not configured")
-	}
-	session, err := s.Sessions.FindByID(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	if session.ProjectID != projectID {
-		return nil, fmt.Errorf("Session %s does not belong to Project %s", sessionID, projectID)
-	}
-	revisionID, err := s.flowBindingRevision(ctx, projectID, flowID, version)
-	if err != nil {
-		return nil, err
-	}
-	definition, heroes, revision, err := s.Sources.ReadFlowRevision(flowID, revisionID)
-	if err != nil {
-		return nil, err
-	}
-	inputsJSON, err := store.NormalizeFlowInputs(definition, inputs, vars)
-	if err != nil {
-		return nil, err
-	}
-	freeze, err := s.freezeFlow(ctx, flowID, definition, heroes)
-	if err != nil {
-		return nil, err
-	}
-	definitionJSON, err := json.Marshal(definition)
-	if err != nil {
-		return nil, err
-	}
-	db, err := s.Sessions.OpenSession(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	runRepo := &store.AgentFlowRunRepo{DB: db}
-	run, err := runRepo.CreateFlowRun(ctx, store.CreateFlowRunInput{
-		SessionID: sessionID, ProjectID: projectID,
-		FlowVersionID:  FlowVersionID(flowID, revisionID),
-		DefinitionJSON: definitionJSON, ConfigDigest: revision.Digest,
-		InputsJSON: inputsJSON,
-	}, freeze)
-	if err != nil {
-		return nil, err
-	}
-	if s.OnRunStarted != nil {
-		sessionPath, pathErr := s.Sessions.SessionPath(sessionID)
-		if pathErr != nil {
-			return nil, pathErr
-		}
-		if err := s.OnRunStarted(ctx, db, sessionPath, run.RunID); err != nil {
-			return nil, err
-		}
-	}
-	return run, nil
+	return s.Start(ctx, projectID, flowID, version, sessionID, inputs, vars)
 }
 
-// flowBindingRevision resolves the exact revision a Project enabled. A missing
-// or disabled binding is a hard error: flow Runs never fall back to "latest".
-func (s *Service) flowBindingRevision(ctx context.Context, projectID, flowID string, version int) (string, error) {
-	if s.Projects == nil {
-		return "", fmt.Errorf("flow_binding_unavailable: project bindings are not configured")
-	}
-	binding, err := s.Projects.FindGraphBinding(ctx, projectID, projectstore.SourceKindFlow, flowID)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("flow_binding_required: flow %q is not enabled in this Project", flowID)
-		}
-		return "", err
-	}
-	if !binding.Enabled {
-		return "", fmt.Errorf("flow_binding_disabled: flow %q is disabled in this Project", flowID)
-	}
-	if binding.Revision == "" {
-		return "", fmt.Errorf("flow_binding_revision_missing: flow %q has no pinned revision", flowID)
-	}
-	if version > 0 {
-		pinned, err := revisionVersion(binding.Revision)
-		if err != nil || pinned != version {
-			return "", fmt.Errorf("flow_binding_revision_mismatch: binding pins %s, requested v%06d", binding.Revision, version)
-		}
-	}
-	return binding.Revision, nil
-}
-
-func revisionVersion(revisionID string) (int, error) {
-	if !strings.HasPrefix(revisionID, "v") {
-		return 0, fmt.Errorf("invalid revision id %q", revisionID)
-	}
-	return strconv.Atoi(strings.TrimPrefix(revisionID, "v"))
-}
-
-// freezeFlow snapshots every task, including check and terminal gates. The
-// graph freeze path (freezeTasks) is deliberately unchanged; this is the same
-// run_agent_flow_nodes contract with full-flow task types.
-func (s *Service) freezeFlow(ctx context.Context, flowID string, definition *domain.FlowDefinition,
-	bundledHeroes map[string]*heroesource.Document) ([]store.FlowNodeFreeze, error) {
+// freezeDefinition snapshots every task, including check and terminal gates.
+// It is the only freeze: a Graph Run and a legacy flow Run both write the same
+// run_agent_flow_nodes contract.
+func (s *Service) freezeDefinition(ctx context.Context, flowID string, definition *domain.FlowDefinition,
+	bundledHeroes map[string]*heroesource.Document, bundle *globalsource.GraphRevisionBundle) ([]store.FlowNodeFreeze, error) {
 	order, err := agentflow.TaskOrder(definition)
 	if err != nil {
 		return nil, err
@@ -155,7 +77,7 @@ func (s *Service) freezeFlow(ctx context.Context, flowID string, definition *dom
 		if task.Type != domain.FlowTaskHero {
 			return nil, fmt.Errorf("Task %q: unsupported type %q", name, task.Type)
 		}
-		hero, globalSkills, err := s.freezeFlowHero(ctx, flowID, name, task, bundledHeroes, skillCatalog)
+		hero, globalSkills, err := s.freezeFlowHero(ctx, flowID, name, task, bundledHeroes, skillCatalog, bundle)
 		if err != nil {
 			return nil, fmt.Errorf("Task %q: %w", name, err)
 		}
@@ -200,7 +122,7 @@ func (s *Service) freezeFlow(ctx context.Context, flowID string, definition *dom
 }
 
 func (s *Service) freezeFlowHero(ctx context.Context, flowID, taskID string, task domain.FlowTask,
-	bundled map[string]*heroesource.Document, skillCatalog map[string]string) (*frozenTaskHero, domain.FrozenSkillRefs, error) {
+	bundled map[string]*heroesource.Document, skillCatalog map[string]string, bundle *globalsource.GraphRevisionBundle) (*frozenTaskHero, domain.FrozenSkillRefs, error) {
 	ref := strings.TrimSpace(task.Hero)
 	if ref == "" {
 		return nil, nil, fmt.Errorf("hero is required")
@@ -217,11 +139,24 @@ func (s *Service) freezeFlowHero(ctx context.Context, flowID, taskID string, tas
 		id := strings.TrimSpace(strings.TrimPrefix(handle, "local/"))
 		bundledDocument, ok := bundled[id]
 		if !ok {
-			return nil, nil, fmt.Errorf("flow-local Hero %q is not present in the published revision bundle", id)
+			// A revision that recorded any local digest is frozen. A missing Hero
+			// then fails closed. A revision with no local digests is the historical
+			// shape and still reads the mutable draft.
+			if bundle != nil && bundle.Frozen {
+				return nil, nil, fmt.Errorf("revision %s local Hero %q missing from frozen bundle", bundle.Revision.ID(), id)
+			}
+			draft, draftDigest, err := s.Sources.ReadGraphHero(flowID, id)
+			if err != nil {
+				return nil, nil, fmt.Errorf("flow-local Hero %q is not present in the published revision bundle", id)
+			}
+			bundledDocument, ok, digest = draft, true, draftDigest
+			_ = ok
 		}
 		document = bundledDocument
-		digest, _ = heroesource.SourceDigest(document)
-		versionID = "flow:" + flowID + "/" + id + "@" + digest
+		if digest == "" {
+			digest, _ = heroesource.SourceDigest(document)
+		}
+		versionID = s.localHeroVersionID(flowID, id, digest)
 	case strings.HasPrefix(handle, "global/"):
 		id := strings.TrimSpace(strings.TrimPrefix(handle, "global/"))
 		doc, revision, err := s.flowGlobalHero(id, versionText, hasVersion)
@@ -234,7 +169,7 @@ func (s *Service) freezeFlowHero(ctx context.Context, flowID, taskID string, tas
 			if bundledDocument, ok := bundled[handle]; ok {
 				document = bundledDocument
 				digest, _ = heroesource.SourceDigest(document)
-				versionID = "flow:" + flowID + "/" + handle + "@" + digest
+				versionID = s.localHeroVersionID(flowID, handle, digest)
 				break
 			}
 		}
@@ -244,11 +179,11 @@ func (s *Service) freezeFlowHero(ctx context.Context, flowID, taskID string, tas
 		}
 		document, versionID, digest = doc, handle+"@"+revision.ID(), revision.Digest
 	}
-	definition, err := s.resolveLocalHero(ctx, nil, flowID, document)
+	definition, err := s.resolveLocalHero(ctx, bundle, flowID, document)
 	if err != nil {
 		return nil, nil, fmt.Errorf("Hero %q: %w", handle, err)
 	}
-	globalSkills, err := s.applyFlowTaskSkills(ctx, flowID, definition, task.Skills, skillCatalog)
+	globalSkills, err := s.applyFlowTaskSkills(ctx, flowID, definition, task.Skills, skillCatalog, bundle)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -287,13 +222,13 @@ func (s *Service) flowGlobalHero(handle, versionText string, hasVersion bool) (*
 // applyFlowTaskSkills inlines local Skills (never widening the Hero's tool
 // allowlist) and returns the content-pinned global Skill refs.
 func (s *Service) applyFlowTaskSkills(ctx context.Context, flowID string, definition *domain.HeroDefinition,
-	refs []string, skillCatalog map[string]string) (domain.FrozenSkillRefs, error) {
+	refs []string, skillCatalog map[string]string, bundle *globalsource.GraphRevisionBundle) (domain.FrozenSkillRefs, error) {
 	globalSkills := make(domain.FrozenSkillRefs, 0, len(refs))
 	for _, ref := range refs {
 		scope, id, scoped := strings.Cut(strings.TrimSpace(ref), "/")
 		if !scoped {
 			// Bare refs resolve flow-local first, exactly like task Heroes.
-			if loaded, err := s.loadLocalSkill(nil, flowID, id); err == nil {
+			if loaded, err := s.loadLocalSkill(bundle, flowID, id); err == nil {
 				definition.HeroPrompt += "\n\n<graph_local_skill id=\"" + id + "\" digest=\"" + loaded.ContentHash + "\">\n" + loaded.PromptText + "\n</graph_local_skill>"
 				continue
 			}
@@ -301,15 +236,18 @@ func (s *Service) applyFlowTaskSkills(ctx context.Context, flowID string, defini
 		}
 		switch scope {
 		case "local":
-			loaded, err := s.loadLocalSkill(nil, flowID, id)
+			loaded, err := s.loadLocalSkill(bundle, flowID, id)
 			if err != nil {
 				return nil, fmt.Errorf("local Skill %q: %w", id, err)
 			}
 			definition.HeroPrompt += "\n\n<graph_local_skill id=\"" + id + "\" digest=\"" + loaded.ContentHash + "\">\n" + loaded.PromptText + "\n</graph_local_skill>"
 		case "global":
 			digest, ok := skillCatalog[id]
-			if !ok || digest == "" {
+			if !ok {
 				return nil, fmt.Errorf("global Skill %q is not available", id)
+			}
+			if digest == "" {
+				return nil, fmt.Errorf("global Skill %q has no content digest; refusing to freeze an unpinned Skill", id)
 			}
 			globalSkills = append(globalSkills, domain.FrozenSkillRef{ID: id, Digest: digest})
 		default:

@@ -114,9 +114,14 @@ func (f *flowRunFixture) publish(t *testing.T, id string, fanOut bool, heroPromp
 
 func (f *flowRunFixture) bind(t *testing.T, id, revision string, enabled bool) {
 	t.Helper()
+	f.bindKind(t, projectstore.SourceKindFlow, id, revision, enabled)
+}
+
+func (f *flowRunFixture) bindKind(t *testing.T, kind string, id, revision string, enabled bool) {
+	t.Helper()
 	_, err := f.projects.UpdateGraphBindings(context.Background(), f.projectID, func(bindings *[]projectstore.GraphBinding) error {
 		*bindings = append(*bindings, projectstore.GraphBinding{
-			SourceKind: projectstore.SourceKindFlow, GraphID: id, Revision: revision, Enabled: enabled,
+			SourceKind: kind, GraphID: id, Revision: revision, Enabled: enabled,
 		})
 		return nil
 	})
