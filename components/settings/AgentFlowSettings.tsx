@@ -1,13 +1,13 @@
 "use client";
 
-import { Check, Loader2, Plus, Workflow } from "lucide-react";
+import { AlertTriangle, Check, Loader2, Plus, Workflow } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GraphBuilderPanel } from "@/components/graphs/GraphBuilderPanel";
 import { confirmAction } from "@/components/ui/confirm";
 import { GraphDependencies } from "@/components/graphs/GraphDependencies";
 import { GraphTabs } from "@/components/graphs/GraphTabs";
 import { TaskAccordion, taskFingerprint } from "@/components/graphs/TaskAccordion";
-import { modelOptions, type GraphDetail, type GraphSummary, type GraphTask, type ImmutableFileRevision } from "@/components/graphs/types";
+import { modelOptions, type FlowTask, type GraphDetail, type GraphSummary, type ImmutableFileRevision } from "@/components/graphs/types";
 import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { apiFetch } from "@/lib/worker-api.client";
@@ -26,7 +26,7 @@ export function AgentFlowSettings({ setError }: { setError: (value: string | nul
   useOverlayLayer(createOpen, () => setCreateOpen(false));
   const [newGraph, setNewGraph] = useState({ id: "", name: "" });
   const [addTaskOpen, setAddTaskOpen] = useState(false);
-  const [newTask, setNewTask] = useState({ id: "", name: "" });
+  const [newTaskId, setNewTaskId] = useState("");
   const [mobileView, setMobileView] = useState<"tasks" | "graph" | "build">("tasks");
   // Pairs with the sequence number in openGraph.
   const openRequestId = useRef(0);
@@ -128,21 +128,19 @@ export function AgentFlowSettings({ setError }: { setError: (value: string | nul
     }
   };
 
-  const saveTask = (id: string, task: GraphTask) => patchGraph({ task: { id, value: task } });
+  const saveTask = (id: string, task: FlowTask) => patchGraph({ task: { id, value: task } });
   const removeTask = async (id: string) => {
-    const name = detail?.document.tasks[id]?.name ?? id;
-    const downstream = Object.entries(detail?.document.graph ?? {})
-      // A dependency list round-trips as null once it is written and re-read, so
-      // the stored shape is not always the array the contract declares.
-      .filter(([, depends]) => (depends ?? []).includes(id))
-      .map(([taskId]) => detail?.document.tasks[taskId]?.name ?? taskId);
-    const listed = downstream.slice(0, 3).map((taskName) => `“${taskName}”`).join(", ")
-      + (downstream.length > 3 ? ` and ${downstream.length - 3} more` : "");
-    const description = downstream.length > 0
-      ? `Removing “${name}” also removes it from the dependencies of ${listed}. Published versions are unaffected.`
+    const definition = detail?.definition;
+    const downstreamIds = Object.entries(definition?.tasks ?? {})
+      .filter(([, task]) => (task.depends ?? []).includes(id))
+      .map(([taskId]) => taskId);
+    const listed = downstreamIds.slice(0, 3).map((taskId) => `“${taskId}”`).join(", ")
+      + (downstreamIds.length > 3 ? ` and ${downstreamIds.length - 3} more` : "");
+    const description = downstreamIds.length > 0
+      ? `Removing “${id}” also removes it from the dependencies of ${listed}. Published versions are unaffected.`
       : "This removes the task from the graph draft. Published versions are unaffected.";
     if (!(await confirmAction({
-      title: `Remove Task “${name}”?`,
+      title: `Remove Task “${id}”?`,
       description,
       confirmLabel: "Remove task",
       tone: "danger",
@@ -150,19 +148,16 @@ export function AgentFlowSettings({ setError }: { setError: (value: string | nul
     await patchGraph({ task: { id, value: null } });
   };
   const addTask = async () => {
-    const model = models[0];
-    if (!model) {
-      setError("Create an active model before adding an inline Task.");
-      return;
-    }
-    const id = newTask.id.trim();
-    const name = newTask.name.trim();
-    if (!id || !name) return;
-    await patchGraph({ task: { id, value: { name, model: model.ref, thinking: "default", skills: [], goal: "Describe the outcome this Task must produce." } } });
-    setNewTask({ id: "", name: "" });
+    const id = newTaskId.trim();
+    if (!id) return;
+    await patchGraph({ task: { id, value: { hero: `local/${id}`, goal: "Describe the outcome this Task must produce." } } });
+    setNewTaskId("");
     setAddTaskOpen(false);
     setExpanded(id);
   };
+
+  const definition = detail?.definition;
+  const legacyDocument = detail && !detail.definition && detail.document ? detail.document : null;
 
   return (
     <div className="graph-workspace">
@@ -188,10 +183,19 @@ export function AgentFlowSettings({ setError }: { setError: (value: string | nul
         <div className="graph-welcome"><Workflow size={28} /><h2>Create your first Graph</h2><p>Compose reusable Tasks and their dependencies without choosing a Project.</p><button type="button" onClick={() => setCreateOpen(true)}><Plus size={16} /> Add Graph</button></div>
       )}
 
-      {detail && (
+      {detail && legacyDocument && (
+        <div className="graph-document">
+          <div className="graph-legacy-banner" role="note">
+            <AlertTriangle size={16} />
+            <span>This Graph uses the legacy graph-v1 format and is read-only. Rewrite it to the current format to edit it.</span>
+          </div>
+        </div>
+      )}
+
+      {detail && definition && (
         <div className="graph-document">
           <header className="graph-document-header">
-            <div><span>Graph</span><h2>{detail.document.name}</h2><code>{detail.document.id}</code></div>
+            <div><span>Graph</span><h2>{definition.name ?? definition.id}</h2><code>{definition.id}</code></div>
             <div className="graph-document-actions">
               <span>v{latestVersion || "draft"}</span>
               <div className={`graph-save-state ${busy === "saving" ? "is-saving" : ""}`}>{busy === "saving"
@@ -199,35 +203,32 @@ export function AgentFlowSettings({ setError }: { setError: (value: string | nul
                 : latestVersion > 0
                   ? <><Check size={14} /> Saved v{latestVersion}</>
                   : <><Check size={14} /> Draft saved</>}</div>
-              <button type="button" onClick={() => void publishGraph()} disabled={Boolean(busy) || Object.keys(detail.document.tasks).length === 0}>{busy === "publishing" ? "Publishing…" : "Publish"}</button>
+              <button type="button" onClick={() => void publishGraph()} disabled={Boolean(busy) || Object.keys(definition.tasks).length === 0}>{busy === "publishing" ? "Publishing…" : "Publish"}</button>
             </div>
           </header>
 
           <main className={`graph-editor-view is-${mobileView}`}>
             <section className="graph-tasks-pane">
               <div className="graph-section-heading"><div><span>Tasks</span><p>Execution configuration. Tasks are collapsed by default.</p></div><button type="button" onClick={() => setAddTaskOpen((value) => !value)}><Plus size={16} /> Add Task</button></div>
-              {addTaskOpen && <div className="graph-add-task"><input value={newTask.id} onChange={(event) => setNewTask((value) => ({ ...value, id: event.target.value }))} placeholder="task_id" /><input value={newTask.name} onChange={(event) => setNewTask((value) => ({ ...value, name: event.target.value }))} placeholder="Task name" /><button type="button" onClick={() => void addTask()}>Add</button></div>}
+              {addTaskOpen && <div className="graph-add-task"><input value={newTaskId} onChange={(event) => setNewTaskId(event.target.value)} placeholder="task_id" /><button type="button" onClick={() => void addTask()}>Add</button></div>}
               <div className="graph-task-list">
-                {Object.keys(detail.document.tasks).sort().map((id) => (
-                  <TaskAccordion key={`${id}:${taskFingerprint(detail.document.tasks[id])}`} id={id} task={detail.document.tasks[id]} expanded={expanded === id} busy={Boolean(busy)} models={models} onToggle={() => setExpanded((value) => value === id ? null : id)} onSave={(task) => void saveTask(id, task)} onRemove={() => void removeTask(id)} />
+                {Object.keys(definition.tasks).sort().map((id) => (
+                  <TaskAccordion key={`${id}:${taskFingerprint(definition.tasks[id])}`} id={id} task={definition.tasks[id]} expanded={expanded === id} busy={Boolean(busy)} onToggle={() => setExpanded((value) => value === id ? null : id)} onSave={(task) => void saveTask(id, task)} onRemove={() => void removeTask(id)} />
                 ))}
-                {Object.keys(detail.document.tasks).length === 0 && <div className="graph-empty-state">No Tasks yet. Add one or ask Builder to draft the Graph.</div>}
+                {Object.keys(definition.tasks).length === 0 && <div className="graph-empty-state">No Tasks yet. Add one or ask Builder to draft the Graph.</div>}
               </div>
             </section>
 
             <section className="graph-dependencies-pane">
               <div className="graph-section-heading"><div><span>Graph</span><p>Dependency orchestration. Hero details stay inside Tasks.</p></div></div>
-              <GraphDependencies document={detail.document} busy={Boolean(busy)} onOpenTask={(id) => { setExpanded(id); setMobileView("tasks"); requestAnimationFrame(() => document.querySelector(`[data-task-id="${CSS.escape(id)}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" })); }} onChange={(taskId, depends) => void patchGraph({ dependencies: { taskId, depends } })} />
+              <GraphDependencies definition={definition} busy={Boolean(busy)} onOpenTask={(id) => { setExpanded(id); setMobileView("tasks"); requestAnimationFrame(() => document.querySelector(`[data-task-id="${CSS.escape(id)}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" })); }} onChange={(taskId, depends) => void patchGraph({ dependencies: { taskId, depends } })} />
             </section>
 
             <GraphBuilderPanel
               graphId={detail.id}
               models={models}
               setError={setError}
-              onApplied={(updated) => {
-                setDetail(updated);
-                setGraphs((current) => current.map((graph) => graph.id === updated.id ? { ...graph, name: updated.name, digest: updated.digest, error: undefined } : graph));
-              }}
+              onApplied={(id) => void openGraph(id)}
             />
           </main>
         </div>

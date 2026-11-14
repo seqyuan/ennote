@@ -93,7 +93,7 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
     const approved = await confirmAction({
       title: `Install ${plan.pack.name} ${plan.pack.version}?`,
       description: plan.willPublishFlowRevision
-        ? "This creates disabled draft objects and publishes an Agent Flow revision."
+        ? "This creates disabled draft objects and publishes a Graph revision."
         : "This creates disabled draft objects on this Worker. Nothing runs until a revision is published and bound.",
       confirmLabel: "Install",
     });
@@ -148,7 +148,7 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
     <section className="settings-tab-section" aria-labelledby="settings-packs-heading">
       <h3 id="settings-packs-heading" className={styles.heading}>Agent Packs</h3>
       <p className={styles.note}>
-        A pack ships Heroes, Skills, and optionally a Graph or Agent Flow. Installing one only creates
+        A pack ships Heroes, Skills, and optionally a Graph. Installing one only creates
         disabled drafts on this Worker — nothing runs until a revision is published and bound.
       </p>
 

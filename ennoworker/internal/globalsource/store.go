@@ -654,11 +654,25 @@ func (s Store) UpdateFlow(id, expectedDigest string, mutate func(*domain.FlowDef
 // UpdateGraphDefinition applies one whole-document CAS update to a
 // definition-shaped graph.yaml draft. The ID is the directory identity and can
 // never change in place. It is the unified Graph editor's write path: a legacy
-// graphsource.Document never passes through it.
+// graphsource.Document never passes through it. Editing a legacy flow.yaml draft
+// through the Graph editor renames it to graph.yaml in the same atomic replace.
 func (s Store) UpdateGraphDefinition(id, expectedDigest string, mutate func(*domain.FlowDefinition) error) (*domain.FlowDefinition, string, error) {
 	unlock := lockSource(filepath.Join(s.GraphsDir(), id))
 	defer unlock()
-	definition, digest, err := s.ReadGraphDefinition(id)
+	kind, err := s.SourceKind(id)
+	if err != nil {
+		return nil, "", err
+	}
+	var definition *domain.FlowDefinition
+	var digest string
+	switch kind {
+	case SourceKindGraph:
+		definition, digest, err = s.ReadGraphDefinition(id)
+	case SourceKindFlow:
+		definition, digest, err = s.ReadFlow(id)
+	default:
+		return nil, "", fmt.Errorf("unsupported source kind %q", kind)
+	}
 	if err != nil {
 		return nil, "", err
 	}
@@ -679,9 +693,22 @@ func (s Store) UpdateGraphDefinition(id, expectedDigest string, mutate func(*dom
 	if err != nil {
 		return nil, digest, err
 	}
-	path, _ := objectPath(s.GraphsDir(), id, graphSourceName)
-	if err := atomicWrite(path, encoded, false); err != nil {
-		return nil, digest, err
+	graphPath, _ := objectPath(s.GraphsDir(), id, graphSourceName)
+	switch kind {
+	case SourceKindFlow:
+		// Write graph.yaml fresh, then drop the legacy flow.yaml so the directory
+		// holds exactly one source again. The immutable revisions/ are untouched.
+		if err := atomicWrite(graphPath, encoded, true); err != nil {
+			return nil, digest, err
+		}
+		flowPath, _ := objectPath(s.GraphsDir(), id, flowSourceName)
+		if err := os.Remove(flowPath); err != nil {
+			return nil, digest, fmt.Errorf("remove legacy flow.yaml after rename: %w", err)
+		}
+	case SourceKindGraph:
+		if err := atomicWrite(graphPath, encoded, false); err != nil {
+			return nil, digest, err
+		}
 	}
 	newDigest, err := AgentFlowDigest(definition)
 	return definition, newDigest, err

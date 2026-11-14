@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { taskFieldChanged, taskFingerprint, thinkingForModel } from "@/components/graphs/TaskAccordion";
-import type { GraphTask } from "@/components/graphs/types";
+import { taskFieldChanged, taskFingerprint } from "@/components/graphs/TaskAccordion";
+import type { FlowTask } from "@/components/graphs/types";
 
-const task: GraphTask = { name: "Align", model: "openai-main/gpt-5", goal: "Align reads" };
+const task: FlowTask = { hero: "local/align", goal: "Align reads" };
 
 // A blur is not a request. Before this, every tab across a field sent a PATCH even
 // when the value had not changed.
@@ -40,25 +40,5 @@ describe("taskFingerprint", () => {
 
   it("changes when the Worker normalises the Task into a different shape", () => {
     expect(taskFingerprint({ ...task, skills: [] })).not.toBe(taskFingerprint(task));
-  });
-});
-
-// Switching to a model that cannot honour the current effort used to leave a
-// selection the UI then hid, and the Run rejected it at freeze time.
-describe("thinkingForModel", () => {
-  it("keeps the effort the new model offers", () => {
-    expect(thinkingForModel(true, ["default", "high"], "high")).toBe("high");
-  });
-
-  it("resets to default when the new model offers something else", () => {
-    expect(thinkingForModel(true, ["default", "low"], "high")).toBe("default");
-  });
-
-  it("resets to default when the new model has no thinking support", () => {
-    expect(thinkingForModel(false, ["default", "high"], "high")).toBe("default");
-  });
-
-  it("defaults an unset effort", () => {
-    expect(thinkingForModel(true, ["default", "high"], undefined)).toBe("default");
   });
 });

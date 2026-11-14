@@ -2,7 +2,7 @@
 
 import { AlertTriangle, Bot, Check, Loader2, Send } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import type { GraphDetail, ModelOption } from "@/components/graphs/types";
+import type { ModelOption } from "@/components/graphs/types";
 import { apiFetch } from "@/lib/worker-api.client";
 
 interface BuilderMessage { id: string; role: "user" | "assistant"; content: string; ordinal: number }
@@ -13,7 +13,7 @@ interface BuilderThread { graphId: string; modelProfileId?: string; messages: Bu
 export function GraphBuilderPanel({ graphId, models, onApplied, setError }: {
   graphId: string;
   models: ModelOption[];
-  onApplied: (detail: GraphDetail) => void;
+  onApplied: (graphId: string) => void;
   setError: (message: string | null) => void;
 }) {
   const [thread, setThread] = useState<BuilderThread | null>(null);
@@ -61,8 +61,8 @@ export function GraphBuilderPanel({ graphId, models, onApplied, setError }: {
     if (!thread?.proposal || thread.proposal.diagnostics.length > 0 || busy) return;
     setBusy("applying");
     try {
-      const detail = await apiFetch<GraphDetail>(`/v1/graphs/${encodeURIComponent(graphId)}/builder/proposals/${encodeURIComponent(thread.proposal.id)}/apply`, { method: "POST" });
-      onApplied(detail);
+      await apiFetch<unknown>(`/v1/graphs/${encodeURIComponent(graphId)}/builder/proposals/${encodeURIComponent(thread.proposal.id)}/apply`, { method: "POST" });
+      onApplied(graphId);
       await load();
       setError(null);
     } catch (reason) {

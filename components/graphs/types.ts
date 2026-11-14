@@ -9,14 +9,77 @@ export type ThinkingEffort = components["schemas"]["ThinkingEffort"];
 export type GraphTask = components["schemas"]["GraphTask"];
 export type GraphDocument = components["schemas"]["GraphDocument"];
 export type GraphSummary = components["schemas"]["GraphSummary"];
-// GraphDetail now carries an optional `definition` (the unified FlowDefinition)
-// and keeps `document` only for a legacy graph-v1 read. Until the editor is
-// switched to `definition` (graph-unification Task 8), the legacy editor still
-// reads `document`, so the alias re-declares it non-optional for that consumer.
-export type GraphDetail = components["schemas"]["GraphDetail"] & {
-  document: components["schemas"]["GraphDocument"];
-};
 export type ImmutableFileRevision = components["schemas"]["ImmutableFileRevision"];
+
+// The unified Graph authoring document is the Agent Flow FlowDefinition. The
+// contract declares `definition` loosely (additionalProperties: true), so the
+// editor restates the fields it reads and writes.
+export interface FlowPort {
+  type: string;
+  required?: boolean;
+}
+
+export interface FlowTaskBudget {
+  tokens?: number;
+}
+
+export interface FlowFanOut {
+  min: number;
+  max: number;
+}
+
+export interface FlowTerminal {
+  status: string;
+  output?: string;
+}
+
+export interface FlowTask {
+  hero?: string;
+  skills?: string[];
+  goal?: string;
+  depends?: string[];
+  type?: string;
+  command?: string;
+  fanOut?: FlowFanOut;
+  budget?: FlowTaskBudget;
+  terminal?: FlowTerminal;
+  output?: string;
+  next?: Record<string, string>;
+  writes?: string[];
+}
+
+export interface FlowConvergenceRule {
+  from: string;
+  to: string;
+  maxRounds: number;
+}
+
+export interface FlowParallelism {
+  max?: number;
+  allowDisjointWriters?: boolean;
+}
+
+export interface FlowDefinition {
+  schemaVersion: number;
+  id: string;
+  name?: string;
+  version?: number;
+  description?: string;
+  inputs?: Record<string, FlowPort>;
+  outputs?: Record<string, FlowPort>;
+  budget: { maxTotalTokens: number };
+  tasks: Record<string, FlowTask>;
+  convergence?: FlowConvergenceRule[];
+  parallelism?: FlowParallelism;
+}
+
+// GraphDetail carries an optional `definition` (the unified FlowDefinition) and
+// keeps `document` only for a legacy graph-v1 read. The editor reads `definition`
+// and treats a detail with only `document` as a read-only legacy object.
+export type GraphDetail = Omit<components["schemas"]["GraphDetail"], "definition"> & {
+  document?: components["schemas"]["GraphDocument"];
+  definition?: FlowDefinition;
+};
 
 export interface ModelOption {
   ref: string;

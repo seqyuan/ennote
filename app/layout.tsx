@@ -14,7 +14,7 @@ const localeInitScript = `(function(){try{var l=localStorage.getItem("ennote-loc
 
 export const metadata: Metadata = {
   title: "Ennote",
-  description: "Auditable local agent runtime built around Agent Flow",
+  description: "Auditable local agent runtime built around Graphs",
 };
 
 export default function RootLayout({

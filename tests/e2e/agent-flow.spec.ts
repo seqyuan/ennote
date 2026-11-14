@@ -12,31 +12,29 @@ function fulfill(route: Route, data: unknown, status = 200) {
 }
 
 interface FixtureTask {
-  name: string;
-  goal: string;
-  role?: string;
-  model?: string;
-  thinking?: string;
+  hero?: string;
+  goal?: string;
   skills?: string[];
+  depends?: string[];
 }
 
-interface FixtureGraphDocument {
+interface FixtureGraphDefinition {
   schemaVersion: number;
   id: string;
   name: string;
   description: string;
+  budget: { maxTotalTokens: number };
   tasks: Record<string, FixtureTask>;
-  graph: Record<string, string[]>;
 }
 
-function graphDocument(): FixtureGraphDocument {
+function graphDefinition(): FixtureGraphDefinition {
   return {
     schemaVersion: 1, id: "rna-seq", name: "RNA-seq", description: "",
+    budget: { maxTotalTokens: 200000 },
     tasks: {
-      prepare_reference: { name: "Prepare reference", role: "local/reference-preparer", goal: "Prepare the genome index." },
-      align_1: { name: "Align batch 1", model: "anthropic/claude-sonnet-4", thinking: "high", skills: ["local/alignment", "global/report-writing"], goal: "Align paired-end reads." },
+      prepare_reference: { hero: "local/reference-preparer", goal: "Prepare the genome index." },
+      align_1: { hero: "global/aligner", skills: ["local/alignment", "global/report-writing"], goal: "Align paired-end reads.", depends: ["prepare_reference"] },
     },
-    graph: { prepare_reference: [], align_1: ["prepare_reference"] },
   };
 }
 
@@ -60,7 +58,7 @@ async function openGraphs(page: Page) {
 
 async function mockGraphAuthoring(page: Page) {
   let digest = "sha256:" + "a".repeat(64);
-  let document = graphDocument();
+  let definition = graphDefinition();
   let builderThread: Record<string, unknown> = { graphId: "rna-seq", modelProfileId: model.id, messages: [] };
   await page.route("**/api/worker/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace("/api/worker", "");
@@ -71,24 +69,26 @@ async function mockGraphAuthoring(page: Page) {
     if (path === "/v1/model-profiles") return fulfill(route, [model]);
     if (path === "/v1/policy-profiles") return fulfill(route, []);
     if (path === "/v1/graphs" && method === "GET") return fulfill(route, [{ id: "rna-seq", name: "RNA-seq", path: "/home/graphs/rna-seq/graph.yaml", digest, latestVersion: 1 }]);
-    if (path === "/v1/graphs" && method === "POST") return fulfill(route, { id: "new-graph", name: "New Graph", path: "/home/graphs/new-graph/graph.yaml", digest, latestVersion: 0, document: { schemaVersion: 1, id: "new-graph", name: "New Graph", tasks: {}, graph: {} } }, 201);
-    if (path === "/v1/graphs/rna-seq" && method === "GET") return fulfill(route, { id: "rna-seq", name: document.name, path: "/home/graphs/rna-seq/graph.yaml", digest, latestVersion: 1, document });
+    if (path === "/v1/graphs" && method === "POST") return fulfill(route, { id: "new-graph", name: "New Graph", path: "/home/graphs/new-graph/graph.yaml", digest, latestVersion: 0, definition: { schemaVersion: 1, id: "new-graph", name: "New Graph", budget: { maxTotalTokens: 200000 }, tasks: {} } }, 201);
+    if (path === "/v1/graphs/rna-seq" && method === "GET") return fulfill(route, { id: "rna-seq", name: definition.name, path: "/home/graphs/rna-seq/graph.yaml", digest, latestVersion: 1, definition });
     if (path === "/v1/graphs/rna-seq" && method === "PATCH") {
       const body = JSON.parse(route.request().postData() ?? "{}");
       if (body.task) {
         if (body.task.value) {
-          document = { ...document, tasks: { ...document.tasks, [body.task.id]: body.task.value }, graph: { ...document.graph, [body.task.id]: document.graph[body.task.id] ?? [] } };
+          definition = { ...definition, tasks: { ...definition.tasks, [body.task.id]: body.task.value } };
         } else {
-          const tasks = { ...document.tasks };
-          const graph = { ...document.graph };
+          const tasks = { ...definition.tasks };
           delete tasks[body.task.id];
-          delete graph[body.task.id];
-          document = { ...document, tasks, graph };
+          definition = { ...definition, tasks };
         }
       }
-      if (body.dependencies) document = { ...document, graph: { ...document.graph, [body.dependencies.taskId]: body.dependencies.depends } };
+      if (body.dependencies) {
+        const tasks = { ...definition.tasks, [body.dependencies.taskId]: { ...definition.tasks[body.dependencies.taskId], depends: body.dependencies.depends } };
+        definition = { ...definition, tasks };
+      }
+      if (body.name !== undefined) definition = { ...definition, name: body.name };
       digest = "sha256:" + "b".repeat(64);
-      return fulfill(route, { id: "rna-seq", name: document.name, path: "/home/graphs/rna-seq/graph.yaml", digest, latestVersion: 1, document });
+      return fulfill(route, { id: "rna-seq", name: definition.name, path: "/home/graphs/rna-seq/graph.yaml", digest, latestVersion: 1, definition });
     }
     if (path === "/v1/graphs/rna-seq/versions") return fulfill(route, [{ id: "graph-v1", profileId: "profile-1", version: 1, configDigest: "c".repeat(64), definition: {}, publishedAt: now }]);
     if (path === "/v1/graphs/rna-seq/publish") return fulfill(route, { id: "graph-v2", profileId: "profile-1", version: 2, configDigest: "d".repeat(64), definition: {}, publishedAt: now }, 201);
@@ -101,9 +101,9 @@ async function mockGraphAuthoring(page: Page) {
       return fulfill(route, builderThread, 201);
     }
     if (path === "/v1/graphs/rna-seq/builder/proposals/proposal-1/apply") {
-      document = { ...document, tasks: { ...document.tasks, qc: { name: "QC", model: "anthropic/claude-sonnet-4", thinking: "default", skills: [], goal: "Review alignment quality." } }, graph: { ...document.graph, qc: ["align_1"] } };
+      definition = { ...definition, tasks: { ...definition.tasks, qc: { hero: "global/aligner", goal: "Review alignment quality.", depends: ["align_1"] } } };
       builderThread = { ...builderThread, proposal: undefined };
-      return fulfill(route, { id: "rna-seq", name: document.name, path: "/home/graphs/rna-seq/graph.yaml", digest: "sha256:" + "e".repeat(64), latestVersion: 1, document });
+      return fulfill(route, { id: "rna-seq", name: definition.name, path: "/home/graphs/rna-seq/graph.yaml", digest: "sha256:" + "e".repeat(64), latestVersion: 1, definition });
     }
     return route.abort();
   });
@@ -124,9 +124,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     const task = page.locator('[data-task-id="align_1"]');
     await expect(task.locator(".graph-task-form")).toHaveCount(0);
     await task.locator(".graph-task-summary").click();
-    await expect(task.getByRole("button", { name: "Inline configuration" })).toHaveAttribute("aria-pressed", "true");
-    await expect(task.getByLabel("Model")).toHaveValue("anthropic/claude-sonnet-4");
-    await expect(task.getByLabel("Thinking")).toHaveValue("high");
+    await expect(task.getByLabel("Hero")).toHaveValue("global/aligner");
 
     if (viewport.width < 500) {
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);

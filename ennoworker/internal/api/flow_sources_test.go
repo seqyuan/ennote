@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -144,6 +145,37 @@ func TestGlobalFlowPublishRejectsInvalidDefinition(t *testing.T) {
 	assert.Equal(t, http.StatusUnprocessableEntity, response.Code)
 	assert.Contains(t, response.Body.String(), "flow_validation_failed")
 	assert.Contains(t, response.Body.String(), "flow_budget_required")
+}
+
+// Saving a legacy flow.yaml draft through the unified Graph editor renames it to
+// graph.yaml in place and leaves the immutable revisions untouched.
+func TestUpdateFlowDraftRenamesToGraph(t *testing.T) {
+	_, handler, sources := flowAPIFixture(t)
+	_, err := sources.CreateFlowFromDefinition(flowWithHero("review-flow"))
+	require.NoError(t, err)
+	_, err = sources.PublishFlowRevision("review-flow")
+	require.NoError(t, err)
+
+	detail := request(t, handler, http.MethodGet, "/v1/graphs/review-flow", nil, true)
+	require.Equal(t, http.StatusOK, detail.Code, detail.Body.String())
+	var current globalGraphDetail
+	decodeData(t, detail, &current)
+
+	response := request(t, handler, http.MethodPatch, "/v1/graphs/review-flow",
+		map[string]any{"expectedDigest": current.Digest, "name": "Review Flow"}, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+
+	graphPath := filepath.Join(sources.GraphsDir(), "review-flow", "graph.yaml")
+	flowPath := filepath.Join(sources.GraphsDir(), "review-flow", "flow.yaml")
+	_, err = os.Stat(graphPath)
+	require.NoError(t, err)
+	_, err = os.Stat(flowPath)
+	require.ErrorIs(t, err, os.ErrNotExist)
+
+	revisions, err := sources.ListGraphRevisions("review-flow")
+	require.NoError(t, err)
+	require.Len(t, revisions, 1)
+	assert.Equal(t, globalsource.SourceKindFlow, revisions[0].SourceKind)
 }
 
 // The unified /v1/graphs catalog lists both a graph.yaml and a legacy flow.yaml
