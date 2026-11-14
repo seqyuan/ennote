@@ -155,6 +155,28 @@ func TestInspectHeroOnlyPack(t *testing.T) {
 	assert.NotContains(t, warningCodes(result.Warnings), WarningFlowOnlyPack)
 }
 
+func TestFormatDefaultsToGraph(t *testing.T) {
+	files := mixedPackFiles()
+	manifest := strings.Replace(mixedManifest, "    format: graph\n", "", 1)
+	files[0] = entry{path: "pack.yaml", body: manifest}
+	result := inspectFiles(t, files)
+	require.Len(t, result.Flows, 1)
+	assert.Equal(t, FlowFormatGraph, result.Flows[0].Format)
+}
+
+func TestInspectRejectsLegacyGraphDocument(t *testing.T) {
+	files := mixedPackFiles()
+	files[2] = entry{path: "flows/qc-review/graph.yaml", body: `schema_version: 1
+id: qc-review
+name: QC Review
+tasks: {}
+graph: {}
+`}
+	_, err := Inspect(Request{Source: Source{Path: writeDirectoryPack(t, files)}})
+	requireCode(t, err, CodePackFlowInvalid)
+	assert.Contains(t, err.Error(), "graph_legacy_source")
+}
+
 func TestInspectHeroOnlyPackRejectsFlowScopedHero(t *testing.T) {
 	files := mixedPackFiles()
 	manifest := strings.Replace(mixedManifest, `flows:
@@ -224,7 +246,6 @@ heroes: []
 skills:`, 1), code: CodePackDuplicateID},
 		"duplicate-skill": {manifest: strings.Replace(mixedManifest, "  - ref: bio-workspace@0.1.0", "  - id: cell-qc-tables\n    path: skills/cell-qc-tables/\n  - ref: bio-workspace@0.1.0", 1),
 			code: CodePackDuplicateID},
-		"missing-format": {manifest: strings.Replace(mixedManifest, "    format: graph\n", "", 1), code: CodePackFlowInvalid},
 		"bad-format":     {manifest: strings.Replace(mixedManifest, "format: graph", "format: dag", 1), code: CodePackFlowInvalid},
 		"anonymous-flow": {manifest: strings.Replace(mixedManifest, "id: qc-review\n    path:", "path:", 1), code: CodePackFlowInvalid},
 		"capability": {manifest: strings.Replace(mixedManifest, "capabilities: [tool_use, thinking]", "capabilities: [telepathy]", 1),

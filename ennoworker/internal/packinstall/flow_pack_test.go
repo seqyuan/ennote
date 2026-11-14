@@ -73,6 +73,23 @@ func TestFlowPackValidationBlocksUnsafeFanOut(t *testing.T) {
 	f.requireNoPackState()
 }
 
+func TestInstallWritesGraphYAML(t *testing.T) {
+	f := newFixture(t)
+	f.service.CheckAllowlistAllowsAll = true
+	source := writePack(t, flowPackFiles(f, heroFile(t, f.modelID, "qc-reviewer", "QC Reviewer")))
+	_, err := f.service.Install(context.Background(), packinstall.Request{SourcePath: source})
+	require.NoError(t, err)
+
+	dir := filepath.Join(f.sources.GraphsDir(), "qc-flow")
+	_, err = os.Stat(filepath.Join(dir, "graph.yaml"))
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Join(dir, "flow.yaml"))
+	assert.True(t, os.IsNotExist(err), "a flow pack must not leave a flow.yaml draft")
+	definition, _, err := f.sources.ReadGraphDefinition("qc-flow")
+	require.NoError(t, err)
+	assert.Equal(t, domain.FlowTaskCheck, definition.Tasks["gate"].Type)
+}
+
 func TestFlowPackValidationUsesCheckAllowlist(t *testing.T) {
 	f := newFixture(t)
 	f.service.CheckAllowlist = []string{"go"}

@@ -25,11 +25,11 @@ func TestFlowPackInstallPublishBindFreeze(t *testing.T) {
 	require.NoError(t, err)
 
 	// Installed draft is not runnable: no revision exists yet.
-	revisions, err := f.sources.ListFlowRevisions("qc-flow")
+	revisions, err := f.sources.ListGraphRevisions("qc-flow")
 	require.NoError(t, err)
 	assert.Empty(t, revisions)
 
-	revision, err := f.sources.PublishFlowRevision("qc-flow")
+	revision, err := f.sources.PublishGraphRevision("qc-flow")
 	require.NoError(t, err)
 	project, _, err := f.projects.CreateWithWorkspace(context.Background(), domain.CreateProjectInput{
 		Name: "Flow Project", HostPath: t.TempDir(),
@@ -37,7 +37,7 @@ func TestFlowPackInstallPublishBindFreeze(t *testing.T) {
 	require.NoError(t, err)
 	_, err = f.projects.UpdateGraphBindings(context.Background(), project.ID, func(bindings *[]projectstore.GraphBinding) error {
 		*bindings = append(*bindings, projectstore.GraphBinding{
-			SourceKind: projectstore.SourceKindFlow, GraphID: "qc-flow", Revision: revision.ID(), Enabled: true,
+			SourceKind: projectstore.SourceKindGraph, GraphID: "qc-flow", Revision: revision.ID(), Enabled: true,
 		})
 		return nil
 	})

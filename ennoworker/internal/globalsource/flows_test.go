@@ -116,9 +116,16 @@ func TestGraphAndFlowCatalogsAreSeparated(t *testing.T) {
 
 	graphs, err := store.ListGraphs()
 	require.NoError(t, err)
-	require.Len(t, graphs, 1)
-	assert.Equal(t, "graph-one", graphs[0].ID)
-	assert.Equal(t, SourceKindGraph, graphs[0].SourceKind)
+	require.Len(t, graphs, 2)
+	byID := map[string]GraphEntry{}
+	for _, entry := range graphs {
+		byID[entry.ID] = entry
+	}
+	assert.Equal(t, SourceKindGraph, byID["graph-one"].SourceKind)
+	assert.Equal(t, LegacyFileGraphV1, byID["graph-one"].LegacyFile)
+	assert.Equal(t, SourceKindGraph, byID["flow-one"].SourceKind)
+	assert.Equal(t, LegacyFileFlow, byID["flow-one"].LegacyFile)
+	require.NotNil(t, byID["flow-one"].Flow)
 
 	flows, err := store.ListFlows()
 	require.NoError(t, err)
@@ -187,6 +194,48 @@ tasks:
 	_, _, err = legacy.ReadGraphDefinition("old")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "graph_legacy_source")
+}
+
+// One catalog. A current graph.yaml and a legacy flow.yaml are both Graphs.
+// The legacy file is labeled so the UI can tell them apart; it is not a second
+// object type. A directory that holds both files is still an error.
+func TestListGraphsIncludesLegacyFlow(t *testing.T) {
+	store := Store{HomeDir: t.TempDir()}
+	_, _, err := store.CreateGraphDefinition("qc", "QC")
+	require.NoError(t, err)
+
+	legacy := filepath.Join(store.GraphsDir(), "review")
+	require.NoError(t, os.MkdirAll(legacy, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(legacy, flowSourceName), []byte(`schemaVersion: 1
+id: review
+budget: {max_total_tokens: 1000}
+tasks:
+  read: {hero: local/reviewer, goal: "Read"}
+`), 0o600))
+
+	both := filepath.Join(store.GraphsDir(), "both")
+	require.NoError(t, os.MkdirAll(both, 0o755))
+	for _, name := range []string{graphSourceName, flowSourceName} {
+		require.NoError(t, os.WriteFile(filepath.Join(both, name), []byte("schemaVersion: 1\n"), 0o600))
+	}
+
+	entries, err := store.ListGraphs()
+	require.NoError(t, err)
+	byID := map[string]GraphEntry{}
+	for _, entry := range entries {
+		byID[entry.ID] = entry
+	}
+	require.Contains(t, byID, "qc")
+	assert.Empty(t, byID["qc"].LegacyFile)
+	assert.NotNil(t, byID["qc"].Flow)
+
+	require.Contains(t, byID, "review")
+	assert.Equal(t, LegacyFileFlow, byID["review"].LegacyFile)
+	assert.Equal(t, SourceKindGraph, byID["review"].SourceKind)
+	assert.NotNil(t, byID["review"].Flow)
+
+	require.Contains(t, byID, "both")
+	assert.Contains(t, byID["both"].Error, "both")
 }
 
 func TestCreateGraphWritesDefinition(t *testing.T) {

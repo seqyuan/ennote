@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
+	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 )
 
@@ -150,39 +150,12 @@ func (b *builder) analyseFlows() error {
 }
 
 func (b *builder) analyseGraphFlow(field string, summary *FlowSummary, file File) error {
-	document, err := graphsource.Parse(file.Data)
-	if err != nil {
+	kind, err := globalsource.ClassifyGraphSource(file.Data)
+	if err != nil || kind != globalsource.GraphFileDefinition {
 		return fieldError(CodePackFlowInvalid, field+".path",
-			"parse Graph source %s: %v", summary.Path, err)
+			"graph_legacy_source: %s is a legacy graph document; a pack graph must be a FlowDefinition", summary.Path)
 	}
-	digest, err := graphsource.SourceDigest(document)
-	if err != nil {
-		return fieldError(CodePackFlowInvalid, field+".path",
-			"digest Graph source %s: %v", summary.Path, err)
-	}
-	summary.SourceDigest = digest
-	summary.TaskCount = len(document.Tasks)
-	summary.EntryTask = graphEntryTask(document)
-
-	names := make([]string, 0, len(document.Tasks))
-	for name := range document.Tasks {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		task := document.Tasks[name]
-		taskField := field + ".tasks." + name
-		if err := b.checkScopedHeroRef(taskField+".hero", task.Hero); err != nil {
-			return err
-		}
-		for _, skill := range task.Skills {
-			if err := b.checkScopedSkillRef(taskField+".skills", skill); err != nil {
-				return err
-			}
-		}
-		b.writes = append(b.writes, task.Writes...)
-	}
-	return nil
+	return b.analyseAgentFlow(field, summary, file)
 }
 
 func (b *builder) analyseAgentFlow(field string, summary *FlowSummary, file File) error {

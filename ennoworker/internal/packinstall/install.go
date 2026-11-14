@@ -223,14 +223,7 @@ func (s *Service) apply(plan *Plan, request Request, staging string, record *jou
 			})
 			continue
 		}
-		var digest string
-		var err error
-		switch target.format {
-		case "flow":
-			digest, err = s.Sources.CreateFlowFromDefinition(target.definition)
-		default:
-			digest, err = s.Sources.CreateGraphFromDocument(target.document)
-		}
+		digest, err := s.Sources.CreateGraphFromDefinition(target.definition)
 		if err != nil {
 			return fmt.Errorf("install %s %s: %w", target.format, target.storeID, err)
 		}
@@ -330,12 +323,8 @@ func (s *Service) rollback(record *journal) {
 	for index := len(record.Written) - 1; index >= 0; index-- {
 		entry := record.Written[index]
 		switch entry.Kind {
-		case journalKindGraph:
-			if _, digest, err := s.Sources.ReadGraph(entry.StoreID); err == nil && digest == entry.Digest {
-				_ = s.Sources.DeleteGraph(entry.StoreID)
-			}
-		case journalKindFlow:
-			if _, digest, err := s.Sources.ReadFlow(entry.StoreID); err == nil && digest == entry.Digest {
+		case journalKindGraph, journalKindFlow:
+			if _, digest, err := s.Sources.ReadGraphDefinition(entry.StoreID); err == nil && digest == entry.Digest {
 				_ = s.Sources.DeleteGraph(entry.StoreID)
 			}
 		case journalKindGraphHero:

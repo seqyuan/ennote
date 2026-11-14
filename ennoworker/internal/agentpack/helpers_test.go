@@ -110,22 +110,20 @@ docs:
   readme: README.md
 `
 
-const graphFlow = `schema_version: 1
+const graphFlow = `schemaVersion: 1
 id: qc-review
 name: QC Review
+budget:
+  max_total_tokens: 20000
 tasks:
   load:
-    name: Load
     hero: local/qc-reviewer
     goal: Load the samplesheet
   review:
-    name: Review
     hero: local/qc-reviewer
     goal: Review QC metrics
     writes: [results/qc.csv]
-graph:
-  load: []
-  review: [load]
+    depends: [load]
 `
 
 const reviewerHero = `---

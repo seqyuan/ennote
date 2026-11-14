@@ -57,6 +57,13 @@ const (
 	flowSourceName  = "flow.yaml"
 )
 
+// Legacy file labels. A current graph.yaml omits the field. These name the
+// file the directory still holds, not a second catalog.
+const (
+	LegacyFileFlow    = "flow"
+	LegacyFileGraphV1 = "graph-v1"
+)
+
 type Store struct {
 	HomeDir string
 }
@@ -65,6 +72,7 @@ type GraphEntry struct {
 	ID         string                 `json:"id"`
 	Name       string                 `json:"name"`
 	SourceKind string                 `json:"sourceKind"`
+	LegacyFile string                 `json:"legacyFile,omitempty"`
 	Path       string                 `json:"path"`
 	Digest     string                 `json:"digest,omitempty"`
 	Document   *graphsource.Document  `json:"document,omitempty"`
@@ -85,31 +93,114 @@ func (s Store) AgentsDir() string { return filepath.Join(s.HomeDir, "agents") }
 func (s Store) GraphsDir() string { return filepath.Join(s.AgentsDir(), "graphs") }
 func (s Store) HeroesDir() string { return filepath.Join(s.AgentsDir(), "heroes") }
 
-// ListGraphs returns graph-source objects only. Flow objects share the same
-// parent directory but are reported by ListFlows, so the live Graph UI is never
-// handed a document it cannot render.
+// ListGraphs returns every object under agents/graphs. A current graph.yaml
+// and a legacy flow.yaml are both rows. LegacyFile names the file that is not
+// a current definition: "flow" for flow.yaml, "graph-v1" for a legacy
+// graphsource.Document. A directory holding both files is a row with an error,
+// not a silent preference for one of them.
 func (s Store) ListGraphs() ([]GraphEntry, error) {
-	return listObjectDirs(s.GraphsDir(), graphSourceName, func(id string) bool {
-		return s.hasOnlySource(id, graphSourceName, flowSourceName)
-	}, func(id, path string, data []byte) GraphEntry {
-		entry := GraphEntry{ID: id, Name: id, SourceKind: SourceKindGraph, Path: path}
-		document, err := graphsource.Parse(data)
-		if err != nil {
-			entry.Error = err.Error()
-			return entry
+	entries, err := os.ReadDir(s.GraphsDir())
+	if errors.Is(err, os.ErrNotExist) {
+		return []GraphEntry{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read source root: %w", err)
+	}
+	result := make([]GraphEntry, 0, len(entries))
+	for _, entry := range entries {
+		id := entry.Name()
+		if !objectIDPattern.MatchString(id) {
+			continue
 		}
-		if document.ID != id {
-			entry.Error = fmt.Sprintf("Graph id %q must match directory %q", document.ID, id)
-			return entry
+		directory := filepath.Join(s.GraphsDir(), id)
+		info, statErr := os.Lstat(directory)
+		if statErr != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			result = append(result, GraphEntry{ID: id, Name: id, SourceKind: SourceKindGraph,
+				Path: filepath.Join(directory, graphSourceName), Error: "source object must be a regular directory"})
+			continue
 		}
-		entry.Name = document.Name
-		entry.Document = document
-		entry.Digest, err = graphsource.SourceDigest(document)
-		if err != nil {
-			entry.Error = err.Error()
+		graphExists, graphErr := regularFileExists(filepath.Join(directory, graphSourceName))
+		flowExists, flowErr := regularFileExists(filepath.Join(directory, flowSourceName))
+		switch {
+		case graphErr != nil || flowErr != nil:
+			result = append(result, GraphEntry{ID: id, Name: id, SourceKind: SourceKindGraph,
+				Path: filepath.Join(directory, graphSourceName), Error: "read source files"})
+		case graphExists && flowExists:
+			result = append(result, GraphEntry{ID: id, Name: id, SourceKind: SourceKindGraph,
+				Path:  filepath.Join(directory, graphSourceName),
+				Error: fmt.Sprintf("source object %q contains both %s and %s", id, graphSourceName, flowSourceName)})
+		case flowExists:
+			result = append(result, s.graphEntryFromFile(id, flowSourceName, LegacyFileFlow))
+		case graphExists:
+			result = append(result, s.graphEntryFromFile(id, graphSourceName, ""))
+		default:
+			result = append(result, GraphEntry{ID: id, Name: id, SourceKind: SourceKindGraph,
+				Path: filepath.Join(directory, graphSourceName), Error: "source object has no graph.yaml or flow.yaml"})
 		}
+	}
+	return result, nil
+}
+
+// graphEntryFromFile parses one source file into a catalog row. A flow.yaml is
+// always a definition. A graph.yaml is classified first: a definition carries
+// Flow, a legacy document carries Document and legacyFile graph-v1.
+func (s Store) graphEntryFromFile(id, filename, legacyFile string) GraphEntry {
+	path := filepath.Join(s.GraphsDir(), id, filename)
+	entry := GraphEntry{ID: id, Name: id, SourceKind: SourceKindGraph, LegacyFile: legacyFile, Path: path}
+	data, err := readRegular(path)
+	if err != nil {
+		entry.Error = err.Error()
 		return entry
-	})
+	}
+	if filename == graphSourceName {
+		kind, classErr := ClassifyGraphSource(data)
+		if classErr != nil {
+			entry.Error = classErr.Error()
+			return entry
+		}
+		if kind == GraphFileLegacy {
+			entry.LegacyFile = LegacyFileGraphV1
+			return s.legacyGraphEntry(entry, id, data)
+		}
+	}
+	definition, err := agentflow.ParseDefinition(data)
+	if err != nil {
+		entry.Error = err.Error()
+		return entry
+	}
+	if definition.ID != id {
+		entry.Error = fmt.Sprintf("Graph id %q must match directory %q", definition.ID, id)
+		return entry
+	}
+	entry.Name = definition.Name
+	if entry.Name == "" {
+		entry.Name = definition.ID
+	}
+	entry.Flow = definition
+	entry.Digest, err = AgentFlowDigest(definition)
+	if err != nil {
+		entry.Error = err.Error()
+	}
+	return entry
+}
+
+func (s Store) legacyGraphEntry(entry GraphEntry, id string, data []byte) GraphEntry {
+	document, err := graphsource.Parse(data)
+	if err != nil {
+		entry.Error = err.Error()
+		return entry
+	}
+	if document.ID != id {
+		entry.Error = fmt.Sprintf("Graph id %q must match directory %q", document.ID, id)
+		return entry
+	}
+	entry.Name = document.Name
+	entry.Document = document
+	entry.Digest, err = graphsource.SourceDigest(document)
+	if err != nil {
+		entry.Error = err.Error()
+	}
+	return entry
 }
 
 // ListFlows returns flow-source objects only. The FlowDefinition is the same
@@ -458,6 +549,40 @@ func (s Store) CreateGraphFromDocument(document *graphsource.Document) (string, 
 		return "", err
 	}
 	return graphsource.SourceDigest(document)
+}
+
+// CreateGraphFromDefinition writes a fully authored FlowDefinition as
+// agents/graphs/<id>/graph.yaml. It is what install uses for both pack formats.
+// An existing graph.yaml or flow.yaml is never overwritten: the caller inspects
+// first and decides create versus identical.
+func (s Store) CreateGraphFromDefinition(definition *domain.FlowDefinition) (string, error) {
+	if definition == nil {
+		return "", fmt.Errorf("graph definition is required")
+	}
+	definition.ID = strings.TrimSpace(definition.ID)
+	if !objectIDPattern.MatchString(definition.ID) {
+		return "", fmt.Errorf("invalid graph id %q", definition.ID)
+	}
+	unlock := lockSource(filepath.Join(s.GraphsDir(), definition.ID))
+	defer unlock()
+	if _, err := s.SourceKind(definition.ID); err == nil {
+		return "", fmt.Errorf("source object %q already exists", definition.ID)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	encoded, err := agentflow.DefinitionToYAML(definition)
+	if err != nil {
+		return "", err
+	}
+	// Local heroes and skills may already exist below the object directory.
+	graphDir, err := ensureSourceDir(s.GraphsDir(), definition.ID)
+	if err != nil {
+		return "", err
+	}
+	if err := atomicWrite(filepath.Join(graphDir, graphSourceName), encoded, true); err != nil {
+		return "", err
+	}
+	return AgentFlowDigest(definition)
 }
 
 // CreateFlowFromDefinition publishes a fully authored Agent Flow draft as

@@ -20,9 +20,10 @@ const ManifestName = "pack.yaml"
 // reserved for S5 and is excluded from the payload digest.
 const SignatureName = "pack.sig"
 
-// Flow formats. format: flow is a full Agent Flow FlowDefinition (check tasks,
-// fan-out, terminal tasks, next routing); format: graph is the existing
-// graphsource.Document, which can only express hero tasks.
+// Flow formats. Both values install as agents/graphs/<id>/graph.yaml carrying a
+// FlowDefinition. format: flow is accepted so existing packs parse; it is
+// deprecated and names no separate file. An omitted format means graph. A legacy
+// graphsource.Document is not a format: inspect rejects it.
 const (
 	FlowFormatFlow  = "flow"
 	FlowFormatGraph = "graph"
@@ -247,8 +248,7 @@ func validateManifest(manifest *Manifest) error {
 		switch flow.Format {
 		case FlowFormatFlow, FlowFormatGraph:
 		case "":
-			return fieldError(CodePackFlowInvalid, field+".format",
-				"flow format is required (%q or %q)", FlowFormatFlow, FlowFormatGraph)
+			flow.Format = FlowFormatGraph
 		default:
 			return fieldError(CodePackFlowInvalid, field+".format",
 				"unsupported flow format %q (supported: %s, %s)", flow.Format, FlowFormatFlow, FlowFormatGraph)

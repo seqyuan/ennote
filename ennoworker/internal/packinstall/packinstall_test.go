@@ -12,6 +12,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/graphrun"
 	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/packinstall"
+	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/skills"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
@@ -60,23 +61,21 @@ docs:
   readme: README.md
 `
 
-const graphFlowSource = `schema_version: 1
+const graphFlowSource = `schemaVersion: 1
 id: qc-review
 name: QC Review
+budget:
+  max_total_tokens: 20000
 tasks:
   load:
-    name: Load
-    model: provider/pack-model
+    hero: local/qc-reviewer
     goal: Load the samplesheet
     skills: [local/cell-qc-tables]
   review:
-    name: Review
     hero: local/qc-reviewer
     goal: Review QC metrics
     writes: [results/qc.csv]
-graph:
-  load: []
-  review: [load]
+    depends: [load]
 `
 
 const flowScopedSkillJSON = `{"id":"cell-qc-tables","prompt":"SKILL.md","allowedTools":["read"]}`
@@ -192,9 +191,9 @@ func TestInstallGraphPackWritesDraftAndScopedObjects(t *testing.T) {
 	require.NotNil(t, plan.State)
 
 	// The Graph is a draft: graph.yaml exists and no revision was published.
-	document, _, err := f.sources.ReadGraph("qc-review")
+	definition, _, err := f.sources.ReadGraphDefinition("qc-review")
 	require.NoError(t, err)
-	assert.Equal(t, "qc-review", document.ID)
+	assert.Equal(t, "qc-review", definition.ID)
 	revisions, err := f.sources.ListGraphRevisions("qc-review")
 	require.NoError(t, err)
 	assert.Empty(t, revisions)
@@ -255,13 +254,13 @@ func TestInstallGraphPackWritesDraftAndScopedObjects(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, staging)
 
-	// Default disabled: the installed Graph has no revision, so a Run start is
-	// refused by the existing graphrun contract.
+	// Default disabled: install publishes nothing and enables no binding, so a
+	// Run start is refused before it can reach a revision.
 	session := f.createSession()
-	runner := &graphrun.Service{Sources: f.sources, Models: &store.ModelRepo{Files: f.models}, Sessions: f.sessions}
+	runner := &graphrun.Service{Sources: f.sources, Models: &store.ModelRepo{Files: f.models}, Sessions: f.sessions, Projects: f.projects}
 	_, err = runner.Start(context.Background(), session.ProjectID, "qc-review", 0, session.ID, nil, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no published revision")
+	assert.Contains(t, err.Error(), "graph_binding_required")
 }
 
 func TestInstallReinstallIsNoop(t *testing.T) {
@@ -374,9 +373,9 @@ heroes:
 		require.Len(t, installed.State.Flows, 1)
 		assert.Equal(t, "flow", installed.State.Flows[0].Format)
 		assert.Nil(t, installed.State.Flows[0].PublishedRevision)
-		_, _, err = f.sources.ReadFlow("qc-review")
+		_, _, err = f.sources.ReadGraphDefinition("qc-review")
 		require.NoError(t, err)
-		revisions, err := f.sources.ListFlowRevisions("qc-review")
+		revisions, err := f.sources.ListGraphRevisions("qc-review")
 		require.NoError(t, err)
 		assert.Empty(t, revisions)
 	})
@@ -539,12 +538,12 @@ func TestRenamesChangeInstalledStoreIDsOnly(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, plan.Blockers)
 
-	document, _, err := f.sources.ReadGraph("cell-qc-review")
+	definition, _, err := f.sources.ReadGraphDefinition("cell-qc-review")
 	require.NoError(t, err)
-	assert.Equal(t, "cell-qc-review", document.ID)
+	assert.Equal(t, "cell-qc-review", definition.ID)
 	// In-pack references are not rewritten: the Graph still points at the pack
 	// handle, which is exactly why a rename warns.
-	assert.Equal(t, "local/qc-reviewer", document.Tasks["review"].Hero)
+	assert.Equal(t, "local/qc-reviewer", definition.Tasks["review"].Hero)
 	heroDoc, _, err := f.sources.ReadGraphHero("cell-qc-review", "qc-reviewer")
 	require.NoError(t, err)
 	assert.Equal(t, "qc-reviewer", heroDoc.Handle)
@@ -606,10 +605,17 @@ func TestRemoveRefusesActiveRunAndEditedFilesThenDeletes(t *testing.T) {
 
 	// Publish through the ordinary Graph path so a Run can start, then verify
 	// the installed Graph is otherwise runnable.
-	_, err = f.sources.PublishGraphRevision("qc-review")
+	revision, err := f.sources.PublishGraphRevision("qc-review")
 	require.NoError(t, err)
 	session := f.createSession()
-	runner := &graphrun.Service{Sources: f.sources, Models: &store.ModelRepo{Files: f.models}, Sessions: f.sessions}
+	_, err = f.projects.UpdateGraphBindings(ctx, session.ProjectID, func(bindings *[]projectstore.GraphBinding) error {
+		*bindings = append(*bindings, projectstore.GraphBinding{
+			SourceKind: projectstore.SourceKindGraph, GraphID: "qc-review", Revision: revision.ID(), Enabled: true,
+		})
+		return nil
+	})
+	require.NoError(t, err)
+	runner := &graphrun.Service{Sources: f.sources, Models: &store.ModelRepo{Files: f.models}, Sessions: f.sessions, Projects: f.projects}
 	run, err := runner.Start(ctx, session.ProjectID, "qc-review", 0, session.ID, nil, nil)
 	require.NoError(t, err)
 

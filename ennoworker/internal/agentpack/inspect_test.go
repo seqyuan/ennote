@@ -42,7 +42,7 @@ func TestInspectDirectoryPack(t *testing.T) {
 	assert.Equal(t, []string{"qc-reviewer"}, flow.Heroes)
 	assert.Zero(t, flow.CheckTasks)
 	assert.Zero(t, flow.FanOutTasks)
-	assert.Zero(t, flow.MaxTotalTokens)
+	assert.Equal(t, int64(20000), flow.MaxTotalTokens)
 	assert.True(t, strings.HasPrefix(flow.PathDigest, "sha256:"))
 	assert.True(t, strings.HasPrefix(flow.SourceDigest, "sha256:"))
 
@@ -87,7 +87,7 @@ func TestInspectDirectoryPack(t *testing.T) {
 	assert.Equal(t, []string{"grep", "read"}, envelope.Tools)
 	assert.Equal(t, []string{"results/qc.csv"}, envelope.Writes)
 	assert.Empty(t, envelope.CheckCommands)
-	assert.Zero(t, envelope.FlowMaxTotalTokens)
+	assert.Equal(t, int64(20000), envelope.FlowMaxTotalTokens)
 
 	codes := warningCodes(result.Warnings)
 	assert.Contains(t, codes, WarningUnsignedPack)

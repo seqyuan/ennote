@@ -207,7 +207,6 @@ func (s *Service) plan(ctx context.Context, request Request) (*Plan, error) {
 		inspect: result, manifest: manifest, pkg: pkg,
 		flowStoreIDs:    map[string]string{},
 		heroStoreIDs:    map[string]string{},
-		flowDocs:        map[string]*graphsource.Document{},
 		flowDefinitions: map[string]*domain.FlowDefinition{},
 		heroDocs:        map[string]*heroesource.Document{},
 		flowHeroRefs:    map[string]map[string]bool{},
@@ -277,7 +276,6 @@ type planner struct {
 	flowStoreIDs map[string]string
 	heroStoreIDs map[string]string
 
-	flowDocs        map[string]*graphsource.Document
 	flowDefinitions map[string]*domain.FlowDefinition
 	heroDocs        map[string]*heroesource.Document
 
@@ -423,18 +421,18 @@ func (p *planner) loadDocuments() error {
 			continue // inspect already reported the missing source
 		}
 		switch entry.Format {
-		case agentpack.FlowFormatGraph:
-			document, err := graphsource.Parse(file.Data)
-			if err != nil {
-				return newError(agentpack.CodePackFlowInvalid,
-					fmt.Sprintf("parse Graph source %s: %v", entry.Path, err))
+		case agentpack.FlowFormatGraph, agentpack.FlowFormatFlow:
+			if entry.Format == agentpack.FlowFormatGraph {
+				kind, classErr := globalsource.ClassifyGraphSource(file.Data)
+				if classErr != nil || kind != globalsource.GraphFileDefinition {
+					return newError(agentpack.CodePackFlowInvalid,
+						fmt.Sprintf("graph_legacy_source: %s is a legacy graph document; a pack graph must be a FlowDefinition", entry.Path))
+				}
 			}
-			p.flowDocs[entry.ID] = document
-		case agentpack.FlowFormatFlow:
 			definition, err := agentflow.ParseDefinition(file.Data)
 			if err != nil {
 				return newError(agentpack.CodePackFlowInvalid,
-					fmt.Sprintf("parse Agent Flow source %s: %v", entry.Path, err))
+					fmt.Sprintf("parse Graph source %s: %v", entry.Path, err))
 			}
 			p.flowDefinitions[entry.ID] = definition
 		}
@@ -468,19 +466,6 @@ func (p *planner) checkModels() {
 			if _, err := p.service.Models.ResolvePortableRef(p.ctx, ref); err != nil {
 				p.blocker(CodeModelUnresolved, fmt.Sprintf(
 					"hero %q model ref %q: %v", entry.Handle, ref, err))
-			}
-		}
-	}
-	for _, packFlowID := range sortedKeys(p.flowDocs) {
-		document := p.flowDocs[packFlowID]
-		for _, taskID := range sortedKeys(document.Tasks) {
-			task := document.Tasks[taskID]
-			if task.Hero != "" {
-				continue
-			}
-			if _, err := p.service.Models.ResolvePortableRef(p.ctx, task.Model); err != nil {
-				p.blocker(CodeModelUnresolved, fmt.Sprintf(
-					"flow %q task %q model ref %q: %v", packFlowID, taskID, task.Model, err))
 			}
 		}
 	}
@@ -594,40 +579,15 @@ func (p *planner) resolveReferences() {
 		for _, handle := range entry.Heroes {
 			refs[handle] = true
 		}
-		switch entry.Format {
-		case agentpack.FlowFormatGraph:
-			document := p.flowDocs[entry.ID]
-			if document != nil {
-				for _, taskID := range sortedKeys(document.Tasks) {
-					task := document.Tasks[taskID]
-					if scope, handle, ok := strings.Cut(task.Hero, "/"); ok && scope == "local" {
-						refs[handle] = true
-						if _, declared := p.heroDocs[handle]; !declared {
-							p.blocker(CodeHeroHandleConflict, fmt.Sprintf(
-								"flow %q task %q references local Hero %q, which the pack does not declare", entry.ID, taskID, handle))
-						}
-					} else if !strings.Contains(task.Hero, "/") && task.Hero != "" {
-						// Bare handle: flow-local when the pack declares it.
-						if _, declared := p.heroDocs[task.Hero]; declared {
-							refs[task.Hero] = true
-						}
-					}
-					for _, ref := range task.Skills {
-						p.collectTaskSkillRef(entry.ID, "flow task "+taskID, ref)
-					}
+		definition := p.flowDefinitions[entry.ID]
+		if definition != nil {
+			for _, taskID := range sortedKeys(definition.Tasks) {
+				task := definition.Tasks[taskID]
+				if task.Type == domain.FlowTaskHero {
+					p.collectFlowHeroRef(entry.ID, taskID, task.Hero, refs)
 				}
-			}
-		case agentpack.FlowFormatFlow:
-			definition := p.flowDefinitions[entry.ID]
-			if definition != nil {
-				for _, taskID := range sortedKeys(definition.Tasks) {
-					task := definition.Tasks[taskID]
-					if task.Type == domain.FlowTaskHero {
-						p.collectFlowHeroRef(entry.ID, taskID, task.Hero, refs)
-					}
-					for _, ref := range task.Skills {
-						p.collectTaskSkillRef(entry.ID, "flow task "+taskID, ref)
-					}
+				for _, ref := range task.Skills {
+					p.collectTaskSkillRef(entry.ID, "flow task "+taskID, ref)
 				}
 			}
 		}
@@ -820,35 +780,7 @@ func (p *planner) planFlows() error {
 	for _, entry := range p.manifest.Flows {
 		storeID := p.flowStoreIDs[entry.ID]
 		switch entry.Format {
-		case agentpack.FlowFormatGraph:
-			document, ok := p.flowDocs[entry.ID]
-			if !ok {
-				continue
-			}
-			installed := *document
-			installed.ID = storeID
-			digest, err := graphsource.SourceDigest(&installed)
-			if err != nil {
-				return fmt.Errorf("digest installed Graph %s: %w", storeID, err)
-			}
-			action := p.service.graphAction(storeID, digest)
-			if action == ActionConflict {
-				p.blocker(CodeFlowIDConflict, fmt.Sprintf(
-					"source %q already exists with different content; the installer never overwrites a Graph", storeID))
-			}
-			if storeID != entry.ID {
-				p.warn(WarningRenamedFlow, SeverityInfo, fmt.Sprintf(
-					"flow %q is installed as Graph %q; in-pack references are not rewritten", entry.ID, storeID))
-			}
-			p.plan.install.flows = append(p.plan.install.flows, &flowTarget{
-				packFlowID: entry.ID, storeID: storeID, format: agentpack.FlowFormatGraph,
-				sourceDigest: sourceDigests[entry.ID], installedDigest: digest,
-				document: &installed, action: action,
-			})
-			p.plan.Actions = append(p.plan.Actions, Action{
-				Kind: ActionKindGraph, StoreID: storeID, Action: action,
-			})
-		case agentpack.FlowFormatFlow:
+		case agentpack.FlowFormatGraph, agentpack.FlowFormatFlow:
 			definition, ok := p.flowDefinitions[entry.ID]
 			if !ok {
 				continue
@@ -861,24 +793,28 @@ func (p *planner) planFlows() error {
 			}
 			digest, err := globalsource.AgentFlowDigest(&installed)
 			if err != nil {
-				return fmt.Errorf("digest installed Flow %s: %w", storeID, err)
+				return fmt.Errorf("digest installed Graph %s: %w", storeID, err)
 			}
 			action := p.service.flowAction(storeID, digest)
 			if action == ActionConflict {
 				p.blocker(CodeFlowIDConflict, fmt.Sprintf(
-					"source %q already exists with different content; the installer never overwrites a Flow", storeID))
+					"source %q already exists with different content; the installer never overwrites a Graph", storeID))
 			}
 			if storeID != entry.ID {
 				p.warn(WarningRenamedFlow, SeverityInfo, fmt.Sprintf(
-					"flow %q is installed as %q; in-pack references are not rewritten", entry.ID, storeID))
+					"flow %q is installed as Graph %q; in-pack references are not rewritten", entry.ID, storeID))
 			}
 			p.plan.install.flows = append(p.plan.install.flows, &flowTarget{
-				packFlowID: entry.ID, storeID: storeID, format: agentpack.FlowFormatFlow,
+				packFlowID: entry.ID, storeID: storeID, format: entry.Format,
 				sourceDigest: sourceDigests[entry.ID], installedDigest: digest,
 				definition: &installed, action: action,
 			})
+			kind := ActionKindFlow
+			if entry.Format == agentpack.FlowFormatGraph {
+				kind = ActionKindGraph
+			}
 			p.plan.Actions = append(p.plan.Actions, Action{
-				Kind: ActionKindFlow, StoreID: storeID, Action: action,
+				Kind: kind, StoreID: storeID, Action: action,
 			})
 		}
 	}
@@ -1095,16 +1031,9 @@ func (s *Service) graphAction(storeID, digest string) string {
 }
 
 func (s *Service) flowAction(storeID, digest string) string {
-	kind, err := s.Sources.SourceKind(storeID)
+	_, existing, err := s.Sources.ReadGraphDefinition(storeID)
 	switch {
 	case err == nil:
-		if kind != globalsource.SourceKindFlow {
-			return ActionConflict
-		}
-		_, existing, readErr := s.Sources.ReadFlow(storeID)
-		if readErr != nil {
-			return ActionConflict
-		}
 		if existing == digest {
 			return ActionExistsIdentical
 		}

@@ -5,7 +5,6 @@ import (
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
-	"github.com/seqyuan/ennote/ennoworker/internal/graphsource"
 )
 
 // Flow task types mirrored from the Agent Flow contract. They are re-declared
@@ -49,22 +48,6 @@ func definitionEntryTask(definition *domain.FlowDefinition) string {
 		tasks[name] = task
 	}
 	return firstIndependentTask(tasks)
-}
-
-func graphEntryTask(document *graphsource.Document) string {
-	if document == nil {
-		return ""
-	}
-	entry := ""
-	for name, dependencies := range document.Graph {
-		if len(dependencies) != 0 {
-			continue
-		}
-		if entry == "" || name < entry {
-			entry = name
-		}
-	}
-	return entry
 }
 
 func firstIndependentTask(tasks map[string]domain.FlowTask) string {

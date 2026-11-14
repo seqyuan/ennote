@@ -177,13 +177,7 @@ func (s *Service) countActiveRuns(ctx context.Context, storeID string) (int, err
 func (s *Service) editedObjects(state *State) ([]string, error) {
 	edited := make([]string, 0)
 	for _, flow := range state.Flows {
-		var digest string
-		var err error
-		if flow.Format == "flow" {
-			_, digest, err = s.Sources.ReadFlow(flow.StoreID)
-		} else {
-			_, digest, err = s.Sources.ReadGraph(flow.StoreID)
-		}
+		_, digest, err := s.Sources.ReadGraphDefinition(flow.StoreID)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
