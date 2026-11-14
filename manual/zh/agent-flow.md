@@ -1,9 +1,10 @@
-# Agent Flow 编排
+# Graph 编排
 
-一次对话能解决的任务，靠聊天就行。多步骤、有依赖、要重跑的长任务，用 Agent Flow 表达成一张
-**Task 图**：谁是上游、谁能并行、预算多少、什么条件下算做完。
+一次对话能解决的任务，靠聊天就行。多步骤、有依赖、要重跑的长任务，用 Graph 表达成一张
+**Task 图**：谁是上游、谁能并行、预算多少、什么条件下算做完。磁盘上的唯一作者格式是
+`agents/graphs/<id>/graph.yaml`，内容即 `FlowDefinition`。
 
-Agent Flow 是可恢复的：中途崩溃、机器重启、你手动取消，都不会让已经从图里消失的工作白做。
+Graph 是可恢复的：中途崩溃、机器重启、你手动取消，都不会让已经从图里消失的工作白做。
 
 ## 它由什么组成
 
@@ -23,7 +24,7 @@ Anchor Run（元 Run：只做编排，自己从不调用 Provider）
 - **每个 Task 都是独立子 Run**：审批、预算、失败、取消都按子 Run 记录，出问题定位到具体 Task
 - **版本不可变**：一条 Run 用的是哪版定义、哪版 Hero、什么模型和权限，事后都能查
 
-## 定义一个 Flow
+## 定义一个 Graph
 
 ```yaml
 schemaVersion: 1
@@ -99,7 +100,7 @@ parallelism:
   allow_disjoint_writers: true
 ```
 
-收敛轮数超过 `max_rounds`，整个 Flow 以 `convergence_exceeded` 终结 —— 不会无限重试。
+收敛轮数超过 `max_rounds`，整个 Graph 以 `convergence_exceeded` 终结 —— 不会无限重试。
 
 !!! warning "`writes` 只影响调度，不是沙箱边界"
     `writes` 声明用来判断两个写任务能不能并行（`allow_disjoint_writers` 打开时要求两两不重叠），
@@ -118,26 +119,29 @@ Task 是 checkpoint：每个节点完成时写入，所以恢复时不需要重�
 
 ## 预算
 
-- **Flow 级 `max_total_tokens` 必填**，发布时缺失直接拒绝
+- **Graph 级 `max_total_tokens` 必填**，发布时缺失直接拒绝
 - Task 级 `budget.tokens` 可以收紧单个任务的额度
-- 累计超过 Flow 预算，以 `budget_exceeded` 终结，并停掉未完成的任务
+- 累计超过 Graph 预算，以 `budget_exceeded` 终结，并停掉未完成的任务
 
 ## 发布与启用
 
-Flow 定义只是草稿，运行前必须走完两步：
+Graph 定义只是草稿，运行前必须走完两步：
 
 ```bash
 # 1. 发布成不可变 revision（会跑真实校验）
-POST /v1/flows/{flowID}/publish
+POST /v1/graphs/{graphID}/publish
 
 # 2. 在 Project 上启用（显式绑定，不会自动发生）
-PUT /v1/projects/{projectID}/graph-bindings/{flowID}
+PUT /v1/projects/{projectID}/graph-bindings/{graphID}
 ```
+
+已废弃的 `/v1/flows/*` 路由仍然存在，并委托给 `/v1/graphs/*`。旧的 `flow.yaml` 草稿会与
+`graph.yaml` 草稿一起列出、仍可运行；在 Graph 编辑器里保存时会改名为 `graph.yaml`。
 
 发布时的校验是"失败即拒绝"，包括：`hero@version` 能否解析、Skill 是否存在、`check`/`fanOut`/
 `terminal`/`next` 的结构是否自洽、并行上限、回边是否成环且有上限。
 
-从 Agent Pack 装进来的 Flow 同样是**草稿**：安装器永远不会自动发布、也不会自动启用。
+从 Agent Pack 装进来的 Graph 同样是**草稿**：安装器永远不会自动发布、也不会自动启用。
 
 ## 运行与恢复
 
@@ -147,7 +151,7 @@ PUT /v1/projects/{projectID}/graph-bindings/{flowID}
 
 恢复语义：
 
-- 进程重启后，服务会扫描该 Session 里所有非终态 Flow Run 并恢复（`RecoverSession`）
+- 进程重启后，服务会扫描该 Session 里所有非终态 Graph Run 并恢复（`RecoverSession`）
 - 恢复只续跑未完成节点，已完成的 checkpoint 不重放
 - 取消只写一个 `cancel_requested` 标志，由编排器在节点边界收敛，避免把正在执行的子 Run 撕开
 
@@ -157,7 +161,7 @@ PUT /v1/projects/{projectID}/graph-bindings/{flowID}
 |---|---|
 | 哪些 Task 已完成 / 在跑 / 阻塞 | `/graphs` 的 Graph 活动面板，与 Run Inspector |
 | 某个 Task 为什么失败 | 打开对应子 Run：事件流、工具调用、审批记录 |
-| 花了多少 token | Flow 累计 + 每个子 Run 的用量 |
+| 花了多少 token | Graph 累计 + 每个子 Run 的用量 |
 | 检查闸门为什么没过 | check 任务的结果与它的审批记录 |
 
 ## 常见失败
@@ -165,8 +169,8 @@ PUT /v1/projects/{projectID}/graph-bindings/{flowID}
 | 现象 | 原因 |
 |---|---|
 | 发布失败：`hero@version` 解析不到 | Hero 未发布，或版本号写错 |
-| 运行按钮点了没反应 | Flow 有 draft 为未发布 revision，或 Project 没建 GraphBinding |
+| 运行按钮点了没反应 | Graph 有 draft 为未发布 revision，或 Project 没建 GraphBinding |
 | 一直 `pending` | 依赖成环，或依赖的 Task 失败后没有 `next` 兜底 |
 | `convergence_exceeded` | 回边轮数超限，检查 `max_rounds` 与修复任务是否真的在改输入 |
-| `budget_exceeded` | Flow 预算太小，或某个 Task 的 `fanOut` 展开过多 |
+| `budget_exceeded` | Graph 预算太小，或某个 Task 的 `fanOut` 展开过多 |
 | 两个写任务没有并行 | 没开 `allow_disjoint_writers`，或 `writes` 有重叠 |

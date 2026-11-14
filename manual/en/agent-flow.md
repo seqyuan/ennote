@@ -1,10 +1,11 @@
-# Agent Flow orchestration
+# Graph orchestration
 
 A task that fits in one conversation belongs in chat. A long task with steps, dependencies and
-re-runs belongs in an **Agent Flow**: a task graph that says what depends on what, what may run in
-parallel, what the budget is, and what counts as done.
+re-runs belongs in a **Graph**: a task graph that says what depends on what, what may run in
+parallel, what the budget is, and what counts as done. The on-disk authoring format is a single
+`agents/graphs/<id>/graph.yaml` holding a `FlowDefinition`.
 
-An Agent Flow is resumable. A crash, a machine reboot or a cancel does not throw away work that has
+A Graph is resumable. A crash, a machine reboot or a cancel does not throw away work that has
 already left the graph.
 
 ## What it is made of
@@ -28,7 +29,7 @@ Three consequences:
 - **Versions are immutable**: which definition, which hero, which model and permissions produced a
   given run stays answerable
 
-## Defining a flow
+## Defining a Graph
 
 ```yaml
 schemaVersion: 1
@@ -124,9 +125,9 @@ A task is a checkpoint: it is written when the node completes, so a resume never
 
 ## Budget
 
-- **The flow's `max_total_tokens` is mandatory**; publish rejects a missing value
+- **The Graph's `max_total_tokens` is mandatory**; publish rejects a missing value
 - A task's `budget.tokens` can tighten one task's ceiling
-- Crossing the flow budget terminalises as `budget_exceeded` and stops unfinished tasks
+- Crossing the Graph budget terminalises as `budget_exceeded` and stops unfinished tasks
 
 ## Publish and enable
 
@@ -134,17 +135,21 @@ A definition is a draft until two steps complete:
 
 ```bash
 # 1. publish an immutable revision (runs the real validator)
-POST /v1/flows/{flowID}/publish
+POST /v1/graphs/{graphID}/publish
 
 # 2. enable it on a Project (explicit; never automatic)
-PUT /v1/projects/{projectID}/graph-bindings/{flowID}
+PUT /v1/projects/{projectID}/graph-bindings/{graphID}
 ```
+
+The deprecated `/v1/flows/*` routes still exist and delegate to `/v1/graphs/*`. A legacy `flow.yaml`
+draft is listed alongside a `graph.yaml` draft and still runs; saving it through the Graph editor
+renames it to `graph.yaml`.
 
 Publishing fails loudly on: an unresolvable `hero@version`, an unknown skill, malformed
 `check`/`fanOut`/`terminal`/`next` structure, an out-of-range parallelism value, or a back-edge without
 a round ceiling.
 
-A flow installed from an Agent Pack is also a **draft**: the installer never publishes and never
+A Graph installed from an Agent Pack is also a **draft**: the installer never publishes and never
 enables.
 
 ## Running and recovering
@@ -155,7 +160,7 @@ enables.
 
 Recovery semantics:
 
-- After a restart the service scans every non-terminal flow run for the session and resumes it
+- After a restart the service scans every non-terminal Graph run for the session and resumes it
   (`RecoverSession`)
 - Resume continues only unfinished nodes; completed checkpoints are not replayed
 - Cancelling writes a `cancel_requested` flag that the orchestrator observes at node boundaries, so an
@@ -167,7 +172,7 @@ Recovery semantics:
 |---|---|
 | Which tasks are done, running, blocked | the graph activity panel on `/graphs`, and the Run Inspector |
 | Why did this task fail | open its child Run: event stream, tool calls, approvals |
-| How many tokens were spent | flow total, plus per-child usage |
+| How many tokens were spent | Graph total, plus per-child usage |
 | Why did a check gate fail | the check task's outcome and its approval record |
 
 ## Common failures
@@ -175,8 +180,8 @@ Recovery semantics:
 | Symptom | Cause |
 |---|---|
 | Publish fails: `hero@version` cannot be resolved | the hero was never published, or the version is wrong |
-| The run button does nothing | the flow is still a draft, or the Project has no GraphBinding |
+| The run button does nothing | the Graph is still a draft, or the Project has no GraphBinding |
 | Stuck in `pending` | a dependency cycle, or a failed dependency with no `next` fallback |
 | `convergence_exceeded` | the back-edge ceiling is too low, or the repair task never changes its input |
-| `budget_exceeded` | the flow budget is too small, or a `fanOut` expanded too far |
+| `budget_exceeded` | the Graph budget is too small, or a `fanOut` expanded too far |
 | Two writing tasks never run in parallel | `allow_disjoint_writers` is off, or their `writes` overlap |
