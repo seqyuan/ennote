@@ -209,6 +209,7 @@ func normalizeDefinition(def *domain.FlowDefinition) error {
 		task.Goal = strings.TrimSpace(task.Goal)
 		task.Command = strings.TrimSpace(task.Command)
 		task.Output = strings.TrimSpace(task.Output)
+		task.ContextMode = strings.TrimSpace(task.ContextMode)
 		task.Skills = sortedUniqueStrings(task.Skills)
 		task.Depends = sortedUniqueStrings(task.Depends)
 		task.Writes = sortedUniqueStrings(task.Writes)

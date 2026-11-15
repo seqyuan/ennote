@@ -389,7 +389,7 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 				o.fail(ctx, runID, fmt.Sprintf("resolve goal for task %q: %v", node.Handle, err))
 				return
 			}
-			child, err := o.dispatchHeroChild(ctx, runID, state, node, task, goal)
+			child, err := o.dispatchHeroChild(ctx, runID, state, node, task, goal, taskOutputs)
 			if err != nil {
 				return
 			}
@@ -430,8 +430,12 @@ func frozenSkillRefs(node *domain.RunAgentFlowNode) domain.FrozenSkillRefs {
 // child Run, records the child on the node, publishes the started event, and
 // enqueues the child. It never blocks: the caller batches hero children and
 // waits for any to settle via waitAndFoldAny.
+//
+// taskOutputs is the checkpoint map the caller already holds; only a snapshot
+// task reads it, to append the bounded upstream section to the assignment. The
+// frozen goalText on the node stays the resolved goal in both modes.
 func (o *Orchestrator) dispatchHeroChild(ctx context.Context, runID string, flow *domain.RunAgentFlow,
-	node *domain.RunAgentFlowNode, task domain.FlowTask, goal string) (ChildInfo, error) {
+	node *domain.RunAgentFlowNode, task domain.FlowTask, goal string, taskOutputs map[string]json.RawMessage) (ChildInfo, error) {
 	budget := taskBudgetCeiling(node)
 	// Claim the node before dispatching (CAS pending -> running) so two
 	// orchestrators (restart race) never dispatch the same task twice.
@@ -443,7 +447,7 @@ func (o *Orchestrator) dispatchHeroChild(ctx context.Context, runID string, flow
 	}
 	child, err := o.Children.CreateTaskChild(ctx, runID, flow.SessionID, ChildSpec{
 		Handle: node.Handle, HeroVersionID: node.HeroVersionID,
-		Skills: frozenSkillRefs(node), Assignment: renderAcceptanceAssignment(goal, node.Acceptance), Budget: budget,
+		Skills: frozenSkillRefs(node), Assignment: renderTaskAssignment(goal, node.Acceptance, task, taskOutputs), Budget: budget,
 		HeroDefinitionJSON: node.HeroDefinitionJSON,
 	})
 	if err != nil {

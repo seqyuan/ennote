@@ -224,7 +224,17 @@ export interface paths {
          *     for the file leaves, `artifact` for `artifact-published`), `columns` or
          *     the check name is missing or malformed, when a file leaf also declares
          *     `artifact` (or the reverse), and when a path is absolute or escapes the
-         *     workspace.
+         *     workspace. A Hero that declares `acceptanceKinds` restricts the leaves
+         *     its tasks may name: a declared kind outside that list is refused with
+         *     `hero_acceptance_kind_unsupported`. An absent or empty `acceptanceKinds`
+         *     means the whole vocabulary, so Heroes written before the field existed
+         *     publish unchanged.
+         *
+         *     Task context: `contextMode` must be `isolated` (the default) or
+         *     `snapshot`, else `context_mode_invalid`; `snapshot` is refused
+         *     (`context_mode_unsupported`) on check, terminal and fan_out tasks, which
+         *     have no single child assignment to extend, instead of being accepted and
+         *     silently ignored.
          *
          *     A Graph needs no project binding to publish; enabling it is a separate
          *     step.
@@ -3207,6 +3217,14 @@ export interface components {
             /** @enum {string} */
             permissionCeiling: "discuss" | "ask" | "auto";
             allowedTools: string[];
+            /**
+             * @description The acceptance leaf kinds this Hero produces artifacts for. A Graph
+             *     task running this Hero may only declare these kinds; publish refuses
+             *     any other with `hero_acceptance_kind_unsupported`. Absent or empty
+             *     means the whole vocabulary, which is the behaviour of every Hero
+             *     written before this field existed.
+             */
+            acceptanceKinds?: ("exists" | "non-empty" | "csv-columns" | "json-valid" | "artifact-published")[];
             context: {
                 /** @enum {string} */
                 defaultMode: "room" | "reply" | "fresh" | "task_only";
@@ -3264,6 +3282,19 @@ export interface components {
             writes?: string[];
             /** @description Machine-checked conditions on this task's artifacts, verified after its child Run */
             acceptance?: components["schemas"]["FlowAcceptanceDecl"][];
+            /**
+             * @description What this task's child assignment carries beyond the resolved goal.
+             *     `isolated` (the default when omitted) is the goal plus the acceptance
+             *     block and nothing about the upstream tasks. `snapshot` appends a
+             *     bounded, deterministic section built from the `depends` tasks'
+             *     recorded `outputRef` - at most 2 KiB per upstream task and 8 KiB in
+             *     total, truncated with an explicit marker, framed as upstream RESULT
+             *     DATA rather than instructions. Refused on check, terminal and fan_out
+             *     tasks (no single child assignment to extend). The frozen `goalText`
+             *     on the node stays the resolved goal in both modes.
+             * @enum {string}
+             */
+            contextMode?: "isolated" | "snapshot";
         };
         ProjectGraphBinding: {
             /** @enum {string} */
@@ -3411,6 +3442,12 @@ export interface components {
             /** @enum {string} */
             permissionCeiling: "discuss" | "ask" | "auto";
             allowedTools: string[];
+            /**
+             * @description Frozen copy of the Hero document's `acceptanceKinds`, carried with the
+             *     Hero definition into the Graph node. Absent or empty means the whole
+             *     acceptance leaf vocabulary.
+             */
+            acceptanceKinds?: string[];
             contextPolicy: components["schemas"]["HeroContextPolicy"];
             delegationPolicy: components["schemas"]["HeroDelegationPolicy"];
             outputContract: string;

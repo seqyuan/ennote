@@ -232,7 +232,22 @@ type FlowTask struct {
 	// artifacts. Empty means the task has no acceptance clause and runs exactly
 	// as before.
 	Acceptance []FlowAcceptance `json:"acceptance,omitempty" yaml:"acceptance,omitempty"`
+	// ContextMode selects what this task's child assignment carries beyond the
+	// resolved goal. Empty and "isolated" are the same thing: today's handoff,
+	// the goal plus the acceptance block and nothing about the upstream tasks.
+	// "snapshot" appends a bounded, deterministic digest of the `depends`
+	// tasks' recorded output_ref, framed as result data rather than
+	// instructions. It selects a payload; it is not a context vocabulary of its
+	// own (a child Run is always task_only).
+	ContextMode string `json:"contextMode,omitempty" yaml:"context_mode,omitempty"`
 }
+
+// FlowTaskContextMode values. There are exactly two: the handing-off task
+// either shows nothing of its upstream results, or a bounded digest of them.
+const (
+	FlowTaskContextIsolated = "isolated"
+	FlowTaskContextSnapshot = "snapshot"
+)
 
 // DefaultFlowParallelismMax is the ready-set dispatch concurrency ceiling when
 // the flow does not specify parallelism.max (decision 2026-08-07).

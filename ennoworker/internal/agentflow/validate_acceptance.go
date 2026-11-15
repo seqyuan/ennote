@@ -32,11 +32,24 @@ func validateUnknownTaskFields(add func(ValidationDiagnostic), def *domain.FlowD
 	}
 }
 
+// heroAcceptanceLimit is one Hero task's acceptance admission: the Hero
+// reference and the leaf kinds that Hero declared in acceptanceKinds. An empty
+// kinds list is the kernel's whole vocabulary, not "nothing allowed".
+type heroAcceptanceLimit struct {
+	heroRef string
+	kinds   []string
+}
+
 // validateAcceptance validates every task's acceptance clause. Acceptance is
 // only supported on ordinary hero tasks: check/terminal tasks have no artifact
 // of their own, and a fan_out parent has no single verdict (parent aggregation
 // is a later design).
-func validateAcceptance(add func(ValidationDiagnostic), def *domain.FlowDefinition) {
+//
+// limits carries the resolved Hero of every task that declared acceptance; a
+// Hero with a non-empty acceptanceKinds restricts the leaves its tasks may
+// declare.
+func validateAcceptance(add func(ValidationDiagnostic), def *domain.FlowDefinition,
+	limits map[string]heroAcceptanceLimit) {
 	names := make([]string, 0, len(def.Tasks))
 	for name := range def.Tasks {
 		names = append(names, name)
@@ -74,8 +87,30 @@ func validateAcceptance(add func(ValidationDiagnostic), def *domain.FlowDefiniti
 		for i, spec := range task.Acceptance {
 			entryField := fmt.Sprintf("%s.acceptance[%d]", field, i)
 			validateAcceptanceEntry(add, name, i, entryField, spec)
+			validateHeroAcceptanceKind(add, name, i, entryField, spec, limits[name])
 		}
 	}
+}
+
+// validateHeroAcceptanceKind refuses a leaf the producing Hero does not accept.
+// It only speaks about kinds the kernel knows: an unknown check already fails as
+// acceptance_check_unknown, and reporting it twice would not help the author.
+// An empty acceptanceKinds list means "the whole vocabulary" and never fires,
+// which is what keeps every Hero written before the field existed working.
+func validateHeroAcceptanceKind(add func(ValidationDiagnostic), taskName string, index int,
+	entryField string, spec domain.FlowAcceptance, limit heroAcceptanceLimit) {
+	if len(limit.kinds) == 0 || !knownAcceptanceCheck(spec.Check) {
+		return
+	}
+	for _, kind := range limit.kinds {
+		if kind == spec.Check {
+			return
+		}
+	}
+	add(ValidationDiagnostic{Code: "hero_acceptance_kind_unsupported",
+		Message: fmt.Sprintf("task %q acceptance[%d] check %q is not accepted by Hero %q (it accepts: %s)",
+			taskName, index, spec.Check, limit.heroRef, strings.Join(limit.kinds, ", ")),
+		Field: entryField + ".check"})
 }
 
 func validateAcceptanceEntry(add func(ValidationDiagnostic), taskName string, index int, entryField string, spec domain.FlowAcceptance) {

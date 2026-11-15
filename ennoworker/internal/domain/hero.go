@@ -171,13 +171,18 @@ type HeroDelegationPolicy struct {
 }
 
 type HeroDefinition struct {
-	SchemaVersion     int                  `json:"schemaVersion"`
-	HeroPrompt        string               `json:"heroPrompt"`
-	ModelBinding      HeroModelBinding     `json:"modelBinding"`
-	Skills            HeroSkills           `json:"skills"`
-	Authority         HeroAuthority        `json:"authority"`
-	PermissionCeiling PermissionMode       `json:"permissionCeiling"`
-	AllowedTools      []string             `json:"allowedTools"`
+	SchemaVersion     int              `json:"schemaVersion"`
+	HeroPrompt        string           `json:"heroPrompt"`
+	ModelBinding      HeroModelBinding `json:"modelBinding"`
+	Skills            HeroSkills       `json:"skills"`
+	Authority         HeroAuthority    `json:"authority"`
+	PermissionCeiling PermissionMode   `json:"permissionCeiling"`
+	AllowedTools      []string         `json:"allowedTools"`
+	// AcceptanceKinds is the frozen copy of the Hero source's acceptanceKinds:
+	// the acceptance leaf kinds a Graph task may declare when it runs this Hero.
+	// Empty means "the kernel's whole vocabulary" (the pre-existing behaviour),
+	// so a Hero written before the field existed keeps publishing unchanged.
+	AcceptanceKinds   []string             `json:"acceptanceKinds,omitempty"`
 	ContextPolicy     HeroContextPolicy    `json:"contextPolicy"`
 	DelegationPolicy  HeroDelegationPolicy `json:"delegationPolicy"`
 	OutputContract    string               `json:"outputContract"`

@@ -65,6 +65,9 @@ func (d *HeroDiscovery) resolveDefinition(ctx context.Context, document *heroeso
 		},
 		Skills: domain.HeroSkills{Entries: skills}, Authority: document.Authority.Domain(),
 		PermissionCeiling: document.PermissionCeiling, AllowedTools: append([]string(nil), document.AllowedTools...),
+		// Frozen with the definition: the publish validator reads it to refuse a
+		// task that declared an acceptance kind this Hero does not produce.
+		AcceptanceKinds: append([]string(nil), document.AcceptanceKinds...),
 		ContextPolicy: domain.HeroContextPolicy{
 			DefaultMode: document.Context.DefaultMode, AllowedModes: append([]domain.HeroContextMode(nil), document.Context.AllowedModes...),
 			OwnExecutionContinuity: document.Context.OwnExecutionContinuity,

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 )
 
@@ -92,6 +93,19 @@ func ValidateForWrite(document *Document) error {
 		return fmt.Errorf("context.ownExecutionContinuity must be \"none\"")
 	}
 
+	// acceptanceKinds names the acceptance leaves a Graph task may declare when
+	// it runs this Hero. The vocabulary is agentflow.KnownChecks - the kernel's
+	// own single source of truth - so a Hero cannot name a leaf the kernel will
+	// never decide. heroesource may import agentflow because agentflow depends
+	// only on domain: the edge stays acyclic. An empty list is deliberately
+	// accepted: it means "the whole vocabulary".
+	for index, kind := range document.AcceptanceKinds {
+		if !knownAcceptanceKind(kind) {
+			return fmt.Errorf("acceptanceKinds[%d] %q is not a known acceptance check (supported: %s)",
+				index, kind, strings.Join(agentflow.KnownChecks, ", "))
+		}
+	}
+
 	if strings.TrimSpace(document.Prompt) == "" {
 		return fmt.Errorf("prompt must not be empty")
 	}
@@ -105,6 +119,17 @@ func ValidateForWrite(document *Document) error {
 func containsContextMode(modes []domain.HeroContextMode, target domain.HeroContextMode) bool {
 	for _, mode := range modes {
 		if mode == target {
+			return true
+		}
+	}
+	return false
+}
+
+// knownAcceptanceKind reports whether the value is one of the kernel's
+// acceptance leaves.
+func knownAcceptanceKind(kind string) bool {
+	for _, known := range agentflow.KnownChecks {
+		if kind == known {
 			return true
 		}
 	}

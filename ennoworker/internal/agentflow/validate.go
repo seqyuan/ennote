@@ -144,6 +144,9 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 	// runs after the loop: the delegation limits are counted per Hero object id
 	// across the whole flow, and those totals do not exist yet task by task.
 	var heroFacts []heroAdmissionFacts
+	// heroAcceptanceLimits carries the resolved Hero of each task so the
+	// acceptance check can refuse a leaf the producing Hero does not accept.
+	heroAcceptanceLimits := map[string]heroAcceptanceLimit{}
 	for name, task := range def.Tasks {
 		field := "tasks." + name
 		if task.Terminal != nil {
@@ -191,6 +194,7 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 				continue
 			}
 			heroDef := info.Definition
+			heroAcceptanceLimits[name] = heroAcceptanceLimit{heroRef: task.Hero, kinds: heroDef.AcceptanceKinds}
 			var taskBudgetTokens int64
 			if task.Budget != nil && task.Budget.Tokens > 0 {
 				taskBudgetTokens = task.Budget.Tokens
@@ -321,7 +325,10 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 	validateUnknownTaskFields(add, def)
 
 	// 10. acceptance clause syntax and targets.
-	validateAcceptance(add, def)
+	validateAcceptance(add, def, heroAcceptanceLimits)
+
+	// 11. context mode: what a task's assignment carries beyond the goal.
+	validateContextMode(add, def)
 
 	result.Valid = len(result.Diagnostics) == 0
 	if result.Valid {

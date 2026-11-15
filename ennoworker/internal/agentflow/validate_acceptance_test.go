@@ -333,3 +333,83 @@ tasks:
 	assert.False(t, hasCode(result, "acceptance_check_unknown"))
 	assert.False(t, hasCode(result, "acceptance_path_absolute"))
 }
+
+// validatorForHeroes returns the standard publish validator over a Hero catalog
+// the case can change, so one Hero's acceptanceKinds can be restricted while
+// every other check keeps its usual facts.
+func validatorForHeroes(resolver Resolver) *Validator {
+	return &Validator{
+		Resolver:       resolver,
+		CheckAllowlist: []string{"go", "python3", "sh", "node", "git", "make"},
+		MaxFanOut:      64,
+		MaxRounds:      100,
+	}
+}
+
+// A Hero states what it produces, so a task running it may only declare the
+// acceptance leaves that Hero accepts. An empty acceptanceKinds list means "the
+// kernel's whole vocabulary" and never fires: that is what keeps every Hero
+// written before the field existed publishing the graphs it always published.
+func TestValidationHeroAcceptanceKindsRestrictDeclaredLeaves(t *testing.T) {
+	csvClause := acceptanceProducerYAML(acceptanceBlock(
+		`{file: outputs/qc.csv, check: csv-columns, columns: [sample, reads]}`))
+	jsonClause := acceptanceProducerYAML(acceptanceBlock(`{file: outputs/qc.json, check: json-valid}`))
+
+	withWriterKinds := func(kinds ...string) *stubResolver {
+		resolver := newStubResolver()
+		writer := resolver.heroDefs["writer@1"]
+		writer.AcceptanceKinds = kinds
+		resolver.heroDefs["writer@1"] = writer
+		return resolver
+	}
+
+	cases := []struct {
+		name        string
+		yaml        string
+		kinds       []string
+		wantAllowed bool
+	}{
+		{name: "declared kind the Hero does not accept", yaml: csvClause, kinds: []string{"json-valid"}},
+		{name: "declared kind the Hero accepts", yaml: jsonClause, kinds: []string{"json-valid"}, wantAllowed: true},
+		{name: "empty list is the whole vocabulary", yaml: csvClause, kinds: nil, wantAllowed: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			def, err := ParseDefinition([]byte(tc.yaml))
+			require.NoError(t, err)
+			result := validatorForHeroes(withWriterKinds(tc.kinds...)).Validate(context.Background(), def)
+			if tc.wantAllowed {
+				assert.True(t, result.Valid, "%v", result.Diagnostics)
+				assert.False(t, hasCode(result, "hero_acceptance_kind_unsupported"))
+				return
+			}
+			require.False(t, result.Valid)
+			diagnostic := acceptanceDiagnostic(result, "hero_acceptance_kind_unsupported")
+			require.NotNil(t, diagnostic, "expected hero_acceptance_kind_unsupported, got %v", result.Diagnostics)
+			assert.Equal(t, "tasks.producer.acceptance[0].check", diagnostic.Field)
+			// The message has to name the task, the kind and the Hero reference:
+			// the HTTP layer flattens diagnostics and drops Field.
+			assert.Contains(t, diagnostic.Message, `"producer"`)
+			assert.Contains(t, diagnostic.Message, `"csv-columns"`)
+			assert.Contains(t, diagnostic.Message, `"writer@1"`)
+			assert.Contains(t, diagnostic.Message, "json-valid")
+		})
+	}
+}
+
+// An unknown check is reported once, as acceptance_check_unknown: the Hero
+// restriction does not add a second diagnostic about a leaf nobody can decide.
+func TestValidationUnknownCheckIsNotAlsoBlamedOnTheHero(t *testing.T) {
+	resolver := newStubResolver()
+	writer := resolver.heroDefs["writer@1"]
+	writer.AcceptanceKinds = []string{"json-valid"}
+	resolver.heroDefs["writer@1"] = writer
+
+	def, err := ParseDefinition([]byte(acceptanceProducerYAML(
+		acceptanceBlock(`{file: outputs/qc.csv, check: tests-passed}`))))
+	require.NoError(t, err)
+	result := validatorForHeroes(resolver).Validate(context.Background(), def)
+	require.False(t, result.Valid)
+	assert.True(t, hasCode(result, "acceptance_check_unknown"))
+	assert.False(t, hasCode(result, "hero_acceptance_kind_unsupported"))
+}

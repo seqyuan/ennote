@@ -115,11 +115,16 @@ type Document struct {
 	Authority         Authority             `json:"authority" yaml:"authority"`
 	PermissionCeiling domain.PermissionMode `json:"permissionCeiling" yaml:"permissionCeiling"`
 	AllowedTools      []string              `json:"allowedTools" yaml:"allowedTools"`
-	Context           ContextPolicy         `json:"context" yaml:"context"`
-	Delegation        DelegationPolicy      `json:"delegation" yaml:"delegation"`
-	OutputContract    string                `json:"outputContract" yaml:"outputContract"`
-	MaxLoopIterations int                   `json:"maxLoopIterations" yaml:"maxLoopIterations"`
-	Prompt            string                `json:"prompt" yaml:"-"`
+	// AcceptanceKinds restricts which acceptance leaf kinds a Graph task may
+	// declare when it runs this Hero. Absent/empty means "the kernel's whole
+	// vocabulary", which is what keeps every Hero written before this field
+	// existed publishing the graphs it always published.
+	AcceptanceKinds   []string         `json:"acceptanceKinds,omitempty" yaml:"acceptanceKinds,omitempty"`
+	Context           ContextPolicy    `json:"context" yaml:"context"`
+	Delegation        DelegationPolicy `json:"delegation" yaml:"delegation"`
+	OutputContract    string           `json:"outputContract" yaml:"outputContract"`
+	MaxLoopIterations int              `json:"maxLoopIterations" yaml:"maxLoopIterations"`
+	Prompt            string           `json:"prompt" yaml:"-"`
 }
 
 func Parse(data []byte) (*Document, error) {
@@ -170,6 +175,7 @@ func Encode(document *Document) ([]byte, error) {
 	copy.Model.Fallbacks = append([]string(nil), document.Model.Fallbacks...)
 	copy.Skills = append([]SkillBinding(nil), document.Skills...)
 	copy.AllowedTools = append([]string(nil), document.AllowedTools...)
+	copy.AcceptanceKinds = append([]string(nil), document.AcceptanceKinds...)
 	copy.Context.AllowedModes = append([]domain.HeroContextMode(nil), document.Context.AllowedModes...)
 	copy.Delegation.AllowedCallerKinds = append([]string(nil), document.Delegation.AllowedCallerKinds...)
 	copy.Delegation.AllowedStrategies = append([]string(nil), document.Delegation.AllowedStrategies...)
@@ -193,6 +199,7 @@ func SourceDigest(document *Document) (string, error) {
 	copy.Model.Fallbacks = append([]string(nil), document.Model.Fallbacks...)
 	copy.Skills = append([]SkillBinding(nil), document.Skills...)
 	copy.AllowedTools = append([]string(nil), document.AllowedTools...)
+	copy.AcceptanceKinds = append([]string(nil), document.AcceptanceKinds...)
 	copy.Context.AllowedModes = append([]domain.HeroContextMode(nil), document.Context.AllowedModes...)
 	copy.Delegation.AllowedCallerKinds = append([]string(nil), document.Delegation.AllowedCallerKinds...)
 	copy.Delegation.AllowedStrategies = append([]string(nil), document.Delegation.AllowedStrategies...)
@@ -271,6 +278,9 @@ func normalizeAndValidate(document *Document) error {
 	}
 	sort.Slice(document.Skills, func(i, j int) bool { return document.Skills[i].ID < document.Skills[j].ID })
 	document.AllowedTools = trimSortedUnique(document.AllowedTools)
+	// The leaf vocabulary is checked at write time only (ValidateForWrite): the
+	// read path must keep loading revisions that a future Worker wrote.
+	document.AcceptanceKinds = trimSortedUnique(document.AcceptanceKinds)
 	if document.Context.DefaultMode != "" && !heroContextModes[document.Context.DefaultMode] {
 		return fmt.Errorf("unsupported context defaultMode %q", document.Context.DefaultMode)
 	}
