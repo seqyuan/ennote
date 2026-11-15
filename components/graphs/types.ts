@@ -8,6 +8,7 @@ import type { ModelProfile } from "@/components/settings/types";
 export type ThinkingEffort = components["schemas"]["ThinkingEffort"];
 export type GraphSummary = components["schemas"]["GraphSummary"];
 export type ImmutableFileRevision = components["schemas"]["ImmutableFileRevision"];
+export type FlowAcceptanceDecl = components["schemas"]["FlowAcceptanceDecl"];
 
 // The unified Graph authoring document is the Agent Flow FlowDefinition. The
 // contract declares `definition` loosely (additionalProperties: true), so the
@@ -44,6 +45,11 @@ export interface FlowTask {
   output?: string;
   next?: Record<string, string>;
   writes?: string[];
+  // The clause the Worker freezes at Run start and verifies against the
+  // workspace afterwards. The task form does not edit it yet, but a Task that
+  // the editor PATCHes must not drop it on the way through: saving a goal would
+  // otherwise delete the acceptance clause the Graph declared.
+  acceptance?: FlowAcceptanceDecl[];
 }
 
 export interface FlowConvergenceRule {

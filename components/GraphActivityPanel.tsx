@@ -11,6 +11,8 @@ import type { components } from "@/lib/worker-api.gen";
 
 type RunAgentFlow = components["schemas"]["RunAgentFlow"];
 type RunAgentFlowNode = components["schemas"]["RunAgentFlowNode"];
+type AcceptanceVerdict = components["schemas"]["AcceptanceVerdict"];
+type AcceptanceCheck = components["schemas"]["AcceptanceCheck"];
 
 const pollIntervalMs = 1500;
 
@@ -19,6 +21,29 @@ function catalogLabel(t: Translator, prefix: string, value: string | undefined):
   const key = `${prefix}.${value}`;
   const text = t(key);
   return text === key ? value : text;
+}
+
+/**
+ * One check, rendered as `check (code): detail`.
+ *
+ * The verdict badge is one word on purpose, so the hover text is where the
+ * diagnostic lives: `file_empty` alone does not say which file, and a detail
+ * alone does not say which leaf kind produced it.
+ */
+function checkLine(t: Translator, check: AcceptanceCheck): string {
+  const label = check.code ? `${check.check} (${check.code})` : check.check;
+  return check.detail ? t("graph.acceptance.checkHint", { check: label, detail: check.detail }) : label;
+}
+
+/**
+ * Hover text for a verdict: what the clause is, and the first leaf that did not
+ * hold. A clause is a declared condition on files, never a review of the work,
+ * and the title says so — an `unverified` badge otherwise reads as "passed".
+ */
+function verdictTitle(t: Translator, verdict: AcceptanceVerdict): string {
+  const hint = t("graph.acceptance.hint");
+  const check = verdict.checks.find((entry) => entry.verdict !== "holds") ?? verdict.checks[0];
+  return check ? `${hint}\n${checkLine(t, check)}` : hint;
 }
 
 /**
@@ -157,9 +182,13 @@ function RunCard({ run, nodes, expanded, onToggle, nodesLoading, t }: {
   const nodeCount = nodes.length;
   const done = nodes.filter((node) => node.terminalState === "completed").length;
   const flowLabel = catalogLabel(t, "graph.flow", state);
+  // `doesNotHold` already fails the Run, so the state dot carries it. An
+  // `unverified` clause leaves a completed Run looking clean, which is the one
+  // signal the card has to add itself.
+  const unverified = run.acceptance?.unverified ?? 0;
 
   return (
-    <div className={styles.card}>
+    <div className={styles.card} data-testid="graph-run-card" data-run-id={run.runId}>
       <button
         type="button"
         onClick={onToggle}
@@ -175,6 +204,15 @@ function RunCard({ run, nodes, expanded, onToggle, nodesLoading, t }: {
         <span className={styles.cardSummary}>
           {nodeCount > 0 ? t("graph.tasks", { done: String(done), total: String(nodeCount) }) : flowLabel}
         </span>
+        {unverified > 0 && (
+          <span
+            className={styles.unverifiedMarker}
+            data-testid="graph-acceptance-unverified"
+            title={t("graph.acceptance.hint")}
+          >
+            {t("graph.acceptance.unverifiedCount", { count: String(unverified) })}
+          </span>
+        )}
       </button>
 
       {expanded && (
@@ -190,17 +228,38 @@ function RunCard({ run, nodes, expanded, onToggle, nodesLoading, t }: {
             <div className={styles.stateLine}>{t("graph.noTasks")}</div>
           ) : (
             <ul className={styles.nodeList}>
-              {nodes.map((node) => (
-                <li key={node.taskIndex ?? node.handle} className={styles.nodeRow}>
-                  <span className={styles.nodeDot} data-node-state={node.terminalState} />
-                  <span className={styles.nodeName}>
-                    {node.handle}
-                  </span>
-                  <span className={styles.nodeState}>
-                    {catalogLabel(t, "graph.node", node.terminalState)}
-                  </span>
-                </li>
-              ))}
+              {nodes.map((node) => {
+                const verdict = node.acceptanceVerdict;
+                return (
+                  <li key={node.taskIndex ?? node.handle} className={styles.nodeRow}>
+                    <span className={styles.nodeDot} data-node-state={node.terminalState} />
+                    <span className={styles.nodeName}>
+                      {node.handle}
+                    </span>
+                    {verdict && (
+                      <span
+                        className={styles.verdict}
+                        data-acceptance-verdict={verdict.result}
+                        data-testid="graph-acceptance-badge"
+                        title={verdictTitle(t, verdict)}
+                      >
+                        {t(`graph.acceptance.${verdict.result}`)}
+                      </span>
+                    )}
+                    {verdict?.result === "does_not_hold" && node.errorCode && (
+                      // The child Run finished; what failed is the clause on its
+                      // artifacts. Without the code, a failed row reads as "the
+                      // work failed" rather than "the work ran and missed".
+                      <span className={styles.nodeErrorCode} title={t("graph.acceptance.errorCodeHint")}>
+                        {node.errorCode}
+                      </span>
+                    )}
+                    <span className={styles.nodeState}>
+                      {catalogLabel(t, "graph.node", node.terminalState)}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

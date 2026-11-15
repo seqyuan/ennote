@@ -39,7 +39,7 @@ export const BUDGETS = [
  * once the file fits its budget.
  */
 export const RECORDED_CEILINGS = {
-  "lib/messages.ts": 1160, // flat dictionary, one block per locale; +rightPanel.* (panel strips/launcher) +conversation.artifact.widget.* +canvas open button / artifact tab copy (+8 lines, one block per locale) +rightPanel.canvas.* channel keys +conversation.artifact.pin/unpin (+22 lines)
+  "lib/messages.ts": 1174, // flat dictionary, one block per locale; +rightPanel.* (panel strips/launcher) +conversation.artifact.widget.* +canvas open button / artifact tab copy (+8 lines, one block per locale) +rightPanel.canvas.* channel keys +conversation.artifact.pin/unpin (+22 lines) +graph.acceptance.* verdict/count/hint keys (+14 lines, one block per locale)
   "hooks/useAgentSession.ts": 700,
   "hooks/useChatComposer.ts": 520, // turn Skills/graph pill state + submit gates
   "lib/session-store.ts": 600,

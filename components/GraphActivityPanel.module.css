@@ -102,6 +102,20 @@
   color: var(--text-dim);
   font-size: var(--text-xs);
 }
+/* Amber on a completed Run: the tasks ran, but at least one declared condition
+   could not be decided. It must not borrow the success or the failure style. */
+.unverifiedMarker {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-full);
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: var(--text-xs);
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: help;
+}
 .details {
   padding: 6px 10px 10px 22px;
   border-top: 1px solid var(--border);
@@ -149,5 +163,39 @@
 .nodeState {
   flex-shrink: 0;
   color: var(--text-dim);
+  font-size: var(--text-xs);
+}
+/* The verdict badge says what was checked, so `unverified` is amber and never the
+   success style: a clause nobody could decide is not a pass. */
+.verdict {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  line-height: 15px;
+  white-space: nowrap;
+  cursor: help;
+}
+.verdict[data-acceptance-verdict="holds"] {
+  border-color: var(--success);
+  background: var(--success-soft);
+  color: var(--success);
+}
+.verdict[data-acceptance-verdict="does_not_hold"] {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.verdict[data-acceptance-verdict="unverified"] {
+  border-color: var(--warning);
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.nodeErrorCode {
+  flex-shrink: 0;
+  color: var(--danger);
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
