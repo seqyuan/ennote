@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -19,9 +20,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ParseDefinition parses a flow definition YAML document. Parsing is strict:
-// schemaVersion is required and must be the supported version; unknown task
-// types and malformed structures fail loudly.
+// ParseDefinition parses a flow definition YAML document. Parsing is strict at
+// the top level and on unknown task types, and it records (but does not
+// reject) unknown task-node keys: the read path must keep working for revision
+// loading and the editor, while the publish validator rejects a definition
+// that carries recorded unknown keys. See domain.FlowDefinition.UnknownTaskFields.
 func ParseDefinition(data []byte) (*domain.FlowDefinition, error) {
 	var raw struct {
 		SchemaVersion *int                       `yaml:"schemaVersion"`
@@ -92,9 +95,15 @@ func ParseDefinition(data []byte) (*domain.FlowDefinition, error) {
 		}
 	}
 	for name, node := range raw.Tasks {
-		task, err := decodeTask(node)
+		task, unknown, err := decodeTask(node)
 		if err != nil {
 			return nil, fmt.Errorf("task %q: %w", name, err)
+		}
+		if len(unknown) > 0 {
+			if def.UnknownTaskFields == nil {
+				def.UnknownTaskFields = make(map[string][]string, len(unknown))
+			}
+			def.UnknownTaskFields[name] = unknown
 		}
 		def.Tasks[name] = task
 	}
@@ -115,10 +124,59 @@ type convergenceRaw struct {
 	MaxRounds int    `yaml:"max_rounds"`
 }
 
-func decodeTask(node yaml.Node) (domain.FlowTask, error) {
+// flowTaskKnownYAMLKeys is the single source of truth for the task-node key
+// allowlist. It is derived from domain.FlowTask's yaml tags rather than written
+// out a second time, so adding a field to the struct cannot leave the parser's
+// allowlist behind.
+var flowTaskKnownYAMLKeys = taskYAMLKeys()
+
+func taskYAMLKeys() map[string]struct{} {
+	t := reflect.TypeOf(domain.FlowTask{})
+	keys := make(map[string]struct{}, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		tag := t.Field(i).Tag.Get("yaml")
+		name, _, _ := strings.Cut(tag, ",")
+		if name == "" || name == "-" {
+			continue
+		}
+		keys[name] = struct{}{}
+	}
+	return keys
+}
+
+// unknownTaskYAMLKeys returns the task-node mapping keys that the task struct
+// does not know, sorted and deduplicated. A non-mapping node has no keys to
+// inspect and decodes to the zero task.
+func unknownTaskYAMLKeys(node yaml.Node) []string {
+	if node.Kind != yaml.MappingNode {
+		return nil
+	}
+	var unknown []string
+	seen := make(map[string]bool)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := node.Content[i]
+		if key.Kind != yaml.ScalarNode {
+			continue
+		}
+		if _, known := flowTaskKnownYAMLKeys[key.Value]; known {
+			continue
+		}
+		if seen[key.Value] {
+			continue
+		}
+		seen[key.Value] = true
+		unknown = append(unknown, key.Value)
+	}
+	sort.Strings(unknown)
+	return unknown
+}
+
+// decodeTask decodes one task node and reports the unknown keys it dropped.
+func decodeTask(node yaml.Node) (domain.FlowTask, []string, error) {
+	unknown := unknownTaskYAMLKeys(node)
 	var task domain.FlowTask
 	if err := node.Decode(&task); err != nil {
-		return domain.FlowTask{}, err
+		return domain.FlowTask{}, unknown, err
 	}
 	task.Type = strings.TrimSpace(task.Type)
 	if task.Type == "" {
@@ -127,7 +185,7 @@ func decodeTask(node yaml.Node) (domain.FlowTask, error) {
 	switch task.Type {
 	case domain.FlowTaskHero, domain.FlowTaskCheck:
 	default:
-		return domain.FlowTask{}, fmt.Errorf("unsupported task type %q", task.Type)
+		return domain.FlowTask{}, unknown, fmt.Errorf("unsupported task type %q", task.Type)
 	}
 	if task.Type == domain.FlowTaskCheck {
 		// Check tasks are deterministic gates: no hero, no skills, no budget.
@@ -137,7 +195,7 @@ func decodeTask(node yaml.Node) (domain.FlowTask, error) {
 	} else {
 		task.Command = ""
 	}
-	return task, nil
+	return task, unknown, nil
 }
 
 // normalizeDefinition canonicalizes a parsed definition: trims strings, sorts
@@ -162,6 +220,12 @@ func normalizeDefinition(def *domain.FlowDefinition) error {
 		if task.Terminal != nil {
 			task.Terminal.Status = strings.TrimSpace(task.Terminal.Status)
 			task.Terminal.Output = strings.TrimSpace(task.Terminal.Output)
+		}
+		for i := range task.Acceptance {
+			task.Acceptance[i].File = strings.TrimSpace(task.Acceptance[i].File)
+			task.Acceptance[i].Check = strings.TrimSpace(task.Acceptance[i].Check)
+			// Column names are matched exactly; whitespace is significant, so they
+			// are deliberately not normalized.
 		}
 		def.Tasks[name] = task
 	}

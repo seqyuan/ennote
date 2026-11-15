@@ -121,6 +121,35 @@ type ConvergenceRule struct {
 	MaxRounds int    `json:"maxRounds" yaml:"max_rounds"`
 }
 
+// AcceptanceResult is the three-valued verdict vocabulary of a machine-checked
+// acceptance condition. These three strings are the only source of truth for
+// the vocabulary: Go constants, SQL values, the OpenAPI enum, and the frontend
+// types all reference them. There is deliberately no "verified" value and no
+// boolean pass: a condition that cannot be decided is unverified, never
+// silently true.
+type AcceptanceResult string
+
+const (
+	// AcceptanceHolds means every declared leaf was decided true.
+	AcceptanceHolds AcceptanceResult = "holds"
+	// AcceptanceDoesNotHold means at least one declared leaf was decided false.
+	AcceptanceDoesNotHold AcceptanceResult = "does_not_hold"
+	// AcceptanceUnverified means no leaf was decided false, but at least one
+	// could not be decided (evidence unavailable, truncated, or timed out).
+	AcceptanceUnverified AcceptanceResult = "unverified"
+)
+
+// FlowAcceptance is one machine-checkable acceptance condition of a task. It
+// is evaluated by the kernel against the workspace after the task's child Run
+// finishes; the child's own report is never consulted. Paths are
+// workspace-relative. There is no command field: shell-based checks are out of
+// scope for this vocabulary.
+type FlowAcceptance struct {
+	File    string   `json:"file,omitempty"    yaml:"file,omitempty"`
+	Check   string   `json:"check"             yaml:"check"`
+	Columns []string `json:"columns,omitempty" yaml:"columns,omitempty"`
+}
+
 // FlowTask is one task of a flow definition.
 type FlowTask struct {
 	Hero     string            `json:"hero,omitempty" yaml:"hero,omitempty"`
@@ -140,6 +169,10 @@ type FlowTask struct {
 	// value means "whole workspace" (exclusive lane). Scheduling-only today;
 	// the sandbox does not enforce the declared scope.
 	Writes []string `json:"writes,omitempty" yaml:"writes,omitempty"`
+	// Acceptance declares machine-checkable conditions on this task's
+	// artifacts. Empty means the task has no acceptance clause and runs exactly
+	// as before.
+	Acceptance []FlowAcceptance `json:"acceptance,omitempty" yaml:"acceptance,omitempty"`
 }
 
 // DefaultFlowParallelismMax is the ready-set dispatch concurrency ceiling when
@@ -176,6 +209,17 @@ type FlowDefinition struct {
 	// Parallelism controls ready-set parallel dispatch (defaults: max 10,
 	// allowDisjointWriters false). Optional; nil means defaults.
 	Parallelism *FlowParallelism `json:"parallelism,omitempty" yaml:"parallelism,omitempty"`
+	// UnknownTaskFields records the task-node YAML keys that the parser dropped
+	// because the task struct does not know them (task -> keys, sorted).
+	//
+	// Parsing stays lenient on the read path so that revision loading and editor
+	// loads keep working, including for definitions written by a newer Worker.
+	// The publish validator rejects a definition with any recorded key, which is
+	// where a typo such as `acceptence:` must fail instead of silently disabling
+	// verification. It is json:"-"/yaml:"-" on purpose: it is derived from the
+	// text, so it must never change the config digest or round-trip into an
+	// exported definition.
+	UnknownTaskFields map[string][]string `json:"-" yaml:"-"`
 }
 
 // EffectiveParallelismMax returns the ready-set dispatch concurrency ceiling:
