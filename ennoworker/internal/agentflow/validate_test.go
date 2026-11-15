@@ -524,10 +524,12 @@ tasks:
 	assert.Equal(t, d1, d4)
 }
 
-// Terminal count: a flow may declare at most one terminal task. The terminal
-// gate resolves the flow outputs from whichever terminal it picks, so two of
-// them make the published outputs depend on iteration order.
-func TestValidationTerminalCount(t *testing.T) {
+// Terminal exclusivity: a flow may declare any number of terminal tasks, but
+// every pair must be mutually exclusive — at least one check gate has to demand
+// pass for one and fail for the other. The terminal gate resolves the flow
+// outputs from the one unlocked terminal, so a non-exclusive pair would make the
+// published outputs ambiguous.
+func TestValidationTerminalExclusivity(t *testing.T) {
 	const head = `schemaVersion: 1
 id: x
 budget: {max_total_tokens: 10000}
@@ -535,12 +537,14 @@ tasks:
   a: {hero: writer@1, goal: "a"}
 `
 
-	// Two terminals: rejected, naming both offending task handles.
+	// Two terminals fed by the same completed producer, with no check gate
+	// between them: both can be unlocked at once, so publish rejects them and
+	// names both handles.
 	result := validateDef(t, head+`  t1: {terminal: {status: success}, depends: [a]}
   t2: {terminal: {status: success}, depends: [a]}
 `)
 	require.False(t, result.Valid)
-	terminalDiagnostics := diagnosticsWithCode(result, "terminal_count_invalid")
+	terminalDiagnostics := diagnosticsWithCode(result, "terminal_not_exclusive")
 	require.Len(t, terminalDiagnostics, 1)
 	assert.Equal(t, "tasks", terminalDiagnostics[0].Field)
 	assert.Contains(t, terminalDiagnostics[0].Message, "t1")
@@ -550,12 +554,48 @@ tasks:
 	result = validateDef(t, head+`  t1: {terminal: {status: success}, depends: [a]}
 `)
 	assert.True(t, result.Valid, "%v", result.Diagnostics)
-	assert.False(t, hasCode(result, "terminal_count_invalid"))
+	assert.False(t, hasCode(result, "terminal_not_exclusive"))
 
 	// Zero terminals stays valid.
 	result = validateDef(t, head)
 	assert.True(t, result.Valid, "%v", result.Diagnostics)
-	assert.False(t, hasCode(result, "terminal_count_invalid"))
+	assert.False(t, hasCode(result, "terminal_not_exclusive"))
+
+	// Two terminals separated by a check gate are mutually exclusive: the
+	// unselected branch stays pending, so the two can never both be unlocked.
+	result = validateDef(t, head+`  g:
+    type: check
+    command: "go test ./..."
+    depends: [a]
+    next: {pass: p, fail: f}
+  p: {hero: reader@1, goal: "p", depends: [g], budget: {tokens: 100}}
+  f: {hero: reader@1, goal: "f", depends: [g], budget: {tokens: 100}}
+  tp: {terminal: {status: success}, depends: [p]}
+  tf: {terminal: {status: success}, depends: [f]}
+`)
+	assert.True(t, result.Valid, "%v", result.Diagnostics)
+	assert.False(t, hasCode(result, "terminal_not_exclusive"))
+
+	// Three terminals: tp/tf are exclusive through gate g, but t3 hangs off the
+	// same producer as tp, so the pairs involving t3 are not exclusive.
+	result = validateDef(t, head+`  g:
+    type: check
+    command: "go test ./..."
+    depends: [a]
+    next: {pass: p, fail: f}
+  p: {hero: reader@1, goal: "p", depends: [g], budget: {tokens: 100}}
+  f: {hero: reader@1, goal: "f", depends: [g], budget: {tokens: 100}}
+  tp: {terminal: {status: success}, depends: [p]}
+  tf: {terminal: {status: success}, depends: [f]}
+  t3: {terminal: {status: success}, depends: [a]}
+`)
+	require.False(t, result.Valid)
+	terminalDiagnostics = diagnosticsWithCode(result, "terminal_not_exclusive")
+	require.Len(t, terminalDiagnostics, 1)
+	assert.Equal(t, "tasks", terminalDiagnostics[0].Field)
+	assert.Contains(t, terminalDiagnostics[0].Message, "t3")
+	assert.Contains(t, terminalDiagnostics[0].Message, "tp")
+	assert.Contains(t, terminalDiagnostics[0].Message, "tf")
 }
 
 // Hero admissibility: a Hero that can only fail when a Run starts must fail at

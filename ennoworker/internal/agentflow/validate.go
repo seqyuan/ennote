@@ -134,22 +134,6 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 		add(v.fail("entry_task_count", message, "tasks"))
 	}
 
-	// 2b. At most one terminal task. The terminal gate resolves the flow
-	// outputs from whichever terminal it picks, so more than one would make the
-	// published flow's outputs depend on iteration order.
-	var terminals []string
-	for name, task := range def.Tasks {
-		if task.Terminal != nil {
-			terminals = append(terminals, name)
-		}
-	}
-	if len(terminals) > 1 {
-		sort.Strings(terminals)
-		add(v.fail("terminal_count_invalid",
-			fmt.Sprintf("at most one terminal task is allowed, found %d: %s", len(terminals), strings.Join(terminals, ", ")),
-			"tasks"))
-	}
-
 	// 3. hero@version / skill resolvability; 6. fan_out read-only; 7. budget.
 	totalTaskTokens := int64(0)
 	checkAllowlistMissing := false
@@ -260,6 +244,9 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 	// 4. DAG acyclicity + convergence back-edge binding.
 	validateTopology(add, def)
 	validateBranchRouting(add, def)
+	// 2b. Multiple terminals are allowed only when every pair is mutually
+	// exclusive; otherwise the runtime terminal gate could find two unlocked.
+	validateTerminalExclusivity(add, def)
 
 	// Parallelism: ready-set dispatch bounds + the disjoint-writers opt-in gate.
 	if def.Parallelism != nil {
@@ -484,6 +471,199 @@ func validateBranchRouting(add func(ValidationDiagnostic), def *domain.FlowDefin
 				Message: fmt.Sprintf("check %q next.pass and next.fail must differ", name), Field: "tasks." + name + ".next"})
 		}
 	}
+}
+
+// branchCondition is the set of check-gate decisions a task requires to be
+// reached (gate handle -> "pass"/"fail"). conflict marks a condition that
+// demands both verdicts on one gate: such a task is unreachable, so it can
+// never be unlocked together with anything.
+type branchCondition struct {
+	decisions map[string]string
+	conflict  bool
+}
+
+func newBranchCondition() *branchCondition {
+	return &branchCondition{decisions: map[string]string{}}
+}
+
+// mergeCondition unions other into cond, flagging a conflict when both demand
+// different decisions on the same gate.
+func mergeCondition(cond, other *branchCondition) *branchCondition {
+	if other == nil {
+		return cond
+	}
+	if other.conflict {
+		cond.conflict = true
+	}
+	for gate, decision := range other.decisions {
+		if existing, ok := cond.decisions[gate]; ok && existing != decision {
+			cond.conflict = true
+			continue
+		}
+		cond.decisions[gate] = decision
+	}
+	return cond
+}
+
+// extendCondition returns a copy of cond that additionally requires the given
+// decision on gate.
+func extendCondition(cond *branchCondition, gate, decision string) *branchCondition {
+	out := newBranchCondition()
+	mergeCondition(out, cond)
+	if existing, ok := out.decisions[gate]; ok && existing != decision {
+		out.conflict = true
+	}
+	out.decisions[gate] = decision
+	return out
+}
+
+// exclusiveWith reports whether two conditions conflict on at least one gate.
+// An unreachable (conflicting) condition can never be unlocked, so it is
+// exclusive with anything.
+func exclusiveWith(a, b *branchCondition) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if a.conflict || b.conflict {
+		return true
+	}
+	for gate, decision := range a.decisions {
+		if other, ok := b.decisions[gate]; ok && other != decision {
+			return true
+		}
+	}
+	return false
+}
+
+// sharedGateDecision returns the first gate (in sorted order) both conditions
+// route through with the same decision.
+func sharedGateDecision(a, b *branchCondition) (string, string, bool) {
+	if a == nil || b == nil {
+		return "", "", false
+	}
+	gates := make([]string, 0, len(a.decisions))
+	for gate := range a.decisions {
+		gates = append(gates, gate)
+	}
+	sort.Strings(gates)
+	for _, gate := range gates {
+		if other, ok := b.decisions[gate]; ok && other == a.decisions[gate] {
+			return gate, a.decisions[gate], true
+		}
+	}
+	return "", "", false
+}
+
+// branchClaim is one check-gate route into a task handle.
+type branchClaim struct {
+	gate     string
+	decision string
+}
+
+// branchConditions computes every task's check-gate condition in dependency
+// order. ok is false when the graph has no DAG order (dag_cycle owns that
+// diagnostic). A check task's pass/fail targets extend the gate's condition
+// with the verdict that selects them; every other task merges its depends.
+func branchConditions(def *domain.FlowDefinition) (map[string]*branchCondition, bool) {
+	backEdges := make(map[[2]string]bool, len(def.Convergence))
+	for _, rule := range def.Convergence {
+		backEdges[[2]string{rule.From, rule.To}] = true
+	}
+	tasks := make(map[string]domain.FlowTask, len(def.Tasks))
+	for name, task := range def.Tasks {
+		depends := make([]string, 0, len(task.Depends))
+		for _, dep := range task.Depends {
+			if backEdges[[2]string{name, dep}] {
+				continue
+			}
+			if _, ok := def.Tasks[dep]; !ok {
+				continue
+			}
+			depends = append(depends, dep)
+		}
+		task.Depends = depends
+		tasks[name] = task
+	}
+	order, err := TopologicalOrder(tasks)
+	if err != nil {
+		return nil, false
+	}
+	// Route claims are collected in sorted task order so the message is stable.
+	gateNames := make([]string, 0, len(def.Tasks))
+	for name := range def.Tasks {
+		gateNames = append(gateNames, name)
+	}
+	sort.Strings(gateNames)
+	claims := make(map[string][]branchClaim)
+	for _, name := range gateNames {
+		task := def.Tasks[name]
+		if task.Type != domain.FlowTaskCheck {
+			continue
+		}
+		for _, decision := range []string{"pass", "fail"} {
+			target := strings.TrimSpace(task.Next[decision])
+			if target == "" || target == name {
+				continue
+			}
+			if _, ok := tasks[target]; !ok {
+				continue
+			}
+			claims[target] = append(claims[target], branchClaim{gate: name, decision: decision})
+		}
+	}
+	conditions := make(map[string]*branchCondition, len(order))
+	for _, name := range order {
+		cond := newBranchCondition()
+		for _, dep := range tasks[name].Depends {
+			mergeCondition(cond, conditions[dep])
+		}
+		for _, claim := range claims[name] {
+			mergeCondition(cond, extendCondition(conditions[claim.gate], claim.gate, claim.decision))
+		}
+		conditions[name] = cond
+	}
+	return conditions, true
+}
+
+// validateTerminalExclusivity enforces the multi-terminal contract: a flow may
+// declare any number of terminals as long as every pair is mutually exclusive,
+// i.e. at least one check gate demands pass for one and fail for the other. The
+// canonical branch shape (one terminal per gate branch) stays valid because the
+// unselected branch stays pending forever. Pairs that could be unlocked
+// together are reported once, naming both handles.
+func validateTerminalExclusivity(add func(ValidationDiagnostic), def *domain.FlowDefinition) {
+	var terminals []string
+	for name, task := range def.Tasks {
+		if task.Terminal != nil {
+			terminals = append(terminals, name)
+		}
+	}
+	if len(terminals) < 2 {
+		return
+	}
+	sort.Strings(terminals)
+	conditions, ok := branchConditions(def)
+	if !ok {
+		return // dag_cycle already reported; no conditions to compare
+	}
+	var problems []string
+	for i := 0; i < len(terminals); i++ {
+		for j := i + 1; j < len(terminals); j++ {
+			a, b := terminals[i], terminals[j]
+			if exclusiveWith(conditions[a], conditions[b]) {
+				continue
+			}
+			message := fmt.Sprintf("terminal tasks %q and %q are not mutually exclusive", a, b)
+			if gate, decision, ok := sharedGateDecision(conditions[a], conditions[b]); ok {
+				message += fmt.Sprintf(" (both require check gate %q to %s)", gate, decision)
+			}
+			problems = append(problems, message+": no check gate separates them, so both can be unlocked at once")
+		}
+	}
+	if len(problems) == 0 {
+		return
+	}
+	add(ValidationDiagnostic{Code: "terminal_not_exclusive", Message: strings.Join(problems, "; "), Field: "tasks"})
 }
 
 // reachabilityMatrix computes transitive reachability over the DAG (without

@@ -282,12 +282,19 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 				}
 				continue
 			}
-			// Terminal gate: once every runnable task has settled, the unique
-			// terminal task (if any) resolves the flow outputs from its
-			// completed dependencies. Branch flows whose unselected paths stay
-			// pending terminate here, never dispatching the inactive branch.
-			if t := terminalGateTask(&def, completed); t != nil {
-				outputs := resolveFlowOutputs(def, *t, completed, taskOutputs)
+			// Terminal gate: once every runnable task has settled, the terminal
+			// task resolves the flow outputs from its completed dependencies.
+			// Branch flows whose unselected paths stay pending terminate here,
+			// never dispatching the inactive branch. Terminals are mutually
+			// exclusive at publish time, so at most one may be unlocked; if two
+			// somehow are, the flow fails loudly instead of picking one.
+			terminal, ambiguous := terminalGateTask(&def, completed)
+			if ambiguous {
+				o.fail(ctx, runID, "terminal_gate_ambiguous: more than one terminal task is unlocked at once, so the flow outputs are ambiguous")
+				return
+			}
+			if terminal != nil {
+				outputs := resolveFlowOutputs(def, *terminal, completed, taskOutputs)
 				if err := o.complete(ctx, runID, state.TotalTokensUsed, outputs); err != nil {
 					return
 				}
@@ -950,30 +957,39 @@ func firstFanOutTask(ready []*domain.RunAgentFlowNode, def *domain.FlowDefinitio
 	return nil
 }
 
-// terminalGateTask returns the flow's terminal task when every one of its
-// depends has a completed checkpoint, or nil if it is not yet unlocked.
+// terminalGateTask returns the flow's single unlocked terminal task and whether
+// the flow is ambiguous (two or more terminals unlocked at once).
 //
-// Terminal tasks are inspected in sorted handle order, never in map iteration
-// order: publish validation rejects more than one terminal, but a legacy graph
-// or an unfolded edge case may still carry two, and the flow's outputs must not
-// depend on which one a map walk happened to reach first.
-func terminalGateTask(def *domain.FlowDefinition, completed map[string]*domain.RunAgentFlowNode) *domain.FlowTask {
-	names := make([]string, 0, len(def.Tasks))
-	for name, task := range def.Tasks {
-		if task.Terminal != nil {
-			names = append(names, name)
-		}
+// Terminals are inspected in TaskOrder order, never in sorted handle order and
+// never in map iteration order, so the flow's outputs never depend on which
+// terminal some walk happened to reach first. Publish validation guarantees the
+// terminals of a valid flow are mutually exclusive, so an unlocked pair means
+// the graph is broken: the caller fails the flow loudly instead of silently
+// picking one.
+func terminalGateTask(def *domain.FlowDefinition, completed map[string]*domain.RunAgentFlowNode) (*domain.FlowTask, bool) {
+	if def == nil {
+		return nil, false
 	}
-	sort.Strings(names)
-	for _, name := range names {
+	order, err := TaskOrder(def)
+	if err != nil {
+		return nil, false // cyclic/unorderable graph: no terminal gate, fail loud upstream
+	}
+	var unlocked []string
+	for _, name := range order {
 		task := def.Tasks[name]
-		if uncompletedDep(task, completed) != "" {
+		if task.Terminal == nil || uncompletedDep(task, completed) != "" {
 			continue
 		}
-		value := task
-		return &value
+		unlocked = append(unlocked, name)
 	}
-	return nil
+	if len(unlocked) > 1 {
+		return nil, true
+	}
+	if len(unlocked) == 0 {
+		return nil, false
+	}
+	value := def.Tasks[unlocked[0]]
+	return &value, false
 }
 
 // firstReadyClass picks the lane for the next dispatch window. Reader-first:

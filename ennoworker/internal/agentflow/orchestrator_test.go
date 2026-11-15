@@ -680,42 +680,81 @@ func (f *fakeStore) UpdateNodeByHandle(ctx context.Context, runID, handle string
 	return errFakeConflict
 }
 
-// A flow can carry more than one terminal task (publish rejects it, legacy
-// graphs may still). The gate must resolve to the same terminal on every call:
-// the previous implementation iterated a Go map and picked t1/t2 at roughly
-// 175/25 over 200 calls.
+// A flow can carry more than one terminal task (branch flows do). The gate must
+// inspect them in task order, not sorted handle order and not map order: here
+// the locked terminal ("a_locked") sorts first by handle but last by task
+// order, and the unlocked one must win on every call.
 func TestTerminalGateTaskDeterministic(t *testing.T) {
 	def := &domain.FlowDefinition{
-		SchemaVersion: 1, ID: "two-terminals",
+		SchemaVersion: 1, ID: "three-terminals",
 		Budget: domain.FlowBudget{MaxTotalTokens: 10000},
 		Tasks: map[string]domain.FlowTask{
-			// Locked: "pending" has no completed checkpoint.
-			"t0": {Terminal: &domain.FlowTerminal{Status: "success", Output: "o0"}, Depends: []string{"pending"}},
-			"t1": {Terminal: &domain.FlowTerminal{Status: "success", Output: "o1"}},
-			"t2": {Terminal: &domain.FlowTerminal{Status: "success", Output: "o2"}},
+			// Sorts first by handle, last by task order (it depends on
+			// z_producer), and is locked: z_producer has no checkpoint.
+			"a_locked":   {Terminal: &domain.FlowTerminal{Status: "success", Output: "o-locked"}, Depends: []string{"z_producer"}},
+			"m_unlocked": {Terminal: &domain.FlowTerminal{Status: "success", Output: "o-unlocked"}},
+			"z_producer": {Type: domain.FlowTaskHero, Hero: "writer@1", Goal: "produce"},
 		},
 	}
 	completed := map[string]*domain.RunAgentFlowNode{}
 
-	first := terminalGateTask(def, completed)
-	require.NotNil(t, first)
-	assert.Equal(t, "o1", first.Terminal.Output, "first unlocked terminal in sorted handle order")
 	for i := 0; i < 200; i++ {
-		got := terminalGateTask(def, completed)
-		require.NotNil(t, got)
-		require.Equal(t, "o1", got.Terminal.Output, "call %d must return the same terminal", i)
+		got, ambiguous := terminalGateTask(def, completed)
+		require.False(t, ambiguous, "call %d: only one terminal is unlocked", i)
+		require.NotNil(t, got, "call %d", i)
+		require.Equal(t, "o-unlocked", got.Terminal.Output, "call %d must select the unlocked terminal", i)
 	}
 
-	// A locked terminal never wins over an unlocked one.
-	lockedFirst := &domain.FlowDefinition{
-		SchemaVersion: 1, ID: "locked-first",
-		Budget: domain.FlowBudget{MaxTotalTokens: 10000},
+	// Once the producer completes both terminals are unlocked: the gate refuses
+	// to pick one and reports the ambiguity instead.
+	completed["z_producer"] = &domain.RunAgentFlowNode{Handle: "z_producer", TerminalState: domain.FlowNodeCompleted}
+	for i := 0; i < 50; i++ {
+		got, ambiguous := terminalGateTask(def, completed)
+		assert.True(t, ambiguous, "call %d: two terminals unlocked is ambiguous", i)
+		assert.Nil(t, got, "call %d must not pick a terminal silently", i)
+	}
+}
+
+// Runtime terminal gate: exactly one unlocked terminal completes the flow; two
+// unlocked terminals fail the flow loudly (terminal_gate_ambiguous) instead of
+// silently picking one by task order.
+func TestTerminalGateRuntime(t *testing.T) {
+	// Two terminals fed by the same completed producer, no check gate between
+	// them: both unlock together.
+	ambiguousDef := &domain.FlowDefinition{
+		SchemaVersion: 1, ID: "ambiguous-terminals",
+		Outputs: map[string]domain.FlowPort{"report": {Type: domain.PortTypeString}},
+		Budget:  domain.FlowBudget{MaxTotalTokens: 100000},
 		Tasks: map[string]domain.FlowTask{
-			"t1": {Terminal: &domain.FlowTerminal{Status: "success", Output: "o1"}, Depends: []string{"pending"}},
-			"t2": {Terminal: &domain.FlowTerminal{Status: "success", Output: "o2"}},
+			"producer": {Type: domain.FlowTaskHero, Hero: "writer@1", Goal: "produce",
+				Budget: &domain.FlowTaskBudget{Tokens: 1000}},
+			"t1": {Terminal: &domain.FlowTerminal{Status: "success", Output: "report"}, Depends: []string{"producer"}},
+			"t2": {Terminal: &domain.FlowTerminal{Status: "success", Output: "report"}, Depends: []string{"producer"}},
 		},
 	}
-	got := terminalGateTask(lockedFirst, completed)
-	require.NotNil(t, got)
-	assert.Equal(t, "o2", got.Terminal.Output)
+	fake, err := newFakeStore(ambiguousDef)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+	orch := newOrchestrator(fake, children, events)
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateFailed, waitTerminal(t, fake))
+	run, _ := fake.GetRun(context.Background(), "flow-run-1")
+	assert.Contains(t, run.TerminalReason, "terminal_gate_ambiguous")
+	assert.Equal(t, domain.RunFailed, fake.anchorStatus)
+	assert.NotContains(t, events.types(), "flow_completed")
+	assert.Contains(t, events.types(), "flow_failed")
+	require.Len(t, children.created, 1, "only the producer is dispatched; terminals never are")
+
+	// One unlocked terminal (the other branch stays pending) completes as before.
+	fake, err = newFakeStore(branchFlowDef())
+	require.NoError(t, err)
+	children = newFakeChildren()
+	events = &fakeEvents{}
+	orch = newOrchestrator(fake, children, events)
+	orch.Checker = &branchChecker{verdict: true}
+	orch.Start(context.Background(), "flow-run-1")
+	assert.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+	assert.Contains(t, events.types(), "flow_completed")
+	assert.NotContains(t, events.types(), "flow_failed")
 }

@@ -126,6 +126,17 @@ func TestBranchRoutingRecoveryReplaysSameRoute(t *testing.T) {
 	assert.Equal(t, "passWork", children.created[0].Handle)
 }
 
+// Regression: the canonical branch flow declares one terminal per gate branch
+// (acceptPass, acceptFail). They are mutually exclusive — the unselected branch
+// stays pending forever — so publish must accept the definition.
+func TestValidationBranchFlowTerminalsExclusive(t *testing.T) {
+	v := validator()
+	v.CheckAllowlist = append(v.CheckAllowlist, "echo")
+	result := v.Validate(context.Background(), branchFlowDef())
+	assert.True(t, result.Valid, "%v", result.Diagnostics)
+	assert.False(t, hasCode(result, "terminal_not_exclusive"))
+}
+
 // Matrix 2A-4: branch validation rejections.
 func TestValidationBranchRouting(t *testing.T) {
 	// next target unknown.
