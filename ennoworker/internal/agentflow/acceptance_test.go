@@ -748,7 +748,11 @@ func TestEvaluateAcceptanceJSONValidReadCap(t *testing.T) {
 	assert.Equal(t, domain.AcceptanceUnverified, check.Verdict,
 		"a document past the read cap is undecidable, never a failed check: %+v", check)
 	assert.Equal(t, "evidence_too_large", check.Code)
-	assert.Less(t, time.Since(started), acceptanceLeafTimeout,
-		"the cap must end the read before the leaf deadline")
+	// The bound is proven by the byte count, not by a stopwatch: under -race a
+	// synthetic 64 MiB stream takes seconds, and a wall-clock assertion would
+	// fail for the instrumentation rather than for the code.
 	assert.Greater(t, reader.sent, int64(capBytes), "the cap is only proven by reading past it")
+	assert.LessOrEqual(t, reader.sent, int64(capBytes)+int64(acceptanceJSONReadChunkBytes)*16,
+		"the read must stop at the cap, not run to the end of the document")
+	_ = started
 }
