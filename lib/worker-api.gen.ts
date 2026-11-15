@@ -189,11 +189,15 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * @description Validates the draft and writes one immutable revision. Validation covers
-         *     the references a Graph Run would otherwise only fail on when it freezes
-         *     (model and Hero resolution, Skill resolution) plus writes scopes the
-         *     scheduler cannot parse. A Graph is a draft format: it carries no budget
-         *     and needs no project binding, so it does not run the Agent Flow validator.
+         * @description Validates the draft with the Agent Flow publish validator and writes one
+         *     immutable revision. Validation covers everything a Graph Run would
+         *     otherwise only fail on after the 201: Hero and Skill resolution, Hero
+         *     admissibility (a Graph Run only admits delegation.admission
+         *     auto_within_budget and task_only context), fan-out read-only Heroes, a
+         *     mandatory flow budget, writes scopes the scheduler cannot parse, goal
+         *     variable scope, convergence back-edges, check branch routing, and
+         *     mutually exclusive terminal tasks. A Graph needs no project binding to
+         *     publish; enabling it is a separate step.
          */
         post: operations["publishGraph"];
         delete?: never;
