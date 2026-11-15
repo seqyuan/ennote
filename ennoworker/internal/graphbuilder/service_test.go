@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

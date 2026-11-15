@@ -144,7 +144,6 @@ func (b *builder) analyseFlows() error {
 	return nil
 }
 
-
 func (b *builder) analyseAgentFlow(field string, summary *FlowSummary, file File) error {
 	definition, err := agentflowParse(file.Data)
 	if err != nil {

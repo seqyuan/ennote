@@ -212,4 +212,3 @@ func (s *Server) deleteProjectGraphBinding(w http.ResponseWriter, r *http.Reques
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
-

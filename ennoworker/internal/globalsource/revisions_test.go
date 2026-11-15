@@ -397,4 +397,3 @@ func TestPublishGraphDefinition(t *testing.T) {
 	_, err = os.Stat(filepath.Join(revisionDir, "skills", "review-tools", "SKILL.md"))
 	require.NoError(t, err)
 }
-

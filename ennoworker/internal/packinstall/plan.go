@@ -103,16 +103,16 @@ type Issue struct {
 // installed; every blocker is non-retryable until the pack or the Worker store
 // state changes.
 type Plan struct {
-	PlanVersion             int          `json:"planVersion"`
-	Pack                    PackIdentity `json:"pack"`
-	ManifestDigest          string       `json:"manifestDigest"`
-	PackDigest              string       `json:"packDigest"`
-	Actions                 []Action     `json:"actions"`
-	Blockers                []Issue      `json:"blockers"`
-	Warnings                []Issue      `json:"warnings"`
-	CommitPoint             string       `json:"commitPoint"`
-	Reinstall               string       `json:"reinstall,omitempty"`
-	State                   *State       `json:"state,omitempty"`
+	PlanVersion    int          `json:"planVersion"`
+	Pack           PackIdentity `json:"pack"`
+	ManifestDigest string       `json:"manifestDigest"`
+	PackDigest     string       `json:"packDigest"`
+	Actions        []Action     `json:"actions"`
+	Blockers       []Issue      `json:"blockers"`
+	Warnings       []Issue      `json:"warnings"`
+	CommitPoint    string       `json:"commitPoint"`
+	Reinstall      string       `json:"reinstall,omitempty"`
+	State          *State       `json:"state,omitempty"`
 
 	// install carries the parsed documents the writer needs. It is never
 	// serialized: clients receive the plan, not the pack payload.
@@ -210,14 +210,14 @@ func (s *Service) plan(ctx context.Context, request Request) (*Plan, error) {
 		skillInputs:     map[string]skillsmgmt.CreateInput{},
 	}
 	planner.plan = &Plan{
-		PlanVersion:             PlanVersion,
-		Pack:                    PackIdentity{ID: manifest.ID, Name: manifest.Name, Version: manifest.Version},
-		ManifestDigest:          result.ManifestDigest,
-		PackDigest:              result.PackDigest,
-		Actions:                 []Action{},
-		Blockers:                []Issue{},
-		Warnings:                []Issue{},
-		CommitPoint:             CommitPointStateFile,
+		PlanVersion:    PlanVersion,
+		Pack:           PackIdentity{ID: manifest.ID, Name: manifest.Name, Version: manifest.Version},
+		ManifestDigest: result.ManifestDigest,
+		PackDigest:     result.PackDigest,
+		Actions:        []Action{},
+		Blockers:       []Issue{},
+		Warnings:       []Issue{},
+		CommitPoint:    CommitPointStateFile,
 	}
 	for _, warning := range result.Warnings {
 		planner.warn(warning.Code, warning.Severity, warning.Message)

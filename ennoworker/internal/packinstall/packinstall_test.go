@@ -359,7 +359,7 @@ heroes:
 		flowAction, ok := findAction(plan, packinstall.ActionKindGraph, "qc-review")
 		require.True(t, ok, plan.Actions)
 		assert.Equal(t, packinstall.ActionCreate, flowAction.Action)
-	
+
 		source = writePack(t, []packFile{
 			{path: "pack.yaml", body: flowFormatManifest},
 			{path: "flows/qc-review/flow.yaml", body: agentFlowSource},

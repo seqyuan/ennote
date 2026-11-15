@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 )
 
 //go:embed skill/SKILL.md
@@ -45,12 +45,12 @@ type Message struct {
 }
 
 type Operation struct {
-	Kind        string            `json:"kind"`
-	TaskID      string            `json:"taskId,omitempty"`
+	Kind        string           `json:"kind"`
+	TaskID      string           `json:"taskId,omitempty"`
 	Task        *domain.FlowTask `json:"task,omitempty"`
-	Depends     []string          `json:"depends,omitempty"`
-	Name        *string           `json:"name,omitempty"`
-	Description *string           `json:"description,omitempty"`
+	Depends     []string         `json:"depends,omitempty"`
+	Name        *string          `json:"name,omitempty"`
+	Description *string          `json:"description,omitempty"`
 }
 
 type Proposal struct {

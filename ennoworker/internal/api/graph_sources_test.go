@@ -261,7 +261,7 @@ func createHeroGraph(t *testing.T, handler http.Handler, heroRef string) {
 
 	response = request(t, handler, http.MethodPatch, "/v1/graphs/qc", map[string]any{
 		"expectedDigest": created.Digest,
-		"task": map[string]any{"id": "align", "value": domain.FlowTask{Hero: heroRef, Goal: "Align reads"}},
+		"task":           map[string]any{"id": "align", "value": domain.FlowTask{Hero: heroRef, Goal: "Align reads"}},
 	}, true)
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 }
