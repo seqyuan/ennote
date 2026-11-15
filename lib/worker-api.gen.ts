@@ -236,6 +236,17 @@ export interface paths {
          *     have no single child assignment to extend, instead of being accepted and
          *     silently ignored.
          *
+         *     Context subscriptions (`contextFrom`) are validated as context, never as
+         *     scheduling: the Worker refuses an id that is not a task
+         *     (`context_from_unknown`), a reference to a task that runs later - one
+         *     reachable FROM this task through `depends`, so its result cannot exist
+         *     yet (`context_from_downstream`) - and a list on an `isolated` task, where
+         *     it would silently carry nothing (`context_from_requires_snapshot`).
+         *     `contextFrom` on a check, terminal or fan_out task is refused as
+         *     `context_mode_unsupported` rather than under a second name. Subscriptions
+         *     never participate in the ready set, the entry-task count or cycle
+         *     detection, so declaring one cannot reorder dispatch.
+         *
          *     A Graph needs no project binding to publish; enabling it is a separate
          *     step.
          */
@@ -3286,15 +3297,29 @@ export interface components {
              * @description What this task's child assignment carries beyond the resolved goal.
              *     `isolated` (the default when omitted) is the goal plus the acceptance
              *     block and nothing about the upstream tasks. `snapshot` appends a
-             *     bounded, deterministic section built from the `depends` tasks'
-             *     recorded `outputRef` - at most 2 KiB per upstream task and 8 KiB in
-             *     total, truncated with an explicit marker, framed as upstream RESULT
-             *     DATA rather than instructions. Refused on check, terminal and fan_out
-             *     tasks (no single child assignment to extend). The frozen `goalText`
-             *     on the node stays the resolved goal in both modes.
+             *     bounded, deterministic section built from the `depends` tasks' and
+             *     the `contextFrom` tasks' recorded `outputRef` - at most 2 KiB per
+             *     upstream task and 8 KiB in total, truncated with an explicit marker,
+             *     framed as upstream RESULT DATA rather than instructions. Refused on
+             *     check, terminal and fan_out tasks (no single child assignment to
+             *     extend). The frozen `goalText` on the node stays the resolved goal in
+             *     both modes.
              * @enum {string}
              */
             contextMode?: "isolated" | "snapshot";
+            /**
+             * @description Tasks whose recorded result this task's child should read without
+             *     waiting for them: a context subscription, not a scheduling
+             *     prerequisite. Only meaningful with `contextMode: snapshot`; refused
+             *     with `context_from_requires_snapshot` otherwise. It does not take
+             *     part in the ready set, the entry-task count, cycle detection or the
+             *     task order, so it never changes dispatch order and never invents an
+             *     edge. A referenced task that runs later than this one is refused
+             *     (`context_from_downstream`) because its result cannot exist yet; a
+             *     valid reference that has not settled when this task starts simply
+             *     contributes nothing to the digest.
+             */
+            contextFrom?: string[];
         };
         ProjectGraphBinding: {
             /** @enum {string} */
@@ -3397,10 +3422,20 @@ export interface components {
         SubmitResult: {
             /** @enum {string} */
             status: "completed" | "blocked" | "needs_input";
+            blocker?: components["schemas"]["SubmitBlocker"];
             summary: string;
             artifactRefs?: Record<string, never>[];
             payload?: Record<string, never>;
         };
+        /**
+         * @description The typed reason of a `blocked` or `needs_input` result, so a reader does
+         *     not have to parse the summary prose. Required with `blocked` and
+         *     `needs_input`, refused with `completed`. Omitted (no key at all) on a
+         *     result written before the field existed: the Worker never invents a
+         *     reason.
+         * @enum {string}
+         */
+        SubmitBlocker: "missing_evidence" | "needs_user_input" | "external_wait";
         DelegationBudgetCeiling: {
             maxModelCalls: number;
             maxToolCalls: number;
@@ -3706,6 +3741,7 @@ export interface components {
         DelegationTerminalResult: {
             /** @enum {string} */
             status: "completed" | "blocked" | "needs_input";
+            blocker?: components["schemas"]["SubmitBlocker"];
             summary: string;
             artifactRefs?: components["schemas"]["ArtifactReference"][];
             payload?: {

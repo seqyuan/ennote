@@ -11,6 +11,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 )
@@ -20,6 +22,99 @@ import (
 // reads to stop dispatching and terminalize the flow (no extra column/state).
 
 const acceptanceFailedCode = "acceptance_failed"
+
+// blockedBlockerPrefix is the node error-code prefix of a task whose child
+// ended `blocked` or `needs_input`. The code is `blocked:<blocker>` so the
+// checkpoint row states the reason in a value a reader (or a filter) can match,
+// the way acceptance_failed already states its own verdict fact.
+const blockedBlockerPrefix = "blocked:"
+
+// blockedChildCode returns the node error code of a child that ended blocked or
+// needs_input with a typed blocker. The second result reports whether the node
+// is blocked at all: a result written before the field existed carries no
+// blocker, and its fold must stay exactly what it was (a completed node), never
+// a guessed reason.
+func blockedChildCode(result *domain.SubmitResult) (string, bool) {
+	if result == nil || result.Blocker == "" {
+		return "", false
+	}
+	switch result.Status {
+	case domain.SubmitBlocked, domain.SubmitNeedsInput:
+		return blockedBlockerPrefix + string(result.Blocker), true
+	default:
+		return "", false
+	}
+}
+
+// foldBlockedChild records a task whose child ended blocked/needs_input as a
+// `blocked` checkpoint carrying `blocked:<blocker>`, and terminalizes the flow
+// with a reason that names the same code. It deliberately does not reuse
+// failTask: a blocked node is not a failed one, and the checkpoint state is the
+// fact a reader filters on. Every fold path (live hero child, fan_out instance,
+// crash recovery) goes through here so a restart cannot turn a blocked child
+// into a completed node.
+func (o *Orchestrator) foldBlockedChild(ctx context.Context, runID string, node *domain.RunAgentFlowNode,
+	code string, total int64) {
+	_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
+		TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
+		SetState: domain.FlowNodeBlocked, ErrorCode: code,
+	})
+	_ = o.Events.PublishFlow(ctx, runID, "flow_task_blocked", map[string]any{
+		"flowRunId": runID, "task": node.Handle, "childRunId": node.ChildRunID,
+		"reason": code, "blocker": strings.TrimPrefix(code, blockedBlockerPrefix),
+	})
+	o.failKeepingUsage(ctx, runID, total, fmt.Sprintf("task %q %s", node.Handle, code))
+}
+
+// foldBlockedHeroChild folds a hero child that ended blocked/needs_input: it
+// cancels the in-flight siblings (a blocked task is a dead end, exactly like a
+// failed one) and reports whether it was blocked at all. A result without a
+// blocker (written before the field existed) is not blocked here, so the caller
+// keeps its pre-existing behaviour: the node completes.
+func (o *Orchestrator) foldBlockedHeroChild(ctx context.Context, runID string, node *domain.RunAgentFlowNode,
+	result *domain.SubmitResult, total int64, remaining []inflightTask) bool {
+	code, blocked := blockedChildCode(result)
+	if !blocked {
+		return false
+	}
+	o.cancelInflight(ctx, runID, remaining)
+	o.foldBlockedChild(ctx, runID, node, code, total)
+	return true
+}
+
+// foldBlockedInstance is the same fold for one instance of a fan_out task, where
+// there is no sibling to cancel and the caller already counted every instance's
+// usage.
+func (o *Orchestrator) foldBlockedInstance(ctx context.Context, runID string, node *domain.RunAgentFlowNode,
+	result *domain.SubmitResult, total int64) bool {
+	code, blocked := blockedChildCode(result)
+	if !blocked {
+		return false
+	}
+	o.foldBlockedChild(ctx, runID, node, code, total)
+	return true
+}
+
+// foldRecoveredBlocker applies the same rule when a crashed fold is replayed: a
+// child that settled blocked before the crash must not become a completed
+// checkpoint after it. The ledger is read at fold time because the recovery loop
+// has already folded every recorded child's usage into it.
+func (o *Orchestrator) foldRecoveredBlocker(ctx context.Context, runID string,
+	node *domain.RunAgentFlowNode, results []*domain.SubmitResult) bool {
+	for _, result := range results {
+		code, blocked := blockedChildCode(result)
+		if !blocked {
+			continue
+		}
+		total := int64(0)
+		if run, err := o.Store.GetRun(ctx, runID); err == nil {
+			total = run.TotalTokensUsed
+		}
+		o.foldBlockedChild(ctx, runID, node, code, total)
+		return true
+	}
+	return false
+}
 
 // acceptanceFailureNode returns the first checkpoint marked failed by acceptance
 // verification, or nil.

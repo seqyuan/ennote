@@ -518,6 +518,11 @@ func (o *Orchestrator) foldHeroChild(ctx context.Context, runID string, flow *do
 		o.failKeepingUsage(ctx, runID, total, fmt.Sprintf("task %q %s", node.Handle, code))
 		return nil
 	}
+	// A blocked child is not a failed Run and not a completed task; see
+	// foldBlockedHeroChild. Checked before acceptance: no evidence, no verdict.
+	if o.foldBlockedHeroChild(ctx, runID, node, result, total, remaining) {
+		return nil
+	}
 	payload := json.RawMessage{}
 	if result != nil && len(result.Payload) > 0 {
 		payload = result.Payload
@@ -752,10 +757,14 @@ func (o *Orchestrator) runFanOutTask(ctx context.Context, runID string, flow *do
 		_ = o.Store.TerminateAnchor(ctx, runID, domain.RunFailed, "budget_exceeded", "flow budget exceeded")
 		return nil
 	}
-	// Aggregate by instance order.
+	// Aggregate by instance order. A blocked instance is not a product: it is
+	// folded in this same order, so the recorded code is deterministic.
 	aggregate := make([]json.RawMessage, 0, len(childIDs))
 	for _, childID := range childIDs {
 		result := results[childID]
+		if o.foldBlockedInstance(ctx, runID, node, result, total) {
+			return nil
+		}
 		payload := json.RawMessage{}
 		if result != nil && len(result.Payload) > 0 {
 			payload = result.Payload
@@ -1222,6 +1231,10 @@ func (o *Orchestrator) reconcileCrashedNodes(ctx context.Context, runID string) 
 		output := aggregate[0]
 		if len(aggregate) > 1 {
 			output, _ = json.Marshal(aggregate)
+		}
+		// Recovery folds the same facts as the live fold.
+		if o.foldRecoveredBlocker(ctx, runID, node, results) {
+			return nil
 		}
 		// A crashed fold must not become a silent skip: a task that declares
 		// acceptance is verified here too, with the verdict written in the same

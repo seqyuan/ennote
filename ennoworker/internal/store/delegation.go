@@ -1742,8 +1742,7 @@ func (r *RunRepo) FinalizeChildSuccess(ctx context.Context, runID string, output
 		if err := ProjectAttentionTx(ctx, tx, projectID, sessionID,
 			domain.AttentionSourceDelegationItem, itemID, generation,
 			domain.AttentionNeedsInput, true,
-			map[string]any{"kind": "needs_input", "generation": generation,
-				"summary": boundedAttentionSummary(string(resultJSON))},
+			needsInputDisplay(string(resultJSON), generation, output.Terminal.Blocker),
 			&domain.AttentionAction{Kind: "delegation_input", ItemID: itemID,
 				ExpectedGeneration: generation}); err != nil {
 			return err
@@ -2580,4 +2579,20 @@ func injectFoldedResultsTx(ctx context.Context, tx *sql.Tx, groupID, parentRunID
 		return err
 	}
 	return nil
+}
+
+// needsInputDisplay is the Attention display payload of a needs_input item: the
+// label facts plus the typed blocker the child reported.
+//
+// The blocker is copied as the typed value, never guessed: a result written
+// before the field existed has no blocker, and its payload keeps exactly the
+// keys it had (no `blocker` key at all). Fabricating one from the summary prose
+// would be a plausible-looking lie, and the UI would label the row wrongly.
+func needsInputDisplay(resultJSON string, generation int, blocker domain.SubmitBlocker) map[string]any {
+	display := map[string]any{"kind": "needs_input", "generation": generation,
+		"summary": boundedAttentionSummary(resultJSON)}
+	if blocker != "" {
+		display["blocker"] = string(blocker)
+	}
+	return display
 }

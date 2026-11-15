@@ -155,9 +155,13 @@ func TestLoopBudgetAdmissionClampsProviderOutputAndRecordsUsage(t *testing.T) {
 }
 
 func TestValidateSubmitResultToolSchema(t *testing.T) {
-	result, err := tools.ValidateSubmitResult(json.RawMessage(`{"status":"needs_input","summary":"need approval","payload":{"q":"x"}}`))
+	// needs_input carries its typed blocker: the domain validator is the
+	// enforcement point for an intercepted submit_result call, so this fixture
+	// spells the field the contract now requires.
+	result, err := tools.ValidateSubmitResult(json.RawMessage(`{"status":"needs_input","blocker":"needs_user_input","summary":"need approval","payload":{"q":"x"}}`))
 	require.NoError(t, err)
 	assert.Equal(t, domain.SubmitNeedsInput, result.Status)
+	assert.Equal(t, domain.BlockerNeedsUserInput, result.Blocker)
 	_, err = tools.ValidateSubmitResult(json.RawMessage(`{"status":"completed"}`))
 	require.Error(t, err)
 }

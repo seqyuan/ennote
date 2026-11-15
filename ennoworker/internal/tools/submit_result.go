@@ -20,9 +20,12 @@ func (t *SubmitResultTool) Definition() domain.ToolDefinition {
 		Name: "submit_result",
 		Description: "End this delegated Run with a structured result. Call this exactly once as the ONLY tool call of the final turn, " +
 			"with status one of completed|blocked|needs_input, a bounded summary, and optional artifact references or a JSON payload. " +
+			"blocked and needs_input also require blocker (missing_evidence|needs_user_input|external_wait) so the parent and the " +
+			"Board can tell why work stopped without parsing the summary. " +
 			"The result is returned to the calling parent; it is never published to the conversation.",
 		Parameters: schema(`{"type":"object","required":["status","summary"],"properties":{
 			"status":{"type":"string","enum":["completed","blocked","needs_input"]},
+			"blocker":{"type":"string","enum":["missing_evidence","needs_user_input","external_wait"]},
 			"summary":{"type":"string","minLength":1,"maxLength":4096},
 			"artifactRefs":{"type":"array","maxItems":32,"items":{"type":"object","required":["artifactId","name","kind","mimeType","sha256"],"properties":{"artifactId":{"type":"string"},"name":{"type":"string"},"kind":{"type":"string"},"mimeType":{"type":"string"},"sha256":{"type":"string"}}}},
 			"payload":{"type":"object"}

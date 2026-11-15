@@ -197,9 +197,52 @@ const (
 	SubmitNeedsInput SubmitStatus = "needs_input"
 )
 
+// SubmitBlocker is why a child stopped short of finishing: the typed half of
+// `blocked` / `needs_input`. It exists so a reader does not have to parse the
+// summary prose to tell "the evidence is not there" from "a service is down"
+// from "a human has to decide". These three strings are the only accepted
+// values; they are named once here and referenced by the validator, the
+// Attention projection and the Graph fold.
+type SubmitBlocker string
+
+const (
+	// BlockerMissingEvidence means the child could not obtain the evidence the
+	// task needed (a file, an artifact, a source, a reading).
+	BlockerMissingEvidence SubmitBlocker = "missing_evidence"
+	// BlockerNeedsUserInput means the child needs a human decision or missing
+	// facts only the user has.
+	BlockerNeedsUserInput SubmitBlocker = "needs_user_input"
+	// BlockerExternalWait means something outside this Run has to happen first
+	// (a service that is down, a queue that has not drained).
+	BlockerExternalWait SubmitBlocker = "external_wait"
+)
+
+// SubmitBlockers is the accepted blocker vocabulary, in the order the error
+// messages list it.
+var SubmitBlockers = []SubmitBlocker{BlockerMissingEvidence, BlockerNeedsUserInput, BlockerExternalWait}
+
+// Valid reports whether b is one of the three accepted blockers. The empty
+// value is NOT valid as a blocker: "no blocker" is expressed by omitting the
+// field, never by sending an empty string.
+func (b SubmitBlocker) Valid() bool {
+	for _, accepted := range SubmitBlockers {
+		if b == accepted {
+			return true
+		}
+	}
+	return false
+}
+
 // SubmitResult is the structured terminal output of a child Run.
+//
+// Blocker is the typed reason of a `blocked` or `needs_input` result and is
+// refused on `completed`: a finished task has nothing blocking it, and a
+// blocked one must say why in a value a machine can read. It is persisted with
+// the rest of the result because the whole struct is what delegation_items.result_json
+// stores, and it is what the Attention projection and the Graph fold read.
 type SubmitResult struct {
 	Status       SubmitStatus        `json:"status"`
+	Blocker      SubmitBlocker       `json:"blocker,omitempty"`
 	Summary      string              `json:"summary"`
 	ArtifactRefs []ArtifactReference `json:"artifactRefs,omitempty"`
 	Payload      json.RawMessage     `json:"payload,omitempty"`

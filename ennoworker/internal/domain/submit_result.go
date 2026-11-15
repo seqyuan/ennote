@@ -25,7 +25,21 @@ func ValidateSubmitResult(arguments json.RawMessage) (*SubmitResult, error) {
 		return nil, fmt.Errorf("invalid submit_result arguments: exactly one JSON object is required")
 	}
 	switch result.Status {
-	case SubmitCompleted, SubmitBlocked, SubmitNeedsInput:
+	case SubmitCompleted:
+		// A finished task has nothing blocking it. Accepting a blocker here would
+		// make two statuses carry the same fact and let the fold guess which one
+		// to believe.
+		if result.Blocker != "" {
+			return nil, fmt.Errorf("submit_result blocker must be omitted when status is %s (accepted values: %s, only with status %s|%s)",
+				SubmitCompleted, blockerVocabulary(), SubmitBlocked, SubmitNeedsInput)
+		}
+	case SubmitBlocked, SubmitNeedsInput:
+		// A blocked or needs_input result must say why in a value the kernel can
+		// read; validating only status is what made the two cases indistinguishable.
+		if !result.Blocker.Valid() {
+			return nil, fmt.Errorf("submit_result blocker must be one of %s when status is %s|%s (got %q)",
+				blockerVocabulary(), SubmitBlocked, SubmitNeedsInput, string(result.Blocker))
+		}
 	default:
 		return nil, fmt.Errorf("submit_result status must be completed|blocked|needs_input")
 	}
@@ -60,4 +74,15 @@ func ValidateSubmitResult(arguments json.RawMessage) (*SubmitResult, error) {
 		return nil, fmt.Errorf("submit_result payload exceeds 64 KiB")
 	}
 	return &result, nil
+}
+
+// blockerVocabulary renders the accepted blocker values for an error message:
+// the message names the field and every value, so a reader never has to open the
+// source to learn what is allowed.
+func blockerVocabulary() string {
+	parts := make([]string, 0, len(SubmitBlockers))
+	for _, blocker := range SubmitBlockers {
+		parts = append(parts, string(blocker))
+	}
+	return strings.Join(parts, "|")
 }
