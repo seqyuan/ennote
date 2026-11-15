@@ -286,6 +286,24 @@ func run() error {
 	packInstaller.CheckAllowlist = checkAllowlist
 	packInstaller.CheckAllowlistAllowsAll = checkUnrestricted
 
+	// The Builder reports what publish will say, so it asks for the same validator
+	// publish builds (see api/graph_sources.go publishGlobalGraph). It is a
+	// factory because the validator is scoped to one Graph. The report never gates
+	// Apply; a nil factory or a down model catalog only marks it unavailable.
+	builderValidators := graphbuilder.ValidatorFactory(func(graphID string) *agentflow.Validator {
+		if models == nil {
+			return nil
+		}
+		return store.NewFlowValidator(store.FlowPublishOptions{
+			FlowID:                  graphID,
+			Sources:                 globalSources,
+			Models:                  models,
+			SkillCatalog:            skillCatalog,
+			CheckAllowlist:          checkAllowlist,
+			CheckAllowlistAllowsAll: checkUnrestricted,
+		})
+	})
+
 	server := &api.Server{
 		CatalogDB: projections.Catalog, UsageDB: projections.Usage, SessionStores: sessionManager,
 		Token: cfg.BootstrapToken, Sandbox: cfg.SandboxMode,
@@ -305,7 +323,7 @@ func run() error {
 		},
 		SkillRoots: &store.SkillRootRepo{Settings: modelFiles.Settings},
 		Trust:      trustStore, GlobalSources: globalSources,
-		GraphBuilder:   &graphbuilder.Service{Sources: globalSources, Completer: builderCompleter},
+		GraphBuilder:   &graphbuilder.Service{Sources: globalSources, Completer: builderCompleter, ValidatorFactory: builderValidators},
 		Packs:          packInstaller,
 		HostRoots:      cfg.HostRoots,
 		GraphRuns:      graphRuns,

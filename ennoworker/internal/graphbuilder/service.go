@@ -29,10 +29,20 @@ type Completer interface {
 	Complete(context.Context, string, string, string) (string, error)
 }
 
+// ValidatorFactory builds the publish validator for one Graph. The Builder
+// reports its verdict; it never blocks Apply, because a draft may legitimately
+// be unpublishable.
+type ValidatorFactory func(graphID string) *agentflow.Validator
+
 type Service struct {
 	DB        *sql.DB
 	Sources   *globalsource.Store
 	Completer Completer
+	// ValidatorFactory supplies the same validator publish runs, so a proposal
+	// and a publish of the same definition report the same publish verdict.
+	// A nil factory leaves every proposal's publish report "unavailable"
+	// instead of silently claiming the draft is publishable.
+	ValidatorFactory ValidatorFactory
 }
 
 type Message struct {
@@ -54,14 +64,24 @@ type Operation struct {
 }
 
 type Proposal struct {
-	ID          string      `json:"id"`
-	GraphID     string      `json:"graphId"`
-	BaseDigest  string      `json:"baseDigest"`
-	Operations  []Operation `json:"operations"`
-	Summary     string      `json:"summary"`
-	Status      string      `json:"status"`
-	Diagnostics []string    `json:"diagnostics"`
-	CreatedAt   time.Time   `json:"createdAt"`
+	ID         string      `json:"id"`
+	GraphID    string      `json:"graphId"`
+	BaseDigest string      `json:"baseDigest"`
+	Operations []Operation `json:"operations"`
+	Summary    string      `json:"summary"`
+	Status     string      `json:"status"`
+	// Diagnostics are the Apply blockers: an unparseable draft or a broken
+	// topology. They are the only gate on Apply.
+	Diagnostics []string `json:"diagnostics"`
+	// PublishDiagnostics is the publish verdict for the post-proposal
+	// definition. It never blocks Apply; a draft may legitimately be
+	// unpublishable (no budget yet, a dependency the user has not added, a Hero
+	// not published yet).
+	PublishDiagnostics []agentflow.ValidationDiagnostic `json:"publishDiagnostics,omitempty"`
+	// PublishDiagnosticsUnavailable is set when the publish validator could not
+	// run, so an empty PublishDiagnostics can never be read as "no problems".
+	PublishDiagnosticsUnavailable string    `json:"publishDiagnosticsUnavailable,omitempty"`
+	CreatedAt                     time.Time `json:"createdAt"`
 }
 
 type Thread struct {
@@ -144,8 +164,11 @@ func (s *Service) Send(ctx context.Context, graphID, modelProfileID, instruction
 	}
 
 	diagnostics := validateOperations(definition, output.Operations)
+	publishDiagnostics, publishUnavailable := s.publishReportFor(ctx, graphID, definition, output.Operations)
 	operationsJSON, _ := json.Marshal(output.Operations)
-	diagnosticsJSON, _ := json.Marshal(diagnostics)
+	diagnosticsJSON, _ := json.Marshal(proposalDiagnostics{
+		Apply: diagnostics, Publish: publishDiagnostics, Unavailable: publishUnavailable,
+	})
 	if _, err := s.DB.ExecContext(ctx, `UPDATE graph_builder_proposals SET status='superseded' WHERE graph_id=? AND status='pending'`, graphID); err != nil {
 		return nil, err
 	}
@@ -189,6 +212,115 @@ func (s *Service) Apply(ctx context.Context, graphID, proposalID string) (*domai
 		return nil, digest, err
 	}
 	return definition, digest, nil
+}
+
+// publishValidationTimeout bounds the publish check a proposal carries. The
+// verdict is a courtesy report: a check that takes longer than this must still
+// yield a proposal, so the draft never waits on the validator.
+const publishValidationTimeout = 5 * time.Second
+
+// The Builder reports publish problems without gating Apply, so a check that
+// could not run has to say so. An empty list alone would render as "publish
+// will succeed" in the UI, which is exactly the claim this item fixes.
+const (
+	publishReportUnavailableNoFactory   = "this Worker does not run the publish validator for the Graph Builder, so the proposal was not checked against the publish rules"
+	publishReportUnavailableNoValidator = "the publish validator is unavailable (the model catalog is down), so the proposal was not checked against the publish rules"
+)
+
+// proposalDiagnostics is the persisted diagnostics blob for a SQL-backed
+// proposal. The column historically held a bare []string of Apply blockers; the
+// envelope carries the publish report without a schema change, and the reader
+// still accepts the bare array.
+type proposalDiagnostics struct {
+	Apply       []string                         `json:"apply"`
+	Publish     []agentflow.ValidationDiagnostic `json:"publish,omitempty"`
+	Unavailable string                           `json:"publishUnavailable,omitempty"`
+}
+
+func decodeProposalDiagnostics(raw string) ([]string, []agentflow.ValidationDiagnostic, string) {
+	if strings.TrimSpace(raw) == "" {
+		return []string{}, nil, ""
+	}
+	var envelope proposalDiagnostics
+	if err := json.Unmarshal([]byte(raw), &envelope); err == nil {
+		if envelope.Apply == nil {
+			// Diagnostics stays a JSON array on the wire, never null.
+			envelope.Apply = []string{}
+		}
+		return envelope.Apply, envelope.Publish, envelope.Unavailable
+	}
+	// Legacy row: the column held the Apply blockers alone.
+	apply := []string{}
+	_ = json.Unmarshal([]byte(raw), &apply)
+	return apply, nil, ""
+}
+
+// publishReportFor runs the publish validator on the post-proposal definition.
+// It reports; it never decides whether the proposal may be applied.
+func (s *Service) publishReportFor(ctx context.Context, graphID string,
+	definition *domain.FlowDefinition, operations []Operation) ([]agentflow.ValidationDiagnostic, string) {
+	if s.ValidatorFactory == nil {
+		return nil, publishReportUnavailableNoFactory
+	}
+	validator := s.ValidatorFactory(graphID)
+	if validator == nil {
+		return nil, publishReportUnavailableNoValidator
+	}
+	post := cloneDefinition(definition)
+	applyOperations(post, operations)
+	// cloneDefinition drops the parser's unknown-key record (json:"-"), but that
+	// record is what publish reports as flow_task_unknown_field.
+	if len(definition.UnknownTaskFields) > 0 {
+		post.UnknownTaskFields = make(map[string][]string, len(definition.UnknownTaskFields))
+		for name, fields := range definition.UnknownTaskFields {
+			if _, kept := post.Tasks[name]; kept {
+				post.UnknownTaskFields[name] = fields
+			}
+		}
+	}
+	// Publish reads graph.yaml, so the report has to run on the document Apply
+	// would write: the round-trip normalises what only the parser fills in (an
+	// empty task type is "hero"). Reporting on the pre-write struct would invent
+	// diagnostics publish never emits.
+	encoded, err := agentflow.DefinitionToYAML(post)
+	if err != nil {
+		return nil, "the draft does not round-trip through graph.yaml, so the proposal was not checked against the publish rules"
+	}
+	document, err := agentflow.ParseDefinition(encoded)
+	if err != nil {
+		return nil, "the draft does not round-trip through graph.yaml, so the proposal was not checked against the publish rules"
+	}
+	document.UnknownTaskFields = post.UnknownTaskFields
+	result, err := runPublishValidation(ctx, validator, document)
+	if err != nil {
+		return nil, fmt.Sprintf("publish validation did not finish (%v), so the proposal was not checked against the publish rules", err)
+	}
+	if result == nil {
+		return nil, "publish validation returned no verdict, so the proposal was not checked against the publish rules"
+	}
+	if len(result.Diagnostics) == 0 {
+		return nil, ""
+	}
+	return append([]agentflow.ValidationDiagnostic(nil), result.Diagnostics...), ""
+}
+
+// runPublishValidation bounds the check in time and turns a validator panic
+// into an error, so a broken resolver degrades one proposal's report instead of
+// failing the request.
+func runPublishValidation(ctx context.Context, validator *agentflow.Validator,
+	definition *domain.FlowDefinition) (result *agentflow.ValidationResult, err error) {
+	bounded, cancel := context.WithTimeout(ctx, publishValidationTimeout)
+	defer cancel()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			result, err = nil, fmt.Errorf("validator panicked: %v", recovered)
+		}
+	}()
+	result = validator.Validate(bounded, definition)
+	if deadlineErr := bounded.Err(); deadlineErr != nil {
+		return nil, deadlineErr
+	}
+	return result, nil
 }
 
 func validateOperations(definition *domain.FlowDefinition, operations []Operation) []string {
@@ -274,7 +406,7 @@ func (s *Service) pendingProposal(ctx context.Context, graphID string) (*Proposa
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(operationsJSON), &proposal.Operations)
-	_ = json.Unmarshal([]byte(diagnosticsJSON), &proposal.Diagnostics)
+	proposal.Diagnostics, proposal.PublishDiagnostics, proposal.PublishDiagnosticsUnavailable = decodeProposalDiagnostics(diagnosticsJSON)
 	proposal.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
 	return proposal, nil
 }

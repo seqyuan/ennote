@@ -2,12 +2,25 @@
 
 import { AlertTriangle, Bot, Check, Loader2, Send } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { useT } from "@/components/LocaleProvider";
 import type { ModelOption } from "@/components/graphs/types";
 import { apiFetch } from "@/lib/worker-api.client";
 
 interface BuilderMessage { id: string; role: "user" | "assistant"; content: string; ordinal: number }
 interface BuilderOperation { kind: string; taskId?: string; depends?: string[] }
-interface BuilderProposal { id: string; summary: string; operations: BuilderOperation[]; diagnostics: string[]; status: string }
+interface PublishDiagnostic { code: string; message: string; field?: string }
+interface BuilderProposal {
+  id: string;
+  summary: string;
+  operations: BuilderOperation[];
+  /** Apply blockers. These alone disable the button. */
+  diagnostics: string[];
+  /** The publish verdict. Reported, never blocking: a draft may be unpublishable. */
+  publishDiagnostics?: PublishDiagnostic[];
+  /** Set when the publish check did not run, so an empty list is not "no problems". */
+  publishDiagnosticsUnavailable?: string;
+  status: string;
+}
 interface BuilderThread { graphId: string; modelProfileId?: string; messages: BuilderMessage[]; proposal?: BuilderProposal }
 
 export function GraphBuilderPanel({ graphId, models, onApplied, setError }: {
@@ -20,6 +33,7 @@ export function GraphBuilderPanel({ graphId, models, onApplied, setError }: {
   const [modelId, setModelId] = useState("");
   const [instruction, setInstruction] = useState("");
   const [busy, setBusy] = useState<"loading" | "sending" | "applying" | null>(null);
+  const t = useT();
 
   const load = useCallback(async () => {
     setBusy("loading");
@@ -91,6 +105,18 @@ export function GraphBuilderPanel({ graphId, models, onApplied, setError }: {
           <p>{thread.proposal.summary}</p>
           <ul>{thread.proposal.operations.map((operation, index) => <li key={index}><code>{operation.kind}</code>{operation.taskId ? ` · ${operation.taskId}` : ""}</li>)}</ul>
           {thread.proposal.diagnostics.map((diagnostic) => <div className="graph-builder-diagnostic" key={diagnostic}>{diagnostic}</div>)}
+          {/* The publish verdict is a report, not a gate: Apply stays enabled. */}
+          {(thread.proposal.publishDiagnostics?.length ?? 0) > 0 && <div className="graph-builder-diagnostic" role="status">
+            <strong>{t("graph.builder.publishBlocked")}</strong>
+            {/* Rendered as rows, not a list: the proposal's own `<ul>` styling belongs to the operations. */}
+            <div>{thread.proposal.publishDiagnostics?.map((diagnostic) => <div key={`${diagnostic.field ?? ""}.${diagnostic.code}.${diagnostic.message}`}>
+              {t("graph.builder.publishDiagnostic", { code: diagnostic.code, message: diagnostic.message })}
+            </div>)}</div>
+          </div>}
+          {!thread.proposal.publishDiagnostics?.length && thread.proposal.publishDiagnosticsUnavailable &&
+            <div className="graph-builder-diagnostic" role="status" title={thread.proposal.publishDiagnosticsUnavailable}>
+              {t("graph.builder.publishUnavailable")}
+            </div>}
           <button type="button" onClick={() => void apply()} disabled={thread.proposal.diagnostics.length > 0 || Boolean(busy)}>{busy === "applying" ? "Applying…" : "Apply proposal"}</button>
         </div>}
         <div className="graph-builder-composer">

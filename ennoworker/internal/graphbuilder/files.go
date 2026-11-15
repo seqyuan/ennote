@@ -146,10 +146,17 @@ func (s *Service) sendFile(ctx context.Context, graphID, modelProfileID, instruc
 		return nil, err
 	}
 	if len(output.Operations) > 0 {
+		// The publish verdict is reported, never blocking: Apply only reads
+		// Diagnostics. Both fields persist with the proposal file so the thread
+		// endpoint returns the same report on every read.
+		publishDiagnostics, publishUnavailable := s.publishReportFor(ctx, graphID, definition, output.Operations)
 		proposal := Proposal{
 			ID: uuid.NewString(), GraphID: graphID, BaseDigest: digest,
 			Operations: output.Operations, Summary: output.Message, Status: "pending",
-			Diagnostics: validateOperations(definition, output.Operations), CreatedAt: time.Now().UTC(),
+			Diagnostics:                   validateOperations(definition, output.Operations),
+			PublishDiagnostics:            publishDiagnostics,
+			PublishDiagnosticsUnavailable: publishUnavailable,
+			CreatedAt:                     time.Now().UTC(),
 		}
 		if err := writeJSONAtomic(filepath.Join(builderDir, "proposals", proposal.ID+".json"), proposal); err != nil {
 			return nil, err

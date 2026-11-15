@@ -3326,6 +3326,10 @@ export interface components {
             /** @enum {string} */
             status: "pending" | "applied" | "superseded";
             diagnostics: string[];
+            /** @description The publish verdict for the post-proposal definition, from the same validator POST /v1/graphs/{graphID}/publish runs. It never blocks Apply: a draft may legitimately be unpublishable. */
+            publishDiagnostics?: components["schemas"]["FlowValidationDiagnostic"][];
+            /** @description Set when the publish validator could not run, so an empty publishDiagnostics is never read as "publish will succeed". */
+            publishDiagnosticsUnavailable?: string;
             /** Format: date-time */
             createdAt: string;
         };
