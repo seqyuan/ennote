@@ -36,14 +36,22 @@ func newStubResolver() *stubResolver {
 			"writer@1": {
 				Authority: domain.HeroAuthorityMutation, PermissionCeiling: domain.PermissionAuto,
 				AllowedTools: []string{"read", "write", "exec"},
+				ContextPolicy: domain.HeroContextPolicy{
+					DefaultMode: domain.HeroContextTask, AllowedModes: []domain.HeroContextMode{domain.HeroContextTask},
+				},
 				DelegationPolicy: domain.HeroDelegationPolicy{
+					Admission:     domain.DelegationAutoWithinBudget,
 					BudgetCeiling: domain.DelegationBudgetCeiling{MaxTotalTokens: 5000},
 				},
 			},
 			"reader@1": {
 				Authority: domain.HeroAuthorityReadOnly, PermissionCeiling: domain.PermissionDiscuss,
 				AllowedTools: []string{"read", "grep", "find"},
+				ContextPolicy: domain.HeroContextPolicy{
+					DefaultMode: domain.HeroContextTask, AllowedModes: []domain.HeroContextMode{domain.HeroContextTask},
+				},
 				DelegationPolicy: domain.HeroDelegationPolicy{
+					Admission:     domain.DelegationAutoWithinBudget,
 					BudgetCeiling: domain.DelegationBudgetCeiling{MaxTotalTokens: 5000},
 				},
 			},
@@ -514,6 +522,113 @@ tasks:
 	d4, err := ConfigDigest(def3)
 	require.NoError(t, err)
 	assert.Equal(t, d1, d4)
+}
+
+// Terminal count: a flow may declare at most one terminal task. The terminal
+// gate resolves the flow outputs from whichever terminal it picks, so two of
+// them make the published outputs depend on iteration order.
+func TestValidationTerminalCount(t *testing.T) {
+	const head = `schemaVersion: 1
+id: x
+budget: {max_total_tokens: 10000}
+tasks:
+  a: {hero: writer@1, goal: "a"}
+`
+
+	// Two terminals: rejected, naming both offending task handles.
+	result := validateDef(t, head+`  t1: {terminal: {status: success}, depends: [a]}
+  t2: {terminal: {status: success}, depends: [a]}
+`)
+	require.False(t, result.Valid)
+	terminalDiagnostics := diagnosticsWithCode(result, "terminal_count_invalid")
+	require.Len(t, terminalDiagnostics, 1)
+	assert.Equal(t, "tasks", terminalDiagnostics[0].Field)
+	assert.Contains(t, terminalDiagnostics[0].Message, "t1")
+	assert.Contains(t, terminalDiagnostics[0].Message, "t2")
+
+	// One terminal stays valid.
+	result = validateDef(t, head+`  t1: {terminal: {status: success}, depends: [a]}
+`)
+	assert.True(t, result.Valid, "%v", result.Diagnostics)
+	assert.False(t, hasCode(result, "terminal_count_invalid"))
+
+	// Zero terminals stays valid.
+	result = validateDef(t, head)
+	assert.True(t, result.Valid, "%v", result.Diagnostics)
+	assert.False(t, hasCode(result, "terminal_count_invalid"))
+}
+
+// Hero admissibility: a Hero that can only fail when a Run starts must fail at
+// publish time instead of publishing and then failing at Run start.
+func TestValidationHeroAdmissibility(t *testing.T) {
+	// Fully admissible Hero: no hero-related diagnostic at all.
+	result := validateWithHero(t, admissibleHeroDefinition())
+	assert.True(t, result.Valid, "%v", result.Diagnostics)
+	assert.False(t, hasCode(result, "hero_admission_incompatible"))
+	assert.False(t, hasCode(result, "hero_context_incompatible"))
+
+	// Graph Runs only admit auto_within_budget Heroes.
+	approvalHero := admissibleHeroDefinition()
+	approvalHero.DelegationPolicy.Admission = domain.DelegationApprovalRequired
+	result = validateWithHero(t, approvalHero)
+	require.False(t, result.Valid)
+	admissionDiagnostics := diagnosticsWithCode(result, "hero_admission_incompatible")
+	require.Len(t, admissionDiagnostics, 1)
+	assert.Equal(t, "tasks.a.hero", admissionDiagnostics[0].Field)
+	assert.Contains(t, admissionDiagnostics[0].Message, "approval_required")
+	assert.False(t, hasCode(result, "hero_context_incompatible"))
+
+	// A child Run loads its config with task_only context.
+	roomHero := admissibleHeroDefinition()
+	roomHero.ContextPolicy.AllowedModes = []domain.HeroContextMode{domain.HeroContextRoom}
+	result = validateWithHero(t, roomHero)
+	require.False(t, result.Valid)
+	contextDiagnostics := diagnosticsWithCode(result, "hero_context_incompatible")
+	require.Len(t, contextDiagnostics, 1)
+	assert.Equal(t, "tasks.a.hero", contextDiagnostics[0].Field)
+	assert.Contains(t, contextDiagnostics[0].Message, "task_only")
+	assert.False(t, hasCode(result, "hero_admission_incompatible"))
+}
+
+func admissibleHeroDefinition() domain.HeroDefinition {
+	return domain.HeroDefinition{
+		Authority: domain.HeroAuthorityMutation, PermissionCeiling: domain.PermissionAuto,
+		AllowedTools: []string{"read", "write"},
+		ContextPolicy: domain.HeroContextPolicy{
+			DefaultMode:  domain.HeroContextTask,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextTask},
+		},
+		DelegationPolicy: domain.HeroDelegationPolicy{
+			Admission:     domain.DelegationAutoWithinBudget,
+			BudgetCeiling: domain.DelegationBudgetCeiling{MaxTotalTokens: 5000},
+		},
+	}
+}
+
+func validateWithHero(t *testing.T, heroDef domain.HeroDefinition) *ValidationResult {
+	t.Helper()
+	def, err := ParseDefinition([]byte(`schemaVersion: 1
+id: x
+budget: {max_total_tokens: 10000}
+tasks:
+  a: {hero: hero@1, goal: "a"}
+`))
+	require.NoError(t, err)
+	resolver := newStubResolver()
+	resolver.heroDefs["hero@1"] = heroDef
+	v := validator()
+	v.Resolver = resolver
+	return v.Validate(context.Background(), def)
+}
+
+func diagnosticsWithCode(result *ValidationResult, code string) []ValidationDiagnostic {
+	var found []ValidationDiagnostic
+	for _, d := range result.Diagnostics {
+		if d.Code == code {
+			found = append(found, d)
+		}
+	}
+	return found
 }
 
 func hasCode(result *ValidationResult, code string) bool {

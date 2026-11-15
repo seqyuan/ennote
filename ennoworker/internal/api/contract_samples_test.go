@@ -478,10 +478,10 @@ func TestContractSamples(t *testing.T) {
 		"permissionCeiling": "ask",
 		"allowedTools":      []string{},
 		"context": map[string]any{
-			"defaultMode": "room", "allowedModes": []string{"room"}, "ownExecutionContinuity": "none",
+			"defaultMode": "room", "allowedModes": []string{"room", "task_only"}, "ownExecutionContinuity": "none",
 		},
 		"delegation": map[string]any{
-			"admission": "deny", "allowedCallerKinds": []string{"host"},
+			"admission": "auto_within_budget", "allowedCallerKinds": []string{"host"},
 			"allowedStrategies": []string{"single"}, "maxInvocationsPerParentRun": 1,
 			"maxConcurrentInstances": 1,
 			"budgetCeiling": map[string]any{

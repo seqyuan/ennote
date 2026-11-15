@@ -203,6 +203,12 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 				continue
 			}
 			heroDef := info.Definition
+			// A Graph's child Runs can only execute an auto_within_budget Hero
+			// asked for task_only context; both are runtime gates today, so a
+			// graph that violates them would publish and then fail at Run start.
+			for _, diagnostic := range HeroAdmissibilityDiagnostics(&heroDef) {
+				add(v.fail(diagnostic.Code, fmt.Sprintf("task %q: %s", name, diagnostic.Message), field+".hero"))
+			}
 			readOnly := heroAllToolsReadOnly(ctx, v.Resolver, heroDef)
 			if task.FanOut != nil {
 				if task.FanOut.Min < 1 || task.FanOut.Max < task.FanOut.Min ||
@@ -511,6 +517,40 @@ func reachabilityMatrix(tasks map[string]domain.FlowTask, backEdges map[[2]strin
 		}
 	}
 	return reach
+}
+
+// HeroAdmissibilityDiagnostics reports why a Hero cannot be admitted by a Graph
+// Run: its delegation admission is not auto_within_budget, or its context policy
+// does not allow task_only. The publish validator reports these per task; the
+// same rules stay enforced at Run start (graphrun freeze) and at child config
+// load (store run config files) as the last line of defence.
+func HeroAdmissibilityDiagnostics(def *domain.HeroDefinition) []ValidationDiagnostic {
+	if def == nil {
+		return nil
+	}
+	var diagnostics []ValidationDiagnostic
+	if admission := def.DelegationPolicy.Admission; admission != domain.DelegationAutoWithinBudget {
+		diagnostics = append(diagnostics, ValidationDiagnostic{
+			Code: "hero_admission_incompatible",
+			Message: fmt.Sprintf("Hero delegation.admission is %q; a Graph Run only admits %q",
+				admission, domain.DelegationAutoWithinBudget),
+		})
+	}
+	taskOnly := false
+	for _, mode := range def.ContextPolicy.AllowedModes {
+		if mode == domain.HeroContextTask {
+			taskOnly = true
+			break
+		}
+	}
+	if !taskOnly {
+		diagnostics = append(diagnostics, ValidationDiagnostic{
+			Code: "hero_context_incompatible",
+			Message: fmt.Sprintf("Hero contextPolicy.allowedModes %v does not include %q; a Graph Run child requires %q context",
+				def.ContextPolicy.AllowedModes, domain.HeroContextTask, domain.HeroContextTask),
+		})
+	}
+	return diagnostics
 }
 
 func heroAllToolsReadOnly(ctx context.Context, resolver Resolver, heroDef domain.HeroDefinition) bool {

@@ -86,6 +86,23 @@ name: QC Reviewer
 model:
   ref: ` + modelRef + `
 authority: read_only
+context:
+  defaultMode: task_only
+  allowedModes: [task_only]
+  ownExecutionContinuity: none
+delegation:
+  admission: auto_within_budget
+  allowedCallerKinds: [host]
+  allowedStrategies: [single]
+  maxInvocationsPerParentRun: 4
+  maxConcurrentInstances: 1
+  budgetCeiling:
+    maxModelCalls: 4
+    maxToolCalls: 8
+    maxTotalTokens: 20000
+    maxOutputTokens: 4000
+    maxCostUsdMicros: 100000
+    maxWallTimeMs: 120000
 ---
 Review the QC metrics.
 `

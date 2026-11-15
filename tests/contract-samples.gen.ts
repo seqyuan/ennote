@@ -14,20 +14,21 @@ import type { WorkerOperationResponse } from "@/lib/contract-samples";
 /** createGlobalHero answering 201. */
 export const createGlobalHero201: WorkerOperationResponse<"createGlobalHero", 201> = {
   "data": {
-    "digest": "sha256:684b6f74a10205543d577f85a4bc64d0d11b1de7d5fdaf092929b064e9ddeb34",
+    "digest": "sha256:fabb5d92472b01edac64a13050328e1c9f63b755e9c6d535cd5a20ca62fab5d4",
     "document": {
       "allowedTools": [],
       "authority": "read_only",
       "color": "blue",
       "context": {
         "allowedModes": [
-          "room"
+          "room",
+          "task_only"
         ],
         "defaultMode": "room",
         "ownExecutionContinuity": "none"
       },
       "delegation": {
-        "admission": "deny",
+        "admission": "auto_within_budget",
         "allowedCallerKinds": [
           "host"
         ],
@@ -157,20 +158,21 @@ export const getArtifact200: WorkerOperationResponse<"getArtifact", 200> = {
 /** getGlobalHero answering 200. */
 export const getGlobalHero200: WorkerOperationResponse<"getGlobalHero", 200> = {
   "data": {
-    "digest": "sha256:684b6f74a10205543d577f85a4bc64d0d11b1de7d5fdaf092929b064e9ddeb34",
+    "digest": "sha256:fabb5d92472b01edac64a13050328e1c9f63b755e9c6d535cd5a20ca62fab5d4",
     "document": {
       "allowedTools": [],
       "authority": "read_only",
       "color": "blue",
       "context": {
         "allowedModes": [
-          "room"
+          "room",
+          "task_only"
         ],
         "defaultMode": "room",
         "ownExecutionContinuity": "none"
       },
       "delegation": {
-        "admission": "deny",
+        "admission": "auto_within_budget",
         "allowedCallerKinds": [
           "host"
         ],
@@ -318,7 +320,7 @@ export const listContextCompactions200: WorkerOperationResponse<"listContextComp
 export const listGlobalHeroes200: WorkerOperationResponse<"listGlobalHeroes", 200> = {
   "data": [
     {
-      "digest": "sha256:684b6f74a10205543d577f85a4bc64d0d11b1de7d5fdaf092929b064e9ddeb34",
+      "digest": "sha256:fabb5d92472b01edac64a13050328e1c9f63b755e9c6d535cd5a20ca62fab5d4",
       "id": "reviewer",
       "name": "Reviewer",
       "path": "<temp-path>"
@@ -545,7 +547,7 @@ export const publishGlobalHero201: WorkerOperationResponse<"publishGlobalHero", 
   "data": {
     "heroId": "reviewer",
     "revision": {
-      "digest": "sha256:684b6f74a10205543d577f85a4bc64d0d11b1de7d5fdaf092929b064e9ddeb34",
+      "digest": "sha256:fabb5d92472b01edac64a13050328e1c9f63b755e9c6d535cd5a20ca62fab5d4",
       "publishedAt": "2026-01-01T00:00:08Z",
       "resourceId": "reviewer",
       "schemaVersion": 1,
@@ -647,20 +649,21 @@ export const unpinArtifact200: WorkerOperationResponse<"unpinArtifact", 200> = {
 /** updateGlobalHero answering 200. */
 export const updateGlobalHero200: WorkerOperationResponse<"updateGlobalHero", 200> = {
   "data": {
-    "digest": "sha256:684b6f74a10205543d577f85a4bc64d0d11b1de7d5fdaf092929b064e9ddeb34",
+    "digest": "sha256:fabb5d92472b01edac64a13050328e1c9f63b755e9c6d535cd5a20ca62fab5d4",
     "document": {
       "allowedTools": [],
       "authority": "read_only",
       "color": "blue",
       "context": {
         "allowedModes": [
-          "room"
+          "room",
+          "task_only"
         ],
         "defaultMode": "room",
         "ownExecutionContinuity": "none"
       },
       "delegation": {
-        "admission": "deny",
+        "admission": "auto_within_budget",
         "allowedCallerKinds": [
           "host"
         ],
