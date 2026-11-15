@@ -51,6 +51,10 @@ type FlowNodeFreeze struct {
 	GoalDigest string
 	GoalText   string
 	BudgetJSON json.RawMessage
+	// AcceptanceJSON is the task's declared acceptance clause (`[]` when none), frozen at Run
+	// start: the fold evaluates it instead of re-reading the version, so a failed version read
+	// cannot skip verification silently.
+	AcceptanceJSON json.RawMessage
 	// ReadOnly/Writes are the scheduler's concurrency class for this node,
 	// frozen from the resolved Hero definition and the task's declares.
 	ReadOnly bool
@@ -176,6 +180,10 @@ func (r *AgentFlowRunRepo) CreateFlowRun(ctx context.Context, input CreateFlowRu
 		if len(budgetJSON) == 0 {
 			budgetJSON = json.RawMessage(`{}`)
 		}
+		acceptanceJSON := node.AcceptanceJSON
+		if len(acceptanceJSON) == 0 {
+			acceptanceJSON = json.RawMessage(`[]`)
+		}
 		readOnly := 0
 		if node.ReadOnly {
 			readOnly = 1
@@ -187,11 +195,11 @@ func (r *AgentFlowRunRepo) CreateFlowRun(ctx context.Context, input CreateFlowRu
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO run_agent_flow_nodes
 			(run_id, task_index, handle, hero_version_id, skill_digests_json, goal_digest, goal_text,
-			 budget_json, terminal_state, created_at, read_only, writes_json, hero_definition_json)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
+			 budget_json, acceptance_json, terminal_state, created_at, read_only, writes_json, hero_definition_json)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
 			runID, node.TaskIndex, node.Handle, node.HeroVersionID, string(skillsJSON),
-			node.GoalDigest, node.GoalText, string(budgetJSON), timestamp, readOnly, string(writesJSON),
-			string(heroDefJSON)); err != nil {
+			node.GoalDigest, node.GoalText, string(budgetJSON), string(acceptanceJSON), timestamp, readOnly,
+			string(writesJSON), string(heroDefJSON)); err != nil {
 			return nil, fmt.Errorf("create flow node %d: %w", node.TaskIndex, err)
 		}
 	}
@@ -296,8 +304,9 @@ func scanFlowRuns(rows *sql.Rows) ([]*domain.RunAgentFlow, error) {
 // ListNodes returns all task checkpoints of a flow run ordered by task index.
 func (r *AgentFlowRunRepo) ListNodes(ctx context.Context, runID string) ([]*domain.RunAgentFlowNode, error) {
 	rows, err := r.DB.QueryContext(ctx, `SELECT run_id, task_index, handle, hero_version_id, skill_digests_json,
-		goal_digest, goal_text, budget_json, terminal_state, output_ref, child_run_id, child_run_ids_json, error_code, created_at, finished_at,
-		read_only, writes_json, hero_definition_json
+		goal_digest, goal_text, budget_json, acceptance_json, terminal_state, output_ref, child_run_id,
+		child_run_ids_json, error_code, created_at, finished_at, read_only, writes_json, hero_definition_json,
+		acceptance_verdict
 		FROM run_agent_flow_nodes WHERE run_id=? ORDER BY task_index`, runID)
 	if err != nil {
 		return nil, err
@@ -317,8 +326,9 @@ func (r *AgentFlowRunRepo) ListNodes(ctx context.Context, runID string) ([]*doma
 // GetNode fetches one task checkpoint.
 func (r *AgentFlowRunRepo) GetNode(ctx context.Context, runID string, taskIndex int) (*domain.RunAgentFlowNode, error) {
 	rows, err := r.DB.QueryContext(ctx, `SELECT run_id, task_index, handle, hero_version_id, skill_digests_json,
-		goal_digest, goal_text, budget_json, terminal_state, output_ref, child_run_id, child_run_ids_json, error_code, created_at, finished_at,
-		read_only, writes_json, hero_definition_json
+		goal_digest, goal_text, budget_json, acceptance_json, terminal_state, output_ref, child_run_id,
+		child_run_ids_json, error_code, created_at, finished_at, read_only, writes_json, hero_definition_json,
+		acceptance_verdict
 		FROM run_agent_flow_nodes WHERE run_id=? AND task_index=?`, runID, taskIndex)
 	if err != nil {
 		return nil, err
@@ -345,6 +355,17 @@ type NodeUpdate struct {
 	OutputRef      json.RawMessage
 	GoalText       string
 	ErrorCode      string
+	// AcceptanceVerdict is tri-state, because one SQL write cannot express
+	// "leave it", "clear it" and "set it" at once:
+	//   nil            -> leave the column alone (dispatch, cancel, re-dispatch)
+	//   non-nil, empty -> clear it (a node reset to pending must not keep a
+	//                     stale verdict)
+	//   non-nil, value -> write it (the acceptance fold, in the checkpoint CAS)
+	// A plain COALESCE cannot express "clear", and an unconditional write would
+	// clear verdicts on every unrelated update.
+	AcceptanceVerdict *json.RawMessage
+	// ClearErrorCode un-records error_code: COALESCE cannot clear, and a reset node must not look failed.
+	ClearErrorCode bool
 }
 
 // UpdateNode applies a checkpoint mutation and returns the node when the CAS
@@ -369,15 +390,31 @@ func (r *AgentFlowRunRepo) UpdateNode(ctx context.Context, runID string, upd Nod
 			childRunIDsJSON = string(encoded)
 		}
 	}
+	// Tri-state verdict: the column is NOT NULL, so "clear" writes '' and "leave" keeps it.
+	setVerdict := 0
+	verdict := ""
+	if upd.AcceptanceVerdict != nil {
+		setVerdict = 1
+		verdict = string(*upd.AcceptanceVerdict)
+	}
+	// error_code has two ways to be left alone and one to be cleared:
+	// ClearErrorCode writes '', a non-empty ErrorCode writes that code, and
+	// neither keeps the current value.
+	clearErrorCode := 0
+	if upd.ClearErrorCode {
+		clearErrorCode = 1
+	}
 	res, err := r.DB.ExecContext(ctx, `UPDATE run_agent_flow_nodes SET
 		terminal_state=?, child_run_id=COALESCE(?, child_run_id),
 		child_run_ids_json=CASE WHEN ?='' THEN child_run_ids_json ELSE ? END,
 		output_ref=COALESCE(?, output_ref), goal_text=COALESCE(?, goal_text),
-		error_code=COALESCE(?, error_code),
+		error_code=CASE WHEN ?=1 THEN NULL ELSE COALESCE(?, error_code) END,
+		acceptance_verdict=CASE WHEN ?=1 THEN ? ELSE acceptance_verdict END,
 		finished_at=CASE WHEN ? IS NULL THEN finished_at ELSE ? END
 		WHERE run_id=? AND task_index=?`+expected,
 		upd.SetState, nullableOrNil(upd.ChildRunID), childRunIDsJSON, childRunIDsJSON,
-		nullableOrNil(outputRef), nullableOrNil(upd.GoalText), nullableOrNil(upd.ErrorCode),
+		nullableOrNil(outputRef), nullableOrNil(upd.GoalText), clearErrorCode, nullableOrNil(upd.ErrorCode),
+		setVerdict, verdict,
 		nullableOrNil(now), nullableOrNil(now), runID, upd.TaskIndex)
 	if err != nil {
 		return nil, err
@@ -474,13 +511,13 @@ func (r *AgentFlowRunRepo) TerminateAnchor(ctx context.Context, runID string, st
 
 func scanFlowNode(scan interface{ Scan(...any) error }) (*domain.RunAgentFlowNode, error) {
 	var node domain.RunAgentFlowNode
-	var heroVersionID, skillsJSON, goalDigest, goalText, budgetJSON, outputRef, childRunID, errorCode, createdAt, finishedAt, heroDefJSON sql.NullString
+	var heroVersionID, skillsJSON, goalDigest, goalText, budgetJSON, acceptanceJSON, outputRef, childRunID, errorCode, createdAt, finishedAt, heroDefJSON, acceptanceVerdict sql.NullString
 	var childRunIDsJSON, writesJSON string
 	var readOnly int
 	if err := scan.Scan(&node.RunID, &node.TaskIndex, &node.Handle, &heroVersionID,
-		&skillsJSON, &goalDigest, &goalText, &budgetJSON, &node.TerminalState,
+		&skillsJSON, &goalDigest, &goalText, &budgetJSON, &acceptanceJSON, &node.TerminalState,
 		&outputRef, &childRunID, &childRunIDsJSON, &errorCode, &createdAt, &finishedAt,
-		&readOnly, &writesJSON, &heroDefJSON); err != nil {
+		&readOnly, &writesJSON, &heroDefJSON, &acceptanceVerdict); err != nil {
 		return nil, err
 	}
 	node.ReadOnly = readOnly != 0
@@ -513,6 +550,14 @@ func scanFlowNode(scan interface{ Scan(...any) error }) (*domain.RunAgentFlowNod
 	if budgetJSON.Valid {
 		node.BudgetJSON = json.RawMessage(budgetJSON.String)
 	}
+	if acceptanceJSON.Valid && acceptanceJSON.String != "" {
+		if err := json.Unmarshal([]byte(acceptanceJSON.String), &node.Acceptance); err != nil {
+			return nil, fmt.Errorf("decode acceptance specs for task %d: %w", node.TaskIndex, err)
+		}
+	}
+	if acceptanceVerdict.Valid && acceptanceVerdict.String != "" {
+		node.AcceptanceVerdict = json.RawMessage(acceptanceVerdict.String)
+	}
 	if outputRef.Valid && outputRef.String != "" {
 		node.OutputRef = json.RawMessage(outputRef.String)
 	}
@@ -539,6 +584,11 @@ var (
 // checkpoint continuation: completed task checkpoints are kept, all other
 // nodes are reset to pending, and the cancel flag clears. Force full replay is
 // a NEW run (explicit), never a silent rewrite of a terminal run.
+//
+// A reset node's acceptance verdict is cleared with it (the empty string is the
+// "no verdict" value of a NOT NULL column), so a resumed task never shows the
+// previous attempt's conclusion while it runs again. The acceptance
+// specification is NOT cleared: it is frozen for the run, not per attempt.
 func (r *AgentFlowRunRepo) ResumeFlowRun(ctx context.Context, runID string) (*domain.RunAgentFlow, error) {
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -565,7 +615,7 @@ func (r *AgentFlowRunRepo) ResumeFlowRun(ctx context.Context, runID string) (*do
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE run_agent_flow_nodes SET terminal_state='pending',
-		error_code=NULL, output_ref=NULL, finished_at=NULL
+		error_code=NULL, output_ref=NULL, finished_at=NULL, acceptance_verdict=''
 		WHERE run_id=? AND terminal_state IN ('cancelled','interrupted','failed','blocked')`, runID); err != nil {
 		return nil, err
 	}

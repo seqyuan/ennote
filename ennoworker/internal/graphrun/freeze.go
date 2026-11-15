@@ -36,13 +36,21 @@ func (s *Service) freezeDefinition(ctx context.Context, graphID string, definiti
 	skillCatalog := s.skillDigests()
 	freeze := make([]store.FlowNodeFreeze, 0, len(order))
 	emptyBudget, _ := json.Marshal(domain.BudgetCeilingJSON{})
+	// No acceptance clause freezes as the empty list, never as JSON null: the
+	// fold path decodes the column, and "no specs" must be an ordinary empty
+	// slice rather than a decode special case.
 	for _, name := range order {
 		task := definition.Tasks[name]
+		acceptanceJSON, err := freezeAcceptanceJSON(task.Acceptance)
+		if err != nil {
+			return nil, fmt.Errorf("Task %q: %w", name, err)
+		}
 		node := store.FlowNodeFreeze{
 			TaskIndex: indexOf[name], Handle: name,
 			GoalDigest: agentflow.TaskGoalDigest(task.Goal), GoalText: task.Goal,
-			BudgetJSON: emptyBudget,
-			Writes:     append([]string(nil), task.Writes...),
+			BudgetJSON:     emptyBudget,
+			Writes:         append([]string(nil), task.Writes...),
+			AcceptanceJSON: acceptanceJSON,
 		}
 		if task.Terminal != nil {
 			node.ReadOnly = true
@@ -129,6 +137,22 @@ func (s *Service) freezeDefinition(ctx context.Context, graphID string, definiti
 		freeze = append(freeze, node)
 	}
 	return freeze, nil
+}
+
+// freezeAcceptanceJSON encodes a task's acceptance clause for the frozen node.
+// An absent clause freezes as the empty list (never a nil slice, never "null").
+// An encode failure fails the freeze instead of freezing an empty clause: a
+// clause that exists in the revision but not on the node would silently
+// disable verification, which is the failure direction this feature removes.
+func freezeAcceptanceJSON(specs []domain.FlowAcceptance) (json.RawMessage, error) {
+	if len(specs) == 0 {
+		return json.RawMessage(`[]`), nil
+	}
+	encoded, err := json.Marshal(specs)
+	if err != nil {
+		return nil, fmt.Errorf("encode acceptance clause: %w", err)
+	}
+	return encoded, nil
 }
 
 func (s *Service) freezeHero(ctx context.Context, graphID, taskID string, task domain.FlowTask,

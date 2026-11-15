@@ -430,25 +430,7 @@ func startFlowOrchestrator(db *sql.DB, runID string,
 		DB: db, PolicyResolver: store.FlowCheckPolicyResolver(policyFiles),
 		MaxOutputBytes: 32 << 10, DefaultTimeoutSeconds: 120,
 		ManagerBuilder: func(ctx context.Context, sessionID string) (*workspace.Manager, error) {
-			session, err := sessions.FindByID(ctx, sessionID)
-			if err != nil {
-				return nil, fmt.Errorf("load check session: %w", err)
-			}
-			workspaceRecord, err := projectFiles.FindWorkspaceByProjectID(ctx, session.ProjectID)
-			if err != nil {
-				return nil, fmt.Errorf("load check workspace: %w", err)
-			}
-			root, err := workspace.CanonicalWorkspaceRoot(workspaceRecord.HostPath)
-			if err != nil {
-				return nil, err
-			}
-			manager, err := workspace.NewManager(root,
-				filepath.Join(homeDir, "runtime", "checks", sessionID), "", workspace.SandboxMode(sandbox))
-			if err != nil {
-				return nil, err
-			}
-			manager.ProtectHome(homeDir)
-			return manager, nil
+			return flowWorkspaceManager(ctx, sessions, projectFiles, homeDir, sandbox, "checks", sessionID)
 		},
 	}
 	orchestrator := &agentflow.Orchestrator{
@@ -459,9 +441,46 @@ func startFlowOrchestrator(db *sql.DB, runID string,
 		},
 		Events:  &store.FlowEventSink{Writer: eventWriter},
 		Checker: checkRunner,
+		// Acceptance evidence resolves through the same per-Session workspace
+		// jail the check runner uses, so one jail rule decides both what a check
+		// task may execute against and what a verdict may read.
+		AcceptanceEvidence: func(ctx context.Context, sessionID string) (agentflow.AcceptanceEvidence, error) {
+			manager, err := flowWorkspaceManager(ctx, sessions, projectFiles, homeDir, sandbox, "acceptance", sessionID)
+			if err != nil {
+				return nil, err
+			}
+			return workspace.NewAcceptanceEvidence(manager.Jail), nil
+		},
 		Enqueue: func(ctx context.Context, childRunID string) error {
 			return coordinator.Enqueue(ctx, childRunID)
 		},
 	}
 	orchestrator.Recover(ctx, []string{runID})
+}
+
+// flowWorkspaceManager resolves one Session's workspace jail: Session → Project
+// workspace record → canonical root → sandboxed Manager. It is the single
+// session→manager lookup shared by the check runner and acceptance evidence; a
+// copy per consumer is how the two would drift on what counts as the workspace.
+func flowWorkspaceManager(ctx context.Context, sessions *sessionstore.Manager,
+	projectFiles *projectstore.Store, homeDir, sandbox, runtimeKind, sessionID string) (*workspace.Manager, error) {
+	session, err := sessions.FindByID(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("load flow session: %w", err)
+	}
+	workspaceRecord, err := projectFiles.FindWorkspaceByProjectID(ctx, session.ProjectID)
+	if err != nil {
+		return nil, fmt.Errorf("load flow workspace: %w", err)
+	}
+	root, err := workspace.CanonicalWorkspaceRoot(workspaceRecord.HostPath)
+	if err != nil {
+		return nil, err
+	}
+	manager, err := workspace.NewManager(root,
+		filepath.Join(homeDir, "runtime", runtimeKind, sessionID), "", workspace.SandboxMode(sandbox))
+	if err != nil {
+		return nil, err
+	}
+	manager.ProtectHome(homeDir)
+	return manager, nil
 }

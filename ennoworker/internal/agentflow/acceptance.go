@@ -55,8 +55,17 @@ const (
 	codeAcceptanceCSVHeaderInvalid  = "csv_header_invalid"
 	codeAcceptanceCSVColumnsMissing = "csv_columns_missing"
 	codeAcceptanceJSONInvalid       = "json_invalid"
-	acceptanceJSONReadChunkBytes    = 32 * 1024
+	// codeAcceptanceUnavailable is the whole-task code: the runtime could not
+	// even obtain an evidence reader, so every declared leaf is unverified.
+	// Never a pass, never a silent skip.
+	codeAcceptanceUnavailable    = "evidence_unavailable"
+	acceptanceJSONReadChunkBytes = 32 * 1024
 )
+
+// acceptanceTaskTimeout bounds one task's whole acceptance evaluation. The fold
+// runs it synchronously, so this also bounds how long other in-flight children
+// wait for their own fold.
+const acceptanceTaskTimeout = 8 * time.Second
 
 // AcceptanceCSVHeaderBudget bounds how many bytes of an artifact csv-columns
 // may read. Only the first logical record (the header) is inspected; the file
@@ -147,6 +156,55 @@ func EvaluateAcceptance(ctx context.Context, specs []domain.FlowAcceptance, evid
 
 func newAcceptanceCheck(check string, verdict domain.AcceptanceResult, code, detail string) AcceptanceCheck {
 	return AcceptanceCheck{Check: check, Verdict: verdict, Code: code, Detail: detail}
+}
+
+// unverifiedAcceptanceVerdict reports every declared leaf as unverified with one
+// code. It is what a task with an acceptance clause gets when the runtime cannot
+// read evidence at all (no reader configured, or the reader factory failed):
+// the clause stays visible in the checkpoint and never reads as a pass.
+func unverifiedAcceptanceVerdict(specs []domain.FlowAcceptance, code, detail string) AcceptanceVerdictValue {
+	checks := make([]AcceptanceCheck, 0, len(specs))
+	for _, spec := range specs {
+		checks = append(checks, newAcceptanceCheck(spec.Check, domain.AcceptanceUnverified, code, detail))
+	}
+	return AcceptanceVerdictValue{Result: domain.AcceptanceUnverified, Checks: checks}
+}
+
+// renderAcceptanceAssignment appends the declared conditions to a task's goal as
+// task DATA: the child must know what will be checked, or a mismatch is only
+// discoverable as an after-the-fact failure. A condition is data, not an
+// instruction — it grants no permission, and the runtime decides the verdict
+// from the workspace, never from the child's own report. No clause adds no bytes.
+func renderAcceptanceAssignment(goal string, specs []domain.FlowAcceptance) string {
+	if len(specs) == 0 {
+		return goal
+	}
+	var builder strings.Builder
+	builder.WriteString(goal)
+	builder.WriteString("\n\nAcceptance (checked by the runtime against the workspace after you finish; your own report is not evidence):\n")
+	for _, spec := range specs {
+		builder.WriteString("- ")
+		builder.WriteString(renderAcceptanceCondition(spec))
+		builder.WriteString("\n")
+	}
+	return builder.String()
+}
+
+// renderAcceptanceCondition renders one condition deterministically from the
+// frozen spec, so the same definition always produces the same assignment.
+func renderAcceptanceCondition(spec domain.FlowAcceptance) string {
+	switch spec.Check {
+	case acceptanceCheckExists:
+		return spec.File + " must exist as a regular file"
+	case acceptanceCheckNonEmpty:
+		return spec.File + " must be a non-empty regular file"
+	case acceptanceCheckCSVColumns:
+		return spec.File + " must have columns [" + strings.Join(spec.Columns, ", ") + "]"
+	case acceptanceCheckJSONValid:
+		return spec.File + " must be valid JSON"
+	default:
+		return spec.File + " must satisfy the " + spec.Check + " check"
+	}
 }
 
 // evaluateAcceptanceLeaf evaluates one condition under its own deadline.

@@ -304,13 +304,21 @@ type RunAgentFlowNode struct {
 	// SkillDigests is the bare task Skill ID list. It is kept for the public
 	// Workers API shape (skillDigests: [id]); the digest-pinned view lives in
 	// FrozenSkills, decoded from the same column.
-	SkillDigests  []string        `json:"skillDigests,omitempty"`
-	GoalDigest    string          `json:"goalDigest,omitempty"`
-	GoalText      string          `json:"goalText,omitempty"`
-	BudgetJSON    json.RawMessage `json:"budget,omitempty"`
-	TerminalState FlowNodeState   `json:"terminalState"`
-	OutputRef     json.RawMessage `json:"outputRef,omitempty"`
-	ChildRunID    string          `json:"childRunId,omitempty"`
+	SkillDigests []string        `json:"skillDigests,omitempty"`
+	GoalDigest   string          `json:"goalDigest,omitempty"`
+	GoalText     string          `json:"goalText,omitempty"`
+	BudgetJSON   json.RawMessage `json:"budget,omitempty"`
+	// Acceptance is the acceptance specification frozen with the node at Run
+	// start. It is frozen rather than re-read from the version at fold time so
+	// a failed read can never silently skip verification (fail-open).
+	Acceptance []FlowAcceptance `json:"acceptance,omitempty"`
+	// AcceptanceVerdict is the machine-checked verdict of the frozen
+	// specification, written in the same CAS as the checkpoint state. Empty
+	// means "not declared, or cleared by a reset".
+	AcceptanceVerdict json.RawMessage `json:"acceptanceVerdict,omitempty"`
+	TerminalState     FlowNodeState   `json:"terminalState"`
+	OutputRef         json.RawMessage `json:"outputRef,omitempty"`
+	ChildRunID        string          `json:"childRunId,omitempty"`
 	// ChildRunIDs is the full set for fan_out tasks (parallel instances).
 	ChildRunIDs []string   `json:"childRunIds,omitempty"`
 	ErrorCode   string     `json:"errorCode,omitempty"`

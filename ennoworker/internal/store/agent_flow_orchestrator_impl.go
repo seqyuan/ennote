@@ -56,8 +56,12 @@ func (s *OrchestratorStore) UpdateNode(ctx context.Context, runID string, upd ag
 	_, err := s.Runs.UpdateNode(ctx, runID, NodeUpdate{
 		TaskIndex: upd.TaskIndex, ExpectedStates: upd.ExpectedStates, SetState: upd.SetState,
 		ChildRunID: upd.ChildRunID, ChildRunIDs: upd.ChildRunIDs, OutputRef: upd.OutputRef,
-		GoalText: upd.GoalText, ErrorCode: upd.ErrorCode,
+		GoalText: upd.GoalText, ErrorCode: upd.ErrorCode, AcceptanceVerdict: upd.AcceptanceVerdict,
+		ClearErrorCode: upd.ClearErrorCode,
 	})
+	if errors.Is(err, ErrFlowNodeStateConflict) {
+		return agentflow.ErrCheckpointConflict
+	}
 	return err
 }
 

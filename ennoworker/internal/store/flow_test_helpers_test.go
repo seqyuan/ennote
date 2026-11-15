@@ -141,6 +141,17 @@ func freezeFlowForTest(t *testing.T, db *sql.DB, flowRuns *store.AgentFlowRunRep
 		task := def.Tasks[name]
 		node := store.FlowNodeFreeze{TaskIndex: indexOf[name], Handle: name,
 			GoalDigest: agentflow.TaskGoalDigest(task.Goal)}
+		// Freeze the acceptance clause exactly like the production freeze does:
+		// the fold path reads the node column, never the version.
+		acceptanceJSON := json.RawMessage(`[]`)
+		if len(task.Acceptance) > 0 {
+			encoded, err := json.Marshal(task.Acceptance)
+			if err != nil {
+				return nil, nil, err
+			}
+			acceptanceJSON = encoded
+		}
+		node.AcceptanceJSON = acceptanceJSON
 		if task.Terminal != nil || task.Type == domain.FlowTaskCheck {
 			// Terminal/check gates complete the flow; they freeze no Hero binding.
 			node.BudgetJSON = json.RawMessage(`{}`)

@@ -3,6 +3,7 @@ package agentflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -17,11 +18,20 @@ import (
 // delegation substrate, writes task checkpoints, accumulates the flow budget,
 // and terminalizes the meta-Run. It is testable through the FlowStore and
 // ChildProvider seams.
+// ErrCheckpointConflict reports that a checkpoint CAS did not match: another
+// orchestrator (a recovery racing a new start) settled the node first. It is a
+// settled node, not a failure.
+var ErrCheckpointConflict = errors.New("flow node state conflict")
+
 type Orchestrator struct {
 	Store    FlowStore
 	Children ChildProvider
 	Events   EventSink
 	Checker  CheckRunner
+	// AcceptanceEvidence resolves the workspace evidence reader for one session.
+	// nil means the runtime cannot read evidence: every declared check is then
+	// UNVERIFIED, never silently absent.
+	AcceptanceEvidence func(ctx context.Context, sessionID string) (AcceptanceEvidence, error)
 	// Enqueue hands a created child Run to the run coordinator.
 	Enqueue      func(ctx context.Context, runID string) error
 	PollInterval time.Duration
@@ -54,6 +64,14 @@ type NodeUpdate struct {
 	OutputRef      json.RawMessage
 	GoalText       string
 	ErrorCode      string
+	// AcceptanceVerdict is tri-state: nil leaves the column alone, a non-nil
+	// empty value clears it (a node reset to pending must not keep a stale
+	// verdict), and a non-nil value writes it in the same CAS as SetState.
+	AcceptanceVerdict *json.RawMessage
+	// ClearErrorCode un-records the failure code. It exists for a checkpoint
+	// reset: COALESCE cannot clear, and a retried node must not still look
+	// failed by acceptance.
+	ClearErrorCode bool
 }
 
 // ChildSpec is one task's child Run request.
@@ -227,6 +245,7 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 				}
 			}
 		}
+		acceptanceFailure := acceptanceFailureNode(nodes)
 		// Convergence: a completed 'from' node triggers one durable back-edge
 		// round (reset the loop path, count it, and stop at max_rounds).
 		converged, err := o.applyConvergence(ctx, runID, &def, nodes)
@@ -238,6 +257,26 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 			continue // nodes changed by the back-edge reset; re-read them
 		}
 		ready := readyHeroTasks(nodes, completed, &def)
+
+		// Acceptance failure settlement. A recorded acceptance failure stops NEW
+		// dispatch immediately: while a sibling is still in flight the loop only
+		// folds it, so "wait for the in-flight siblings" cannot turn into "run
+		// the rest of the graph". Once nothing is in flight the flow fails with
+		// the CURRENT token total (never 0) and the already-finished siblings
+		// keep their own checkpoints. This runs before the terminal gate: an
+		// unlocked terminal would otherwise complete a flow whose task failed
+		// acceptance.
+		if acceptanceFailure != nil {
+			if len(inFlight) > 0 {
+				if err := o.waitAndFoldAny(ctx, runID, run, &inFlight); err != nil {
+					return
+				}
+				continue
+			}
+			o.failKeepingUsage(ctx, runID, state.TotalTokensUsed,
+				fmt.Sprintf("task %q %s", acceptanceFailure.Handle, acceptanceFailedCode))
+			return
+		}
 
 		// Check and fan_out tasks are blocking gates: checks may mutate the
 		// workspace (sandbox commands) and fan_out instances read it. They run
@@ -396,7 +435,7 @@ func (o *Orchestrator) dispatchHeroChild(ctx context.Context, runID string, flow
 	}
 	child, err := o.Children.CreateTaskChild(ctx, runID, flow.SessionID, ChildSpec{
 		Handle: node.Handle, HeroVersionID: node.HeroVersionID,
-		Skills: frozenSkillRefs(node), Assignment: goal, Budget: budget,
+		Skills: frozenSkillRefs(node), Assignment: renderAcceptanceAssignment(goal, node.Acceptance), Budget: budget,
 		HeroDefinitionJSON: node.HeroDefinitionJSON,
 	})
 	if err != nil {
@@ -462,7 +501,9 @@ func (o *Orchestrator) foldHeroChild(ctx context.Context, runID string, flow *do
 		}
 		o.cancelInflight(ctx, runID, remaining)
 		o.failTask(ctx, runID, node, code)
-		o.fail(ctx, runID, fmt.Sprintf("task %q %s", node.Handle, code))
+		// Keep the ledger: this path also runs while draining siblings after an
+		// acceptance failure, and a flow that consumed tokens must not report 0.
+		o.failKeepingUsage(ctx, runID, total, fmt.Sprintf("task %q %s", node.Handle, code))
 		return nil
 	}
 	payload := json.RawMessage{}
@@ -470,6 +511,11 @@ func (o *Orchestrator) foldHeroChild(ctx context.Context, runID string, flow *do
 		payload = result.Payload
 	} else if result != nil {
 		payload, _ = json.Marshal(map[string]any{"summary": result.Summary})
+	}
+	// A declared acceptance clause is verified here, against the workspace,
+	// before the checkpoint write: the child's own report is never evidence.
+	if len(node.Acceptance) > 0 {
+		return o.foldAcceptance(ctx, runID, flow, node, childID, payload)
 	}
 	if err := o.Store.UpdateNode(ctx, runID, NodeUpdate{
 		TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
@@ -480,60 +526,6 @@ func (o *Orchestrator) foldHeroChild(ctx context.Context, runID string, flow *do
 	return o.Events.PublishFlow(ctx, runID, "flow_task_completed", map[string]any{
 		"flowRunId": runID, "task": node.Handle, "outputRef": string(payload), "childRunId": childID,
 	})
-}
-
-// waitAndFoldAny polls all in-flight hero children and folds the first one
-// that settles, removing it from the set. The rest keep running; the caller
-// re-evaluates the ready set. On flow cancellation every in-flight child is
-// hard-cancelled and the caller's next loop iteration terminalizes the run.
-func (o *Orchestrator) waitAndFoldAny(ctx context.Context, runID string, flow *domain.RunAgentFlow,
-	inFlight *[]inflightTask) error {
-	ticker := time.NewTicker(o.PollInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		}
-		if o.isCancelled(ctx, runID) {
-			o.cancelInflight(ctx, runID, *inFlight)
-			return nil // loop top terminalizes via cancelRemaining
-		}
-		settled := -1
-		for i := range *inFlight {
-			status, err := o.Children.ChildRunStatus(ctx, (*inFlight)[i].childID)
-			if err != nil {
-				return err
-			}
-			if status.Terminal() {
-				settled = i
-				break
-			}
-		}
-		if settled < 0 {
-			continue
-		}
-		task := (*inFlight)[settled]
-		*inFlight = append((*inFlight)[:settled], (*inFlight)[settled+1:]...)
-		result, _ := o.Children.ChildTerminalResult(ctx, task.childID)
-		status, _ := o.Children.ChildRunStatus(ctx, task.childID)
-		return o.foldHeroChild(ctx, runID, flow, task.node, task.childID, status, result, *inFlight)
-	}
-}
-
-// cancelInflight hard-cancels a set of in-flight children and marks their
-// nodes cancelled, without touching the flow state (used on parallel task
-// failure and budget overrun; user cancellation takes the cancelRemaining
-// path instead).
-func (o *Orchestrator) cancelInflight(ctx context.Context, runID string, inFlight []inflightTask) {
-	for _, task := range inFlight {
-		_ = o.Children.CancelChildRun(ctx, task.childID)
-		_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
-			TaskIndex: task.node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
-			SetState: domain.FlowNodeCancelled,
-		})
-	}
 }
 
 // runCheckTask executes one deterministic check gate: policy gate, durable
@@ -814,38 +806,6 @@ func (o *Orchestrator) waitChildren(ctx context.Context, runID string, childIDs 
 		}
 	}
 	return results, statuses
-}
-
-func (o *Orchestrator) complete(ctx context.Context, runID string, totalTokens int64, outputs map[string]json.RawMessage) error {
-	payload := map[string]any{"outputs": map[string]any{}}
-	for name, value := range outputs {
-		payload["outputs"].(map[string]any)[name] = json.RawMessage(value)
-	}
-	if err := o.Store.UpdateFlowState(ctx, runID, domain.FlowStateCompleted, totalTokens, ""); err != nil {
-		return err
-	}
-	if err := o.Events.PublishFlow(ctx, runID, "flow_completed", map[string]any{
-		"flowRunId": runID, "outputs": payload["outputs"],
-	}); err != nil {
-		return err
-	}
-	return o.Store.TerminateAnchor(ctx, runID, domain.RunSucceeded, "", "")
-}
-
-func (o *Orchestrator) fail(ctx context.Context, runID, reason string) {
-	_ = o.Store.UpdateFlowState(ctx, runID, domain.FlowStateFailed, 0, reason)
-	_ = o.Events.PublishFlow(ctx, runID, "flow_failed", map[string]any{"flowRunId": runID, "reason": reason})
-	_ = o.Store.TerminateAnchor(ctx, runID, domain.RunFailed, "flow_failed", reason)
-}
-
-func (o *Orchestrator) failTask(ctx context.Context, runID string, node *domain.RunAgentFlowNode, code string) {
-	_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
-		TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
-		SetState: domain.FlowNodeFailed, ErrorCode: code,
-	})
-	_ = o.Events.PublishFlow(ctx, runID, "flow_task_failed", map[string]any{
-		"flowRunId": runID, "task": node.Handle, "childRunId": node.ChildRunID, "reason": code,
-	})
 }
 
 // cancelRemaining terminalizes the meta-Run as cancelled: the active child is
@@ -1248,6 +1208,38 @@ func (o *Orchestrator) reconcileCrashedNodes(ctx context.Context, runID string) 
 		if len(aggregate) > 1 {
 			output, _ = json.Marshal(aggregate)
 		}
+		// A crashed fold must not become a silent skip: a task that declares
+		// acceptance is verified here too, with the verdict written in the same
+		// CAS as the checkpoint. Otherwise a crash between the child's success
+		// and the fold would record a plain `completed` and never verify.
+		// fan_out cannot declare acceptance (publish rejects it), so an
+		// acceptance node always has exactly one recorded child.
+		if len(node.Acceptance) > 0 {
+			// A fan-out parent cannot declare acceptance (publish rejects it), so
+			// a verified node always has exactly one child. Guard anyway: an
+			// aggregate cannot be verified against a single instance.
+			if len(childIDs) > 1 {
+				verdict := unverifiedAcceptanceVerdict(node.Acceptance, codeAcceptanceUnavailable,
+					"a fan-out task cannot be verified from one child Run")
+				raw, _ := json.Marshal(verdict)
+				_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
+					TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
+					SetState: domain.FlowNodeCompleted, OutputRef: output,
+					AcceptanceVerdict: (*json.RawMessage)(&raw),
+				})
+				continue
+			}
+			if err := o.foldAcceptance(ctx, runID, flow, node, childIDs[0], output); err != nil {
+				// Another orchestrator (recovery races a new start) may have
+				// settled this node already; that is a settled node, not a flow
+				// failure.
+				if errors.Is(err, ErrCheckpointConflict) {
+					continue
+				}
+				return err
+			}
+			continue
+		}
 		_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
 			TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
 			SetState: domain.FlowNodeCompleted, OutputRef: output,
@@ -1313,9 +1305,15 @@ func (o *Orchestrator) applyConvergence(ctx context.Context, runID string, def *
 			if node == nil || !node.TerminalState.Terminal() {
 				continue
 			}
+			// A reset node must not keep the previous round's verdict; the
+			// verdict is part of the checkpoint, not of the frozen specs.
+			// The reset must un-record the failure code as well: a node left with
+			// error_code=acceptance_failed and a cleared verdict would make the
+			// run loop fail a flow whose task is about to be retried.
 			_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
 				TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{node.TerminalState},
-				SetState: domain.FlowNodePending,
+				SetState: domain.FlowNodePending, AcceptanceVerdict: clearedAcceptanceVerdict(),
+				ClearErrorCode: true,
 			})
 		}
 	}

@@ -22,6 +22,9 @@ type fakeStore struct {
 	cancelRequested bool
 	anchorStatus    domain.RunStatus
 	rounds          map[string]int
+	// conflictOnUpdate forces UpdateNode to lose the CAS for a task index, which
+	// is how a second orchestrator observing an already-settled node looks.
+	conflictOnUpdate map[int]bool
 }
 
 func newFakeStore(def *domain.FlowDefinition) (*fakeStore, error) {
@@ -49,6 +52,9 @@ func newFakeStore(def *domain.FlowDefinition) (*fakeStore, error) {
 			RunID: run.RunID, TaskIndex: i, Handle: name,
 			GoalDigest: TaskGoalDigest(task.Goal), TerminalState: domain.FlowNodePending,
 			BudgetJSON: json.RawMessage(`{"maxModelCalls":4,"maxToolCalls":8,"maxTotalTokens":50000,"maxOutputTokens":4000,"maxCostUsdMicros":100000,"maxWallTimeMs":120000}`),
+			// Freeze the acceptance clause onto the node, exactly like the
+			// production freeze (the fold path reads the node, not the version).
+			Acceptance: append([]domain.FlowAcceptance(nil), task.Acceptance...),
 			CreatedAt:  time.Now(),
 		})
 	}
@@ -87,6 +93,9 @@ func (f *fakeStore) UpdateNode(ctx context.Context, runID string, upd NodeUpdate
 		if f.nodes[i].TaskIndex != upd.TaskIndex {
 			continue
 		}
+		if f.conflictOnUpdate[upd.TaskIndex] {
+			return ErrCheckpointConflict
+		}
 		if len(upd.ExpectedStates) > 0 {
 			ok := false
 			for _, expected := range upd.ExpectedStates {
@@ -114,6 +123,14 @@ func (f *fakeStore) UpdateNode(ctx context.Context, runID string, upd NodeUpdate
 		}
 		if upd.ErrorCode != "" {
 			f.nodes[i].ErrorCode = upd.ErrorCode
+		}
+		// Tri-state verdict: nil leaves it, empty clears it, a value writes it.
+		if upd.AcceptanceVerdict != nil {
+			if len(*upd.AcceptanceVerdict) == 0 {
+				f.nodes[i].AcceptanceVerdict = nil
+			} else {
+				f.nodes[i].AcceptanceVerdict = append(json.RawMessage(nil), (*upd.AcceptanceVerdict)...)
+			}
 		}
 		return nil
 	}
