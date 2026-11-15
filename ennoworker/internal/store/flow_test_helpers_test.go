@@ -44,8 +44,11 @@ func setupFlowFixture(t *testing.T) (*sql.DB, *store.AgentFlowRunRepo, string, s
 		Model:  heroesource.ModelBinding{Ref: model.ID, ThinkingEffort: domain.ThinkingDefault, Fallbacks: []string{}},
 		Skills: []heroesource.SkillBinding{}, Authority: heroesource.AuthorityReadOnly,
 		PermissionCeiling: domain.PermissionDiscuss, AllowedTools: []string{"read", "grep"},
-		Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextRoom,
-			AllowedModes: []domain.HeroContextMode{domain.HeroContextRoom}, OwnExecutionContinuity: domain.HeroContinuityNone},
+		// A Graph/flow task child always runs with task_only context, so a
+		// fixture Hero that only allows another mode would be frozen here and
+		// rejected by the production freeze (see freezeFlowForTest).
+		Context: heroesource.ContextPolicy{DefaultMode: domain.HeroContextTask,
+			AllowedModes: []domain.HeroContextMode{domain.HeroContextTask}, OwnExecutionContinuity: domain.HeroContinuityNone},
 		Delegation: heroesource.DelegationPolicy{Admission: domain.DelegationAutoWithinBudget,
 			AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single", "parallel"},
 			MaxInvocationsPerParentRun: 16, MaxConcurrentInstances: 16,
@@ -158,8 +161,32 @@ func freezeFlowForTest(t *testing.T, db *sql.DB, flowRuns *store.AgentFlowRunRep
 			add("task %q: decode Hero definition: %v", name, err)
 			continue
 		}
-		if heroDef.DelegationPolicy.Admission != domain.DelegationAutoWithinBudget {
-			add("task %q: Hero %s is not auto_within_budget", name, task.Hero)
+		// The gate is the one production uses, with the facts graphrun freeze
+		// passes: a Run start validates a single task, so the delegation limits
+		// see one invocation (or fan_out.min) rather than a flow total. A
+		// fixture Hero therefore cannot pass here and fail the real freeze.
+		var taskBudgetTokens int64
+		if task.Budget != nil && task.Budget.Tokens > 0 {
+			taskBudgetTokens = task.Budget.Tokens
+		}
+		fanOutMin := 0
+		if task.FanOut != nil {
+			fanOutMin = task.FanOut.Min
+		}
+		taskInvocations := int64(1)
+		if fanOutMin > 1 {
+			taskInvocations = int64(fanOutMin)
+		}
+		if admission := agentflow.HeroAdmissibilityDiagnostics(agentflow.HeroGraphAdmission{
+			Hero:                    &heroDef,
+			HeroRef:                 task.Hero,
+			TaskBudgetTokens:        taskBudgetTokens,
+			SameHeroTaskInvocations: taskInvocations,
+			FanOutMin:               fanOutMin,
+			CallerKind:              "host",
+			Strategy:                string(domain.DelegationStrategySingle),
+		}); len(admission) > 0 {
+			add("task %q: %s: %s", name, admission[0].Code, admission[0].Message)
 			continue
 		}
 		// The test fixture has no on-disk Skill catalog, so frozen refs are
@@ -174,12 +201,8 @@ func freezeFlowForTest(t *testing.T, db *sql.DB, flowRuns *store.AgentFlowRunRep
 			frozenSkills = append(frozenSkills, domain.FrozenSkillRef{ID: id})
 		}
 		ceiling := heroDef.DelegationPolicy.BudgetCeiling
-		if task.Budget != nil && task.Budget.Tokens > 0 {
-			if task.Budget.Tokens > ceiling.MaxTotalTokens {
-				add("task %q: budget tokens %d exceed the Hero ceiling %d", name, task.Budget.Tokens, ceiling.MaxTotalTokens)
-				continue
-			}
-			ceiling.MaxTotalTokens = task.Budget.Tokens
+		if taskBudgetTokens > 0 {
+			ceiling.MaxTotalTokens = taskBudgetTokens
 		}
 		budgetJSON, _ := json.Marshal(domain.BudgetCeilingJSON{
 			MaxModelCalls: ceiling.MaxModelCalls, MaxToolCalls: ceiling.MaxToolCalls,

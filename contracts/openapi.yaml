@@ -287,14 +287,33 @@ paths:
       operationId: publishGraph
       description: |
         Validates the draft with the Agent Flow publish validator and writes one
-        immutable revision. Validation covers everything a Graph Run would
-        otherwise only fail on after the 201: Hero and Skill resolution, Hero
-        admissibility (a Graph Run only admits delegation.admission
-        auto_within_budget and task_only context), fan-out read-only Heroes, a
-        mandatory flow budget, writes scopes the scheduler cannot parse, goal
-        variable scope, convergence back-edges, check branch routing, and
-        mutually exclusive terminal tasks. A Graph needs no project binding to
-        publish; enabling it is a separate step.
+        immutable revision. Validation rejects everything a Graph Run would
+        otherwise only fail on after the 201.
+
+        Hero admission, per hero task: the Hero must resolve, and its delegation
+        must admit `auto_within_budget` (not `approval_required` or `denied`),
+        allow `task_only` context, allow the `host` caller kind and the `single`
+        strategy; every `budgetCeiling` field must clear the delegation request
+        minimum the Worker enforces when it creates a child Run (so
+        `maxToolCalls: 0` is rejected); and a task `budget.tokens` may not
+        exceed the Hero `budgetCeiling.maxTotalTokens`.
+
+        Hero delegation limits, counted the way the Worker counts them - per
+        Hero version id up to `@`, so `checker@v1` and `checker@v2` share one
+        bucket: the flow's total invocations (each task consumes
+        `max(1, fan_out.min)`) must fit `delegation.maxInvocationsPerParentRun`,
+        a `fan_out.min` must fit `delegation.maxConcurrentInstances`, and both
+        limits must be at least 1. Parallel co-readiness of two tasks is not
+        modelled; only the two guaranteed failures are.
+
+        Structural checks: exactly one entry task, resolvable Skills, fan-out
+        Heroes whose tool allowlist is fully read-only, a mandatory flow budget
+        that covers the sum of task budgets, writes scopes the scheduler cannot
+        parse, goal variable scope, convergence back-edges, check branch routing,
+        and mutually exclusive terminal tasks.
+
+        A Graph needs no project binding to publish; enabling it is a separate
+        step.
       responses:
         "201":
           description: Immutable Graph version published

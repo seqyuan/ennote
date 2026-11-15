@@ -73,21 +73,43 @@ func (s *Service) freezeDefinition(ctx context.Context, graphID string, definiti
 		if err != nil {
 			return nil, fmt.Errorf("Task %q: %w", name, err)
 		}
-		// The publish validator runs the same admission gate with the same facts,
-		// so a Graph that publishes cannot fail here for a reason publish could
-		// have reported. A Graph task child is always a host-delegated single run.
+		// The publish validator runs the same gate with the same facts, so this
+		// reports the same rules rather than a stricter set: a Hero that publish
+		// accepted does not fail here for an admission reason publish could have
+		// reported. That is not an absolute guarantee for a bare handle - publish
+		// and freeze both resolve LatestHeroRevision, so a Hero republished in
+		// between the two can differ. A Graph task child is always a host-delegated
+		// single run.
 		var taskBudgetTokens int64
 		if task.Budget != nil && task.Budget.Tokens > 0 {
 			taskBudgetTokens = task.Budget.Tokens
 		}
+		// A Run start validates one task at a time, so the delegation limits only
+		// see this task's share: one invocation, or fan_out.min when the task fans
+		// out. The flow-wide totals are a publish-time fact and stay there.
+		fanOutMin := 0
+		if task.FanOut != nil {
+			fanOutMin = task.FanOut.Min
+		}
+		taskInvocations := int64(1)
+		if fanOutMin > 1 {
+			taskInvocations = int64(fanOutMin)
+		}
 		admission := agentflow.HeroAdmissibilityDiagnostics(agentflow.HeroGraphAdmission{
-			Hero:             &hero.Definition,
-			TaskBudgetTokens: taskBudgetTokens,
-			CallerKind:       "host",
-			Strategy:         string(domain.DelegationStrategySingle),
+			Hero:                    &hero.Definition,
+			HeroRef:                 strings.TrimSpace(task.Hero),
+			TaskBudgetTokens:        taskBudgetTokens,
+			SameHeroTaskInvocations: taskInvocations,
+			FanOutMin:               fanOutMin,
+			CallerKind:              "host",
+			Strategy:                string(domain.DelegationStrategySingle),
 		})
 		if len(admission) > 0 {
-			return nil, fmt.Errorf("Task %q: %s: %s", name, admission[0].Code, admission[0].Message)
+			messages := make([]string, 0, len(admission))
+			for _, diagnostic := range admission {
+				messages = append(messages, diagnostic.Code+": "+diagnostic.Message)
+			}
+			return nil, fmt.Errorf("Task %q: %s", name, strings.Join(messages, "; "))
 		}
 		ceiling := hero.Definition.DelegationPolicy.BudgetCeiling
 		if taskBudgetTokens > 0 {

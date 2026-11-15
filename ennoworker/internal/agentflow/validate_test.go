@@ -42,6 +42,7 @@ func newStubResolver() *stubResolver {
 				DelegationPolicy: domain.HeroDelegationPolicy{
 					Admission:          domain.DelegationAutoWithinBudget,
 					AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
+					MaxInvocationsPerParentRun: 16, MaxConcurrentInstances: 16,
 					BudgetCeiling: domain.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
 						MaxTotalTokens: 60000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 120000},
 				},
@@ -55,6 +56,7 @@ func newStubResolver() *stubResolver {
 				DelegationPolicy: domain.HeroDelegationPolicy{
 					Admission:          domain.DelegationAutoWithinBudget,
 					AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
+					MaxInvocationsPerParentRun: 16, MaxConcurrentInstances: 16,
 					BudgetCeiling: domain.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
 						MaxTotalTokens: 60000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 120000},
 				},
@@ -703,10 +705,93 @@ func TestValidationHeroAdmissionRules(t *testing.T) {
 		require.False(t, result.Valid)
 		diagnostics := diagnosticsWithCode(result, "hero_budget_exceeds_ceiling")
 		require.Len(t, diagnostics, 1)
-		assert.Equal(t, "tasks.a.hero", diagnostics[0].Field)
+		// The fix is in the Graph task, not in the Hero file.
+		assert.Equal(t, "tasks.a.budget.tokens", diagnostics[0].Field)
 		assert.Contains(t, diagnostics[0].Message, "maxTotalTokens")
 		assert.Contains(t, diagnostics[0].Message, "5000")
 		assert.Contains(t, diagnostics[0].Message, "9000")
+	})
+
+	t.Run("limit_minimums", func(t *testing.T) {
+		result := validateWithHero(t, admissibleHeroDefinition())
+		assert.False(t, hasCode(result, "hero_limit_invalid"), "%v", result.Diagnostics)
+
+		// A pack-installed or hand-edited Graph-local Hero bypasses the Hero
+		// editor's minimums, and store child creation rejects every child of a
+		// Hero whose limit is below 1.
+		for _, limit := range []string{"maxInvocationsPerParentRun", "maxConcurrentInstances"} {
+			heroDef := admissibleHeroDefinition()
+			if limit == "maxInvocationsPerParentRun" {
+				heroDef.DelegationPolicy.MaxInvocationsPerParentRun = 0
+			} else {
+				heroDef.DelegationPolicy.MaxConcurrentInstances = 0
+			}
+			result = validateWithHero(t, heroDef)
+			require.False(t, result.Valid)
+			diagnostics := diagnosticsWithCode(result, "hero_limit_invalid")
+			require.Len(t, diagnostics, 1, "%v", result.Diagnostics)
+			assert.Equal(t, "tasks.a.hero", diagnostics[0].Field)
+			assert.Contains(t, diagnostics[0].Message, limit)
+			// The HTTP layer flattens diagnostics and drops Field, so the message
+			// has to name the Hero file itself.
+			assert.Contains(t, diagnostics[0].Message, "hero@1")
+		}
+	})
+
+	t.Run("invocation_total", func(t *testing.T) {
+		heroDef := admissibleHeroDefinition()
+		heroDef.DelegationPolicy.MaxInvocationsPerParentRun = 1
+		// One task fits the UI's default limit of 1.
+		result := validateWithHero(t, heroDef)
+		assert.False(t, hasCode(result, "hero_invocation_limit_exceeded"), "%v", result.Diagnostics)
+
+		// Two tasks referencing one Hero consume two invocations of the same
+		// bucket, so the second one always fails at Run start.
+		result = validateHeroTasks(t, heroDef, `  a:
+    hero: hero@1
+    goal: "a"
+  b:
+    hero: hero@1
+    goal: "b"
+    depends: [a]
+`)
+		require.False(t, result.Valid)
+		diagnostics := diagnosticsWithCode(result, "hero_invocation_limit_exceeded")
+		require.Len(t, diagnostics, 2, "%v", result.Diagnostics)
+		assert.Equal(t, "tasks.a.hero", diagnostics[0].Field)
+		assert.Equal(t, "tasks.b.hero", diagnostics[1].Field)
+		assert.Contains(t, diagnostics[0].Message, "2 invocations")
+		assert.Contains(t, diagnostics[0].Message, "maxInvocationsPerParentRun is 1")
+
+		// The bucket is the Hero object id up to "@": two pinned versions of
+		// one Hero share it, exactly like the store's count.
+		result = validateHeroTasks(t, heroDef, `  a:
+    hero: hero@1
+    goal: "a"
+  b:
+    hero: hero@2
+    goal: "b"
+    depends: [a]
+`)
+		assert.Len(t, diagnosticsWithCode(result, "hero_invocation_limit_exceeded"), 2, "%v", result.Diagnostics)
+	})
+
+	t.Run("fan_out_concurrency", func(t *testing.T) {
+		heroDef := graphReadOnlyHeroDefinition()
+		heroDef.DelegationPolicy.MaxConcurrentInstances = 2
+		result := validateWithHeroFanOut(t, heroDef, 2)
+		assert.False(t, hasCode(result, "hero_concurrency_limit_exceeded"), "%v", result.Diagnostics)
+
+		// fan_out.min opens that many children at once, so a limit below it
+		// always fails.
+		heroDef.DelegationPolicy.MaxConcurrentInstances = 1
+		result = validateWithHeroFanOut(t, heroDef, 2)
+		require.False(t, result.Valid)
+		diagnostics := diagnosticsWithCode(result, "hero_concurrency_limit_exceeded")
+		require.Len(t, diagnostics, 1, "%v", result.Diagnostics)
+		assert.Equal(t, "tasks.a.hero", diagnostics[0].Field)
+		assert.Contains(t, diagnostics[0].Message, "fan_out.min 2")
+		assert.Contains(t, diagnostics[0].Message, "maxConcurrentInstances is 1")
 	})
 }
 
@@ -714,7 +799,8 @@ func TestValidationHeroAdmissionRules(t *testing.T) {
 func TestHeroAdmissibilityDiagnosticsAdmissible(t *testing.T) {
 	heroDef := admissibleHeroDefinition()
 	assert.Empty(t, HeroAdmissibilityDiagnostics(HeroGraphAdmission{
-		Hero: &heroDef, TaskBudgetTokens: 5000, CallerKind: "host", Strategy: "single",
+		Hero: &heroDef, HeroRef: "global/checker", TaskBudgetTokens: 5000,
+		SameHeroTaskInvocations: 2, FanOutMin: 0, CallerKind: "host", Strategy: "single",
 	}))
 }
 
@@ -736,17 +822,34 @@ func admissibleHeroDefinition() domain.HeroDefinition {
 			AllowedModes: []domain.HeroContextMode{domain.HeroContextTask},
 		},
 		DelegationPolicy: domain.HeroDelegationPolicy{
-			Admission:          domain.DelegationAutoWithinBudget,
-			AllowedCallerKinds: []string{"host"},
-			AllowedStrategies:  []string{"single"},
-			BudgetCeiling:      graphAdmissibleCeiling(),
+			Admission:                  domain.DelegationAutoWithinBudget,
+			AllowedCallerKinds:         []string{"host"},
+			AllowedStrategies:          []string{"single"},
+			MaxInvocationsPerParentRun: 16,
+			MaxConcurrentInstances:     16,
+			BudgetCeiling:              graphAdmissibleCeiling(),
 		},
 	}
+}
+
+// graphReadOnlyHeroDefinition is the fan-out capable admissible Hero: fan_out
+// requires a fully read-only Hero.
+func graphReadOnlyHeroDefinition() domain.HeroDefinition {
+	def := admissibleHeroDefinition()
+	def.Authority = domain.HeroAuthorityReadOnly
+	def.PermissionCeiling = domain.PermissionDiscuss
+	def.AllowedTools = []string{"read"}
+	return def
 }
 
 func validateWithHero(t *testing.T, heroDef domain.HeroDefinition) *ValidationResult {
 	t.Helper()
 	return validateHeroTask(t, heroDef, `  a: {hero: hero@1, goal: "a"}`)
+}
+
+func validateWithHeroFanOut(t *testing.T, heroDef domain.HeroDefinition, fanOutMin int) *ValidationResult {
+	t.Helper()
+	return validateHeroTask(t, heroDef, fmt.Sprintf(`  a: {hero: hero@1, goal: "a", fan_out: {min: %d, max: %d}}`, fanOutMin, fanOutMin))
 }
 
 func validateWithHeroTaskBudget(t *testing.T, heroDef domain.HeroDefinition, tokens int64) *ValidationResult {
@@ -756,14 +859,20 @@ func validateWithHeroTaskBudget(t *testing.T, heroDef domain.HeroDefinition, tok
 
 func validateHeroTask(t *testing.T, heroDef domain.HeroDefinition, taskLine string) *ValidationResult {
 	t.Helper()
+	return validateHeroTasks(t, heroDef, taskLine+"\n")
+}
+
+func validateHeroTasks(t *testing.T, heroDef domain.HeroDefinition, tasks string) *ValidationResult {
+	t.Helper()
 	def, err := ParseDefinition([]byte(`schemaVersion: 1
 id: x
-budget: {max_total_tokens: 10000}
+budget: {max_total_tokens: 100000}
 tasks:
-` + taskLine + "\n"))
+` + tasks))
 	require.NoError(t, err)
 	resolver := newStubResolver()
 	resolver.heroDefs["hero@1"] = heroDef
+	resolver.heroDefs["hero@2"] = heroDef
 	v := validator()
 	v.Resolver = resolver
 	return v.Validate(context.Background(), def)

@@ -140,6 +140,10 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 	// writerScopes collects tasks whose Hero can mutate (writer class); used by
 	// the allow_disjoint_writers validation.
 	writerScopes := map[string][]string{}
+	// heroFacts carries every resolved Hero task to the admission gate, which
+	// runs after the loop: the delegation limits are counted per Hero object id
+	// across the whole flow, and those totals do not exist yet task by task.
+	var heroFacts []heroAdmissionFacts
 	for name, task := range def.Tasks {
 		field := "tasks." + name
 		if task.Terminal != nil {
@@ -191,19 +195,17 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 			if task.Budget != nil && task.Budget.Tokens > 0 {
 				taskBudgetTokens = task.Budget.Tokens
 			}
-			// A Graph's child Runs impose a fixed admission shape on every Hero:
-			// auto_within_budget admission, task_only context, the host as caller
-			// and the single lane. The same gate runs at Run start (graphrun
-			// freeze), so a graph that violates it fails at publish instead of
-			// publishing and then failing when the user presses Run.
-			for _, diagnostic := range HeroAdmissibilityDiagnostics(HeroGraphAdmission{
-				Hero:             &heroDef,
-				TaskBudgetTokens: taskBudgetTokens,
-				CallerKind:       "host",
-				Strategy:         string(domain.DelegationStrategySingle),
-			}) {
-				add(v.fail(diagnostic.Code, fmt.Sprintf("task %q: %s", name, diagnostic.Message), field+".hero"))
+			fanOutMin := 0
+			if task.FanOut != nil {
+				fanOutMin = task.FanOut.Min
 			}
+			heroFacts = append(heroFacts, heroAdmissionFacts{
+				taskName: name, heroRef: task.Hero,
+				heroObjectID:     heroObjectID(info.VersionID, task.Hero),
+				definition:       heroDef,
+				taskBudgetTokens: taskBudgetTokens,
+				fanOutMin:        fanOutMin,
+			})
 			readOnly := heroAllToolsReadOnly(ctx, v.Resolver, heroDef)
 			if task.FanOut != nil {
 				if task.FanOut.Min < 1 || task.FanOut.Max < task.FanOut.Min ||
@@ -251,6 +253,14 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 		v.validateGoalReferences(ctx, add, def, name, task)
 	}
 	_ = checkAllowlistMissing
+
+	// 3b. Hero admission. One gate for every Hero task, run with the flow-level
+	// delegation totals: a Graph's child Runs impose a fixed admission shape
+	// (auto_within_budget, task_only, host caller, single lane), and the
+	// delegation limits are counted per Hero object id across the flow. The same
+	// gate runs at Run start (graphrun freeze), so a graph that violates it fails
+	// at publish instead of publishing and then failing when the user presses Run.
+	validateHeroAdmission(heroFacts, add)
 
 	// 4. DAG acyclicity + convergence back-edge binding.
 	validateTopology(add, def)
@@ -715,34 +725,71 @@ func reachabilityMatrix(tasks map[string]domain.FlowTask, backEdges map[[2]strin
 // CallerKind and Strategy are fixed; the task budget is optional (0 means the
 // task declared no budget.tokens, leaving the Hero ceiling in force).
 //
+// The delegation limits are not per task, they are per Hero object id, so a
+// caller that only knows one task cannot answer them: SameHeroTaskInvocations is
+// the invocation total the flow's tasks resolving to this Hero object consume,
+// and FanOutMin is this task's own fan_out.min. Pass them explicitly.
+//
 // It is the input to the shared admission gate: the publish validator and the
 // Graph Run freeze build it from the same facts, so publish and Run start
 // cannot drift.
 type HeroGraphAdmission struct {
-	Hero             *domain.HeroDefinition
+	Hero *domain.HeroDefinition
+	// HeroRef is the Hero reference as the task wrote it (global/checker,
+	// local/checker, checker@v000001). Diagnostics carry it because the HTTP
+	// layer flattens them into one message and drops Field, so a Hero-side
+	// problem has to name the Hero file the author has to open.
+	HeroRef          string
 	TaskBudgetTokens int64
-	CallerKind       string
-	Strategy         string
+	// SameHeroTaskInvocations is how many invocations the tasks resolving to
+	// this Hero object consume, max(1, fan_out.min) each. Zero means "one
+	// task", the single-task baseline the freeze path uses.
+	SameHeroTaskInvocations int64
+	// FanOutMin is this task's fan_out.min; 0 means the task does not fan out.
+	FanOutMin  int
+	CallerKind string
+	Strategy   string
+}
+
+// sameHeroTaskInvocations reads the invocation fact, treating "not supplied" as
+// the single-task baseline instead of as unlimited.
+func (in HeroGraphAdmission) sameHeroTaskInvocations() int64 {
+	if in.SameHeroTaskInvocations < 1 {
+		return 1
+	}
+	return in.SameHeroTaskInvocations
+}
+
+// heroLabel names the Hero in a diagnostic message. The HTTP layer flattens
+// diagnostics and drops Field, so a message that only says "delegation.admission"
+// leaves the user unable to find the file it is talking about.
+func heroLabel(in HeroGraphAdmission) string {
+	if ref := strings.TrimSpace(in.HeroRef); ref != "" {
+		return "Hero " + ref
+	}
+	return "Hero"
 }
 
 // HeroAdmissibilityDiagnostics reports why a Hero cannot be admitted by a Graph
 // Run: its delegation admission is not auto_within_budget, its context policy
 // does not allow task_only, its delegation does not allow the caller or strategy
-// the Graph uses, its budget ceiling is unusable, or the task budget exceeds the
-// ceiling. The publish validator reports these per task; the freeze path calls
-// the same function so both surfaces reject the same Heroes.
+// the Graph uses, its budget ceiling or delegation limits are unusable, its
+// invocation or concurrency limit cannot cover the flow, or the task budget
+// exceeds the ceiling. The publish validator reports these per task; the freeze
+// path calls the same function so both surfaces reject the same Heroes.
 func HeroAdmissibilityDiagnostics(in HeroGraphAdmission) []ValidationDiagnostic {
 	def := in.Hero
 	if def == nil {
 		return nil
 	}
+	hero := heroLabel(in)
 	var diagnostics []ValidationDiagnostic
 	delegation := def.DelegationPolicy
 	if admission := delegation.Admission; admission != domain.DelegationAutoWithinBudget {
 		diagnostics = append(diagnostics, ValidationDiagnostic{
 			Code: "hero_admission_incompatible",
-			Message: fmt.Sprintf("Hero delegation.admission is %q; a Graph Run only admits %q",
-				admission, domain.DelegationAutoWithinBudget),
+			Message: fmt.Sprintf("%s delegation.admission is %q; a Graph Run only admits %q",
+				hero, admission, domain.DelegationAutoWithinBudget),
 		})
 	}
 	taskOnly := false
@@ -755,22 +802,22 @@ func HeroAdmissibilityDiagnostics(in HeroGraphAdmission) []ValidationDiagnostic 
 	if !taskOnly {
 		diagnostics = append(diagnostics, ValidationDiagnostic{
 			Code: "hero_context_incompatible",
-			Message: fmt.Sprintf("Hero contextPolicy.allowedModes %v does not include %q; a Graph Run child requires %q context",
-				def.ContextPolicy.AllowedModes, domain.HeroContextTask, domain.HeroContextTask),
+			Message: fmt.Sprintf("%s contextPolicy.allowedModes %v does not include %q; a Graph Run child requires %q context",
+				hero, def.ContextPolicy.AllowedModes, domain.HeroContextTask, domain.HeroContextTask),
 		})
 	}
 	if in.CallerKind != "" && !containsString(delegation.AllowedCallerKinds, in.CallerKind) {
 		diagnostics = append(diagnostics, ValidationDiagnostic{
 			Code: "hero_caller_kind_incompatible",
-			Message: fmt.Sprintf("Hero delegation.allowedCallerKinds %v does not allow caller kind %q; a Graph Run task is always delegated by %q",
-				delegation.AllowedCallerKinds, in.CallerKind, in.CallerKind),
+			Message: fmt.Sprintf("%s delegation.allowedCallerKinds %v does not allow caller kind %q; a Graph Run task is always delegated by %q",
+				hero, delegation.AllowedCallerKinds, in.CallerKind, in.CallerKind),
 		})
 	}
 	if in.Strategy != "" && !containsString(delegation.AllowedStrategies, in.Strategy) {
 		diagnostics = append(diagnostics, ValidationDiagnostic{
 			Code: "hero_strategy_incompatible",
-			Message: fmt.Sprintf("Hero delegation.allowedStrategies %v does not allow strategy %q; a Graph Run task child always runs as %q",
-				delegation.AllowedStrategies, in.Strategy, in.Strategy),
+			Message: fmt.Sprintf("%s delegation.allowedStrategies %v does not allow strategy %q; a Graph Run task child always runs as %q",
+				hero, delegation.AllowedStrategies, in.Strategy, in.Strategy),
 		})
 	}
 	ceiling := delegation.BudgetCeiling
@@ -792,19 +839,132 @@ func HeroAdmissibilityDiagnostics(in HeroGraphAdmission) []ValidationDiagnostic 
 		if field.got < field.min {
 			diagnostics = append(diagnostics, ValidationDiagnostic{
 				Code: "hero_ceiling_invalid",
-				Message: fmt.Sprintf("Hero delegation.budgetCeiling.%s is %d; a Graph Run child requires at least %d",
-					field.name, field.got, field.min),
+				Message: fmt.Sprintf("%s delegation.budgetCeiling.%s is %d; a Graph Run child requires at least %d",
+					hero, field.name, field.got, field.min),
 			})
 		}
+	}
+	// Delegation limits below 1 are unwritable through the Hero editor but a
+	// pack-installed or hand-edited Graph-local Hero bypasses those minimums, and
+	// the store rejects every child once the limit is 0.
+	limits := []struct {
+		name string
+		got  int
+	}{
+		{"maxInvocationsPerParentRun", delegation.MaxInvocationsPerParentRun},
+		{"maxConcurrentInstances", delegation.MaxConcurrentInstances},
+	}
+	for _, limit := range limits {
+		if limit.got < 1 {
+			diagnostics = append(diagnostics, ValidationDiagnostic{
+				Code: "hero_limit_invalid",
+				Message: fmt.Sprintf("%s delegation.%s is %d; a Graph Run child requires at least 1",
+					hero, limit.name, limit.got),
+			})
+		}
+	}
+	// Two runtime failures are statically guaranteed and reported here: every
+	// task referencing the Hero consumes one invocation (a fan-out task consumes
+	// fan_out.min), and a fan-out task opens fan_out.min children at once. Nothing
+	// else is modelled: whether two dependent tasks become co-ready inside one Run
+	// is a scheduling question, not a publish-time fact, so the gate does not try
+	// to predict it.
+	invocations := in.sameHeroTaskInvocations()
+	if delegation.MaxInvocationsPerParentRun >= 1 && invocations > int64(delegation.MaxInvocationsPerParentRun) {
+		diagnostics = append(diagnostics, ValidationDiagnostic{
+			Code: "hero_invocation_limit_exceeded",
+			Message: fmt.Sprintf("%s consumes %d invocations (every task counts max(1, fan_out.min)); delegation.maxInvocationsPerParentRun is %d",
+				hero, invocations, delegation.MaxInvocationsPerParentRun),
+		})
+	}
+	if delegation.MaxConcurrentInstances >= 1 && in.FanOutMin > delegation.MaxConcurrentInstances {
+		diagnostics = append(diagnostics, ValidationDiagnostic{
+			Code: "hero_concurrency_limit_exceeded",
+			Message: fmt.Sprintf("%s fan_out.min %d would open that many concurrent instances; delegation.maxConcurrentInstances is %d",
+				hero, in.FanOutMin, delegation.MaxConcurrentInstances),
+		})
 	}
 	if in.TaskBudgetTokens > 0 && in.TaskBudgetTokens > ceiling.MaxTotalTokens {
 		diagnostics = append(diagnostics, ValidationDiagnostic{
 			Code: "hero_budget_exceeds_ceiling",
-			Message: fmt.Sprintf("Hero delegation.budgetCeiling.maxTotalTokens %d is below the task budget.tokens %d",
-				ceiling.MaxTotalTokens, in.TaskBudgetTokens),
+			Message: fmt.Sprintf("%s delegation.budgetCeiling.maxTotalTokens %d is below the task budget.tokens %d",
+				hero, ceiling.MaxTotalTokens, in.TaskBudgetTokens),
 		})
 	}
 	return diagnostics
+}
+
+// heroAdmissionFacts is one resolved Hero task as the admission gate sees it.
+// The gate also needs flow-level totals, so the task loop collects facts and the
+// gate runs once every task has resolved.
+type heroAdmissionFacts struct {
+	taskName         string
+	heroRef          string
+	heroObjectID     string
+	definition       domain.HeroDefinition
+	taskBudgetTokens int64
+	fanOutMin        int
+}
+
+// heroObjectID is the delegation bucket the store counts both limits on: the
+// frozen Hero version id up to "@", so checker@v1 and checker@v2 share one
+// bucket. The file publish resolvers return a definition without a version id,
+// so it falls back to the reference string. The scope prefix is not part of a
+// frozen version id (freeze stores checker@v000001, not global/checker@...), so
+// it is stripped to keep global/checker and checker in one bucket.
+func heroObjectID(versionID, heroRef string) string {
+	key := strings.TrimSpace(versionID)
+	if key == "" {
+		key = strings.TrimSpace(heroRef)
+	}
+	scope, _, _ := strings.Cut(key, "@")
+	return strings.TrimPrefix(strings.TrimSpace(scope), "global/")
+}
+
+// validateHeroAdmission runs the shared admission gate once per Hero task.
+//
+// The delegation limits are counted per Hero object id across the flow: every
+// task referencing the Hero consumes max(1, fan_out.min) invocations, and a
+// fan-out task needs fan_out.min concurrent instances. Those totals are a
+// publish-only fact - graphrun freeze validates one task at a time and passes the
+// single-task baseline instead (see HeroAdmissibilityDiagnostics).
+func validateHeroAdmission(facts []heroAdmissionFacts, add func(ValidationDiagnostic)) {
+	if len(facts) == 0 {
+		return
+	}
+	invocations := make(map[string]int64, len(facts))
+	for _, fact := range facts {
+		consumed := int64(1)
+		if fact.fanOutMin > 1 {
+			consumed = int64(fact.fanOutMin)
+		}
+		invocations[fact.heroObjectID] += consumed
+	}
+	sort.Slice(facts, func(i, j int) bool { return facts[i].taskName < facts[j].taskName })
+	for _, fact := range facts {
+		field := "tasks." + fact.taskName
+		for _, diagnostic := range HeroAdmissibilityDiagnostics(HeroGraphAdmission{
+			Hero:                    &fact.definition,
+			HeroRef:                 fact.heroRef,
+			TaskBudgetTokens:        fact.taskBudgetTokens,
+			SameHeroTaskInvocations: invocations[fact.heroObjectID],
+			FanOutMin:               fact.fanOutMin,
+			CallerKind:              "host",
+			Strategy:                string(domain.DelegationStrategySingle),
+		}) {
+			// A budget above the ceiling is fixed in the Graph task, not in the
+			// Hero file; every other code names a Hero-side problem.
+			diagnosticField := field + ".hero"
+			if diagnostic.Code == "hero_budget_exceeds_ceiling" {
+				diagnosticField = field + ".budget.tokens"
+			}
+			add(ValidationDiagnostic{
+				Code:    diagnostic.Code,
+				Message: fmt.Sprintf("task %q: %s", fact.taskName, diagnostic.Message),
+				Field:   diagnosticField,
+			})
+		}
+	}
 }
 
 func heroAllToolsReadOnly(ctx context.Context, resolver Resolver, heroDef domain.HeroDefinition) bool {
