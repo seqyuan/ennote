@@ -73,21 +73,25 @@ func (s *Service) freezeDefinition(ctx context.Context, graphID string, definiti
 		if err != nil {
 			return nil, fmt.Errorf("Task %q: %w", name, err)
 		}
-		switch hero.Definition.DelegationPolicy.Admission {
-		case domain.DelegationAutoWithinBudget:
-		case domain.DelegationDenied:
-			return nil, fmt.Errorf("Task %q: Hero %s denies Host delegation", name, hero.VersionID)
-		case domain.DelegationApprovalRequired:
-			return nil, fmt.Errorf("Task %q: Hero %s requires explicit delegation approval; Graph Runs only admit auto_within_budget Heroes", name, hero.VersionID)
-		default:
-			return nil, fmt.Errorf("Task %q: Hero %s has an invalid admission policy", name, hero.VersionID)
+		// The publish validator runs the same admission gate with the same facts,
+		// so a Graph that publishes cannot fail here for a reason publish could
+		// have reported. A Graph task child is always a host-delegated single run.
+		var taskBudgetTokens int64
+		if task.Budget != nil && task.Budget.Tokens > 0 {
+			taskBudgetTokens = task.Budget.Tokens
+		}
+		admission := agentflow.HeroAdmissibilityDiagnostics(agentflow.HeroGraphAdmission{
+			Hero:             &hero.Definition,
+			TaskBudgetTokens: taskBudgetTokens,
+			CallerKind:       "host",
+			Strategy:         string(domain.DelegationStrategySingle),
+		})
+		if len(admission) > 0 {
+			return nil, fmt.Errorf("Task %q: %s: %s", name, admission[0].Code, admission[0].Message)
 		}
 		ceiling := hero.Definition.DelegationPolicy.BudgetCeiling
-		if task.Budget != nil && task.Budget.Tokens > 0 {
-			if task.Budget.Tokens > ceiling.MaxTotalTokens {
-				return nil, fmt.Errorf("Task %q: budget tokens %d exceed the Hero ceiling %d", name, task.Budget.Tokens, ceiling.MaxTotalTokens)
-			}
-			ceiling.MaxTotalTokens = task.Budget.Tokens
+		if taskBudgetTokens > 0 {
+			ceiling.MaxTotalTokens = taskBudgetTokens
 		}
 		budgetJSON, _ := json.Marshal(domain.BudgetCeilingJSON{
 			MaxModelCalls: ceiling.MaxModelCalls, MaxToolCalls: ceiling.MaxToolCalls,

@@ -40,8 +40,10 @@ func newStubResolver() *stubResolver {
 					DefaultMode: domain.HeroContextTask, AllowedModes: []domain.HeroContextMode{domain.HeroContextTask},
 				},
 				DelegationPolicy: domain.HeroDelegationPolicy{
-					Admission:     domain.DelegationAutoWithinBudget,
-					BudgetCeiling: domain.DelegationBudgetCeiling{MaxTotalTokens: 5000},
+					Admission:          domain.DelegationAutoWithinBudget,
+					AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
+					BudgetCeiling: domain.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
+						MaxTotalTokens: 60000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 120000},
 				},
 			},
 			"reader@1": {
@@ -51,8 +53,10 @@ func newStubResolver() *stubResolver {
 					DefaultMode: domain.HeroContextTask, AllowedModes: []domain.HeroContextMode{domain.HeroContextTask},
 				},
 				DelegationPolicy: domain.HeroDelegationPolicy{
-					Admission:     domain.DelegationAutoWithinBudget,
-					BudgetCeiling: domain.DelegationBudgetCeiling{MaxTotalTokens: 5000},
+					Admission:          domain.DelegationAutoWithinBudget,
+					AllowedCallerKinds: []string{"host"}, AllowedStrategies: []string{"single"},
+					BudgetCeiling: domain.DelegationBudgetCeiling{MaxModelCalls: 4, MaxToolCalls: 8,
+						MaxTotalTokens: 60000, MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 120000},
 				},
 			},
 		},
@@ -601,9 +605,13 @@ tasks:
 // Hero admissibility: a Hero that can only fail when a Run starts must fail at
 // publish time instead of publishing and then failing at Run start.
 func TestValidationHeroAdmissibility(t *testing.T) {
-	// Fully admissible Hero: no hero-related diagnostic at all.
+	// Fully admissible Hero: no diagnostic at all. Every condition the Graph
+	// Run freeze enforces must hold: auto_within_budget admission, task_only
+	// context, host caller, single lane, usable ceilings and a task budget
+	// within the ceiling.
 	result := validateWithHero(t, admissibleHeroDefinition())
 	assert.True(t, result.Valid, "%v", result.Diagnostics)
+	assert.Empty(t, result.Diagnostics)
 	assert.False(t, hasCode(result, "hero_admission_incompatible"))
 	assert.False(t, hasCode(result, "hero_context_incompatible"))
 
@@ -630,6 +638,95 @@ func TestValidationHeroAdmissibility(t *testing.T) {
 	assert.False(t, hasCode(result, "hero_admission_incompatible"))
 }
 
+// Graph admission rules the Run freeze enforces on every task child: the same
+// conditions must fail publish, otherwise a Graph publishes and then cannot
+// start.
+func TestValidationHeroAdmissionRules(t *testing.T) {
+	t.Run("caller_kind", func(t *testing.T) {
+		result := validateWithHero(t, admissibleHeroDefinition())
+		assert.True(t, result.Valid, "%v", result.Diagnostics)
+		assert.False(t, hasCode(result, "hero_caller_kind_incompatible"), "%v", result.Diagnostics)
+
+		heroDef := admissibleHeroDefinition()
+		heroDef.DelegationPolicy.AllowedCallerKinds = []string{"parent_hero"}
+		result = validateWithHero(t, heroDef)
+		require.False(t, result.Valid)
+		diagnostics := diagnosticsWithCode(result, "hero_caller_kind_incompatible")
+		require.Len(t, diagnostics, 1)
+		assert.Equal(t, "tasks.a.hero", diagnostics[0].Field)
+		assert.Contains(t, diagnostics[0].Message, "allowedCallerKinds")
+		assert.Contains(t, diagnostics[0].Message, "host")
+		assert.Contains(t, diagnostics[0].Message, "parent_hero")
+	})
+
+	t.Run("strategy", func(t *testing.T) {
+		result := validateWithHero(t, admissibleHeroDefinition())
+		assert.True(t, result.Valid, "%v", result.Diagnostics)
+		assert.False(t, hasCode(result, "hero_strategy_incompatible"), "%v", result.Diagnostics)
+
+		heroDef := admissibleHeroDefinition()
+		heroDef.DelegationPolicy.AllowedStrategies = []string{"parallel"}
+		result = validateWithHero(t, heroDef)
+		require.False(t, result.Valid)
+		diagnostics := diagnosticsWithCode(result, "hero_strategy_incompatible")
+		require.Len(t, diagnostics, 1)
+		assert.Equal(t, "tasks.a.hero", diagnostics[0].Field)
+		assert.Contains(t, diagnostics[0].Message, "allowedStrategies")
+		assert.Contains(t, diagnostics[0].Message, "single")
+		assert.Contains(t, diagnostics[0].Message, "parallel")
+	})
+
+	t.Run("ceiling", func(t *testing.T) {
+		result := validateWithHero(t, admissibleHeroDefinition())
+		assert.True(t, result.Valid, "%v", result.Diagnostics)
+		assert.False(t, hasCode(result, "hero_ceiling_invalid"), "%v", result.Diagnostics)
+
+		// The delegation request is built from the ceiling, so a zero tool call
+		// ceiling publishes today and then fails child Run creation.
+		heroDef := admissibleHeroDefinition()
+		heroDef.DelegationPolicy.BudgetCeiling.MaxToolCalls = 0
+		result = validateWithHero(t, heroDef)
+		require.False(t, result.Valid)
+		diagnostics := diagnosticsWithCode(result, "hero_ceiling_invalid")
+		require.Len(t, diagnostics, 1)
+		assert.Equal(t, "tasks.a.hero", diagnostics[0].Field)
+		assert.Contains(t, diagnostics[0].Message, "maxToolCalls")
+		assert.Contains(t, diagnostics[0].Message, "0")
+	})
+
+	t.Run("budget_exceeds_ceiling", func(t *testing.T) {
+		result := validateWithHeroTaskBudget(t, admissibleHeroDefinition(), 5000)
+		assert.True(t, result.Valid, "%v", result.Diagnostics)
+		assert.False(t, hasCode(result, "hero_budget_exceeds_ceiling"), "%v", result.Diagnostics)
+
+		result = validateWithHeroTaskBudget(t, admissibleHeroDefinition(), 9000)
+		require.False(t, result.Valid)
+		diagnostics := diagnosticsWithCode(result, "hero_budget_exceeds_ceiling")
+		require.Len(t, diagnostics, 1)
+		assert.Equal(t, "tasks.a.hero", diagnostics[0].Field)
+		assert.Contains(t, diagnostics[0].Message, "maxTotalTokens")
+		assert.Contains(t, diagnostics[0].Message, "5000")
+		assert.Contains(t, diagnostics[0].Message, "9000")
+	})
+}
+
+// The gate itself is the shared contract between publish and Run start.
+func TestHeroAdmissibilityDiagnosticsAdmissible(t *testing.T) {
+	heroDef := admissibleHeroDefinition()
+	assert.Empty(t, HeroAdmissibilityDiagnostics(HeroGraphAdmission{
+		Hero: &heroDef, TaskBudgetTokens: 5000, CallerKind: "host", Strategy: "single",
+	}))
+}
+
+// graphAdmissibleCeiling is a ceiling every field of which clears the delegation
+// request minimum the store enforces at child Run creation.
+func graphAdmissibleCeiling() domain.DelegationBudgetCeiling {
+	return domain.DelegationBudgetCeiling{
+		MaxModelCalls: 4, MaxToolCalls: 8, MaxTotalTokens: 5000,
+		MaxOutputTokens: 4000, MaxCostUSDMicros: 100000, MaxWallTimeMS: 120000,
+	}
+}
+
 func admissibleHeroDefinition() domain.HeroDefinition {
 	return domain.HeroDefinition{
 		Authority: domain.HeroAuthorityMutation, PermissionCeiling: domain.PermissionAuto,
@@ -639,20 +736,31 @@ func admissibleHeroDefinition() domain.HeroDefinition {
 			AllowedModes: []domain.HeroContextMode{domain.HeroContextTask},
 		},
 		DelegationPolicy: domain.HeroDelegationPolicy{
-			Admission:     domain.DelegationAutoWithinBudget,
-			BudgetCeiling: domain.DelegationBudgetCeiling{MaxTotalTokens: 5000},
+			Admission:          domain.DelegationAutoWithinBudget,
+			AllowedCallerKinds: []string{"host"},
+			AllowedStrategies:  []string{"single"},
+			BudgetCeiling:      graphAdmissibleCeiling(),
 		},
 	}
 }
 
 func validateWithHero(t *testing.T, heroDef domain.HeroDefinition) *ValidationResult {
 	t.Helper()
+	return validateHeroTask(t, heroDef, `  a: {hero: hero@1, goal: "a"}`)
+}
+
+func validateWithHeroTaskBudget(t *testing.T, heroDef domain.HeroDefinition, tokens int64) *ValidationResult {
+	t.Helper()
+	return validateHeroTask(t, heroDef, fmt.Sprintf(`  a: {hero: hero@1, goal: "a", budget: {tokens: %d}}`, tokens))
+}
+
+func validateHeroTask(t *testing.T, heroDef domain.HeroDefinition, taskLine string) *ValidationResult {
+	t.Helper()
 	def, err := ParseDefinition([]byte(`schemaVersion: 1
 id: x
 budget: {max_total_tokens: 10000}
 tasks:
-  a: {hero: hero@1, goal: "a"}
-`))
+` + taskLine + "\n"))
 	require.NoError(t, err)
 	resolver := newStubResolver()
 	resolver.heroDefs["hero@1"] = heroDef

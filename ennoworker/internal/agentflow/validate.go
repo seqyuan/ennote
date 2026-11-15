@@ -187,10 +187,21 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 				continue
 			}
 			heroDef := info.Definition
-			// A Graph's child Runs can only execute an auto_within_budget Hero
-			// asked for task_only context; both are runtime gates today, so a
-			// graph that violates them would publish and then fail at Run start.
-			for _, diagnostic := range HeroAdmissibilityDiagnostics(&heroDef) {
+			var taskBudgetTokens int64
+			if task.Budget != nil && task.Budget.Tokens > 0 {
+				taskBudgetTokens = task.Budget.Tokens
+			}
+			// A Graph's child Runs impose a fixed admission shape on every Hero:
+			// auto_within_budget admission, task_only context, the host as caller
+			// and the single lane. The same gate runs at Run start (graphrun
+			// freeze), so a graph that violates it fails at publish instead of
+			// publishing and then failing when the user presses Run.
+			for _, diagnostic := range HeroAdmissibilityDiagnostics(HeroGraphAdmission{
+				Hero:             &heroDef,
+				TaskBudgetTokens: taskBudgetTokens,
+				CallerKind:       "host",
+				Strategy:         string(domain.DelegationStrategySingle),
+			}) {
 				add(v.fail(diagnostic.Code, fmt.Sprintf("task %q: %s", name, diagnostic.Message), field+".hero"))
 			}
 			readOnly := heroAllToolsReadOnly(ctx, v.Resolver, heroDef)
@@ -221,8 +232,8 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 				writerScopes[name] = task.Writes
 			}
 			effectiveTokens := heroDef.DelegationPolicy.BudgetCeiling.MaxTotalTokens
-			if task.Budget != nil && task.Budget.Tokens > 0 {
-				effectiveTokens = task.Budget.Tokens
+			if taskBudgetTokens > 0 {
+				effectiveTokens = taskBudgetTokens
 				totalTaskTokens += effectiveTokens
 			}
 			// Tasks without an explicit budget contribute 0 to the publish-time
@@ -699,17 +710,35 @@ func reachabilityMatrix(tasks map[string]domain.FlowTask, backEdges map[[2]strin
 	return reach
 }
 
+// HeroGraphAdmission is the admission context a Graph Run imposes on one Hero
+// task. Every Graph task child is delegated by its host on the single lane, so
+// CallerKind and Strategy are fixed; the task budget is optional (0 means the
+// task declared no budget.tokens, leaving the Hero ceiling in force).
+//
+// It is the input to the shared admission gate: the publish validator and the
+// Graph Run freeze build it from the same facts, so publish and Run start
+// cannot drift.
+type HeroGraphAdmission struct {
+	Hero             *domain.HeroDefinition
+	TaskBudgetTokens int64
+	CallerKind       string
+	Strategy         string
+}
+
 // HeroAdmissibilityDiagnostics reports why a Hero cannot be admitted by a Graph
-// Run: its delegation admission is not auto_within_budget, or its context policy
-// does not allow task_only. The publish validator reports these per task; the
-// same rules stay enforced at Run start (graphrun freeze) and at child config
-// load (store run config files) as the last line of defence.
-func HeroAdmissibilityDiagnostics(def *domain.HeroDefinition) []ValidationDiagnostic {
+// Run: its delegation admission is not auto_within_budget, its context policy
+// does not allow task_only, its delegation does not allow the caller or strategy
+// the Graph uses, its budget ceiling is unusable, or the task budget exceeds the
+// ceiling. The publish validator reports these per task; the freeze path calls
+// the same function so both surfaces reject the same Heroes.
+func HeroAdmissibilityDiagnostics(in HeroGraphAdmission) []ValidationDiagnostic {
+	def := in.Hero
 	if def == nil {
 		return nil
 	}
 	var diagnostics []ValidationDiagnostic
-	if admission := def.DelegationPolicy.Admission; admission != domain.DelegationAutoWithinBudget {
+	delegation := def.DelegationPolicy
+	if admission := delegation.Admission; admission != domain.DelegationAutoWithinBudget {
 		diagnostics = append(diagnostics, ValidationDiagnostic{
 			Code: "hero_admission_incompatible",
 			Message: fmt.Sprintf("Hero delegation.admission is %q; a Graph Run only admits %q",
@@ -728,6 +757,51 @@ func HeroAdmissibilityDiagnostics(def *domain.HeroDefinition) []ValidationDiagno
 			Code: "hero_context_incompatible",
 			Message: fmt.Sprintf("Hero contextPolicy.allowedModes %v does not include %q; a Graph Run child requires %q context",
 				def.ContextPolicy.AllowedModes, domain.HeroContextTask, domain.HeroContextTask),
+		})
+	}
+	if in.CallerKind != "" && !containsString(delegation.AllowedCallerKinds, in.CallerKind) {
+		diagnostics = append(diagnostics, ValidationDiagnostic{
+			Code: "hero_caller_kind_incompatible",
+			Message: fmt.Sprintf("Hero delegation.allowedCallerKinds %v does not allow caller kind %q; a Graph Run task is always delegated by %q",
+				delegation.AllowedCallerKinds, in.CallerKind, in.CallerKind),
+		})
+	}
+	if in.Strategy != "" && !containsString(delegation.AllowedStrategies, in.Strategy) {
+		diagnostics = append(diagnostics, ValidationDiagnostic{
+			Code: "hero_strategy_incompatible",
+			Message: fmt.Sprintf("Hero delegation.allowedStrategies %v does not allow strategy %q; a Graph Run task child always runs as %q",
+				delegation.AllowedStrategies, in.Strategy, in.Strategy),
+		})
+	}
+	ceiling := delegation.BudgetCeiling
+	// A Graph Run child submits its ceiling as the delegation request, so every
+	// field must clear the request minimum the store enforces.
+	ceilings := []struct {
+		name string
+		got  int64
+		min  int64
+	}{
+		{"maxModelCalls", int64(ceiling.MaxModelCalls), 1},
+		{"maxToolCalls", int64(ceiling.MaxToolCalls), 1},
+		{"maxTotalTokens", ceiling.MaxTotalTokens, 1},
+		{"maxOutputTokens", ceiling.MaxOutputTokens, 1},
+		{"maxWallTimeMs", ceiling.MaxWallTimeMS, 1},
+		{"maxCostUsdMicros", ceiling.MaxCostUSDMicros, 0},
+	}
+	for _, field := range ceilings {
+		if field.got < field.min {
+			diagnostics = append(diagnostics, ValidationDiagnostic{
+				Code: "hero_ceiling_invalid",
+				Message: fmt.Sprintf("Hero delegation.budgetCeiling.%s is %d; a Graph Run child requires at least %d",
+					field.name, field.got, field.min),
+			})
+		}
+	}
+	if in.TaskBudgetTokens > 0 && in.TaskBudgetTokens > ceiling.MaxTotalTokens {
+		diagnostics = append(diagnostics, ValidationDiagnostic{
+			Code: "hero_budget_exceeds_ceiling",
+			Message: fmt.Sprintf("Hero delegation.budgetCeiling.maxTotalTokens %d is below the task budget.tokens %d",
+				ceiling.MaxTotalTokens, in.TaskBudgetTokens),
 		})
 	}
 	return diagnostics
