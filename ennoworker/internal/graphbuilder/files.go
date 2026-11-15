@@ -170,6 +170,11 @@ func (s *Service) applyFile(_ context.Context, graphID, proposalID string) (*dom
 		return nil, "", fmt.Errorf("proposal is invalid: %s", proposal.Diagnostics[0])
 	}
 	definition, digest, err := s.Sources.UpdateGraphDefinition(graphID, proposal.BaseDigest, func(definition *domain.FlowDefinition) error {
+		// Refuse before the rewrite: applyOperations then DefinitionToYAML would
+		// silently delete a key the parser dropped from graph.yaml.
+		if err := UnknownTaskKeys(definition); err != nil {
+			return err
+		}
 		applyOperations(definition, proposal.Operations)
 		return nil
 	})

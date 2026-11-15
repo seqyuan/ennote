@@ -493,3 +493,54 @@ func TestAcceptanceReconcileConflictIsNotAFlowFailure(t *testing.T) {
 		"losing the checkpoint CAS to another orchestrator is a settled node, not a flow failure")
 	assert.NotContains(t, events.types(), "flow_failed")
 }
+
+// The completed event carries the same run-level summary the API projects from
+// the node rows, so an auditor reading the timeline sees which tasks were only
+// "nothing was disproved" without opening the run. It is computed from the nodes
+// the dispatch loop already holds: no extra query.
+func TestAcceptanceSummaryRidesOnFlowCompleted(t *testing.T) {
+	def := threeTaskDef()
+	def.Tasks["producer"] = domain.FlowTask{
+		Type: domain.FlowTaskHero, Hero: "writer@1", Goal: "produce",
+		Budget:     &domain.FlowTaskBudget{Tokens: 1000},
+		Acceptance: []domain.FlowAcceptance{{File: "outputs/qc.csv", Check: "non-empty"}},
+	}
+	def.Tasks["reviewer"] = domain.FlowTask{
+		Type: domain.FlowTaskHero, Hero: "reader@1", Goal: "review", Depends: []string{"producer"},
+		Acceptance: []domain.FlowAcceptance{{File: "outputs/review.json", Check: "json-valid"}},
+	}
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+	evidence := newFakeEvidence()
+	evidence.files["outputs/qc.csv"] = AcceptanceFile{Size: 12, Regular: true}
+	evidence.contents["outputs/qc.csv"] = "sample,reads\ns1,10\n"
+	// Registered but unreadable: the reviewer's clause is unverified, not failed.
+	evidence.files["outputs/review.json"] = AcceptanceFile{Size: 20, Regular: true}
+
+	orch := acceptanceOrchestrator(t, fake, children, events, evidence)
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	payload := events.payloadOf("flow_completed")
+	require.NotNil(t, payload)
+	require.Contains(t, payload, "acceptance")
+	assert.Equal(t, &domain.AcceptanceSummary{Total: 2, Holds: 1, Unverified: 1}, payload["acceptance"])
+}
+
+// A flow whose tasks declared nothing publishes exactly the payload it used to:
+// no acceptance key, no zeroed summary that would read as "all verified".
+func TestFlowCompletedWithoutAcceptanceOmitsSummary(t *testing.T) {
+	fake, err := newFakeStore(threeTaskDef())
+	require.NoError(t, err)
+	events := &fakeEvents{}
+
+	orch := newOrchestrator(fake, newFakeChildren(), events)
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	payload := events.payloadOf("flow_completed")
+	require.NotNil(t, payload)
+	assert.NotContains(t, payload, "acceptance")
+}

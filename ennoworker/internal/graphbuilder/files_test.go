@@ -42,3 +42,47 @@ func TestFileBuilderPersistsThreadProposalAndApply(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
+
+// The apply rewrites graph.yaml from the parsed definition, so a key the parser
+// dropped would be deleted by the rewrite and the following publish would succeed
+// without the clause. Apply refuses instead, and the file keeps the user's text.
+func TestFileBuilderApplyRefusesUnknownTaskKey(t *testing.T) {
+	sources := &globalsource.Store{HomeDir: t.TempDir()}
+	_, _, err := sources.CreateGraphDefinition("rna-seq", "RNA-seq")
+	require.NoError(t, err)
+	path := filepath.Join(sources.GraphsDir(), "rna-seq", "graph.yaml")
+	const draft = `schemaVersion: 1
+id: rna-seq
+name: RNA-seq
+budget:
+  max_total_tokens: 1000
+tasks:
+  produce:
+    hero: reviewer@1
+    goal: Produce the QC table.
+    acceptence:
+      - file: outputs/qc.csv
+        check: non-empty
+`
+	require.NoError(t, os.WriteFile(path, []byte(draft), 0o644))
+	service := &Service{
+		Sources: sources,
+		Completer: CompleteFunc(func(context.Context, string, string, string) (string, error) {
+			return `{"message":"Describe it","operations":[{"kind":"update_graph","description":"described"}]}`, nil
+		}),
+	}
+	thread, err := service.Send(context.Background(), "rna-seq", "p7/m1", "Describe it")
+	require.NoError(t, err)
+	require.NotNil(t, thread.Proposal)
+
+	_, _, err = service.Apply(context.Background(), "rna-seq", thread.Proposal.ID)
+	require.Error(t, err)
+	var unknown *UnknownTaskKeysError
+	require.ErrorAs(t, err, &unknown)
+	assert.Equal(t, []string{"acceptence"}, unknown.Fields["produce"])
+	assert.Contains(t, err.Error(), "graph.yaml directly")
+
+	onDisk, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, draft, string(onDisk), "a refused apply must not rewrite the draft")
+}

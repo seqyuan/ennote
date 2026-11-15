@@ -678,3 +678,58 @@ func TestKnownChecksIsTheLeafVocabulary(t *testing.T) {
 	}
 	assert.False(t, knownAcceptanceCheck("tests-passed"))
 }
+
+// endlessStringReader streams one JSON string that never closes, so the only
+// thing that can end the leaf is the read cap. Its budget is a guard for the
+// test itself: a reader with no end would hang the suite instead of failing it
+// if the cap regressed.
+type endlessStringReader struct {
+	prefix []byte
+	offset int
+	sent   int64
+	budget int64
+}
+
+func (r *endlessStringReader) Read(p []byte) (int, error) {
+	if r.sent >= r.budget {
+		return 0, errors.New("endless reader exhausted: the read cap did not fire")
+	}
+	if r.offset < len(r.prefix) {
+		written := copy(p, r.prefix[r.offset:])
+		r.offset += written
+		r.sent += int64(written)
+		return written, nil
+	}
+	for index := range p {
+		p[index] = 'x'
+	}
+	r.sent += int64(len(p))
+	return len(p), nil
+}
+
+func (r *endlessStringReader) Close() error { return nil }
+
+// json-valid stops at the read cap. One enormous string token is a single call
+// into the decoder, and the context is only observably expired between tokens,
+// so without a cap the fold could outlive every deadline it set — and it runs
+// synchronously, blocking every other in-flight child's settlement.
+func TestEvaluateAcceptanceJSONValidReadCap(t *testing.T) {
+	const capBytes = AcceptanceJSONReadCapBytes
+	reader := &endlessStringReader{
+		prefix: []byte(`{"payload":"`),
+		budget: capBytes + 8*acceptanceJSONReadChunkBytes,
+	}
+	ev := &fakeAcceptanceEvidence{
+		stat:   map[string]AcceptanceFile{"outputs/qc.json": {Size: capBytes + 1<<20, Regular: true}},
+		openFn: func(string) (io.ReadCloser, error) { return reader, nil },
+	}
+	started := time.Now()
+	check := acceptanceCase(t, domain.FlowAcceptance{File: "outputs/qc.json", Check: "json-valid"}, ev)
+
+	assert.Equal(t, domain.AcceptanceUnverified, check.Verdict,
+		"a document past the read cap is undecidable, never a failed check: %+v", check)
+	assert.Equal(t, "evidence_too_large", check.Code)
+	assert.Less(t, time.Since(started), acceptanceLeafTimeout,
+		"the cap must end the read before the leaf deadline")
+	assert.Greater(t, reader.sent, int64(capBytes), "the cap is only proven by reading past it")
+}

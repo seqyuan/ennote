@@ -708,8 +708,8 @@ func TestContractSamples(t *testing.T) {
 	})
 
 	// The 503 answer for the canvas: every Session of a non-empty Project failing
-	// to open is fail-closed, not an empty 200. It must be the very last record so
-	// its normaliser stand-ins do not renumber the ids of the samples above. The
+	// to open is fail-closed, not an empty 200. It is recorded after the artifact
+	// samples so its normaliser stand-ins do not renumber their ids. The
 	// two Sessions the fixture created in this Project are both corrupted, and the
 	// manager's open handles are dropped so the next read re-opens (and re-verifies)
 	// them; the project list cache was already primed by the 200 sample above.
@@ -780,6 +780,80 @@ func TestContractSamples(t *testing.T) {
 	samples.record(contractSampleRequest{
 		method: http.MethodGet, route: "/v1/graphs/{graphID}/versions", auth: true,
 		values: map[string]string{"graphID": "qc"}, status: http.StatusOK,
+	})
+
+	// The Graph Run shape: `RunAgentFlowNode.acceptance` / `acceptanceVerdict` and
+	// the run-level `acceptance` summary had no sample at all, so a renamed field
+	// or a summary that began counting undeclared tasks was invisible.
+	//
+	// Both answers come from one seeded run, because a sample is named after
+	// (operation, status) and a second `getSessionGraphRun-200.json` is not
+	// expressible. The run therefore carries every bucket at once: a task whose
+	// clause holds, one that is only unverified, one that does not hold, one that
+	// declared a clause and was never evaluated (counts in `total` only) and one
+	// that declared nothing (never counted).
+	//
+	// Seeded row by row rather than driven through `runGraph`: the sample pins the
+	// shape the handlers answer, and a real Graph Run needs a published Hero, a
+	// Graph revision and a project binding that have nothing to do with the shape.
+	// Recorded last, for the same reason every addition before it was: the
+	// normaliser numbers its stand-ins in encounter order. The Session is a fresh
+	// one because the 503 sample above closed the manager's handles and corrupted
+	// the two manifests it had to corrupt.
+	graphSession, err := server.SessionStores.Create(context.Background(),
+		domain.CreateSessionInput{ProjectID: project.Project.ID, Title: "contract graph run"})
+	require.NoError(t, err)
+	graphSessionDB, err := server.SessionStores.OpenSession(context.Background(), graphSession.ID)
+	require.NoError(t, err)
+	const sampleGraphRunID = "2f7c1e5a-8d3b-4a1f-9c6e-5b0d7f2a4c31"
+	const sampleGraphTime = "2026-11-15T00:00:00Z"
+	_, err = graphSessionDB.Exec(`INSERT INTO run_agent_flow
+		(run_id,session_id,project_id,flow_version_id,manifest_digest,inputs_json,state,
+		 total_tokens_used,terminal_reason,created_at,updated_at,finished_at,definition_json,config_digest)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		sampleGraphRunID, graphSession.ID, project.Project.ID, "qc-sample@v000001",
+		"4b1d0a7c9e2f3568", `{"inputs":{},"vars":{}}`, "failed", 4200,
+		"task \"report\" acceptance_failed", sampleGraphTime, sampleGraphTime, sampleGraphTime, "{}",
+		"sha256:"+strings.Repeat("0", 64))
+	require.NoError(t, err)
+	for _, node := range []struct {
+		index      int
+		handle     string
+		state      string
+		errorCode  any
+		outputRef  any
+		acceptance string
+		verdict    string
+	}{
+		{index: 0, handle: "collect", state: "completed",
+			acceptance: `[{"check":"csv-columns","file":"outputs/qc.csv","columns":["sample","reads","dup_rate"]}]`,
+			verdict:    `{"result":"holds","checks":[{"check":"csv-columns","verdict":"holds"}]}`},
+		{index: 1, handle: "validate", state: "completed",
+			acceptance: `[{"check":"json-valid","file":"outputs/qc.json"}]`,
+			verdict:    `{"result":"unverified","checks":[{"check":"json-valid","verdict":"unverified","code":"evidence_timeout","detail":"evidence evaluation exceeded its deadline"}]}`},
+		{index: 2, handle: "report", state: "failed", errorCode: "acceptance_failed",
+			outputRef:  `{"changedFiles":["outputs/report.md"]}`,
+			acceptance: `[{"check":"non-empty","file":"outputs/report.md"}]`,
+			verdict:    `{"result":"does_not_hold","checks":[{"check":"non-empty","verdict":"does_not_hold","code":"file_empty","detail":"\"outputs/report.md\" is empty"}]}`},
+		{index: 3, handle: "audit", state: "pending",
+			acceptance: `[{"check":"exists","file":"outputs/audit.log"}]`},
+		{index: 4, handle: "summarize", state: "completed", acceptance: `[]`},
+	} {
+		_, err = graphSessionDB.Exec(`INSERT INTO run_agent_flow_nodes
+			(run_id,task_index,handle,terminal_state,error_code,output_ref,acceptance_json,acceptance_verdict,
+			 created_at,finished_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+			sampleGraphRunID, node.index, node.handle, node.state, node.errorCode, node.outputRef,
+			node.acceptance, node.verdict, sampleGraphTime, sampleGraphTime)
+		require.NoError(t, err)
+	}
+	samples.record(contractSampleRequest{
+		method: http.MethodGet, route: "/v1/sessions/{sessionID}/graph-runs", auth: true,
+		values: map[string]string{"sessionID": graphSession.ID}, status: http.StatusOK,
+	})
+	samples.record(contractSampleRequest{
+		method: http.MethodGet, route: "/v1/sessions/{sessionID}/graph-runs/{runID}", auth: true,
+		values: map[string]string{"sessionID": graphSession.ID, "runID": sampleGraphRunID},
+		status: http.StatusOK,
 	})
 
 	if os.Getenv(contractSampleUpdateEnv) != "1" {

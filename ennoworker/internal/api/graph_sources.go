@@ -9,6 +9,7 @@ import (
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
+	"github.com/seqyuan/ennote/ennoworker/internal/graphbuilder"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 )
 
@@ -245,6 +246,12 @@ func (s *Server) updateGlobalGraph(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	definition, digest, err := sources.UpdateGraphDefinition(r.PathValue("graphID"), body.ExpectedDigest, func(definition *domain.FlowDefinition) error {
+		// Refuse before the rewrite. The editor saves by rewriting graph.yaml from
+		// the parsed definition, which silently deletes the task keys the lenient
+		// parser dropped; publish would then succeed *without* the clause.
+		if err := graphbuilder.UnknownTaskKeys(definition); err != nil {
+			return err
+		}
 		if body.Name != nil {
 			definition.Name = strings.TrimSpace(*body.Name)
 		}
@@ -276,11 +283,27 @@ func (s *Server) updateGlobalGraph(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusConflict, "source_digest_conflict", "graph.yaml changed since it was loaded; reload before saving", false)
 		return
 	}
+	if writeUnknownTaskFieldError(w, r, err) {
+		return
+	}
 	if err != nil {
 		writeError(w, r, http.StatusUnprocessableEntity, "graph_invalid", err.Error(), false)
 		return
 	}
 	writeData(w, http.StatusOK, s.graphDefinitionDetailFor(sources, definition, digest))
+}
+
+// writeUnknownTaskFieldError answers a save refused because the draft on disk
+// carries task keys this Worker does not know. Both save paths use it, so the
+// editor and the Graph Builder apply answer the same code and message for the
+// same state of graph.yaml; it reports whether it wrote the response.
+func writeUnknownTaskFieldError(w http.ResponseWriter, r *http.Request, err error) bool {
+	var unknown *graphbuilder.UnknownTaskKeysError
+	if !errors.As(err, &unknown) {
+		return false
+	}
+	writeError(w, r, http.StatusUnprocessableEntity, "graph_unknown_task_field", unknown.Error(), false)
+	return true
 }
 
 // pruneTaskDependency removes one task id from a dependency list, preserving a

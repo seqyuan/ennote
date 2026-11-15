@@ -139,6 +139,55 @@ const (
 	AcceptanceUnverified AcceptanceResult = "unverified"
 )
 
+// AcceptanceResultFromVerdict reads the aggregate result out of a stored
+// verdict document. It returns the empty result when the document is absent or
+// unreadable, which the summary counts in Total only: a verdict that cannot be
+// read is never folded into a bucket, and never into holds.
+func AcceptanceResultFromVerdict(verdict json.RawMessage) AcceptanceResult {
+	if len(verdict) == 0 {
+		return ""
+	}
+	var payload struct {
+		Result AcceptanceResult `json:"result"`
+	}
+	if err := json.Unmarshal(verdict, &payload); err != nil {
+		return ""
+	}
+	return payload.Result
+}
+
+// AcceptanceSummary is the run-level projection of the per-node acceptance
+// verdicts. It exists because FlowState has no completed_unverified state: a
+// run whose tasks all read `completed` can still hold tasks that were merely
+// never disproved.
+//
+// The counts cover ONLY nodes that declared an acceptance clause, so a run
+// without acceptance has no summary at all instead of one that reads as
+// "everything holds". Total is the number of declared nodes; a declared node
+// without a verdict yet (never folded, or reset by a resume) counts in Total
+// only.
+type AcceptanceSummary struct {
+	Total       int `json:"total"`
+	Holds       int `json:"holds"`
+	DoesNotHold int `json:"doesNotHold"`
+	Unverified  int `json:"unverified"`
+}
+
+// AddDeclared records one node that declared an acceptance clause. result is
+// that node's verdict, or empty when it has none yet. An unrecognised result is
+// counted in Total only: the summary never turns an unknown value into holds.
+func (s *AcceptanceSummary) AddDeclared(result AcceptanceResult) {
+	s.Total++
+	switch result {
+	case AcceptanceHolds:
+		s.Holds++
+	case AcceptanceDoesNotHold:
+		s.DoesNotHold++
+	case AcceptanceUnverified:
+		s.Unverified++
+	}
+}
+
 // FlowAcceptance is one machine-checkable acceptance condition of a task. It
 // is evaluated by the kernel against the workspace after the task's child Run
 // finishes; the child's own report is never consulted. Paths are
@@ -289,9 +338,13 @@ type RunAgentFlow struct {
 	TotalTokensUsed int64           `json:"totalTokensUsed"`
 	TerminalReason  string          `json:"terminalReason,omitempty"`
 	InputsJSON      json.RawMessage `json:"inputs,omitempty"`
-	CreatedAt       time.Time       `json:"createdAt"`
-	UpdatedAt       time.Time       `json:"updatedAt"`
-	FinishedAt      *time.Time      `json:"finishedAt,omitempty"`
+	// Acceptance is the run-level projection of the task verdicts. It is nil
+	// when no task of the run declared an acceptance clause, so a run without
+	// acceptance is indistinguishable from before the feature existed.
+	Acceptance *AcceptanceSummary `json:"acceptance,omitempty"`
+	CreatedAt  time.Time          `json:"createdAt"`
+	UpdatedAt  time.Time          `json:"updatedAt"`
+	FinishedAt *time.Time         `json:"finishedAt,omitempty"`
 }
 
 // RunAgentFlowNode is one task checkpoint. terminal_state + output_ref is the

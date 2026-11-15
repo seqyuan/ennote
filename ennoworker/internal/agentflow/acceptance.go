@@ -55,11 +55,24 @@ const (
 	codeAcceptanceCSVHeaderInvalid  = "csv_header_invalid"
 	codeAcceptanceCSVColumnsMissing = "csv_columns_missing"
 	codeAcceptanceJSONInvalid       = "json_invalid"
+	// codeAcceptanceTooLarge is the whole-read cap: one enormous JSON document
+	// keeps json.Decoder.Token() reading long past the leaf deadline (the token
+	// loop only re-checks the context between tokens, and one string token is
+	// one call). Exceeding the cap is undecidable, never a pass and never a
+	// failed check: the evidence exists, it just cannot be verified here.
+	codeAcceptanceTooLarge = "evidence_too_large"
 	// codeAcceptanceUnavailable is the whole-task code: the runtime could not
 	// even obtain an evidence reader, so every declared leaf is unverified.
 	// Never a pass, never a silent skip.
 	codeAcceptanceUnavailable    = "evidence_unavailable"
 	acceptanceJSONReadChunkBytes = 32 * 1024
+	// AcceptanceJSONReadCapBytes is the hard ceiling on bytes json-valid will
+	// read for one leaf. It is not a semantic size limit: the leaf still has no
+	// total size cap for any document under it (a legal multi-MiB QC JSON
+	// stays holds). It exists so a single unbounded read cannot outlive the
+	// deadline of a synchronous fold, which blocks every other in-flight
+	// child's settlement.
+	AcceptanceJSONReadCapBytes = 64 << 20
 )
 
 // acceptanceTaskTimeout bounds one task's whole acceptance evaluation. The fold
@@ -86,6 +99,11 @@ var ErrEvidenceOutOfScope = errors.New("acceptance evidence is outside the works
 // silently replaces invalid UTF-8 inside strings with U+FFFD, so the byte
 // stream is validated before the decoder sees it.
 var errAcceptanceInvalidUTF8 = errors.New("acceptance evidence is not valid UTF-8")
+
+// errAcceptanceEvidenceTooLarge marks a json-valid evidence stream that passed
+// the read cap. It is a sticky reader error, so it survives any wrapping the
+// decoder applies, and it is mapped to unverified/evidence_too_large.
+var errAcceptanceEvidenceTooLarge = errors.New("acceptance JSON evidence exceeds the read cap")
 
 // AcceptanceEvidence is the injected seam for every filesystem effect of
 // acceptance evaluation. Implementations must be read-only and must fail
@@ -479,9 +497,12 @@ func parseCSVHeader(data []byte) (fields []string, record []byte, terminated boo
 	return append(fields, string(field)), data[start:], false, openQuote
 }
 
-// evaluateAcceptanceJSONValid streams the evidence through encoding/json. There
-// is no total size limit: the leaf semantics are "syntactically valid JSON", so
-// the per-leaf deadline is the only bound.
+// evaluateAcceptanceJSONValid streams the evidence through encoding/json. Below
+// the read cap there is no total size limit: the leaf semantics are
+// "syntactically valid JSON", so the per-leaf deadline is the only bound and a
+// legal multi-MiB document still holds. Above the cap the read stops and the
+// leaf is unverified: the context is only observably expired between tokens, so
+// one enormous string token would otherwise run past the deadline.
 func evaluateAcceptanceJSONValid(ctx context.Context, check string, spec domain.FlowAcceptance,
 	evidence AcceptanceEvidence) AcceptanceCheck {
 	if _, failed := statAcceptanceEvidence(ctx, check, spec, evidence); failed != nil {
@@ -506,6 +527,10 @@ func evaluateAcceptanceJSONValid(ctx context.Context, check string, spec domain.
 			break
 		}
 		if err != nil {
+			if validating.tooLarge() {
+				return newAcceptanceCheck(check, domain.AcceptanceUnverified, codeAcceptanceTooLarge,
+					fmt.Sprintf("evidence exceeds the %d MiB json-valid read cap", AcceptanceJSONReadCapBytes>>20))
+			}
 			if validating.sawInvalidUTF8() {
 				return newAcceptanceCheck(check, domain.AcceptanceDoesNotHold, codeAcceptanceJSONInvalid,
 					"evidence is not valid UTF-8")
@@ -547,13 +572,18 @@ func evaluateAcceptanceJSONValid(ctx context.Context, check string, spec domain.
 
 // utf8ValidatingReader streams bytes while rejecting invalid UTF-8, which
 // encoding/json would otherwise accept inside strings (it substitutes U+FFFD).
-// Sequences straddling a read boundary are carried to the next chunk.
+// Sequences straddling a read boundary are carried to the next chunk. It also
+// enforces the json-valid read cap: encoding/json reports a reader error as a
+// bare "unexpected end of JSON input", so the cap is remembered on the reader
+// rather than inferred from the decoder's error.
 type utf8ValidatingReader struct {
 	reader  io.Reader
 	ready   []byte // validated bytes not yet handed out
 	carry   []byte // trailing bytes of a possibly incomplete sequence
 	err     error  // sticky terminal error
 	invalid bool
+	read    int64 // bytes pulled from the underlying reader
+	overCap bool
 }
 
 func newUTF8ValidatingReader(reader io.Reader) *utf8ValidatingReader {
@@ -561,6 +591,8 @@ func newUTF8ValidatingReader(reader io.Reader) *utf8ValidatingReader {
 }
 
 func (r *utf8ValidatingReader) sawInvalidUTF8() bool { return r.invalid }
+
+func (r *utf8ValidatingReader) tooLarge() bool { return r.overCap }
 
 func (r *utf8ValidatingReader) Read(p []byte) (int, error) {
 	for len(r.ready) == 0 {
@@ -570,6 +602,16 @@ func (r *utf8ValidatingReader) Read(p []byte) (int, error) {
 		chunk := make([]byte, acceptanceJSONReadChunkBytes)
 		n, readErr := r.reader.Read(chunk)
 		if n > 0 {
+			r.read += int64(n)
+			if r.read > AcceptanceJSONReadCapBytes {
+				// Stop here, and drop whatever is buffered: a prefix is not
+				// evidence, and the leaf must not be decided on one.
+				r.ready = nil
+				r.carry = nil
+				r.overCap = true
+				r.err = errAcceptanceEvidenceTooLarge
+				continue
+			}
 			data := chunk[:n]
 			if len(r.carry) > 0 {
 				merged := make([]byte, 0, len(r.carry)+len(data))

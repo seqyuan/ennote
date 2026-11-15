@@ -215,6 +215,14 @@ export interface paths {
          *     parse, goal variable scope, convergence back-edges, check branch routing,
          *     and mutually exclusive terminal tasks.
          *
+         *     Task clauses: a task-node key the Worker does not recognise is refused
+         *     (`flow_task_unknown_field`) instead of being dropped, and an acceptance
+         *     clause is validated against the leaf vocabulary this Worker can decide
+         *     (`exists`, `non-empty`, `csv-columns`, `json-valid`): it is refused on
+         *     check, terminal and fan_out tasks, when the list is empty, when `file`,
+         *     `columns` or the check name is missing or malformed, and when the path is
+         *     absolute or escapes the workspace.
+         *
          *     A Graph needs no project binding to publish; enabling it is a separate
          *     step.
          */
@@ -2394,9 +2402,55 @@ export interface components {
             inputs?: {
                 [key: string]: unknown;
             };
+            acceptance?: components["schemas"]["AcceptanceSummary"];
             createdAt?: string;
             updatedAt?: string;
             finishedAt?: string;
+        };
+        /**
+         * @description One acceptance condition a task declared, frozen with the task checkpoint
+         *     at Run start. `check` is one of the leaf kinds the Worker decides against
+         *     the workspace after the task's child Run finishes; `file` is required by
+         *     every leaf kind in this vocabulary, and `columns` only by `csv-columns`.
+         */
+        FlowAcceptanceDecl: {
+            check: string;
+            file?: string;
+            columns?: string[];
+        };
+        AcceptanceCheck: {
+            check: string;
+            /** @enum {string} */
+            verdict: "holds" | "does_not_hold" | "unverified";
+            /** @description Diagnostic code of this leaf, e.g. `file_missing` or `evidence_timeout` */
+            code?: string;
+            /** @description Human-readable explanation; never file content */
+            detail?: string;
+        };
+        /**
+         * @description The machine-checked verdict of a task's frozen acceptance clause, written
+         *     in the same checkpoint as the task state. Present on a node only when it
+         *     declared a clause and has been evaluated since the last reset. `unverified`
+         *     means no leaf was decided false but at least one could not be decided, and
+         *     it never reads as a pass.
+         */
+        AcceptanceVerdict: {
+            /** @enum {string} */
+            result: "holds" | "does_not_hold" | "unverified";
+            checks: components["schemas"]["AcceptanceCheck"][];
+        };
+        /**
+         * @description Counts of the Run's declared acceptance verdicts. Present on a Run only
+         *     when at least one of its tasks declared an acceptance clause, so a Run
+         *     without acceptance never reads as "everything verified". `total` and the
+         *     three buckets count only declaring tasks; a declared task with no verdict
+         *     yet counts in `total` alone.
+         */
+        AcceptanceSummary: {
+            total: number;
+            holds: number;
+            doesNotHold: number;
+            unverified: number;
         };
         FlowCheckApproval: {
             runId: string;
@@ -2423,6 +2477,9 @@ export interface components {
             budget?: {
                 [key: string]: unknown;
             };
+            /** @description The acceptance clause frozen with this task at Run start; absent when it declared none */
+            acceptance?: components["schemas"]["FlowAcceptanceDecl"][];
+            acceptanceVerdict?: components["schemas"]["AcceptanceVerdict"];
             /** @enum {string} */
             terminalState?: "pending" | "running" | "completed" | "failed" | "blocked" | "cancelled" | "interrupted";
             outputRef?: {

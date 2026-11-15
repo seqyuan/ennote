@@ -2,16 +2,20 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
+	"github.com/seqyuan/ennote/ennoworker/internal/graphbuilder"
 	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/sessionstore"
@@ -482,4 +486,106 @@ func TestGlobalGraphResponsesReportLatestVersion(t *testing.T) {
 	var updated globalGraphDetail
 	decodeData(t, response, &updated)
 	assert.Equal(t, read.LatestVersion, updated.LatestVersion)
+}
+
+// writeGraphDraft replaces graph.yaml the way a user editing the file directly
+// would, and returns the path and the bytes now on disk.
+func writeGraphDraft(t *testing.T, home, graphID, contents string) (string, []byte) {
+	t.Helper()
+	path := filepath.Join(home, "agents", "graphs", graphID, "graph.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte(contents), 0o644))
+	onDisk, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return path, onDisk
+}
+
+// draftWithUnknownTaskKey is a valid draft whose producer declares the clause
+// under a misspelled key, which the lenient parser drops.
+const draftWithUnknownTaskKey = `schemaVersion: 1
+id: rna-seq
+name: RNA-seq
+budget:
+  max_total_tokens: 1000
+tasks:
+  produce:
+    hero: reviewer@1
+    goal: Produce the QC table.
+    acceptence:
+      - file: outputs/qc.csv
+        check: non-empty
+`
+
+// Saving from the editor rewrites graph.yaml from the parsed definition. An
+// unknown task key is dropped by the parser, so the rewrite would silently
+// delete the clause and the following publish would succeed without it. The save
+// has to refuse before the rewrite, and the file must still be the user's text.
+func TestGlobalGraphSaveRefusesUnknownTaskKeyWithoutRewriting(t *testing.T) {
+	_, handler, home := setupGlobalGraphServer(t)
+	response := request(t, handler, http.MethodPost, "/v1/graphs", map[string]any{"id": "rna-seq", "name": "RNA-seq"}, true)
+	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+	path, before := writeGraphDraft(t, home, "rna-seq", draftWithUnknownTaskKey)
+
+	// The digest the editor would send is the one the GET returns: unknown keys do
+	// not participate in it.
+	response = request(t, handler, http.MethodGet, "/v1/graphs/rna-seq", nil, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var loaded globalGraphDetail
+	decodeData(t, response, &loaded)
+
+	response = request(t, handler, http.MethodPatch, "/v1/graphs/rna-seq",
+		map[string]any{"expectedDigest": loaded.Digest, "name": "Renamed"}, true)
+	require.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "graph_unknown_task_field")
+	assert.Contains(t, response.Body.String(), `task \"produce\"`)
+	assert.Contains(t, response.Body.String(), "acceptence")
+	assert.Contains(t, response.Body.String(), "graph.yaml")
+
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(after), "the refused save must not normalise the file")
+}
+
+// The Graph Builder applies by rewriting the same document, so it has to refuse
+// for the same reason: an "apply" that deleted the user's clause would be the
+// same silent disable by another route.
+func TestGraphBuilderApplyRefusesUnknownTaskKeyWithoutRewriting(t *testing.T) {
+	home := t.TempDir()
+	server := &Server{Token: "test-token", GlobalSources: &globalsource.Store{HomeDir: home}}
+	server.GraphBuilder = &graphbuilder.Service{Sources: server.GlobalSources}
+	handler := server.Handler()
+	response := request(t, handler, http.MethodPost, "/v1/graphs", map[string]any{"id": "rna-seq", "name": "RNA-seq"}, true)
+	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+	path, before := writeGraphDraft(t, home, "rna-seq", draftWithUnknownTaskKey)
+
+	response = request(t, handler, http.MethodGet, "/v1/graphs/rna-seq", nil, true)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var loaded globalGraphDetail
+	decodeData(t, response, &loaded)
+
+	// A pending proposal, written the way the file-native Builder writes one.
+	proposalID := uuid.NewString()
+	proposal := map[string]any{
+		"id": proposalID, "graphId": "rna-seq", "baseDigest": loaded.Digest,
+		"operations": []any{map[string]any{"kind": "update_graph", "description": "applied"}},
+		"summary":    "Describe the Graph.", "status": "pending", "diagnostics": []string{},
+		"createdAt": time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	encoded, err := json.MarshalIndent(proposal, "", "  ")
+	require.NoError(t, err)
+	proposalPath := filepath.Join(home, "agents", "graphs", "rna-seq", "builder", "proposals", proposalID+".json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(proposalPath), 0o755))
+	require.NoError(t, os.WriteFile(proposalPath, encoded, 0o644))
+
+	response = request(t, handler, http.MethodPost,
+		"/v1/graphs/rna-seq/builder/proposals/"+proposalID+"/apply", nil, true)
+	require.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "graph_unknown_task_field")
+	assert.Contains(t, response.Body.String(), "acceptence")
+
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(after), "the refused apply must not normalise the file")
+	_, err = os.Stat(proposalPath)
+	require.NoError(t, err, "a refused apply leaves the proposal pending")
 }

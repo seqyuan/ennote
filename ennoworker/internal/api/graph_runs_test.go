@@ -99,3 +99,92 @@ func TestSessionGraphRunsLifecycle(t *testing.T) {
 	rec = request(t, handler, http.MethodPost, "/v1/sessions/"+session.ID+"/graph-runs/"+run.RunID+"/resume", nil, true)
 	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
 }
+
+// seedGraphRun freezes one Graph Run whose "produce" task declares an acceptance
+// clause (or none at all) so the handlers can be read back for the run-level
+// summary.
+func seedGraphRun(t *testing.T, repo *store.AgentFlowRunRepo, projectID, sessionID string,
+	acceptance json.RawMessage) string {
+	t.Helper()
+	definitionJSON, err := json.Marshal(&domain.FlowDefinition{
+		SchemaVersion: 1, ID: "pipeline", Budget: domain.FlowBudget{MaxTotalTokens: 1000},
+		Tasks: map[string]domain.FlowTask{
+			"produce": {Type: domain.FlowTaskHero, Hero: "r@1", Goal: "run"},
+			"review":  {Type: domain.FlowTaskHero, Hero: "r@1", Goal: "review", Depends: []string{"produce"}},
+		},
+	})
+	require.NoError(t, err)
+	run, err := repo.CreateFlowRun(context.Background(), store.CreateFlowRunInput{
+		SessionID: sessionID, ProjectID: projectID, FlowVersionID: "pipeline@v000001",
+		DefinitionJSON: definitionJSON, ConfigDigest: "sha256:" + "a",
+		InputsJSON: json.RawMessage(`{"inputs":{},"vars":{}}`),
+	}, []store.FlowNodeFreeze{
+		{TaskIndex: 0, Handle: "produce", GoalDigest: "g", GoalText: "run",
+			BudgetJSON: json.RawMessage(`{}`), AcceptanceJSON: acceptance},
+		{TaskIndex: 1, Handle: "review", GoalDigest: "g", GoalText: "review",
+			BudgetJSON: json.RawMessage(`{}`), AcceptanceJSON: json.RawMessage(`[]`)},
+	})
+	require.NoError(t, err)
+	return run.RunID
+}
+
+// The detail payload carries the run-level summary the UI needs to mark a
+// completed-but-unverified run, and it rides on `run` so the response object
+// stays closed.
+func TestSessionGraphRunsCarryAcceptanceSummary(t *testing.T) {
+	_, handler, project, session, sessionDB := setupGraphRunsServer(t)
+	repo := &store.AgentFlowRunRepo{DB: sessionDB}
+	runID := seedGraphRun(t, repo, project.ID, session.ID,
+		json.RawMessage(`[{"check":"non-empty","file":"outputs/qc.csv"}]`))
+
+	verdict := json.RawMessage(`{"result":"unverified","checks":[{"check":"non-empty","verdict":"unverified","code":"evidence_timeout"}]}`)
+	_, err := repo.UpdateNode(context.Background(), runID, store.NodeUpdate{
+		TaskIndex: 0, ExpectedStates: []domain.FlowNodeState{domain.FlowNodePending},
+		SetState: domain.FlowNodeCompleted, AcceptanceVerdict: &verdict,
+	})
+	require.NoError(t, err)
+
+	rec := request(t, handler, http.MethodGet,
+		"/v1/sessions/"+session.ID+"/graph-runs/"+runID, nil, true)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var detail graphRunDetail
+	decodeData(t, rec, &detail)
+	require.NotNil(t, detail.Run.Acceptance)
+	assert.Equal(t, domain.AcceptanceSummary{Total: 1, Unverified: 1}, *detail.Run.Acceptance)
+	require.Len(t, detail.Nodes, 2)
+	assert.JSONEq(t, string(verdict), string(detail.Nodes[0].AcceptanceVerdict))
+
+	// The list is what the Run cards read, so it carries the same summary without
+	// a second round trip for the nodes.
+	rec = request(t, handler, http.MethodGet, "/v1/sessions/"+session.ID+"/graph-runs", nil, true)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var listed []domain.RunAgentFlow
+	decodeData(t, rec, &listed)
+	require.Len(t, listed, 1)
+	require.NotNil(t, listed[0].Acceptance)
+	assert.Equal(t, domain.AcceptanceSummary{Total: 1, Unverified: 1}, *listed[0].Acceptance)
+}
+
+// A run whose tasks declared nothing stays exactly as it was: no summary, not a
+// zeroed one that would render as "all verified".
+func TestSessionGraphRunWithoutAcceptanceOmitsSummary(t *testing.T) {
+	_, handler, project, session, sessionDB := setupGraphRunsServer(t)
+	repo := &store.AgentFlowRunRepo{DB: sessionDB}
+	runID := seedGraphRun(t, repo, project.ID, session.ID, json.RawMessage(`[]`))
+
+	rec := request(t, handler, http.MethodGet,
+		"/v1/sessions/"+session.ID+"/graph-runs/"+runID, nil, true)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var detail graphRunDetail
+	decodeData(t, rec, &detail)
+	assert.Nil(t, detail.Run.Acceptance)
+
+	rec = request(t, handler, http.MethodGet, "/v1/sessions/"+session.ID+"/graph-runs", nil, true)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var listed []domain.RunAgentFlow
+	decodeData(t, rec, &listed)
+	require.Len(t, listed, 1)
+	assert.Nil(t, listed[0].Acceptance)
+	assert.NotContains(t, rec.Body.String(), `"acceptance"`,
+		"the field must be absent from the payload, not null")
+}

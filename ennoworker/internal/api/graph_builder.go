@@ -58,6 +58,11 @@ func (s *Server) applyGraphBuilderProposal(w http.ResponseWriter, r *http.Reques
 	}
 	definition, digest, err := service.Apply(r.Context(), r.PathValue("graphID"), r.PathValue("proposalID"))
 	if err != nil {
+		// Apply rewrites graph.yaml from the parsed draft, so an unknown task key
+		// has to be refused here exactly like the editor's own save.
+		if writeUnknownTaskFieldError(w, r, err) {
+			return
+		}
 		writeError(w, r, http.StatusConflict, "graph_builder_apply_failed", err.Error(), false)
 		return
 	}

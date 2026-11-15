@@ -202,6 +202,10 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 	lane := laneNone
 	var inFlight []inflightTask
 	maxParallel := def.EffectiveParallelismMax()
+	// nodes is the last checkpoint read of the dispatch loop. The loop breaks only
+	// when every node is completed, so the post-loop completion still has the
+	// verdicts it needs for the run-level acceptance summary.
+	var nodes []*domain.RunAgentFlowNode
 
 	// Crash recovery: any node left in 'running' by a crashed orchestrator is
 	// reconciled against its child Run's terminal fact (folded when terminal,
@@ -231,7 +235,7 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 		if state.State.Terminal() {
 			return
 		}
-		nodes, err := o.Store.ListNodes(ctx, runID)
+		nodes, err = o.Store.ListNodes(ctx, runID)
 		if err != nil {
 			o.fail(ctx, runID, "list nodes: "+err.Error())
 			return
@@ -334,7 +338,7 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 			}
 			if terminal != nil {
 				outputs := resolveFlowOutputs(def, *terminal, completed, taskOutputs)
-				if err := o.complete(ctx, runID, state.TotalTokensUsed, outputs); err != nil {
+				if err := o.complete(ctx, runID, state.TotalTokensUsed, outputs, nodes); err != nil {
 					return
 				}
 				return
@@ -398,7 +402,7 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 		}
 	}
 	// All tasks completed.
-	if err := o.complete(ctx, runID, run.TotalTokensUsed, resolveFlowOutputsAll(def, taskOutputs)); err != nil {
+	if err := o.complete(ctx, runID, run.TotalTokensUsed, resolveFlowOutputsAll(def, taskOutputs), nodes); err != nil {
 		return
 	}
 }

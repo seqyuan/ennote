@@ -66,17 +66,40 @@ func (o *Orchestrator) cancelInflight(ctx context.Context, runID string, inFligh
 	}
 }
 
-func (o *Orchestrator) complete(ctx context.Context, runID string, totalTokens int64, outputs map[string]json.RawMessage) error {
-	payload := map[string]any{"outputs": map[string]any{}}
+// acceptanceSummaryOf folds the declared acceptance clauses of the nodes the
+// dispatch loop already holds: the run-level summary of a completed flow costs
+// no extra query. It returns nil when no node declared a clause, so a flow
+// without acceptance keeps publishing exactly the payload it used to.
+func acceptanceSummaryOf(nodes []*domain.RunAgentFlowNode) *domain.AcceptanceSummary {
+	var summary *domain.AcceptanceSummary
+	for _, node := range nodes {
+		if node == nil || len(node.Acceptance) == 0 {
+			continue
+		}
+		if summary == nil {
+			summary = &domain.AcceptanceSummary{}
+		}
+		summary.AddDeclared(domain.AcceptanceResultFromVerdict(node.AcceptanceVerdict))
+	}
+	return summary
+}
+
+func (o *Orchestrator) complete(ctx context.Context, runID string, totalTokens int64,
+	outputs map[string]json.RawMessage, nodes []*domain.RunAgentFlowNode) error {
+	payload := map[string]any{"flowRunId": runID, "outputs": map[string]any{}}
 	for name, value := range outputs {
 		payload["outputs"].(map[string]any)[name] = json.RawMessage(value)
+	}
+	// The event carries the same summary the API projects from the node rows, so
+	// an auditor reading the timeline sees which tasks were only "nothing was
+	// disproved" without opening the run. Absent when nothing declared a clause.
+	if summary := acceptanceSummaryOf(nodes); summary != nil {
+		payload["acceptance"] = summary
 	}
 	if err := o.Store.UpdateFlowState(ctx, runID, domain.FlowStateCompleted, totalTokens, ""); err != nil {
 		return err
 	}
-	if err := o.Events.PublishFlow(ctx, runID, "flow_completed", map[string]any{
-		"flowRunId": runID, "outputs": payload["outputs"],
-	}); err != nil {
+	if err := o.Events.PublishFlow(ctx, runID, "flow_completed", payload); err != nil {
 		return err
 	}
 	return o.Store.TerminateAnchor(ctx, runID, domain.RunSucceeded, "", "")

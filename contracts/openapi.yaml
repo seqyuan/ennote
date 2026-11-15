@@ -312,6 +312,14 @@ paths:
         parse, goal variable scope, convergence back-edges, check branch routing,
         and mutually exclusive terminal tasks.
 
+        Task clauses: a task-node key the Worker does not recognise is refused
+        (`flow_task_unknown_field`) instead of being dropped, and an acceptance
+        clause is validated against the leaf vocabulary this Worker can decide
+        (`exists`, `non-empty`, `csv-columns`, `json-valid`): it is refused on
+        check, terminal and fan_out tasks, when the list is empty, when `file`,
+        `columns` or the check name is missing or malformed, and when the path is
+        absolute or escapes the workspace.
+
         A Graph needs no project binding to publish; enabling it is a separate
         step.
       responses:
@@ -3759,9 +3767,66 @@ components:
         totalTokensUsed: { type: integer }
         terminalReason: { type: string }
         inputs: { type: object, additionalProperties: true }
+        acceptance: { $ref: "#/components/schemas/AcceptanceSummary" }
         createdAt: { type: string }
         updatedAt: { type: string }
         finishedAt: { type: string }
+    FlowAcceptanceDecl:
+      type: object
+      additionalProperties: false
+      required: [check]
+      description: |
+        One acceptance condition a task declared, frozen with the task checkpoint
+        at Run start. `check` is one of the leaf kinds the Worker decides against
+        the workspace after the task's child Run finishes; `file` is required by
+        every leaf kind in this vocabulary, and `columns` only by `csv-columns`.
+      properties:
+        check: { type: string }
+        file: { type: string }
+        columns: { type: array, items: { type: string } }
+    AcceptanceCheck:
+      type: object
+      additionalProperties: false
+      required: [check, verdict]
+      properties:
+        check: { type: string }
+        verdict: { type: string, enum: [holds, does_not_hold, unverified] }
+        code:
+          type: string
+          description: Diagnostic code of this leaf, e.g. `file_missing` or `evidence_timeout`
+        detail:
+          type: string
+          description: Human-readable explanation; never file content
+    AcceptanceVerdict:
+      type: object
+      additionalProperties: false
+      required: [result, checks]
+      description: |
+        The machine-checked verdict of a task's frozen acceptance clause, written
+        in the same checkpoint as the task state. Present on a node only when it
+        declared a clause and has been evaluated since the last reset. `unverified`
+        means no leaf was decided false but at least one could not be decided, and
+        it never reads as a pass.
+      properties:
+        result: { type: string, enum: [holds, does_not_hold, unverified] }
+        checks:
+          type: array
+          items: { $ref: "#/components/schemas/AcceptanceCheck" }
+    AcceptanceSummary:
+      type: object
+      additionalProperties: false
+      required: [total, holds, doesNotHold, unverified]
+      description: |
+        Counts of the Run's declared acceptance verdicts. Present on a Run only
+        when at least one of its tasks declared an acceptance clause, so a Run
+        without acceptance never reads as "everything verified". `total` and the
+        three buckets count only declaring tasks; a declared task with no verdict
+        yet counts in `total` alone.
+      properties:
+        total: { type: integer }
+        holds: { type: integer }
+        doesNotHold: { type: integer }
+        unverified: { type: integer }
     FlowCheckApproval:
       type: object
       additionalProperties: false
@@ -3787,6 +3852,11 @@ components:
         goalDigest: { type: string }
         goalText: { type: string }
         budget: { type: object, additionalProperties: true }
+        acceptance:
+          type: array
+          items: { $ref: "#/components/schemas/FlowAcceptanceDecl" }
+          description: The acceptance clause frozen with this task at Run start; absent when it declared none
+        acceptanceVerdict: { $ref: "#/components/schemas/AcceptanceVerdict" }
         terminalState: { type: string, enum: [pending, running, completed, failed, blocked, cancelled, interrupted] }
         outputRef: { type: object, additionalProperties: true }
         childRunId: { type: string }

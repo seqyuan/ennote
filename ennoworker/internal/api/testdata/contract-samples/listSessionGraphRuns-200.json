@@ -1,0 +1,27 @@
+{
+  "data": [
+    {
+      "acceptance": {
+        "doesNotHold": 1,
+        "holds": 1,
+        "total": 4,
+        "unverified": 1
+      },
+      "createdAt": "2026-01-01T00:00:10Z",
+      "finishedAt": "2026-01-01T00:00:10Z",
+      "flowVersionId": "qc-sample@v000001",
+      "inputs": {
+        "inputs": {},
+        "vars": {}
+      },
+      "manifestDigest": "0000000000000006",
+      "projectId": "00000000-0000-0000-0000-000000000002",
+      "runId": "00000000-0000-0000-0000-000000000014",
+      "sessionId": "00000000-0000-0000-0000-000000000015",
+      "state": "failed",
+      "terminalReason": "task \"report\" acceptance_failed",
+      "totalTokensUsed": 4200,
+      "updatedAt": "2026-01-01T00:00:10Z"
+    }
+  ]
+}

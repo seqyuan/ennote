@@ -61,6 +61,16 @@ func (s *Server) listSessionGraphRuns(w http.ResponseWriter, r *http.Request) {
 	if runs == nil {
 		runs = []*domain.RunAgentFlow{}
 	}
+	// One extra query for the whole page, not one per run: the card needs the
+	// unverified marker without expanding the run and loading its nodes.
+	summaries, err := repo.SessionAcceptanceSummaries(r.Context(), r.PathValue("sessionID"))
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	for _, run := range runs {
+		run.Acceptance = summaries[run.RunID]
+	}
 	writeData(w, http.StatusOK, runs)
 }
 
@@ -88,6 +98,12 @@ func (s *Server) getSessionGraphRun(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		flowVersion = version.Version
 	}
+	summary, err := repo.AcceptanceSummary(r.Context(), run.RunID)
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	run.Acceptance = summary
 	writeData(w, http.StatusOK, graphRunDetail{Run: run, Nodes: nodes, FlowVersion: flowVersion})
 }
 

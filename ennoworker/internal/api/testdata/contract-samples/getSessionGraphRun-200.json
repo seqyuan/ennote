@@ -1,0 +1,141 @@
+{
+  "data": {
+    "flowVersion": 1,
+    "nodes": [
+      {
+        "acceptance": [
+          {
+            "check": "csv-columns",
+            "columns": [
+              "sample",
+              "reads",
+              "dup_rate"
+            ],
+            "file": "outputs/qc.csv"
+          }
+        ],
+        "acceptanceVerdict": {
+          "checks": [
+            {
+              "check": "csv-columns",
+              "verdict": "holds"
+            }
+          ],
+          "result": "holds"
+        },
+        "budget": {},
+        "createdAt": "2026-01-01T00:00:10Z",
+        "finishedAt": "2026-01-01T00:00:10Z",
+        "handle": "collect",
+        "runId": "00000000-0000-0000-0000-000000000014",
+        "taskIndex": 0,
+        "terminalState": "completed"
+      },
+      {
+        "acceptance": [
+          {
+            "check": "json-valid",
+            "file": "outputs/qc.json"
+          }
+        ],
+        "acceptanceVerdict": {
+          "checks": [
+            {
+              "check": "json-valid",
+              "code": "evidence_timeout",
+              "detail": "evidence evaluation exceeded its deadline",
+              "verdict": "unverified"
+            }
+          ],
+          "result": "unverified"
+        },
+        "budget": {},
+        "createdAt": "2026-01-01T00:00:10Z",
+        "finishedAt": "2026-01-01T00:00:10Z",
+        "handle": "validate",
+        "runId": "00000000-0000-0000-0000-000000000014",
+        "taskIndex": 1,
+        "terminalState": "completed"
+      },
+      {
+        "acceptance": [
+          {
+            "check": "non-empty",
+            "file": "outputs/report.md"
+          }
+        ],
+        "acceptanceVerdict": {
+          "checks": [
+            {
+              "check": "non-empty",
+              "code": "file_empty",
+              "detail": "\"outputs/report.md\" is empty",
+              "verdict": "does_not_hold"
+            }
+          ],
+          "result": "does_not_hold"
+        },
+        "budget": {},
+        "createdAt": "2026-01-01T00:00:10Z",
+        "errorCode": "acceptance_failed",
+        "finishedAt": "2026-01-01T00:00:10Z",
+        "handle": "report",
+        "outputRef": {
+          "changedFiles": [
+            "outputs/report.md"
+          ]
+        },
+        "runId": "00000000-0000-0000-0000-000000000014",
+        "taskIndex": 2,
+        "terminalState": "failed"
+      },
+      {
+        "acceptance": [
+          {
+            "check": "exists",
+            "file": "outputs/audit.log"
+          }
+        ],
+        "budget": {},
+        "createdAt": "2026-01-01T00:00:10Z",
+        "finishedAt": "2026-01-01T00:00:10Z",
+        "handle": "audit",
+        "runId": "00000000-0000-0000-0000-000000000014",
+        "taskIndex": 3,
+        "terminalState": "pending"
+      },
+      {
+        "budget": {},
+        "createdAt": "2026-01-01T00:00:10Z",
+        "finishedAt": "2026-01-01T00:00:10Z",
+        "handle": "summarize",
+        "runId": "00000000-0000-0000-0000-000000000014",
+        "taskIndex": 4,
+        "terminalState": "completed"
+      }
+    ],
+    "run": {
+      "acceptance": {
+        "doesNotHold": 1,
+        "holds": 1,
+        "total": 4,
+        "unverified": 1
+      },
+      "createdAt": "2026-01-01T00:00:10Z",
+      "finishedAt": "2026-01-01T00:00:10Z",
+      "flowVersionId": "qc-sample@v000001",
+      "inputs": {
+        "inputs": {},
+        "vars": {}
+      },
+      "manifestDigest": "0000000000000006",
+      "projectId": "00000000-0000-0000-0000-000000000002",
+      "runId": "00000000-0000-0000-0000-000000000014",
+      "sessionId": "00000000-0000-0000-0000-000000000015",
+      "state": "failed",
+      "terminalReason": "task \"report\" acceptance_failed",
+      "totalTokensUsed": 4200,
+      "updatedAt": "2026-01-01T00:00:10Z"
+    }
+  }
+}
