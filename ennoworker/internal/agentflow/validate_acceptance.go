@@ -79,6 +79,25 @@ func validateAcceptance(add func(ValidationDiagnostic), def *domain.FlowDefiniti
 }
 
 func validateAcceptanceEntry(add func(ValidationDiagnostic), taskName string, index int, entryField string, spec domain.FlowAcceptance) {
+	if !knownAcceptanceCheck(spec.Check) {
+		add(ValidationDiagnostic{Code: "acceptance_check_unknown",
+			Message: fmt.Sprintf("task %q acceptance[%d] check %q is unknown (supported: %s); tests-passed is not supported yet",
+				taskName, index, spec.Check, strings.Join(KnownChecks, ", ")),
+			Field: entryField + ".check"})
+		return
+	}
+	if spec.Check == acceptanceCheckArtifactPublished {
+		validateArtifactAcceptanceEntry(add, taskName, index, entryField, spec)
+		return
+	}
+	// A file leaf names one workspace path. A path and a published artifact are
+	// two different evidences, so the two fields are mutually exclusive.
+	if strings.TrimSpace(spec.Artifact) != "" {
+		add(ValidationDiagnostic{Code: "acceptance_artifact_forbidden",
+			Message: fmt.Sprintf("task %q acceptance[%d] check %q takes a file, not an artifact (only artifact-published declares an artifact)",
+				taskName, index, spec.Check),
+			Field: entryField + ".artifact"})
+	}
 	if strings.TrimSpace(spec.File) == "" {
 		add(ValidationDiagnostic{Code: "acceptance_file_required",
 			Message: fmt.Sprintf("task %q acceptance[%d] requires a file", taskName, index),
@@ -88,13 +107,6 @@ func validateAcceptanceEntry(add func(ValidationDiagnostic), taskName string, in
 			Message: fmt.Sprintf("task %q acceptance[%d] file %q must be workspace-relative and must not contain a .. segment",
 				taskName, index, spec.File),
 			Field: entryField + ".file"})
-	}
-	if !knownAcceptanceCheck(spec.Check) {
-		add(ValidationDiagnostic{Code: "acceptance_check_unknown",
-			Message: fmt.Sprintf("task %q acceptance[%d] check %q is unknown (supported: %s); tests-passed is not supported yet",
-				taskName, index, spec.Check, strings.Join(KnownChecks, ", ")),
-			Field: entryField + ".check"})
-		return
 	}
 	if spec.Check != acceptanceCheckCSVColumns {
 		if len(spec.Columns) > 0 {
@@ -117,9 +129,33 @@ func validateAcceptanceEntry(add func(ValidationDiagnostic), taskName string, in
 	}
 }
 
+// validateArtifactAcceptanceEntry validates artifact-published: it is the one
+// leaf whose operand is a published artifact NAME, so it requires `artifact` and
+// refuses the file-leaf operands. It never validates a path: there is no path.
+func validateArtifactAcceptanceEntry(add func(ValidationDiagnostic), taskName string, index int, entryField string, spec domain.FlowAcceptance) {
+	if strings.TrimSpace(spec.Artifact) == "" {
+		add(ValidationDiagnostic{Code: "acceptance_artifact_required",
+			Message: fmt.Sprintf("task %q acceptance[%d] check %q requires the artifact field (the name of the artifact the task must have published)",
+				taskName, index, spec.Check),
+			Field: entryField + ".artifact"})
+	}
+	if strings.TrimSpace(spec.File) != "" {
+		add(ValidationDiagnostic{Code: "acceptance_file_forbidden",
+			Message: fmt.Sprintf("task %q acceptance[%d] check %q takes an artifact name, not a file path (artifact-published reads the published artifact, never the workspace)",
+				taskName, index, spec.Check),
+			Field: entryField + ".file"})
+	}
+	if len(spec.Columns) > 0 {
+		add(ValidationDiagnostic{Code: "acceptance_columns_forbidden",
+			Message: fmt.Sprintf("task %q acceptance[%d] check %q does not take columns", taskName, index, spec.Check),
+			Field:   entryField + ".columns"})
+	}
+}
+
 // validAcceptancePath rejects absolute paths and any .. segment. Paths are
-// workspace-relative; this slice deliberately allows any workspace subtree
-// (not only outputs/), because some flows write under work/.
+// workspace-relative; an artifact name is not a path and never reaches this
+// function. This slice deliberately allows any workspace subtree (not only
+// outputs/), because some flows write under work/.
 func validAcceptancePath(file string) bool {
 	path := strings.TrimSpace(file)
 	if path == "" {

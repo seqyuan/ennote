@@ -58,7 +58,7 @@ func (f *fakeAcceptanceEvidence) Open(rel string) (io.ReadCloser, error) {
 
 func acceptanceCase(t *testing.T, spec domain.FlowAcceptance, evidence *fakeAcceptanceEvidence) AcceptanceCheck {
 	t.Helper()
-	verdict := EvaluateAcceptance(context.Background(), []domain.FlowAcceptance{spec}, evidence)
+	verdict := EvaluateAcceptance(context.Background(), []domain.FlowAcceptance{spec}, evidence, nil)
 	require.Len(t, verdict.Checks, 1)
 	assert.Equal(t, AggregateAcceptance(verdict.Checks), verdict.Result)
 	return verdict.Checks[0]
@@ -676,7 +676,7 @@ func TestEvaluateAcceptanceAggregatesSpecs(t *testing.T) {
 		{File: "outputs/qc.json", Check: "json-valid"},
 		{File: "outputs/report.md", Check: "non-empty"},
 	}
-	verdict := EvaluateAcceptance(context.Background(), specs, ev)
+	verdict := EvaluateAcceptance(context.Background(), specs, ev, nil)
 	require.Len(t, verdict.Checks, 3)
 	assert.Equal(t, domain.AcceptanceHolds, verdict.Checks[0].Verdict)
 	assert.Equal(t, domain.AcceptanceHolds, verdict.Checks[1].Verdict)
@@ -685,17 +685,182 @@ func TestEvaluateAcceptanceAggregatesSpecs(t *testing.T) {
 	assert.Equal(t, domain.AcceptanceDoesNotHold, verdict.Result)
 
 	// No declared acceptance -> holds with no leaves.
-	empty := EvaluateAcceptance(context.Background(), nil, ev)
+	empty := EvaluateAcceptance(context.Background(), nil, ev, nil)
 	assert.Equal(t, domain.AcceptanceHolds, empty.Result)
 	assert.Empty(t, empty.Checks)
 }
 
 func TestKnownChecksIsTheLeafVocabulary(t *testing.T) {
-	assert.Equal(t, []string{"exists", "non-empty", "csv-columns", "json-valid"}, KnownChecks)
+	assert.Equal(t, []string{"exists", "non-empty", "csv-columns", "json-valid", "artifact-published"}, KnownChecks)
 	for _, check := range KnownChecks {
 		assert.True(t, knownAcceptanceCheck(check))
 	}
 	assert.False(t, knownAcceptanceCheck("tests-passed"))
+}
+
+// fakeAcceptanceArtifacts is the artifact seam: refs are fixed and the managed
+// store answers per (artifactID, sha256) pair, so every verdict is reachable
+// without a store. lookups records whether the leaf even asked.
+type fakeAcceptanceArtifacts struct {
+	refs    []domain.ArtifactReference
+	present map[string]bool
+	err     error
+	lookups int
+}
+
+func newFakeAcceptanceArtifacts(refs ...domain.ArtifactReference) *fakeAcceptanceArtifacts {
+	return &fakeAcceptanceArtifacts{refs: refs, present: map[string]bool{}}
+}
+
+func (f *fakeAcceptanceArtifacts) Refs() []domain.ArtifactReference { return f.refs }
+
+func (f *fakeAcceptanceArtifacts) Present(ctx context.Context, artifactID, sha256 string) (bool, error) {
+	f.lookups++
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.present[artifactID+"@"+sha256], nil
+}
+
+// artifactCase evaluates one artifact leaf with no workspace evidence at all,
+// which is exactly the production shape: the leaf must not need one.
+func artifactCase(t *testing.T, spec domain.FlowAcceptance, artifacts AcceptanceArtifacts) AcceptanceCheck {
+	t.Helper()
+	verdict := EvaluateAcceptance(context.Background(), []domain.FlowAcceptance{spec}, nil, artifacts)
+	require.Len(t, verdict.Checks, 1)
+	assert.Equal(t, AggregateAcceptance(verdict.Checks), verdict.Result)
+	return verdict.Checks[0]
+}
+
+// Every artifact leaf verdict is reachable, and none of them reads the
+// workspace or the child's prose.
+func TestEvaluateAcceptanceArtifactPublished(t *testing.T) {
+	published := domain.ArtifactReference{ArtifactID: "art-1", Name: "outputs/qc.csv", SHA256: "abc123"}
+	spec := domain.FlowAcceptance{Artifact: "outputs/qc.csv", Check: "artifact-published"}
+
+	tests := []struct {
+		name      string
+		artifacts AcceptanceArtifacts
+		spec      domain.FlowAcceptance
+		want      domain.AcceptanceResult
+		code      string
+		lookups   int
+	}{
+		{
+			name: "retrievable with the recorded digest holds",
+			artifacts: func() AcceptanceArtifacts {
+				a := newFakeAcceptanceArtifacts(published)
+				a.present["art-1@abc123"] = true
+				return a
+			}(),
+			want:    domain.AcceptanceHolds,
+			lookups: 1,
+		},
+		{
+			name:      "no ref with that name does not hold",
+			artifacts: newFakeAcceptanceArtifacts(domain.ArtifactReference{ArtifactID: "art-2", Name: "outputs/other.csv", SHA256: "def"}),
+			want:      domain.AcceptanceDoesNotHold,
+			code:      "artifact_missing",
+			lookups:   0,
+		},
+		{
+			name:      "empty digest does not hold and is never looked up",
+			artifacts: newFakeAcceptanceArtifacts(domain.ArtifactReference{ArtifactID: "art-1", Name: "outputs/qc.csv"}),
+			want:      domain.AcceptanceDoesNotHold,
+			code:      "artifact_digest_missing",
+			lookups:   0,
+		},
+		{
+			name: "a ref with a digest wins over an earlier digest-less one",
+			artifacts: func() AcceptanceArtifacts {
+				a := newFakeAcceptanceArtifacts(
+					domain.ArtifactReference{ArtifactID: "art-9", Name: "outputs/qc.csv"},
+					published,
+				)
+				a.present["art-1@abc123"] = true
+				return a
+			}(),
+			want:    domain.AcceptanceHolds,
+			lookups: 1,
+		},
+		{
+			name:      "store says absent does not hold",
+			artifacts: newFakeAcceptanceArtifacts(published), // no present entry: the row is gone
+			want:      domain.AcceptanceDoesNotHold,
+			code:      "artifact_not_retrievable",
+			lookups:   1,
+		},
+		{
+			name: "store holds a different digest does not hold",
+			artifacts: func() AcceptanceArtifacts {
+				a := newFakeAcceptanceArtifacts(published)
+				a.present["art-1@rewritten"] = true
+				return a
+			}(),
+			want:    domain.AcceptanceDoesNotHold,
+			code:    "artifact_not_retrievable",
+			lookups: 1,
+		},
+		{
+			name: "lookup failure is unverified never a pass",
+			artifacts: func() AcceptanceArtifacts {
+				a := newFakeAcceptanceArtifacts(published)
+				a.err = errors.New("database is locked")
+				return a
+			}(),
+			want:    domain.AcceptanceUnverified,
+			code:    "evidence_unavailable",
+			lookups: 1,
+		},
+		{
+			name: "lookup timeout is unverified",
+			artifacts: func() AcceptanceArtifacts {
+				a := newFakeAcceptanceArtifacts(published)
+				a.err = context.DeadlineExceeded
+				return a
+			}(),
+			want:    domain.AcceptanceUnverified,
+			code:    "evidence_unavailable",
+			lookups: 1,
+		},
+		{
+			name:      "nil artifacts is unverified",
+			artifacts: nil,
+			want:      domain.AcceptanceUnverified,
+			code:      "evidence_unavailable",
+			lookups:   0,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			check := artifactCase(t, spec, tc.artifacts)
+			assert.Equal(t, tc.want, check.Verdict)
+			assert.Equal(t, tc.code, check.Code)
+			assert.Equal(t, acceptanceCheckArtifactPublished, check.Check)
+			if fake, ok := tc.artifacts.(*fakeAcceptanceArtifacts); ok {
+				assert.Equal(t, tc.lookups, fake.lookups, "the store is asked exactly once, and only when a digest exists")
+			}
+		})
+	}
+}
+
+// A clause that mixes a file leaf and an artifact leaf decides each on its own
+// evidence: a workspace the runtime cannot read must not poison the artifact
+// verdict, and a missing artifact must not read as an unreadable file.
+func TestEvaluateAcceptanceMixedFileAndArtifactLeaves(t *testing.T) {
+	published := domain.ArtifactReference{ArtifactID: "art-1", Name: "outputs/qc.csv", SHA256: "abc123"}
+	artifacts := newFakeAcceptanceArtifacts(published)
+	artifacts.present["art-1@abc123"] = true
+	specs := []domain.FlowAcceptance{
+		{File: "outputs/report.md", Check: "non-empty"},
+		{Artifact: "outputs/qc.csv", Check: "artifact-published"},
+	}
+	verdict := EvaluateAcceptance(context.Background(), specs, nil, artifacts)
+	require.Len(t, verdict.Checks, 2)
+	assert.Equal(t, domain.AcceptanceUnverified, verdict.Checks[0].Verdict)
+	assert.Equal(t, "evidence_unavailable", verdict.Checks[0].Code)
+	assert.Equal(t, domain.AcceptanceHolds, verdict.Checks[1].Verdict)
+	assert.Equal(t, domain.AcceptanceUnverified, verdict.Result)
 }
 
 // endlessStringReader streams one JSON string that never closes, so the only

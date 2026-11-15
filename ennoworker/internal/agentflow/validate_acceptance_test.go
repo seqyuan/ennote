@@ -92,6 +92,14 @@ func TestValidationAcceptanceValid(t *testing.T) {
 		`{file: work/qc.csv, check: csv-columns, columns: [reads, sample]}`,
 	)))
 	assert.True(t, result.Valid, "%v", result.Diagnostics)
+
+	// The published-artifact leaf is accepted alone and next to a file leaf, and
+	// it is the only leaf that takes no path at all.
+	result = validateAcceptanceYAML(t, acceptanceProducerYAML(acceptanceBlock(
+		`{artifact: outputs/qc.csv, check: artifact-published}`,
+		`{file: outputs/report.md, check: non-empty}`,
+	)))
+	assert.True(t, result.Valid, "%v", result.Diagnostics)
 }
 
 // A3: every acceptance diagnostic code has a failing case naming the task.
@@ -168,6 +176,41 @@ tasks:
 			code:            "acceptance_file_required",
 			field:           "tasks.producer.acceptance[0].file",
 			messageContains: []string{"producer", "acceptance[0]"},
+		},
+		{
+			name:            "artifact required",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{check: artifact-published}`)),
+			code:            "acceptance_artifact_required",
+			field:           "tasks.producer.acceptance[0].artifact",
+			messageContains: []string{"producer", "acceptance[0]", "artifact-published", "artifact field"},
+		},
+		{
+			name:            "artifact-published refuses a file path",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{artifact: outputs/qc.csv, file: outputs/qc.csv, check: artifact-published}`)),
+			code:            "acceptance_file_forbidden",
+			field:           "tasks.producer.acceptance[0].file",
+			messageContains: []string{"producer", "artifact-published", "not a file path"},
+		},
+		{
+			name:            "artifact-published refuses columns",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{artifact: outputs/qc.csv, check: artifact-published, columns: [sample]}`)),
+			code:            "acceptance_columns_forbidden",
+			field:           "tasks.producer.acceptance[0].columns",
+			messageContains: []string{"producer", "artifact-published", "does not take columns"},
+		},
+		{
+			name:            "csv-columns refuses an artifact",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{file: outputs/qc.csv, check: csv-columns, columns: [sample], artifact: outputs/qc.csv}`)),
+			code:            "acceptance_artifact_forbidden",
+			field:           "tasks.producer.acceptance[0].artifact",
+			messageContains: []string{"producer", "csv-columns", "only artifact-published"},
+		},
+		{
+			name:            "file leaves refuse an artifact",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{file: outputs/report.md, check: non-empty, artifact: outputs/qc.csv}`)),
+			code:            "acceptance_artifact_forbidden",
+			field:           "tasks.producer.acceptance[0].artifact",
+			messageContains: []string{"producer", "non-empty", "only artifact-published"},
 		},
 		{
 			name:            "check unknown names tests-passed",

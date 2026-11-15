@@ -13,14 +13,16 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 )
 
-// Acceptance leaves. These four names are the whole vocabulary of the first
-// acceptance slice; there is no shell/command leaf, so tests-passed is not
-// expressible yet.
+// Acceptance leaves. These five names are the whole vocabulary; there is no
+// shell/command leaf, so tests-passed is not expressible yet. Four leaves read
+// the workspace; artifact-published reads the child's recorded artifact refs and
+// the managed store instead.
 const (
-	acceptanceCheckExists     = "exists"
-	acceptanceCheckNonEmpty   = "non-empty"
-	acceptanceCheckCSVColumns = "csv-columns"
-	acceptanceCheckJSONValid  = "json-valid"
+	acceptanceCheckExists            = "exists"
+	acceptanceCheckNonEmpty          = "non-empty"
+	acceptanceCheckCSVColumns        = "csv-columns"
+	acceptanceCheckJSONValid         = "json-valid"
+	acceptanceCheckArtifactPublished = "artifact-published"
 )
 
 // KnownChecks is the single source of truth for the acceptance leaf names. The
@@ -31,11 +33,24 @@ var KnownChecks = []string{
 	acceptanceCheckNonEmpty,
 	acceptanceCheckCSVColumns,
 	acceptanceCheckJSONValid,
+	acceptanceCheckArtifactPublished,
 }
 
 func knownAcceptanceCheck(check string) bool {
 	for _, known := range KnownChecks {
 		if check == known {
+			return true
+		}
+	}
+	return false
+}
+
+// needsWorkspaceEvidence reports whether any declared leaf reads the workspace.
+// An artifact-only clause never does, so it never opens a workspace jail: the
+// verdict is decided from the child's own refs and the artifact store.
+func needsWorkspaceEvidence(specs []domain.FlowAcceptance) bool {
+	for _, spec := range specs {
+		if spec.Check != acceptanceCheckArtifactPublished {
 			return true
 		}
 	}
@@ -55,15 +70,22 @@ const (
 	codeAcceptanceCSVHeaderInvalid  = "csv_header_invalid"
 	codeAcceptanceCSVColumnsMissing = "csv_columns_missing"
 	codeAcceptanceJSONInvalid       = "json_invalid"
+	// Artifact leaf codes. artifact_missing and artifact_digest_missing are facts
+	// the child's own submit_result establishes, so they are does_not_hold; a
+	// store that cannot confirm or a lookup that failed is unverified.
+	codeAcceptanceArtifactMissing        = "artifact_missing"
+	codeAcceptanceArtifactDigestMissing  = "artifact_digest_missing"
+	codeAcceptanceArtifactNotRetrievable = "artifact_not_retrievable"
 	// codeAcceptanceTooLarge is the whole-read cap: one enormous JSON document
 	// keeps json.Decoder.Token() reading long past the leaf deadline (the token
 	// loop only re-checks the context between tokens, and one string token is
 	// one call). Exceeding the cap is undecidable, never a pass and never a
 	// failed check: the evidence exists, it just cannot be verified here.
 	codeAcceptanceTooLarge = "evidence_too_large"
-	// codeAcceptanceUnavailable is the whole-task code: the runtime could not
-	// even obtain an evidence reader, so every declared leaf is unverified.
-	// Never a pass, never a silent skip.
+	// codeAcceptanceUnavailable means the evidence seam of a leaf is unusable by
+	// this runtime: no workspace reader (every file leaf is unverified for this
+	// reason), no artifact store seam, or a store that could not answer. Never a
+	// pass, never a silent skip.
 	codeAcceptanceUnavailable    = "evidence_unavailable"
 	acceptanceJSONReadChunkBytes = 32 * 1024
 	// AcceptanceJSONReadCapBytes is the hard ceiling on bytes json-valid will
@@ -116,6 +138,18 @@ type AcceptanceEvidence interface {
 	Open(rel string) (io.ReadCloser, error)
 }
 
+// AcceptanceArtifacts is the injected seam for the artifact leaves. Unlike
+// AcceptanceEvidence it is not workspace-scoped: the refs belong to ONE child
+// Run, so the fold builds it from that child's terminal submit_result. Nothing
+// here reads file content, and nothing here trusts the child's prose — the refs
+// are the fold's own input.
+type AcceptanceArtifacts interface {
+	// Refs are the child Run's recorded published-artifact references.
+	Refs() []domain.ArtifactReference
+	// Present reports whether the artifact is retrievable with that digest.
+	Present(ctx context.Context, artifactID, sha256 string) (bool, error)
+}
+
 // AcceptanceFile is the stat answer for one evidence path. Missing and Regular
 // are returned as facts rather than as errors because exists must distinguish
 // "definitely absent" (does_not_hold) from "cannot be decided" (unverified).
@@ -159,15 +193,18 @@ func AggregateAcceptance(checks []AcceptanceCheck) domain.AcceptanceResult {
 
 // EvaluateAcceptance evaluates every declared acceptance condition of one task
 // and aggregates the verdicts. It is pure with respect to filesystem effects:
-// all evidence comes through the injected AcceptanceEvidence, and every leaf is
-// bounded by its own deadline so a caller cannot forget one.
-func EvaluateAcceptance(ctx context.Context, specs []domain.FlowAcceptance, evidence AcceptanceEvidence) AcceptanceVerdictValue {
+// all workspace evidence comes through the injected AcceptanceEvidence and all
+// published-artifact evidence through AcceptanceArtifacts. A nil seam never
+// passes: the leaves that need it are unverified. Every leaf is bounded by its
+// own deadline so a caller cannot forget one.
+func EvaluateAcceptance(ctx context.Context, specs []domain.FlowAcceptance,
+	evidence AcceptanceEvidence, artifacts AcceptanceArtifacts) AcceptanceVerdictValue {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	checks := make([]AcceptanceCheck, 0, len(specs))
 	for _, spec := range specs {
-		checks = append(checks, evaluateAcceptanceLeaf(ctx, spec, evidence))
+		checks = append(checks, evaluateAcceptanceLeaf(ctx, spec, evidence, artifacts))
 	}
 	return AcceptanceVerdictValue{Result: AggregateAcceptance(checks), Checks: checks}
 }
@@ -199,7 +236,7 @@ func renderAcceptanceAssignment(goal string, specs []domain.FlowAcceptance) stri
 	}
 	var builder strings.Builder
 	builder.WriteString(goal)
-	builder.WriteString("\n\nAcceptance (checked by the runtime against the workspace after you finish; your own report is not evidence):\n")
+	builder.WriteString("\n\nAcceptance (checked by the runtime after you finish, not from your report: file conditions are read from the workspace, published-artifact conditions from managed storage):\n")
 	for _, spec := range specs {
 		builder.WriteString("- ")
 		builder.WriteString(renderAcceptanceCondition(spec))
@@ -220,17 +257,22 @@ func renderAcceptanceCondition(spec domain.FlowAcceptance) string {
 		return spec.File + " must have columns [" + strings.Join(spec.Columns, ", ") + "]"
 	case acceptanceCheckJSONValid:
 		return spec.File + " must be valid JSON"
+	case acceptanceCheckArtifactPublished:
+		return "artifact " + spec.Artifact + " must be published and still retrievable from managed storage"
 	default:
 		return spec.File + " must satisfy the " + spec.Check + " check"
 	}
 }
 
 // evaluateAcceptanceLeaf evaluates one condition under its own deadline.
-func evaluateAcceptanceLeaf(ctx context.Context, spec domain.FlowAcceptance, evidence AcceptanceEvidence) AcceptanceCheck {
+func evaluateAcceptanceLeaf(ctx context.Context, spec domain.FlowAcceptance,
+	evidence AcceptanceEvidence, artifacts AcceptanceArtifacts) AcceptanceCheck {
 	check := spec.Check
 	leafCtx, cancel := context.WithTimeout(ctx, acceptanceLeafTimeout)
 	defer cancel()
 	switch check {
+	case acceptanceCheckArtifactPublished:
+		return evaluateAcceptanceArtifactPublished(leafCtx, check, spec, artifacts)
 	case acceptanceCheckExists:
 		return evaluateAcceptanceExistence(leafCtx, check, spec, evidence, false)
 	case acceptanceCheckNonEmpty:
@@ -283,7 +325,9 @@ func acceptanceEvidenceReadFailure(check string, err error) AcceptanceCheck {
 func statAcceptanceEvidence(ctx context.Context, check string, spec domain.FlowAcceptance,
 	evidence AcceptanceEvidence) (AcceptanceFile, *AcceptanceCheck) {
 	if evidence == nil {
-		failed := newAcceptanceCheck(check, domain.AcceptanceUnverified, codeAcceptanceUnreadable,
+		// The runtime itself has no reader: that is evidence_unavailable (the
+		// whole-task code), not a per-leaf read failure.
+		failed := newAcceptanceCheck(check, domain.AcceptanceUnverified, codeAcceptanceUnavailable,
 			"no acceptance evidence source is available")
 		return AcceptanceFile{}, &failed
 	}
@@ -336,6 +380,66 @@ func evaluateAcceptanceExistence(ctx context.Context, check string, spec domain.
 			fmt.Sprintf("%q is empty", spec.File))
 	}
 	return newAcceptanceCheck(check, domain.AcceptanceHolds, "", "")
+}
+
+// evaluateAcceptanceArtifactPublished decides the one leaf that reads no
+// workspace: the child Run's terminal submit_result must carry a reference with
+// the declared name and a non-empty sha256, and the managed store must still
+// retrieve that artifact with that digest. A ref the child never reported is a
+// fact (does_not_hold); a store that cannot answer is undecidable (unverified).
+func evaluateAcceptanceArtifactPublished(ctx context.Context, check string,
+	spec domain.FlowAcceptance, artifacts AcceptanceArtifacts) AcceptanceCheck {
+	if artifacts == nil {
+		return newAcceptanceCheck(check, domain.AcceptanceUnverified, codeAcceptanceUnavailable,
+			"published-artifact evidence is unavailable")
+	}
+	reference, found := findArtifactReference(artifacts.Refs(), spec.Artifact)
+	if !found {
+		return newAcceptanceCheck(check, domain.AcceptanceDoesNotHold, codeAcceptanceArtifactMissing,
+			fmt.Sprintf("the task published no artifact named %q", spec.Artifact))
+	}
+	if strings.TrimSpace(reference.SHA256) == "" {
+		return newAcceptanceCheck(check, domain.AcceptanceDoesNotHold, codeAcceptanceArtifactDigestMissing,
+			fmt.Sprintf("published artifact %q records no sha256", spec.Artifact))
+	}
+	present, err := artifacts.Present(ctx, reference.ArtifactID, reference.SHA256)
+	if err != nil {
+		// Any lookup failure — including one that ran out of time — is
+		// undecidable, never a pass and never a failed check.
+		return newAcceptanceCheck(check, domain.AcceptanceUnverified, codeAcceptanceUnavailable,
+			"the published artifact could not be looked up")
+	}
+	if ctx.Err() != nil {
+		return newAcceptanceCheck(check, domain.AcceptanceUnverified, codeAcceptanceUnavailable,
+			"the published artifact lookup exceeded its deadline")
+	}
+	if !present {
+		return newAcceptanceCheck(check, domain.AcceptanceDoesNotHold, codeAcceptanceArtifactNotRetrievable,
+			fmt.Sprintf("published artifact %q is not retrievable from managed storage with its recorded sha256", spec.Artifact))
+	}
+	return newAcceptanceCheck(check, domain.AcceptanceHolds, "", "")
+}
+
+// findArtifactReference picks the reference the leaf judges: the first entry
+// with the declared name and a recorded digest, else the first entry with the
+// declared name (whose digest is then missing). Names are compared exactly, like
+// csv-columns names; ref order is the child's, so the same report always decides
+// the same way.
+func findArtifactReference(refs []domain.ArtifactReference, name string) (domain.ArtifactReference, bool) {
+	var named domain.ArtifactReference
+	namedFound := false
+	for _, reference := range refs {
+		if reference.Name != name {
+			continue
+		}
+		if strings.TrimSpace(reference.SHA256) != "" {
+			return reference, true
+		}
+		if !namedFound {
+			named, namedFound = reference, true
+		}
+	}
+	return named, namedFound
 }
 
 // evaluateAcceptanceCSVColumns checks that the first logical CSV record

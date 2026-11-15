@@ -133,7 +133,7 @@ func TestAcceptanceHoldsCompletesWithVerdict(t *testing.T) {
 	// The child receives the contract as task data, deterministically.
 	require.NotEmpty(t, children.created)
 	assignment := children.created[0].Assignment
-	assert.Contains(t, assignment, "Acceptance (checked by the runtime against the workspace after you finish; your own report is not evidence):")
+	assert.Contains(t, assignment, "Acceptance (checked by the runtime after you finish, not from your report:")
 	assert.Contains(t, assignment, "- outputs/qc.csv must have columns [sample, reads]")
 	// The checkpoint still shows what the task asked for, not the contract.
 	assert.Equal(t, "Implement src/main.go and fast", producer.GoalText)
@@ -543,4 +543,182 @@ func TestFlowCompletedWithoutAcceptanceOmitsSummary(t *testing.T) {
 	payload := events.payloadOf("flow_completed")
 	require.NotNil(t, payload)
 	assert.NotContains(t, payload, "acceptance")
+}
+
+// --- artifact-published -----------------------------------------------------
+
+// artifactAcceptanceTask makes the entry task declare the published-artifact
+// leaf: the only clause of this fixture, so no workspace evidence is involved.
+func artifactAcceptanceTask(t *testing.T, def *domain.FlowDefinition) {
+	t.Helper()
+	def.Tasks["producer"] = domain.FlowTask{
+		Type: domain.FlowTaskHero, Hero: "writer@1", Goal: "produce",
+		Budget: &domain.FlowTaskBudget{Tokens: 1000},
+		Acceptance: []domain.FlowAcceptance{
+			{Artifact: "outputs/qc.csv", Check: "artifact-published"},
+		},
+	}
+}
+
+// artifactLookup answers the store seam for one recorded reference and nothing
+// else, so a digest mismatch and a missing row are both reachable.
+func artifactLookup(reference domain.ArtifactReference, present bool) func(context.Context, string, string) (bool, error) {
+	return func(_ context.Context, artifactID, sha256 string) (bool, error) {
+		return present && artifactID == reference.ArtifactID && sha256 == reference.SHA256, nil
+	}
+}
+
+// A matching ref in the child's terminal submit_result holds, and the leaf needs
+// no workspace evidence reader at all.
+func TestAcceptanceArtifactPublishedHolds(t *testing.T) {
+	def := threeTaskDef()
+	artifactAcceptanceTask(t, def)
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	reference := domain.ArtifactReference{ArtifactID: "art-1", Name: "outputs/qc.csv", SHA256: "abc123"}
+	children.results["producer"] = &domain.SubmitResult{
+		Status: domain.SubmitCompleted, Payload: json.RawMessage(`{"changedFiles":["a.go"]}`),
+		ArtifactRefs: []domain.ArtifactReference{reference},
+	}
+	events := &fakeEvents{}
+
+	orch := newOrchestrator(fake, children, events)
+	// An artifact-only clause never opens the workspace jail: the factory is
+	// wired but must not be asked.
+	orch.AcceptanceEvidence = func(context.Context, string) (AcceptanceEvidence, error) {
+		t.Error("an artifact-only clause must not read workspace evidence")
+		return newFakeEvidence(), nil
+	}
+	orch.ArtifactPresent = artifactLookup(reference, true)
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeCompleted, producer.TerminalState)
+	verdict := decodeVerdict(t, producer)
+	assert.Equal(t, domain.AcceptanceHolds, verdict.Result)
+	require.Len(t, verdict.Checks, 1)
+	assert.Equal(t, "artifact-published", verdict.Checks[0].Check)
+	assert.Empty(t, verdict.Checks[0].Code)
+
+	types := events.types()
+	assert.Contains(t, types, "flow_task_completed")
+	assert.NotContains(t, types, "flow_task_unverified")
+	assert.NotContains(t, types, "flow_task_acceptance_failed")
+
+	// The child is told the contract, in the same task-data channel.
+	require.NotEmpty(t, children.created)
+	assert.Contains(t, children.created[0].Assignment,
+		"- artifact outputs/qc.csv must be published and still retrievable from managed storage")
+}
+
+// A child that reports success without publishing the declared artifact fails
+// the task and the flow, and keeps its output_ref: the report is what shows what
+// was (not) done.
+func TestAcceptanceArtifactPublishedMissingFailsFlow(t *testing.T) {
+	def := threeTaskDef()
+	artifactAcceptanceTask(t, def)
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	children.results["producer"] = &domain.SubmitResult{
+		Status: domain.SubmitCompleted, Summary: "done", Payload: json.RawMessage(`{"changedFiles":["a.go"]}`),
+	}
+	events := &fakeEvents{}
+
+	orch := newOrchestrator(fake, children, events)
+	orch.ArtifactPresent = artifactLookup(domain.ArtifactReference{ArtifactID: "art-1", Name: "outputs/qc.csv", SHA256: "abc123"}, true)
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateFailed, waitTerminal(t, fake))
+
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeFailed, producer.TerminalState)
+	assert.Equal(t, "acceptance_failed", producer.ErrorCode)
+	assert.JSONEq(t, `{"changedFiles":["a.go"]}`, string(producer.OutputRef))
+	verdict := decodeVerdict(t, producer)
+	assert.Equal(t, domain.AcceptanceDoesNotHold, verdict.Result)
+	require.Len(t, verdict.Checks, 1)
+	assert.Equal(t, "artifact_missing", verdict.Checks[0].Code)
+	assert.Equal(t, 0, countHandle(children, "reviewer"), "a failed acceptance stops the flow")
+
+	types := events.types()
+	assert.Contains(t, types, "flow_task_acceptance_failed")
+	assert.Contains(t, types, "flow_failed")
+	assert.Equal(t, domain.RunFailed, fake.anchorStatus, "the meta-Run is failed, not left running")
+}
+
+// A runtime with no artifact-store seam cannot confirm anything: the task
+// completes as unverified and the flow keeps going, visibly.
+func TestAcceptanceArtifactPublishedWithoutStoreSeamIsUnverified(t *testing.T) {
+	def := threeTaskDef()
+	artifactAcceptanceTask(t, def)
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	children.results["producer"] = &domain.SubmitResult{
+		Status: domain.SubmitCompleted, Payload: json.RawMessage(`{"changedFiles":["a.go"]}`),
+		ArtifactRefs: []domain.ArtifactReference{
+			{ArtifactID: "art-1", Name: "outputs/qc.csv", SHA256: "abc123"},
+		},
+	}
+	events := &fakeEvents{}
+
+	orch := newOrchestrator(fake, children, events) // ArtifactPresent stays nil
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeCompleted, producer.TerminalState)
+	verdict := decodeVerdict(t, producer)
+	assert.Equal(t, domain.AcceptanceUnverified, verdict.Result)
+	require.Len(t, verdict.Checks, 1)
+	assert.Equal(t, "evidence_unavailable", verdict.Checks[0].Code)
+
+	types := events.types()
+	assert.Contains(t, types, "flow_task_unverified")
+	assert.NotContains(t, types, "flow_task_acceptance_failed")
+}
+
+// Crash recovery folds a child that succeeded before the crash. When its
+// terminal result cannot be read back, the artifact leaf is unverified — not
+// missing — because "the report is gone" and "the report has no such ref" are
+// different facts.
+func TestAcceptanceArtifactCrashRecoveryWithoutResultIsUnverified(t *testing.T) {
+	def := threeTaskDef()
+	artifactAcceptanceTask(t, def)
+	// The next task reads no template from the folded output: the point of this
+	// fixture is the verdict, and an empty payload would fail goal resolution.
+	def.Tasks["reviewer"] = domain.FlowTask{
+		Type: domain.FlowTaskHero, Hero: "reader@1", Goal: "review", Depends: []string{"producer"},
+	}
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	// Succeeded, but no recorded submit_result survives (ChildTerminalResult
+	// returns nil for an unknown handle).
+	children.status["child-producer"] = domain.RunSucceeded
+	require.NoError(t, fake.UpdateNode(context.Background(), "flow-run-1", NodeUpdate{
+		TaskIndex: 0, ExpectedStates: []domain.FlowNodeState{domain.FlowNodePending},
+		SetState: domain.FlowNodeRunning, ChildRunID: "child-producer",
+	}))
+	fake.mu.Lock()
+	fake.run.State = domain.FlowStateRunning
+	fake.mu.Unlock()
+
+	orch := newOrchestrator(fake, children, &fakeEvents{})
+	orch.ArtifactPresent = func(context.Context, string, string) (bool, error) {
+		t.Fatal("the store must not be consulted when no ref was recorded")
+		return false, nil
+	}
+	orch.Recover(context.Background(), []string{"flow-run-1"})
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeCompleted, producer.TerminalState,
+		"an unreadable result never fails the task it could not read")
+	verdict := decodeVerdict(t, producer)
+	assert.Equal(t, domain.AcceptanceUnverified, verdict.Result)
+	require.Len(t, verdict.Checks, 1)
+	assert.Equal(t, "evidence_unavailable", verdict.Checks[0].Code)
 }

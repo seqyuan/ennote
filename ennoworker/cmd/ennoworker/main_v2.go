@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -469,11 +470,35 @@ func startFlowOrchestrator(db *sql.DB, runID string,
 			}
 			return workspace.NewAcceptanceEvidence(manager.Jail), nil
 		},
+		// ArtifactPresent confirms a published artifact against the Session
+		// database the Run lives in. The digest the child recorded must equal the
+		// stored one: an id alone would accept a rewritten or replaced artifact,
+		// and the leaf exists to prove the frozen bytes are still retrievable.
+		ArtifactPresent: func(ctx context.Context, artifactID, sha256 string) (bool, error) {
+			return artifactPresent(ctx, db, artifactID, sha256)
+		},
 		Enqueue: func(ctx context.Context, childRunID string) error {
 			return coordinator.Enqueue(ctx, childRunID)
 		},
 	}
 	orchestrator.Recover(ctx, []string{runID})
+}
+
+// artifactPresent reports whether a published artifact is still retrievable
+// from managed storage with the digest a child Run recorded. An absent row is
+// "not retrievable" (false, nil) — a retry can never make it true; a query
+// error is an error, so the acceptance leaf stays unverified instead of reading
+// an unreachable database as a missing artifact.
+func artifactPresent(ctx context.Context, db *sql.DB, artifactID, sha256 string) (bool, error) {
+	var stored string
+	err := db.QueryRowContext(ctx, `SELECT sha256 FROM artifacts WHERE id=?`, artifactID).Scan(&stored)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("look up artifact %s: %w", artifactID, err)
+	}
+	return strings.EqualFold(strings.TrimSpace(stored), strings.TrimSpace(sha256)), nil
 }
 
 // flowWorkspaceManager resolves one Session's workspace jail: Session → Project

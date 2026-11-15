@@ -188,15 +188,25 @@ func (s *AcceptanceSummary) AddDeclared(result AcceptanceResult) {
 	}
 }
 
-// FlowAcceptance is one machine-checkable acceptance condition of a task. It
-// is evaluated by the kernel against the workspace after the task's child Run
-// finishes; the child's own report is never consulted. Paths are
-// workspace-relative. There is no command field: shell-based checks are out of
-// scope for this vocabulary.
+// FlowAcceptance is one machine-checkable acceptance condition of a task. It is
+// evaluated by the kernel after the task's child Run finishes; the child's own
+// prose is never consulted. File leaves are decided against the workspace, and
+// their paths are workspace-relative. artifact-published is decided against the
+// managed artifact store instead: it names an artifact, never a path, and it
+// reads the child's recorded submit_result.artifactRefs rather than the
+// workspace. There is no command field: shell-based checks are out of scope for
+// this vocabulary.
 type FlowAcceptance struct {
-	File    string   `json:"file,omitempty"    yaml:"file,omitempty"`
-	Check   string   `json:"check"             yaml:"check"`
-	Columns []string `json:"columns,omitempty" yaml:"columns,omitempty"`
+	// Artifact is the artifact NAME the task must have published. It is the
+	// only operand of artifact-published and it is refused on every file leaf:
+	// one clause is either about a path or about a published artifact. The name
+	// is matched against the recorded reference exactly, the way column names
+	// are: whitespace is significant, so nothing normalizes it behind the
+	// author's back.
+	Artifact string   `json:"artifact,omitempty" yaml:"artifact,omitempty"`
+	File     string   `json:"file,omitempty"     yaml:"file,omitempty"`
+	Check    string   `json:"check"              yaml:"check"`
+	Columns  []string `json:"columns,omitempty"  yaml:"columns,omitempty"`
 }
 
 // FlowTask is one task of a flow definition.

@@ -315,10 +315,13 @@ paths:
         Task clauses: a task-node key the Worker does not recognise is refused
         (`flow_task_unknown_field`) instead of being dropped, and an acceptance
         clause is validated against the leaf vocabulary this Worker can decide
-        (`exists`, `non-empty`, `csv-columns`, `json-valid`): it is refused on
-        check, terminal and fan_out tasks, when the list is empty, when `file`,
-        `columns` or the check name is missing or malformed, and when the path is
-        absolute or escapes the workspace.
+        (`exists`, `non-empty`, `csv-columns`, `json-valid`,
+        `artifact-published`): it is refused on check, terminal and fan_out
+        tasks, when the list is empty, when the operand the check needs (`file`
+        for the file leaves, `artifact` for `artifact-published`), `columns` or
+        the check name is missing or malformed, when a file leaf also declares
+        `artifact` (or the reverse), and when a path is absolute or escapes the
+        workspace.
 
         A Graph needs no project binding to publish; enabling it is a separate
         step.
@@ -3778,11 +3781,18 @@ components:
       required: [check]
       description: |
         One acceptance condition a task declared, frozen with the task checkpoint
-        at Run start. `check` is one of the leaf kinds the Worker decides against
-        the workspace after the task's child Run finishes; `file` is required by
-        every leaf kind in this vocabulary, and `columns` only by `csv-columns`.
+        at Run start. `check` is one of the leaf kinds the Worker decides after
+        the task's child Run finishes. The file leaves (`exists`, `non-empty`,
+        `csv-columns`, `json-valid`) decide against the workspace and require
+        `file`; `columns` is only taken by `csv-columns`. `artifact-published`
+        decides against managed storage instead: it requires `artifact` (the
+        artifact NAME the task must have published) and accepts neither `file`
+        nor `columns`.
       properties:
         check: { type: string }
+        artifact:
+          type: string
+          description: The artifact name `artifact-published` requires; refused on every file leaf
         file: { type: string }
         columns: { type: array, items: { type: string } }
     AcceptanceCheck:

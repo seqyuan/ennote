@@ -32,6 +32,10 @@ type Orchestrator struct {
 	// nil means the runtime cannot read evidence: every declared check is then
 	// UNVERIFIED, never silently absent.
 	AcceptanceEvidence func(ctx context.Context, sessionID string) (AcceptanceEvidence, error)
+	// ArtifactPresent reports whether a published artifact is retrievable with
+	// the digest a child Run recorded. nil means the runtime cannot confirm it:
+	// artifact leaves are then UNVERIFIED, never absent and never a pass.
+	ArtifactPresent func(ctx context.Context, artifactID, sha256 string) (bool, error)
 	// Enqueue hands a created child Run to the run coordinator.
 	Enqueue      func(ctx context.Context, runID string) error
 	PollInterval time.Duration
@@ -516,10 +520,11 @@ func (o *Orchestrator) foldHeroChild(ctx context.Context, runID string, flow *do
 	} else if result != nil {
 		payload, _ = json.Marshal(map[string]any{"summary": result.Summary})
 	}
-	// A declared acceptance clause is verified here, against the workspace,
-	// before the checkpoint write: the child's own report is never evidence.
+	// A declared acceptance clause is verified here, before the checkpoint
+	// write: the child's own prose is never evidence. File leaves read the
+	// workspace; artifact leaves read the refs this fold already holds.
 	if len(node.Acceptance) > 0 {
-		return o.foldAcceptance(ctx, runID, flow, node, childID, payload)
+		return o.foldAcceptance(ctx, runID, flow, node, childID, payload, result)
 	}
 	if err := o.Store.UpdateNode(ctx, runID, NodeUpdate{
 		TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
@@ -1187,8 +1192,10 @@ func (o *Orchestrator) reconcileCrashedNodes(ctx context.Context, runID string) 
 			continue
 		}
 		aggregate := make([]json.RawMessage, 0, len(childIDs))
+		results := make([]*domain.SubmitResult, 0, len(childIDs))
 		for _, childID := range childIDs {
 			result, _ := o.Children.ChildTerminalResult(ctx, childID)
+			results = append(results, result)
 			payload := json.RawMessage{}
 			if result != nil && len(result.Payload) > 0 {
 				payload = result.Payload
@@ -1233,7 +1240,7 @@ func (o *Orchestrator) reconcileCrashedNodes(ctx context.Context, runID string) 
 				})
 				continue
 			}
-			if err := o.foldAcceptance(ctx, runID, flow, node, childIDs[0], output); err != nil {
+			if err := o.foldAcceptance(ctx, runID, flow, node, childIDs[0], output, results[0]); err != nil {
 				// Another orchestrator (recovery races a new start) may have
 				// settled this node already; that is a settled node, not a flow
 				// failure.
