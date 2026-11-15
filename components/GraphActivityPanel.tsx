@@ -42,7 +42,10 @@ function checkLine(t: Translator, check: AcceptanceCheck): string {
  */
 function verdictTitle(t: Translator, verdict: AcceptanceVerdict): string {
   const hint = t("graph.acceptance.hint");
-  const check = verdict.checks.find((entry) => entry.verdict !== "holds") ?? verdict.checks[0];
+  // A verdict row the store could not parse is tolerated there, so the render
+  // must tolerate it too instead of throwing inside the panel.
+  const checks = verdict.checks ?? [];
+  const check = checks.find((entry) => entry.verdict !== "holds") ?? checks[0];
   return check ? `${hint}\n${checkLine(t, check)}` : hint;
 }
 
@@ -104,17 +107,33 @@ export function GraphActivityPanel({ sessionId, onCount }: {
     };
   }, [load]);
 
-  // Load task checkpoints for the expanded run.
+  // Load task checkpoints for the expanded run, and keep them as fresh as the
+  // list: the card's unverified marker is recomputed every poll, so a frozen
+  // node list would show a marker with no badge next to the task that caused it.
   useEffect(() => {
     if (!sessionId || !expanded) return;
+    const controller = new AbortController();
     let cancelled = false;
-    void apiFetch<{ run: RunAgentFlow; nodes: RunAgentFlowNode[] }>(
-      `/v1/sessions/${encodeURIComponent(sessionId)}/graph-runs/${encodeURIComponent(expanded)}`,
-    ).then((detail) => {
+    let timer: number | undefined;
+    const loadDetail = async () => {
+      try {
+        const detail = await apiFetch<{ run: RunAgentFlow; nodes: RunAgentFlowNode[] }>(
+          `/v1/sessions/${encodeURIComponent(sessionId)}/graph-runs/${encodeURIComponent(expanded)}`,
+        );
+        if (cancelled) return;
+        setNodes((previous) => ({ ...previous, [expanded]: detail.nodes ?? [] }));
+      } catch {
+        if (!cancelled) setError("graph.loadFailed");
+      }
       if (cancelled) return;
-      setNodes((previous) => ({ ...previous, [expanded]: detail.nodes ?? [] }));
-    }).catch(() => { if (!cancelled) setError("graph.loadFailed"); });
-    return () => { cancelled = true; };
+      timer = window.setTimeout(loadDetail, pollIntervalMs);
+    };
+    void loadDetail();
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [expanded, sessionId]);
 
   const runningCount = useMemo(() => runs.filter((run) => run.state === "running").length, [runs]);

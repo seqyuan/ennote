@@ -341,6 +341,7 @@ export const getSessionGraphRun200: WorkerOperationResponse<"getSessionGraphRun"
         "createdAt": "2026-01-01T00:00:10Z",
         "finishedAt": "2026-01-01T00:00:10Z",
         "handle": "collect",
+        "readOnly": true,
         "runId": "00000000-0000-0000-0000-000000000014",
         "taskIndex": 0,
         "terminalState": "completed"
@@ -420,12 +421,19 @@ export const getSessionGraphRun200: WorkerOperationResponse<"getSessionGraphRun"
       },
       {
         "budget": {},
+        "childRunIds": [
+          "child-a",
+          "child-b"
+        ],
         "createdAt": "2026-01-01T00:00:10Z",
         "finishedAt": "2026-01-01T00:00:10Z",
         "handle": "summarize",
         "runId": "00000000-0000-0000-0000-000000000014",
         "taskIndex": 4,
-        "terminalState": "completed"
+        "terminalState": "completed",
+        "writes": [
+          "outputs/report.md"
+        ]
       }
     ],
     "run": {

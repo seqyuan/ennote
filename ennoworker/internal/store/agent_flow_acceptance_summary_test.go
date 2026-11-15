@@ -105,10 +105,11 @@ func TestAcceptanceSummaryCountsOnlyDeclaredNodes(t *testing.T) {
 	assert.Nil(t, summary)
 }
 
-// The Session list answers every run in one call: a run with a declaration gets
-// its summary, a run without one gets no entry to attach.
-func TestSessionAcceptanceSummariesCoversEveryRunInOneCall(t *testing.T) {
-	repo, sessionID, runIDs := acceptanceSummaryFixture(t)
+// The list answers a whole page in one call and only that page: a run with a
+// declaration gets its summary, a run without one gets no entry to attach, and a
+// run outside the page is not aggregated (the poll must not scan the Session).
+func TestAcceptanceSummariesCoversOnePageInOneCall(t *testing.T) {
+	repo, _, runIDs := acceptanceSummaryFixture(t)
 	ctx := context.Background()
 	writeVerdict(t, repo, runIDs[0], "producer", domain.AcceptanceHolds)
 	writeVerdict(t, repo, runIDs[2], "producer", domain.AcceptanceDoesNotHold)
@@ -116,13 +117,20 @@ func TestSessionAcceptanceSummariesCoversEveryRunInOneCall(t *testing.T) {
 
 	counting, queries := openCountingDB(t, repo.DB)
 	counted := &store.AgentFlowRunRepo{DB: counting}
-	summaries, err := counted.SessionAcceptanceSummaries(ctx, sessionID)
+	summaries, err := counted.AcceptanceSummaries(ctx, []string{runIDs[0], runIDs[1]})
 	require.NoError(t, err)
 	assert.Equal(t, 1, queries.count(), "the list must not query once per run")
-	require.Len(t, summaries, 2)
+	require.Len(t, summaries, 1)
 	assert.Equal(t, domain.AcceptanceSummary{Total: 2, Holds: 1}, *summaries[runIDs[0]])
-	assert.Equal(t, domain.AcceptanceSummary{Total: 2, DoesNotHold: 1, Unverified: 1}, *summaries[runIDs[2]])
 	assert.NotContains(t, summaries, runIDs[1])
+	assert.NotContains(t, summaries, runIDs[2], "a run outside the page is not aggregated")
+
+	// An empty page costs no query at all.
+	queries.reset()
+	empty, err := counted.AcceptanceSummaries(ctx, nil)
+	require.NoError(t, err)
+	assert.Empty(t, empty)
+	assert.Equal(t, 0, queries.count())
 
 	// The detail entry point is one query too.
 	queries.reset()

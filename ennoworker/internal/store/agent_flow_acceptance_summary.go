@@ -37,15 +37,24 @@ func (r *AgentFlowRunRepo) AcceptanceSummary(ctx context.Context, runID string) 
 	return summaries[runID], nil
 }
 
-// SessionAcceptanceSummaries returns the run-level acceptance summary of every
-// run of one Session that declared an acceptance clause, keyed by run id. It is
-// one query for all runs: the list endpoint must not go back to the database
-// once per row. A run with no declared clause has no entry.
-func (r *AgentFlowRunRepo) SessionAcceptanceSummaries(ctx context.Context,
-	sessionID string) (map[string]*domain.AcceptanceSummary, error) {
-	rows, err := r.DB.QueryContext(ctx, `SELECT n.run_id, n.acceptance_json, n.acceptance_verdict
-		FROM run_agent_flow_nodes n JOIN run_agent_flow r ON r.run_id = n.run_id
-		WHERE r.session_id=? AND n.acceptance_json NOT IN ('', '[]')`, sessionID)
+// AcceptanceSummaries returns the run-level acceptance summary of the given
+// runs that declared an acceptance clause, keyed by run id. It is one query for
+// the whole page (never one per row) and it is scoped to the page: aggregating
+// every run of the Session would make the list's 1.5s poll do work nobody reads.
+// A run with no declared clause has no entry.
+func (r *AgentFlowRunRepo) AcceptanceSummaries(ctx context.Context,
+	runIDs []string) (map[string]*domain.AcceptanceSummary, error) {
+	if len(runIDs) == 0 {
+		return map[string]*domain.AcceptanceSummary{}, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(runIDs)), ",")
+	args := make([]any, 0, len(runIDs))
+	for _, id := range runIDs {
+		args = append(args, id)
+	}
+	rows, err := r.DB.QueryContext(ctx, `SELECT run_id, acceptance_json, acceptance_verdict
+		FROM run_agent_flow_nodes
+		WHERE run_id IN (`+placeholders+`) AND acceptance_json NOT IN ('', '[]')`, args...)
 	if err != nil {
 		return nil, err
 	}

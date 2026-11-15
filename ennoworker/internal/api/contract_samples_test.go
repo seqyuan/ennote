@@ -824,8 +824,14 @@ func TestContractSamples(t *testing.T) {
 		outputRef  any
 		acceptance string
 		verdict    string
+		// The node row also carries the frozen scheduling class and the child
+		// set; the contract declares them, so at least one sample must show
+		// them or tsc never sees the shape.
+		readOnly    int
+		writesJSON  string
+		childRunIDs string
 	}{
-		{index: 0, handle: "collect", state: "completed",
+		{index: 0, handle: "collect", state: "completed", readOnly: 1,
 			acceptance: `[{"check":"csv-columns","file":"outputs/qc.csv","columns":["sample","reads","dup_rate"]}]`,
 			verdict:    `{"result":"holds","checks":[{"check":"csv-columns","verdict":"holds"}]}`},
 		{index: 1, handle: "validate", state: "completed",
@@ -837,13 +843,23 @@ func TestContractSamples(t *testing.T) {
 			verdict:    `{"result":"does_not_hold","checks":[{"check":"non-empty","verdict":"does_not_hold","code":"file_empty","detail":"\"outputs/report.md\" is empty"}]}`},
 		{index: 3, handle: "audit", state: "pending",
 			acceptance: `[{"check":"exists","file":"outputs/audit.log"}]`},
-		{index: 4, handle: "summarize", state: "completed", acceptance: `[]`},
+		{index: 4, handle: "summarize", state: "completed", acceptance: `[]`,
+			writesJSON: `["outputs/report.md"]`, childRunIDs: `["child-a","child-b"]`},
 	} {
+		writes := node.writesJSON
+		if writes == "" {
+			writes = "[]"
+		}
+		childRunIDs := node.childRunIDs
+		if childRunIDs == "" {
+			childRunIDs = "[]"
+		}
 		_, err = graphSessionDB.Exec(`INSERT INTO run_agent_flow_nodes
 			(run_id,task_index,handle,terminal_state,error_code,output_ref,acceptance_json,acceptance_verdict,
-			 created_at,finished_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+			 read_only,writes_json,child_run_ids_json,created_at,finished_at)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			sampleGraphRunID, node.index, node.handle, node.state, node.errorCode, node.outputRef,
-			node.acceptance, node.verdict, sampleGraphTime, sampleGraphTime)
+			node.acceptance, node.verdict, node.readOnly, writes, childRunIDs, sampleGraphTime, sampleGraphTime)
 		require.NoError(t, err)
 	}
 	samples.record(contractSampleRequest{

@@ -2486,6 +2486,12 @@ export interface components {
                 [key: string]: unknown;
             };
             childRunId?: string;
+            /** @description The full child set of a fan-out task */
+            childRunIds?: string[];
+            /** @description Frozen concurrency class; a read-only task cannot mutate the workspace */
+            readOnly?: boolean;
+            /** @description Frozen declared write scopes (scheduling only, not isolation) */
+            writes?: string[];
             errorCode?: string;
             createdAt?: string;
             finishedAt?: string;
@@ -3247,6 +3253,8 @@ export interface components {
                 tokens?: number;
             };
             writes?: string[];
+            /** @description Machine-checked conditions on this task's artifacts, verified after its child Run */
+            acceptance?: components["schemas"]["FlowAcceptanceDecl"][];
         };
         ProjectGraphBinding: {
             /** @enum {string} */
@@ -5236,6 +5244,7 @@ export interface operations {
                 };
             };
             409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
         };
     };
     listProviderProfiles: {

@@ -375,7 +375,7 @@ func TestEvaluateAcceptanceJSONValid(t *testing.T) {
 			want:    domain.AcceptanceHolds,
 		},
 		{
-			name:    "valid JSON over 1 MiB holds (no size limit)",
+			name:    "valid JSON over 1 MiB holds under the 64 MiB read cap",
 			content: bigJSON(t),
 			want:    domain.AcceptanceHolds,
 		},
@@ -615,6 +615,25 @@ func TestEvaluateAcceptanceOpenOutOfScope(t *testing.T) {
 		Columns: []string{"a"}}, ev)
 	assert.Equal(t, domain.AcceptanceUnverified, check.Verdict)
 	assert.Equal(t, "evidence_out_of_scope", check.Code)
+}
+
+// The verdict is a wire contract (the node column, the API field and the event
+// payload all carry it), so pin the encoded form rather than only the round-trip
+// through the same struct: a renamed json tag would otherwise pass every test.
+func TestAcceptanceVerdictWireShape(t *testing.T) {
+	encoded, err := json.Marshal(AcceptanceVerdictValue{
+		Result: domain.AcceptanceUnverified,
+		Checks: []AcceptanceCheck{{
+			Check: "csv-columns", Verdict: domain.AcceptanceUnverified,
+			Code: "evidence_truncated", Detail: "header exceeds the read budget",
+		}},
+	})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"result":"unverified","checks":[{"check":"csv-columns","verdict":"unverified","code":"evidence_truncated","detail":"header exceeds the read budget"}]}`,
+		string(encoded))
+	empty, err := json.Marshal(AcceptanceVerdictValue{Result: domain.AcceptanceHolds, Checks: []AcceptanceCheck{}})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"result":"holds","checks":[]}`, string(empty))
 }
 
 func TestAggregateAcceptance(t *testing.T) {

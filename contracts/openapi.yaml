@@ -585,6 +585,7 @@ paths:
                   - type: object
                     properties: { data: { $ref: "#/components/schemas/GraphDetail" } }
         "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
   /v1/provider-profiles:
     get:
       operationId: listProviderProfiles
@@ -3860,6 +3861,17 @@ components:
         terminalState: { type: string, enum: [pending, running, completed, failed, blocked, cancelled, interrupted] }
         outputRef: { type: object, additionalProperties: true }
         childRunId: { type: string }
+        childRunIds:
+          type: array
+          items: { type: string }
+          description: The full child set of a fan-out task
+        readOnly:
+          type: boolean
+          description: Frozen concurrency class; a read-only task cannot mutate the workspace
+        writes:
+          type: array
+          items: { type: string }
+          description: Frozen declared write scopes (scheduling only, not isolation)
         errorCode: { type: string }
         createdAt: { type: string }
         finishedAt: { type: string }
@@ -4854,6 +4866,10 @@ components:
           additionalProperties: false
           properties: { tokens: { type: integer, minimum: 1 } }
         writes: { type: array, uniqueItems: true, items: { type: string } }
+        acceptance:
+          type: array
+          items: { $ref: "#/components/schemas/FlowAcceptanceDecl" }
+          description: Machine-checked conditions on this task's artifacts, verified after its child Run
     ProjectGraphBinding:
       type: object
       additionalProperties: false

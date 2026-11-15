@@ -302,7 +302,9 @@ func writeUnknownTaskFieldError(w http.ResponseWriter, r *http.Request, err erro
 	if !errors.As(err, &unknown) {
 		return false
 	}
-	writeError(w, r, http.StatusUnprocessableEntity, "graph_unknown_task_field", unknown.Error(), false)
+	message := unknown.Error() + "; fix the key in agents/graphs/" + r.PathValue("graphID") + "/graph.yaml, " +
+		"then reload this Graph (the editor rewrites the file from the parsed definition)"
+	writeError(w, r, http.StatusUnprocessableEntity, "graph_unknown_task_field", message, false)
 	return true
 }
 

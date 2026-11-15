@@ -63,7 +63,11 @@ func (s *Server) listSessionGraphRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	// One extra query for the whole page, not one per run: the card needs the
 	// unverified marker without expanding the run and loading its nodes.
-	summaries, err := repo.SessionAcceptanceSummaries(r.Context(), r.PathValue("sessionID"))
+	pageIDs := make([]string, 0, len(runs))
+	for _, run := range runs {
+		pageIDs = append(pageIDs, run.RunID)
+	}
+	summaries, err := repo.AcceptanceSummaries(r.Context(), pageIDs)
 	if err != nil {
 		writeInternal(w, r, err)
 		return
