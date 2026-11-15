@@ -97,6 +97,11 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 		return result
 	}
 
+	// contextFrom is canonical context metadata, not an edge. Normalizing it up
+	// front keeps every later check (and the digest at the end) independent of
+	// the order an in-memory caller built the list in.
+	normalizeContextRefs(def)
+
 	// 1. schemaVersion strictly parsed.
 	if def.SchemaVersion != domain.FlowSchemaVersion {
 		add(v.fail("schema_version_unsupported",
@@ -105,7 +110,9 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 
 	// 2. Exactly one entry task (in-degree 0 == 1). In-degree counts the
 	// task's own depends (prerequisites): the entry is the task with no
-	// depends at all.
+	// depends at all. `contextFrom` is NOT counted here: a context subscription
+	// is not a prerequisite, so it must never change the entry-task count or
+	// the ready set (see snapshotSources in context_mode.go).
 	indegree := make(map[string]int, len(def.Tasks))
 	for name := range def.Tasks {
 		indegree[name] = 0
@@ -709,7 +716,9 @@ func validateTerminalExclusivity(add func(ValidationDiagnostic), def *domain.Flo
 }
 
 // reachabilityMatrix computes transitive reachability over the DAG (without
-// convergence back-edges).
+// convergence back-edges). It reads `depends` ONLY: `contextFrom` is a context
+// subscription, not an edge, so it must not affect reachability, cycle
+// detection, TaskOrder or the finality checks below.
 func reachabilityMatrix(tasks map[string]domain.FlowTask, backEdges map[[2]string]int) map[string]map[string]bool {
 	reach := make(map[string]map[string]bool, len(tasks))
 	for name := range tasks {

@@ -10,8 +10,9 @@ package agentflow
 // in one file because they state one rule.
 //
 // The upstream section is RESULT DATA, never instructions. It is bounded twice
-// (per upstream task and in total) and rendered in task order, so the same
-// definition plus the same checkpoints always produce the same assignment bytes.
+// (per upstream task and in total) and rendered in the definition's canonical
+// task order, so the same definition plus the same checkpoints always produce
+// the same assignment bytes.
 
 import (
 	"encoding/json"
@@ -35,24 +36,58 @@ const (
 	contextSnapshotTruncated = "\n[upstream result truncated: the flow kernel caps this section at 2 KiB per task and 8 KiB in total]"
 )
 
+// normalizeContextRefs canonicalizes every task's contextFrom in place. Parsing
+// and JSON decoding already do this; a definition built directly in memory does
+// not, and publish diagnostics plus the config digest must not depend on the
+// order such a caller happened to use.
+func normalizeContextRefs(def *domain.FlowDefinition) {
+	if def == nil {
+		return
+	}
+	for name, task := range def.Tasks {
+		if len(task.ContextFrom) == 0 {
+			continue
+		}
+		task.ContextFrom = domain.NormalizeContextRefs(task.ContextFrom)
+		def.Tasks[name] = task
+	}
+}
+
 // validateContextMode validates what a task's child assignment carries beyond
 // the resolved goal. `isolated` (the default when omitted) is exactly the
 // pre-existing behaviour: the goal plus the acceptance block, nothing about the
 // upstream tasks. `snapshot` additionally appends a bounded digest of the
-// depends tasks' recorded output_ref.
+// depends tasks' recorded output_ref, and of any contextFrom task's.
 //
 // A check task and a terminal task have no child assignment, and a fan_out
 // parent has no single assignment to extend, so snapshot is refused on them
-// rather than accepted and silently ignored.
+// rather than accepted and silently ignored. `contextFrom` on such a task is
+// refused with the SAME code: it is one rule ("this task has nothing to extend"),
+// and a second code for the same fact would make a reader chase two names.
 func validateContextMode(add func(ValidationDiagnostic), def *domain.FlowDefinition) {
 	names := make([]string, 0, len(def.Tasks))
 	for name := range def.Tasks {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	// Reachability is only needed for contextFrom, so it is computed lazily -
+	// a definition without a single subscription pays nothing.
+	var reach map[string]map[string]bool
+	reachable := func() map[string]map[string]bool {
+		if reach != nil {
+			return reach
+		}
+		backEdges := make(map[[2]string]int, len(def.Convergence))
+		for _, rule := range def.Convergence {
+			backEdges[[2]string{rule.From, rule.To}] = rule.MaxRounds
+		}
+		reach = reachabilityMatrix(def.Tasks, backEdges)
+		return reach
+	}
 	for _, name := range names {
 		task := def.Tasks[name]
 		field := "tasks." + name + ".contextMode"
+		invalidMode := false
 		switch task.ContextMode {
 		case "", domain.FlowTaskContextIsolated, domain.FlowTaskContextSnapshot:
 		default:
@@ -60,17 +95,77 @@ func validateContextMode(add func(ValidationDiagnostic), def *domain.FlowDefinit
 				Message: fmt.Sprintf("task %q contextMode %q is invalid (supported: %s, %s)",
 					name, task.ContextMode, domain.FlowTaskContextIsolated, domain.FlowTaskContextSnapshot),
 				Field: field})
-			continue
+			invalidMode = true
 		}
-		if task.ContextMode != domain.FlowTaskContextSnapshot {
-			continue
-		}
-		if kind := contextModeUnsupportedKind(task); kind != "" {
+		kind := contextModeUnsupportedKind(task)
+		unsupported := !invalidMode && kind != ""
+		switch {
+		case unsupported && len(task.ContextFrom) > 0:
+			// One refusal for one fact ("this task has nothing to extend"), even
+			// when both fields are declared: a second code for the same refusal
+			// would make a reader chase two names.
+			add(ValidationDiagnostic{Code: "context_mode_unsupported",
+				Message: fmt.Sprintf("task %q is a %s task and has no child assignment to carry contextMode/contextFrom results", name, kind),
+				Field:   "tasks." + name + ".contextFrom"})
+		case unsupported && task.ContextMode == domain.FlowTaskContextSnapshot:
 			add(ValidationDiagnostic{Code: "context_mode_unsupported",
 				Message: fmt.Sprintf("task %q is a %s task and has no child assignment to carry upstream results", name, kind),
 				Field:   field})
 		}
+		validateContextFrom(add, def, name, task, unsupported, reachable)
 	}
+}
+
+// validateContextFrom validates the context subscription list of one task:
+//
+//   - `context_from_unknown`: the id is not a task in this flow.
+//   - `context_from_downstream`: the referenced task is reachable FROM this task
+//     through `depends`, i.e. it runs later, so its result cannot exist yet.
+//   - `context_from_requires_snapshot`: the task is isolated, where the field
+//     would silently carry nothing (the default mode, so this is the mistake an
+//     author makes by forgetting the mode).
+//   - `context_mode_unsupported`: the task shape has no child assignment at all;
+//     reported once by validateContextMode, under the contextMode code, instead
+//     of inventing a second name for the same refusal.
+func validateContextFrom(add func(ValidationDiagnostic), def *domain.FlowDefinition, name string,
+	task domain.FlowTask, unsupported bool,
+	reachable func() map[string]map[string]bool) {
+	if len(task.ContextFrom) == 0 {
+		return
+	}
+	field := "tasks." + name + ".contextFrom"
+	if unsupported {
+		return // the shape refusal is already reported, once, by contextMode
+	}
+	if task.ContextMode != domain.FlowTaskContextSnapshot {
+		add(ValidationDiagnostic{Code: "context_from_requires_snapshot",
+			Message: fmt.Sprintf("task %q declares contextFrom but contextMode is %q: context results are only carried in %q mode, so the field would do nothing",
+				name, defaultContextMode(task.ContextMode), domain.FlowTaskContextSnapshot),
+			Field: field})
+	}
+	reach := reachable()
+	for _, ref := range task.ContextFrom {
+		if _, ok := def.Tasks[ref]; !ok {
+			add(ValidationDiagnostic{Code: "context_from_unknown",
+				Message: fmt.Sprintf("task %q contextFrom references unknown task %q", name, ref), Field: field})
+			continue
+		}
+		if reach[name][ref] {
+			add(ValidationDiagnostic{Code: "context_from_downstream",
+				Message: fmt.Sprintf("task %q contextFrom references task %q, which runs later (it is reachable from %q through depends), so its result cannot exist yet",
+					name, ref, name),
+				Field: field})
+		}
+	}
+}
+
+// defaultContextMode renders the effective mode of a task for a diagnostic: an
+// omitted value IS isolated, and saying so is the whole point of the message.
+func defaultContextMode(mode string) string {
+	if mode == "" {
+		return domain.FlowTaskContextIsolated
+	}
+	return mode
 }
 
 // contextModeUnsupportedKind names the task shape that has no single child
@@ -90,7 +185,8 @@ func contextModeUnsupportedKind(task domain.FlowTask) string {
 
 // renderTaskAssignment builds a child's assignment: the resolved goal, the
 // declared acceptance block, then (only for a snapshot task) the bounded
-// upstream results. An isolated task's assignment is exactly what it was before
+// upstream results, which are the task's `depends` unioned with its `contextFrom`
+// subscriptions. An isolated task's assignment is exactly what it was before
 // contextMode existed.
 func renderTaskAssignment(goal string, specs []domain.FlowAcceptance,
 	task domain.FlowTask, taskOutputs map[string]json.RawMessage) string {
@@ -101,19 +197,19 @@ func renderTaskAssignment(goal string, specs []domain.FlowAcceptance,
 	return assignment + renderUpstreamSnapshot(task, taskOutputs)
 }
 
-// renderUpstreamSnapshot renders the depends tasks' recorded output_ref in task
-// order, bounded to 2 KiB per task and 8 KiB in total. A dependency without a
-// recorded output contributes nothing, and when nothing is left to show the
-// function returns "" - no header, no empty section.
+// renderUpstreamSnapshot renders the depends tasks' recorded output_ref, plus
+// every contextFrom task's, in the definition's canonical task order, bounded to
+// 2 KiB per task and 8 KiB in total. A source without a recorded output - a
+// sibling branch that has not settled yet - contributes nothing, and when
+// nothing is left to show the function returns "": no header, no empty section.
 func renderUpstreamSnapshot(task domain.FlowTask, taskOutputs map[string]json.RawMessage) string {
 	if task.ContextMode != domain.FlowTaskContextSnapshot {
 		return ""
 	}
-	depends := append([]string(nil), task.Depends...)
-	sort.Strings(depends)
+	sources := snapshotSources(task)
 	var builder strings.Builder
 	remaining := contextSnapshotTotalBytes
-	for _, dep := range depends {
+	for _, dep := range sources {
 		payload := taskOutputs[dep]
 		if len(payload) == 0 || remaining <= 0 {
 			continue
@@ -130,6 +226,21 @@ func renderUpstreamSnapshot(task domain.FlowTask, taskOutputs map[string]json.Ra
 		builder.WriteString(marker)
 	}
 	return builder.String()
+}
+
+// snapshotSources is the union of a task's scheduling prerequisites and its
+// context subscriptions, canonicalized (trim, sort, dedupe) so the rendered
+// bytes depend on the definition, not on the order the author typed.
+//
+// This is the ONLY place contextFrom is read by the runtime. It deliberately
+// does not participate in the ready set, the entry-task count, cycle detection,
+// TaskOrder or the dependency gate: a context subscription is not an edge, and
+// treating it as one is the fake `depends` this field exists to remove.
+func snapshotSources(task domain.FlowTask) []string {
+	union := make([]string, 0, len(task.Depends)+len(task.ContextFrom))
+	union = append(union, task.Depends...)
+	union = append(union, task.ContextFrom...)
+	return domain.NormalizeContextRefs(union)
 }
 
 // boundSnapshot cuts a payload to at most limit bytes without splitting a UTF-8

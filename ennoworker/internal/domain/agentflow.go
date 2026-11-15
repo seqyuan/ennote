@@ -2,7 +2,11 @@ package domain
 
 import (
 	"encoding/json"
+	"sort"
+	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Agent Flow (roadmap item 7, governing design 2026-08-05-agent-flow-design-v2.md).
@@ -240,6 +244,81 @@ type FlowTask struct {
 	// instructions. It selects a payload; it is not a context vocabulary of its
 	// own (a child Run is always task_only).
 	ContextMode string `json:"contextMode,omitempty" yaml:"context_mode,omitempty"`
+	// ContextFrom names tasks whose recorded result this task's child should
+	// read when that result exists: a context subscription, never a scheduling
+	// prerequisite. It is only meaningful with ContextMode "snapshot" (publish
+	// refuses it otherwise, because it would silently do nothing), and it is
+	// deliberately absent from every scheduling computation - the ready set,
+	// the entry-task count, cycle detection, TaskOrder and the dependency gate
+	// read `Depends` only, so declaring a sibling's finding never reorders
+	// dispatch and never invents a fake edge.
+	//
+	// publish refuses a reference that runs LATER than this task
+	// (`context_from_downstream`: reachable FROM this task through `depends`),
+	// because its result cannot exist yet. A reference that is merely unrelated
+	// may also have no result when this task starts; it then contributes nothing
+	// to the digest instead of being an error.
+	ContextFrom []string `json:"contextFrom,omitempty" yaml:"context_from,omitempty"`
+}
+
+// NormalizeContextRefs canonicalizes a contextFrom list the way the parser
+// canonicalizes `depends`: trim, drop empties, sort, dedupe. Sorting is not a
+// semantic choice, it is what makes the config digest and the rendered snapshot
+// independent of the order the author typed.
+func NormalizeContextRefs(refs []string) []string {
+	if len(refs) == 0 {
+		return nil
+	}
+	trimmed := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if ref = strings.TrimSpace(ref); ref != "" {
+			trimmed = append(trimmed, ref)
+		}
+	}
+	if len(trimmed) == 0 {
+		return nil
+	}
+	sort.Strings(trimmed)
+	unique := trimmed[:1]
+	for _, ref := range trimmed[1:] {
+		if ref != unique[len(unique)-1] {
+			unique = append(unique, ref)
+		}
+	}
+	return unique
+}
+
+// UnmarshalYAML canonicalizes contextFrom while decoding a task node, so a
+// parsed definition carries the same list regardless of authoring order - the
+// same canonicalization `depends` gets from the parser's normalizer. It is done
+// here rather than in the parser because the field is pure context metadata and
+// every reader of the definition (digest, publish validation, run freeze) must
+// see one ordering.
+func (t *FlowTask) UnmarshalYAML(value *yaml.Node) error {
+	type plain FlowTask
+	var decoded plain
+	if err := value.Decode(&decoded); err != nil {
+		return err
+	}
+	*t = FlowTask(decoded)
+	t.ContextFrom = NormalizeContextRefs(t.ContextFrom)
+	return nil
+}
+
+// UnmarshalJSON canonicalizes contextFrom for the same reason: a definition that
+// arrives as JSON (a Graph Builder proposal, a frozen version document) has to
+// produce the same config digest as the same definition read from graph.yaml.
+// Only ingestion is canonicalized; encoding emits whatever the value holds, so
+// no existing JSON shape changes.
+func (t *FlowTask) UnmarshalJSON(data []byte) error {
+	type plain FlowTask
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*t = FlowTask(decoded)
+	t.ContextFrom = NormalizeContextRefs(t.ContextFrom)
+	return nil
 }
 
 // FlowTaskContextMode values. There are exactly two: the handing-off task
