@@ -952,15 +952,26 @@ func firstFanOutTask(ready []*domain.RunAgentFlowNode, def *domain.FlowDefinitio
 
 // terminalGateTask returns the flow's terminal task when every one of its
 // depends has a completed checkpoint, or nil if it is not yet unlocked.
+//
+// Terminal tasks are inspected in sorted handle order, never in map iteration
+// order: publish validation rejects more than one terminal, but a legacy graph
+// or an unfolded edge case may still carry two, and the flow's outputs must not
+// depend on which one a map walk happened to reach first.
 func terminalGateTask(def *domain.FlowDefinition, completed map[string]*domain.RunAgentFlowNode) *domain.FlowTask {
-	for _, task := range def.Tasks {
-		if task.Terminal == nil {
+	names := make([]string, 0, len(def.Tasks))
+	for name, task := range def.Tasks {
+		if task.Terminal != nil {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		task := def.Tasks[name]
+		if uncompletedDep(task, completed) != "" {
 			continue
 		}
-		if uncompletedDep(task, completed) == "" {
-			value := task
-			return &value
-		}
+		value := task
+		return &value
 	}
 	return nil
 }

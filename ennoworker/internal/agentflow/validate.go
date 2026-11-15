@@ -134,6 +134,22 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 		add(v.fail("entry_task_count", message, "tasks"))
 	}
 
+	// 2b. At most one terminal task. The terminal gate resolves the flow
+	// outputs from whichever terminal it picks, so more than one would make the
+	// published flow's outputs depend on iteration order.
+	var terminals []string
+	for name, task := range def.Tasks {
+		if task.Terminal != nil {
+			terminals = append(terminals, name)
+		}
+	}
+	if len(terminals) > 1 {
+		sort.Strings(terminals)
+		add(v.fail("terminal_count_invalid",
+			fmt.Sprintf("at most one terminal task is allowed, found %d: %s", len(terminals), strings.Join(terminals, ", ")),
+			"tasks"))
+	}
+
 	// 3. hero@version / skill resolvability; 6. fan_out read-only; 7. budget.
 	totalTaskTokens := int64(0)
 	checkAllowlistMissing := false

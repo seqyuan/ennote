@@ -679,3 +679,43 @@ func (f *fakeStore) UpdateNodeByHandle(ctx context.Context, runID, handle string
 	}
 	return errFakeConflict
 }
+
+// A flow can carry more than one terminal task (publish rejects it, legacy
+// graphs may still). The gate must resolve to the same terminal on every call:
+// the previous implementation iterated a Go map and picked t1/t2 at roughly
+// 175/25 over 200 calls.
+func TestTerminalGateTaskDeterministic(t *testing.T) {
+	def := &domain.FlowDefinition{
+		SchemaVersion: 1, ID: "two-terminals",
+		Budget: domain.FlowBudget{MaxTotalTokens: 10000},
+		Tasks: map[string]domain.FlowTask{
+			// Locked: "pending" has no completed checkpoint.
+			"t0": {Terminal: &domain.FlowTerminal{Status: "success", Output: "o0"}, Depends: []string{"pending"}},
+			"t1": {Terminal: &domain.FlowTerminal{Status: "success", Output: "o1"}},
+			"t2": {Terminal: &domain.FlowTerminal{Status: "success", Output: "o2"}},
+		},
+	}
+	completed := map[string]*domain.RunAgentFlowNode{}
+
+	first := terminalGateTask(def, completed)
+	require.NotNil(t, first)
+	assert.Equal(t, "o1", first.Terminal.Output, "first unlocked terminal in sorted handle order")
+	for i := 0; i < 200; i++ {
+		got := terminalGateTask(def, completed)
+		require.NotNil(t, got)
+		require.Equal(t, "o1", got.Terminal.Output, "call %d must return the same terminal", i)
+	}
+
+	// A locked terminal never wins over an unlocked one.
+	lockedFirst := &domain.FlowDefinition{
+		SchemaVersion: 1, ID: "locked-first",
+		Budget: domain.FlowBudget{MaxTotalTokens: 10000},
+		Tasks: map[string]domain.FlowTask{
+			"t1": {Terminal: &domain.FlowTerminal{Status: "success", Output: "o1"}, Depends: []string{"pending"}},
+			"t2": {Terminal: &domain.FlowTerminal{Status: "success", Output: "o2"}},
+		},
+	}
+	got := terminalGateTask(lockedFirst, completed)
+	require.NotNil(t, got)
+	assert.Equal(t, "o2", got.Terminal.Output)
+}
