@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -63,8 +64,9 @@ func (o *Orchestrator) attemptExpired(def *domain.FlowDefinition, inFlight []inf
 
 // waitAndFoldAny polls all in-flight hero children and folds the first one
 // that settles, removing it from the set. The rest keep running; the caller
-// re-evaluates the ready set. On flow cancellation every in-flight child is
-// hard-cancelled and the caller's next loop iteration terminalizes the run.
+// re-evaluates the ready set. On flow cancellation it returns at once and the
+// caller's next loop iteration terminalizes the run through cancelRemaining,
+// which stops the in-flight children and observes the stops it actually made.
 //
 // An attempt past its task's timeout_ms is hard-cancelled here and recorded as
 // task_timeout; the settlement then runs through the ordinary failure path
@@ -83,7 +85,13 @@ func (o *Orchestrator) waitAndFoldAny(ctx context.Context, runID string, flow *d
 		case <-ticker.C:
 		}
 		if o.isCancelled(ctx, runID) {
-			o.cancelInflight(ctx, runID, *inFlight)
+			// The stop is NOT requested here. The loop top terminalizes through
+			// cancelRemaining, which runs the whole stop -> cleanup -> publish sequence
+			// over the nodes it reads, and the flow_cancelled payload must report what
+			// THIS process observed. Cancelling the in-flight children here as well
+			// would write their nodes `cancelled` first, so the later observation would
+			// see settled nodes, count zero stopped children and have nothing to
+			// report - a payload describing an observation nobody made.
 			return nil // loop top terminalizes via cancelRemaining
 		}
 		// Settled first, expired second: a child that already ended is folded from
@@ -176,8 +184,8 @@ func (o *Orchestrator) settleTimedOutAttempt(ctx context.Context, runID string, 
 		reason += ": the child is still " + string(status)
 	}
 	o.failTask(ctx, runID, task.node, taskTimeoutCode)
-	o.cancelInflight(ctx, runID, remaining)
-	o.failKeepingUsage(ctx, runID, total, reason)
+	outcome := o.cancelInflight(ctx, runID, remaining)
+	o.failKeepingUsage(ctx, runID, total, reason+outcome.reasonSuffix())
 }
 
 // cancelSettlePolls bounds how long a cancelled attempt is awaited. The poll
@@ -229,8 +237,11 @@ func (o *Orchestrator) settleAttemptFailure(ctx context.Context, runID string, d
 		// this task is still schedulable (depSatisfied).
 		return
 	}
-	o.cancelInflight(ctx, runID, remaining)
-	o.failKeepingUsage(ctx, runID, total, fmt.Sprintf("task %q %s", node.Handle, code))
+	// The siblings are stopped in the same three phases as a user cancel, and the
+	// reason says so when a stop was not observed: the ledger total is the one the
+	// fold already counted, never 0.
+	outcome := o.cancelInflight(ctx, runID, remaining)
+	o.failKeepingUsage(ctx, runID, total, fmt.Sprintf("task %q %s", node.Handle, code)+outcome.reasonSuffix())
 }
 
 // retryAttempt re-dispatches a task whose attempt failed retryably, while its
@@ -304,17 +315,231 @@ func (o *Orchestrator) nodeChildRunsSettled(ctx context.Context, node *domain.Ru
 	return true
 }
 
-// cancelInflight hard-cancels a set of in-flight children and marks their
-// nodes cancelled, without touching the flow state (used on parallel task
-// failure and budget overrun; user cancellation takes the cancelRemaining
-// path instead).
-func (o *Orchestrator) cancelInflight(ctx context.Context, runID string, inFlight []inflightTask) {
+// cancelCleanupIncompleteCode is the node error code of a cancelled node whose
+// child Run never confirmed that it stopped. The node is still `cancelled`: the
+// code records that the stop was not OBSERVED, not that it did not happen.
+const cancelCleanupIncompleteCode = "cancel_cleanup_incomplete"
+
+// cancelCleanupTimeout bounds the cleanup phase of a cancellation: how long the
+// flow waits for a cancelled child's stop to become observable. It is a plain
+// var so tests can shorten it.
+//
+// The bound is measured on the wall clock, never on o.Now: it bounds how long
+// this process blocks, and a task's (possibly faked) ceiling clock must not be
+// able to stretch it or skip it.
+var cancelCleanupTimeout = 30 * time.Second
+
+// cancelTarget is one node facing cancellation, plus every child Run recorded on
+// it (a fan_out node records one per instance, a retried node one per attempt).
+type cancelTarget struct {
+	node     *domain.RunAgentFlowNode
+	childIDs []string
+}
+
+// cancelOutcome is what a cancellation actually observed. It is the only input
+// of the publish phase and of the terminal reason, so the words a cancelled flow
+// reports are the words this process saw.
+type cancelOutcome struct {
+	// stopped counts the child Runs observed terminal after the stop request.
+	stopped int
+	// unconfirmed lists, in node/task order, the child Run ids whose stop was
+	// never observed (not terminal when the cleanup budget ran out, or the caller
+	// context ended first).
+	unconfirmed []string
+	// unconfirmedNodes counts the affected NODES with at least one unconfirmed
+	// child: the reason talks about tasks, the payload talks about child Runs, and
+	// one fan_out node can hold several unconfirmed instances.
+	unconfirmedNodes int
+	// stopErrors keeps each child's cancel error. A refused cancel (the child had
+	// already settled) and an undelivered one are indistinguishable from the
+	// return value alone; only the status read tells them apart. Kept for
+	// diagnostics and tests, deliberately not published: the payload names what
+	// was observed, and an error string would be a second, unverifiable claim.
+	stopErrors map[string]error
+}
+
+// reasonSuffix names an unconfirmed stop at the end of a terminal reason, or
+// nothing at all when every child confirmed.
+func (o cancelOutcome) reasonSuffix() string {
+	if o.unconfirmedNodes == 0 {
+		return ""
+	}
+	plural := "s"
+	if o.unconfirmedNodes == 1 {
+		plural = ""
+	}
+	return fmt.Sprintf("; %d task%s did not confirm stop", o.unconfirmedNodes, plural)
+}
+
+// payload is the `cleanup` object of flow_cancelled. The unconfirmed list is
+// always a list (never null) so a consumer can iterate it unconditionally, and
+// it is empty exactly when every child confirmed.
+func (o cancelOutcome) payload() map[string]any {
+	unconfirmed := o.unconfirmed
+	if unconfirmed == nil {
+		unconfirmed = []string{}
+	}
+	return map[string]any{"stopped": o.stopped, "unconfirmed": unconfirmed}
+}
+
+// cancelInflight cancels a set of in-flight children and marks their nodes
+// cancelled, without touching the flow state (used on parallel task failure,
+// budget overrun, blocked children and the timeout path; user cancellation takes
+// the cancelRemaining path instead, which also terminalizes the flow).
+//
+// It runs the SAME three phases as cancelRemaining (cancelNodes), so the node
+// write and the reason suffix can never drift from the observation. The caller
+// that terminalizes the flow appends outcome.reasonSuffix() to its reason and
+// writes the ledger total it already holds. The worst case adds
+// cancelCleanupTimeout to the caller's path, and never more.
+func (o *Orchestrator) cancelInflight(ctx context.Context, runID string, inFlight []inflightTask) cancelOutcome {
+	targets := make([]cancelTarget, 0, len(inFlight))
 	for _, task := range inFlight {
-		_ = o.Children.CancelChildRun(ctx, task.childID)
-		_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
-			TaskIndex: task.node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
-			SetState: domain.FlowNodeCancelled,
+		// Every child of the node is stopped, not only the one this loop is
+		// waiting on: an earlier attempt's child recorded on the same node must not
+		// outlive a cancelled flow either. task.childID is the attempt in flight
+		// now, and it may not be on the node snapshot the loop holds yet.
+		childIDs := o.nodeChildIDs(task.node)
+		if task.childID != "" && !slices.Contains(childIDs, task.childID) {
+			childIDs = append(childIDs, task.childID)
+		}
+		targets = append(targets, cancelTarget{node: task.node, childIDs: childIDs})
+	}
+	return o.cancelNodes(ctx, runID, targets)
+}
+
+// cancelNodes applies a cancellation in three explicit phases and reports what
+// the process actually observed.
+//
+// It is the ONE implementation both entry points call (cancelInflight for task
+// failure / budget overrun / blocked children / timeout, cancelRemaining for user
+// cancellation), so the two cannot drift into "stopped" meaning two things.
+//
+// Phase 1, stop: request the cancel for every child of every target and keep the
+// error. Nothing is written - a cancel request is not a fact about the child yet.
+//
+// Phase 2, cleanup: poll each child until it is OBSERVABLY terminal, bounded by
+// cancelCleanupTimeout and polled with o.PollInterval. A terminal child counts as
+// stopped, the rest are unconfirmed. A cancelled caller context ends the wait and
+// keeps what is known: cancellation is best effort by definition.
+//
+// Phase 3, publish: write each node cancelled exactly once, carrying
+// cancel_cleanup_incomplete when one of its children is unconfirmed. The CAS
+// never overwrites a node that reached a terminal state on its own (a task that
+// finished keeps its own outcome and its result).
+//
+// A check task is NOT covered here: it runs synchronously inside the
+// orchestrator (runCheckTask), so it has no child Run to stop and no separate
+// lifecycle to observe. Cancelling a flow whose active task is a check is
+// handled by that call returning to the loop, not by this helper.
+func (o *Orchestrator) cancelNodes(ctx context.Context, runID string, targets []cancelTarget) cancelOutcome {
+	out := cancelOutcome{stopErrors: map[string]error{}}
+
+	// Phase 1 — stop: request, keep the error, publish nothing.
+	var ids []string
+	seen := make(map[string]bool, len(targets))
+	for _, target := range targets {
+		for _, childID := range target.childIDs {
+			if seen[childID] {
+				continue
+			}
+			seen[childID] = true
+			ids = append(ids, childID)
+			out.stopErrors[childID] = o.Children.CancelChildRun(ctx, childID)
+		}
+	}
+
+	// Phase 2 — cleanup: observe, bounded.
+	statuses := o.awaitCancelCleanup(ctx, ids)
+	unconfirmed := make(map[string]bool, len(ids))
+	for _, childID := range ids {
+		if statuses[childID].Terminal() {
+			out.stopped++
+			continue
+		}
+		unconfirmed[childID] = true
+		out.unconfirmed = append(out.unconfirmed, childID)
+	}
+	unconfirmedTargets := make([]bool, len(targets))
+	for index, target := range targets {
+		unconfirmedTargets[index] = slices.ContainsFunc(target.childIDs, func(childID string) bool {
+			return unconfirmed[childID]
 		})
+		if unconfirmedTargets[index] {
+			out.unconfirmedNodes++
+		}
+	}
+
+	// Phase 3 — publish: one write per node, CAS-guarded.
+	for index, target := range targets {
+		code := ""
+		if unconfirmedTargets[index] {
+			code = cancelCleanupIncompleteCode
+		}
+		_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
+			// The CAS is the observation that matters: pending/running is "not
+			// settled yet", every other state is somebody else's terminal fact
+			// (completed, failed, blocked, interrupted, already cancelled) and is
+			// never overwritten by a cancel.
+			TaskIndex:      target.node.TaskIndex,
+			ExpectedStates: []domain.FlowNodeState{domain.FlowNodePending, domain.FlowNodeRunning},
+			SetState:       domain.FlowNodeCancelled,
+			ErrorCode:      code,
+		})
+	}
+	return out
+}
+
+// awaitCancelCleanup polls the children a cancel was delivered to until each one
+// is observably terminal or the cleanup budget is spent.
+//
+// It returns the last status it read per child. A child that is absent from the
+// returned map was never readable, which the caller reads as unconfirmed:
+// "I could not see it stop" is not "it stopped".
+//
+// The budget is checked BETWEEN passes, so one pass of status reads may run past
+// it by the cost of that pass. That is deliberate: the alternative is a
+// per-child deadline, which would make the total wait grow with the fan-out.
+func (o *Orchestrator) awaitCancelCleanup(ctx context.Context, ids []string) map[string]domain.RunStatus {
+	statuses := make(map[string]domain.RunStatus, len(ids))
+	if len(ids) == 0 {
+		return statuses
+	}
+	pending := append([]string(nil), ids...)
+	deadline := time.Now().Add(cancelCleanupTimeout)
+	for {
+		if ctx.Err() != nil {
+			return statuses
+		}
+		remaining := make([]string, 0, len(pending))
+		for _, childID := range pending {
+			status, err := o.Children.ChildRunStatus(ctx, childID)
+			if err == nil {
+				statuses[childID] = status
+			}
+			if err != nil || !status.Terminal() {
+				remaining = append(remaining, childID)
+			}
+		}
+		pending = remaining
+		if len(pending) == 0 {
+			return statuses
+		}
+		// One observation pass always happens, even with an exhausted budget: a
+		// child that is already terminal answers on the first read, and a zero
+		// budget must still report what it saw instead of nothing.
+		wait := o.PollInterval
+		if left := time.Until(deadline); left < wait {
+			wait = left
+		}
+		if wait <= 0 {
+			return statuses
+		}
+		select {
+		case <-ctx.Done():
+			return statuses
+		case <-time.After(wait):
+		}
 	}
 }
 

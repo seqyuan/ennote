@@ -29,6 +29,14 @@ type fakeStore struct {
 	// conflictOnUpdate forces UpdateNode to lose the CAS for a task index, which
 	// is how a second orchestrator observing an already-settled node looks.
 	conflictOnUpdate map[int]bool
+	// completeOnCancelWrite simulates a node that reaches its own terminal fact
+	// between the cleanup poll and the cancel write: the first cancel write for
+	// that task index finds the node already completed, so the CAS must lose and
+	// the node must keep its state AND its result.
+	completeOnCancelWrite map[int]bool
+	// cancelWrites counts the successful `cancelled` node writes per task index,
+	// which is how "write the state once per node" is observable.
+	cancelWrites map[int]int
 }
 
 func newFakeStore(def *domain.FlowDefinition) (*fakeStore, error) {
@@ -66,7 +74,9 @@ func newFakeStore(def *domain.FlowDefinition) (*fakeStore, error) {
 	}
 	return &fakeStore{
 		run: run, nodes: nodes,
-		version: &domain.AgentFlowVersion{ID: "version-1", ConfigDigest: digest, DefinitionJSON: encoded},
+		version:               &domain.AgentFlowVersion{ID: "version-1", ConfigDigest: digest, DefinitionJSON: encoded},
+		completeOnCancelWrite: map[int]bool{},
+		cancelWrites:          map[int]int{},
 	}, nil
 }
 
@@ -101,6 +111,13 @@ func (f *fakeStore) UpdateNode(ctx context.Context, runID string, upd NodeUpdate
 		}
 		if f.conflictOnUpdate[upd.TaskIndex] {
 			return ErrCheckpointConflict
+		}
+		// Simulate the node reaching its terminal fact after the cleanup poll and
+		// before this write: the CAS below must lose against it.
+		if upd.SetState == domain.FlowNodeCancelled && f.completeOnCancelWrite[upd.TaskIndex] {
+			delete(f.completeOnCancelWrite, upd.TaskIndex)
+			f.nodes[i].TerminalState = domain.FlowNodeCompleted
+			f.nodes[i].OutputRef = json.RawMessage(`{"changedFiles":["late.go"]}`)
 		}
 		if len(upd.ExpectedStates) > 0 {
 			ok := false
@@ -146,6 +163,9 @@ func (f *fakeStore) UpdateNode(ctx context.Context, runID string, upd NodeUpdate
 			} else {
 				f.nodes[i].AcceptanceVerdict = append(json.RawMessage(nil), (*upd.AcceptanceVerdict)...)
 			}
+		}
+		if upd.SetState == domain.FlowNodeCancelled {
+			f.cancelWrites[upd.TaskIndex]++
 		}
 		return nil
 	}
@@ -645,6 +665,324 @@ func TestOrchestratorCancelPropagation(t *testing.T) {
 	// The durable event carries the cancelled child run ids.
 	payload := events.payloadOf("flow_cancelled")
 	assert.NotNil(t, payload["cancelledChildRuns"])
+}
+
+// --- Cancellation in three phases (stop -> cleanup -> publish) ---
+
+// shortenCancelCleanup bounds the cleanup phase for one test and restores the
+// package default afterwards. The timeout is a var exactly for this.
+func shortenCancelCleanup(t *testing.T, limit time.Duration) {
+	t.Helper()
+	previous := cancelCleanupTimeout
+	cancelCleanupTimeout = limit
+	t.Cleanup(func() { cancelCleanupTimeout = previous })
+}
+
+// requestCancelWhenRunning requests the flow cancel once the named node has been
+// dispatched, so a cancellation test stops a real in-flight child instead of
+// racing one. It is meant to run in a goroutine (it only calls t.Errorf, which is
+// safe from there).
+func requestCancelWhenRunning(t *testing.T, fake *fakeStore, handle string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		nodes, err := fake.ListNodes(context.Background(), "flow-run-1")
+		if err == nil {
+			for _, node := range nodes {
+				if node.Handle != handle || node.TerminalState != domain.FlowNodeRunning {
+					continue
+				}
+				if err := fake.SetCancelRequested(context.Background(), "flow-run-1"); err != nil {
+					t.Errorf("request cancel: %v", err)
+				}
+				return
+			}
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Errorf("task %q never started, so the cancel was never requested", handle)
+}
+
+// cleanupOf reads the cancellation observation out of the flow_cancelled event.
+func cleanupOf(t *testing.T, events *fakeEvents) map[string]any {
+	t.Helper()
+	payload := events.payloadOf("flow_cancelled")
+	require.NotNil(t, payload, "flow_cancelled must be published")
+	cleanup, ok := payload["cleanup"].(map[string]any)
+	require.True(t, ok, "flow_cancelled must carry the cleanup observation, got %#v", payload["cleanup"])
+	return cleanup
+}
+
+// cancelWriteCount reports how many times the `cancelled` state was written to
+// one node. Two writes would mean "cancelled" was published before it was
+// observed and then written again.
+func (f *fakeStore) cancelWriteCount(taskIndex int) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.cancelWrites[taskIndex]
+}
+
+// Everything stops: the nodes are cancelled with no incomplete code, the event
+// reports one stopped child and nothing unconfirmed, the reason carries no
+// suffix, the node state is written once, and the ledger keeps the total the
+// flow had already accumulated.
+func TestCancelStopsEveryChildAndPublishesTheObservation(t *testing.T) {
+	def := threeTaskDef()
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	children.blockedHandles["reviewer"] = true // the second child never settles on its own
+	events := &fakeEvents{}
+	orch := newOrchestrator(fake, children, events)
+
+	// Cancel while the reviewer's child is in flight. The producer already
+	// completed, so the ledger holds something a cancellation could lose.
+	go requestCancelWhenRunning(t, fake, "reviewer")
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCancelled, waitTerminal(t, fake))
+
+	nodes := nodesByHandle(t, fake)
+	assert.Equal(t, domain.FlowNodeCompleted, nodes["producer"].TerminalState,
+		"a node that settled on its own keeps its outcome")
+	assert.NotEmpty(t, nodes["producer"].OutputRef)
+	for _, handle := range []string{"reviewer", "accept"} {
+		assert.Equal(t, domain.FlowNodeCancelled, nodes[handle].TerminalState, handle)
+		assert.Empty(t, nodes[handle].ErrorCode, "a confirmed stop carries no incomplete code: %s", handle)
+		assert.Equal(t, 1, fake.cancelWriteCount(nodes[handle].TaskIndex),
+			"the cancelled state is written exactly once: %s", handle)
+	}
+
+	cleanup := cleanupOf(t, events)
+	assert.Equal(t, len(children.childIDsOf("reviewer")), cleanup["stopped"])
+	assert.Equal(t, []string{}, cleanup["unconfirmed"], "an empty list, not a nil one")
+
+	run, err := fake.GetRun(context.Background(), "flow-run-1")
+	require.NoError(t, err)
+	assert.Equal(t, "cancelled by user", run.TerminalReason, "no suffix when every child confirmed")
+	assert.Equal(t, int64(1000), run.TotalTokensUsed, "a cancelled flow keeps its ledger")
+}
+
+// A child that ignores the cancel is the whole point: the flow must still reach
+// a terminal state, bounded, and must say that the stop was not observed instead
+// of writing a plain `cancelled`.
+func TestCancelReportsUnconfirmedStopAndSuffixesTheReason(t *testing.T) {
+	shortenCancelCleanup(t, 60*time.Millisecond)
+	def := threeTaskDef()
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	children.blockedHandles["producer"] = true
+	children.ignoreCancel["producer"] = true // DB-only cancel: the child keeps running
+	events := &fakeEvents{}
+	orch := newOrchestrator(fake, children, events)
+
+	go requestCancelWhenRunning(t, fake, "producer")
+	start := time.Now()
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCancelled, waitTerminal(t, fake))
+	elapsed := time.Since(start)
+	assert.GreaterOrEqual(t, elapsed, 60*time.Millisecond, "the flow waited for the stop to be observable")
+	assert.Less(t, elapsed, 3*time.Second, "and gave up at the cleanup budget instead of blocking")
+
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeCancelled, producer.TerminalState,
+		"an unconfirmed stop is still cancelled; the code records why it is not clean")
+	assert.Equal(t, cancelCleanupIncompleteCode, producer.ErrorCode)
+	assert.Equal(t, 1, fake.cancelWriteCount(producer.TaskIndex))
+
+	cleanup := cleanupOf(t, events)
+	assert.Equal(t, 0, cleanup["stopped"])
+	assert.Equal(t, []string{"child-producer"}, cleanup["unconfirmed"])
+
+	run, err := fake.GetRun(context.Background(), "flow-run-1")
+	require.NoError(t, err)
+	assert.Contains(t, run.TerminalReason, "; 1 task did not confirm stop")
+	assert.Equal(t, domain.RunCancelled, fake.anchorStatus)
+}
+
+// Cancellation between tasks: nothing is in flight, so nothing was stopped and
+// nothing is unconfirmed, but the ledger still survives.
+func TestCancelBetweenTasksCountsNoCleanup(t *testing.T) {
+	def := threeTaskDef()
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+	orch := newOrchestrator(fake, children, events)
+	_, err = fake.AddTokenUsage(context.Background(), "flow-run-1", 250)
+	require.NoError(t, err)
+
+	require.NoError(t, orch.cancelRemaining(context.Background(), "flow-run-1", ""))
+
+	for handle, node := range nodesByHandle(t, fake) {
+		assert.Equal(t, domain.FlowNodeCancelled, node.TerminalState, handle)
+		assert.Empty(t, node.ErrorCode, "a node with no child is cancelled cleanly: %s", handle)
+		assert.Equal(t, 1, fake.cancelWriteCount(node.TaskIndex), handle)
+	}
+	assert.Empty(t, children.created, "cancelling between tasks starts no child")
+
+	cleanup := cleanupOf(t, events)
+	assert.Equal(t, 0, cleanup["stopped"])
+	assert.Equal(t, []string{}, cleanup["unconfirmed"])
+
+	run, err := fake.GetRun(context.Background(), "flow-run-1")
+	require.NoError(t, err)
+	assert.Equal(t, "cancelled by user", run.TerminalReason)
+	assert.Equal(t, int64(250), run.TotalTokensUsed, "cancelling an idle flow must not zero the ledger")
+}
+
+// A node that reaches its terminal fact between the cleanup poll and the cancel
+// write is not overwritten: the CAS loses and the node keeps its state and its
+// result, while the flow still terminalizes as cancelled.
+func TestCancelDoesNotOverwriteANodeThatFinishedFirst(t *testing.T) {
+	def := threeTaskDef()
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+	orch := newOrchestrator(fake, children, events)
+
+	producer := nodesByHandle(t, fake)["producer"]
+	// The node is mid-attempt when the cancel starts...
+	require.NoError(t, fake.UpdateNode(context.Background(), "flow-run-1", NodeUpdate{
+		TaskIndex: producer.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodePending},
+		SetState: domain.FlowNodeRunning, ChildRunID: "child-producer",
+	}))
+	children.status["child-producer"] = domain.RunRunning
+	// ...and it settles on its own between the poll and the write.
+	fake.completeOnCancelWrite[producer.TaskIndex] = true
+
+	require.NoError(t, orch.cancelRemaining(context.Background(), "flow-run-1", ""))
+
+	nodes := nodesByHandle(t, fake)
+	assert.Equal(t, domain.FlowNodeCompleted, nodes["producer"].TerminalState,
+		"a node that finished concurrently keeps its terminal state")
+	assert.Equal(t, json.RawMessage(`{"changedFiles":["late.go"]}`), nodes["producer"].OutputRef,
+		"and its result")
+	assert.Equal(t, 0, fake.cancelWriteCount(producer.TaskIndex), "the cancel write lost the CAS")
+	assert.Equal(t, domain.FlowNodeCancelled, nodes["reviewer"].TerminalState)
+
+	// The stop itself was observed, so the flow may report it even though the
+	// node it belonged to kept its own (winning) outcome.
+	cleanup := cleanupOf(t, events)
+	assert.Equal(t, 1, cleanup["stopped"])
+	assert.Equal(t, []string{}, cleanup["unconfirmed"])
+	run, err := fake.GetRun(context.Background(), "flow-run-1")
+	require.NoError(t, err)
+	assert.Equal(t, domain.FlowStateCancelled, run.State)
+	assert.Equal(t, "cancelled by user", run.TerminalReason)
+}
+
+// A cancelled flow keeps its ledger, including the parallel case: the fan_out
+// instances are stopped, counted, and their unfurled usage is not invented.
+func TestCancelledFlowKeepsItsLedger(t *testing.T) {
+	def := fanOutDef(2)
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	children.blockedHandles["scan-0"] = true
+	children.blockedHandles["scan-1"] = true
+	events := &fakeEvents{}
+	orch := newOrchestrator(fake, children, events)
+
+	go requestCancelWhenRunning(t, fake, "scan")
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCancelled, waitTerminal(t, fake))
+
+	cleanup := cleanupOf(t, events)
+	assert.Equal(t, 2, cleanup["stopped"], "both instances are stopped and counted")
+	assert.Equal(t, []string{}, cleanup["unconfirmed"])
+
+	run, err := fake.GetRun(context.Background(), "flow-run-1")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1000), run.TotalTokensUsed,
+		"the ledger is the accumulated total (the producer's 1000), never 0")
+	assert.Equal(t, "cancelled by user", run.TerminalReason)
+	for _, id := range children.childIDsOf("scan-0") {
+		assert.Equal(t, domain.RunCancelled, children.status[id])
+	}
+}
+
+// The helper's contract on its own: a cancel the substrate ACCEPTED is not a
+// child that stopped, and an unconfirmed child is named by node for the reason
+// and by Run id for the payload.
+func TestCancelInflightReportsDeliveredButUnconfirmedStop(t *testing.T) {
+	shortenCancelCleanup(t, 40*time.Millisecond)
+	def := threeTaskDef()
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	children.blockedHandles["producer"] = true
+	children.ignoreCancel["producer"] = true
+	events := &fakeEvents{}
+	orch := newOrchestrator(fake, children, events)
+
+	producer := nodesByHandle(t, fake)["producer"]
+	require.NoError(t, fake.UpdateNode(context.Background(), "flow-run-1", NodeUpdate{
+		TaskIndex: producer.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodePending},
+		SetState: domain.FlowNodeRunning, ChildRunID: "child-producer",
+	}))
+	children.status["child-producer"] = domain.RunRunning
+	node, err := fake.GetNode(context.Background(), "flow-run-1", producer.TaskIndex)
+	require.NoError(t, err)
+
+	outcome := orch.cancelInflight(context.Background(), "flow-run-1",
+		[]inflightTask{{node: node, childID: "child-producer"}})
+
+	require.Contains(t, outcome.stopErrors, "child-producer", "the cancel error is kept, not discarded")
+	assert.NoError(t, outcome.stopErrors["child-producer"], "the substrate accepted the cancel")
+	assert.Equal(t, 0, outcome.stopped, "an accepted cancel is not a stopped child")
+	assert.Equal(t, []string{"child-producer"}, outcome.unconfirmed)
+	assert.Equal(t, 1, outcome.unconfirmedNodes)
+	assert.Equal(t, "; 1 task did not confirm stop", outcome.reasonSuffix())
+	assert.Equal(t, map[string]any{"stopped": 0, "unconfirmed": []string{"child-producer"}}, outcome.payload())
+
+	cancelled := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeCancelled, cancelled.TerminalState)
+	assert.Equal(t, cancelCleanupIncompleteCode, cancelled.ErrorCode)
+	// cancelInflight never touches the flow state: the caller terminalizes.
+	run, err := fake.GetRun(context.Background(), "flow-run-1")
+	require.NoError(t, err)
+	assert.False(t, run.State.Terminal(), "the flow state belongs to the caller")
+}
+
+// Cancellation is best effort: a caller context cancelled during the cleanup ends
+// the wait, keeps what is known, and still terminalises the flow.
+func TestCancelTerminalisesWhenTheCallerContextIsCancelled(t *testing.T) {
+	shortenCancelCleanup(t, 30*time.Second) // the context, not the budget, must end the wait
+	def := threeTaskDef()
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	children.blockedHandles["producer"] = true
+	children.ignoreCancel["producer"] = true
+	events := &fakeEvents{}
+	orch := newOrchestrator(fake, children, events)
+
+	producer := nodesByHandle(t, fake)["producer"]
+	require.NoError(t, fake.UpdateNode(context.Background(), "flow-run-1", NodeUpdate{
+		TaskIndex: producer.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodePending},
+		SetState: domain.FlowNodeRunning, ChildRunID: "child-producer",
+	}))
+	children.status["child-producer"] = domain.RunRunning
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(30*time.Millisecond, cancel)
+	start := time.Now()
+	require.NoError(t, orch.cancelRemaining(ctx, "flow-run-1", ""))
+	assert.Less(t, time.Since(start), 5*time.Second, "a cancelled caller context ends the cleanup wait")
+
+	run, err := fake.GetRun(context.Background(), "flow-run-1")
+	require.NoError(t, err)
+	assert.Equal(t, domain.FlowStateCancelled, run.State,
+		"a caller that gave up must not leave the flow non-terminal")
+	assert.Equal(t, domain.RunCancelled, fake.anchorStatus)
+
+	node := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeCancelled, node.TerminalState)
+	assert.Equal(t, cancelCleanupIncompleteCode, node.ErrorCode,
+		"a stop nobody observed is recorded as unconfirmed")
+	assert.Equal(t, []string{"child-producer"}, cleanupOf(t, events)["unconfirmed"])
 }
 
 // Matrix 12: budget exceeded -> budget_exceeded terminal state.

@@ -514,13 +514,14 @@ func (o *Orchestrator) foldHeroChild(ctx context.Context, runID string, flow *do
 		var def domain.FlowDefinition
 		if json.Unmarshal(version.DefinitionJSON, &def) == nil &&
 			def.Budget.MaxTotalTokens > 0 && total > def.Budget.MaxTotalTokens {
-			o.cancelInflight(ctx, runID, remaining)
-			_ = o.Store.UpdateFlowState(ctx, runID, domain.FlowStateBudgetExceeded, total,
-				fmt.Sprintf("flow budget exceeded: %d > %d", total, def.Budget.MaxTotalTokens))
+			outcome := o.cancelInflight(ctx, runID, remaining)
+			reason := fmt.Sprintf("flow budget exceeded: %d > %d", total, def.Budget.MaxTotalTokens) + outcome.reasonSuffix()
+			_ = o.Store.UpdateFlowState(ctx, runID, domain.FlowStateBudgetExceeded, total, reason)
 			_ = o.Events.PublishFlow(ctx, runID, "flow_budget_exceeded", map[string]any{
 				"flowRunId": runID, "used": total, "limit": def.Budget.MaxTotalTokens,
 			})
-			_ = o.Store.TerminateAnchor(ctx, runID, domain.RunFailed, "budget_exceeded", "flow budget exceeded")
+			_ = o.Store.TerminateAnchor(ctx, runID, domain.RunFailed, "budget_exceeded",
+				"flow budget exceeded"+outcome.reasonSuffix())
 			return nil
 		}
 	}
@@ -883,35 +884,62 @@ func (o *Orchestrator) waitChildren(ctx context.Context, runID string, childIDs 
 	return results, statuses
 }
 
-// cancelRemaining terminalizes the meta-Run as cancelled: the active child is
-// hard-cancelled (already cancelled by the poll), future tasks are never
-// scheduled, and every non-terminal node is marked cancelled.
+// cancelRemaining terminalizes the meta-Run as cancelled: the user cancel is the
+// entry point for the same three phases cancelInflight uses (stop -> cleanup ->
+// publish), applied to every non-terminal node, and only then does the flow
+// terminalize.
+//
+// What it may claim is bounded by what it can observe: a node whose child Run was
+// seen terminal after the cancel is `cancelled`; a node whose child did not
+// confirm carries cancel_cleanup_incomplete, and the flow_cancelled payload
+// carries the observation (cleanup.stopped / cleanup.unconfirmed) plus a reason
+// suffix, so "cancelled" never reads as "everything stopped" when it did not.
+// The ledger keeps the total the flow already accumulated: a cancelled flow that
+// spent tokens must not report 0.
+//
+// It is idempotent on purpose. Three internal callers reach here in the middle of
+// the dispatch loop (the check-approval wait, the fan_out instance loop and the
+// waitChildren return), and the loop top calls it again after they return; with a
+// flow that is already terminal the second call would republish flow_cancelled
+// and report a cleanup nobody observed.
 func (o *Orchestrator) cancelRemaining(ctx context.Context, runID string, activeChild string) error {
+	// A caller whose context ended during the cleanup still gets a terminal flow:
+	// the observation is finished, so reading the ledger and recording the outcome
+	// must not be cancelled with it. Otherwise the run stays non-terminal and a
+	// resume would restart work the user already stopped.
+	publishCtx := context.WithoutCancel(ctx)
+	run, err := o.Store.GetRun(publishCtx, runID)
+	if err != nil {
+		return err
+	}
+	if run.State.Terminal() {
+		return nil // already terminalized: nothing left to stop or to publish
+	}
 	nodes, err := o.Store.ListNodes(ctx, runID)
 	if err != nil {
 		return err
 	}
-	for i := range nodes {
-		if nodes[i].TerminalState.Terminal() {
-			continue
-		}
-		for _, childID := range o.nodeChildIDs(nodes[i]) {
-			_ = o.Children.CancelChildRun(ctx, childID)
-		}
-		_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
-			TaskIndex: nodes[i].TaskIndex, ExpectedStates: []domain.FlowNodeState{nodes[i].TerminalState},
-			SetState: domain.FlowNodeCancelled,
-		})
-	}
+	targets := make([]cancelTarget, 0, len(nodes))
 	cancelledChildRuns := []string{}
 	for i := range nodes {
-		cancelledChildRuns = append(cancelledChildRuns, o.nodeChildIDs(nodes[i])...)
+		childIDs := o.nodeChildIDs(nodes[i])
+		cancelledChildRuns = append(cancelledChildRuns, childIDs...)
+		if nodes[i].TerminalState.Terminal() {
+			// A node that already reached a terminal fact keeps it (and its result);
+			// the cancel only owns work that is still open. Its child Runs are still
+			// listed in the payload: they are part of what the cancel covers.
+			continue
+		}
+		targets = append(targets, cancelTarget{node: nodes[i], childIDs: childIDs})
 	}
-	_ = o.Store.UpdateFlowState(ctx, runID, domain.FlowStateCancelled, 0, "cancelled by user")
-	_ = o.Events.PublishFlow(ctx, runID, "flow_cancelled", map[string]any{
+	outcome := o.cancelNodes(ctx, runID, targets)
+	reason := "cancelled by user" + outcome.reasonSuffix()
+	_ = o.Store.UpdateFlowState(publishCtx, runID, domain.FlowStateCancelled, run.TotalTokensUsed, reason)
+	_ = o.Events.PublishFlow(publishCtx, runID, "flow_cancelled", map[string]any{
 		"flowRunId": runID, "cancelledChildRuns": cancelledChildRuns,
+		"cleanup": outcome.payload(),
 	})
-	_ = o.Store.TerminateAnchor(ctx, runID, domain.RunCancelled, "flow_cancelled", "cancelled by user")
+	_ = o.Store.TerminateAnchor(publishCtx, runID, domain.RunCancelled, "flow_cancelled", reason)
 	return nil
 }
 
@@ -937,60 +965,6 @@ type inflightTask struct {
 	node      *domain.RunAgentFlowNode
 	childID   string
 	startedAt time.Time
-}
-
-// readyHeroTasks returns every dispatchable hero/fan_out/check node: pending
-// or interrupted, not on an inactive check-gate branch, and with every
-// depends task satisfied (the ready set). A failed-but-optional dependency
-// counts as satisfied (depSatisfied), which is what lets the rest of a flow run
-// after an optional task gives up. Nodes are already ordered by task
-// index (ListNodes), which keeps dispatch deterministic and recovery
-// reproducible. Terminal tasks are excluded: they complete the flow instead
-// of dispatching a child.
-func readyHeroTasks(nodes []*domain.RunAgentFlowNode, byHandle map[string]*domain.RunAgentFlowNode,
-	def *domain.FlowDefinition) []*domain.RunAgentFlowNode {
-	var ready []*domain.RunAgentFlowNode
-	for i := range nodes {
-		node := nodes[i]
-		if node.TerminalState != domain.FlowNodePending && node.TerminalState != domain.FlowNodeInterrupted {
-			continue
-		}
-		if inactiveBranch(node.Handle, def, byHandle, map[string]bool{}) {
-			continue
-		}
-		if task, ok := def.Tasks[node.Handle]; ok {
-			if task.Terminal != nil {
-				continue // terminal gates complete the flow; never dispatched
-			}
-			if uncompletedDep(task, byHandle) != "" {
-				continue // depends not yet satisfied; not ready
-			}
-		}
-		ready = append(ready, node)
-	}
-	return ready
-}
-
-// firstSpecialTask returns the first ready check task (or nil). Check tasks
-// are deterministic gates that run alone, once the parallel lane has drained.
-func firstSpecialTask(ready []*domain.RunAgentFlowNode, def *domain.FlowDefinition, taskType string) *domain.RunAgentFlowNode {
-	for _, node := range ready {
-		if task, ok := def.Tasks[node.Handle]; ok && task.Type == taskType {
-			return node
-		}
-	}
-	return nil
-}
-
-// firstFanOutTask returns the first ready fan_out task (or nil). Fan_out
-// tasks are read-only (validated) and run alone like checks.
-func firstFanOutTask(ready []*domain.RunAgentFlowNode, def *domain.FlowDefinition) *domain.RunAgentFlowNode {
-	for _, node := range ready {
-		if task, ok := def.Tasks[node.Handle]; ok && task.FanOut != nil {
-			return node
-		}
-	}
-	return nil
 }
 
 // terminalGateTask returns the flow's single unlocked terminal task and whether
@@ -1029,82 +1003,6 @@ func terminalGateTask(def *domain.FlowDefinition, byHandle map[string]*domain.Ru
 	}
 	value := def.Tasks[unlocked[0]]
 	return &value, false
-}
-
-// firstReadyClass picks the lane for the next dispatch window. Reader-first:
-// when both classes are ready, read-only tasks go first so the mutation lane
-// drains before any writer touches the workspace.
-func firstReadyClass(ready []*domain.RunAgentFlowNode) int {
-	for _, node := range ready {
-		if node.ReadOnly {
-			return laneReader
-		}
-	}
-	return laneWriter
-}
-
-// selectLaneBatch picks the dispatch batch for the active lane: up to
-// parallelism.max same-class hero tasks. Writers stay exclusive unless the
-// flow opts into disjoint writes scopes; in that case the batch greedily adds
-// writers whose frozen Writes are pairwise disjoint with the batch and with
-// the in-flight writers. Returns the batch and whether any ready task belongs
-// to the lane.
-func selectLaneBatch(ready []*domain.RunAgentFlowNode, lane int, def *domain.FlowDefinition,
-	maxParallel int, inFlight []inflightTask) ([]*domain.RunAgentFlowNode, bool) {
-	var batch []*domain.RunAgentFlowNode
-	found := false
-	if lane == laneReader {
-		for _, node := range ready {
-			if !node.ReadOnly {
-				continue
-			}
-			found = true
-			if len(batch) < maxParallel {
-				batch = append(batch, node)
-			}
-		}
-		return batch, found
-	}
-	// Writer lane.
-	disjoint := def.DisjointWritersEnabled()
-	inFlightScopes := make([][]string, 0, len(inFlight))
-	for _, f := range inFlight {
-		inFlightScopes = append(inFlightScopes, f.node.Writes)
-	}
-	for _, node := range ready {
-		if node.ReadOnly {
-			continue
-		}
-		found = true
-		if len(batch) >= maxParallel {
-			continue
-		}
-		if !disjoint {
-			if len(batch) == 0 {
-				batch = append(batch, node)
-			}
-			continue
-		}
-		compatible := true
-		for _, other := range inFlightScopes {
-			if !writesDisjoint(node.Writes, other) {
-				compatible = false
-				break
-			}
-		}
-		if compatible {
-			for _, selected := range batch {
-				if !writesDisjoint(node.Writes, selected.Writes) {
-					compatible = false
-					break
-				}
-			}
-		}
-		if compatible {
-			batch = append(batch, node)
-		}
-	}
-	return batch, found
 }
 
 // inactiveBranch reports whether a node lies on an inactive check-gate
