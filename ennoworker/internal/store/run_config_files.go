@@ -276,6 +276,7 @@ func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.Ag
 				Authority: heroDefinition.Authority, PermissionCeiling: heroDefinition.PermissionCeiling,
 				AllowedTools: append([]string(nil), heroDefinition.AllowedTools...), Skills: heroDefinition.Skills,
 				OutputContract: heroDefinition.OutputContract,
+				ReportContract: domain.CloneHeroReportContract(heroDefinition.ReportContract),
 			}
 			heroPrompt = heroDefinition.HeroPrompt
 		} else if targetKind, kindErr := loadTurnTargetKind(ctx, tx, run.TurnID); kindErr != nil {
@@ -333,6 +334,7 @@ func (r *RunRepo) resolveAndFreezeFileConfig(ctx context.Context, run *domain.Ag
 				PermissionCeiling: heroDefinition.PermissionCeiling,
 				AllowedTools:      append([]string(nil), heroDefinition.AllowedTools...), Skills: heroDefinition.Skills,
 				OutputContract: heroDefinition.OutputContract,
+				ReportContract: domain.CloneHeroReportContract(heroDefinition.ReportContract),
 			}
 			heroPrompt = heroDefinition.HeroPrompt
 		}

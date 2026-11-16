@@ -1639,6 +1639,42 @@ func settleAttemptTx(ctx context.Context, tx *sql.Tx, childRunID string, status 
 	return nil
 }
 
+// frozenReportContract is the report contract this completion must enforce, read
+// from the delegation item that owns the child Run. nil means "nothing to
+// enforce": either the Hero declared no contract, or the parent is an Agent Flow
+// anchor, whose task verdict belongs to the agentflow fold (it needs the
+// successful report to name the violation on the node, keep the output_ref, and
+// drain the in-flight siblings before the flow fails). hero_meta_json is the same
+// frozen Hero meta the child's effective config was built from, so the rule can
+// never drift from the definition the child actually ran under. It reads through
+// the caller's transaction because the session store runs SQLite with a single
+// connection.
+func frozenReportContract(ctx context.Context, tx *sql.Tx, childRunID, parentRunID string) (*domain.HeroReportContract, error) {
+	var metaJSON sql.NullString
+	var flowAnchor int
+	err := tx.QueryRowContext(ctx, `SELECT i.hero_meta_json,
+		EXISTS(SELECT 1 FROM run_agent_flow WHERE run_id=?)
+		FROM delegation_item_attempts a JOIN delegation_items i ON i.id=a.item_id
+		WHERE a.child_run_id=?`, parentRunID, childRunID).Scan(&metaJSON, &flowAnchor)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if flowAnchor == 1 || !metaJSON.Valid || strings.TrimSpace(metaJSON.String) == "" ||
+		strings.TrimSpace(metaJSON.String) == "{}" {
+		return nil, nil
+	}
+	var meta DelegationHeroMeta
+	if err := json.Unmarshal([]byte(metaJSON.String), &meta); err != nil {
+		// A frozen meta that cannot be decoded is a data error; returning nil here
+		// would silently drop the contract it may declare.
+		return nil, fmt.Errorf("decode frozen delegation Hero meta: %w", err)
+	}
+	return meta.Definition.ReportContract, nil
+}
+
 // FinalizeChildSuccess terminalizes a delegated_agent Run: it writes the
 // complete private transcript to run_messages (no canonical message), folds the
 // submit_result contract into the delegation item, settles the group when all
@@ -1677,6 +1713,20 @@ func (r *RunRepo) FinalizeChildSuccess(ctx context.Context, runID string, output
 	}
 	if status != string(domain.RunRunning) {
 		return fmt.Errorf("%w: child must be running to finalize success", ErrInvalidRunState)
+	}
+
+	// A report that breaks the Hero's frozen contract is a failed completion, not a
+	// success; see frozenReportContract for why a Graph task's child is left to the
+	// fold instead.
+	contract, err := frozenReportContract(ctx, tx, runID, parent.String)
+	if err != nil {
+		return err
+	}
+	if violation := domain.ValidateReportAgainstContract(output.Terminal, contract); violation != nil {
+		_ = tx.Rollback() // release the connection the failure path needs
+		_, _, err := r.FinalizeChildFailure(ctx, runID,
+			string(domain.ErrorReportContractViolation), violation.Error())
+		return err
 	}
 
 	timestamp := time.Now().UTC()

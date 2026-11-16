@@ -137,6 +137,10 @@ type FrozenHeroExecution struct {
 	// unpinned for compatibility.
 	FrozenSkills   FrozenSkillRefs `json:"frozenSkills,omitempty"`
 	OutputContract string          `json:"outputContract"`
+	// ReportContract is the frozen enforceable report shape (nil for every Hero
+	// written before the field existed). It rides the snapshot so a Run records
+	// what its child was actually required to produce.
+	ReportContract *HeroReportContract `json:"reportContract,omitempty"`
 }
 
 type EffectiveRunConfig struct {
@@ -296,8 +300,13 @@ const (
 	// resolve: the frozen prompt must never claim provenance it cannot prove.
 	ErrorSkillNotFound ErrorCode = "skill_not_found"
 	// ErrorTooManySkills refuses a selection larger than one prompt should carry.
-	ErrorTooManySkills                   ErrorCode = "too_many_skills"
-	ErrorIncompleteTerminalContract      ErrorCode = "incomplete_terminal_contract"
+	ErrorTooManySkills              ErrorCode = "too_many_skills"
+	ErrorIncompleteTerminalContract ErrorCode = "incomplete_terminal_contract"
+	// ErrorReportContractViolation is a delegated child that ended completed but
+	// whose submit_result does not keep the shape its Hero's report contract
+	// promised. It is a distinct code because a well-formed report that breaks
+	// its promise is not a missing one.
+	ErrorReportContractViolation         ErrorCode = "report_contract_violation"
 	ErrorDelegationBudgetExceeded        ErrorCode = "delegation_budget_exceeded"
 	ErrorDelegationNotAuthorized         ErrorCode = "delegation_not_authorized"
 	ErrorDelegationGenerationConflict    ErrorCode = "delegation_generation_conflict"

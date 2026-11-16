@@ -254,7 +254,7 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 				}
 			}
 		}
-		acceptanceFailure := acceptanceFailureNode(nodes)
+		settlementFailure := settlementFailureNode(nodes)
 		// Convergence: a completed 'from' node triggers one durable back-edge
 		// round (reset the loop path, count it, and stop at max_rounds).
 		converged, err := o.applyConvergence(ctx, runID, &def, nodes)
@@ -267,15 +267,16 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 		}
 		ready := readyHeroTasks(nodes, completed, &def)
 
-		// Acceptance failure settlement. A recorded acceptance failure stops NEW
-		// dispatch immediately: while a sibling is still in flight the loop only
-		// folds it, so "wait for the in-flight siblings" cannot turn into "run
-		// the rest of the graph". Once nothing is in flight the flow fails with
-		// the CURRENT token total (never 0) and the already-finished siblings
+		// Recorded-verdict settlement. A failed checkpoint that says the task's
+		// report was not acceptable (acceptance_failed, report_contract_violation)
+		// stops NEW dispatch immediately: while a sibling is still in flight the
+		// loop only folds it, so "wait for the in-flight siblings" cannot turn into
+		// "run the rest of the graph". Once nothing is in flight the flow fails
+		// with the CURRENT token total (never 0) and the already-finished siblings
 		// keep their own checkpoints. This runs before the terminal gate: an
-		// unlocked terminal would otherwise complete a flow whose task failed
-		// acceptance.
-		if acceptanceFailure != nil {
+		// unlocked terminal would otherwise complete a flow whose task's report was
+		// rejected.
+		if settlementFailure != nil {
 			if len(inFlight) > 0 {
 				if err := o.waitAndFoldAny(ctx, runID, run, &inFlight); err != nil {
 					return
@@ -283,7 +284,7 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 				continue
 			}
 			o.failKeepingUsage(ctx, runID, state.TotalTokensUsed,
-				fmt.Sprintf("task %q %s", acceptanceFailure.Handle, acceptanceFailedCode))
+				fmt.Sprintf("task %q %s", settlementFailure.Handle, settlementFailure.ErrorCode))
 			return
 		}
 
@@ -530,6 +531,14 @@ func (o *Orchestrator) foldHeroChild(ctx context.Context, runID string, flow *do
 	} else if result != nil {
 		payload, _ = json.Marshal(map[string]any{"summary": result.Summary})
 	}
+	// The Hero's report contract is enforced before acceptance: a report that does
+	// not have the promised shape is not evidence for anything, so a declared
+	// acceptance clause is never evaluated against it.
+	if contract := heroReportContractOf(node); contract != nil {
+		if violation := domain.ValidateReportAgainstContract(result, contract); violation != nil {
+			return o.foldReportContractViolation(ctx, runID, node, childID, payload, violation)
+		}
+	}
 	// A declared acceptance clause is verified here, before the checkpoint
 	// write: the child's own prose is never evidence. File leaves read the
 	// workspace; artifact leaves read the refs this fold already holds.
@@ -760,6 +769,7 @@ func (o *Orchestrator) runFanOutTask(ctx context.Context, runID string, flow *do
 	}
 	// Aggregate by instance order. A blocked instance is not a product: it is
 	// folded in this same order, so the recorded code is deterministic.
+	contract := heroReportContractOf(node)
 	aggregate := make([]json.RawMessage, 0, len(childIDs))
 	for _, childID := range childIDs {
 		result := results[childID]
@@ -771,6 +781,12 @@ func (o *Orchestrator) runFanOutTask(ctx context.Context, runID string, flow *do
 			payload = result.Payload
 		} else if result != nil {
 			payload, _ = json.Marshal(map[string]any{"summary": result.Summary})
+		}
+		// Every instance ran the task's Hero, so every instance's report must keep
+		// the Hero's contract. The violating instance's own payload is the node's
+		// output_ref: the aggregate would hide which instance broke the promise.
+		if violation := domain.ValidateReportAgainstContract(result, contract); violation != nil {
+			return o.foldReportContractViolation(ctx, runID, node, childID, payload, violation)
 		}
 		aggregate = append(aggregate, payload)
 	}
@@ -1143,141 +1159,6 @@ func uncompletedDep(task domain.FlowTask, completed map[string]*domain.RunAgentF
 		}
 	}
 	return ""
-}
-
-// reconcileCrashedNodes folds any node left in 'running' state by a crashed
-// orchestrator. For each such node:
-//   - child Run reached a terminal fact -> the result is folded into the
-//     checkpoint (completed + output_ref / failed / cancelled) and usage is
-//     accumulated, exactly like a normal dispatch settlement;
-//   - child Run is not terminal (or unknown) -> the node is reset to
-//     interrupted so the dispatch loop re-runs the task once.
-//
-// The flow budget check is applied after folding so a recovered run that
-// already exceeded its ceiling terminalizes as budget_exceeded instead of
-// dispatching more tasks.
-func (o *Orchestrator) reconcileCrashedNodes(ctx context.Context, runID string) error {
-	nodes, err := o.Store.ListNodes(ctx, runID)
-	if err != nil {
-		return err
-	}
-	flow, err := o.Store.GetRun(ctx, runID)
-	if err != nil {
-		return err
-	}
-	budgetLimit := o.flowBudgetLimit(ctx, flow.FlowVersionID)
-	for i := range nodes {
-		node := nodes[i]
-		if node.TerminalState != domain.FlowNodeRunning {
-			continue
-		}
-		reset := func() {
-			_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
-				TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
-				SetState: domain.FlowNodeInterrupted,
-			})
-		}
-		childIDs := o.nodeChildIDs(node)
-		if len(childIDs) == 0 {
-			reset()
-			continue
-		}
-		// Every recorded child must be terminal with the same verdict for the
-		// checkpoint to be foldable; otherwise the whole task is re-dispatched.
-		foldable := true
-		for _, childID := range childIDs {
-			status, err := o.Children.ChildRunStatus(ctx, childID)
-			if err != nil || !status.Terminal() || status != domain.RunSucceeded {
-				foldable = false
-				break
-			}
-		}
-		if !foldable {
-			// Still active (or the row is gone, or an instance failed): reset
-			// for re-dispatch. Cancel only the non-succeeded stragglers;
-			// succeeded instances keep their folded results untouched.
-			for _, childID := range childIDs {
-				status, err := o.Children.ChildRunStatus(ctx, childID)
-				if err != nil || status != domain.RunSucceeded {
-					_ = o.Children.CancelChildRun(ctx, childID)
-				}
-			}
-			reset()
-			continue
-		}
-		aggregate := make([]json.RawMessage, 0, len(childIDs))
-		results := make([]*domain.SubmitResult, 0, len(childIDs))
-		for _, childID := range childIDs {
-			result, _ := o.Children.ChildTerminalResult(ctx, childID)
-			results = append(results, result)
-			payload := json.RawMessage{}
-			if result != nil && len(result.Payload) > 0 {
-				payload = result.Payload
-			} else if result != nil {
-				payload, _ = json.Marshal(map[string]any{"summary": result.Summary})
-			}
-			usage, _ := o.Children.ChildUsage(ctx, childID)
-			total, _ := o.Store.AddTokenUsage(ctx, runID, usage.Tokens)
-			if budgetLimit > 0 && total > budgetLimit {
-				_ = o.Store.UpdateFlowState(ctx, runID, domain.FlowStateBudgetExceeded, total,
-					fmt.Sprintf("flow budget exceeded: %d > %d", total, budgetLimit))
-				_ = o.Events.PublishFlow(ctx, runID, "flow_budget_exceeded", map[string]any{
-					"flowRunId": runID, "used": total, "limit": budgetLimit,
-				})
-				_ = o.Store.TerminateAnchor(ctx, runID, domain.RunFailed, "budget_exceeded", "flow budget exceeded")
-				return nil
-			}
-			aggregate = append(aggregate, payload)
-		}
-		output := aggregate[0]
-		if len(aggregate) > 1 {
-			output, _ = json.Marshal(aggregate)
-		}
-		// Recovery folds the same facts as the live fold.
-		if o.foldRecoveredBlocker(ctx, runID, node, results) {
-			return nil
-		}
-		// A crashed fold must not become a silent skip: a task that declares
-		// acceptance is verified here too, with the verdict written in the same
-		// CAS as the checkpoint. Otherwise a crash between the child's success
-		// and the fold would record a plain `completed` and never verify.
-		// fan_out cannot declare acceptance (publish rejects it), so an
-		// acceptance node always has exactly one recorded child.
-		if len(node.Acceptance) > 0 {
-			// A fan-out parent cannot declare acceptance (publish rejects it), so
-			// a verified node always has exactly one child. Guard anyway: an
-			// aggregate cannot be verified against a single instance.
-			if len(childIDs) > 1 {
-				verdict := unverifiedAcceptanceVerdict(node.Acceptance, codeAcceptanceUnavailable,
-					"a fan-out task cannot be verified from one child Run")
-				raw, _ := json.Marshal(verdict)
-				_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
-					TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
-					SetState: domain.FlowNodeCompleted, OutputRef: output,
-					AcceptanceVerdict: (*json.RawMessage)(&raw),
-				})
-				continue
-			}
-			if err := o.foldAcceptance(ctx, runID, flow, node, childIDs[0], output, results[0]); err != nil {
-				// Another orchestrator (recovery races a new start) may have
-				// settled this node already; that is a settled node, not a flow
-				// failure.
-				if errors.Is(err, ErrCheckpointConflict) {
-					continue
-				}
-				return err
-			}
-			continue
-		}
-		_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
-			TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
-			SetState: domain.FlowNodeCompleted, OutputRef: output,
-		})
-		_ = o.Events.PublishFlow(ctx, runID, "flow_task_completed", map[string]any{
-			"flowRunId": runID, "task": node.Handle, "outputRef": string(output), "childRunIds": childIDs,
-		})
-	}
-	return nil
 }
 
 // applyConvergence performs at most one back-edge round per rule per

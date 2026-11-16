@@ -8,6 +8,7 @@ package agentflow
 // validate_acceptance.go.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,6 +23,13 @@ import (
 // reads to stop dispatching and terminalize the flow (no extra column/state).
 
 const acceptanceFailedCode = "acceptance_failed"
+
+// reportContractViolationCode is the node error code of a task whose child ended
+// completed with a report that does not keep the shape its Hero's report
+// contract promised. It is a verdict like acceptanceFailedCode, not a task
+// crash: the checkpoint carries it, the child's output_ref stays, and the run
+// loop terminalizes the flow only after the in-flight siblings have settled.
+const reportContractViolationCode = string(domain.ErrorReportContractViolation)
 
 // blockedBlockerPrefix is the node error-code prefix of a task whose child
 // ended `blocked` or `needs_input`. The code is `blocked:<blocker>` so the
@@ -121,6 +129,63 @@ func (o *Orchestrator) foldRecoveredBlocker(ctx context.Context, runID string,
 func acceptanceFailureNode(nodes []*domain.RunAgentFlowNode) *domain.RunAgentFlowNode {
 	for _, node := range nodes {
 		if node.TerminalState == domain.FlowNodeFailed && node.ErrorCode == acceptanceFailedCode {
+			return node
+		}
+	}
+	return nil
+}
+
+// heroReportContractOf is the report contract frozen on a task's Hero. The node
+// freezes the whole resolved HeroDefinition at Run start, so the fold reads the
+// exact contract the child ran under instead of re-resolving a mutable Hero
+// file. The substring pre-check is what keeps a contract-free Graph as cheap as
+// it was: no Hero declares a contract, so no definition is decoded.
+func heroReportContractOf(node *domain.RunAgentFlowNode) *domain.HeroReportContract {
+	if node == nil || len(node.HeroDefinitionJSON) == 0 ||
+		!bytes.Contains(node.HeroDefinitionJSON, []byte(`"reportContract"`)) {
+		return nil
+	}
+	var definition domain.HeroDefinition
+	if err := json.Unmarshal(node.HeroDefinitionJSON, &definition); err != nil {
+		// The freeze writes the definition atomically with the node row, so an
+		// unreadable one is corruption, not a declaration. The child could not
+		// have run without a readable definition, and inventing a contract here
+		// would be a second source of truth.
+		return nil
+	}
+	return definition.ReportContract
+}
+
+// foldReportContractViolation records a task whose child ended completed with a
+// report that breaks its Hero's contract. Like a does_not_hold acceptance
+// verdict it does NOT cancel the in-flight siblings and it keeps the child's
+// payload as output_ref: the report is the evidence of what the child actually
+// returned, and a sibling that already finished must not be discarded. The run
+// loop terminalizes the flow once the in-flight children have settled.
+func (o *Orchestrator) foldReportContractViolation(ctx context.Context, runID string,
+	node *domain.RunAgentFlowNode, childID string, payload json.RawMessage, violation error) error {
+	if err := o.Store.UpdateNode(ctx, runID, NodeUpdate{
+		TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
+		SetState: domain.FlowNodeFailed, ErrorCode: reportContractViolationCode, OutputRef: payload,
+	}); err != nil {
+		return err
+	}
+	return o.Events.PublishFlow(ctx, runID, "flow_task_report_contract_violation", map[string]any{
+		"flowRunId": runID, "task": node.Handle, "childRunId": childID,
+		"reason": reportContractViolationCode, "message": violation.Error(), "outputRef": string(payload),
+	})
+}
+
+// settlementFailureNode returns the first checkpoint whose recorded verdict must
+// fail the flow once the in-flight siblings drain. Acceptance verification and
+// report contract enforcement both record their verdict as a failed checkpoint
+// with a code, so they share one settlement path in the dispatch loop.
+func settlementFailureNode(nodes []*domain.RunAgentFlowNode) *domain.RunAgentFlowNode {
+	for _, node := range nodes {
+		if node.TerminalState != domain.FlowNodeFailed {
+			continue
+		}
+		if node.ErrorCode == acceptanceFailedCode || node.ErrorCode == reportContractViolationCode {
 			return node
 		}
 	}

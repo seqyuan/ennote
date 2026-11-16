@@ -88,6 +88,9 @@ func (d *HeroDiscovery) resolveDefinition(ctx context.Context, document *heroeso
 			},
 		},
 		OutputContract: document.OutputContract, MaxLoopIterations: document.MaxLoopIterations,
+		// Frozen with the definition so every Run started from this revision
+		// carries the report shape its child was required to produce.
+		ReportContract: domain.CloneHeroReportContract(document.ReportContract),
 	}
 	return definition, diagnostics
 }

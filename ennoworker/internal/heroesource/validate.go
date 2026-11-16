@@ -27,6 +27,13 @@ func ValidateForWrite(document *Document) error {
 	if document == nil {
 		return fmt.Errorf("Hero source document is required")
 	}
+	// Duplicate payload keys are decided on the RAW list: normalisation is what
+	// collapses them, so a check that ran after it could never fire. "aa" and
+	// " aa " are the same key once trimmed, which is the shape a caller gets
+	// wrong by copy-pasting, so the duplicate test is trim-insensitive.
+	if err := validateReportContractDuplicates(document.ReportContract); err != nil {
+		return err
+	}
 	if err := normalizeAndValidate(document); err != nil {
 		return err
 	}
@@ -113,6 +120,64 @@ func ValidateForWrite(document *Document) error {
 		return fmt.Errorf("prompt must be at most 65536 bytes")
 	}
 
+	return validateReportContractForWrite(document.ReportContract)
+}
+
+// validateReportContractDuplicates rejects a payloadFields list that names the
+// same key twice (after trimming) and an entry that is not a plain identifier.
+// The identifier rule is checked here as well as in
+// validateReportContractForWrite because a malformed key that normalisation would
+// drop (an all-whitespace entry) must be reported, not silently discarded.
+//
+// The list is read as given, so this is reached by the API write boundary where
+// the body is still un-normalised. A hand-authored Hero file has already been
+// canonicalised by Parse (duplicates collapse, order-independently), which is why
+// publishing one stays possible: the read path must keep loading every revision
+// that exists.
+func validateReportContractDuplicates(contract *domain.HeroReportContract) error {
+	if contract == nil {
+		return nil
+	}
+	seen := make(map[string]int, len(contract.PayloadFields))
+	for index, field := range contract.PayloadFields {
+		trimmed := strings.TrimSpace(field)
+		if trimmed == "" {
+			return fmt.Errorf("reportContract.payloadFields[%d] must not be empty", index)
+		}
+		if first, exists := seen[trimmed]; exists {
+			return fmt.Errorf("reportContract.payloadFields[%d] duplicates payloadFields[%d] (%q)", index, first, trimmed)
+		}
+		seen[trimmed] = index
+	}
+	return nil
+}
+
+// validateReportContractForWrite enforces the write-time rules of a report
+// contract. The read path deliberately skips them (see normalizeAndValidate), so
+// a revision a future Worker published stays loadable; the enforcement path
+// fails closed on an unsupported version instead of ignoring the contract.
+func validateReportContractForWrite(contract *domain.HeroReportContract) error {
+	if contract == nil {
+		return nil
+	}
+	if contract.Version != domain.HeroReportContractV1 {
+		return fmt.Errorf("reportContract.version must be %d (unsupported versions cannot be enforced)",
+			domain.HeroReportContractV1)
+	}
+	if contract.SummaryMaxBytes < 1 || contract.SummaryMaxBytes > domain.HeroReportSummaryMaxBytesCeiling {
+		return fmt.Errorf("reportContract.summaryMaxBytes must be 1..%d (state the cap explicitly: 0 would leave the promise unstated)",
+			domain.HeroReportSummaryMaxBytesCeiling)
+	}
+	if len(contract.PayloadFields) > domain.HeroReportPayloadFieldLimit {
+		return fmt.Errorf("reportContract.payloadFields must contain at most %d entries",
+			domain.HeroReportPayloadFieldLimit)
+	}
+	for index, field := range contract.PayloadFields {
+		if !domain.IsHeroReportPayloadField(field) {
+			return fmt.Errorf("reportContract.payloadFields[%d] %q must match ^[A-Za-z_][A-Za-z0-9_]*$",
+				index, field)
+		}
+	}
 	return nil
 }
 

@@ -4885,6 +4885,7 @@ components:
                 maxCostUsdMicros: { type: integer, minimum: 0 }
                 maxWallTimeMs: { type: integer, minimum: 1 }
         outputContract: { type: string }
+        reportContract: { $ref: "#/components/schemas/HeroReportContract" }
         maxLoopIterations: { type: integer, minimum: 1 }
         prompt: { type: string, minLength: 1, maxLength: 65536 }
     GlobalHeroDetail:
@@ -5161,6 +5162,40 @@ components:
           uniqueItems: true
           items: { type: string, enum: [room, reply, fresh, task_only] }
         ownExecutionContinuity: { type: string, enum: [none] }
+    HeroReportContract:
+      type: object
+      additionalProperties: false
+      description: |
+        The enforceable shape of a Hero's terminal report. Omitted means the Hero
+        promises nothing beyond the `outputContract` label, which is the behaviour
+        of every Hero written before this field existed. A delegated Run whose
+        `submit_result` breaks the frozen contract ends with
+        `report_contract_violation` instead of being recorded as a successful
+        completion. Only version 1 exists, and enforcement fails closed on any
+        other version rather than ignoring it.
+      required: [version, summaryMaxBytes]
+      properties:
+        version: { type: integer, enum: [1] }
+        summaryMaxBytes:
+          type: integer
+          minimum: 1
+          maximum: 4096
+          description: |
+            Maximum `submit_result.summary` length in bytes, never above the
+            global 4096-byte cap. Required: a contract that leaves its cap
+            unstated promises nothing a Run can check.
+        requireArtifacts:
+          type: boolean
+          description: Require at least one `submit_result.artifactRefs` entry.
+        payloadFields:
+          type: array
+          maxItems: 16
+          uniqueItems: true
+          items: { type: string, pattern: "^[A-Za-z_][A-Za-z0-9_]*$" }
+          description: |
+            Required top-level keys of `submit_result.payload`. When present, the
+            payload must be a JSON object containing every listed key.
+            Normalised to a sorted, duplicate-free list.
     HeroDefinition:
       type: object
       additionalProperties: false
@@ -5190,6 +5225,7 @@ components:
         contextPolicy: { $ref: "#/components/schemas/HeroContextPolicy" }
         delegationPolicy: { $ref: "#/components/schemas/HeroDelegationPolicy" }
         outputContract: { type: string, minLength: 1 }
+        reportContract: { $ref: "#/components/schemas/HeroReportContract" }
         maxLoopIterations: { type: integer, minimum: 1, maximum: 64 }
     HeroSummary:
       type: object

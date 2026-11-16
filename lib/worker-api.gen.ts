@@ -3281,6 +3281,7 @@ export interface components {
                 };
             };
             outputContract: string;
+            reportContract?: components["schemas"]["HeroReportContract"];
             maxLoopIterations: number;
             prompt: string;
         };
@@ -3485,6 +3486,33 @@ export interface components {
             /** @enum {string} */
             ownExecutionContinuity: "none";
         };
+        /**
+         * @description The enforceable shape of a Hero's terminal report. Omitted means the Hero
+         *     promises nothing beyond the `outputContract` label, which is the behaviour
+         *     of every Hero written before this field existed. A delegated Run whose
+         *     `submit_result` breaks the frozen contract ends with
+         *     `report_contract_violation` instead of being recorded as a successful
+         *     completion. Only version 1 exists, and enforcement fails closed on any
+         *     other version rather than ignoring it.
+         */
+        HeroReportContract: {
+            /** @enum {integer} */
+            version: 1;
+            /**
+             * @description Maximum `submit_result.summary` length in bytes, never above the
+             *     global 4096-byte cap. Required: a contract that leaves its cap
+             *     unstated promises nothing a Run can check.
+             */
+            summaryMaxBytes: number;
+            /** @description Require at least one `submit_result.artifactRefs` entry. */
+            requireArtifacts?: boolean;
+            /**
+             * @description Required top-level keys of `submit_result.payload`. When present, the
+             *     payload must be a JSON object containing every listed key.
+             *     Normalised to a sorted, duplicate-free list.
+             */
+            payloadFields?: string[];
+        };
         HeroDefinition: {
             /** @enum {integer} */
             schemaVersion: 1;
@@ -3507,6 +3535,7 @@ export interface components {
             contextPolicy: components["schemas"]["HeroContextPolicy"];
             delegationPolicy: components["schemas"]["HeroDelegationPolicy"];
             outputContract: string;
+            reportContract?: components["schemas"]["HeroReportContract"];
             maxLoopIterations: number;
         };
         HeroSummary: {

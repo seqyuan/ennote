@@ -119,12 +119,17 @@ type Document struct {
 	// declare when it runs this Hero. Absent/empty means "the kernel's whole
 	// vocabulary", which is what keeps every Hero written before this field
 	// existed publishing the graphs it always published.
-	AcceptanceKinds   []string         `json:"acceptanceKinds,omitempty" yaml:"acceptanceKinds,omitempty"`
-	Context           ContextPolicy    `json:"context" yaml:"context"`
-	Delegation        DelegationPolicy `json:"delegation" yaml:"delegation"`
-	OutputContract    string           `json:"outputContract" yaml:"outputContract"`
-	MaxLoopIterations int              `json:"maxLoopIterations" yaml:"maxLoopIterations"`
-	Prompt            string           `json:"prompt" yaml:"-"`
+	AcceptanceKinds []string         `json:"acceptanceKinds,omitempty" yaml:"acceptanceKinds,omitempty"`
+	Context         ContextPolicy    `json:"context" yaml:"context"`
+	Delegation      DelegationPolicy `json:"delegation" yaml:"delegation"`
+	OutputContract  string           `json:"outputContract" yaml:"outputContract"`
+	// ReportContract is the enforceable shape of the Hero's report. Absent
+	// means the Hero promises nothing a machine can check beyond the
+	// outputContract label, which is what keeps every Hero written before the
+	// field existed digesting and encoding exactly as it did.
+	ReportContract    *domain.HeroReportContract `json:"reportContract,omitempty" yaml:"reportContract,omitempty"`
+	MaxLoopIterations int                        `json:"maxLoopIterations" yaml:"maxLoopIterations"`
+	Prompt            string                     `json:"prompt" yaml:"-"`
 }
 
 func Parse(data []byte) (*Document, error) {
@@ -179,6 +184,7 @@ func Encode(document *Document) ([]byte, error) {
 	copy.Context.AllowedModes = append([]domain.HeroContextMode(nil), document.Context.AllowedModes...)
 	copy.Delegation.AllowedCallerKinds = append([]string(nil), document.Delegation.AllowedCallerKinds...)
 	copy.Delegation.AllowedStrategies = append([]string(nil), document.Delegation.AllowedStrategies...)
+	copy.ReportContract = domain.CloneHeroReportContract(document.ReportContract)
 	if err := normalizeAndValidate(&copy); err != nil {
 		return nil, err
 	}
@@ -203,6 +209,7 @@ func SourceDigest(document *Document) (string, error) {
 	copy.Context.AllowedModes = append([]domain.HeroContextMode(nil), document.Context.AllowedModes...)
 	copy.Delegation.AllowedCallerKinds = append([]string(nil), document.Delegation.AllowedCallerKinds...)
 	copy.Delegation.AllowedStrategies = append([]string(nil), document.Delegation.AllowedStrategies...)
+	copy.ReportContract = domain.CloneHeroReportContract(document.ReportContract)
 	if err := normalizeAndValidate(&copy); err != nil {
 		return "", err
 	}
@@ -294,7 +301,22 @@ func normalizeAndValidate(document *Document) error {
 	})
 	document.Delegation.AllowedCallerKinds = trimSortedUnique(document.Delegation.AllowedCallerKinds)
 	document.Delegation.AllowedStrategies = trimSortedUnique(document.Delegation.AllowedStrategies)
+	// ReportContract is normalized but never rejected here: this runs on the READ
+	// path, so a revision published by a future Worker must stay loadable. The
+	// rules a reader may skip live in ValidateForWrite.
+	normalizeReportContract(document.ReportContract)
 	return nil
+}
+
+// normalizeReportContract canonicalises the required payload keys: trimmed,
+// empty entries dropped, sorted, duplicates collapsed. Sorting and deduping make
+// the frozen definition and the source digest independent of the author's
+// ordering, so two Heroes that require the same keys are the same Hero.
+func normalizeReportContract(contract *domain.HeroReportContract) {
+	if contract == nil {
+		return
+	}
+	contract.PayloadFields = trimSortedUnique(contract.PayloadFields)
 }
 
 // heroContextModes is the accepted Hero execution-context vocabulary. A Hero is
