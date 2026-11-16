@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"math"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 )
@@ -44,9 +45,14 @@ func (r *RunRepo) buildRunTelemetryTx(ctx context.Context, tx *sql.Tx, runID, ti
 	for rows.Next() {
 		var name string
 		var timing domain.ToolTiming
-		if err := rows.Scan(&name, &timing.Count, &timing.ErrorCount, &timing.TotalMS); err != nil {
+		// julianday arithmetic is REAL, so the duration aggregate arrives as a
+		// fractional millisecond count and cannot be scanned into the int64 domain
+		// field. Round, never truncate: CAST would lose the sub-millisecond part.
+		var totalMS float64
+		if err := rows.Scan(&name, &timing.Count, &timing.ErrorCount, &totalMS); err != nil {
 			return telemetry, err
 		}
+		timing.TotalMS = int64(math.Round(totalMS))
 		telemetry.ToolTimings[name] = timing
 	}
 	if err := rows.Err(); err != nil {
