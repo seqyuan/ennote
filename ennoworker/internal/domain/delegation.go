@@ -234,10 +234,11 @@ func (b SubmitBlocker) Valid() bool {
 }
 
 // ExitCodeUnrecorded is the ExitCode of a ToolExecution whose exit status was
-// never written down. tool_calls.exit_code is nullable and no recorder populates
-// it today, so every recorded shell execution carries this sentinel instead of a
-// fabricated 0. A reader must treat it as "unknown", never as success and never
-// as failure: IsError is the recorded failure fact.
+// never written down. tool_calls.exit_code is nullable, so a legacy row, a tool
+// that ran no process, and a result whose caller supplied no status all read back
+// as this sentinel instead of a fabricated 0. A reader must treat it as
+// "unknown", never as success and never as failure: IsError is the recorded
+// failure fact.
 const ExitCodeUnrecorded = -1
 
 // ToolExecution is one shell execution a child Run recorded: the command it ran
