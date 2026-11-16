@@ -175,9 +175,10 @@ func (r *CallRepo) ToolCompleted(ctx context.Context, call domain.ToolCallFinish
 		result, err := tx.ExecContext(ctx, `UPDATE tool_calls SET status = 'completed', result_preview = ?,
 			raw_result_preview = ?, projected_result_preview = ?, raw_artifact_refs_json = ?,
 			projected_artifact_refs_json = ?, is_error = ?, stop_after_batch = ?, policy_code = ?,
-			finished_at = ? WHERE id = ? AND run_id = ? AND status = 'started'`,
+			exit_code = ?, finished_at = ? WHERE id = ? AND run_id = ? AND status = 'started'`,
 			call.Result.Content, raw.Content, call.Result.Content, string(rawArtifacts), string(projectedArtifacts),
-			boolInt(call.Result.IsError), boolInt(call.Policy.StopAfterBatch), call.Policy.Code, now, call.ID, call.RunID)
+			boolInt(call.Result.IsError), boolInt(call.Policy.StopAfterBatch), call.Policy.Code,
+			exitStatusColumn(call), now, call.ID, call.RunID)
 		if err != nil {
 			return err
 		}
@@ -196,8 +197,8 @@ func (r *CallRepo) ToolFailed(ctx context.Context, call domain.ToolCallFinish) e
 	})
 	return r.transact(ctx, call.RunID, domain.PendingEvent{EventType: "tool_call_failed", Payload: payload}, func(tx *sql.Tx, now string) error {
 		result, err := tx.ExecContext(ctx, `UPDATE tool_calls SET status='failed',raw_result_preview=?,
-			raw_artifact_refs_json=?,policy_code=?,finished_at=? WHERE id=? AND run_id=? AND status='started'`,
-			call.RawResult.Content, string(rawArtifacts), call.Policy.Code, now, call.ID, call.RunID)
+			raw_artifact_refs_json=?,policy_code=?,exit_code=?,finished_at=? WHERE id=? AND run_id=? AND status='started'`,
+			call.RawResult.Content, string(rawArtifacts), call.Policy.Code, exitStatusColumn(call), now, call.ID, call.RunID)
 		if err != nil {
 			return err
 		}
@@ -296,6 +297,26 @@ func upsertUsage(ctx context.Context, tx *sql.Tx, runID, callID string, usage do
 	return err
 }
 
+// exitStatusColumn is the tool_calls.exit_code value for one finish: the status
+// the shell tool captured, or NULL when the call never ran a process to
+// completion. NULL is deliberate - it is what every row written before the
+// column had a writer holds, and the reader resolves it to
+// domain.ExitCodeUnrecorded. A fabricated 0 here would read as a success.
+//
+// The RAW result is preferred, because the projected result is the one a
+// redaction step may rebuild; the exit status is Worker-level bookkeeping and
+// neither step is allowed to lose it.
+func exitStatusColumn(call domain.ToolCallFinish) any {
+	status := call.Result.ExitStatus
+	if call.RawResult.ExitStatus != nil {
+		status = call.RawResult.ExitStatus
+	}
+	if status == nil {
+		return nil
+	}
+	return *status
+}
+
 func nullableTime(value time.Time) any {
 	if value.IsZero() {
 		return nil
@@ -328,7 +349,19 @@ func boolInt(value bool) int {
 // execution reader pulls into memory, per row. It is a read budget, not a
 // semantic limit: a longer output is read up to the budget and reported as
 // truncated, so a missing test summary in it is undecidable instead of absent.
+//
+// The budget is split between the two ends of the preview, because the fact a
+// reader decides on is at the end: a test runner prints its summary last. Half of
+// it is more than any summary block needs, and the half before it is what a reader
+// skims.
 const MaxToolExecutionOutputBytes = 256 << 10
+
+// toolExecutionHeadBytes and toolExecutionTailBytes split that one budget: they
+// are the first and the last bytes of the recorded preview, never more than
+// MaxToolExecutionOutputBytes together.
+func toolExecutionHeadBytes() int { return MaxToolExecutionOutputBytes / 2 }
+
+func toolExecutionTailBytes() int { return MaxToolExecutionOutputBytes - toolExecutionHeadBytes() }
 
 // MaxToolExecutionRows bounds how many recorded executions one reader returns.
 // The tests-passed leaf decides on the highest matching seq, so the LAST rows of
@@ -357,11 +390,15 @@ func (r *CallRepo) ListToolExecutions(ctx context.Context, runID string) ([]doma
 	rows, err := r.DB.QueryContext(ctx, `SELECT seq, tool_call_id, tool_name, arguments_json, status, is_error,
 		COALESCE(exit_code, -1),
 		substr(CAST(projected_result_preview AS BLOB), 1, ?),
+		CASE WHEN length(CAST(projected_result_preview AS BLOB)) > ?
+			THEN substr(CAST(projected_result_preview AS BLOB), -?)
+			ELSE NULL END,
 		COALESCE(length(CAST(projected_result_preview AS BLOB)) > ?, 0),
 		projected_result_path
 		FROM tool_calls WHERE run_id = ? AND tool_name IN ('bash','exec') AND status = 'completed'
 		ORDER BY seq DESC LIMIT ?`,
-		MaxToolExecutionOutputBytes, MaxToolExecutionOutputBytes, runID, MaxToolExecutionRows)
+		toolExecutionHeadBytes(), MaxToolExecutionOutputBytes, toolExecutionTailBytes(),
+		MaxToolExecutionOutputBytes, runID, MaxToolExecutionRows)
 	if err != nil {
 		return nil, fmt.Errorf("list tool executions: %w", err)
 	}
@@ -374,11 +411,12 @@ func (r *CallRepo) ListToolExecutions(ctx context.Context, runID string) ([]doma
 			status      string
 			isError     int
 			preview     []byte
+			tail        []byte
 			wasCapped   int
 			projectedTo sql.NullString
 		)
 		if err := rows.Scan(&execution.Seq, &execution.ToolCallID, &execution.Tool, &arguments, &status,
-			&isError, &execution.ExitCode, &preview, &wasCapped, &projectedTo); err != nil {
+			&isError, &execution.ExitCode, &preview, &tail, &wasCapped, &projectedTo); err != nil {
 			return nil, fmt.Errorf("scan tool execution: %w", err)
 		}
 		if status != "completed" {
@@ -386,9 +424,20 @@ func (r *CallRepo) ListToolExecutions(ctx context.Context, runID string) ([]doma
 		}
 		execution.IsError = isError != 0
 		execution.Command, execution.Argv = recordedInvocation(execution.Tool, arguments)
-		// The SQL cap is byte-based, so it can cut a multi-byte sequence in half;
-		// drop the partial tail rather than hand invalid UTF-8 to the leaf.
+		// The SQL caps are byte-based, so they can cut a multi-byte sequence in
+		// half; drop the partial rune at either cut rather than hand invalid UTF-8
+		// to the leaf.
 		execution.Output = string(trimPartialUTF8Tail(preview))
+		if wasCapped != 0 && len(tail) > 0 {
+			// Both ends of the preview are retained and its middle is dropped. The
+			// seam carries the same marker vocabulary the shell tools use
+			// (domain.Output*TruncationMarker), so a reader that decides on the end
+			// of an output reads one contract however deeply it was cut. Without it
+			// the head and the tail would be glued together and read as one
+			// continuous output that never happened.
+			execution.Output = execution.Output + "\n" + domain.OutputHeadTruncationMarker + "\n" +
+				domain.OutputTailTruncationMarker + "\n" + string(trimPartialUTF8Head(tail))
+		}
 		execution.Truncated = wasCapped != 0
 		if projectedTo.Valid && projectedTo.String != "" {
 			// The projection spilled to a file: that file is the whole output, so
@@ -421,6 +470,18 @@ func trimPartialUTF8Tail(data []byte) []byte {
 			break
 		}
 		data = data[:len(data)-1]
+	}
+	return data
+}
+
+// trimPartialUTF8Head drops up to three leading bytes of an incomplete UTF-8
+// sequence, so a byte-capped tail does not start in the middle of a rune.
+func trimPartialUTF8Head(data []byte) []byte {
+	for n := 0; n < 3 && len(data) > 0; n++ {
+		if r, size := utf8.DecodeRune(data); r != utf8.RuneError || size > 1 {
+			break
+		}
+		data = data[1:]
 	}
 	return data
 }

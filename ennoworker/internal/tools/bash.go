@@ -3,10 +3,13 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/seqyuan/ennote/ennoworker/internal/proc"
 	"os"
+	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
@@ -104,7 +107,8 @@ func (t *BashTool) execute(ctx context.Context, call domain.ToolCall, sink domai
 		content += artifactErr.Error()
 	}
 	return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: content,
-		IsError: runErr != nil || artifactErr != nil, Artifacts: references}, nil
+		IsError: runErr != nil || artifactErr != nil, Artifacts: references,
+		ExitStatus: exitStatus(runErr)}, nil
 }
 
 func safeEnvironment(runtimeDir string) []string {
@@ -132,3 +136,46 @@ func formatCommandOutput(stdout, stderr string) string {
 		return stderr
 	}
 }
+
+// exitStatus records the exit status of the process one shell tool (bash or
+// exec) ran, so tool_calls.exit_code stops being a column nobody writes.
+//
+// A finished process records its own status: 0, its non-zero exit code, or
+// 128+signal when a signal killed it (the shell convention every runner and CI
+// prints, so SIGKILL reads 137). "Killed by a signal" and "this tool's deadline
+// killed it" are different facts and get different values: a signaled process
+// did exit, a timed-out one never completed.
+//
+// A process that produced no status of its own is never recorded as 0. The
+// deadline records domain.ExitCodeTimedOut, a cancelled Run records
+// domain.ExitCodeCancelled, and every path where no process ran to completion
+// (a refused invocation, a start failure such as a missing executable) records
+// nil, which the store writes as NULL and every reader resolves to
+// domain.ExitCodeUnrecorded - the same "unknown" legacy rows carry.
+func exitStatus(runErr error) *int {
+	if runErr == nil {
+		return exitStatusCode(0)
+	}
+	if errors.Is(runErr, context.DeadlineExceeded) {
+		return exitStatusCode(domain.ExitCodeTimedOut)
+	}
+	if errors.Is(runErr, context.Canceled) {
+		return exitStatusCode(domain.ExitCodeCancelled)
+	}
+	var exitErr *exec.ExitError
+	if errors.As(runErr, &exitErr) {
+		// A process killed by a signal has ExitCode() == -1; the wait status is
+		// where the signal itself lives. Both shell tools run under
+		// proc.RunGroup, which waits for the child, so a negative ExitCode here
+		// always means "signaled", never "not finished".
+		if wait, ok := exitErr.Sys().(syscall.WaitStatus); ok && wait.Signaled() {
+			return exitStatusCode(128 + int(wait.Signal()))
+		}
+		if code := exitErr.ExitCode(); code >= 0 {
+			return exitStatusCode(code)
+		}
+	}
+	return nil
+}
+
+func exitStatusCode(code int) *int { return &code }

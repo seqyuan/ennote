@@ -102,5 +102,6 @@ func (t *ExecTool) execute(ctx context.Context, call domain.ToolCall, sink domai
 		content += artifactErr.Error()
 	}
 	return domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: content,
-		IsError: runErr != nil || artifactErr != nil, Artifacts: references}, nil
+		IsError: runErr != nil || artifactErr != nil, Artifacts: references,
+		ExitStatus: exitStatus(runErr)}, nil
 }

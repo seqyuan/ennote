@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1473,4 +1474,94 @@ func TestNeedsWorkspaceEvidenceByLeaf(t *testing.T) {
 	assert.False(t, needsWorkspaceEvidence([]domain.FlowAcceptance{{Command: "go test", Check: "tests-passed"}}))
 	assert.True(t, needsExecutions([]domain.FlowAcceptance{{Command: "go test", Check: "tests-passed"}}))
 	assert.False(t, needsExecutions([]domain.FlowAcceptance{{File: "x", Check: "exists"}}))
+}
+
+// A recorded exit status is the authority of the tests-passed leaf: a passing
+// summary in the output can never outvote a process that exited non-zero or
+// never completed, and the verdict names the status it decided on. An unknown
+// status (ExitCodeUnrecorded) keeps the older, weaker rule - the summary
+// decides - because the recorder may simply not have written one.
+func TestEvaluateAcceptanceTestsPassedRecordedExitStatusDecides(t *testing.T) {
+	passGo := "=== RUN   TestA\n--- PASS: TestA (0.00s)\nok  \texample.com/x\t0.002s\n"
+
+	for _, status := range []int{1, 2, 137, domain.ExitCodeTimedOut, domain.ExitCodeCancelled} {
+		execution := bashExecution(1, "go test -v ./...", passGo)
+		execution.ExitCode = status
+		check := executionCase(t, "go test -v ./...", []domain.ToolExecution{execution})
+		assert.Equal(t, domain.AcceptanceDoesNotHold, check.Verdict,
+			"a recorded exit status of %d outvotes the passing summary", status)
+		assert.Equal(t, "command_failed", check.Code)
+		assert.Contains(t, check.Detail, strconv.Itoa(status),
+			"the verdict must name the status it decided on")
+	}
+
+	// A recorded non-zero status still outvotes a truncated output: the output
+	// being incomplete does not make a known failure undecidable.
+	truncated := bashExecution(1, "go test -v ./...", "=== RUN   TestA\n")
+	truncated.Truncated = true
+	truncated.ExitCode = 2
+	check := executionCase(t, "go test -v ./...", []domain.ToolExecution{truncated})
+	assert.Equal(t, domain.AcceptanceDoesNotHold, check.Verdict)
+	assert.Equal(t, "command_failed", check.Code)
+
+	// A recorded zero is not a pass by itself: the summary still has to be there.
+	quietZero := bashExecution(1, "go test -v ./...", "=== RUN   TestA\n")
+	quietZero.ExitCode = 0
+	check = executionCase(t, "go test -v ./...", []domain.ToolExecution{quietZero})
+	assert.Equal(t, domain.AcceptanceUnverified, check.Verdict)
+	assert.Equal(t, "evidence_no_pass_summary", check.Code)
+
+	// Unknown keeps today's behaviour in both directions.
+	unknownPass := bashExecution(1, "go test -v ./...", passGo)
+	unknownPass.ExitCode = domain.ExitCodeUnrecorded
+	check = executionCase(t, "go test -v ./...", []domain.ToolExecution{unknownPass})
+	assert.Equal(t, domain.AcceptanceHolds, check.Verdict,
+		"an unrecorded status is unknown, so the summary decides")
+
+	unknownQuiet := bashExecution(1, "go test -v ./...", "=== RUN   TestA\n")
+	unknownQuiet.ExitCode = domain.ExitCodeUnrecorded
+	check = executionCase(t, "go test -v ./...", []domain.ToolExecution{unknownQuiet})
+	assert.Equal(t, domain.AcceptanceUnverified, check.Verdict)
+	assert.Equal(t, "evidence_no_pass_summary", check.Code)
+}
+
+// A verbose suite prints megabytes and its verdict in the last two kilobytes.
+// The recorder keeps both ends of the output, so the leaf reads the retained tail
+// instead of reporting "no pass summary was printed" for a run that passed.
+func TestEvaluateAcceptanceTestsPassedReadsTheRetainedTail(t *testing.T) {
+	const limit = 64 << 10
+	body := strings.Repeat("tests/test_pipeline.py::test_align PASSED\n", (3<<20)/(len("tests/test_pipeline.py::test_align PASSED\n")))
+	summary := "===== 40 passed, 2 skipped in 91.20s =====\n"
+	require.Greater(t, len(body), 3<<20-len(summary))
+	require.LessOrEqual(t, len(body), 3<<20)
+
+	// The shape a recorder produces: the head, the two cut markers, the tail. The
+	// assertion below is about the leaf, so the string is built directly from the
+	// shared marker vocabulary rather than by running a tool.
+	retained := body[:limit/2] + "\n" + domain.OutputHeadTruncationMarker + "\n" +
+		domain.OutputTailTruncationMarker + "\n" + body[len(body)-limit/2+len(summary):] + summary
+
+	recorded := bashExecution(1, "python -m pytest -v", retained)
+	recorded.Truncated = true
+	recorded.ExitCode = 0
+	check := executionCase(t, "python -m pytest -v", []domain.ToolExecution{recorded})
+	assert.Equal(t, domain.AcceptanceHolds, check.Verdict, check.Detail)
+
+	// A failing run whose summary is in the retained tail still fails.
+	failed := retained + "FAILED tests/test_pipeline.py::test_align - AssertionError\n===== 1 failed, 39 passed in 91.20s =====\n"
+	recorded = bashExecution(1, "python -m pytest -v", failed)
+	recorded.Truncated = true
+	recorded.ExitCode = 1
+	check = executionCase(t, "python -m pytest -v", []domain.ToolExecution{recorded})
+	assert.Equal(t, domain.AcceptanceDoesNotHold, check.Verdict)
+
+	// Without a recorded exit status the cut head could still hide an earlier
+	// failure, so the retained tail alone stays undecidable - the pre-existing rule
+	// for rows written before the exit status was recorded.
+	unknown := bashExecution(1, "python -m pytest -v", retained)
+	unknown.Truncated = true
+	unknown.ExitCode = domain.ExitCodeUnrecorded
+	check = executionCase(t, "python -m pytest -v", []domain.ToolExecution{unknown})
+	assert.Equal(t, domain.AcceptanceUnverified, check.Verdict)
+	assert.Equal(t, "evidence_truncated", check.Code)
 }

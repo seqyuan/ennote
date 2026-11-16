@@ -84,7 +84,56 @@ type ToolResult struct {
 	Content    string              `json:"content"`
 	IsError    bool                `json:"isError"`
 	Artifacts  []ArtifactReference `json:"artifacts,omitempty"`
+	// ExitStatus is the exit status of the process a shell tool ran, or nil when
+	// this call never ran a process to completion. It is the single fact
+	// tool_calls.exit_code records, and it is deliberately off the wire: the
+	// Provider request, the committed message and the Web client read the tool
+	// result shape that existed before this field, which is why it carries
+	// json:"-". A reader who needs it reads the recorded row (see
+	// domain.ToolExecution.ExitCode).
+	//
+	// Non-nil values follow ExitCodeUnrecorded's vocabulary: 0 for success, the
+	// process's own code for a non-zero exit, 128+signal for a process killed by
+	// a signal (the shell convention), and one of the negative sentinels below for
+	// a process that ended without an exit status of its own. nil means "no
+	// process ran", which reads back as ExitCodeUnrecorded.
+	ExitStatus *int `json:"-"`
 }
+
+// Truncation markers of a bounded tool output.
+//
+// A tool that keeps only part of what a command printed keeps BOTH ends: the head
+// is what the command started with and the tail is where every test runner puts
+// its pass/fail summary. The bytes between the two are what is dropped, so the
+// retained text reads head, head marker, tail marker, tail.
+//
+// Both markers start with the historical literal "[output truncated]", which is
+// what readers (agentflow's tests-passed leaf among them) already grep for; the
+// rest of each marker says which end of the retained text it describes. Every
+// producer of a bounded output (the shell tools and the store's per-row read of a
+// recorded preview) uses these two constants, so one vocabulary describes both
+// layers and a reader never has to guess which one cut.
+const (
+	// OutputHeadTruncationMarker closes the retained head: everything before it
+	// is the beginning of the output, and the output continues somewhere later.
+	OutputHeadTruncationMarker = "[output truncated] head cut"
+	// OutputTailTruncationMarker opens the retained tail: everything after it is
+	// the END of the output, so a summary found there is the run's real summary.
+	OutputTailTruncationMarker = "[output truncated] tail cut"
+)
+
+// Exit status sentinels for a shell process that ended without an exit status of
+// its own. They are negative because a real exit status is 0..255 and a signal
+// death is recorded as 128+signal; a reader that only knows "zero vs non-zero"
+// still gets the right answer from them.
+const (
+	// ExitCodeTimedOut is the tool's own deadline killing the process: the run
+	// never completed, so 0 (or any code it might have produced) would be a lie.
+	ExitCodeTimedOut = -2
+	// ExitCodeCancelled is the Run being cancelled while the process ran. It is a
+	// different fact from the deadline, which is why it is a different value.
+	ExitCodeCancelled = -3
+)
 
 type ToolDefinition struct {
 	Name        string

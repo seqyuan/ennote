@@ -301,20 +301,48 @@ func acceptanceLastNodeCounter(output, key string) (int, bool) {
 	return value, found
 }
 
-// executionOutputTruncated reports that the recorded output is not the whole
-// projected output. A truncated output can hide the very summary the verdict
-// needs, so it is never decided as a pass.
-func executionOutputTruncated(execution domain.ToolExecution) bool {
+// executionOutputCut reports that the recorded output is not the whole projected
+// output: either the reader flagged it, or one of the truncation markers the
+// producers write is inside it.
+func executionOutputCut(execution domain.ToolExecution) bool {
 	return execution.Truncated || strings.Contains(execution.Output, acceptanceTruncationMarker)
 }
 
-// executionExitFailed reports a recorded non-zero exit status. ExitCodeUnrecorded
-// is not a failure: the recorder may simply not have written one. Any OTHER
-// non-zero value - including a negative signal code a future writer records -
-// is a failure.
-func executionExitFailed(execution domain.ToolExecution) bool {
-	return execution.IsError ||
-		(execution.ExitCode != 0 && execution.ExitCode != domain.ExitCodeUnrecorded)
+// acceptanceRetainedTail splits a recorded output at its last tail marker and
+// returns what follows it: the bytes that are the true END of the run. retained is
+// false for an output that carries no tail marker, which means either that nothing
+// was cut (the whole output is returned) or that only a head was kept (the whole
+// output is still returned, and the caller must not read it as a verdict).
+//
+// Reading the end is what makes a long, verbose test run decidable: a runner
+// prints its summary last, so the end of the output is the part that says whether
+// the suite passed. The head being cut matters for the opposite reason - a failure
+// line could be in the omitted middle - which is why a retained tail is only
+// trusted together with a recorded success (see the leaf below).
+func acceptanceRetainedTail(output string) (tail string, retained bool) {
+	index := strings.LastIndex(output, domain.OutputTailTruncationMarker)
+	if index < 0 {
+		return output, false
+	}
+	return output[index+len(domain.OutputTailTruncationMarker):], true
+}
+
+// executionExitStatus reports the recorded exit status of one execution, and
+// whether it is known at all.
+//
+// domain.ExitCodeUnrecorded is "unknown", never a value: rows written before the
+// recorder wrote the column, and calls that never ran a process, carry it, and a
+// reader must not read it as success or as failure. Every other value is the
+// status itself: 0 for success, the process's own non-zero code, 128+signal for
+// a signal death, and the negative sentinels domain.ExitCodeTimedOut /
+// domain.ExitCodeCancelled for a process that never completed. The leaf does not
+// need to know which non-zero value it got: any of them means the run did not
+// pass, and the detail names the value it decided on.
+func executionExitStatus(execution domain.ToolExecution) (int, bool) {
+	if execution.ExitCode == domain.ExitCodeUnrecorded {
+		return 0, false
+	}
+	return execution.ExitCode, true
 }
 
 // evaluateAcceptanceTestsPassed decides tests-passed from recorded executions
@@ -348,22 +376,43 @@ func evaluateAcceptanceTestsPassed(ctx context.Context, check string, spec domai
 		return newAcceptanceCheck(check, domain.AcceptanceUnverified, codeAcceptanceNoExecution,
 			fmt.Sprintf("the task recorded no shell execution of %q", strings.Join(declared, " ")))
 	}
-	outcome := classifyAcceptanceOutput(runner, execution.Output)
+	// The verdict is read off the end of the output, where every runner prints its
+	// summary; when nothing was cut this is the whole output.
+	tail, tailRetained := acceptanceRetainedTail(execution.Output)
+	outcome := classifyAcceptanceOutput(runner, tail)
+	status, statusKnown := executionExitStatus(execution)
 	switch {
+	case statusKnown && status != 0:
+		// A recorded exit status decides, and it is checked before anything the
+		// output says: a runner prints its pass summary before it exits, so a
+		// summary in the visible output is not evidence about a process that then
+		// failed, and an incomplete output does not make a known non-zero status
+		// undecidable either.
+		return newAcceptanceCheck(check, domain.AcceptanceDoesNotHold, codeAcceptanceCommandFailed,
+			fmt.Sprintf("the execution of %q exited with status %d", strings.Join(declared, " "), status))
 	case outcome == acceptanceOutputFailed:
 		return newAcceptanceCheck(check, domain.AcceptanceDoesNotHold, codeAcceptanceCommandFailed,
 			fmt.Sprintf("the output of %q shows a failing test run", strings.Join(declared, " ")))
-	case executionExitFailed(execution):
-		// A recorded failure of the execution itself is not a pass even when the
-		// visible prefix of its output happens to contain a passing summary.
+	case execution.IsError:
+		// The recorded tool-level failure fact. It is the only failure signal an
+		// execution with an unknown exit status has (a row written before the
+		// recorder wrote the column), and it stays authoritative next to a known
+		// status because a tool can fail without the process exiting, e.g. when
+		// publishing its retained output failed.
 		return newAcceptanceCheck(check, domain.AcceptanceDoesNotHold, codeAcceptanceCommandFailed,
 			fmt.Sprintf("the execution of %q ended in error", strings.Join(declared, " ")))
-	case executionOutputTruncated(execution):
-		// Truncation is checked BEFORE the pass summary: only the head of the
-		// output was kept, so a visible passing head says nothing about a
-		// failure or a differently-shaped summary further on.
+	case executionOutputCut(execution) && !tailRetained:
+		// Only the head was kept: the omitted bytes can hide the summary, or the
+		// failure, the verdict is about, so a visible passing head proves nothing.
 		return newAcceptanceCheck(check, domain.AcceptanceUnverified, codeAcceptanceTruncated,
-			"the recorded output was truncated, so its visible head cannot decide the run")
+			"the recorded output was truncated and only its head was retained, so the omitted middle cannot decide the run")
+	case executionOutputCut(execution) && !statusKnown:
+		// The end of the output IS retained, but its head was cut, and no exit
+		// status was recorded: an earlier failure line could be in the omitted
+		// middle, and without a recorded success the tail alone cannot outvote that
+		// possibility. A run that recorded its exit status does not land here.
+		return newAcceptanceCheck(check, domain.AcceptanceUnverified, codeAcceptanceTruncated,
+			"the recorded output was cut and no exit status was recorded, so its retained tail cannot decide the run on its own")
 	case outcome == acceptanceOutputPassed:
 		return newAcceptanceCheck(check, domain.AcceptanceHolds, "", "")
 	default:

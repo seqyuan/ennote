@@ -2,6 +2,8 @@ package store_test
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -167,7 +169,10 @@ func TestListToolExecutionsCapsRowsToTheNewest(t *testing.T) {
 }
 
 // One row's preview is capped too: a 1 MiB preview must not be materialised whole
-// per row, and a capped preview is truncated so its missing tail is undecidable.
+// per row, and a capped preview is reported truncated so the leaf knows its
+// middle was dropped. The bound covers both ends of the preview (see
+// TestListToolExecutionsRetainsHeadAndTail), so it is asserted as a bound on the
+// read, not as an exact length.
 func TestListToolExecutionsCapsPreviewBytes(t *testing.T) {
 	repo, submission := setupSubmittedRun(t, "calls-preview-cap")
 	ctx := context.Background()
@@ -183,7 +188,11 @@ func TestListToolExecutionsCapsPreviewBytes(t *testing.T) {
 	executions, err := calls.ListToolExecutions(ctx, submission.Run.ID)
 	require.NoError(t, err)
 	require.Len(t, executions, 2)
-	assert.Len(t, executions[0].Output, store.MaxToolExecutionOutputBytes)
+	const seamSlack = 128 // the two cut markers and their newlines
+	assert.LessOrEqual(t, len(executions[0].Output), store.MaxToolExecutionOutputBytes+seamSlack,
+		"the per-row read budget is unchanged")
+	assert.True(t, strings.HasPrefix(executions[0].Output, "xxxx"), "the head of the preview is retained")
+	assert.Contains(t, executions[0].Output, domain.OutputTailTruncationMarker)
 	assert.True(t, executions[0].Truncated, "a capped preview is not the whole output")
 	assert.True(t, utf8.ValidString(executions[1].Output), "the byte cap must not split a rune")
 	assert.True(t, executions[1].Truncated)
@@ -195,4 +204,113 @@ func TestListToolExecutionsCapsPreviewBytes(t *testing.T) {
 	}, agentflow.AcceptanceFacts{Executions: executionsSeam{executions: executions[:1]}})
 	assert.Equal(t, domain.AcceptanceUnverified, verdict.Result)
 	assert.Equal(t, "evidence_truncated", verdict.Checks[0].Code)
+}
+
+// The recorder writes the exit status the shell tool captured, so the column is
+// no longer dead. A call whose process produced no status stays NULL and reads
+// back as the ExitCodeUnrecorded sentinel: unknown is never a fabricated 0.
+func TestToolFinishRecordsExitStatus(t *testing.T) {
+	repo, submission := setupSubmittedRun(t, "calls-exit-status")
+	ctx := context.Background()
+	calls := &store.CallRepo{DB: repo.DB}
+	runID := submission.Run.ID
+	invocation := domain.ToolCall{ID: "provider-bash", Name: "bash",
+		Arguments: json.RawMessage(`{"command":"go test ./..."}`)}
+
+	start := func(recordID string, index int) {
+		t.Helper()
+		require.NoError(t, calls.ToolStarted(ctx, domain.ToolCallStart{ID: recordID, RunID: runID,
+			Iteration: 1, CallIndex: index, Call: invocation}))
+	}
+	finish := func(recordID string, index int, isError bool, status *int) domain.ToolResult {
+		t.Helper()
+		result := domain.ToolResult{ToolCallID: invocation.ID, ToolName: invocation.Name,
+			Content: "recorded output", IsError: isError, ExitStatus: status}
+		finish := domain.ToolCallFinish{ID: recordID, RunID: runID, Iteration: 1, CallIndex: index,
+			Call: invocation, RawResult: result, Result: result}
+		if isError {
+			require.NoError(t, calls.ToolFailed(ctx, finish))
+		} else {
+			require.NoError(t, calls.ToolCompleted(ctx, finish))
+		}
+		return result
+	}
+	code := func(value int) *int { return &value }
+
+	start("record-zero", 0)
+	finish("record-zero", 0, false, code(0))
+	start("record-legacy", 1)
+	finish("record-legacy", 1, false, nil)
+	start("record-one", 2)
+	finish("record-one", 2, true, code(1))
+	start("record-signal", 3)
+	finish("record-signal", 3, true, code(137))
+	start("record-timeout", 4)
+	finish("record-timeout", 4, true, code(domain.ExitCodeTimedOut))
+	start("record-unknown", 5)
+	finish("record-unknown", 5, true, nil)
+
+	executions, err := calls.ListToolExecutions(ctx, runID)
+	require.NoError(t, err)
+	// Only completed calls are executions; the failed and timed-out rows are read
+	// straight from the table below.
+	require.Len(t, executions, 2)
+	assert.Equal(t, invocation.ID, executions[0].ToolCallID)
+	assert.Equal(t, 0, executions[0].ExitCode, "a recorded success is 0, not unknown")
+	assert.Equal(t, domain.ExitCodeUnrecorded, executions[1].ExitCode,
+		"a call that recorded nothing still reads as unknown, exactly like an old row")
+
+	recorded := map[string]sql.NullInt64{}
+	rows, err := repo.DB.Query(`SELECT id, exit_code FROM tool_calls WHERE run_id = ?`, runID)
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id string
+		var status sql.NullInt64
+		require.NoError(t, rows.Scan(&id, &status))
+		recorded[id] = status
+	}
+	require.NoError(t, rows.Err())
+	assert.Equal(t, sql.NullInt64{Int64: 1, Valid: true}, recorded["record-one"])
+	assert.Equal(t, sql.NullInt64{Int64: 137, Valid: true}, recorded["record-signal"],
+		"a signal death is recorded as 128+signal")
+	assert.Equal(t, sql.NullInt64{Int64: domain.ExitCodeTimedOut, Valid: true}, recorded["record-timeout"])
+	assert.False(t, recorded["record-unknown"].Valid,
+		"an unknown status is NULL, not 0")
+}
+
+// The execution reader retains both ends of a long recorded preview inside the
+// same read budget. The verdict of a test run is at the tail, so a head-only read
+// reported a passing suite as "no pass summary was printed".
+func TestListToolExecutionsRetainsHeadAndTail(t *testing.T) {
+	repo, submission := setupSubmittedRun(t, "calls-preview-tail")
+	ctx := context.Background()
+	calls := &store.CallRepo{DB: repo.DB}
+	const summary = "\n===== 40 passed, 2 skipped in 91.20s =====\n"
+	line := "tests/test_pipeline.py::test_align PASSED\n"
+	preview := strings.Repeat(line, store.MaxToolExecutionOutputBytes/len(line)+64) + summary
+	require.Greater(t, len(preview), store.MaxToolExecutionOutputBytes)
+	insertToolCall(t, calls, submission.Run.ID, "call-tail", 1, "bash",
+		`{"command":"python -m pytest -v"}`, "completed", false, 0, preview, "", "")
+
+	executions, err := calls.ListToolExecutions(ctx, submission.Run.ID)
+	require.NoError(t, err)
+	require.Len(t, executions, 1)
+	output := executions[0].Output
+	assert.True(t, executions[0].Truncated, "part of the preview was dropped")
+	assert.True(t, strings.HasPrefix(output, line), "the head is still available")
+	assert.True(t, strings.HasSuffix(output, summary), "the tail, where the verdict is, is retained")
+	assert.Contains(t, output, domain.OutputHeadTruncationMarker)
+	assert.Contains(t, output, domain.OutputTailTruncationMarker)
+	assert.LessOrEqual(t, len(output),
+		store.MaxToolExecutionOutputBytes+len(domain.OutputHeadTruncationMarker)+len(domain.OutputTailTruncationMarker)+8,
+		"the read budget is unchanged: only the seam markers are added")
+
+	// The leaf can now decide the run: the retained tail holds the summary and a
+	// zero exit status was recorded.
+	verdict := agentflow.EvaluateAcceptance(ctx, []domain.FlowAcceptance{
+		{Check: "tests-passed", Command: "python -m pytest -v"},
+	}, agentflow.AcceptanceFacts{Executions: executionsSeam{executions: executions}})
+	assert.Equal(t, domain.AcceptanceHolds, verdict.Result, verdict.Checks[0].Detail)
+	assert.Empty(t, verdict.Checks[0].Code)
 }
