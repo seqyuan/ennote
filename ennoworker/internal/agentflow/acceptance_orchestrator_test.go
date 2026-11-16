@@ -468,9 +468,12 @@ func TestAcceptanceDrainSiblingFailureKeepsUsage(t *testing.T) {
 }
 
 // Two orchestrators may reconcile the same run (a recovery racing a new start).
-// The loser's CAS conflict means the node is already settled, so it must not
-// fail the flow that the winner just finished verifying.
-func TestAcceptanceReconcileConflictIsNotAFlowFailure(t *testing.T) {
+// The loser's checkpoint CAS fails because the winner already settled the node;
+// reconcile must treat that as "settled", not as a reason to fail the flow. The
+// property is pinned on reconcileCrashedNodes directly: driving it through the
+// run loop would make the assertion race the recovery goroutine, which is how
+// this test was flaky in CI.
+func TestReconcileSwallowsCheckpointConflict(t *testing.T) {
 	def := threeTaskDef()
 	def.Tasks["producer"] = domain.FlowTask{
 		Type: domain.FlowTaskHero, Hero: "writer@1", Goal: "produce",
@@ -487,18 +490,12 @@ func TestAcceptanceReconcileConflictIsNotAFlowFailure(t *testing.T) {
 	}))
 	fake.mu.Lock()
 	fake.run.State = domain.FlowStateRunning
-	// From here on the node CAS loses, exactly as it would to another
-	// orchestrator that settled the node between ListNodes and UpdateNode.
 	fake.conflictOnUpdate = map[int]bool{0: true}
 	fake.mu.Unlock()
 
 	orch := acceptanceOrchestrator(t, fake, children, events, newFakeEvidence())
-	orch.Recover(context.Background(), []string{"flow-run-1"})
-
-	run, err := fake.GetRun(context.Background(), "flow-run-1")
-	require.NoError(t, err)
-	assert.NotEqual(t, domain.FlowStateFailed, run.State,
-		"losing the checkpoint CAS to another orchestrator is a settled node, not a flow failure")
+	require.NoError(t, orch.reconcileCrashedNodes(context.Background(), "flow-run-1"),
+		"losing the checkpoint CAS to another orchestrator is a settled node, not an error")
 	assert.NotContains(t, events.types(), "flow_failed")
 }
 
