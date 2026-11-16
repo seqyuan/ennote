@@ -567,14 +567,27 @@ func (l *Loop) executeOneToolPlan(ctx context.Context, runID string, iteration, 
 		return domain.ToolResult{}, false, err
 	}
 	outcome := l.executeToolAttempts(ctx, runID, plan.effective)
-	raw, attemptCount := outcome.Result, outcome.AttemptCount
-	raw = BudgetToolResult(raw, defaultToolResultBudget)
+	return l.settleToolPlan(ctx, runID, iteration, callIndex, recordID, plan, outcome)
+}
 
-	// When the tool panics or is cancelled, record a failed event (not completed).
-	if outcome.Kind == domain.ToolPanicked || outcome.Kind == domain.ToolCancelled {
+// settleToolPlan is the single producer of a settled tool outcome; the mode decides
+// how an outcome is obtained, never how it settles. The no-execution transcript paths
+// (completePrecomputedToolCall, submit_result in loop.go) record their own completion.
+func (l *Loop) settleToolPlan(ctx context.Context, runID string, iteration, callIndex int, recordID string,
+	plan plannedToolCall, outcome domain.ToolExecutionOutcome) (domain.ToolResult, bool, error) {
+	raw := BudgetToolResult(outcome.Result, defaultToolResultBudget)
+
+	// A panic or a cancellation is never a completed call: record it as failed so
+	// event terminal state does not depend on which dispatch path ran.
+	if code, failed := terminationCode(outcome.Kind); failed {
 		metadata := l.policyMetadata(plan.decision, false)
+		// The termination code wins over the decision code: a call that was allowed
+		// through an approval and then panicked did not fail because of the approval.
+		// The decision code survives in the tool_call_started payload.
+		metadata.Code = code
 		finish := domain.ToolCallFinish{ID: recordID, RunID: runID, Iteration: iteration, CallIndex: callIndex,
-			Call: plan.effective, RawResult: raw, Result: raw, Status: "failed", Policy: metadata, AttemptCount: attemptCount}
+			Call: plan.effective, RawResult: raw, Result: raw, Status: "failed", Policy: metadata,
+			AttemptCount: outcome.AttemptCount}
 		if err := l.recordToolFailed(context.WithoutCancel(ctx), finish); err != nil {
 			return raw, false, err
 		}
@@ -596,7 +609,8 @@ func (l *Loop) executeOneToolPlan(ctx context.Context, runID string, iteration, 
 	metadata.Code = firstNonEmptyString(policyCode, metadata.Code)
 	if policyErr != nil {
 		finish := domain.ToolCallFinish{ID: recordID, RunID: runID, Iteration: iteration, CallIndex: callIndex,
-			Call: plan.effective, RawResult: raw, Result: raw, Status: "failed", Policy: metadata, AttemptCount: attemptCount}
+			Call: plan.effective, RawResult: raw, Result: raw, Status: "failed", Policy: metadata,
+			AttemptCount: outcome.AttemptCount}
 		if err := l.recordToolFailed(context.WithoutCancel(ctx), finish); err != nil {
 			return raw, false, errors.Join(policyErr, err)
 		}
@@ -604,7 +618,7 @@ func (l *Loop) executeOneToolPlan(ctx context.Context, runID string, iteration, 
 	}
 	finish := domain.ToolCallFinish{ID: recordID, RunID: runID, Iteration: iteration,
 		CallIndex: callIndex, Call: plan.effective, RawResult: raw, Result: projected,
-		Status: "completed", Policy: metadata, AttemptCount: attemptCount}
+		Status: "completed", Policy: metadata, AttemptCount: outcome.AttemptCount}
 	if err := l.recordToolCompleted(context.WithoutCancel(ctx), finish); err != nil {
 		return projected, stop, err
 	}
@@ -612,6 +626,20 @@ func (l *Loop) executeOneToolPlan(ctx context.Context, runID string, iteration, 
 		return projected, stop, context.Canceled
 	}
 	return projected, stop, nil
+}
+
+// terminationCode is the only judge of whether an outcome may settle as completed.
+// Cancellation has exactly one code: attemptCount == 0 means the call never
+// started, which is diagnostic detail, not a separate category.
+func terminationCode(kind domain.ToolOutcomeKind) (code string, failed bool) {
+	switch kind {
+	case domain.ToolPanicked:
+		return "tool_panicked", true
+	case domain.ToolCancelled:
+		return "tool_cancelled", true
+	default:
+		return "", false // returned / infrastructure_failed
+	}
 }
 
 func (l *Loop) executeReadGroup(ctx context.Context, runID string, iteration, baseIndex int, calls []domain.ToolCall) ([]domain.ToolResult, error) {
@@ -638,23 +666,25 @@ func (l *Loop) executeReadPlanGroup(ctx context.Context, runID string, iteration
 	batchCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	semaphore := make(chan struct{}, limit)
-	type parallelResult struct {
-		result       domain.ToolResult
-		attemptCount int
-	}
-	rawResults := make([]chan parallelResult, len(plans))
+	outcomes := make([]chan domain.ToolExecutionOutcome, len(plans))
 	for index, plan := range plans {
-		rawResults[index] = make(chan parallelResult, 1)
+		outcomes[index] = make(chan domain.ToolExecutionOutcome, 1)
 		go func(index int, plan plannedToolCall) {
 			select {
 			case semaphore <- struct{}{}:
 				defer func() { <-semaphore }()
 			case <-batchCtx.Done():
-				rawResults[index] <- parallelResult{result: policyDeniedResult(plan.effective, batchCtx.Err().Error()), attemptCount: 0}
+				// The call never started: nothing denied it, so report cancellation
+				// with its own text instead of a fabricated policy denial.
+				outcomes[index] <- domain.ToolExecutionOutcome{
+					Result: domain.ToolResult{ToolCallID: plan.effective.ID, ToolName: plan.effective.Name,
+						Content: fmt.Sprintf("tool execution cancelled before this call started: %v", batchCtx.Err()),
+						IsError: true},
+					AttemptCount: 0, Kind: domain.ToolCancelled, Cause: batchCtx.Err(),
+				}
 				return
 			}
-			outcome := l.executeToolAttempts(batchCtx, runID, plan.effective)
-			rawResults[index] <- parallelResult{result: BudgetToolResult(outcome.Result, defaultToolResultBudget), attemptCount: outcome.AttemptCount}
+			outcomes[index] <- l.executeToolAttempts(batchCtx, runID, plan.effective)
 		}(index, plan)
 	}
 
@@ -662,36 +692,13 @@ func (l *Loop) executeReadPlanGroup(ctx context.Context, runID string, iteration
 	stopAfterBatch := false
 	var firstErr error
 	for index, plan := range plans {
-		pr := <-rawResults[index]
-		raw := pr.result
-		projected, stop, policyCode, policyErr := l.projectToolResult(context.WithoutCancel(ctx), runID,
-			iteration, baseIndex+index, plan, raw)
-		metadata := l.policyMetadata(plan.decision, stop)
-		metadata.Code = firstNonEmptyString(policyCode, metadata.Code)
-		attemptCount := pr.attemptCount
-		if policyErr != nil {
-			finish := domain.ToolCallFinish{ID: recordIDs[index], RunID: runID, Iteration: iteration,
-				CallIndex: baseIndex + index, Call: plan.effective, RawResult: raw, Result: raw,
-				Status: "failed", Policy: metadata, AttemptCount: attemptCount}
-			if err := l.recordToolFailed(context.WithoutCancel(ctx), finish); err != nil && firstErr == nil {
-				firstErr = err
-			}
-			if firstErr == nil {
-				firstErr = domain.NewCodedError(domain.ErrorToolPolicyFailed, policyErr)
-			}
-			cancel()
-			results[index] = raw
-			continue
-		}
-		finish := domain.ToolCallFinish{ID: recordIDs[index], RunID: runID, Iteration: iteration,
-			CallIndex: baseIndex + index, Call: plan.effective, RawResult: raw, Result: projected,
-			Status: "completed", Policy: metadata, AttemptCount: attemptCount}
-		if err := l.recordToolCompleted(context.WithoutCancel(ctx), finish); err != nil && firstErr == nil {
+		result, stop, err := l.settleToolPlan(ctx, runID, iteration, baseIndex+index, recordIDs[index], plan, <-outcomes[index])
+		results[index] = result
+		stopAfterBatch = stopAfterBatch || stop
+		if err != nil && firstErr == nil {
 			firstErr = err
 			cancel()
 		}
-		results[index] = projected
-		stopAfterBatch = stopAfterBatch || stop
 	}
 	if firstErr != nil {
 		return results, stopAfterBatch, firstErr
