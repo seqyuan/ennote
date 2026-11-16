@@ -75,22 +75,42 @@ async function mockBackend(page: Page, onInvocation?: (body: Record<string, unkn
 }
 
 /**
- * Wait until the composer has the Hero and Skill catalogues.
+ * The catalogue fetches the composer needs, subscribed before the app loads.
  *
  * Opening the `+` panel proves only that the panel opened: an empty group is
  * dropped before it is drawn, so "no group yet" and "no data yet" look the same,
  * and a click that closes the panel again says nothing about the fetches behind
  * it. These waits are on the requests, which is what the typing actually depends
- * on. Under parallel load the first `@` arrives before the fetches land, and that
- * — not the token logic — is what used to fail.
+ * on. `waitForResponse` only sees responses that arrive AFTER it is called, and the
+ * second call used to be made only once the first had resolved, so under parallel
+ * load a response could land before its waiter existed and the test then timed out
+ * waiting for a request that had already happened. Both waiters are therefore
+ * created by `openSession` BEFORE it navigates, and every test awaits the promise
+ * that was already subscribed.
  */
+function watchCatalogue(page: Page): Promise<void> {
+  return Promise.all([
+    page.waitForResponse((response) => response.url().includes("/v1/skills") && response.ok()),
+    page.waitForResponse((response) => /\/v1\/global-heroes\/[^/]+$/.test(new URL(response.url()).pathname) && response.ok()),
+  ]).then(() => undefined);
+}
+
+const catalogueWaits = new WeakMap<Page, Promise<void>>();
+
+/** Wait until the composer has the Hero and Skill catalogues. */
 async function awaitCatalogue(page: Page) {
-  await page.waitForResponse((response) => response.url().includes("/v1/skills") && response.ok());
-  await page.waitForResponse((response) => /\/v1\/global-heroes\/[^/]+$/.test(new URL(response.url()).pathname) && response.ok());
+  const waiting = catalogueWaits.get(page);
+  if (!waiting) {
+    throw new Error("awaitCatalogue needs openSession to have subscribed to the catalogue fetches first");
+  }
+  await waiting;
 }
 
 async function openSession(page: Page, onInvocation?: (body: Record<string, unknown>) => void) {
   await mockBackend(page, onInvocation);
+  // Subscribe BEFORE the app loads: a response that already happened is invisible
+  // to waitForResponse, which is the race this used to lose under parallel load.
+  catalogueWaits.set(page, watchCatalogue(page));
   // The stored session is restored by the app's own startup path, so nothing here
   // competes with the connect hook's selection.
   await openSeededSession(page, { projectId: project.id, sessionId: session.id });
