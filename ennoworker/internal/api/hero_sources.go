@@ -46,15 +46,28 @@ func heroNeedsSkillCatalog(document *heroesource.Document) bool {
 	return false
 }
 
-// validateHeroPublish runs the two checks that belong at publish, not save: a
-// read-only Hero must not carry a mutation tool, and every Skill binding must
-// resolve through the same resolver Graph publish uses.
+// validateHeroPublish runs the checks that belong at publish, not save: a
+// read-only Hero must not carry a mutation tool, a report contract must not
+// demand an artifact that authority makes impossible, and every Skill binding
+// must resolve through the same resolver Graph publish uses.
 func (s *Server) validateHeroPublish(r *http.Request, document *heroesource.Document) error {
 	if document.Authority.Domain() == domain.HeroAuthorityReadOnly {
 		for _, tool := range document.AllowedTools {
 			if domain.HeroToolRequiresMutation(tool) {
 				return fmt.Errorf("read-only Hero cannot include mutation tool %q", tool)
 			}
+		}
+		// The same rule read forwards: publish_artifact is a mutation tool, so a
+		// read-only Hero can never call it, and a report contract that REQUIRES an
+		// artifact can therefore never be satisfied by this Hero's own Run. The
+		// request is coherent on paper and impossible in practice: every Run would
+		// do its work and then fail with report_contract_violation. Refuse the
+		// contradiction here, next to the rule that creates it, instead of letting
+		// the Hero publish and failing at Run time.
+		if contract := document.ReportContract; contract != nil && contract.RequireArtifacts {
+			return fmt.Errorf("Hero %q requires an artifact (reportContract.requireArtifacts) but its authority is read_only, "+
+				"which forbids publish_artifact: its Runs can never satisfy the contract and would fail report_contract_violation",
+				document.Handle)
 		}
 	}
 
