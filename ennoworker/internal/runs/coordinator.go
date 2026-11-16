@@ -59,13 +59,25 @@ type childRunResolver interface {
 
 // RunClass is who a Run is for, and it decides which permits the Run needs.
 //
-// The coordinator holds MaxConcurrentRuns global permits plus MaxConcurrentRuns-1
-// batch permits, so batch work can never occupy the last slot: a person's next
-// turn always finds one free. With a single global permit there is nothing to
-// reserve, so batch keeps that slot and the two classes are simply serialised.
+// The coordinator holds MaxConcurrentRuns global permits plus max(1,
+// MaxConcurrentRuns-1) batch permits, and a batch Run must hold a batch permit
+// before it queues for a global one. The invariant that buys is narrower than
+// "the person always runs next", and worth stating exactly: with more than one
+// global permit, batch can never hold every one of them, so batch work (a Graph,
+// a wave of delegated children) cannot make the person's next Run wait for batch
+// work to finish. An interactive Run therefore starts as soon as a global permit
+// is free — immediately, when every running Run is batch. With a single global
+// permit there is nothing to reserve: the classes are simply serialised.
+//
+// It is not a priority queue. A batch Run already parked on the global semaphore
+// can win the permit a finishing Run releases ahead of an interactive Run that
+// arrives a moment later: the semaphore is a plain channel, and a blocked sender
+// is served before a new arrival. Closing that gap needs an interactive-pending
+// counter that parked batch waiters respect; it is a follow-up, deliberately not
+// part of this change.
 //
 // The values are read by cmd/ennoworker when it classifies a Graph child, and
-// agentflow.RunClass mirrors them, so do not change a value without both.
+// agentflow mirrors them, so do not change a value without both.
 type RunClass string
 
 const (
@@ -75,6 +87,28 @@ const (
 	// started but is not waiting on turn by turn.
 	ClassBatch RunClass = "batch"
 )
+
+// ClassifyRun decides a Run's class from its own persisted facts, and it is the
+// one rule for every site that re-schedules a Run it did not create: a person's
+// own turn is an agent Run with no parent, and everything else is work that turn
+// started.
+//
+// Classify by the Run, never by who woke it. A settled delegated child wakes its
+// parent, and that parent is usually the person's own turn that yielded waiting
+// on its children — the same wake-up reaches either class, so the wake-up itself
+// says nothing about it.
+//
+// The rule is deliberately strict: only an unparented agent Run is interactive,
+// so a kind this pair cannot vouch for (a context compaction, say) is throttled
+// instead of being admitted to the reserved slot. The paths that know the Run is
+// the person's — submit, retry, compaction, invocation — name ClassInteractive
+// themselves rather than asking this function to guess.
+func ClassifyRun(kind domain.RunKind, parentRunID string) RunClass {
+	if kind == domain.RunKindAgent && parentRunID == "" {
+		return ClassInteractive
+	}
+	return ClassBatch
+}
 
 type activeRun struct {
 	cancel context.CancelFunc
@@ -90,7 +124,8 @@ type Coordinator struct {
 	semaphore chan struct{}
 	// batchSemaphore bounds batch work below that ceiling. It is structural, not
 	// a poll: a batch Run must hold a batch permit before it queues for a global
-	// one, so the free slot the reservation guarantees is never taken by batch.
+	// one, so the slot the reservation guarantees is out of batch's reach. With
+	// one global permit there is no slot to reserve and it is a plain throttle.
 	batchSemaphore chan struct{}
 
 	mu           sync.Mutex
@@ -152,8 +187,8 @@ func (c *Coordinator) EnqueueWithClass(parent context.Context, runID string, cla
 
 // acquireSlot blocks until this class of Run may execute and returns the
 // release for the permits it holds. Only ClassInteractive is exempt from the
-// batch reservation: any other value is throttled, so a mislabelled Run can
-// never take the slot a person needs.
+// batch reservation: any other value is throttled, so a Run this code does not
+// recognise is treated as batch rather than being let into the reserved slot.
 //
 // The batch permit is taken BEFORE the global one by design. A batch Run that
 // held a global permit while queueing for a batch permit would block the very
@@ -216,7 +251,7 @@ func (c *Coordinator) execute(ctx context.Context, runID string, state *activeRu
 		}
 	}()
 
-	output, err := c.executor.Execute(ctx, run)
+	output, err := c.runExecutor(ctx, run)
 	switch {
 	case errors.Is(ctx.Err(), context.Canceled), errors.Is(err, context.Canceled):
 		state.err = c.lifecycle.Cancel(context.Background(), runID)
@@ -288,6 +323,19 @@ func (c *Coordinator) execute(ctx context.Context, runID string, state *activeRu
 	}
 }
 
+// runExecutor runs the executor and turns a panic into an error. Without the
+// recover, a panicking executor kills the goroutine and the whole process with
+// it: the Run never settles and nothing else on the Worker can report why.
+func (c *Coordinator) runExecutor(ctx context.Context, run *domain.AgentRun) (output domain.RunOutput, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			output = domain.RunOutput{}
+			err = fmt.Errorf("run executor panic: %v", recovered)
+		}
+	}()
+	return c.executor.Execute(ctx, run)
+}
+
 func (c *Coordinator) notifyRunSettled(run *domain.AgentRun) error {
 	current, err := c.lifecycle.Get(context.Background(), run.ID)
 	if err != nil || !current.Status.Terminal() {
@@ -313,9 +361,10 @@ func (c *Coordinator) enqueueSettledParent(parentID string) error {
 	if parentRun.Status != domain.RunQueued {
 		return nil
 	}
-	// The parent of a delegated child is running batch work waiting on its
-	// children: it resumes as batch so it cannot outrank a person's next turn.
-	if err := c.EnqueueWithClass(context.Background(), parentID, ClassBatch); err != nil && !errors.Is(err, store.ErrRunNotFound) {
+	// Classify the parent by its own persisted facts, never by the fact that a
+	// child woke it: the parent of a delegated child is often the person's own
+	// turn, which yielded waiting on its children and must resume as interactive.
+	if err := c.EnqueueWithClass(context.Background(), parentID, ClassifyRun(parentRun.RunKind, parentRun.ParentRunID)); err != nil && !errors.Is(err, store.ErrRunNotFound) {
 		return err
 	}
 	return nil

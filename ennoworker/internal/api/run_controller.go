@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 
+	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/runs"
 )
 
@@ -12,6 +13,19 @@ import (
 // separate child work from interactive work.
 type ClassedRunController interface {
 	EnqueueWithClass(context.Context, string, runs.RunClass) error
+}
+
+// enqueueResumedRun schedules the Run an approval decision or a question answer
+// resumed. It is not necessarily a person's own turn: delegated and Graph
+// children suspend for approval too, and a wave of child approvals must not
+// occupy every permit. The class comes from the Run's own facts, like every
+// other enqueue site that did not create the Run.
+func enqueueResumedRun(ctx context.Context, control RunController, run *domain.AgentRun) error {
+	class := runs.ClassifyRun(run.RunKind, run.ParentRunID)
+	if classed, ok := control.(ClassedRunController); ok {
+		return classed.EnqueueWithClass(ctx, run.ID, class)
+	}
+	return control.Enqueue(ctx, run.ID)
 }
 
 // enqueueChildRun schedules one delegated child Run as batch when the wired

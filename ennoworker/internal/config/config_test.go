@@ -16,7 +16,7 @@ func TestLoadDefaultsToLoopback(t *testing.T) {
 	cfg, err := config.Load()
 	require.NoError(t, err)
 	assert.Equal(t, "127.0.0.1:0", cfg.ListenAddr)
-	assert.Equal(t, 2, cfg.MaxConcurrentRuns)
+	assert.Equal(t, 3, cfg.MaxConcurrentRuns)
 }
 
 func TestLoadRejectsPublicBind(t *testing.T) {

@@ -422,8 +422,17 @@ func recoverV2Sessions(ctx context.Context, sessions *sessionstore.Manager, temp
 			return err
 		}
 		for _, runID := range ready {
-			// Recovered delegated children resume as batch, exactly as they ran.
-			if err := coordinator.EnqueueWithClass(context.Background(), runID, runs.ClassBatch); err != nil {
+			// Classify each recovered Run by its own persisted facts. A Run stays
+			// `queued` while its goroutine is parked on the semaphore, so this list
+			// holds the person's own queued turn as well as delegated children:
+			// labelling them all batch re-throttles a turn that was interactive
+			// before the restart.
+			recovered, err := runRepo.Get(ctx, runID)
+			if err != nil {
+				return fmt.Errorf("recover Session %s run %s: %w", sessionID, runID, err)
+			}
+			class := runs.ClassifyRun(recovered.RunKind, recovered.ParentRunID)
+			if err := coordinator.EnqueueWithClass(context.Background(), runID, class); err != nil {
 				return err
 			}
 		}

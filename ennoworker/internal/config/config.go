@@ -17,7 +17,9 @@ type Config struct {
 	HomeDir string
 	// ListenAddr is the loopback address and port for the HTTP server.
 	ListenAddr string
-	// MaxConcurrentRuns limits how many agent runs can execute in parallel.
+	// MaxConcurrentRuns limits how many agent runs can execute in parallel. The
+	// value includes the slot the coordinator reserves for interactive Runs, so a
+	// batch-only Graph gets at most max(1, MaxConcurrentRuns-1) of them.
 	MaxConcurrentRuns int
 	// Layout contains all V2 storage paths rooted under HomeDir.
 	Layout storage.Layout
@@ -57,9 +59,11 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		HomeDir:           home,
-		ListenAddr:        fmt.Sprintf("127.0.0.1:%s", port),
-		MaxConcurrentRuns: 2,
+		HomeDir:    home,
+		ListenAddr: fmt.Sprintf("127.0.0.1:%s", port),
+		// 3, not 2: with the reservation, 2 would mean one batch Run plus the
+		// reserved interactive slot, halving Graph parallelism from the old default.
+		MaxConcurrentRuns: 3,
 		Layout:            storage.ForHome(home),
 		SandboxMode:       sandboxMode(),
 		LogLevel:          logLevel(),

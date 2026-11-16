@@ -219,6 +219,171 @@ func TestCoordinatorRunClassValuesAreStable(t *testing.T) {
 	assert.Equal(t, "batch", string(ClassBatch))
 }
 
+// The class of a Run nobody already scheduled is decided by the Run's own
+// persisted facts: a person's turn is an agent Run with no parent, everything
+// else is work that turn started.
+func TestClassifyRunUsesTheRunsOwnFacts(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		kind     domain.RunKind
+		parentID string
+		want     RunClass
+	}{
+		{name: "person turn", kind: domain.RunKindAgent, want: ClassInteractive},
+		{name: "compaction run", kind: domain.RunKindContextCompaction, want: ClassBatch},
+		{name: "delegated child", kind: domain.RunKindDelegatedAgent, parentID: "parent", want: ClassBatch},
+		{name: "parented agent run", kind: domain.RunKindAgent, parentID: "parent", want: ClassBatch},
+		{name: "parented compaction", kind: domain.RunKindContextCompaction, parentID: "parent", want: ClassBatch},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			assert.Equal(t, testCase.want, ClassifyRun(testCase.kind, testCase.parentID))
+		})
+	}
+}
+
+// The parent of a settled delegated child is often the person's own turn: it
+// yielded waiting for its children and the store woke it to `queued` so the
+// coordinator re-enqueues it. Classifying that parent as batch puts the person's
+// next step behind unrelated Graph work, which is the regression the reservation
+// exists to remove.
+func TestCoordinatorResumesSettledParentInItsOwnClass(t *testing.T) {
+	repo := setupRunDB(t)
+	parent, child := setupDelegatedCoordinatorTree(t, repo, "settled-parent-class")
+	holder := setupRun(t, repo, "settled-parent-batch-holder")
+
+	release := make(chan struct{})
+	started := make(chan string, 4)
+	coordinator := NewCoordinator(repo, blockingExecutor(started, release), 2)
+
+	// Settle the child outside the coordinator: this test drives the wake-up, and
+	// the batch permit must already be held when it happens.
+	_, err := repo.Claim(context.Background(), child.ID)
+	require.NoError(t, err)
+	require.NoError(t, repo.FinalizeChildSuccess(context.Background(), child.ID, domain.RunOutput{
+		Messages: []domain.ChatMessage{{Role: domain.RoleAssistant,
+			Content: []domain.ContentBlock{{Kind: domain.ContentText, Text: "child done"}}}},
+		Terminal: &domain.SubmitResult{Status: domain.SubmitCompleted, Summary: "done"},
+	}))
+	queuedParent, err := repo.Get(context.Background(), parent.Run.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.RunQueued, queuedParent.Status, "a settled child must wake its parent to queued")
+
+	// One batch Run holds the only batch permit, so a parent classified as batch
+	// would queue behind it.
+	require.NoError(t, coordinator.EnqueueWithClass(context.Background(), holder.Run.ID, ClassBatch))
+	require.Equal(t, holder.Run.ID, <-started)
+	require.NoError(t, coordinator.enqueueSettledParent(parent.Run.ID))
+	select {
+	case id := <-started:
+		require.Equal(t, parent.Run.ID, id,
+			"the person's own resumed turn must not queue behind batch work")
+	case <-time.After(2 * time.Second):
+		t.Fatal("the settled parent was enqueued as batch and waited on Graph work")
+	}
+	close(release)
+	waitForAll(t, coordinator, holder.Run.ID, parent.Run.ID)
+	storedParent, err := repo.Get(context.Background(), parent.Run.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunSucceeded, storedParent.Status)
+}
+
+// A batch Run cancelled while it is parked on the batch permit never starts, and
+// the permit it was parked on must be free afterwards: the next batch Run runs as
+// soon as the holder lets go.
+func TestCoordinatorCancelsQueuedBatchRunBeforeItStarts(t *testing.T) {
+	repo := setupRunDB(t)
+	holder := setupRun(t, repo, "batch-cancel-holder")
+	parked := setupRun(t, repo, "batch-cancel-parked")
+	next := setupRun(t, repo, "batch-cancel-next")
+
+	release := make(chan struct{})
+	started := make(chan string, 4)
+	coordinator := NewCoordinator(repo, blockingExecutor(started, release), 2)
+	require.NoError(t, coordinator.EnqueueWithClass(context.Background(), holder.Run.ID, ClassBatch))
+	require.Equal(t, holder.Run.ID, <-started)
+	require.NoError(t, coordinator.EnqueueWithClass(context.Background(), parked.Run.ID, ClassBatch))
+	require.NoError(t, coordinator.Cancel(context.Background(), parked.Run.ID))
+
+	waitForAll(t, coordinator, parked.Run.ID)
+	stored, err := repo.Get(context.Background(), parked.Run.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunCancelled, stored.Status)
+
+	require.NoError(t, coordinator.EnqueueWithClass(context.Background(), next.Run.ID, ClassBatch))
+	close(release)
+	// A leaked permit would leave the next batch Run parked for the whole Wait
+	// timeout instead of starting after the holder releases.
+	waitForAll(t, coordinator, holder.Run.ID, next.Run.ID)
+	storedNext, err := repo.Get(context.Background(), next.Run.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunSucceeded, storedNext.Status)
+}
+
+// A failing Run must release its permits in both classes. The coordinator runs on
+// one permit and the Runs are strictly sequential, so a leak wedges every Run
+// after the failing one.
+func TestCoordinatorReleasesPermitsAfterFailureInBothClasses(t *testing.T) {
+	repo := setupRunDB(t)
+	failingBatch := setupRun(t, repo, "fail-batch")
+	afterBatch := setupRun(t, repo, "after-batch")
+	failingInteractive := setupRun(t, repo, "fail-interactive")
+	afterInteractive := setupRun(t, repo, "after-interactive")
+	failing := map[string]bool{failingBatch.Run.ID: true, failingInteractive.Run.ID: true}
+	executor := resultExecutorFunc(func(_ context.Context, run *domain.AgentRun) (domain.RunOutput, error) {
+		if failing[run.ID] {
+			return domain.RunOutput{}, errors.New("provider unavailable")
+		}
+		return domain.RunOutput{}, nil
+	})
+	coordinator := NewCoordinator(repo, executor, 1)
+	order := []struct {
+		runID string
+		class RunClass
+	}{
+		{failingBatch.Run.ID, ClassBatch},
+		{afterBatch.Run.ID, ClassBatch},
+		{failingInteractive.Run.ID, ClassInteractive},
+		{afterInteractive.Run.ID, ClassInteractive},
+	}
+	for _, step := range order {
+		require.NoError(t, coordinator.EnqueueWithClass(context.Background(), step.runID, step.class))
+		waitForAll(t, coordinator, step.runID)
+		stored, err := repo.Get(context.Background(), step.runID)
+		require.NoError(t, err)
+		want := domain.RunSucceeded
+		if failing[step.runID] {
+			want = domain.RunFailed
+		}
+		assert.Equal(t, want, stored.Status, "Run %s", step.runID)
+	}
+}
+
+// A panicking executor must not keep the goroutine's permits: the Run fails and
+// the next Run of the same class runs.
+func TestCoordinatorReleasesPermitsAfterExecutorPanic(t *testing.T) {
+	repo := setupRunDB(t)
+	panicking := setupRun(t, repo, "panic-batch")
+	next := setupRun(t, repo, "after-panic-batch")
+	executor := resultExecutorFunc(func(_ context.Context, run *domain.AgentRun) (domain.RunOutput, error) {
+		if run.ID == panicking.Run.ID {
+			panic("executor exploded")
+		}
+		return domain.RunOutput{}, nil
+	})
+	coordinator := NewCoordinator(repo, executor, 1)
+	require.NoError(t, coordinator.EnqueueWithClass(context.Background(), panicking.Run.ID, ClassBatch))
+	waitForAll(t, coordinator, panicking.Run.ID)
+	stored, err := repo.Get(context.Background(), panicking.Run.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunFailed, stored.Status, "a panic must fail the Run, not leave it running")
+
+	require.NoError(t, coordinator.EnqueueWithClass(context.Background(), next.Run.ID, ClassBatch))
+	waitForAll(t, coordinator, next.Run.ID)
+	storedNext, err := repo.Get(context.Background(), next.Run.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunSucceeded, storedNext.Status)
+}
+
 func setupRunDB(t *testing.T) *store.RunRepo {
 	t.Helper()
 	db, _, _ := newSessionDB(t)

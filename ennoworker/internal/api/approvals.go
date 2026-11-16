@@ -97,7 +97,7 @@ func (s *Server) decideApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if run.Status == domain.RunQueued && s.Control != nil {
-		if err := s.Control.Enqueue(context.Background(), run.ID); err != nil {
+		if err := enqueueResumedRun(context.Background(), s.Control, run); err != nil {
 			writeError(w, r, http.StatusServiceUnavailable, "run_enqueue_failed",
 				"approval was stored but the Run could not be scheduled", true)
 			return
@@ -146,7 +146,7 @@ func (s *Server) answerApprovalQuestion(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if run.Status == domain.RunQueued && s.Control != nil {
-		if err := s.Control.Enqueue(context.Background(), run.ID); err != nil {
+		if err := enqueueResumedRun(context.Background(), s.Control, run); err != nil {
 			writeError(w, r, http.StatusServiceUnavailable, "run_enqueue_failed",
 				"answer was stored but the Run could not be scheduled", true)
 			return
