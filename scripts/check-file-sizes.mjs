@@ -48,7 +48,7 @@ export const RECORDED_CEILINGS = {
   "ennoworker/cmd/ennoworker/main.go": 2200,
   "ennoworker/cmd/ennogate/main.go": 1050,
   "ennoworker/internal/store/delegation.go": 2650,
-  "ennoworker/internal/store/runs.go": 1580, // FindSubmission + turn Skills encode/decode
+  "ennoworker/internal/store/runs.go": 1517, // the run telemetry aggregation moved to run_telemetry.go
   "ennoworker/internal/store/approvals.go": 750,
   "ennoworker/internal/store/run_config_files.go": 740, // turn Skills loader + freeze merge
   "ennoworker/internal/store/mcp_profiles.go": 700,
