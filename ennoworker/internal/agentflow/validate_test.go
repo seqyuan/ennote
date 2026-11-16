@@ -3,6 +3,7 @@ package agentflow
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
@@ -904,6 +905,19 @@ func hasCode(result *ValidationResult, code string) bool {
 // point: it pins that `retry`, `timeout_ms` and `optional` are real task keys and
 // not silently dropped by the parser's allowlist.
 func schedulingDefYAML(producerExtra string) string {
+	return schedulingDefWithReviewerGoal(producerExtra, `    goal: "Review {task.producer.output.changed_files}"`+"\n")
+}
+
+// schedulingDefIndependentReviewerYAML is the same fixture with a reviewer that
+// does NOT read the producer's output. It exists because `optional` on a task
+// whose output a dependent reads is refused at publish
+// (optional_output_referenced): a fixture that declares both is not a valid
+// Graph any more, and a test about accepting the knob must not smuggle it in.
+func schedulingDefIndependentReviewerYAML(producerExtra string) string {
+	return schedulingDefWithReviewerGoal(producerExtra, "    goal: \"Review the producer's work\"\n")
+}
+
+func schedulingDefWithReviewerGoal(producerExtra, reviewerGoal string) string {
 	return `schemaVersion: 1
 id: maker-checker
 inputs:
@@ -919,8 +933,7 @@ tasks:
     budget: {tokens: 50000}
 ` + producerExtra + `  reviewer:
     hero: reader@1
-    goal: "Review {task.producer.output.changed_files}"
-    depends: [producer]
+` + reviewerGoal + `    depends: [producer]
   decision:
     type: check
     command: "go test ./..."
@@ -935,10 +948,13 @@ tasks:
 // The three knobs are accepted with their documented bounds, and they are part
 // of the definition (they survive the parser and the config digest).
 func TestValidationSchedulingKnobsAccepted(t *testing.T) {
-	result := validateDef(t, schedulingDefYAML("    retry: {max: 2}\n    timeout_ms: 600000\n    optional: true\n"))
+	// `optional` on the producer needs a dependent that does not read its output:
+	// that combination is refused by TestValidationOptionalOutputReferenced.
+	accepted := schedulingDefIndependentReviewerYAML("    retry: {max: 2}\n    timeout_ms: 600000\n    optional: true\n")
+	result := validateDef(t, accepted)
 	require.True(t, result.Valid, "%v", result.Diagnostics)
 
-	def, err := ParseDefinition([]byte(schedulingDefYAML("    retry: {max: 2}\n    timeout_ms: 600000\n    optional: true\n")))
+	def, err := ParseDefinition([]byte(accepted))
 	require.NoError(t, err)
 	producer := def.Tasks["producer"]
 	require.NotNil(t, producer.Retry)
@@ -1060,4 +1076,125 @@ func TestSchedulingKnobsRoundTrip(t *testing.T) {
 	assert.Equal(t, def.Tasks["producer"].TimeoutMS, reparsed.Tasks["producer"].TimeoutMS)
 	assert.True(t, reparsed.Tasks["producer"].Optional)
 	assert.NotContains(t, string(encoded), "timeoutMS", "the YAML contract keeps the snake_case key")
+}
+
+// B1. `optional` on a task whose output a dependent's goal reads is refused at
+// publish: a failed optional task has no output to supply, so the dependent could
+// only fail on a reference the graph promised. The diagnostic names the task
+// whose `optional` must be dropped, next to the reference that breaks.
+func TestValidationOptionalOutputReferenced(t *testing.T) {
+	// The REAL dependency shape: the reviewer reads {task.producer.output...}.
+	result := validateDef(t, schedulingDefYAML("    optional: true\n"))
+	require.False(t, result.Valid)
+	require.True(t, hasCode(result, "optional_output_referenced"), "%v", result.Diagnostics)
+	var diagnostic ValidationDiagnostic
+	for _, candidate := range result.Diagnostics {
+		if candidate.Code == "optional_output_referenced" {
+			diagnostic = candidate
+		}
+	}
+	assert.Equal(t, "tasks.producer.optional", diagnostic.Field)
+	assert.Contains(t, diagnostic.Message, `"producer"`)
+	assert.Contains(t, diagnostic.Message, `"reviewer"`)
+
+	// Without the flag the same graph is valid: the rule is about `optional`, not
+	// about reading a dependency's output.
+	required := validateDef(t, schedulingDefYAML(""))
+	require.True(t, required.Valid, "%v", required.Diagnostics)
+	assert.False(t, hasCode(required, "optional_output_referenced"))
+
+	// An optional task whose output nobody reads is still accepted, and so is an
+	// optional fan_out task (one failed instance is absorbed, and a dependent that
+	// does not read its output stays schedulable).
+	independent := validateDef(t, schedulingDefIndependentReviewerYAML("    optional: true\n"))
+	require.True(t, independent.Valid, "%v", independent.Diagnostics)
+
+	fanOutOptional := validateDef(t, `schemaVersion: 1
+id: optional-fanout
+budget: {max_total_tokens: 10000}
+tasks:
+  producer: {hero: reader@1, goal: "a", budget: {tokens: 100}, fan_out: {min: 2, max: 2}, optional: true}
+  accept: {terminal: {status: success}, depends: [producer]}
+`)
+	require.True(t, fanOutOptional.Valid, "%v", fanOutOptional.Diagnostics)
+
+	// A reference from the optional task's own goal is not a dependent reading it.
+	self := validateDef(t, schedulingDefIndependentReviewerYAML("    optional: true\n"))
+	require.True(t, self.Valid, "%v", self.Diagnostics)
+}
+
+// S1. `optional` on a check gate that declares `next` is refused: a failed gate
+// selects no branch, so both targets stay inactive, no terminal unlocks, and the
+// flow would die with "no runnable task" instead of continuing as `optional`
+// promises.
+func TestValidationOptionalOnRoutingCheckRefused(t *testing.T) {
+	routingCheck := func(extra string) string {
+		return `schemaVersion: 1
+id: optional-routing-gate
+budget: {max_total_tokens: 10000}
+tasks:
+  producer: {hero: writer@1, goal: "a", budget: {tokens: 100}}
+  gate:
+    type: check
+    command: "go test ./..."
+    depends: [producer]
+    next: {pass: passed, fail: failed}
+` + extra + `  passed: {hero: writer@1, goal: "b", budget: {tokens: 100}, depends: [gate]}
+  failed: {hero: writer@1, goal: "c", budget: {tokens: 100}, depends: [gate]}
+  accept: {terminal: {status: success}, depends: [passed, failed]}
+`
+	}
+	plain := validateDef(t, routingCheck(""))
+	require.True(t, plain.Valid, "%v", plain.Diagnostics)
+
+	optional := validateDef(t, routingCheck("    optional: true\n"))
+	require.False(t, optional.Valid)
+	require.True(t, hasCode(optional, "scheduling_unsupported"), "%v", optional.Diagnostics)
+	for _, diagnostic := range optional.Diagnostics {
+		if diagnostic.Code == "scheduling_unsupported" {
+			assert.Equal(t, "tasks.gate.optional", diagnostic.Field)
+			assert.Contains(t, diagnostic.Message, "next")
+		}
+	}
+
+	// The same gate WITHOUT next keeps `optional`: a gate that routes nothing has
+	// no branch to strand, and its failure is absorbed like any other task's.
+	optionalWithoutRouting := validateDef(t, `schemaVersion: 1
+id: optional-plain-gate
+budget: {max_total_tokens: 10000}
+tasks:
+  producer: {hero: writer@1, goal: "a", budget: {tokens: 100}}
+  gate: {type: check, command: "go test ./...", depends: [producer], optional: true}
+  accept: {terminal: {status: success}, depends: [gate]}
+`)
+	require.True(t, optionalWithoutRouting.Valid, "%v", optionalWithoutRouting.Diagnostics)
+}
+
+// N1. `optional` on a terminal task is refused instead of silently ignored: a
+// terminal completes the flow and never fails, so the flag can do nothing.
+func TestValidationOptionalOnTerminalRefused(t *testing.T) {
+	terminalDef := func(extra string) string {
+		return `schemaVersion: 1
+id: optional-terminal
+budget: {max_total_tokens: 10000}
+tasks:
+  producer: {hero: writer@1, goal: "a", budget: {tokens: 100}}
+  accept:
+    terminal: {status: success}
+    depends: [producer]
+` + extra
+	}
+	plain := validateDef(t, terminalDef(""))
+	require.True(t, plain.Valid, "%v", plain.Diagnostics)
+
+	optional := validateDef(t, strings.Replace(terminalDef(""), "    depends: [producer]\n",
+		"    depends: [producer]\n    optional: true\n", 1))
+	require.False(t, optional.Valid)
+	require.True(t, hasCode(optional, "scheduling_unsupported"), "%v", optional.Diagnostics)
+	for _, diagnostic := range optional.Diagnostics {
+		if diagnostic.Code == "scheduling_unsupported" {
+			assert.Equal(t, "tasks.accept.optional", diagnostic.Field)
+			assert.Contains(t, diagnostic.Message, "terminal")
+		}
+	}
 }

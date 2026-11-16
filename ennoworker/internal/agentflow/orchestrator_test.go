@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -200,6 +203,12 @@ type conflictError struct{}
 func (e *conflictError) Error() string { return "fake node state conflict" }
 
 // fakeChildren auto-settles each created child with a per-handle result.
+//
+// It models one child Run per DISPATCH, not one per handle: the first dispatch
+// of a handle keeps the historical id "child-<handle>" (many tests address it)
+// and a re-dispatch gets "child-<handle>#<n>". Without that, a retried node
+// would look like it re-used the child it was supposed to have stopped, and the
+// "one child per node at a time" rule would be untestable.
 type fakeChildren struct {
 	mu          sync.Mutex
 	created     []ChildSpec
@@ -214,13 +223,44 @@ type fakeChildren struct {
 	// failTimes/blockTimes limit the two behaviours to the first N dispatches of
 	// a handle, which is how a retry test gets "the first attempt fails, the
 	// second succeeds". dispatchCount is the per-handle CreateTaskChild count.
-	failTimes     map[string]int
-	blockTimes    map[string]int
-	dispatchCount map[string]int
+	failTimes      map[string]int
+	blockTimes     map[string]int
+	interruptTimes map[string]int
+	dispatchCount  map[string]int
+	// handles maps a child Run id back to the handle it was dispatched for, so a
+	// per-dispatch id still answers result/usage queries by handle.
+	handles map[string]string
+	// childOrder is every created child Run id in dispatch order, so a test can
+	// talk about "the first attempt" without depending on map iteration.
+	childOrder []string
+	// settledAtDispatch records, per dispatch, the earlier children of the same
+	// handle that were still running when a new one was created. The substrate
+	// allows one running child per node, so a test can assert this stays empty:
+	// it is the observable form of "a retry never runs two children at once".
+	settledAtDispatch map[string][]string
+	// overOneAtATime records the dispatches that created a second child while an
+	// earlier child of the same handle was still running (fan_out instances are
+	// the legitimate exception: they dispatch several children at once).
+	overOneAtATime []string
+	// ignoreCancel models a substrate whose cancel does not stop the child (a
+	// DB-only cancel): the call succeeds and the child keeps running. The flow
+	// must not treat that as settled.
+	ignoreCancel map[string]bool
+	// raceOnCancel: a cancel of these handles finds the child already settled - it
+	// won the race against the deadline - so the cancel is refused the way the
+	// real RunRepo refuses a terminal Run. cancelBlocker delivers that settle.
+	raceOnCancel  map[string]bool
+	cancelBlocker map[string]domain.RunStatus
+	// settleAt makes a running child finish on its own: the first status read
+	// at/after the instant still reports running (the settlement poll of that
+	// tick), the next one reports succeeded (the timeout path's re-read).
+	settleAt  map[string]time.Time
+	raceReads map[string]int
+	clock     func() time.Time
 }
 
 func newFakeChildren() *fakeChildren {
-	return &fakeChildren{results: map[string]*domain.SubmitResult{}, status: map[string]domain.RunStatus{}, usage: map[string]domain.RunBudgetUsage{}, failHandles: map[string]bool{}, blockedHandles: map[string]bool{}, failTimes: map[string]int{}, blockTimes: map[string]int{}, dispatchCount: map[string]int{}}
+	return &fakeChildren{results: map[string]*domain.SubmitResult{}, status: map[string]domain.RunStatus{}, usage: map[string]domain.RunBudgetUsage{}, failHandles: map[string]bool{}, blockedHandles: map[string]bool{}, failTimes: map[string]int{}, blockTimes: map[string]int{}, interruptTimes: map[string]int{}, dispatchCount: map[string]int{}, handles: map[string]string{}, settledAtDispatch: map[string][]string{}, raceOnCancel: map[string]bool{}, ignoreCancel: map[string]bool{}, cancelBlocker: map[string]domain.RunStatus{}, settleAt: map[string]time.Time{}, raceReads: map[string]int{}, clock: time.Now}
 }
 
 // dispatched is the number of times a handle was handed to the substrate.
@@ -228,6 +268,27 @@ func (c *fakeChildren) dispatched(handle string) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.dispatchCount[handle]
+}
+
+// childIDsOf returns the child Run ids created for one handle, in dispatch order.
+func (c *fakeChildren) childIDsOf(handle string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var ids []string
+	for _, id := range c.childOrder {
+		if c.handles[id] == handle {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// unsettledAtDispatch returns, for one handle, the dispatches that started while
+// an earlier child of that handle was still running.
+func (c *fakeChildren) unsettledAtDispatch(handle string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.settledAtDispatch[handle]...)
 }
 
 // setStatus settles a child from the test side.
@@ -243,11 +304,29 @@ func (c *fakeChildren) CreateTaskChild(ctx context.Context, parentRunID, session
 	c.created = append(c.created, spec)
 	c.runIDSeq++
 	c.dispatchCount[spec.Handle]++
-	id := "child-" + spec.Handle
 	attempt := c.dispatchCount[spec.Handle]
+	// Honesty check: a new child for a handle whose previous child has not
+	// settled is two children of one node at once.
+	if attempt > 1 && !isFanOutInstance(spec.Handle) {
+		for id, handle := range c.handles {
+			if handle != spec.Handle || c.status[id].Terminal() {
+				continue
+			}
+			c.settledAtDispatch[spec.Handle] = append(c.settledAtDispatch[spec.Handle], id)
+			c.overOneAtATime = append(c.overOneAtATime, spec.Handle)
+		}
+	}
+	id := "child-" + spec.Handle
+	if attempt > 1 {
+		id = fmt.Sprintf("child-%s#%d", spec.Handle, attempt)
+	}
+	c.handles[id] = spec.Handle
+	c.childOrder = append(c.childOrder, id)
 	switch {
 	case c.blockedHandles[spec.Handle] || attempt <= c.blockTimes[spec.Handle]:
 		c.status[id] = domain.RunRunning
+	case attempt <= c.interruptTimes[spec.Handle]:
+		c.status[id] = domain.RunInterrupted
 	case c.failHandles[spec.Handle] || attempt <= c.failTimes[spec.Handle]:
 		c.status[id] = domain.RunFailed
 	default:
@@ -262,6 +341,18 @@ func (c *fakeChildren) CreateTaskChild(ctx context.Context, parentRunID, session
 	return ChildInfo{RunID: id, ItemID: "item-" + spec.Handle, GroupID: "group-" + spec.Handle}, nil
 }
 
+// isFanOutInstance reports whether a handle names one instance of a fan_out task
+// ("<task>-<index>"), the one case where several children of a handle are
+// dispatched at once by design.
+func isFanOutInstance(handle string) bool {
+	_, index, ok := strings.Cut(handle, "-")
+	if !ok || index == "" {
+		return false
+	}
+	_, err := strconv.Atoi(index)
+	return err == nil
+}
+
 func (c *fakeChildren) ChildRunStatus(ctx context.Context, runID string) (domain.RunStatus, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -269,13 +360,36 @@ func (c *fakeChildren) ChildRunStatus(ctx context.Context, runID string) (domain
 	if !ok {
 		return domain.RunQueued, nil
 	}
+	// A child that finishes exactly at its deadline: the first read at/after the
+	// instant still says running, the next one says succeeded.
+	if status == domain.RunRunning {
+		if instant, ok := c.settleAt[c.handleOf(runID)]; ok && !c.clock().Before(instant) {
+			c.raceReads[runID]++
+			if c.raceReads[runID] > 1 {
+				c.status[runID] = domain.RunSucceeded
+				return domain.RunSucceeded, nil
+			}
+		}
+	}
 	return status, nil
+}
+
+// handleOf maps a child Run id to its handle. A child created through
+// CreateTaskChild is registered; an id a test seeded directly (a crash fixture)
+// falls back to the historical "child-<handle>" shape.
+func (c *fakeChildren) handleOf(runID string) string {
+	if handle, ok := c.handles[runID]; ok {
+		return handle
+	}
+	handle := strings.TrimPrefix(runID, "child-")
+	base, _, _ := strings.Cut(handle, "#")
+	return base
 }
 
 func (c *fakeChildren) ChildTerminalResult(ctx context.Context, runID string) (*domain.SubmitResult, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	handle := runID[len("child-"):]
+	handle := c.handleOf(runID)
 	result := c.results[handle]
 	if result == nil {
 		return nil, nil
@@ -287,18 +401,43 @@ func (c *fakeChildren) ChildTerminalResult(ctx context.Context, runID string) (*
 func (c *fakeChildren) ChildUsage(ctx context.Context, runID string) (domain.RunBudgetUsage, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	handle := runID[len("child-"):]
+	handle := c.handleOf(runID)
 	return c.usage[handle], nil
 }
 
+// CancelChildRun delivers a cancel. A child that already settled refuses it the
+// way the real substrate does (ErrInvalidRunState), which is the race the
+// timeout path resolves by re-reading the status instead of recording a timeout.
 func (c *fakeChildren) CancelChildRun(ctx context.Context, runID string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if _, ok := c.status[runID]; ok {
-		c.status[runID] = domain.RunCancelled
+	current, ok := c.status[runID]
+	if !ok {
+		return nil
 	}
+	if current.Terminal() {
+		return fmt.Errorf("%w: %s -> cancelled", errFakeInvalidRunState, current)
+	}
+	if c.ignoreCancel[c.handleOf(runID)] {
+		// Delivered, but it did not stop the child: exactly what a DB-only cancel
+		// looks like from the flow's side.
+		return nil
+	}
+	if c.raceOnCancel[c.handleOf(runID)] {
+		// The child won the race: it settled at the deadline, so the cancel
+		// cannot be applied and the caller must fold the real outcome.
+		c.status[runID] = c.cancelBlocker[c.handles[runID]]
+		return fmt.Errorf("%w: %s -> cancelled", errFakeInvalidRunState, c.status[runID])
+	}
+	// Delivered: the cancel is what stops the child. Nothing else in this fake
+	// ever settles a running child, so a flow that assumes a cancel worked - or
+	// never delivers one - leaves it running and is caught.
+	c.status[runID] = domain.RunCancelled
 	return nil
 }
+
+// errFakeInvalidRunState mirrors store.ErrInvalidRunState for the fake substrate.
+var errFakeInvalidRunState = errors.New("invalid run state")
 
 type fakeEvents struct {
 	mu      sync.Mutex
@@ -1318,4 +1457,394 @@ func (c *failingChecker) CheckApprovalStatus(ctx context.Context, runID string, 
 }
 func (c *failingChecker) ExecuteCheck(ctx context.Context, command string, timeoutSeconds int) (*CheckOutcome, error) {
 	return nil, errors.New("sandbox unavailable")
+}
+
+// --- Review fixes: retry/timeout/optional (adversarial review of 0d2dccb) ---
+
+// B1 (runtime net). A dependent whose goal reads the output of an optional task
+// cannot be satisfied when that task fails. The publish gate refuses the shape
+// (optional_output_referenced); a run frozen before that gate still reaches the
+// resolution, and it must fail naming the optional failure - and keep the tokens
+// it already spent instead of reporting zero.
+func TestOptionalOutputReferenceNamesTheOptionalFailure(t *testing.T) {
+	// The REAL dependency shape: the reviewer reads the producer's output.
+	def := threeTaskDef()
+	producer := def.Tasks["producer"]
+	producer.Optional = true
+	def.Tasks["producer"] = producer
+	fake, children, events, orch := newScheduledFlow(t, def)
+	children.failHandles["producer"] = true
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateFailed, waitTerminal(t, fake))
+
+	assert.Equal(t, 1, children.dispatched("producer"))
+	assert.Equal(t, 0, children.dispatched("reviewer"), "the dependent cannot run without the output it reads")
+
+	run, err := fake.GetRun(context.Background(), "flow-run-1")
+	require.NoError(t, err)
+	assert.Contains(t, run.TerminalReason, `optional task "producer"`)
+	assert.Contains(t, run.TerminalReason, "task_failed", "the reason quotes the code the node recorded")
+	assert.Contains(t, run.TerminalReason, `"reviewer"`, "the reason names the task that could not resolve its goal")
+	assert.Equal(t, int64(1000), run.TotalTokensUsed,
+		"a flow that ran a child must not report a zero ledger")
+	assert.Contains(t, events.types(), "flow_failed")
+	assert.NotContains(t, events.types(), "flow_completed")
+}
+
+// A missing output whose producer is NOT optional keeps the plain resolution
+// failure: the net is only about the optional shape, it does not reword every
+// dependency problem, and it does not invent a token total the flow never spent.
+func TestMissingOutputWithoutOptionalKeepsThePlainFailure(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) {})
+	def.Tasks["reviewer"] = domain.FlowTask{
+		Type: domain.FlowTaskHero, Hero: "reader@1", Goal: "Review {task.producer.output.changedFiles}",
+		Depends: []string{"producer"},
+	}
+	fake, children, events, orch := newScheduledFlow(t, def)
+	// The producer completes but records no output, so the reviewer's reference
+	// cannot resolve while the producer is not optional.
+	for _, node := range fake.nodes {
+		if node.Handle != "producer" {
+			continue
+		}
+		require.NoError(t, fake.UpdateNode(context.Background(), "flow-run-1", NodeUpdate{
+			TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodePending},
+			SetState: domain.FlowNodeCompleted,
+		}))
+	}
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateFailed, waitTerminal(t, fake))
+
+	run, err := fake.GetRun(context.Background(), "flow-run-1")
+	require.NoError(t, err)
+	assert.Contains(t, run.TerminalReason, `output is not available`)
+	assert.NotContains(t, run.TerminalReason, "optional task")
+	assert.Equal(t, 0, children.dispatched("reviewer"))
+	assert.Contains(t, events.types(), "flow_failed")
+}
+
+// B2. The fake substrate no longer stops a child by simply being asked; it
+// stops it when the cancel is DELIVERED, and it records any dispatch that
+// created a second child while the first was still running. A timed-out attempt
+// therefore has to be observably terminal before the retry dispatches.
+func TestTimedOutAttemptIsTerminalBeforeTheRetryDispatches(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) {
+		task.TimeoutMS = 60000
+		task.Retry = &domain.FlowTaskRetry{Max: 1}
+	})
+	fake, children, events, orch := newScheduledFlow(t, def)
+	children.blockTimes["producer"] = 1 // the first attempt never settles on its own
+	clock := &fakeClock{}
+	orch.Now = clock.now
+	stop := advanceUntilTerminal(fake, clock, 90*time.Second)
+	defer stop()
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	require.Equal(t, 2, children.dispatched("producer"))
+	assert.Empty(t, children.unsettledAtDispatch("producer"),
+		"a retry must never dispatch while the previous attempt is still running")
+	ids := children.childIDsOf("producer")
+	require.Len(t, ids, 2, "each dispatch is its own child Run")
+	assert.NotEqual(t, ids[0], ids[1], "the retry runs a different child Run")
+	first, err := children.ChildRunStatus(context.Background(), ids[0])
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunCancelled, first, "the ceiling stopped the first attempt")
+	second, err := children.ChildRunStatus(context.Background(), ids[1])
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunSucceeded, second)
+	assert.Contains(t, events.types(), "flow_task_retrying")
+	assert.Contains(t, events.types(), "flow_completed")
+	assert.Equal(t, domain.FlowNodeCompleted, nodesByHandle(t, fake)["producer"].TerminalState)
+	assert.Equal(t, 1, nodesByHandle(t, fake)["producer"].Attempts)
+}
+
+// B2.2. A child that settles exactly at its deadline is folded from its own
+// outcome. Recording task_timeout for it would fail a flow whose work is done -
+// and, with a retry budget, would run the task a second time for nothing.
+func TestChildSettlingAtTheDeadlineIsFoldedNotTimedOut(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) {
+		task.TimeoutMS = 60000
+		task.Retry = &domain.FlowTaskRetry{Max: 1}
+	})
+	fake, children, events, orch := newScheduledFlow(t, def)
+	clock := &fakeClock{}
+	orch.Now = clock.now
+	children.clock = clock.now
+	// The child finishes at its ceiling: the settlement poll of that tick still
+	// sees it running, the re-read the timeout path performs sees it succeeded.
+	children.blockedHandles["producer"] = true
+	children.settleAt["producer"] = time.Now().Add(60 * time.Second)
+	stop := advanceUntilTerminal(fake, clock, 90*time.Second)
+	defer stop()
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeCompleted, producer.TerminalState)
+	assert.Empty(t, producer.ErrorCode, "a settled child is not a timeout")
+	assert.Equal(t, 1, children.dispatched("producer"), "a settled attempt is never re-dispatched")
+	assert.NotContains(t, events.types(), "flow_task_retrying")
+	status, err := children.ChildRunStatus(context.Background(), "child-producer")
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunSucceeded, status)
+}
+
+// B2.2. The cancel can be refused because the child settled first. The error is
+// no longer discarded: the child's real outcome owns the node.
+func TestCancelRefusedBySettledChildFoldsTheOutcome(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) {
+		task.TimeoutMS = 60000
+		task.Retry = &domain.FlowTaskRetry{Max: 2}
+	})
+	fake, children, events, orch := newScheduledFlow(t, def)
+	children.blockedHandles["producer"] = true
+	// The child wins the race at the deadline: the cancel finds it already
+	// succeeded and is refused the way the real substrate refuses a terminal Run.
+	children.raceOnCancel["producer"] = true
+	children.cancelBlocker["producer"] = domain.RunSucceeded
+	clock := &fakeClock{}
+	orch.Now = clock.now
+	stop := advanceUntilTerminal(fake, clock, 90*time.Second)
+	defer stop()
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeCompleted, producer.TerminalState)
+	assert.Empty(t, producer.ErrorCode)
+	assert.Equal(t, 1, children.dispatched("producer"), "the settled attempt is not re-dispatched")
+	assert.NotContains(t, events.types(), "flow_task_retrying")
+}
+
+// B2.3. A cancel that does not stop the child leaves the attempt unsettled. The
+// flow must not record a timeout and must not retry over it (two children for one
+// node in one workspace); it stops loudly instead.
+func TestUnstoppableTimedOutChildFailsTheFlowWithoutRetry(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) {
+		task.TimeoutMS = 60000
+		task.Retry = &domain.FlowTaskRetry{Max: 3}
+		task.Optional = true
+	})
+	fake, children, events, orch := newScheduledFlow(t, def)
+	children.blockedHandles["producer"] = true
+	children.ignoreCancel["producer"] = true // DB-only cancel: the child keeps running
+	clock := &fakeClock{}
+	orch.Now = clock.now
+	stop := advanceUntilTerminal(fake, clock, 90*time.Second)
+	defer stop()
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateFailed, waitTerminal(t, fake))
+
+	assert.Equal(t, 1, children.dispatched("producer"), "an unsettled attempt is never retried")
+	assert.Empty(t, children.unsettledAtDispatch("producer"))
+	run, err := fake.GetRun(context.Background(), "flow-run-1")
+	require.NoError(t, err)
+	assert.Contains(t, run.TerminalReason, "did not stop")
+	assert.Equal(t, int64(1000), run.TotalTokensUsed, "the ledger survives the loud failure")
+	assert.NotContains(t, events.types(), "flow_completed")
+	// `optional` does not absorb an infrastructure failure: the workspace is in an
+	// unknown state, so the flow stops.
+	assert.NotContains(t, events.types(), "flow_task_retrying")
+}
+
+// S2. A crash consumes the attempt it was running: the recovery reset spends it,
+// so retry.max stays an upper bound on dispatches instead of a budget a crash
+// loop is handed back for free.
+func TestCrashedAttemptIsSpentByTheRecoveryReset(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) { task.Retry = &domain.FlowTaskRetry{Max: 1} })
+	fake, children, events, orch := newScheduledFlow(t, def)
+	producerIndex := -1
+	for _, node := range fake.nodes {
+		if node.Handle == "producer" {
+			producerIndex = node.TaskIndex
+		}
+	}
+	require.NotNil(t, fake.run)
+	// A crash mid-attempt: the node says running, its child is still executing.
+	require.NoError(t, fake.UpdateNode(context.Background(), "flow-run-1", NodeUpdate{
+		TaskIndex: producerIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodePending},
+		SetState: domain.FlowNodeRunning, ChildRunID: "child-producer",
+	}))
+	children.status["child-producer"] = domain.RunRunning
+	fake.run.State = domain.FlowStateRunning
+
+	require.NoError(t, orch.reconcileCrashedNodes(context.Background(), "flow-run-1"))
+	crashed := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeInterrupted, crashed.TerminalState)
+	assert.Equal(t, 1, crashed.Attempts, "a crash consumed one attempt")
+
+	// The single re-dispatch is the last one the budget allows: when it fails, the
+	// flow fails instead of being handed a second free attempt.
+	children.failHandles["producer"] = true
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateFailed, waitTerminal(t, fake))
+
+	assert.Equal(t, 1, children.dispatched("producer"), "the crash already spent the retry budget")
+	assert.NotContains(t, events.types(), "flow_task_retrying")
+	assert.Equal(t, 1, nodesByHandle(t, fake)["producer"].Attempts)
+}
+
+// N2. `flow_task_retrying` announces the dispatch about to happen, named so it
+// cannot be read as the attempt that just failed: the first retry is dispatch 2.
+func TestRetryEventReportsTheDispatchOrdinal(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) { task.Retry = &domain.FlowTaskRetry{Max: 2} })
+	fake, children, events, orch := newScheduledFlow(t, def)
+	children.failTimes["producer"] = 2 // two failures, then the third dispatch succeeds
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	require.Equal(t, 3, children.dispatched("producer"))
+	payload := events.payloadOf("flow_task_retrying")
+	require.NotNil(t, payload)
+	assert.Equal(t, 3, payload["maxDispatches"], "1 + retry.max is the dispatch ceiling")
+	assert.NotContains(t, payload, "attempt", "the ambiguous field is gone")
+	assert.NotContains(t, payload, "maxAttempts")
+	// The event map carries the LAST retry (dispatch 3): the fake records each
+	// publish, the map keeps the last one.
+	assert.Equal(t, 3, payload["dispatchOrdinal"])
+	assert.Equal(t, "task_failed", payload["reason"])
+}
+
+// N3. `optional` on a fan_out task: a failed instance is absorbed, the dependents
+// still run and the flow completes with the node failed.
+func TestOptionalFanOutFailureIsAbsorbed(t *testing.T) {
+	def := &domain.FlowDefinition{
+		SchemaVersion: 1, ID: "optional-fanout",
+		Outputs: map[string]domain.FlowPort{"report": {Type: domain.PortTypeString}},
+		Budget:  domain.FlowBudget{MaxTotalTokens: 100000},
+		Tasks: map[string]domain.FlowTask{
+			"producer": {Type: domain.FlowTaskHero, Hero: "reader@1", Goal: "survey",
+				FanOut: &domain.FlowFanOut{Min: 2, Max: 2}, Optional: true,
+				Budget: &domain.FlowTaskBudget{Tokens: 1000}},
+			"reviewer": {Type: domain.FlowTaskHero, Hero: "reader@1", Goal: "summarize",
+				Depends: []string{"producer"}, Budget: &domain.FlowTaskBudget{Tokens: 1000}},
+			"done": {Terminal: &domain.FlowTerminal{Status: "success", Output: "report"}, Depends: []string{"reviewer"}},
+		},
+	}
+	fake, children, events, orch := newScheduledFlow(t, def)
+	children.failHandles["producer-1"] = true // one instance of the fan_out fails
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeFailed, producer.TerminalState)
+	assert.Equal(t, "task_failed", producer.ErrorCode)
+	assert.Equal(t, 1, children.dispatched("reviewer"), "a failed optional fan_out still satisfies its dependents")
+	assert.Contains(t, events.types(), "flow_completed")
+	assert.NotContains(t, events.types(), "flow_failed")
+}
+
+// N3. `optional` absorbs an acceptance verdict: the node keeps the verdict and
+// its code, and the flow continues.
+func TestOptionalAbsorbsAcceptanceFailure(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) { task.Optional = true })
+	def.Tasks["producer"] = domain.FlowTask{
+		Type: domain.FlowTaskHero, Hero: "writer@1", Goal: "produce", Optional: true,
+		Acceptance: []domain.FlowAcceptance{{File: "outputs/qc.csv", Check: "non-empty"}},
+	}
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+	orch := acceptanceOrchestrator(t, fake, children, events, newFakeEvidence()) // the file does not exist
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeFailed, producer.TerminalState)
+	assert.Equal(t, acceptanceFailedCode, producer.ErrorCode)
+	assert.Contains(t, events.types(), "flow_task_acceptance_failed")
+	assert.Equal(t, 1, children.dispatched("reviewer"))
+	assert.Contains(t, events.types(), "flow_completed")
+	assert.NotContains(t, events.types(), "flow_failed")
+}
+
+// N3. `optional` absorbs a report contract violation the same way: the verdict
+// is on the node, the dependent still runs, the flow completes.
+func TestOptionalAbsorbsReportContractViolation(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) { task.Optional = true })
+	fake, children, events, orch := newScheduledFlow(t, def)
+	freezeReportContract(t, fake, "producer", requiredPayloadContract())
+	children.results["producer"] = &domain.SubmitResult{
+		Status: domain.SubmitCompleted, Summary: "done", Payload: json.RawMessage(`{"summary":"done"}`),
+	}
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeFailed, producer.TerminalState)
+	assert.Equal(t, reportContractViolationCode, producer.ErrorCode)
+	assert.Contains(t, events.types(), "flow_task_report_contract_violation")
+	assert.Equal(t, 1, children.dispatched("reviewer"))
+	assert.Contains(t, events.types(), "flow_completed")
+	assert.NotContains(t, events.types(), "flow_failed")
+}
+
+// N3. The interrupted retry path: a child Run that ended interrupted is an
+// attempt-shaped failure, so it is re-dispatched like a failed one.
+func TestInterruptedChildIsRetried(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) { task.Retry = &domain.FlowTaskRetry{Max: 1} })
+	fake, children, events, orch := newScheduledFlow(t, def)
+	children.interruptTimes["producer"] = 1
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	require.Equal(t, 2, children.dispatched("producer"))
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeCompleted, producer.TerminalState)
+	assert.Equal(t, 1, producer.Attempts)
+	assert.Empty(t, producer.ErrorCode, "the re-dispatched node no longer looks interrupted")
+	payload := events.payloadOf("flow_task_retrying")
+	require.NotNil(t, payload)
+	assert.Equal(t, "task_interrupted", payload["reason"])
+	assert.Equal(t, 2, payload["dispatchOrdinal"])
+	first, err := children.ChildRunStatus(context.Background(), "child-producer")
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunInterrupted, first, "the interrupted attempt is the terminal fact the retry folded")
+}
+
+// S3. A completed flow that tolerated a failed optional task is not a clean one:
+// the run's terminal reason and the flow_completed payload both say which tasks
+// failed, instead of the flow reading exactly like a run where everything worked.
+func TestCompletedFlowNamesFailedOptionalTasks(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) { task.Optional = true })
+	fake, children, events, orch := newScheduledFlow(t, def)
+	children.failHandles["producer"] = true
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	run, err := fake.GetRun(context.Background(), "flow-run-1")
+	require.NoError(t, err)
+	assert.Equal(t, "completed with 1 failed optional task: producer", run.TerminalReason)
+
+	payload := events.payloadOf("flow_completed")
+	require.NotNil(t, payload)
+	entries, ok := payload["failedTasks"].([]map[string]string)
+	require.True(t, ok, "flow_completed carries the failed optional tasks as data: %#v", payload["failedTasks"])
+	require.Len(t, entries, 1)
+	assert.Equal(t, "producer", entries[0]["task"])
+	assert.Equal(t, "task_failed", entries[0]["errorCode"])
+
+	// A clean flow keeps saying nothing: no reason, no failedTasks key.
+	clean, cleanChildren, cleanEvents, cleanOrch := newScheduledFlow(t, scheduledDef(func(task *domain.FlowTask) {}))
+	cleanOrch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, clean))
+	assert.Equal(t, 1, cleanChildren.dispatched("producer"))
+	cleanRun, err := clean.GetRun(context.Background(), "flow-run-1")
+	require.NoError(t, err)
+	assert.Empty(t, cleanRun.TerminalReason, "a clean completion still reports no reason")
+	assert.NotContains(t, cleanEvents.payloadOf("flow_completed"), "failedTasks")
 }

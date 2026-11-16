@@ -457,6 +457,12 @@ func startFlowOrchestrator(db *sql.DB, runID string,
 		Children: &store.OrchestratorChildren{
 			DB: db, Delegations: &store.DelegationRepo{DB: db, HeroSources: sources, Models: models, Policies: policyFiles},
 			Policies: policyFiles,
+			// The flow's own cancel must reach the in-process execution, not just the
+			// row: the coordinator is what stops an executing child Run, and the
+			// orchestrator's timeout path re-reads the child's status afterwards.
+			CancelExecution: func(ctx context.Context, childRunID string) error {
+				return coordinator.Cancel(ctx, childRunID)
+			},
 		},
 		Events:  &store.FlowEventSink{Writer: eventWriter},
 		Checker: checkRunner,

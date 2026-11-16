@@ -8,10 +8,12 @@ package store_test
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
+	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -129,4 +131,80 @@ func TestFlowNodeAttemptsSurviveResume(t *testing.T) {
 	assert.True(t, resumed.Optional, "the frozen declaration survives a resume")
 	assert.Empty(t, resumed.ErrorCode)
 	assert.Empty(t, resumed.OutputRef)
+}
+
+// B2. The flow's cancel must reach BOTH channels: the durable row and the
+// in-process execution. A DB-only cancel marks the child cancelled while its loop
+// keeps executing, so a `retry` deciding on the row dispatches a second child next
+// to it in the same workspace.
+func TestCancelChildRunReachesExecutionAndRow(t *testing.T) {
+	db, flowRuns, projectID, _, heroVersionID := setupFlowFixture(t)
+	ctx := context.Background()
+	def, err := agentflow.ParseDefinition([]byte(flowYAML("cancel-wiring", "")))
+	require.NoError(t, err)
+	version := flowVersionFromDef(def)
+	inputs, err := store.NormalizeFlowInputs(def, map[string]any{"target": "src/main.go"}, nil)
+	require.NoError(t, err)
+	freeze, diagnostics, err := freezeFlowForTest(t, db, flowRuns, projectID, "", def, inputs)
+	require.NoError(t, err, diagnostics)
+	session := sqlCreateSession(t, db, projectID)
+	run, err := flowRuns.CreateFlowRun(ctx, store.CreateFlowRunInput{
+		SessionID: session.ID, ProjectID: projectID, FlowVersionID: version.ID,
+		DefinitionJSON: version.DefinitionJSON, ConfigDigest: version.ConfigDigest, InputsJSON: inputs,
+	}, freeze)
+	require.NoError(t, err)
+	var producerNode *store.FlowNodeFreeze
+	for i := range freeze {
+		if freeze[i].Handle == "producer" {
+			producerNode = &freeze[i]
+		}
+	}
+	require.NotNil(t, producerNode)
+	var ceiling domain.BudgetCeilingJSON
+	require.NoError(t, json.Unmarshal(producerNode.BudgetJSON, &ceiling))
+
+	var cancelledExecutions []string
+	policies := &fileconfig.PolicyStore{Path: filepath.Join(t.TempDir(), "config", "policies.json")}
+	children := &store.OrchestratorChildren{
+		DB:          db,
+		Delegations: &store.DelegationRepo{DB: db, Policies: policies},
+		Policies:    policies,
+		CancelExecution: func(ctx context.Context, runID string) error {
+			cancelledExecutions = append(cancelledExecutions, runID)
+			return nil
+		},
+	}
+	first, err := children.CreateTaskChild(ctx, run.RunID, session.ID, agentflow.ChildSpec{
+		Handle: "producer", HeroVersionID: heroVersionID, Assignment: "a",
+		HeroDefinitionJSON: producerNode.HeroDefinitionJSON, Budget: ceiling,
+	})
+	require.NoError(t, err)
+	require.NoError(t, children.CancelChildRun(ctx, first.RunID))
+
+	assert.Equal(t, []string{first.RunID}, cancelledExecutions,
+		"the in-process execution is cancelled, not only the row")
+	status, err := children.ChildRunStatus(ctx, first.RunID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunCancelled, status)
+
+	// The execution channel runs even when the row write is refused (a child that
+	// already settled cannot transition to cancelled), so an error on one channel
+	// never leaves a live execution behind - and the error is surfaced, not
+	// swallowed.
+	cancelledExecutions = nil
+	second, err := children.CreateTaskChild(ctx, run.RunID, session.ID, agentflow.ChildSpec{
+		Handle: "producer", HeroVersionID: heroVersionID, Assignment: "a",
+		HeroDefinitionJSON: producerNode.HeroDefinitionJSON, Budget: ceiling,
+	})
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `UPDATE agent_runs SET status='succeeded', finished_at=? WHERE id=?`,
+		heroTimeNow(), second.RunID)
+	require.NoError(t, err)
+
+	err = children.CancelChildRun(ctx, second.RunID)
+	require.Error(t, err, "a settled child refuses the cancel; the error is not discarded")
+	assert.Equal(t, []string{second.RunID}, cancelledExecutions)
+	status, err = children.ChildRunStatus(ctx, second.RunID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunSucceeded, status, "the settled outcome is untouched")
 }

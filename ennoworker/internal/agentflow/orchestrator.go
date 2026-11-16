@@ -110,6 +110,13 @@ type ChildInfo struct {
 }
 
 // ChildProvider wraps the delegation substrate.
+//
+// CancelChildRun is one fact, not two: it must both record the cancellation
+// durably AND stop the in-process execution of the child. A DB-only cancel
+// leaves an executing Run looping to completion, so a retry would start a second
+// child for the same node in the same workspace. After it returns, the child's
+// status must be observably terminal (or becoming so); the flow re-reads the
+// status instead of assuming it.
 type ChildProvider interface {
 	CreateTaskChild(ctx context.Context, parentRunID, sessionID string, spec ChildSpec) (ChildInfo, error)
 	ChildRunStatus(ctx context.Context, runID string) (domain.RunStatus, error)
@@ -302,9 +309,9 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 		// writer can never race their snapshot.
 		if len(inFlight) == 0 {
 			if c := firstSpecialTask(ready, &def, domain.FlowTaskCheck); c != nil {
-				goal, err := ResolveGoalTemplate(def.Tasks[c.Handle].Goal, inputs, vars, taskOutputs)
-				if err != nil {
-					o.fail(ctx, runID, fmt.Sprintf("resolve goal for task %q: %v", c.Handle, err))
+				goal, ok := o.resolveGoalForTask(ctx, runID, c.Handle, def.Tasks[c.Handle].Goal,
+					inputs, vars, taskOutputs, byHandle, state.TotalTokensUsed)
+				if !ok {
 					return
 				}
 				if err := o.runCheckTask(ctx, runID, state, c, def.Tasks[c.Handle], goal, taskOutputs); err != nil {
@@ -313,9 +320,9 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 				continue
 			}
 			if f := firstFanOutTask(ready, &def); f != nil {
-				goal, err := ResolveGoalTemplate(def.Tasks[f.Handle].Goal, inputs, vars, taskOutputs)
-				if err != nil {
-					o.fail(ctx, runID, fmt.Sprintf("resolve goal for task %q: %v", f.Handle, err))
+				goal, ok := o.resolveGoalForTask(ctx, runID, f.Handle, def.Tasks[f.Handle].Goal,
+					inputs, vars, taskOutputs, byHandle, state.TotalTokensUsed)
+				if !ok {
 					return
 				}
 				if err := o.runFanOutTask(ctx, runID, state, f, def.Tasks[f.Handle], goal); err != nil {
@@ -394,9 +401,9 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 				o.fail(ctx, runID, fmt.Sprintf("task %q depends on incomplete task %q", node.Handle, missing))
 				return
 			}
-			goal, err := ResolveGoalTemplate(task.Goal, inputs, vars, taskOutputs)
-			if err != nil {
-				o.fail(ctx, runID, fmt.Sprintf("resolve goal for task %q: %v", node.Handle, err))
+			goal, ok := o.resolveGoalForTask(ctx, runID, node.Handle, task.Goal,
+				inputs, vars, taskOutputs, byHandle, state.TotalTokensUsed)
+			if !ok {
 				return
 			}
 			child, err := o.dispatchHeroChild(ctx, runID, state, node, task, goal, taskOutputs)
@@ -1400,7 +1407,10 @@ func resolveRef(raw string, inputs, vars map[string]any, taskOutputs map[string]
 		task, path, hasPath := strings.Cut(rest, ".")
 		payload, ok := taskOutputs[task]
 		if !ok {
-			return "", fmt.Errorf("task %q output is not available (dependency not completed)", task)
+			// Typed, so the caller can ask WHICH task has no output instead of
+			// matching on a message: a producer that failed while optional is a
+			// named diagnosis, not a generic resolution error.
+			return "", &missingTaskOutputError{task: task}
 		}
 		if !hasPath || strings.TrimPrefix(path, "output") == "" {
 			return string(payload), nil
@@ -1428,6 +1438,15 @@ func resolveRef(raw string, inputs, vars map[string]any, taskOutputs map[string]
 	default:
 		return "", fmt.Errorf("unsupported goal reference {%s}", raw)
 	}
+}
+
+// missingTaskOutputError reports a goal reference to a task that has no recorded
+// output. Its message is the historical one (the status is what an author needs
+// to hear); the type is what lets the orchestrator name an optional producer.
+type missingTaskOutputError struct{ task string }
+
+func (e *missingTaskOutputError) Error() string {
+	return fmt.Sprintf("task %q output is not available (dependency not completed)", e.task)
 }
 
 func lookupPath(root any, path string) (any, bool) {

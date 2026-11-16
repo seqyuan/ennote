@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
@@ -104,13 +105,27 @@ func (o *Orchestrator) waitAndFoldAny(ctx context.Context, runID string, flow *d
 			if index := o.attemptExpired(def, *inFlight); index >= 0 {
 				task := (*inFlight)[index]
 				*inFlight = append((*inFlight)[:index], (*inFlight)[index+1:]...)
+				// Re-read before cancelling: the child may have settled between the
+				// settlement poll above and this decision (a race with the deadline).
+				// A task that finished is folded from its own outcome - a success
+				// recorded as task_timeout would fail a flow that did its work.
+				status, err := o.Children.ChildRunStatus(ctx, task.childID)
+				if err != nil {
+					return err
+				}
+				if status.Terminal() {
+					result, _ := o.Children.ChildTerminalResult(ctx, task.childID)
+					return o.foldHeroChild(ctx, runID, flow, def, task.node, task.childID, status, result, *inFlight)
+				}
 				// Hard-cancel the timed-out child: the ceiling bounds the budget it
 				// may spend, and the node must not keep a running child behind a
-				// failed checkpoint.
-				_ = o.Children.CancelChildRun(ctx, task.childID)
+				// failed checkpoint. The settlement waits for that cancel to be
+				// observable (settleTimedOutAttempt), because re-dispatching a retry
+				// over a child that is still running would put two children for this
+				// node in the same workspace.
 				usage, _ := o.Children.ChildUsage(ctx, task.childID)
 				total, _ := o.Store.AddTokenUsage(ctx, runID, usage.Tokens)
-				o.settleAttemptFailure(ctx, runID, def, task.node, taskTimeoutCode, total, *inFlight)
+				o.settleTimedOutAttempt(ctx, runID, flow, def, task, *inFlight, total)
 				return nil // whichever way it settled, the dispatch loop re-reads state
 			}
 			continue
@@ -121,6 +136,76 @@ func (o *Orchestrator) waitAndFoldAny(ctx context.Context, runID string, flow *d
 		status, _ := o.Children.ChildRunStatus(ctx, task.childID)
 		return o.foldHeroChild(ctx, runID, flow, def, task.node, task.childID, status, result, *inFlight)
 	}
+}
+
+// settleTimedOutAttempt records one attempt that ran past its ceiling, and it
+// records it only once the child is observably terminal.
+//
+// The cancel is not fire-and-forget: a DB-only cancel leaves the child's loop
+// executing, and `retry` would then dispatch a second child for the same node in
+// the same workspace. So the error is no longer discarded, the status is re-read
+// (a child that won the race settled on its own, and its own outcome owns the
+// node), and a cancel that does not reach the child stops the flow loudly
+// instead of guessing. An attempt stuck in that state is an infrastructure
+// fact, not a task verdict: `optional` does not absorb it.
+func (o *Orchestrator) settleTimedOutAttempt(ctx context.Context, runID string, flow *domain.RunAgentFlow,
+	def *domain.FlowDefinition, task inflightTask, remaining []inflightTask, total int64) {
+	cancelErr := o.Children.CancelChildRun(ctx, task.childID)
+	// A cancel can fail because the child settled first (a terminal Run refuses
+	// the transition); that is a race, not a broken cancel, and the re-read is
+	// what tells the two apart.
+	status, statusErr := o.awaitChildTerminal(ctx, task.childID)
+	if statusErr == nil && status.Terminal() {
+		if status != domain.RunCancelled {
+			// Settled concurrently with the deadline: fold the real outcome
+			// instead of recording a timeout that did not happen.
+			result, _ := o.Children.ChildTerminalResult(ctx, task.childID)
+			_ = o.foldHeroChild(ctx, runID, flow, def, task.node, task.childID, status, result, remaining)
+			return
+		}
+		o.settleAttemptFailure(ctx, runID, def, task.node, taskTimeoutCode, total, remaining)
+		return
+	}
+	reason := fmt.Sprintf("task %q %s: the timed-out attempt did not stop", task.node.Handle, taskTimeoutCode)
+	switch {
+	case cancelErr != nil:
+		reason += ": cancel failed: " + cancelErr.Error()
+	case statusErr != nil:
+		reason += ": status unreadable: " + statusErr.Error()
+	default:
+		reason += ": the child is still " + string(status)
+	}
+	o.failTask(ctx, runID, task.node, taskTimeoutCode)
+	o.cancelInflight(ctx, runID, remaining)
+	o.failKeepingUsage(ctx, runID, total, reason)
+}
+
+// cancelSettlePolls bounds how long a cancelled attempt is awaited. The poll
+// count, not a second timeout, keeps the wait short and bounded: a child that is
+// terminal in the substrate answers on the first read.
+const cancelSettlePolls = 20
+
+// awaitChildTerminal polls a child until it is terminal, the budget of polls is
+// spent, or the caller context ends. It returns the last observed status so a
+// caller can say what it actually saw.
+func (o *Orchestrator) awaitChildTerminal(ctx context.Context, childID string) (domain.RunStatus, error) {
+	var status domain.RunStatus
+	var lastErr error
+	for poll := 0; poll < cancelSettlePolls; poll++ {
+		if poll > 0 {
+			select {
+			case <-ctx.Done():
+				return status, ctx.Err()
+			case <-time.After(o.PollInterval):
+			}
+		}
+		observed, err := o.Children.ChildRunStatus(ctx, childID)
+		if err == nil && observed.Terminal() {
+			return observed, nil
+		}
+		status, lastErr = observed, err
+	}
+	return status, lastErr
 }
 
 // settleAttemptFailure records one failed attempt of a task and decides what it
@@ -170,6 +255,14 @@ func (o *Orchestrator) retryAttempt(ctx context.Context, runID string, def *doma
 	if limit <= 0 || node.Attempts >= limit {
 		return false // no budget: the ordinary failure path owns this
 	}
+	// One child per node at a time: a retry re-dispatches the node, so every child
+	// the previous attempt created must be observably terminal first. A timeout
+	// already waits for its cancel (settleTimedOutAttempt); this is the same rule
+	// at the dispatch gate, so no path can leave two children running for one
+	// node in one workspace.
+	if !o.nodeChildRunsSettled(ctx, node) {
+		return false
+	}
 	// A cancelled flow is never retried: re-dispatching a task the user stopped
 	// would keep work going after the cancel, and the cancellation path is about
 	// to mark every non-terminal node cancelled anyway.
@@ -189,8 +282,25 @@ func (o *Orchestrator) retryAttempt(ctx context.Context, runID string, def *doma
 	}
 	_ = o.Events.PublishFlow(ctx, runID, "flow_task_retrying", map[string]any{
 		"flowRunId": runID, "task": node.Handle, "reason": code,
-		"attempt": node.Attempts + 1, "maxAttempts": limit + 1,
+		// The dispatch this event announces, not the attempt it spent: the
+		// first retry is dispatch 2 (dispatch 1 was the attempt that failed),
+		// and maxDispatches = 1 + retry.max. The names say which is which so a
+		// reader cannot take one for the other.
+		"dispatchOrdinal": node.Attempts + 2, "maxDispatches": limit + 1,
 	})
+	return true
+}
+
+// nodeChildRunsSettled reports whether every child Run recorded on a node has
+// settled. An unreadable status is NOT settled: the gate exists to keep two
+// children of one node from running at once, so it fails closed.
+func (o *Orchestrator) nodeChildRunsSettled(ctx context.Context, node *domain.RunAgentFlowNode) bool {
+	for _, childID := range o.nodeChildIDs(node) {
+		status, err := o.Children.ChildRunStatus(ctx, childID)
+		if err != nil || !status.Terminal() {
+			return false
+		}
+	}
 	return true
 }
 
@@ -235,9 +345,13 @@ func (o *Orchestrator) reconcileCrashedNodes(ctx context.Context, runID string) 
 			continue
 		}
 		reset := func() {
+			// A crash consumed the attempt it was running: the reset SPENDS it, so
+			// retry.max stays an upper bound on dispatches instead of a budget a
+			// crash loop re-grants for free. The CAS is the same one that states
+			// `interrupted`, so the counter cannot be lost or applied twice.
 			_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
 				TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
-				SetState: domain.FlowNodeInterrupted,
+				SetState: domain.FlowNodeInterrupted, IncrementAttempts: true,
 			})
 		}
 		childIDs := o.nodeChildIDs(node)
@@ -386,19 +500,53 @@ func (o *Orchestrator) complete(ctx context.Context, runID string, totalTokens i
 	for name, value := range outputs {
 		payload["outputs"].(map[string]any)[name] = json.RawMessage(value)
 	}
+	// A completed flow that tolerated a failed optional task is not a clean one,
+	// and it must not read like one. Both surfaces say so: the run's
+	// terminal_reason names the tasks, and the payload carries them as data so a
+	// consumer does not have to parse prose to find them.
+	reason := ""
+	if failed := failedOptionalTasks(nodes); len(failed) > 0 {
+		handles := make([]string, 0, len(failed))
+		entries := make([]map[string]string, 0, len(failed))
+		for _, node := range failed {
+			handles = append(handles, node.Handle)
+			entries = append(entries, map[string]string{"task": node.Handle, "errorCode": node.ErrorCode})
+		}
+		plural := "s"
+		if len(failed) == 1 {
+			plural = ""
+		}
+		reason = fmt.Sprintf("completed with %d failed optional task%s: %s",
+			len(failed), plural, strings.Join(handles, ", "))
+		payload["failedTasks"] = entries
+	}
 	// The event carries the same summary the API projects from the node rows, so
 	// an auditor reading the timeline sees which tasks were only "nothing was
 	// disproved" without opening the run. Absent when nothing declared a clause.
 	if summary := acceptanceSummaryOf(nodes); summary != nil {
 		payload["acceptance"] = summary
 	}
-	if err := o.Store.UpdateFlowState(ctx, runID, domain.FlowStateCompleted, totalTokens, ""); err != nil {
+	if err := o.Store.UpdateFlowState(ctx, runID, domain.FlowStateCompleted, totalTokens, reason); err != nil {
 		return err
 	}
 	if err := o.Events.PublishFlow(ctx, runID, "flow_completed", payload); err != nil {
 		return err
 	}
 	return o.Store.TerminateAnchor(ctx, runID, domain.RunSucceeded, "", "")
+}
+
+// failedOptionalTasks returns the checkpoints that failed while declared
+// optional, in task order (the node list is already ordered by task index).
+// These are exactly the failures the flow absorbed: a completed run that holds
+// them is not a clean run, and `complete` says so.
+func failedOptionalTasks(nodes []*domain.RunAgentFlowNode) []*domain.RunAgentFlowNode {
+	var failed []*domain.RunAgentFlowNode
+	for _, node := range nodes {
+		if node != nil && node.Optional && node.TerminalState == domain.FlowNodeFailed {
+			failed = append(failed, node)
+		}
+	}
+	return failed
 }
 
 func (o *Orchestrator) fail(ctx context.Context, runID, reason string) {
@@ -414,6 +562,37 @@ func (o *Orchestrator) failKeepingUsage(ctx context.Context, runID string, total
 	_ = o.Store.UpdateFlowState(ctx, runID, domain.FlowStateFailed, total, reason)
 	_ = o.Events.PublishFlow(ctx, runID, "flow_failed", map[string]any{"flowRunId": runID, "reason": reason})
 	_ = o.Store.TerminateAnchor(ctx, runID, domain.RunFailed, "flow_failed", reason)
+}
+
+// resolveGoalForTask resolves one ready task's goal, and it lives with the
+// failure paths because that is what its error case is.
+//
+// A reference to the output of a task that failed while declared `optional` is
+// refused at publish (optional_output_referenced): a failed task has no output,
+// so the dependent could only fail. A run frozen before that gate existed still
+// reaches this code, and it must not report a missing checkpoint as if nothing
+// had run: the failure names the optional task and its error code, and keeps the
+// ledger the flow already spent (failKeepingUsage). total is the ledger from the
+// run row the dispatch loop already holds, so the honest total costs no read.
+func (o *Orchestrator) resolveGoalForTask(ctx context.Context, runID, handle, template string,
+	inputs, vars map[string]any, taskOutputs map[string]json.RawMessage,
+	byHandle map[string]*domain.RunAgentFlowNode, total int64) (string, bool) {
+	goal, err := ResolveGoalTemplate(template, inputs, vars, taskOutputs)
+	if err == nil {
+		return goal, true
+	}
+	var missing *missingTaskOutputError
+	if errors.As(err, &missing) {
+		if producer := byHandle[missing.task]; producer != nil &&
+			producer.TerminalState == domain.FlowNodeFailed && producer.Optional {
+			o.failKeepingUsage(ctx, runID, total,
+				fmt.Sprintf("task %q cannot resolve its goal: optional task %q failed (%s), so {task.%s.output} is not available",
+					handle, missing.task, producer.ErrorCode, missing.task))
+			return "", false
+		}
+	}
+	o.fail(ctx, runID, fmt.Sprintf("resolve goal for task %q: %v", handle, err))
+	return "", false
 }
 
 func (o *Orchestrator) failTask(ctx context.Context, runID string, node *domain.RunAgentFlowNode, code string) {

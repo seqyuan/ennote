@@ -107,6 +107,12 @@ type OrchestratorChildren struct {
 	// Policies resolves the file-backed delegation policy for the root budget
 	// ledger (V2); nil keeps the legacy global policy SQL path.
 	Policies *fileconfig.PolicyStore
+	// CancelExecution stops an executing child Run in-process (the run
+	// coordinator's cancel). It is nil in tests and in substrates without an
+	// in-process executor, and then a cancel is DB-only - which is why the
+	// orchestrator re-reads the child's status instead of assuming a cancel
+	// stopped it.
+	CancelExecution func(ctx context.Context, runID string) error
 }
 
 // CreateTaskChild atomically materializes one task's single-item delegation
@@ -211,9 +217,27 @@ func (c *OrchestratorChildren) ChildUsage(ctx context.Context, runID string) (do
 	return usage, err
 }
 
-// CancelChildRun hard-cancels the child and settles its attempt (RunRepo.Cancel).
+// CancelChildRun cancels a child Run on BOTH channels it lives on: the durable
+// row and the in-process execution.
+//
+// The row write alone is not a cancel. It marks the child cancelled but leaves an
+// already-executing Run looping to completion in the same workspace, so a retry
+// deciding on the row would dispatch a second child next to it. CancelExecution
+// is the coordinator's cancel, which stops that execution; it is called even when
+// the row write failed, because the run may still be live.
+//
+// A child that settled on its own refuses the row transition (ErrInvalidRunState);
+// that is not a cancel failure, it is a race the caller resolves by re-reading the
+// status, and the error is returned rather than swallowed.
 func (c *OrchestratorChildren) CancelChildRun(ctx context.Context, runID string) error {
-	return (&RunRepo{DB: c.DB}).Cancel(ctx, runID)
+	dbErr := (&RunRepo{DB: c.DB}).Cancel(ctx, runID)
+	var execErr error
+	if c.CancelExecution != nil {
+		if err := c.CancelExecution(ctx, runID); err != nil && !errors.Is(err, ErrRunNotFound) {
+			execErr = err
+		}
+	}
+	return errors.Join(dbErr, execErr)
 }
 
 // ListRecoverableRuns returns every non-terminal meta-Run id for startup

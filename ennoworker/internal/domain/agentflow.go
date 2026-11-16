@@ -299,6 +299,13 @@ type FlowTask struct {
 	// Optional marks a task whose failure does not fail the flow: the node still
 	// records `failed` with its error code, the flow continues, and the
 	// dependents of a failed-but-optional task are considered satisfied.
+	//
+	// Publish refuses two shapes where it cannot keep that promise: a terminal
+	// task (it never fails, so the flag would be ignored) and a check gate that
+	// declares `next` (a failed gate selects no branch, so both targets would
+	// stay inactive). A task whose output a dependent's goal reads is refused
+	// too (optional_output_referenced): a failed optional task has no output to
+	// supply the dependent that promised to read it.
 	Optional bool `json:"optional,omitempty" yaml:"optional,omitempty"`
 }
 

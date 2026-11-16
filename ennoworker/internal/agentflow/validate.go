@@ -143,7 +143,6 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 
 	// 3. hero@version / skill resolvability; 6. fan_out read-only; 7. budget.
 	totalTaskTokens := int64(0)
-	checkAllowlistMissing := false
 	// writerScopes collects tasks whose Hero can mutate (writer class); used by
 	// the allow_disjoint_writers validation.
 	writerScopes := map[string][]string{}
@@ -179,7 +178,6 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 			if !v.allowedCheckExec(task.Command) {
 				add(v.fail("check_command_not_allowed",
 					fmt.Sprintf("task %q check command is not in the sandbox allowlist", name), field+".command"))
-				checkAllowlistMissing = true
 			}
 		case domain.FlowTaskHero:
 			if strings.TrimSpace(task.Hero) == "" {
@@ -263,7 +261,6 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 		// 5. goal variable references (per task).
 		v.validateGoalReferences(ctx, add, def, name, task)
 	}
-	_ = checkAllowlistMissing
 
 	// 3b. Hero admission. One gate for every Hero task, run with the flow-level
 	// delegation totals: a Graph's child Runs impose a fixed admission shape
@@ -356,13 +353,11 @@ const (
 	maxAcceptanceColumnSize = 128
 )
 
-// validateTaskScheduling validates the retry budget and the per-attempt timeout,
-// and refuses either on a task that has no single attempt to schedule (a terminal
-// completes the flow, a check gate has its own verdict, a fan_out parent has one
-// attempt per instance). A knob this Worker cannot honour is refused instead of
-// ignored: `timeout_ms` on a check task must not read as a bounded gate.
-// `optional` needs no check: it is a boolean, and it is meaningful wherever a
-// task can fail.
+// validateTaskScheduling validates the retry budget, the per-attempt timeout and
+// the shapes a knob cannot be honoured on: `retry`/`timeout_ms` need one attempt (no
+// terminal, check gate or fan_out parent), `optional` cannot be kept on a terminal
+// (never fails) or a routing gate (a failed gate selects no branch, stranding both
+// targets); a dependent reading an optional output is refused by validateGoalReferences.
 func (v *Validator) validateTaskScheduling(add func(ValidationDiagnostic), def *domain.FlowDefinition) {
 	names := make([]string, 0, len(def.Tasks))
 	for name := range def.Tasks {
@@ -379,6 +374,11 @@ func (v *Validator) validateTaskScheduling(add func(ValidationDiagnostic), def *
 			}
 			if timeout {
 				add(v.fail("scheduling_unsupported", fmt.Sprintf("task %q is a %s task and cannot declare timeout_ms", name, kind), field+".timeout_ms"))
+			}
+			if task.Optional && task.Terminal != nil {
+				add(v.fail("scheduling_unsupported", fmt.Sprintf("task %q is a terminal task and cannot declare optional: a terminal never fails, so the flag would be ignored", name), field+".optional"))
+			} else if task.Optional && task.Type == domain.FlowTaskCheck && task.Next != nil {
+				add(v.fail("scheduling_unsupported", fmt.Sprintf("task %q is a check gate that declares next and cannot declare optional: a failed gate selects no branch, so both targets stay inactive and the flow has nothing left to run", name), field+".optional"))
 			}
 			continue
 		}
@@ -408,6 +408,9 @@ func (v *Validator) validateGoalReferences(ctx context.Context, add func(Validat
 			if !depends[ref.Task] {
 				add(v.fail("goal_task_out_of_scope",
 					fmt.Sprintf("task %q may only reference outputs of its depends tasks, not %q", taskName, ref.Task), field))
+			}
+			if producer, ok := def.Tasks[ref.Task]; ok && producer.Optional {
+				add(v.fail("optional_output_referenced", fmt.Sprintf("task %q is optional but its output is read by task %q's goal; a failed optional task has no output to supply, so either drop optional or stop reading {task.%s.output}", ref.Task, taskName, ref.Task), "tasks."+ref.Task+".optional"))
 			}
 		case refFlowVars:
 			// flow.vars.y is allowed; the value is provided at run time.

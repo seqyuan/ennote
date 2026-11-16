@@ -262,12 +262,20 @@ export interface paths {
          *     tasks, which have no single attempt to retry or bound, instead of being
          *     accepted and silently ignored. `optional` needs no range check: a failed
          *     optional task keeps its `failed` checkpoint and its error code, its
-         *     dependents still run, and the flow can still complete. Retries are
+         *     dependents still run, and the flow can still complete (the completion's
+         *     `terminal_reason` names the failed optional tasks, and the
+         *     `flow_completed` payload lists them under `failedTasks`). Retries are
          *     attempted before `optional` absorbs an outcome. Only an attempt-shaped
          *     failure is retried (a child Run that ended failed or interrupted, or a
          *     timeout); `acceptance_failed`, `report_contract_violation`, a cancelled
          *     task and a cancelled flow are verdicts about the product or about the
-         *     user's intent and are never re-run.
+         *     user's intent and are never re-run. `optional` is itself refused
+         *     (`scheduling_unsupported`) on a terminal task and on a check task that
+         *     declares `next`, because neither shape can honour it: a terminal never
+         *     fails, and a failed gate selects no branch, so both of its targets would
+         *     stay inactive. It is refused as `optional_output_referenced` on a task
+         *     whose recorded output a dependent's goal reads, because a failed
+         *     optional task has no output to supply that dependent.
          *
          *     A Graph needs no project binding to publish; enabling it is a separate
          *     step.
@@ -2552,7 +2560,7 @@ export interface components {
             };
             /** @description The `optional` declaration frozen with this node at Run start */
             optional?: boolean;
-            /** @description Extra attempts this node has already spent on a retry (0 on the first dispatch); incremented in the same checkpoint write that re-dispatches it */
+            /** @description Extra attempts this node has already spent on a retry (0 on the first dispatch); incremented in the same checkpoint write that re-dispatches it, and by the crash-recovery reset, which also spends the attempt the crash interrupted */
             attempts?: number;
             childRunId?: string;
             /** @description The full child set of a fan-out task */
@@ -3387,7 +3395,11 @@ export interface components {
              *     records `failed` with its error code, the flow continues, and a
              *     failed-but-optional dependency counts as satisfied, so dependents
              *     run and the terminal gate may unlock. Combined with `retry`, the
-             *     retry budget is spent first.
+             *     retry budget is spent first. Refused (`scheduling_unsupported`) on a
+             *     terminal task and on a check task that declares `next`, which have no
+             *     failure for the flag to absorb; refused (`optional_output_referenced`)
+             *     when a dependent's goal reads this task's output, because a failed
+             *     optional task cannot supply it.
              */
             optional?: boolean;
         };
