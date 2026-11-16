@@ -57,6 +57,25 @@ type childRunResolver interface {
 	OwnedChildIDs(context.Context, string) ([]string, error)
 }
 
+// RunClass is who a Run is for, and it decides which permits the Run needs.
+//
+// The coordinator holds MaxConcurrentRuns global permits plus MaxConcurrentRuns-1
+// batch permits, so batch work can never occupy the last slot: a person's next
+// turn always finds one free. With a single global permit there is nothing to
+// reserve, so batch keeps that slot and the two classes are simply serialised.
+//
+// The values are read by cmd/ennoworker when it classifies a Graph child, and
+// agentflow.RunClass mirrors them, so do not change a value without both.
+type RunClass string
+
+const (
+	// ClassInteractive is a person's turn, or a Run they asked for.
+	ClassInteractive RunClass = "interactive"
+	// ClassBatch is a Graph task child or a delegated child Run: work the person
+	// started but is not waiting on turn by turn.
+	ClassBatch RunClass = "batch"
+)
+
 type activeRun struct {
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -66,7 +85,13 @@ type activeRun struct {
 type Coordinator struct {
 	lifecycle Lifecycle
 	executor  Executor
+	// semaphore is the global concurrency ceiling: every running Run holds one
+	// permit whatever its class.
 	semaphore chan struct{}
+	// batchSemaphore bounds batch work below that ceiling. It is structural, not
+	// a poll: a batch Run must hold a batch permit before it queues for a global
+	// one, so the free slot the reservation guarantees is never taken by batch.
+	batchSemaphore chan struct{}
 
 	mu           sync.Mutex
 	active       map[string]*activeRun
@@ -77,11 +102,19 @@ func NewCoordinator(lifecycle Lifecycle, executor Executor, maxConcurrent int) *
 	if maxConcurrent < 1 {
 		maxConcurrent = 1
 	}
+	// MaxConcurrentRuns-1 reserved for interactive, but never zero: with one
+	// global permit there is no slot to reserve, and a zero-size batchSemaphore
+	// would wedge every batch Run forever.
+	batchSlots := maxConcurrent - 1
+	if batchSlots < 1 {
+		batchSlots = 1
+	}
 	return &Coordinator{
-		lifecycle: lifecycle,
-		executor:  executor,
-		semaphore: make(chan struct{}, maxConcurrent),
-		active:    make(map[string]*activeRun),
+		lifecycle:      lifecycle,
+		executor:       executor,
+		semaphore:      make(chan struct{}, maxConcurrent),
+		batchSemaphore: make(chan struct{}, batchSlots),
+		active:         make(map[string]*activeRun),
 	}
 }
 
@@ -93,7 +126,16 @@ func (c *Coordinator) SetRunSettledHook(hook func(context.Context, *domain.Agent
 	c.onRunSettled = hook
 }
 
+// Enqueue schedules a Run a person is waiting on. It is EnqueueWithClass with
+// ClassInteractive, which is what every caller meant before RunClass existed.
 func (c *Coordinator) Enqueue(parent context.Context, runID string) error {
+	return c.EnqueueWithClass(parent, runID, ClassInteractive)
+}
+
+// EnqueueWithClass schedules one Run in its class. An already-enqueued run id is
+// a no-op whatever class it names: dedupe is per run id, and a Run's class is
+// fixed at scheduling time rather than mutated under a running goroutine.
+func (c *Coordinator) EnqueueWithClass(parent context.Context, runID string, class RunClass) error {
 	c.mu.Lock()
 	if _, exists := c.active[runID]; exists {
 		c.mu.Unlock()
@@ -104,11 +146,44 @@ func (c *Coordinator) Enqueue(parent context.Context, runID string) error {
 	c.active[runID] = state
 	c.mu.Unlock()
 
-	go c.execute(ctx, runID, state)
+	go c.execute(ctx, runID, state, class)
 	return nil
 }
 
-func (c *Coordinator) execute(ctx context.Context, runID string, state *activeRun) {
+// acquireSlot blocks until this class of Run may execute and returns the
+// release for the permits it holds. Only ClassInteractive is exempt from the
+// batch reservation: any other value is throttled, so a mislabelled Run can
+// never take the slot a person needs.
+//
+// The batch permit is taken BEFORE the global one by design. A batch Run that
+// held a global permit while queueing for a batch permit would block the very
+// interactive Run the reservation exists to let through.
+func (c *Coordinator) acquireSlot(ctx context.Context, class RunClass) (func(), bool) {
+	batch := class != ClassInteractive
+	if batch {
+		select {
+		case c.batchSemaphore <- struct{}{}:
+		case <-ctx.Done():
+			return nil, false
+		}
+	}
+	select {
+	case c.semaphore <- struct{}{}:
+	case <-ctx.Done():
+		if batch {
+			<-c.batchSemaphore
+		}
+		return nil, false
+	}
+	return func() {
+		<-c.semaphore
+		if batch {
+			<-c.batchSemaphore
+		}
+	}, true
+}
+
+func (c *Coordinator) execute(ctx context.Context, runID string, state *activeRun, class RunClass) {
 	defer func() {
 		state.cancel()
 		c.mu.Lock()
@@ -117,13 +192,14 @@ func (c *Coordinator) execute(ctx context.Context, runID string, state *activeRu
 		close(state.done)
 	}()
 
-	select {
-	case c.semaphore <- struct{}{}:
-		defer func() { <-c.semaphore }()
-	case <-ctx.Done():
+	release, acquired := c.acquireSlot(ctx, class)
+	if !acquired {
+		// Cancelled while queued: the Run never started, so it terminalises
+		// cancelled exactly as it did when one semaphore gated both classes.
 		state.err = c.lifecycle.Cancel(context.Background(), runID)
 		return
 	}
+	defer release()
 
 	run, err := c.lifecycle.Claim(ctx, runID)
 	if err != nil {
@@ -237,7 +313,9 @@ func (c *Coordinator) enqueueSettledParent(parentID string) error {
 	if parentRun.Status != domain.RunQueued {
 		return nil
 	}
-	if err := c.Enqueue(context.Background(), parentID); err != nil && !errors.Is(err, store.ErrRunNotFound) {
+	// The parent of a delegated child is running batch work waiting on its
+	// children: it resumes as batch so it cannot outrank a person's next turn.
+	if err := c.EnqueueWithClass(context.Background(), parentID, ClassBatch); err != nil && !errors.Is(err, store.ErrRunNotFound) {
 		return err
 	}
 	return nil
@@ -257,7 +335,9 @@ func (c *Coordinator) enqueueReadySuccessors(childRunID string) error {
 		return err
 	}
 	for _, successor := range ready {
-		if err := c.Enqueue(context.Background(), successor); err != nil && !errors.Is(err, store.ErrRunNotFound) {
+		// A task-graph successor is one more child of a Graph the person already
+		// started: batch, never the reserved interactive slot.
+		if err := c.EnqueueWithClass(context.Background(), successor, ClassBatch); err != nil && !errors.Is(err, store.ErrRunNotFound) {
 			return err
 		}
 	}

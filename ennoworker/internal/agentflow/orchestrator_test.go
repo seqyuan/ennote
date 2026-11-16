@@ -670,6 +670,74 @@ func TestOrchestratorTaskFailureFailsFlow(t *testing.T) {
 	assert.Contains(t, events.types(), "flow_failed")
 }
 
+// enqueueRecord is one dispatch through the Enqueue seam: the child Run id and
+// the class the orchestrator asked the scheduler for.
+type enqueueRecord struct {
+	runID string
+	class RunClass
+}
+
+// recordingEnqueuer installs a recording Enqueue seam and returns a reader for
+// what it saw.
+func recordingEnqueuer(orch *Orchestrator) func() []enqueueRecord {
+	var mu sync.Mutex
+	var recorded []enqueueRecord
+	orch.Enqueue = func(_ context.Context, runID string, class RunClass) error {
+		mu.Lock()
+		defer mu.Unlock()
+		recorded = append(recorded, enqueueRecord{runID: runID, class: class})
+		return nil
+	}
+	return func() []enqueueRecord {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]enqueueRecord(nil), recorded...)
+	}
+}
+
+// Every task child the orchestrator dispatches goes through the Enqueue seam as
+// batch work, so a Graph can never take the slot a person's next turn needs.
+func TestOrchestratorEnqueuesTaskChildAsBatch(t *testing.T) {
+	fake, err := newFakeStore(threeTaskDef())
+	require.NoError(t, err)
+	children := newFakeChildren()
+	orch := newOrchestrator(fake, children, &fakeEvents{})
+	saw := recordingEnqueuer(orch)
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	recorded := saw()
+	require.Len(t, recorded, 2, "producer and reviewer are dispatched; accept is the terminal gate")
+	assert.Equal(t, []string{"child-producer", "child-reviewer"}, []string{recorded[0].runID, recorded[1].runID})
+	for _, item := range recorded {
+		assert.Equal(t, RunClassBatch, item.class)
+	}
+	// The value crosses into runs.RunClass in cmd/ennoworker, so it is a contract.
+	assert.Equal(t, "batch", string(RunClassBatch))
+	assert.Equal(t, "interactive", string(RunClassInteractive))
+}
+
+// The fan_out path has its own enqueue loop; every instance is batch too.
+func TestOrchestratorEnqueuesFanOutChildrenAsBatch(t *testing.T) {
+	fake, err := newFakeStore(fanOutDef(2))
+	require.NoError(t, err)
+	children := newFakeChildren()
+	orch := newOrchestrator(fake, children, &fakeEvents{})
+	saw := recordingEnqueuer(orch)
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	recorded := saw()
+	require.Len(t, recorded, 3, "producer plus the two fan_out instances")
+	assert.ElementsMatch(t, []string{"child-producer", "child-scan-0", "child-scan-1"},
+		[]string{recorded[0].runID, recorded[1].runID, recorded[2].runID})
+	for _, item := range recorded {
+		assert.Equal(t, RunClassBatch, item.class)
+	}
+}
+
 // Matrix 14: checkpoint recovery — completed tasks are not replayed; their
 // outputs feed the next tasks.
 func TestOrchestratorCheckpointResume(t *testing.T) {

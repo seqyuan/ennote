@@ -90,7 +90,9 @@ func (s *Server) enqueueChildRuns(ctx context.Context, children []*domain.AgentR
 		return fmt.Errorf("filter children by task readiness: %w", err)
 	}
 	for _, childID := range ready {
-		if err := s.Control.Enqueue(context.WithoutCancel(ctx), childID); err != nil {
+		// A delegated child is batch work: it must not compete with a person's next
+		// turn for the slot the coordinator reserves for interactive Runs.
+		if err := enqueueChildRun(context.WithoutCancel(ctx), s.Control, childID); err != nil {
 			return fmt.Errorf("enqueue delegated child %s: %w", childID, err)
 		}
 	}

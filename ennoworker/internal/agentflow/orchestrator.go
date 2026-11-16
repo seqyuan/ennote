@@ -37,8 +37,11 @@ type Orchestrator struct {
 	// ChildExecutions returns one child Run's recorded shell executions. nil means the
 	// runtime cannot read them: tests-passed is then UNVERIFIED, never a pass.
 	ChildExecutions func(ctx context.Context, childRunID string) ([]domain.ToolExecution, error)
-	// Enqueue hands a created child Run to the run coordinator.
-	Enqueue      func(ctx context.Context, runID string) error
+	// Enqueue hands a created child Run to the run coordinator, with the class the
+	// scheduler must use. Every child the orchestrator creates is batch: a Graph
+	// task must never take the slot reserved for a person's next turn, and the
+	// class is passed explicitly so the coordinator never has to guess.
+	Enqueue      func(ctx context.Context, runID string, class RunClass) error
 	PollInterval time.Duration
 	// CancelCleanupTimeout bounds how long a cancellation waits for its stop to
 	// become observable. It is a field, not a package var, so two orchestrators
@@ -46,6 +49,20 @@ type Orchestrator struct {
 	CancelCleanupTimeout time.Duration
 	Now                  func() time.Time
 }
+
+// RunClass mirrors runs.RunClass across the agentflow -> runs boundary. The runs
+// package imports agentflow (through store), so agentflow cannot import it; the
+// two packages agree on the string values, and the worker's wiring is the only
+// place a class crosses. Only ClassBatch is used here: every Run this package
+// creates is a Graph child.
+type RunClass string
+
+const (
+	// RunClassInteractive is a person's turn. agentflow never creates one.
+	RunClassInteractive RunClass = "interactive"
+	// RunClassBatch is a Graph task child.
+	RunClassBatch RunClass = "batch"
+)
 
 // FlowStore is the durable meta-Run substrate.
 type FlowStore interface {
@@ -492,7 +509,7 @@ func (o *Orchestrator) dispatchHeroChild(ctx context.Context, runID string, flow
 		return ChildInfo{}, nil
 	}
 	if o.Enqueue != nil {
-		if err := o.Enqueue(ctx, child.RunID); err != nil {
+		if err := o.Enqueue(ctx, child.RunID, RunClassBatch); err != nil {
 			o.fail(ctx, runID, fmt.Sprintf("enqueue child %s: %v", child.RunID, err))
 			return ChildInfo{}, nil
 		}
@@ -764,7 +781,7 @@ func (o *Orchestrator) runFanOutTask(ctx context.Context, runID string, flow *do
 	}
 	for _, childID := range childIDs {
 		if o.Enqueue != nil {
-			if err := o.Enqueue(ctx, childID); err != nil {
+			if err := o.Enqueue(ctx, childID, RunClassBatch); err != nil {
 				o.fail(ctx, runID, fmt.Sprintf("enqueue fan_out child %s: %v", childID, err))
 				return nil
 			}

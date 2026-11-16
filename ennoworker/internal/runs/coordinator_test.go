@@ -20,6 +20,205 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// blockingExecutor is the executor shape the scheduler tests need: a started Run
+// announces itself and then blocks until the test opens the gate, so "which Runs
+// are executing" is observable without a sleep-until-hopefully.
+func blockingExecutor(started chan<- string, release <-chan struct{}) Executor {
+	return ExecutorFunc(func(ctx context.Context, run *domain.AgentRun) error {
+		started <- run.ID
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return ctx.Err()
+	})
+}
+
+func waitForAll(t *testing.T, coordinator *Coordinator, runIDs ...string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, runID := range runIDs {
+		require.NoError(t, coordinator.Wait(ctx, runID))
+	}
+}
+
+// MaxConcurrentRuns=2: the batch reservation is one slot, so a second batch Run
+// waits and a person's Run goes straight through to the slot it leaves free.
+func TestCoordinatorReservesSlotForInteractiveRuns(t *testing.T) {
+	repo := setupRunDB(t)
+	firstBatch := setupRun(t, repo, "batch-first")
+	secondBatch := setupRun(t, repo, "batch-second")
+	interactive := setupRun(t, repo, "interactive")
+
+	release := make(chan struct{})
+	started := make(chan string, 4)
+	coordinator := NewCoordinator(repo, blockingExecutor(started, release), 2)
+	require.NoError(t, coordinator.EnqueueWithClass(context.Background(), firstBatch.Run.ID, ClassBatch))
+	require.NoError(t, coordinator.EnqueueWithClass(context.Background(), secondBatch.Run.ID, ClassBatch))
+
+	// Exactly one of the two batch Runs executes: batch may hold 2-1 slots.
+	running := <-started
+	var waiting *domain.TurnSubmission
+	switch running {
+	case firstBatch.Run.ID:
+		waiting = secondBatch
+	case secondBatch.Run.ID:
+		waiting = firstBatch
+	default:
+		t.Fatalf("unexpected Run started: %s", running)
+	}
+	waitingRun, err := repo.Get(context.Background(), waiting.Run.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunQueued, waitingRun.Status, "the second batch Run must still be queued")
+	select {
+	case second := <-started:
+		t.Fatalf("a second batch Run took a slot while the reservation was in force: %s", second)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// The person's Run must not queue behind the waiting batch Run.
+	require.NoError(t, coordinator.Enqueue(context.Background(), interactive.Run.ID))
+	select {
+	case id := <-started:
+		require.Equal(t, interactive.Run.ID, id, "the interactive Run must run before the queued batch Run")
+	case <-time.After(2 * time.Second):
+		t.Fatal("interactive Run queued behind batch work instead of taking the reserved slot")
+	}
+	close(release)
+
+	waitForAll(t, coordinator, firstBatch.Run.ID, secondBatch.Run.ID, interactive.Run.ID)
+	assert.Equal(t, 0, coordinator.ActiveCount())
+	for _, id := range []string{firstBatch.Run.ID, secondBatch.Run.ID, interactive.Run.ID} {
+		run, err := repo.Get(context.Background(), id)
+		require.NoError(t, err)
+		assert.Equal(t, domain.RunSucceeded, run.Status)
+	}
+}
+
+// MaxConcurrentRuns=1: there is no slot to reserve, so batch keeps the only one
+// and the two classes are serialised. A zero-size batch semaphore would wedge
+// batch here forever.
+func TestCoordinatorSingleSlotHasNoReservation(t *testing.T) {
+	repo := setupRunDB(t)
+	batch := setupRun(t, repo, "single-batch")
+	interactive := setupRun(t, repo, "single-interactive")
+
+	release := make(chan struct{})
+	started := make(chan string, 2)
+	var current, maximum atomic.Int32
+	executor := ExecutorFunc(func(ctx context.Context, run *domain.AgentRun) error {
+		value := current.Add(1)
+		for {
+			old := maximum.Load()
+			if value <= old || maximum.CompareAndSwap(old, value) {
+				break
+			}
+		}
+		started <- run.ID
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		current.Add(-1)
+		return ctx.Err()
+	})
+	coordinator := NewCoordinator(repo, executor, 1)
+
+	require.NoError(t, coordinator.EnqueueWithClass(context.Background(), batch.Run.ID, ClassBatch))
+	require.Equal(t, batch.Run.ID, <-started, "batch keeps the only slot: with one permit there is nothing to reserve")
+	require.NoError(t, coordinator.Enqueue(context.Background(), interactive.Run.ID))
+	select {
+	case id := <-started:
+		t.Fatalf("two Runs overlapped on a single slot: %s", id)
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+
+	waitForAll(t, coordinator, batch.Run.ID, interactive.Run.ID)
+	assert.Equal(t, int32(1), maximum.Load(), "the two classes are serialised on one permit")
+	for _, id := range []string{batch.Run.ID, interactive.Run.ID} {
+		run, err := repo.Get(context.Background(), id)
+		require.NoError(t, err)
+		assert.Equal(t, domain.RunSucceeded, run.Status)
+	}
+}
+
+// The per-run-id dedupe predates RunClass and must survive it: a second enqueue
+// of a scheduled run id starts nothing, whatever class it names.
+func TestCoordinatorEnqueueWithClassDeduplicatesPerRunID(t *testing.T) {
+	repo := setupRunDB(t)
+	submission := setupRun(t, repo, "class-dedupe")
+	release := make(chan struct{})
+	started := make(chan string, 4)
+	var executions atomic.Int32
+	executor := ExecutorFunc(func(ctx context.Context, run *domain.AgentRun) error {
+		executions.Add(1)
+		started <- run.ID
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return ctx.Err()
+	})
+	coordinator := NewCoordinator(repo, executor, 2)
+
+	require.NoError(t, coordinator.EnqueueWithClass(context.Background(), submission.Run.ID, ClassBatch))
+	require.Equal(t, submission.Run.ID, <-started)
+	// A Run already scheduled keeps its class: re-enqueueing cannot reclassify it.
+	require.NoError(t, coordinator.EnqueueWithClass(context.Background(), submission.Run.ID, ClassInteractive))
+	require.NoError(t, coordinator.EnqueueWithClass(context.Background(), submission.Run.ID, ClassBatch))
+	require.NoError(t, coordinator.Enqueue(context.Background(), submission.Run.ID))
+	assert.Equal(t, 1, coordinator.ActiveCount())
+	close(release)
+
+	waitForAll(t, coordinator, submission.Run.ID)
+	assert.Equal(t, int32(1), executions.Load(), "the run executed exactly once")
+	select {
+	case id := <-started:
+		t.Fatalf("the run id was scheduled twice: %s", id)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// A Run cancelled while it is queued for a permit never starts: the cancel takes
+// the same path it took when one semaphore gated both classes.
+func TestCoordinatorCancelsQueuedInteractiveRunBeforeItStarts(t *testing.T) {
+	repo := setupRunDB(t)
+	holder := setupRun(t, repo, "slot-holder")
+	queued := setupRun(t, repo, "queued-interactive")
+
+	release := make(chan struct{})
+	started := make(chan string, 4)
+	coordinator := NewCoordinator(repo, blockingExecutor(started, release), 1)
+
+	// A batch Run takes the only permit, so the interactive Run is genuinely
+	// queued rather than racing for a free slot.
+	require.NoError(t, coordinator.EnqueueWithClass(context.Background(), holder.Run.ID, ClassBatch))
+	require.Equal(t, holder.Run.ID, <-started)
+	require.NoError(t, coordinator.Enqueue(context.Background(), queued.Run.ID))
+	require.NoError(t, coordinator.Cancel(context.Background(), queued.Run.ID))
+
+	waitForAll(t, coordinator, queued.Run.ID)
+	stored, err := repo.Get(context.Background(), queued.Run.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunCancelled, stored.Status)
+	select {
+	case id := <-started:
+		t.Fatalf("a cancelled queued Run executed: %s", id)
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	waitForAll(t, coordinator, holder.Run.ID)
+}
+
+func TestCoordinatorRunClassValuesAreStable(t *testing.T) {
+	// cmd/ennoworker converts agentflow.RunClass into this type, so the values are
+	// a cross-package contract, not an implementation detail.
+	assert.Equal(t, "interactive", string(ClassInteractive))
+	assert.Equal(t, "batch", string(ClassBatch))
+}
+
 func setupRunDB(t *testing.T) *store.RunRepo {
 	t.Helper()
 	db, _, _ := newSessionDB(t)

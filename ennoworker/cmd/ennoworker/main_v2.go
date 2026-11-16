@@ -178,7 +178,8 @@ func run() error {
 	coordinator := runs.NewCoordinator(routedRuns, executorRouter, cfg.MaxConcurrentRuns)
 	executorRouter.onChild = func(_ context.Context, ids []string) {
 		for _, id := range ids {
-			if err := coordinator.Enqueue(context.Background(), id); err != nil {
+			// Children materialized by a delegate_heroes call are batch work.
+			if err := coordinator.EnqueueWithClass(context.Background(), id, runs.ClassBatch); err != nil {
 				slog.Warn("enqueue child run failed", "runID", id, "error", err)
 			}
 		}
@@ -421,7 +422,8 @@ func recoverV2Sessions(ctx context.Context, sessions *sessionstore.Manager, temp
 			return err
 		}
 		for _, runID := range ready {
-			if err := coordinator.Enqueue(context.Background(), runID); err != nil {
+			// Recovered delegated children resume as batch, exactly as they ran.
+			if err := coordinator.EnqueueWithClass(context.Background(), runID, runs.ClassBatch); err != nil {
 				return err
 			}
 		}
@@ -489,8 +491,8 @@ func startFlowOrchestrator(db *sql.DB, runID string,
 		ChildExecutions: func(ctx context.Context, childRunID string) ([]domain.ToolExecution, error) {
 			return (&store.CallRepo{DB: db}).ListToolExecutions(ctx, childRunID)
 		},
-		Enqueue: func(ctx context.Context, childRunID string) error {
-			return coordinator.Enqueue(ctx, childRunID)
+		Enqueue: func(ctx context.Context, childRunID string, class agentflow.RunClass) error {
+			return coordinator.EnqueueWithClass(ctx, childRunID, runs.RunClass(class))
 		},
 	}
 	orchestrator.Recover(ctx, []string{runID})
