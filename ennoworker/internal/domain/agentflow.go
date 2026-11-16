@@ -117,6 +117,25 @@ type FlowTerminal struct {
 	Output string `json:"output,omitempty" yaml:"output,omitempty"`
 }
 
+// FlowTaskRetry is a task's retry budget. Max counts EXTRA attempts, so max: 2
+// means at most three dispatches of the same task node.
+type FlowTaskRetry struct {
+	Max int `json:"max" yaml:"max"`
+}
+
+// Scheduling limits of the retry/timeout knobs. They are enforced at publish
+// time (retry_invalid / timeout_invalid) and are the only values the
+// orchestrator has to handle.
+const (
+	// MaxFlowTaskRetry bounds retry.max.
+	MaxFlowTaskRetry = 5
+	// MinFlowTaskTimeoutMS bounds timeout_ms from below: a ceiling under a
+	// second is a race against the poll interval, not a decision.
+	MinFlowTaskTimeoutMS int64 = 1000
+	// MaxFlowTaskTimeoutMS bounds timeout_ms from above (24h).
+	MaxFlowTaskTimeoutMS int64 = 86400000
+)
+
 // ConvergenceRule binds one convergence declaration to an actual back-edge.
 // The orchestrator counts rounds and terminalizes as convergence_exceeded.
 type ConvergenceRule struct {
@@ -267,6 +286,20 @@ type FlowTask struct {
 	// may also have no result when this task starts; it then contributes nothing
 	// to the digest instead of being an error.
 	ContextFrom []string `json:"contextFrom,omitempty" yaml:"context_from,omitempty"`
+	// Retry re-dispatches this task after a retryable failure (a child Run that
+	// ended failed or interrupted, or a task timeout). A verdict about the
+	// product (acceptance_failed, report_contract_violation), a cancelled task
+	// and a cancelled flow are never retried: re-running them without changing
+	// the input hides the real problem.
+	Retry *FlowTaskRetry `json:"retry,omitempty" yaml:"retry,omitempty"`
+	// TimeoutMS is the wall-clock ceiling of ONE attempt, measured from dispatch
+	// to settle. It is declared in snake_case in graph.yaml (timeout_ms) and
+	// camelCase in JSON, matching the rest of the definition contract.
+	TimeoutMS int64 `json:"timeoutMs,omitempty" yaml:"timeout_ms,omitempty"`
+	// Optional marks a task whose failure does not fail the flow: the node still
+	// records `failed` with its error code, the flow continues, and the
+	// dependents of a failed-but-optional task are considered satisfied.
+	Optional bool `json:"optional,omitempty" yaml:"optional,omitempty"`
 }
 
 // NormalizeContextRefs canonicalizes a contextFrom list the way the parser
@@ -483,7 +516,15 @@ type RunAgentFlowNode struct {
 	AcceptanceVerdict json.RawMessage `json:"acceptanceVerdict,omitempty"`
 	TerminalState     FlowNodeState   `json:"terminalState"`
 	OutputRef         json.RawMessage `json:"outputRef,omitempty"`
-	ChildRunID        string          `json:"childRunId,omitempty"`
+	// Optional is the frozen `optional` declaration of the definition: a failed
+	// optional node is a satisfied dependency, so its failure never blocks the
+	// dependents and the flow can still complete.
+	Optional bool `json:"optional,omitempty"`
+	// Attempts is how many EXTRA attempts this node has already spent on a
+	// retry. It is incremented in the same checkpoint CAS that re-dispatches the
+	// node, so a resume never re-grants an attempt a previous run already spent.
+	Attempts   int    `json:"attempts,omitempty"`
+	ChildRunID string `json:"childRunId,omitempty"`
 	// ChildRunIDs is the full set for fan_out tasks (parallel instances).
 	ChildRunIDs []string   `json:"childRunIds,omitempty"`
 	ErrorCode   string     `json:"errorCode,omitempty"`

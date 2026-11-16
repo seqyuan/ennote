@@ -255,6 +255,20 @@ export interface paths {
          *     never participate in the ready set, the entry-task count or cycle
          *     detection, so declaring one cannot reorder dispatch.
          *
+         *     Task scheduling: `retry.max` is a budget of EXTRA attempts and must be
+         *     1..5 (`retry_invalid`); `timeout_ms` bounds ONE attempt measured from
+         *     dispatch to settle and must be 1000..86400000 (`timeout_invalid`). Both
+         *     are refused (`scheduling_unsupported`) on check, terminal and fan_out
+         *     tasks, which have no single attempt to retry or bound, instead of being
+         *     accepted and silently ignored. `optional` needs no range check: a failed
+         *     optional task keeps its `failed` checkpoint and its error code, its
+         *     dependents still run, and the flow can still complete. Retries are
+         *     attempted before `optional` absorbs an outcome. Only an attempt-shaped
+         *     failure is retried (a child Run that ended failed or interrupted, or a
+         *     timeout); `acceptance_failed`, `report_contract_violation`, a cancelled
+         *     task and a cancelled flow are verdicts about the product or about the
+         *     user's intent and are never re-run.
+         *
          *     A Graph needs no project binding to publish; enabling it is a separate
          *     step.
          */
@@ -2536,6 +2550,10 @@ export interface components {
             outputRef?: {
                 [key: string]: unknown;
             };
+            /** @description The `optional` declaration frozen with this node at Run start */
+            optional?: boolean;
+            /** @description Extra attempts this node has already spent on a retry (0 on the first dispatch); incremented in the same checkpoint write that re-dispatches it */
+            attempts?: number;
             childRunId?: string;
             /** @description The full child set of a fan-out task */
             childRunIds?: string[];
@@ -3342,6 +3360,36 @@ export interface components {
              *     contributes nothing to the digest.
              */
             contextFrom?: string[];
+            /**
+             * @description Re-dispatch this task after a retryable failure. `max` counts EXTRA
+             *     attempts, so `{max: 2}` means at most three dispatches. Retryable
+             *     failures are a child Run that ended failed or interrupted, and a
+             *     task timeout; `acceptance_failed`, `report_contract_violation`,
+             *     `task_cancelled` and a cancelled flow are never retried. A retry
+             *     re-runs the same node: it is reset to `pending`, its error code,
+             *     output and acceptance verdict are cleared, and one durable attempt
+             *     is spent, so a resume never re-grants it. Refused
+             *     (`scheduling_unsupported`) on check, terminal and fan_out tasks.
+             */
+            retry?: {
+                max: number;
+            };
+            /**
+             * @description Wall-clock ceiling of ONE attempt, in milliseconds, measured from
+             *     dispatch to settle (`timeout_ms` in graph.yaml). A timed-out child
+             *     is hard-cancelled and the task is recorded as failed with
+             *     `task_timeout`, which is retryable. Refused
+             *     (`scheduling_unsupported`) on check, terminal and fan_out tasks.
+             */
+            timeoutMs?: number;
+            /**
+             * @description A failure of this task does not fail the flow. The node still
+             *     records `failed` with its error code, the flow continues, and a
+             *     failed-but-optional dependency counts as satisfied, so dependents
+             *     run and the terminal gate may unlock. Combined with `retry`, the
+             *     retry budget is spent first.
+             */
+            optional?: boolean;
         };
         ProjectGraphBinding: {
             /** @enum {string} */

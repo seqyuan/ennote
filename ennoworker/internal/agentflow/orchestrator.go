@@ -77,6 +77,13 @@ type NodeUpdate struct {
 	// reset: COALESCE cannot clear, and a retried node must not still look
 	// failed by acceptance.
 	ClearErrorCode bool
+	// ClearOutputRef un-records the checkpoint output. It exists for the same
+	// reset: a re-dispatched node must not expose the previous attempt's result
+	// as its checkpoint ({task.X.output} would read a failed attempt).
+	ClearOutputRef bool
+	// IncrementAttempts spends one retry attempt in the same CAS as the reset, so
+	// the budget is durable and a resume can never re-grant an attempt.
+	IncrementAttempts bool
 }
 
 // ChildSpec is one task's child Run request.
@@ -245,13 +252,14 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 			o.fail(ctx, runID, "list nodes: "+err.Error())
 			return
 		}
-		completed := map[string]*domain.RunAgentFlowNode{}
+		// byHandle is every checkpoint, not only the completed ones: a dependency
+		// is satisfied by a completed node OR by a failed-but-optional one (see
+		// depSatisfied), so readiness needs the whole set.
+		byHandle := make(map[string]*domain.RunAgentFlowNode, len(nodes))
 		for i := range nodes {
-			if nodes[i].TerminalState == domain.FlowNodeCompleted {
-				completed[nodes[i].Handle] = nodes[i]
-				if len(nodes[i].OutputRef) > 0 {
-					taskOutputs[nodes[i].Handle] = nodes[i].OutputRef
-				}
+			byHandle[nodes[i].Handle] = nodes[i]
+			if nodes[i].TerminalState == domain.FlowNodeCompleted && len(nodes[i].OutputRef) > 0 {
+				taskOutputs[nodes[i].Handle] = nodes[i].OutputRef
 			}
 		}
 		settlementFailure := settlementFailureNode(nodes)
@@ -265,7 +273,7 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 		if converged {
 			continue // nodes changed by the back-edge reset; re-read them
 		}
-		ready := readyHeroTasks(nodes, completed, &def)
+		ready := readyHeroTasks(nodes, byHandle, &def)
 
 		// Recorded-verdict settlement. A failed checkpoint that says the task's
 		// report was not acceptable (acceptance_failed, report_contract_violation)
@@ -278,7 +286,7 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 		// rejected.
 		if settlementFailure != nil {
 			if len(inFlight) > 0 {
-				if err := o.waitAndFoldAny(ctx, runID, run, &inFlight); err != nil {
+				if err := o.waitAndFoldAny(ctx, runID, run, &def, &inFlight); err != nil {
 					return
 				}
 				continue
@@ -320,13 +328,13 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 		if len(ready) == 0 {
 			// No runnable task: either the flow finished, the lane is still
 			// draining, or a dependency failed.
-			if len(completed) == len(nodes) {
-				break // all tasks completed
+			if allSettled(nodes) {
+				break // every task is a satisfied dependency
 			}
 			// While children are still in flight, keep folding them: a batch
 			// sibling may be exactly the dependency the terminal gate needs.
 			if len(inFlight) > 0 {
-				if err := o.waitAndFoldAny(ctx, runID, run, &inFlight); err != nil {
+				if err := o.waitAndFoldAny(ctx, runID, run, &def, &inFlight); err != nil {
 					return
 				}
 				continue
@@ -337,13 +345,13 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 			// never dispatching the inactive branch. Terminals are mutually
 			// exclusive at publish time, so at most one may be unlocked; if two
 			// somehow are, the flow fails loudly instead of picking one.
-			terminal, ambiguous := terminalGateTask(&def, completed)
+			terminal, ambiguous := terminalGateTask(&def, byHandle)
 			if ambiguous {
 				o.fail(ctx, runID, "terminal_gate_ambiguous: more than one terminal task is unlocked at once, so the flow outputs are ambiguous")
 				return
 			}
 			if terminal != nil {
-				outputs := resolveFlowOutputs(def, *terminal, completed, taskOutputs)
+				outputs := resolveFlowOutputs(def, *terminal, byHandle, taskOutputs)
 				if err := o.complete(ctx, runID, state.TotalTokensUsed, outputs, nodes); err != nil {
 					return
 				}
@@ -366,7 +374,7 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 			// drain it before switching so readers and writers never overlap;
 			// otherwise flip the lane.
 			if len(inFlight) > 0 {
-				if err := o.waitAndFoldAny(ctx, runID, run, &inFlight); err != nil {
+				if err := o.waitAndFoldAny(ctx, runID, run, &def, &inFlight); err != nil {
 					return
 				}
 				continue
@@ -382,7 +390,7 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 			// Dependency gate (defensive: ready-set computation already enforces
 			// this, and the check turns any failed dependency into a clear
 			// flow failure instead of a stuck run).
-			if missing := uncompletedDep(task, completed); missing != "" {
+			if missing := uncompletedDep(task, byHandle); missing != "" {
 				o.fail(ctx, runID, fmt.Sprintf("task %q depends on incomplete task %q", node.Handle, missing))
 				return
 			}
@@ -395,14 +403,14 @@ func (o *Orchestrator) run(ctx context.Context, runID string) {
 			if err != nil {
 				return
 			}
-			inFlight = append(inFlight, inflightTask{node: node, childID: child.RunID})
+			inFlight = append(inFlight, inflightTask{node: node, childID: child.RunID, startedAt: o.now()})
 		}
 
 		if len(inFlight) > 0 {
 			// Wait for any in-flight child to settle, fold its checkpoint, and
 			// re-evaluate the ready set (completed dependencies unlock the next
 			// tier while the rest of the batch keeps running).
-			if err := o.waitAndFoldAny(ctx, runID, run, &inFlight); err != nil {
+			if err := o.waitAndFoldAny(ctx, runID, run, &def, &inFlight); err != nil {
 				return
 			}
 		}
@@ -480,10 +488,13 @@ func (o *Orchestrator) dispatchHeroChild(ctx context.Context, runID string, flow
 
 // foldHeroChild settles one hero child from an already-known terminal status:
 // budget accounting, over-budget termination, failure/cancel handling, and the
-// completed checkpoint + event. On failure it cancels every other in-flight
-// child so a parallel batch never leaks running children.
+// completed checkpoint + event. A failure goes through settleAttemptFailure,
+// which re-dispatches it while its retry budget lasts, lets `optional` absorb it,
+// and otherwise cancels every other in-flight child so a parallel batch never
+// leaks running children. def is the frozen definition the run decoded once: it
+// carries the retry budget the settlement reads.
 func (o *Orchestrator) foldHeroChild(ctx context.Context, runID string, flow *domain.RunAgentFlow,
-	node *domain.RunAgentFlowNode, childID string, status domain.RunStatus,
+	def *domain.FlowDefinition, node *domain.RunAgentFlowNode, childID string, status domain.RunStatus,
 	result *domain.SubmitResult, remaining []inflightTask) error {
 	// Budget accounting: fold the child's actual usage into the flow ledger.
 	usage, _ := o.Children.ChildUsage(ctx, childID)
@@ -513,11 +524,10 @@ func (o *Orchestrator) foldHeroChild(ctx context.Context, runID string, flow *do
 		} else if status == domain.RunInterrupted {
 			code = "task_interrupted"
 		}
-		o.cancelInflight(ctx, runID, remaining)
-		o.failTask(ctx, runID, node, code)
+		// Retry first, `optional` second, flow failure last (settleAttemptFailure).
 		// Keep the ledger: this path also runs while draining siblings after an
 		// acceptance failure, and a flow that consumed tokens must not report 0.
-		o.failKeepingUsage(ctx, runID, total, fmt.Sprintf("task %q %s", node.Handle, code))
+		o.settleAttemptFailure(ctx, runID, def, node, code, total, remaining)
 		return nil
 	}
 	// A blocked child is not a failed Run and not a completed task; see
@@ -556,6 +566,22 @@ func (o *Orchestrator) foldHeroChild(ctx context.Context, runID string, flow *do
 	})
 }
 
+// failCheck records a check-gate failure and decides what it does to the flow.
+// A gate is a task like any other for the `optional` knob: declaring it optional
+// means the gate's failure is recorded on the node and the flow continues, with
+// the gate's branch targets inactive (an unresolved gate selects no branch).
+// Every check failure takes this path — policy denial, approval rejection,
+// approval bookkeeping and execution error — because "this gate could not be
+// decided" is one fact, and a positive list of exceptions would be a second rule
+// to keep in sync.
+func (o *Orchestrator) failCheck(ctx context.Context, runID string, node *domain.RunAgentFlowNode, code, reason string) {
+	o.failTask(ctx, runID, node, code)
+	if node.Optional {
+		return
+	}
+	o.fail(ctx, runID, reason)
+}
+
 // runCheckTask executes one deterministic check gate: policy gate, durable
 // Ask-mode approval, sandbox execution, and checkpoint write. Check tasks are
 // never a bypass: Discuss mode denies, Ask mode suspends on approval.
@@ -573,21 +599,20 @@ func (o *Orchestrator) runCheckTask(ctx context.Context, runID string, flow *dom
 	}
 	policy, err := o.Checker.CheckPolicyForSession(ctx, flow.SessionID)
 	if err != nil {
-		o.failTask(ctx, runID, node, "policy_unavailable")
-		o.fail(ctx, runID, fmt.Sprintf("check task %q: %v", node.Handle, err))
+		o.failCheck(ctx, runID, node, "policy_unavailable", fmt.Sprintf("check task %q: %v", node.Handle, err))
 		return nil
 	}
 	argv := ParseCheckCommand(task.Command)
 	decision := EvaluateCheck(policy, argv)
 	switch decision.Action {
 	case CheckDeny:
-		o.failTask(ctx, runID, node, decision.Code)
-		o.fail(ctx, runID, fmt.Sprintf("check task %q denied by tool policy: %s", node.Handle, decision.Reason))
+		o.failCheck(ctx, runID, node, decision.Code,
+			fmt.Sprintf("check task %q denied by tool policy: %s", node.Handle, decision.Reason))
 		return nil
 	case CheckRequireAsk:
 		if err := o.Checker.CreateCheckApproval(ctx, runID, node.TaskIndex, task.Command); err != nil {
-			o.failTask(ctx, runID, node, "approval_create_failed")
-			o.fail(ctx, runID, fmt.Sprintf("check task %q approval failed: %v", node.Handle, err))
+			o.failCheck(ctx, runID, node, "approval_create_failed",
+				fmt.Sprintf("check task %q approval failed: %v", node.Handle, err))
 			return nil
 		}
 		if err := o.Events.PublishFlow(ctx, runID, "flow_task_started", map[string]any{
@@ -610,16 +635,15 @@ func (o *Orchestrator) runCheckTask(ctx context.Context, runID string, flow *dom
 			}
 			status, err := o.Checker.CheckApprovalStatus(ctx, runID, node.TaskIndex)
 			if err != nil {
-				o.failTask(ctx, runID, node, "approval_read_failed")
-				o.fail(ctx, runID, fmt.Sprintf("check task %q approval read failed: %v", node.Handle, err))
+				o.failCheck(ctx, runID, node, "approval_read_failed",
+					fmt.Sprintf("check task %q approval read failed: %v", node.Handle, err))
 				return nil
 			}
 			switch status {
 			case agentFlowApprovalApproved:
 				goto run
 			case agentFlowApprovalRejected:
-				o.failTask(ctx, runID, node, "approval_rejected")
-				o.fail(ctx, runID, fmt.Sprintf("check task %q approval rejected", node.Handle))
+				o.failCheck(ctx, runID, node, "approval_rejected", fmt.Sprintf("check task %q approval rejected", node.Handle))
 				return nil
 			}
 		}
@@ -627,8 +651,8 @@ func (o *Orchestrator) runCheckTask(ctx context.Context, runID string, flow *dom
 run:
 	outcome, err := o.Checker.ExecuteCheck(WithCheckSession(ctx, flow.SessionID), task.Command, 0)
 	if err != nil {
-		o.failTask(ctx, runID, node, "check_execution_failed")
-		o.fail(ctx, runID, fmt.Sprintf("check task %q execution failed: %v", node.Handle, err))
+		o.failCheck(ctx, runID, node, "check_execution_failed",
+			fmt.Sprintf("check task %q execution failed: %v", node.Handle, err))
 		return nil
 	}
 	payload, _ := json.Marshal(map[string]any{
@@ -739,6 +763,11 @@ func (o *Orchestrator) runFanOutTask(ctx context.Context, runID string, flow *do
 				code = "task_interrupted"
 			}
 			o.failTask(ctx, runID, node, code)
+			if node.Optional {
+				// Recorded on the node and absorbed: the flow continues, and a
+				// dependent of this fan_out task is still schedulable.
+				return nil
+			}
 			o.fail(ctx, runID, fmt.Sprintf("fan_out task %q %s", node.Handle, code))
 			return nil
 		}
@@ -894,24 +923,25 @@ const (
 	laneWriter = 1
 )
 
-// inflightTask is one dispatched hero child awaiting settlement.
+// inflightTask is one dispatched hero child awaiting settlement. startedAt is
+// the in-memory dispatch time the timeout measures from: it is deliberately not
+// persisted (see attemptExpired for what a restart can and cannot recover).
 type inflightTask struct {
-	node    *domain.RunAgentFlowNode
-	childID string
+	node      *domain.RunAgentFlowNode
+	childID   string
+	startedAt time.Time
 }
 
 // readyHeroTasks returns every dispatchable hero/fan_out/check node: pending
 // or interrupted, not on an inactive check-gate branch, and with every
-// depends task completed (the ready set). Nodes are already ordered by task
+// depends task satisfied (the ready set). A failed-but-optional dependency
+// counts as satisfied (depSatisfied), which is what lets the rest of a flow run
+// after an optional task gives up. Nodes are already ordered by task
 // index (ListNodes), which keeps dispatch deterministic and recovery
 // reproducible. Terminal tasks are excluded: they complete the flow instead
 // of dispatching a child.
-func readyHeroTasks(nodes []*domain.RunAgentFlowNode, completed map[string]*domain.RunAgentFlowNode,
+func readyHeroTasks(nodes []*domain.RunAgentFlowNode, byHandle map[string]*domain.RunAgentFlowNode,
 	def *domain.FlowDefinition) []*domain.RunAgentFlowNode {
-	byHandle := make(map[string]*domain.RunAgentFlowNode, len(nodes))
-	for i := range nodes {
-		byHandle[nodes[i].Handle] = nodes[i]
-	}
 	var ready []*domain.RunAgentFlowNode
 	for i := range nodes {
 		node := nodes[i]
@@ -925,8 +955,8 @@ func readyHeroTasks(nodes []*domain.RunAgentFlowNode, completed map[string]*doma
 			if task.Terminal != nil {
 				continue // terminal gates complete the flow; never dispatched
 			}
-			if uncompletedDep(task, completed) != "" {
-				continue // depends not yet completed; not ready
+			if uncompletedDep(task, byHandle) != "" {
+				continue // depends not yet satisfied; not ready
 			}
 		}
 		ready = append(ready, node)
@@ -957,7 +987,10 @@ func firstFanOutTask(ready []*domain.RunAgentFlowNode, def *domain.FlowDefinitio
 }
 
 // terminalGateTask returns the flow's single unlocked terminal task and whether
-// the flow is ambiguous (two or more terminals unlocked at once).
+// the flow is ambiguous (two or more terminals unlocked at once). A terminal is
+// unlocked when every one of its depends is satisfied, which includes a
+// failed-but-optional dependency: that is how a flow with an optional failure
+// still produces its outputs.
 //
 // Terminals are inspected in TaskOrder order, never in sorted handle order and
 // never in map iteration order, so the flow's outputs never depend on which
@@ -965,7 +998,7 @@ func firstFanOutTask(ready []*domain.RunAgentFlowNode, def *domain.FlowDefinitio
 // terminals of a valid flow are mutually exclusive, so an unlocked pair means
 // the graph is broken: the caller fails the flow loudly instead of silently
 // picking one.
-func terminalGateTask(def *domain.FlowDefinition, completed map[string]*domain.RunAgentFlowNode) (*domain.FlowTask, bool) {
+func terminalGateTask(def *domain.FlowDefinition, byHandle map[string]*domain.RunAgentFlowNode) (*domain.FlowTask, bool) {
 	if def == nil {
 		return nil, false
 	}
@@ -976,7 +1009,7 @@ func terminalGateTask(def *domain.FlowDefinition, completed map[string]*domain.R
 	var unlocked []string
 	for _, name := range order {
 		task := def.Tasks[name]
-		if task.Terminal == nil || uncompletedDep(task, completed) != "" {
+		if task.Terminal == nil || uncompletedDep(task, byHandle) != "" {
 			continue
 		}
 		unlocked = append(unlocked, name)
@@ -1150,15 +1183,73 @@ func (o *Orchestrator) nodeChildIDs(node *domain.RunAgentFlowNode) []string {
 	return ids
 }
 
-// uncompletedDep returns the first depends task that does not have a completed
-// checkpoint, or "" when every prerequisite is satisfied.
-func uncompletedDep(task domain.FlowTask, completed map[string]*domain.RunAgentFlowNode) string {
+// depSatisfied reports whether a checkpoint satisfies the dependency it is
+// named by: it is completed, or it failed while declared `optional`. An
+// optional task's failure is a recorded outcome, not a broken prerequisite, so
+// its dependents are dispatchable and a terminal gate behind it unlocks.
+//
+// This is the ONE place that answers the question. Every readiness check
+// (readyHeroTasks, the dispatch-time dependency gate, uncompletedDep and
+// terminalGateTask) routes through it so the three cannot drift into "the
+// terminal unlocks but nothing before it runs" or the reverse.
+func depSatisfied(node *domain.RunAgentFlowNode) bool {
+	if node == nil {
+		return false
+	}
+	if node.TerminalState == domain.FlowNodeCompleted {
+		return true
+	}
+	return node.Optional && node.TerminalState == domain.FlowNodeFailed
+}
+
+// allSettled reports whether every task is a satisfied dependency, i.e. the
+// flow has nothing left to run: all tasks completed, or the only failures are
+// optional ones (a pending node on an unselected branch is NOT settled; that
+// case completes through the terminal gate instead).
+func allSettled(nodes []*domain.RunAgentFlowNode) bool {
+	for _, node := range nodes {
+		if !depSatisfied(node) {
+			return false
+		}
+	}
+	return true
+}
+
+// uncompletedDep returns the first depends task that is not a satisfied
+// dependency (see depSatisfied), or "" when every prerequisite is satisfied.
+// byHandle must hold every checkpoint of the run, not only the completed ones:
+// a failed optional dependency is satisfied without being completed.
+func uncompletedDep(task domain.FlowTask, byHandle map[string]*domain.RunAgentFlowNode) string {
 	for _, dep := range task.Depends {
-		if _, ok := completed[dep]; !ok {
+		if !depSatisfied(byHandle[dep]) {
 			return dep
 		}
 	}
 	return ""
+}
+
+// now reads the orchestrator clock. Tests replace it through Now; a nil Now
+// (an orchestrator driven without Start) falls back to the wall clock rather
+// than measuring every timeout against the zero time.
+func (o *Orchestrator) now() time.Time {
+	if o.Now != nil {
+		return o.Now()
+	}
+	return time.Now()
+}
+
+// taskTimeoutMS reads a task's declared wall-clock ceiling for one attempt, or
+// 0 when it declares none. The definition is the source: timeout is not frozen
+// onto the node (only `optional`, which readiness needs, is).
+func taskTimeoutMS(def *domain.FlowDefinition, handle string) time.Duration {
+	if def == nil {
+		return 0
+	}
+	task, ok := def.Tasks[handle]
+	if !ok || task.TimeoutMS <= 0 {
+		return 0
+	}
+	return time.Duration(task.TimeoutMS) * time.Millisecond
 }
 
 // applyConvergence performs at most one back-edge round per rule per

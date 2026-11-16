@@ -420,6 +420,7 @@ export const getSessionGraphRun200: WorkerOperationResponse<"getSessionGraphRun"
         "terminalState": "pending"
       },
       {
+        "attempts": 2,
         "budget": {},
         "childRunIds": [
           "child-a",
@@ -428,6 +429,7 @@ export const getSessionGraphRun200: WorkerOperationResponse<"getSessionGraphRun"
         "createdAt": "2026-01-01T00:00:10Z",
         "finishedAt": "2026-01-01T00:00:10Z",
         "handle": "summarize",
+        "optional": true,
         "runId": "00000000-0000-0000-0000-000000000014",
         "taskIndex": 4,
         "terminalState": "completed",

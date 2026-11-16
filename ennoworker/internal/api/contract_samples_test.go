@@ -824,12 +824,15 @@ func TestContractSamples(t *testing.T) {
 		outputRef  any
 		acceptance string
 		verdict    string
-		// The node row also carries the frozen scheduling class and the child
-		// set; the contract declares them, so at least one sample must show
-		// them or tsc never sees the shape.
+		// The node row also carries the frozen scheduling class, the child set
+		// and the durable scheduling facts (attempts/optional); the contract
+		// declares them, so at least one sample must show them or tsc never sees
+		// the shape.
 		readOnly    int
 		writesJSON  string
 		childRunIDs string
+		attempts    int
+		optional    int
 	}{
 		{index: 0, handle: "collect", state: "completed", readOnly: 1,
 			acceptance: `[{"check":"csv-columns","file":"outputs/qc.csv","columns":["sample","reads","dup_rate"]}]`,
@@ -844,7 +847,10 @@ func TestContractSamples(t *testing.T) {
 		{index: 3, handle: "audit", state: "pending",
 			acceptance: `[{"check":"exists","file":"outputs/audit.log"}]`},
 		{index: 4, handle: "summarize", state: "completed", acceptance: `[]`,
-			writesJSON: `["outputs/report.md"]`, childRunIDs: `["child-a","child-b"]`},
+			writesJSON: `["outputs/report.md"]`, childRunIDs: `["child-a","child-b"]`,
+			// The durable scheduling facts: this task spent two retries before it
+			// succeeded and is declared optional.
+			attempts: 2, optional: 1},
 	} {
 		writes := node.writesJSON
 		if writes == "" {
@@ -856,10 +862,11 @@ func TestContractSamples(t *testing.T) {
 		}
 		_, err = graphSessionDB.Exec(`INSERT INTO run_agent_flow_nodes
 			(run_id,task_index,handle,terminal_state,error_code,output_ref,acceptance_json,acceptance_verdict,
-			 read_only,writes_json,child_run_ids_json,created_at,finished_at)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			 read_only,writes_json,child_run_ids_json,created_at,finished_at,attempts,optional)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			sampleGraphRunID, node.index, node.handle, node.state, node.errorCode, node.outputRef,
-			node.acceptance, node.verdict, node.readOnly, writes, childRunIDs, sampleGraphTime, sampleGraphTime)
+			node.acceptance, node.verdict, node.readOnly, writes, childRunIDs, sampleGraphTime, sampleGraphTime,
+			node.attempts, node.optional)
 		require.NoError(t, err)
 	}
 	samples.record(contractSampleRequest{

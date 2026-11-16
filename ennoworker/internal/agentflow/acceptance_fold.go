@@ -180,9 +180,15 @@ func (o *Orchestrator) foldReportContractViolation(ctx context.Context, runID st
 // fail the flow once the in-flight siblings drain. Acceptance verification and
 // report contract enforcement both record their verdict as a failed checkpoint
 // with a code, so they share one settlement path in the dispatch loop.
+//
+// A failed-but-optional node is skipped: `optional` means "this task's failure
+// does not fail the flow", and a verdict against the product is exactly a
+// failure of that task. Retries cover the attempt-shaped failures (see
+// retryableFailureCode); a verdict is never retried, so `optional` is the only
+// knob that can absorb it.
 func settlementFailureNode(nodes []*domain.RunAgentFlowNode) *domain.RunAgentFlowNode {
 	for _, node := range nodes {
-		if node.TerminalState != domain.FlowNodeFailed {
+		if node.TerminalState != domain.FlowNodeFailed || node.Optional {
 			continue
 		}
 		if node.ErrorCode == acceptanceFailedCode || node.ErrorCode == reportContractViolationCode {

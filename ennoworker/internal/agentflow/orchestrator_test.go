@@ -3,6 +3,7 @@ package agentflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -55,7 +56,9 @@ func newFakeStore(def *domain.FlowDefinition) (*fakeStore, error) {
 			// Freeze the acceptance clause onto the node, exactly like the
 			// production freeze (the fold path reads the node, not the version).
 			Acceptance: append([]domain.FlowAcceptance(nil), task.Acceptance...),
-			CreatedAt:  time.Now(),
+			// `optional` is frozen the same way; readiness reads the node.
+			Optional:  task.Optional,
+			CreatedAt: time.Now(),
 		})
 	}
 	return &fakeStore{
@@ -123,6 +126,15 @@ func (f *fakeStore) UpdateNode(ctx context.Context, runID string, upd NodeUpdate
 		}
 		if upd.ErrorCode != "" {
 			f.nodes[i].ErrorCode = upd.ErrorCode
+		}
+		if upd.ClearErrorCode {
+			f.nodes[i].ErrorCode = ""
+		}
+		if upd.ClearOutputRef {
+			f.nodes[i].OutputRef = nil
+		}
+		if upd.IncrementAttempts {
+			f.nodes[i].Attempts++
 		}
 		// Tri-state verdict: nil leaves it, empty clears it, a value writes it.
 		if upd.AcceptanceVerdict != nil {
@@ -199,10 +211,30 @@ type fakeChildren struct {
 	// blockedHandles: children for these handles stay running until cancelled
 	// or explicitly settled by the test.
 	blockedHandles map[string]bool
+	// failTimes/blockTimes limit the two behaviours to the first N dispatches of
+	// a handle, which is how a retry test gets "the first attempt fails, the
+	// second succeeds". dispatchCount is the per-handle CreateTaskChild count.
+	failTimes     map[string]int
+	blockTimes    map[string]int
+	dispatchCount map[string]int
 }
 
 func newFakeChildren() *fakeChildren {
-	return &fakeChildren{results: map[string]*domain.SubmitResult{}, status: map[string]domain.RunStatus{}, usage: map[string]domain.RunBudgetUsage{}, failHandles: map[string]bool{}, blockedHandles: map[string]bool{}}
+	return &fakeChildren{results: map[string]*domain.SubmitResult{}, status: map[string]domain.RunStatus{}, usage: map[string]domain.RunBudgetUsage{}, failHandles: map[string]bool{}, blockedHandles: map[string]bool{}, failTimes: map[string]int{}, blockTimes: map[string]int{}, dispatchCount: map[string]int{}}
+}
+
+// dispatched is the number of times a handle was handed to the substrate.
+func (c *fakeChildren) dispatched(handle string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.dispatchCount[handle]
+}
+
+// setStatus settles a child from the test side.
+func (c *fakeChildren) setStatus(runID string, status domain.RunStatus) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.status[runID] = status
 }
 
 func (c *fakeChildren) CreateTaskChild(ctx context.Context, parentRunID, sessionID string, spec ChildSpec) (ChildInfo, error) {
@@ -210,11 +242,13 @@ func (c *fakeChildren) CreateTaskChild(ctx context.Context, parentRunID, session
 	defer c.mu.Unlock()
 	c.created = append(c.created, spec)
 	c.runIDSeq++
+	c.dispatchCount[spec.Handle]++
 	id := "child-" + spec.Handle
+	attempt := c.dispatchCount[spec.Handle]
 	switch {
-	case c.blockedHandles[spec.Handle]:
+	case c.blockedHandles[spec.Handle] || attempt <= c.blockTimes[spec.Handle]:
 		c.status[id] = domain.RunRunning
-	case c.failHandles[spec.Handle]:
+	case c.failHandles[spec.Handle] || attempt <= c.failTimes[spec.Handle]:
 		c.status[id] = domain.RunFailed
 	default:
 		c.status[id] = domain.RunSucceeded
@@ -774,4 +808,514 @@ func TestTerminalGateRuntime(t *testing.T) {
 	assert.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
 	assert.Contains(t, events.types(), "flow_completed")
 	assert.NotContains(t, events.types(), "flow_failed")
+}
+
+// --- Scheduling knobs: retry / timeout / optional (P2 D6) ---
+
+// fakeClock is the orchestrator's Now seam. A test advances it instead of
+// sleeping out a real timeout_ms.
+type fakeClock struct {
+	mu     sync.Mutex
+	offset time.Duration
+}
+
+func (c *fakeClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return time.Now().Add(c.offset)
+}
+
+func (c *fakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.offset += d
+}
+
+// advanceUntilTerminal pushes the clock forward until the run settles. It is the
+// deterministic form of "wait out the ceiling": an attempt that never stops
+// running will cross it whatever moment its dispatch time was captured at, and
+// the push stops as soon as the flow is terminal so a settled attempt is never
+// retroactively expired (waitAndFoldAny checks settlement before expiry anyway).
+func advanceUntilTerminal(fake *fakeStore, clock *fakeClock, step time.Duration) func() {
+	done := make(chan struct{})
+	var once sync.Once
+	go func() {
+		ticker := time.NewTicker(2 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if run, err := fake.GetRun(context.Background(), "flow-run-1"); err == nil && run.State.Terminal() {
+					return
+				}
+				clock.advance(step)
+			}
+		}
+	}()
+	return func() { once.Do(func() { close(done) }) }
+}
+
+// scheduledDef is the three-task fixture with one task rewritten. The reviewer's
+// goal deliberately does NOT read the producer's output: a test about scheduling
+// must not fail on goal resolution for a dependency that produced nothing.
+func scheduledDef(mutate func(task *domain.FlowTask)) *domain.FlowDefinition {
+	def := threeTaskDef()
+	def.Tasks["reviewer"] = domain.FlowTask{
+		Type: domain.FlowTaskHero, Hero: "reader@1", Goal: "Review the producer's work",
+		Depends: []string{"producer"},
+	}
+	producer := def.Tasks["producer"]
+	mutate(&producer)
+	def.Tasks["producer"] = producer
+	return def
+}
+
+func newScheduledFlow(t *testing.T, def *domain.FlowDefinition) (*fakeStore, *fakeChildren, *fakeEvents, *Orchestrator) {
+	t.Helper()
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+	return fake, children, events, newOrchestrator(fake, children, events)
+}
+
+// retry: a child that ended failed is re-dispatched on the SAME node, the node
+// ends completed, and the attempt it spent is recorded durably on the row.
+func TestTaskRetryRedispatchesFailedChild(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) { task.Retry = &domain.FlowTaskRetry{Max: 2} })
+	fake, children, events, orch := newScheduledFlow(t, def)
+	children.failTimes["producer"] = 1 // first attempt fails, second succeeds
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	require.Equal(t, 2, children.dispatched("producer"), "the failed attempt must be re-dispatched")
+	require.Len(t, children.created, 3, "producer twice + reviewer once")
+	assert.Equal(t, "producer", children.created[0].Handle)
+	assert.Equal(t, "producer", children.created[1].Handle, "a retry re-runs the same node")
+
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeCompleted, producer.TerminalState)
+	assert.Equal(t, 1, producer.Attempts, "the spent attempt is part of the checkpoint")
+	assert.Empty(t, producer.ErrorCode, "a re-dispatched node must not keep the failure code")
+	assert.NotEmpty(t, producer.OutputRef, "the successful attempt's result is the checkpoint")
+
+	types := events.types()
+	assert.Contains(t, types, "flow_task_retrying")
+	assert.Contains(t, types, "flow_completed")
+	assert.NotContains(t, types, "flow_failed")
+	assert.NotContains(t, types, "flow_task_failed", "a retried attempt is not a flow-level failure")
+}
+
+// retry: the budget is durable. A node that already spent its single attempt
+// before the flow stopped must not be handed a fresh one by the next start.
+func TestTaskRetryBudgetSurvivesResume(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) { task.Retry = &domain.FlowTaskRetry{Max: 1} })
+	fake, children, events, orch := newScheduledFlow(t, def)
+	// Spent before the crash: the resumed run sees attempts=1 and max=1.
+	for _, node := range fake.nodes {
+		if node.Handle == "producer" {
+			node.Attempts = 1
+		}
+	}
+	children.failTimes["producer"] = 9
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateFailed, waitTerminal(t, fake))
+
+	assert.Equal(t, 1, children.dispatched("producer"), "a spent attempt must not be re-granted")
+	assert.Equal(t, 1, nodesByHandle(t, fake)["producer"].Attempts, "attempts is not reset by a start")
+	assert.NotContains(t, events.types(), "flow_task_retrying")
+}
+
+// retry: exhausting max fails the flow exactly as today would have.
+func TestTaskRetryExhaustedFailsFlow(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) { task.Retry = &domain.FlowTaskRetry{Max: 1} })
+	fake, children, events, orch := newScheduledFlow(t, def)
+	children.failHandles["producer"] = true
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateFailed, waitTerminal(t, fake))
+
+	assert.Equal(t, 2, children.dispatched("producer"), "max:1 means at most two dispatches")
+	assert.Equal(t, 0, children.dispatched("reviewer"), "a failed required dependency is never worked around")
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeFailed, producer.TerminalState)
+	assert.Equal(t, "task_failed", producer.ErrorCode)
+	assert.Equal(t, 1, producer.Attempts)
+	assert.Contains(t, events.types(), "flow_failed")
+}
+
+// retry: a verdict about the product is not retried. `acceptance_failed` says
+// the product does not satisfy its declared conditions; running the same task
+// again on the same input hides that instead of fixing it.
+func TestAcceptanceFailureIsNotRetried(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) { task.Retry = &domain.FlowTaskRetry{Max: 3} })
+	def.Tasks["producer"] = domain.FlowTask{
+		Type: domain.FlowTaskHero, Hero: "writer@1", Goal: "produce",
+		Retry:      &domain.FlowTaskRetry{Max: 3},
+		Acceptance: []domain.FlowAcceptance{{File: "outputs/qc.csv", Check: "non-empty"}},
+	}
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+	evidence := newFakeEvidence() // the file does not exist: does_not_hold
+
+	orch := acceptanceOrchestrator(t, fake, children, events, evidence)
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateFailed, waitTerminal(t, fake))
+
+	assert.Equal(t, 1, children.dispatched("producer"), "an acceptance verdict is never re-run")
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, acceptanceFailedCode, producer.ErrorCode)
+	assert.Equal(t, 0, producer.Attempts)
+	assert.NotContains(t, events.types(), "flow_task_retrying")
+}
+
+// retry: a report contract violation is a verdict too (the report shape the
+// Hero promised), so it is never retried either.
+func TestReportContractViolationIsNotRetried(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) { task.Retry = &domain.FlowTaskRetry{Max: 3} })
+	fake, children, events, orch := newScheduledFlow(t, def)
+	freezeReportContract(t, fake, "producer", requiredPayloadContract())
+	children.results["producer"] = &domain.SubmitResult{
+		Status: domain.SubmitCompleted, Summary: "done", Payload: json.RawMessage(`{"summary":"done"}`),
+	}
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateFailed, waitTerminal(t, fake))
+
+	assert.Equal(t, 1, children.dispatched("producer"))
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, reportContractViolationCode, producer.ErrorCode)
+	assert.Equal(t, 0, producer.Attempts)
+	assert.NotContains(t, events.types(), "flow_task_retrying")
+}
+
+// retry: a cancelled flow is never retried — re-dispatching a task the user
+// stopped would keep work running after the cancel.
+func TestCancelledFlowIsNotRetried(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) { task.Retry = &domain.FlowTaskRetry{Max: 3} })
+	fake, children, events, orch := newScheduledFlow(t, def)
+	children.blockedHandles["producer"] = true
+
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		_ = fake.SetCancelRequested(context.Background(), "flow-run-1")
+	}()
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCancelled, waitTerminal(t, fake))
+
+	assert.Equal(t, 1, children.dispatched("producer"))
+	assert.Equal(t, domain.FlowNodeCancelled, nodesByHandle(t, fake)["producer"].TerminalState)
+	assert.NotContains(t, events.types(), "flow_task_retrying")
+}
+
+// timeout: an attempt past its ceiling is hard-cancelled and recorded as
+// task_timeout (a retryable code, so the same path can re-dispatch it).
+func TestTaskTimeoutCancelsAttemptAndRecordsTaskTimeout(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) { task.TimeoutMS = 60000 })
+	fake, children, events, orch := newScheduledFlow(t, def)
+	children.blockedHandles["producer"] = true
+	clock := &fakeClock{}
+	orch.Now = clock.now
+	stop := advanceUntilTerminal(fake, clock, 90*time.Second)
+	defer stop()
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateFailed, waitTerminal(t, fake))
+
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeFailed, producer.TerminalState)
+	assert.Equal(t, taskTimeoutCode, producer.ErrorCode)
+	status, err := children.ChildRunStatus(context.Background(), "child-producer")
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunCancelled, status, "the timed-out child must be hard-cancelled")
+	assert.Contains(t, events.types(), "flow_task_failed")
+	assert.NotContains(t, events.types(), "flow_completed")
+}
+
+// timeout: a task that settles inside its ceiling is untouched by the mechanism.
+func TestTaskWithinTimeoutIsUntouched(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) { task.TimeoutMS = 600000 })
+	fake, children, events, orch := newScheduledFlow(t, def)
+	clock := &fakeClock{}
+	orch.Now = clock.now
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	assert.Equal(t, 1, children.dispatched("producer"))
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeCompleted, producer.TerminalState)
+	assert.Empty(t, producer.ErrorCode)
+	status, err := children.ChildRunStatus(context.Background(), "child-producer")
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunSucceeded, status, "a settled child must never be cancelled by the ceiling")
+	assert.NotContains(t, events.types(), "flow_task_retrying")
+}
+
+// timeout then retry: the ceiling and the retry budget compose — a timed-out
+// attempt is re-dispatched, and the second attempt completes.
+func TestTaskTimeoutThenRetrySucceeds(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) {
+		task.TimeoutMS = 60000
+		task.Retry = &domain.FlowTaskRetry{Max: 1}
+	})
+	fake, children, events, orch := newScheduledFlow(t, def)
+	children.blockTimes["producer"] = 1 // the first attempt never settles, the second does
+	clock := &fakeClock{}
+	orch.Now = clock.now
+	stop := advanceUntilTerminal(fake, clock, 90*time.Second)
+	defer stop()
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	assert.Equal(t, 2, children.dispatched("producer"))
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeCompleted, producer.TerminalState)
+	assert.Equal(t, 1, producer.Attempts)
+	assert.Empty(t, producer.ErrorCode, "the re-dispatched node must not keep task_timeout")
+	assert.Contains(t, events.types(), "flow_task_retrying")
+	assert.Contains(t, events.types(), "flow_completed")
+}
+
+// timeout: a timed-out attempt must not discard a sibling's progress. The
+// sibling that already settled keeps its checkpoint when the flow fails.
+func TestTaskTimeoutKeepsSiblingCheckpoints(t *testing.T) {
+	def := &domain.FlowDefinition{
+		SchemaVersion: 1, ID: "timeout-siblings",
+		Outputs: map[string]domain.FlowPort{"report": {Type: domain.PortTypeString}},
+		Budget:  domain.FlowBudget{MaxTotalTokens: 100000},
+		Tasks: map[string]domain.FlowTask{
+			"alpha": {Type: domain.FlowTaskHero, Hero: "writer@1", Goal: "slow", TimeoutMS: 60000,
+				Budget: &domain.FlowTaskBudget{Tokens: 1000}},
+			"beta": {Type: domain.FlowTaskHero, Hero: "reader@1", Goal: "fast",
+				Budget: &domain.FlowTaskBudget{Tokens: 1000}},
+			"done": {Terminal: &domain.FlowTerminal{Status: "success", Output: "report"}, Depends: []string{"beta"}},
+		},
+	}
+	fake, children, events, orch := newScheduledFlow(t, def)
+	readOnlyNodes(fake) // one parallel reader batch: alpha and beta are in flight together
+	children.blockedHandles["alpha"] = true
+	clock := &fakeClock{}
+	orch.Now = clock.now
+	stop := advanceUntilTerminal(fake, clock, 90*time.Second)
+	defer stop()
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateFailed, waitTerminal(t, fake))
+
+	nodes := nodesByHandle(t, fake)
+	assert.Equal(t, taskTimeoutCode, nodes["alpha"].ErrorCode)
+	assert.Equal(t, domain.FlowNodeCompleted, nodes["beta"].TerminalState,
+		"a sibling that settled before the timeout keeps its checkpoint")
+	assert.NotEmpty(t, nodes["beta"].OutputRef)
+	assert.Contains(t, events.types(), "flow_failed")
+}
+
+// optional: a failed optional task records the failure on its node, its
+// dependents still run, and the flow completes.
+func TestOptionalFailureLetsDependentsRunAndFlowComplete(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) { task.Optional = true })
+	fake, children, events, orch := newScheduledFlow(t, def)
+	children.failHandles["producer"] = true
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeFailed, producer.TerminalState, "an optional failure stays a failed node")
+	assert.Equal(t, "task_failed", producer.ErrorCode, "the node row is the record of what happened")
+	assert.Equal(t, 1, children.dispatched("reviewer"), "a failed optional dependency must not block its dependents")
+	types := events.types()
+	assert.Contains(t, types, "flow_completed")
+	assert.NotContains(t, types, "flow_failed")
+	assert.Contains(t, types, "flow_task_failed", "the failure is still on the timeline")
+}
+
+// optional: without the flag the same failure still fails the flow. The knob is
+// opt-in per task, and the default is exactly today's behaviour.
+func TestRequiredFailureStillFailsFlow(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) {})
+	fake, children, events, orch := newScheduledFlow(t, def)
+	children.failHandles["producer"] = true
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateFailed, waitTerminal(t, fake))
+
+	assert.Equal(t, 0, children.dispatched("reviewer"))
+	assert.Equal(t, domain.FlowNodeFailed, nodesByHandle(t, fake)["producer"].TerminalState)
+	assert.Contains(t, events.types(), "flow_failed")
+	assert.NotContains(t, events.types(), "flow_completed")
+}
+
+// optional + retry: the retry budget is spent BEFORE `optional` absorbs the
+// outcome, so a task that can still recover keeps trying.
+func TestOptionalWithRetrySpendsRetriesFirst(t *testing.T) {
+	def := scheduledDef(func(task *domain.FlowTask) {
+		task.Optional = true
+		task.Retry = &domain.FlowTaskRetry{Max: 2}
+	})
+	fake, children, events, orch := newScheduledFlow(t, def)
+	children.failHandles["producer"] = true
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	assert.Equal(t, 3, children.dispatched("producer"), "max:2 extra attempts before giving up")
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeFailed, producer.TerminalState)
+	assert.Equal(t, 2, producer.Attempts)
+	assert.Equal(t, 1, children.dispatched("reviewer"))
+	assert.Contains(t, events.types(), "flow_completed")
+}
+
+// optional: the terminal gate unlocks through a failed optional dependency and
+// the flow completes with that node still failed.
+func TestTerminalGateUnlocksThroughOptionalFailure(t *testing.T) {
+	def := &domain.FlowDefinition{
+		SchemaVersion: 1, ID: "optional-terminal",
+		Outputs: map[string]domain.FlowPort{"report": {Type: domain.PortTypeString}},
+		Budget:  domain.FlowBudget{MaxTotalTokens: 100000},
+		Tasks: map[string]domain.FlowTask{
+			"producer": {Type: domain.FlowTaskHero, Hero: "writer@1", Goal: "produce", Optional: true,
+				Budget: &domain.FlowTaskBudget{Tokens: 1000}},
+			"done": {Terminal: &domain.FlowTerminal{Status: "success", Output: "report"}, Depends: []string{"producer"}},
+		},
+	}
+	fake, children, events, orch := newScheduledFlow(t, def)
+	children.failHandles["producer"] = true
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeFailed, producer.TerminalState, "the flow completes, the task stays failed")
+	assert.Contains(t, events.types(), "flow_completed")
+	assert.NotContains(t, events.types(), "flow_failed")
+}
+
+// depSatisfied is the one answer readiness and the terminal gate share. Pinned
+// as a table because three call sites now agree only if this helper is right.
+func TestDepSatisfied(t *testing.T) {
+	cases := []struct {
+		name string
+		node *domain.RunAgentFlowNode
+		want bool
+	}{
+		{"nil is not satisfied", nil, false},
+		{"completed", &domain.RunAgentFlowNode{TerminalState: domain.FlowNodeCompleted}, true},
+		{"optional failure", &domain.RunAgentFlowNode{TerminalState: domain.FlowNodeFailed, Optional: true}, true},
+		{"required failure", &domain.RunAgentFlowNode{TerminalState: domain.FlowNodeFailed}, false},
+		{"optional but completed", &domain.RunAgentFlowNode{TerminalState: domain.FlowNodeCompleted, Optional: true}, true},
+		{"pending", &domain.RunAgentFlowNode{TerminalState: domain.FlowNodePending}, false},
+		{"interrupted", &domain.RunAgentFlowNode{TerminalState: domain.FlowNodeInterrupted}, false},
+		{"optional but cancelled", &domain.RunAgentFlowNode{TerminalState: domain.FlowNodeCancelled, Optional: true}, false},
+	}
+	for _, testCase := range cases {
+		assert.Equal(t, testCase.want, depSatisfied(testCase.node), testCase.name)
+	}
+}
+
+// retryableFailureCode is the closed retry vocabulary: an attempt-shaped
+// failure is retryable, a verdict about the product or about the user's intent
+// is not.
+func TestRetryableFailureCode(t *testing.T) {
+	for code, want := range map[string]bool{
+		"task_failed":                             true,
+		"task_interrupted":                        true,
+		taskTimeoutCode:                           true,
+		"task_cancelled":                          false,
+		acceptanceFailedCode:                      false,
+		reportContractViolationCode:               false,
+		blockedBlockerPrefix + "needs_user_input": false,
+	} {
+		assert.Equal(t, want, retryableFailureCode(code), code)
+	}
+}
+
+// Regression: a Graph that declares none of the three knobs behaves exactly as
+// before — same dispatch order, same checkpoints, same event list.
+func TestGraphWithoutSchedulingKnobsBehavesExactlyAsBefore(t *testing.T) {
+	fake, children, events, orch := newScheduledFlow(t, scheduledDef(func(task *domain.FlowTask) {}))
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	require.Len(t, children.created, 2)
+	assert.Equal(t, "producer", children.created[0].Handle)
+	assert.Equal(t, "reviewer", children.created[1].Handle)
+	assert.Equal(t, []string{
+		"flow_started", "flow_task_started", "flow_task_completed",
+		"flow_task_started", "flow_task_completed", "flow_completed",
+	}, events.types(), "the event list of a knob-free Graph is unchanged")
+
+	for _, node := range nodesByHandle(t, fake) {
+		assert.Equal(t, 0, node.Attempts, "%s never retried", node.Handle)
+		assert.False(t, node.Optional, "%s is not optional", node.Handle)
+	}
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeCompleted, producer.TerminalState)
+	assert.Equal(t, domain.RunSucceeded, fake.anchorStatus)
+}
+
+// optional on a check gate: the gate's failure is recorded on its node and the
+// flow continues. The gate's branch targets stay inactive (an unresolved gate
+// selects no branch), so nothing downstream of it is dispatched.
+func TestOptionalCheckGateFailureDoesNotFailFlow(t *testing.T) {
+	failing := &failingChecker{}
+	def := &domain.FlowDefinition{
+		SchemaVersion: 1, ID: "optional-gate",
+		Outputs: map[string]domain.FlowPort{"report": {Type: domain.PortTypeString}},
+		Budget:  domain.FlowBudget{MaxTotalTokens: 100000},
+		Tasks: map[string]domain.FlowTask{
+			"producer": {Type: domain.FlowTaskHero, Hero: "writer@1", Goal: "produce",
+				Budget: &domain.FlowTaskBudget{Tokens: 1000}},
+			"gate": {Type: domain.FlowTaskCheck, Command: "go test ./...", Optional: true,
+				Depends: []string{"producer"}},
+			"done": {Terminal: &domain.FlowTerminal{Status: "success", Output: "report"}, Depends: []string{"gate"}},
+		},
+	}
+	fake, children, events, orch := newScheduledFlow(t, def)
+	orch.Checker = failing
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	gate := nodesByHandle(t, fake)["gate"]
+	assert.Equal(t, domain.FlowNodeFailed, gate.TerminalState, "the gate's failure stays on the row")
+	assert.Equal(t, "check_execution_failed", gate.ErrorCode)
+	assert.Contains(t, events.types(), "flow_completed")
+	assert.NotContains(t, events.types(), "flow_failed")
+	assert.Equal(t, 1, children.dispatched("producer"))
+
+	// Without the flag the same failure fails the flow, exactly as before.
+	def.Tasks["gate"] = domain.FlowTask{Type: domain.FlowTaskCheck, Command: "go test ./...",
+		Depends: []string{"producer"}}
+	fake, _, events, orch = newScheduledFlow(t, def)
+	orch.Checker = failing
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateFailed, waitTerminal(t, fake))
+	assert.Contains(t, events.types(), "flow_failed")
+}
+
+// failingChecker reports a sandbox execution error on every gate.
+type failingChecker struct{}
+
+func (c *failingChecker) CheckPolicyForSession(ctx context.Context, sessionID string) (*CheckPolicy, error) {
+	return &CheckPolicy{Mode: "allow_existing_behavior"}, nil
+}
+func (c *failingChecker) CreateCheckApproval(ctx context.Context, runID string, taskIndex int, command string) error {
+	return nil
+}
+func (c *failingChecker) CheckApprovalStatus(ctx context.Context, runID string, taskIndex int) (CheckApprovalStatus, error) {
+	return CheckApprovalNone, nil
+}
+func (c *failingChecker) ExecuteCheck(ctx context.Context, command string, timeoutSeconds int) (*CheckOutcome, error) {
+	return nil, errors.New("sandbox unavailable")
 }

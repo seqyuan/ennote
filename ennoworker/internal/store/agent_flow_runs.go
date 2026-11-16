@@ -4,9 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -55,6 +53,13 @@ type FlowNodeFreeze struct {
 	// start: the fold evaluates it instead of re-reading the version, so a failed version read
 	// cannot skip verification silently.
 	AcceptanceJSON json.RawMessage
+	// Optional is the task's `optional` declaration. A failed optional node is a
+	// satisfied dependency: the flow continues and can still complete.
+	Optional bool
+	// Attempts is the retry budget already spent at freeze time. It is 0 for a
+	// fresh Run; the column is written explicitly rather than left to its
+	// default so a freeze that carries a spent count cannot be silently reset.
+	Attempts int
 	// ReadOnly/Writes are the scheduler's concurrency class for this node,
 	// frozen from the resolved Hero definition and the task's declares.
 	ReadOnly bool
@@ -188,6 +193,13 @@ func (r *AgentFlowRunRepo) CreateFlowRun(ctx context.Context, input CreateFlowRu
 		if node.ReadOnly {
 			readOnly = 1
 		}
+		// `optional` is a pure scheduling declaration, so the frozen definition
+		// is its source: a caller that built a FlowNodeFreeze without it (a test
+		// helper, a second freeze path) cannot silently drop it.
+		optional := 0
+		if node.Optional || def.Tasks[node.Handle].Optional {
+			optional = 1
+		}
 		writesJSON, _ := json.Marshal(node.Writes)
 		heroDefJSON := node.HeroDefinitionJSON
 		if len(heroDefJSON) == 0 {
@@ -195,11 +207,12 @@ func (r *AgentFlowRunRepo) CreateFlowRun(ctx context.Context, input CreateFlowRu
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO run_agent_flow_nodes
 			(run_id, task_index, handle, hero_version_id, skill_digests_json, goal_digest, goal_text,
-			 budget_json, acceptance_json, terminal_state, created_at, read_only, writes_json, hero_definition_json)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
+			 budget_json, acceptance_json, terminal_state, created_at, read_only, writes_json, hero_definition_json,
+			 optional, attempts)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
 			runID, node.TaskIndex, node.Handle, node.HeroVersionID, string(skillsJSON),
 			node.GoalDigest, node.GoalText, string(budgetJSON), string(acceptanceJSON), timestamp, readOnly,
-			string(writesJSON), string(heroDefJSON)); err != nil {
+			string(writesJSON), string(heroDefJSON), optional, node.Attempts); err != nil {
 			return nil, fmt.Errorf("create flow node %d: %w", node.TaskIndex, err)
 		}
 	}
@@ -306,7 +319,7 @@ func (r *AgentFlowRunRepo) ListNodes(ctx context.Context, runID string) ([]*doma
 	rows, err := r.DB.QueryContext(ctx, `SELECT run_id, task_index, handle, hero_version_id, skill_digests_json,
 		goal_digest, goal_text, budget_json, acceptance_json, terminal_state, output_ref, child_run_id,
 		child_run_ids_json, error_code, created_at, finished_at, read_only, writes_json, hero_definition_json,
-		acceptance_verdict
+		acceptance_verdict, attempts, optional
 		FROM run_agent_flow_nodes WHERE run_id=? ORDER BY task_index`, runID)
 	if err != nil {
 		return nil, err
@@ -328,7 +341,7 @@ func (r *AgentFlowRunRepo) GetNode(ctx context.Context, runID string, taskIndex 
 	rows, err := r.DB.QueryContext(ctx, `SELECT run_id, task_index, handle, hero_version_id, skill_digests_json,
 		goal_digest, goal_text, budget_json, acceptance_json, terminal_state, output_ref, child_run_id,
 		child_run_ids_json, error_code, created_at, finished_at, read_only, writes_json, hero_definition_json,
-		acceptance_verdict
+		acceptance_verdict, attempts, optional
 		FROM run_agent_flow_nodes WHERE run_id=? AND task_index=?`, runID, taskIndex)
 	if err != nil {
 		return nil, err
@@ -342,87 +355,6 @@ func (r *AgentFlowRunRepo) GetNode(ctx context.Context, runID string, taskIndex 
 		return nil, err
 	}
 	return node, rows.Err()
-}
-
-// NodeUpdate is a CAS checkpoint mutation: the node moves from expectedState
-// (or any state when empty) to the provided terminal/running state.
-type NodeUpdate struct {
-	TaskIndex      int
-	ExpectedStates []domain.FlowNodeState
-	SetState       domain.FlowNodeState
-	ChildRunID     string
-	ChildRunIDs    []string
-	OutputRef      json.RawMessage
-	GoalText       string
-	ErrorCode      string
-	// AcceptanceVerdict is tri-state, because one SQL write cannot express
-	// "leave it", "clear it" and "set it" at once:
-	//   nil            -> leave the column alone (dispatch, cancel, re-dispatch)
-	//   non-nil, empty -> clear it (a node reset to pending must not keep a
-	//                     stale verdict)
-	//   non-nil, value -> write it (the acceptance fold, in the checkpoint CAS)
-	// A plain COALESCE cannot express "clear", and an unconditional write would
-	// clear verdicts on every unrelated update.
-	AcceptanceVerdict *json.RawMessage
-	// ClearErrorCode un-records error_code: COALESCE cannot clear, and a reset node must not look failed.
-	ClearErrorCode bool
-}
-
-// UpdateNode applies a checkpoint mutation and returns the node when the CAS
-// matched. It fails with ErrFlowNodeStateConflict otherwise.
-func (r *AgentFlowRunRepo) UpdateNode(ctx context.Context, runID string, upd NodeUpdate) (*domain.RunAgentFlowNode, error) {
-	expected := ""
-	if len(upd.ExpectedStates) > 0 {
-		quoted := make([]string, 0, len(upd.ExpectedStates))
-		for _, s := range upd.ExpectedStates {
-			quoted = append(quoted, fmt.Sprintf("'%s'", s))
-		}
-		expected = " AND terminal_state IN (" + strings.Join(quoted, ",") + ")"
-	}
-	now := heroTime(time.Now().UTC())
-	outputRef := ""
-	if len(upd.OutputRef) > 0 {
-		outputRef = string(upd.OutputRef)
-	}
-	childRunIDsJSON := ""
-	if len(upd.ChildRunIDs) > 0 {
-		if encoded, err := json.Marshal(upd.ChildRunIDs); err == nil {
-			childRunIDsJSON = string(encoded)
-		}
-	}
-	// Tri-state verdict: the column is NOT NULL, so "clear" writes '' and "leave" keeps it.
-	setVerdict := 0
-	verdict := ""
-	if upd.AcceptanceVerdict != nil {
-		setVerdict = 1
-		verdict = string(*upd.AcceptanceVerdict)
-	}
-	// error_code has two ways to be left alone and one to be cleared:
-	// ClearErrorCode writes '', a non-empty ErrorCode writes that code, and
-	// neither keeps the current value.
-	clearErrorCode := 0
-	if upd.ClearErrorCode {
-		clearErrorCode = 1
-	}
-	res, err := r.DB.ExecContext(ctx, `UPDATE run_agent_flow_nodes SET
-		terminal_state=?, child_run_id=COALESCE(?, child_run_id),
-		child_run_ids_json=CASE WHEN ?='' THEN child_run_ids_json ELSE ? END,
-		output_ref=COALESCE(?, output_ref), goal_text=COALESCE(?, goal_text),
-		error_code=CASE WHEN ?=1 THEN NULL ELSE COALESCE(?, error_code) END,
-		acceptance_verdict=CASE WHEN ?=1 THEN ? ELSE acceptance_verdict END,
-		finished_at=CASE WHEN ? IS NULL THEN finished_at ELSE ? END
-		WHERE run_id=? AND task_index=?`+expected,
-		upd.SetState, nullableOrNil(upd.ChildRunID), childRunIDsJSON, childRunIDsJSON,
-		nullableOrNil(outputRef), nullableOrNil(upd.GoalText), clearErrorCode, nullableOrNil(upd.ErrorCode),
-		setVerdict, verdict,
-		nullableOrNil(now), nullableOrNil(now), runID, upd.TaskIndex)
-	if err != nil {
-		return nil, err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return nil, ErrFlowNodeStateConflict
-	}
-	return r.GetNode(ctx, runID, upd.TaskIndex)
 }
 
 // UpdateFlowState transitions the meta-Run state. Terminal transitions also
@@ -513,14 +445,16 @@ func scanFlowNode(scan interface{ Scan(...any) error }) (*domain.RunAgentFlowNod
 	var node domain.RunAgentFlowNode
 	var heroVersionID, skillsJSON, goalDigest, goalText, budgetJSON, acceptanceJSON, outputRef, childRunID, errorCode, createdAt, finishedAt, heroDefJSON, acceptanceVerdict sql.NullString
 	var childRunIDsJSON, writesJSON string
-	var readOnly int
+	var readOnly, attempts, optional int
 	if err := scan.Scan(&node.RunID, &node.TaskIndex, &node.Handle, &heroVersionID,
 		&skillsJSON, &goalDigest, &goalText, &budgetJSON, &acceptanceJSON, &node.TerminalState,
 		&outputRef, &childRunID, &childRunIDsJSON, &errorCode, &createdAt, &finishedAt,
-		&readOnly, &writesJSON, &heroDefJSON, &acceptanceVerdict); err != nil {
+		&readOnly, &writesJSON, &heroDefJSON, &acceptanceVerdict, &attempts, &optional); err != nil {
 		return nil, err
 	}
 	node.ReadOnly = readOnly != 0
+	node.Optional = optional != 0
+	node.Attempts = attempts
 	if writesJSON != "" {
 		_ = json.Unmarshal([]byte(writesJSON), &node.Writes)
 	}
@@ -575,10 +509,6 @@ func scanFlowNode(scan interface{ Scan(...any) error }) (*domain.RunAgentFlowNod
 	}
 	return &node, nil
 }
-
-var (
-	ErrFlowNodeStateConflict = errors.New("flow node state conflict")
-)
 
 // ResumeFlowRun reopens a cancelled (or failed/interrupted) meta-Run for
 // checkpoint continuation: completed task checkpoints are kept, all other

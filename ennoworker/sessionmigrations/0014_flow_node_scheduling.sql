@@ -1,0 +1,22 @@
+-- Task scheduling knobs (retry / timeout / optional) need two durable facts on
+-- the checkpoint row.
+--
+-- attempts is the retry budget already spent by this node. It has to be durable:
+-- the in-flight attempt counter of a running orchestrator dies with the process,
+-- and a resume that re-granted spent attempts would turn `retry.max: 2` into an
+-- unbounded loop across restarts. The column counts EXTRA attempts (0 on the
+-- first dispatch) and is incremented in the same CAS that resets the node, so a
+-- crash can neither lose the increment nor replay it.
+--
+-- optional is the frozen `optional` declaration. It is a node column rather than
+-- a read of the frozen version for the same reason acceptance_json is: the fold
+-- path and the ready-set computation both run on the node row, and a failed
+-- optional node has to stay a satisfied dependency after a restart even when the
+-- version read fails. Deliberately no new FlowNodeState value: an optional
+-- failure is a `failed` node, not a state of its own (a new state would have to
+-- be handled in eight places for visibility a column already gives us).
+--
+-- Both are NOT NULL with a numeric default, so every pre-existing row reads as
+-- "no attempts spent, not optional" and the Go layer scans plain integers.
+ALTER TABLE run_agent_flow_nodes ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE run_agent_flow_nodes ADD COLUMN optional INTEGER NOT NULL DEFAULT 0;

@@ -57,7 +57,8 @@ func (s *OrchestratorStore) UpdateNode(ctx context.Context, runID string, upd ag
 		TaskIndex: upd.TaskIndex, ExpectedStates: upd.ExpectedStates, SetState: upd.SetState,
 		ChildRunID: upd.ChildRunID, ChildRunIDs: upd.ChildRunIDs, OutputRef: upd.OutputRef,
 		GoalText: upd.GoalText, ErrorCode: upd.ErrorCode, AcceptanceVerdict: upd.AcceptanceVerdict,
-		ClearErrorCode: upd.ClearErrorCode,
+		ClearErrorCode: upd.ClearErrorCode, ClearOutputRef: upd.ClearOutputRef,
+		IncrementAttempts: upd.IncrementAttempts,
 	})
 	if errors.Is(err, ErrFlowNodeStateConflict) {
 		return agentflow.ErrCheckpointConflict
@@ -242,3 +243,113 @@ func (s *OrchestratorStore) GetConvergenceRounds(ctx context.Context, runID stri
 func (s *OrchestratorStore) SetConvergenceRounds(ctx context.Context, runID string, rounds map[string]int) error {
 	return s.Runs.SetConvergenceRounds(ctx, runID, rounds)
 }
+
+// Checkpoint CAS: the durable write of one task node, next to the FlowStore
+// adapter that exposes it to the orchestrator. It lives here rather than in
+// agent_flow_runs.go so the write, its NodeUpdate modes and the adapter that
+// translates agentflow.NodeUpdate stay in one file.
+
+// NodeUpdate is a CAS checkpoint mutation: the node moves from expectedState
+// (or any state when empty) to the provided terminal/running state.
+type NodeUpdate struct {
+	TaskIndex      int
+	ExpectedStates []domain.FlowNodeState
+	SetState       domain.FlowNodeState
+	ChildRunID     string
+	ChildRunIDs    []string
+	OutputRef      json.RawMessage
+	GoalText       string
+	ErrorCode      string
+	// AcceptanceVerdict is tri-state, because one SQL write cannot express
+	// "leave it", "clear it" and "set it" at once:
+	//   nil            -> leave the column alone (dispatch, cancel, re-dispatch)
+	//   non-nil, empty -> clear it (a node reset to pending must not keep a
+	//                     stale verdict)
+	//   non-nil, value -> write it (the acceptance fold, in the checkpoint CAS)
+	// A plain COALESCE cannot express "clear", and an unconditional write would
+	// clear verdicts on every unrelated update.
+	AcceptanceVerdict *json.RawMessage
+	// ClearErrorCode un-records error_code: COALESCE cannot clear, and a reset node must not look failed.
+	ClearErrorCode bool
+	// ClearOutputRef un-records output_ref for the same reason: a re-dispatched
+	// node must not still carry the previous attempt's result as its checkpoint,
+	// or a dependent would resolve {task.X.output} from a failed attempt.
+	ClearOutputRef bool
+	// IncrementAttempts spends one retry attempt in the SAME CAS that resets the
+	// node. One write is what makes the budget durable: a crash after the reset
+	// can neither lose the increment (the attempt would be re-granted on resume)
+	// nor apply it twice.
+	IncrementAttempts bool
+}
+
+// UpdateNode applies a checkpoint mutation and returns the node when the CAS
+// matched. It fails with ErrFlowNodeStateConflict otherwise.
+func (r *AgentFlowRunRepo) UpdateNode(ctx context.Context, runID string, upd NodeUpdate) (*domain.RunAgentFlowNode, error) {
+	expected := ""
+	if len(upd.ExpectedStates) > 0 {
+		quoted := make([]string, 0, len(upd.ExpectedStates))
+		for _, s := range upd.ExpectedStates {
+			quoted = append(quoted, fmt.Sprintf("'%s'", s))
+		}
+		expected = " AND terminal_state IN (" + strings.Join(quoted, ",") + ")"
+	}
+	now := heroTime(time.Now().UTC())
+	outputRef := ""
+	if len(upd.OutputRef) > 0 {
+		outputRef = string(upd.OutputRef)
+	}
+	childRunIDsJSON := ""
+	if len(upd.ChildRunIDs) > 0 {
+		if encoded, err := json.Marshal(upd.ChildRunIDs); err == nil {
+			childRunIDsJSON = string(encoded)
+		}
+	}
+	// Tri-state verdict: the column is NOT NULL, so "clear" writes '' and "leave" keeps it.
+	setVerdict := 0
+	verdict := ""
+	if upd.AcceptanceVerdict != nil {
+		setVerdict = 1
+		verdict = string(*upd.AcceptanceVerdict)
+	}
+	// error_code has two ways to be left alone and one to be cleared:
+	// ClearErrorCode writes '', a non-empty ErrorCode writes that code, and
+	// neither keeps the current value.
+	clearErrorCode := 0
+	if upd.ClearErrorCode {
+		clearErrorCode = 1
+	}
+	clearOutputRef := 0
+	if upd.ClearOutputRef {
+		clearOutputRef = 1
+	}
+	spendAttempt := 0
+	if upd.IncrementAttempts {
+		spendAttempt = 1
+	}
+	res, err := r.DB.ExecContext(ctx, `UPDATE run_agent_flow_nodes SET
+		terminal_state=?, child_run_id=COALESCE(?, child_run_id),
+		child_run_ids_json=CASE WHEN ?='' THEN child_run_ids_json ELSE ? END,
+		output_ref=CASE WHEN ?=1 THEN NULL ELSE COALESCE(?, output_ref) END,
+		goal_text=COALESCE(?, goal_text),
+		error_code=CASE WHEN ?=1 THEN NULL ELSE COALESCE(?, error_code) END,
+		acceptance_verdict=CASE WHEN ?=1 THEN ? ELSE acceptance_verdict END,
+		attempts=attempts+?,
+		finished_at=CASE WHEN ? IS NULL THEN finished_at ELSE ? END
+		WHERE run_id=? AND task_index=?`+expected,
+		upd.SetState, nullableOrNil(upd.ChildRunID), childRunIDsJSON, childRunIDsJSON,
+		clearOutputRef, nullableOrNil(outputRef), nullableOrNil(upd.GoalText),
+		clearErrorCode, nullableOrNil(upd.ErrorCode),
+		setVerdict, verdict, spendAttempt,
+		nullableOrNil(now), nullableOrNil(now), runID, upd.TaskIndex)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, ErrFlowNodeStateConflict
+	}
+	return r.GetNode(ctx, runID, upd.TaskIndex)
+}
+
+var (
+	ErrFlowNodeStateConflict = errors.New("flow node state conflict")
+)

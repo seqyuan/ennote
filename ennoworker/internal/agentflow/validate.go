@@ -337,6 +337,9 @@ func (v *Validator) Validate(ctx context.Context, def *domain.FlowDefinition) *V
 	// 11. context mode: what a task's assignment carries beyond the goal.
 	validateContextMode(add, def)
 
+	// 12. scheduling knobs: retry budget, per-attempt timeout, optional.
+	v.validateTaskScheduling(add, def)
+
 	result.Valid = len(result.Diagnostics) == 0
 	if result.Valid {
 		digest, err := ConfigDigest(def)
@@ -352,6 +355,41 @@ const (
 	maxAcceptanceColumns    = 64
 	maxAcceptanceColumnSize = 128
 )
+
+// validateTaskScheduling validates the retry budget and the per-attempt timeout,
+// and refuses either on a task that has no single attempt to schedule (a terminal
+// completes the flow, a check gate has its own verdict, a fan_out parent has one
+// attempt per instance). A knob this Worker cannot honour is refused instead of
+// ignored: `timeout_ms` on a check task must not read as a bounded gate.
+// `optional` needs no check: it is a boolean, and it is meaningful wherever a
+// task can fail.
+func (v *Validator) validateTaskScheduling(add func(ValidationDiagnostic), def *domain.FlowDefinition) {
+	names := make([]string, 0, len(def.Tasks))
+	for name := range def.Tasks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		task := def.Tasks[name]
+		field := "tasks." + name
+		retry, timeout := task.Retry != nil, task.TimeoutMS != 0
+		if kind := contextModeUnsupportedKind(task); kind != "" {
+			if retry {
+				add(v.fail("scheduling_unsupported", fmt.Sprintf("task %q is a %s task and cannot declare retry", name, kind), field+".retry"))
+			}
+			if timeout {
+				add(v.fail("scheduling_unsupported", fmt.Sprintf("task %q is a %s task and cannot declare timeout_ms", name, kind), field+".timeout_ms"))
+			}
+			continue
+		}
+		if retry && (task.Retry.Max < 1 || task.Retry.Max > domain.MaxFlowTaskRetry) {
+			add(v.fail("retry_invalid", fmt.Sprintf("task %q retry.max must be 1..%d (it counts extra attempts, so 2 means at most 3 dispatches)", name, domain.MaxFlowTaskRetry), field+".retry.max"))
+		}
+		if timeout && (task.TimeoutMS < domain.MinFlowTaskTimeoutMS || task.TimeoutMS > domain.MaxFlowTaskTimeoutMS) {
+			add(v.fail("timeout_invalid", fmt.Sprintf("task %q timeout_ms must be %d..%d", name, domain.MinFlowTaskTimeoutMS, domain.MaxFlowTaskTimeoutMS), field+".timeout_ms"))
+		}
+	}
+}
 
 func (v *Validator) validateGoalReferences(ctx context.Context, add func(ValidationDiagnostic), def *domain.FlowDefinition,
 	taskName string, task domain.FlowTask) {

@@ -15,12 +15,64 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 )
 
+// taskTimeoutCode is the node error code of an attempt that ran past its
+// declared timeout_ms. It is retryable, unlike a verdict about the product.
+const taskTimeoutCode = "task_timeout"
+
+// retryableFailureCode reports whether a task failure may be re-dispatched.
+// Only the two outcomes that say "this attempt went wrong" are retryable: a
+// child Run that ended failed or interrupted, and a timeout. A verdict about the
+// product (acceptance_failed, report_contract_violation), a cancelled task and
+// therefore a cancelled flow are not: re-running them without changing the
+// input hides the real problem instead of fixing it.
+func retryableFailureCode(code string) bool {
+	switch code {
+	case "task_failed", "task_interrupted", taskTimeoutCode:
+		return true
+	default:
+		return false
+	}
+}
+
+// attemptExpired reports the index of an in-flight attempt that ran past its
+// task's wall-clock ceiling, or -1.
+//
+// The dispatch time is in memory only: it dies with the process, and no
+// persisted dispatch timestamp is invented here. A restart therefore cannot
+// know how long a still-running attempt had already run. That limitation is
+// handled at recovery: a node left `running` whose child is already terminal is
+// folded from that terminal fact, and one whose child is still active is reset
+// to `interrupted` and re-dispatched through the ordinary poll (reconcileCrashedNodes) —
+// never treated as expired just because the start time is gone. The ceiling
+// still bounds every attempt this process dispatches, so a task can never run
+// unbounded: at worst a restart re-runs one attempt from its own start.
+func (o *Orchestrator) attemptExpired(def *domain.FlowDefinition, inFlight []inflightTask) int {
+	now := o.now()
+	for i := range inFlight {
+		limit := taskTimeoutMS(def, inFlight[i].node.Handle)
+		if limit <= 0 || inFlight[i].startedAt.IsZero() {
+			continue
+		}
+		if now.Sub(inFlight[i].startedAt) >= limit {
+			return i
+		}
+	}
+	return -1
+}
+
 // waitAndFoldAny polls all in-flight hero children and folds the first one
 // that settles, removing it from the set. The rest keep running; the caller
 // re-evaluates the ready set. On flow cancellation every in-flight child is
 // hard-cancelled and the caller's next loop iteration terminalizes the run.
+//
+// An attempt past its task's timeout_ms is hard-cancelled here and recorded as
+// task_timeout; the settlement then runs through the ordinary failure path
+// (retry first, `optional` second, flow failure last). The in-flight siblings are
+// left alone by the retry and optional outcomes, so a timed-out task never
+// discards progress another task already holds, and a terminal failure only
+// cancels what is still running.
 func (o *Orchestrator) waitAndFoldAny(ctx context.Context, runID string, flow *domain.RunAgentFlow,
-	inFlight *[]inflightTask) error {
+	def *domain.FlowDefinition, inFlight *[]inflightTask) error {
 	ticker := time.NewTicker(o.PollInterval)
 	defer ticker.Stop()
 	for {
@@ -33,6 +85,10 @@ func (o *Orchestrator) waitAndFoldAny(ctx context.Context, runID string, flow *d
 			o.cancelInflight(ctx, runID, *inFlight)
 			return nil // loop top terminalizes via cancelRemaining
 		}
+		// Settled first, expired second: a child that already ended is folded from
+		// its terminal fact even when the poll happens to arrive after the ceiling.
+		// A timeout means "the child had not settled by the deadline", not "the
+		// deadline passed before we looked".
 		settled := -1
 		for i := range *inFlight {
 			status, err := o.Children.ChildRunStatus(ctx, (*inFlight)[i].childID)
@@ -45,14 +101,97 @@ func (o *Orchestrator) waitAndFoldAny(ctx context.Context, runID string, flow *d
 			}
 		}
 		if settled < 0 {
+			if index := o.attemptExpired(def, *inFlight); index >= 0 {
+				task := (*inFlight)[index]
+				*inFlight = append((*inFlight)[:index], (*inFlight)[index+1:]...)
+				// Hard-cancel the timed-out child: the ceiling bounds the budget it
+				// may spend, and the node must not keep a running child behind a
+				// failed checkpoint.
+				_ = o.Children.CancelChildRun(ctx, task.childID)
+				usage, _ := o.Children.ChildUsage(ctx, task.childID)
+				total, _ := o.Store.AddTokenUsage(ctx, runID, usage.Tokens)
+				o.settleAttemptFailure(ctx, runID, def, task.node, taskTimeoutCode, total, *inFlight)
+				return nil // whichever way it settled, the dispatch loop re-reads state
+			}
 			continue
 		}
 		task := (*inFlight)[settled]
 		*inFlight = append((*inFlight)[:settled], (*inFlight)[settled+1:]...)
 		result, _ := o.Children.ChildTerminalResult(ctx, task.childID)
 		status, _ := o.Children.ChildRunStatus(ctx, task.childID)
-		return o.foldHeroChild(ctx, runID, flow, task.node, task.childID, status, result, *inFlight)
+		return o.foldHeroChild(ctx, runID, flow, def, task.node, task.childID, status, result, *inFlight)
 	}
+}
+
+// settleAttemptFailure records one failed attempt of a task and decides what it
+// does to the flow. The order is fixed and load-bearing: the retry budget is
+// spent FIRST, then `optional` may absorb the outcome, and only then does the
+// flow fail. A task declaring both therefore retries before it gives up.
+//
+// It returns nothing because the durable node state is the answer: a retry
+// leaves the node `pending` (the dispatch loop picks it up again), an absorbed
+// failure leaves it `failed` with its code (its dependents are satisfied), and a
+// flow failure terminalizes the run.
+func (o *Orchestrator) settleAttemptFailure(ctx context.Context, runID string, def *domain.FlowDefinition,
+	node *domain.RunAgentFlowNode, code string, total int64, remaining []inflightTask) {
+	if o.retryAttempt(ctx, runID, def, node, code) {
+		return
+	}
+	o.failTask(ctx, runID, node, code)
+	if node.Optional {
+		// The failure is recorded on the node and nowhere else: the flow keeps
+		// running, the in-flight siblings are untouched, and every dependent of
+		// this task is still schedulable (depSatisfied).
+		return
+	}
+	o.cancelInflight(ctx, runID, remaining)
+	o.failKeepingUsage(ctx, runID, total, fmt.Sprintf("task %q %s", node.Handle, code))
+}
+
+// retryAttempt re-dispatches a task whose attempt failed retryably, while its
+// retry budget lasts, and reports whether it did.
+//
+// The node is reset to `pending` in ONE CAS that also clears error_code,
+// output_ref and the acceptance verdict and spends the attempt: two writes would
+// leave a window where a crash either loses the increment (resume re-grants a
+// spent attempt, turning retry.max into an unbounded loop across restarts) or
+// keeps a stale failure on a node that is about to run again.
+func (o *Orchestrator) retryAttempt(ctx context.Context, runID string, def *domain.FlowDefinition,
+	node *domain.RunAgentFlowNode, code string) bool {
+	if !retryableFailureCode(code) {
+		return false
+	}
+	limit := 0
+	if def != nil {
+		if task, ok := def.Tasks[node.Handle]; ok && task.Retry != nil {
+			limit = task.Retry.Max
+		}
+	}
+	if limit <= 0 || node.Attempts >= limit {
+		return false // no budget: the ordinary failure path owns this
+	}
+	// A cancelled flow is never retried: re-dispatching a task the user stopped
+	// would keep work going after the cancel, and the cancellation path is about
+	// to mark every non-terminal node cancelled anyway.
+	if o.isCancelled(ctx, runID) {
+		return false
+	}
+	err := o.Store.UpdateNode(ctx, runID, NodeUpdate{
+		TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
+		SetState: domain.FlowNodePending, ClearErrorCode: true, ClearOutputRef: true,
+		AcceptanceVerdict: clearedAcceptanceVerdict(), IncrementAttempts: true,
+	})
+	if err != nil {
+		// A lost CAS (or any write failure) leaves the attempt unspent and the node
+		// with its failure fact: the caller's ordinary failure path decides next. It
+		// must not guess that the node was settled.
+		return false
+	}
+	_ = o.Events.PublishFlow(ctx, runID, "flow_task_retrying", map[string]any{
+		"flowRunId": runID, "task": node.Handle, "reason": code,
+		"attempt": node.Attempts + 1, "maxAttempts": limit + 1,
+	})
+	return true
 }
 
 // cancelInflight hard-cancels a set of in-flight children and marks their

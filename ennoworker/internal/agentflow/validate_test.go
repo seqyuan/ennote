@@ -896,3 +896,168 @@ func hasCode(result *ValidationResult, code string) bool {
 	}
 	return false
 }
+
+// --- Scheduling knobs: publish validation (P2 D6) ---
+
+// schedulingDefYAML is the valid fixture with one task's scheduling declaration
+// spliced in. Writing the YAML (rather than mutating the parsed struct) is the
+// point: it pins that `retry`, `timeout_ms` and `optional` are real task keys and
+// not silently dropped by the parser's allowlist.
+func schedulingDefYAML(producerExtra string) string {
+	return `schemaVersion: 1
+id: maker-checker
+inputs:
+  target: {type: path, required: true}
+outputs:
+  decision: {type: string}
+budget:
+  max_total_tokens: 120000
+tasks:
+  producer:
+    hero: writer@1
+    goal: "Implement {inputs.target}"
+    budget: {tokens: 50000}
+` + producerExtra + `  reviewer:
+    hero: reader@1
+    goal: "Review {task.producer.output.changed_files}"
+    depends: [producer]
+  decision:
+    type: check
+    command: "go test ./..."
+    depends: [reviewer]
+  accept:
+    terminal: {status: success, output: decision}
+    output: decision
+    depends: [decision]
+`
+}
+
+// The three knobs are accepted with their documented bounds, and they are part
+// of the definition (they survive the parser and the config digest).
+func TestValidationSchedulingKnobsAccepted(t *testing.T) {
+	result := validateDef(t, schedulingDefYAML("    retry: {max: 2}\n    timeout_ms: 600000\n    optional: true\n"))
+	require.True(t, result.Valid, "%v", result.Diagnostics)
+
+	def, err := ParseDefinition([]byte(schedulingDefYAML("    retry: {max: 2}\n    timeout_ms: 600000\n    optional: true\n")))
+	require.NoError(t, err)
+	producer := def.Tasks["producer"]
+	require.NotNil(t, producer.Retry)
+	assert.Equal(t, 2, producer.Retry.Max)
+	assert.Equal(t, int64(600000), producer.TimeoutMS)
+	assert.True(t, producer.Optional)
+
+	// The bounds themselves are legal: 1..5 extra attempts, 1s..24h.
+	for _, extra := range []string{"    retry: {max: 1}\n", "    retry: {max: 5}\n",
+		"    timeout_ms: 1000\n", "    timeout_ms: 86400000\n"} {
+		bounded := validateDef(t, schedulingDefYAML(extra))
+		assert.True(t, bounded.Valid, "%q: %v", extra, bounded.Diagnostics)
+	}
+
+	// A knob changes the published definition, so it must change the digest: two
+	// Graphs that differ only in a retry budget cannot share one immutable version.
+	yamlA := schedulingDefYAML("    retry: {max: 1}\n")
+	yamlB := schedulingDefYAML("    retry: {max: 2}\n")
+	digestA := validateDef(t, yamlA).ConfigDigest
+	digestB := validateDef(t, yamlB).ConfigDigest
+	require.NotEmpty(t, digestA)
+	assert.NotEqual(t, digestA, digestB, "the retry budget is part of the config identity")
+}
+
+// retry.max is 1..5: 0 would mean "declare a retry and never use it", and the
+// upper bound keeps a wedged task from being re-dispatched without limit.
+func TestValidationRetryRange(t *testing.T) {
+	for _, value := range []string{"0", "-1", "6"} {
+		result := validateDef(t, schedulingDefYAML("    retry: {max: "+value+"}\n"))
+		assert.False(t, result.Valid, "retry.max=%s", value)
+		assert.True(t, hasCode(result, "retry_invalid"), "retry.max=%s: %v", value, result.Diagnostics)
+	}
+	// No retry key at all is not an error: the field is optional.
+	assert.False(t, hasCode(validateDef(t, schedulingDefYAML("")), "retry_invalid"))
+}
+
+// timeout_ms is 1000..86400000: below a second it is a race against the poll
+// interval, above a day it is not a decision any more.
+func TestValidationTimeoutRange(t *testing.T) {
+	for _, value := range []string{"999", "86400001", "-1"} {
+		result := validateDef(t, schedulingDefYAML("    timeout_ms: "+value+"\n"))
+		assert.False(t, result.Valid, "timeout_ms=%s", value)
+		assert.True(t, hasCode(result, "timeout_invalid"), "timeout_ms=%s: %v", value, result.Diagnostics)
+	}
+	assert.False(t, hasCode(validateDef(t, schedulingDefYAML("")), "timeout_invalid"))
+}
+
+// A check, terminal or fan_out task has no single attempt to retry or bound, so
+// the knobs are refused instead of ignored: a `timeout_ms` that silently does
+// nothing reads as a bounded gate that is not bounded.
+func TestValidationSchedulingUnsupportedShapes(t *testing.T) {
+	// A check task cannot bound its own execution.
+	result := validateDef(t, `schemaVersion: 1
+id: check-scheduling
+budget: {max_total_tokens: 10000}
+tasks:
+  producer: {hero: writer@1, goal: "a", budget: {tokens: 100}}
+  gate:
+    type: check
+    command: "go test ./..."
+    timeout_ms: 60000
+    depends: [producer]
+`)
+	assert.False(t, result.Valid)
+	assert.True(t, hasCode(result, "scheduling_unsupported"), "%v", result.Diagnostics)
+
+	// A terminal task cannot retry: it dispatches nothing.
+	result = validateDef(t, `schemaVersion: 1
+id: terminal-scheduling
+budget: {max_total_tokens: 10000}
+tasks:
+  producer: {hero: writer@1, goal: "a", budget: {tokens: 100}}
+  accept:
+    terminal: {status: success}
+    retry: {max: 2}
+    depends: [producer]
+`)
+	assert.False(t, result.Valid)
+	assert.True(t, hasCode(result, "scheduling_unsupported"), "%v", result.Diagnostics)
+
+	// A fan_out parent has one attempt per instance, not one attempt: the same
+	// definition is valid without a knob and invalid with one.
+	fanOutYAML := func(extra string) string {
+		return `schemaVersion: 1
+id: fanout-scheduling
+budget: {max_total_tokens: 10000}
+tasks:
+  producer: {hero: reader@1, goal: "a", budget: {tokens: 100}, fan_out: {min: 2, max: 2}` + extra + `}
+  accept: {terminal: {status: success}, depends: [producer]}
+`
+	}
+	plain := validateDef(t, fanOutYAML(""))
+	require.True(t, plain.Valid, "%v", plain.Diagnostics)
+	for _, extra := range []string{", retry: {max: 2}", ", timeout_ms: 60000"} {
+		withKnob := validateDef(t, fanOutYAML(extra))
+		assert.False(t, withKnob.Valid, extra)
+		assert.True(t, hasCode(withKnob, "scheduling_unsupported"), "%s: %v", extra, withKnob.Diagnostics)
+	}
+}
+
+// A misspelled knob must fail publish instead of silently disabling the limit —
+// the same reason every task key has a diagnostic.
+func TestValidationSchedulingTypoIsRejected(t *testing.T) {
+	result := validateDef(t, schedulingDefYAML("    retries: {max: 2}\n"))
+	assert.False(t, result.Valid)
+	assert.True(t, hasCode(result, "flow_task_unknown_field"), "%v", result.Diagnostics)
+}
+
+// The frozen definition round-trips: a Run freezes the definition it validated,
+// so the scheduling knobs must survive YAML export and re-parse unchanged.
+func TestSchedulingKnobsRoundTrip(t *testing.T) {
+	def, err := ParseDefinition([]byte(schedulingDefYAML("    retry: {max: 3}\n    timeout_ms: 5000\n    optional: true\n")))
+	require.NoError(t, err)
+	encoded, err := DefinitionToYAML(def)
+	require.NoError(t, err)
+	reparsed, err := ParseDefinition(encoded)
+	require.NoError(t, err)
+	assert.Equal(t, def.Tasks["producer"].Retry, reparsed.Tasks["producer"].Retry)
+	assert.Equal(t, def.Tasks["producer"].TimeoutMS, reparsed.Tasks["producer"].TimeoutMS)
+	assert.True(t, reparsed.Tasks["producer"].Optional)
+	assert.NotContains(t, string(encoded), "timeoutMS", "the YAML contract keeps the snake_case key")
+}
