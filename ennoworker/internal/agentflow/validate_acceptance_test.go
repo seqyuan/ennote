@@ -100,6 +100,19 @@ func TestValidationAcceptanceValid(t *testing.T) {
 		`{file: outputs/report.md, check: non-empty}`,
 	)))
 	assert.True(t, result.Valid, "%v", result.Diagnostics)
+
+	// tests-passed takes a plain invocation and nothing else; a quoted argument
+	// without shell control syntax stays legal.
+	for _, entry := range []string{
+		`{check: tests-passed, command: "go test ./..."}`,
+		`{check: tests-passed, command: "python -m pytest tests/test_qc.py -q"}`,
+		`{check: tests-passed, command: "node --test"}`,
+		`{check: tests-passed, command: "cargo test --all"}`,
+		`{check: tests-passed, command: "pytest -k 'not slow'"}`,
+	} {
+		result := validateAcceptanceYAML(t, acceptanceProducerYAML(acceptanceBlock(entry)))
+		assert.True(t, result.Valid, "%s: %v", entry, result.Diagnostics)
+	}
 }
 
 // A3: every acceptance diagnostic code has a failing case naming the task.
@@ -213,11 +226,95 @@ tasks:
 			messageContains: []string{"producer", "non-empty", "only artifact-published"},
 		},
 		{
-			name:            "check unknown names tests-passed",
-			yaml:            acceptanceProducerYAML(acceptanceBlock(`{file: outputs/report.md, check: tests-passed}`)),
+			name:            "check unknown names the vocabulary",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{file: outputs/report.md, check: no-such-leaf}`)),
 			code:            "acceptance_check_unknown",
 			field:           "tasks.producer.acceptance[0].check",
-			messageContains: []string{"producer", "tests-passed is not supported yet"},
+			messageContains: []string{"producer", "tests-passed"},
+		},
+		{
+			name:            "tests-passed requires a command",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{check: tests-passed}`)),
+			code:            "acceptance_command_required",
+			field:           "tasks.producer.acceptance[0].command",
+			messageContains: []string{"producer", "tests-passed", "command"},
+		},
+		{
+			name:            "tests-passed forbids a file",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{file: outputs/qc.csv, check: tests-passed, command: go test ./...}`)),
+			code:            "acceptance_file_forbidden",
+			field:           "tasks.producer.acceptance[0].file",
+			messageContains: []string{"producer", "recorded execution"},
+		},
+		{
+			name:            "tests-passed forbids an artifact",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{artifact: qc, check: tests-passed, command: go test ./...}`)),
+			code:            "acceptance_artifact_forbidden",
+			field:           "tasks.producer.acceptance[0].artifact",
+			messageContains: []string{"producer", "recorded execution"},
+		},
+		{
+			name:            "tests-passed forbids columns",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{check: tests-passed, command: go test ./..., columns: [a]}`)),
+			code:            "acceptance_columns_forbidden",
+			field:           "tasks.producer.acceptance[0].columns",
+			messageContains: []string{"producer", "columns"},
+		},
+		{
+			name:            "every other leaf forbids a command",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{file: outputs/report.md, check: non-empty, command: go test ./...}`)),
+			code:            "acceptance_command_forbidden",
+			field:           "tasks.producer.acceptance[0].command",
+			messageContains: []string{"producer", "only tests-passed"},
+		},
+		{
+			name:            "artifact-published forbids a command",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{artifact: qc, check: artifact-published, command: go test ./...}`)),
+			code:            "acceptance_command_forbidden",
+			field:           "tasks.producer.acceptance[0].command",
+			messageContains: []string{"producer", "only tests-passed"},
+		},
+		{
+			name:            "compound command with || true",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{check: tests-passed, command: "pytest a.py || true"}`)),
+			code:            "acceptance_command_compound",
+			field:           "tasks.producer.acceptance[0].command",
+			messageContains: []string{"producer", "shell control syntax", "quoted"},
+		},
+		{
+			name:            "compound command with cd &&",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{check: tests-passed, command: "cd sub && pytest"}`)),
+			code:            "acceptance_command_compound",
+			field:           "tasks.producer.acceptance[0].command",
+			messageContains: []string{"producer", "shell control syntax"},
+		},
+		{
+			name:            "pipe into a pager",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{check: tests-passed, command: "pytest a.py | tail -3"}`)),
+			code:            "acceptance_command_compound",
+			field:           "tasks.producer.acceptance[0].command",
+			messageContains: []string{"producer", "shell control syntax"},
+		},
+		{
+			name:            "redirect to a log",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{check: tests-passed, command: "go test ./... > out.log"}`)),
+			code:            "acceptance_command_compound",
+			field:           "tasks.producer.acceptance[0].command",
+			messageContains: []string{"producer", "shell control syntax"},
+		},
+		{
+			name:            "command substitution",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{check: tests-passed, command: "pytest $(cat files.txt)"}`)),
+			code:            "acceptance_command_compound",
+			field:           "tasks.producer.acceptance[0].command",
+			messageContains: []string{"producer", "shell control syntax"},
+		},
+		{
+			name:            "operator inside a quoted argument",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{check: tests-passed, command: "pytest -k 'a && b'"}`)),
+			code:            "acceptance_command_compound",
+			field:           "tasks.producer.acceptance[0].command",
+			messageContains: []string{"producer", "quoted argument"},
 		},
 		{
 			name:            "csv-columns requires columns",
@@ -406,7 +503,7 @@ func TestValidationUnknownCheckIsNotAlsoBlamedOnTheHero(t *testing.T) {
 	resolver.heroDefs["writer@1"] = writer
 
 	def, err := ParseDefinition([]byte(acceptanceProducerYAML(
-		acceptanceBlock(`{file: outputs/qc.csv, check: tests-passed}`))))
+		acceptanceBlock(`{file: outputs/qc.csv, check: no-such-leaf}`))))
 	require.NoError(t, err)
 	result := validatorForHeroes(resolver).Validate(context.Background(), def)
 	require.False(t, result.Valid)

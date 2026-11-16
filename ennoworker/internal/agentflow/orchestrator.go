@@ -13,16 +13,15 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 )
 
-// Orchestrator is the meta-Run state machine: pure orchestration, no Provider
-// calls, no loop decisions. It drives one child Run per task through the
-// delegation substrate, writes task checkpoints, accumulates the flow budget,
-// and terminalizes the meta-Run. It is testable through the FlowStore and
-// ChildProvider seams.
 // ErrCheckpointConflict reports that a checkpoint CAS did not match: another
 // orchestrator (a recovery racing a new start) settled the node first. It is a
 // settled node, not a failure.
 var ErrCheckpointConflict = errors.New("flow node state conflict")
 
+// Orchestrator is the meta-Run state machine: pure orchestration, no Provider
+// calls, no loop decisions. It drives one child Run per task through the
+// delegation substrate, writes task checkpoints, accumulates the flow budget,
+// and terminalizes the meta-Run. It is testable through its seams.
 type Orchestrator struct {
 	Store    FlowStore
 	Children ChildProvider
@@ -33,9 +32,11 @@ type Orchestrator struct {
 	// UNVERIFIED, never silently absent.
 	AcceptanceEvidence func(ctx context.Context, sessionID string) (AcceptanceEvidence, error)
 	// ArtifactPresent reports whether a published artifact is retrievable with
-	// the digest a child Run recorded. nil means the runtime cannot confirm it:
-	// artifact leaves are then UNVERIFIED, never absent and never a pass.
+	// the digest a child Run recorded; nil leaves artifact leaves UNVERIFIED.
 	ArtifactPresent func(ctx context.Context, artifactID, sha256 string) (bool, error)
+	// ChildExecutions returns one child Run's recorded shell executions. nil means the
+	// runtime cannot read them: tests-passed is then UNVERIFIED, never a pass.
+	ChildExecutions func(ctx context.Context, childRunID string) ([]domain.ToolExecution, error)
 	// Enqueue hands a created child Run to the run coordinator.
 	Enqueue      func(ctx context.Context, runID string) error
 	PollInterval time.Duration

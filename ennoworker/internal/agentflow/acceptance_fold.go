@@ -166,18 +166,41 @@ func (c childArtifactRefs) Present(ctx context.Context, artifactID, sha256 strin
 	return c.present(ctx, artifactID, sha256)
 }
 
+// childExecutions is the AcceptanceExecutions view of one child Run: the shell
+// executions its own tool calls recorded. A runtime without the seam, or one
+// whose query failed, yields the nil interface (not an empty list): "cannot be
+// read" must stay distinguishable from "read, and there were none", or an
+// infrastructure failure would read as evidence_no_execution.
+type childExecutions struct{ executions []domain.ToolExecution }
+
+func (c childExecutions) Executions() []domain.ToolExecution { return c.executions }
+
+// childExecutionsOf resolves one child's recorded executions. Only a clause that
+// declares tests-passed pays for the query.
+func (o *Orchestrator) childExecutionsOf(ctx context.Context, specs []domain.FlowAcceptance,
+	childID string) AcceptanceExecutions {
+	if !needsExecutions(specs) || o.ChildExecutions == nil {
+		return nil
+	}
+	executions, err := o.ChildExecutions(ctx, childID)
+	if err != nil {
+		return nil
+	}
+	return childExecutions{executions: executions}
+}
+
 // evaluateAcceptance verifies a task's frozen acceptance clause under the task
 // deadline. It is read-only: crash recovery may fold the same node twice, so it
 // must not publish, notify or count anything.
-func (o *Orchestrator) evaluateAcceptance(ctx context.Context, sessionID string,
+func (o *Orchestrator) evaluateAcceptance(ctx context.Context, sessionID, childID string,
 	specs []domain.FlowAcceptance, artifacts AcceptanceArtifacts) AcceptanceVerdictValue {
 	evalCtx, cancel := context.WithTimeout(ctx, acceptanceTaskTimeout)
 	defer cancel()
-	var evidence AcceptanceEvidence
+	facts := AcceptanceFacts{Artifacts: artifacts, Executions: o.childExecutionsOf(evalCtx, specs, childID)}
 	if needsWorkspaceEvidence(specs) {
-		evidence = o.acceptanceEvidence(evalCtx, sessionID)
+		facts.Evidence = o.acceptanceEvidence(evalCtx, sessionID)
 	}
-	return EvaluateAcceptance(evalCtx, specs, evidence, artifacts)
+	return EvaluateAcceptance(evalCtx, specs, facts)
 }
 
 // acceptanceEvidence resolves the workspace reader for one fold. A reader that
@@ -206,7 +229,7 @@ func (o *Orchestrator) acceptanceEvidence(ctx context.Context, sessionID string)
 func (o *Orchestrator) foldAcceptance(ctx context.Context, runID string, flow *domain.RunAgentFlow,
 	node *domain.RunAgentFlowNode, childID string, payload json.RawMessage,
 	result *domain.SubmitResult) error {
-	verdict := o.evaluateAcceptance(ctx, flow.SessionID, node.Acceptance, o.childArtifacts(result))
+	verdict := o.evaluateAcceptance(ctx, flow.SessionID, childID, node.Acceptance, o.childArtifacts(result))
 	encoded, err := json.Marshal(verdict)
 	if err != nil {
 		// Unreachable for the closed verdict shape, but a checkpoint written

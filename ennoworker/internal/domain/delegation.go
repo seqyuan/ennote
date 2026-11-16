@@ -233,6 +233,40 @@ func (b SubmitBlocker) Valid() bool {
 	return false
 }
 
+// ExitCodeUnrecorded is the ExitCode of a ToolExecution whose exit status was
+// never written down. tool_calls.exit_code is nullable and no recorder populates
+// it today, so every recorded shell execution carries this sentinel instead of a
+// fabricated 0. A reader must treat it as "unknown", never as success and never
+// as failure: IsError is the recorded failure fact.
+const ExitCodeUnrecorded = -1
+
+// ToolExecution is one shell execution a child Run recorded: the command it ran
+// and the output the Worker projected for it. It is the acceptance evidence of
+// the tests-passed leaf, which is why it carries no raw (unredacted) content:
+// only what a client was already allowed to read.
+type ToolExecution struct {
+	// Seq is the run-local position of the call; the highest matching Seq is the
+	// execution a verdict is decided on.
+	Seq        int64
+	ToolCallID string
+	Tool       string // "bash" | "exec"
+	// Command is the raw recorded command of a bash call, else empty.
+	Command string
+	// Argv is the recorded argument vector of an exec call, else empty.
+	Argv []string
+	// ExitCode is the recorded exit status, or ExitCodeUnrecorded.
+	ExitCode int
+	// IsError is the recorded tool-level failure fact (non-zero exit, timeout,
+	// kill, artifact error). It is authoritative: ExitCode may be unrecorded.
+	IsError bool
+	// Output is the projected output, possibly truncated. It never contains the
+	// pre-redaction text.
+	Output string
+	// Truncated reports that Output is not the whole projected output, so an
+	// absent summary in it is not evidence of an absent summary.
+	Truncated bool
+}
+
 // SubmitResult is the structured terminal output of a child Run.
 //
 // Blocker is the typed reason of a `blocked` or `needs_input` result and is

@@ -58,7 +58,7 @@ func (f *fakeAcceptanceEvidence) Open(rel string) (io.ReadCloser, error) {
 
 func acceptanceCase(t *testing.T, spec domain.FlowAcceptance, evidence *fakeAcceptanceEvidence) AcceptanceCheck {
 	t.Helper()
-	verdict := EvaluateAcceptance(context.Background(), []domain.FlowAcceptance{spec}, evidence, nil)
+	verdict := EvaluateAcceptance(context.Background(), []domain.FlowAcceptance{spec}, AcceptanceFacts{Evidence: evidence})
 	require.Len(t, verdict.Checks, 1)
 	assert.Equal(t, AggregateAcceptance(verdict.Checks), verdict.Result)
 	return verdict.Checks[0]
@@ -576,7 +576,7 @@ func TestEvaluateAcceptanceDeadlineIsUnverified(t *testing.T) {
 
 func TestEvaluateAcceptanceUnknownCheck(t *testing.T) {
 	ev := &fakeAcceptanceEvidence{content: map[string][]byte{"outputs/x": []byte("x")}}
-	check := acceptanceCase(t, domain.FlowAcceptance{File: "outputs/x", Check: "tests-passed"}, ev)
+	check := acceptanceCase(t, domain.FlowAcceptance{File: "outputs/x", Check: "no-such-leaf"}, ev)
 	assert.Equal(t, domain.AcceptanceUnverified, check.Verdict)
 	assert.Equal(t, "evidence_check_unknown", check.Code)
 	assert.Empty(t, ev.opened, "an unknown check must not touch the filesystem")
@@ -676,7 +676,7 @@ func TestEvaluateAcceptanceAggregatesSpecs(t *testing.T) {
 		{File: "outputs/qc.json", Check: "json-valid"},
 		{File: "outputs/report.md", Check: "non-empty"},
 	}
-	verdict := EvaluateAcceptance(context.Background(), specs, ev, nil)
+	verdict := EvaluateAcceptance(context.Background(), specs, AcceptanceFacts{Evidence: ev})
 	require.Len(t, verdict.Checks, 3)
 	assert.Equal(t, domain.AcceptanceHolds, verdict.Checks[0].Verdict)
 	assert.Equal(t, domain.AcceptanceHolds, verdict.Checks[1].Verdict)
@@ -685,17 +685,17 @@ func TestEvaluateAcceptanceAggregatesSpecs(t *testing.T) {
 	assert.Equal(t, domain.AcceptanceDoesNotHold, verdict.Result)
 
 	// No declared acceptance -> holds with no leaves.
-	empty := EvaluateAcceptance(context.Background(), nil, ev, nil)
+	empty := EvaluateAcceptance(context.Background(), nil, AcceptanceFacts{Evidence: ev})
 	assert.Equal(t, domain.AcceptanceHolds, empty.Result)
 	assert.Empty(t, empty.Checks)
 }
 
 func TestKnownChecksIsTheLeafVocabulary(t *testing.T) {
-	assert.Equal(t, []string{"exists", "non-empty", "csv-columns", "json-valid", "artifact-published"}, KnownChecks)
+	assert.Equal(t, []string{"exists", "non-empty", "csv-columns", "json-valid", "artifact-published", "tests-passed"}, KnownChecks)
 	for _, check := range KnownChecks {
 		assert.True(t, knownAcceptanceCheck(check))
 	}
-	assert.False(t, knownAcceptanceCheck("tests-passed"))
+	assert.False(t, knownAcceptanceCheck("no-such-leaf"))
 }
 
 // fakeAcceptanceArtifacts is the artifact seam: refs are fixed and the managed
@@ -726,7 +726,7 @@ func (f *fakeAcceptanceArtifacts) Present(ctx context.Context, artifactID, sha25
 // which is exactly the production shape: the leaf must not need one.
 func artifactCase(t *testing.T, spec domain.FlowAcceptance, artifacts AcceptanceArtifacts) AcceptanceCheck {
 	t.Helper()
-	verdict := EvaluateAcceptance(context.Background(), []domain.FlowAcceptance{spec}, nil, artifacts)
+	verdict := EvaluateAcceptance(context.Background(), []domain.FlowAcceptance{spec}, AcceptanceFacts{Artifacts: artifacts})
 	require.Len(t, verdict.Checks, 1)
 	assert.Equal(t, AggregateAcceptance(verdict.Checks), verdict.Result)
 	return verdict.Checks[0]
@@ -855,7 +855,7 @@ func TestEvaluateAcceptanceMixedFileAndArtifactLeaves(t *testing.T) {
 		{File: "outputs/report.md", Check: "non-empty"},
 		{Artifact: "outputs/qc.csv", Check: "artifact-published"},
 	}
-	verdict := EvaluateAcceptance(context.Background(), specs, nil, artifacts)
+	verdict := EvaluateAcceptance(context.Background(), specs, AcceptanceFacts{Artifacts: artifacts})
 	require.Len(t, verdict.Checks, 2)
 	assert.Equal(t, domain.AcceptanceUnverified, verdict.Checks[0].Verdict)
 	assert.Equal(t, "evidence_unavailable", verdict.Checks[0].Code)
@@ -920,4 +920,409 @@ func TestEvaluateAcceptanceJSONValidReadCap(t *testing.T) {
 	assert.LessOrEqual(t, reader.sent, int64(capBytes)+int64(acceptanceJSONReadChunkBytes)*16,
 		"the read must stop at the cap, not run to the end of the document")
 	_ = started
+}
+
+// fakeAcceptanceExecutions is the execution seam: it exposes exactly what the
+// recorder projected, so a verdict can only be decided from projected output.
+type fakeAcceptanceExecutions struct {
+	executions []domain.ToolExecution
+	nilSlice   bool
+}
+
+func (f fakeAcceptanceExecutions) Executions() []domain.ToolExecution {
+	if f.nilSlice {
+		return nil
+	}
+	return f.executions
+}
+
+func executionCase(t *testing.T, command string, executions []domain.ToolExecution) AcceptanceCheck {
+	t.Helper()
+	spec := domain.FlowAcceptance{Check: "tests-passed", Command: command}
+	verdict := EvaluateAcceptance(context.Background(), []domain.FlowAcceptance{spec}, AcceptanceFacts{
+		Executions: fakeAcceptanceExecutions{executions: executions},
+	})
+	require.Len(t, verdict.Checks, 1)
+	assert.Equal(t, AggregateAcceptance(verdict.Checks), verdict.Result)
+	return verdict.Checks[0]
+}
+
+func bashExecution(seq int64, command, output string) domain.ToolExecution {
+	return domain.ToolExecution{Seq: seq, ToolCallID: "call-" + command, Tool: "bash",
+		Command: command, ExitCode: 0, Output: output}
+}
+
+// The "not a pass" case comes first for every runner: a zero exit status and an
+// `ok` banner are not enough when no test actually ran.
+func TestEvaluateAcceptanceTestsPassedNotAPass(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		output  string
+		code    string
+	}{
+		{
+			name:    "go test with only no test files",
+			command: "go test ./...",
+			output:  "?   \texample.com/x\t[no test files]\n?   \texample.com/y\t[no test files]\n",
+			code:    "evidence_no_pass_summary",
+		},
+		{
+			name:    "go test with only skips",
+			command: "go test -v ./...",
+			output:  "=== RUN   TestSkipped\n--- SKIP: TestSkipped (0.00s)\n    x_test.go:4: not today\nok  \texample.com/x\t0.002s\n",
+			code:    "evidence_no_pass_summary",
+		},
+		{
+			name:    "go test with an empty banner",
+			command: "go test ./...",
+			output:  "",
+			code:    "evidence_no_pass_summary",
+		},
+		{
+			name:    "go test failure",
+			command: "go test ./...",
+			output:  "--- FAIL: TestA (0.00s)\nFAIL\texample.com/x\t0.003s\nFAIL\n",
+			code:    "command_failed",
+		},
+		{
+			name:    "pytest with zero passed",
+			command: "pytest -q",
+			output:  "0 passed, 2 skipped in 0.04s\n",
+			code:    "evidence_no_pass_summary",
+		},
+		{
+			name:    "pytest all skipped",
+			command: "pytest -q",
+			output:  "2 skipped in 0.03s\n",
+			code:    "evidence_no_pass_summary",
+		},
+		{
+			name:    "pytest failure summary",
+			command: "pytest -q",
+			output:  "FAILED tests/test_a.py::test_x - AssertionError\n1 failed, 1 passed in 0.05s\n",
+			code:    "command_failed",
+		},
+		{
+			name:    "node --test with only todos",
+			command: "node --test",
+			output:  "TAP version 13\n# tests 0\n# pass 0\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 2\n1..0\n",
+			code:    "evidence_no_pass_summary",
+		},
+		{
+			name:    "node --test with a failing test line",
+			command: "node --test",
+			output:  "TAP version 13\nnot ok 1 - adds\n# pass 0\n# fail 1\n",
+			code:    "command_failed",
+		},
+		{
+			name:    "cargo test with zero tests",
+			command: "cargo test",
+			output:  "running 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n",
+			code:    "evidence_no_pass_summary",
+		},
+		{
+			name:    "cargo test failure",
+			command: "cargo test",
+			output:  "test result: FAILED. 1 passed; 1 failed; 0 ignored\n",
+			code:    "command_failed",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			check := executionCase(t, tc.command, []domain.ToolExecution{bashExecution(1, tc.command, tc.output)})
+			assert.NotEqual(t, domain.AcceptanceHolds, check.Verdict, "an unclear run must never be a pass")
+			require.Equal(t, tc.code, check.Code)
+			want := domain.AcceptanceDoesNotHold
+			if tc.code == "evidence_no_pass_summary" {
+				want = domain.AcceptanceUnverified
+			}
+			assert.Equal(t, want, check.Verdict)
+		})
+	}
+}
+
+// The passing summary of every supported runner, including the counters a naive
+// "failed"/"error" substring scan would misread as a failure.
+func TestEvaluateAcceptanceTestsPassedHolds(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		output  string
+	}{
+		{
+			name:    "go test ok",
+			command: "go test ./...",
+			output:  "ok  \texample.com/x\t0.002s\n?   \texample.com/y\t[no test files]\n",
+		},
+		{
+			name:    "go test mixed skip and pass",
+			command: "go test -v ./...",
+			output:  "--- PASS: TestA (0.00s)\n--- SKIP: TestB (0.00s)\nok  \texample.com/x\t0.002s\n",
+		},
+		{
+			name:    "pytest passed",
+			command: "pytest tests/test_qc.py -q",
+			output:  "....\n4 passed in 0.12s\n",
+		},
+		{
+			name:    "python -m pytest passed",
+			command: "python -m pytest -q",
+			output:  "3 passed, 1 warning in 0.20s\n",
+		},
+		{
+			name:    "node --test spec reporter",
+			command: "node --test",
+			output:  "TESTS 3\n\u2139 tests 3\n\u2139 pass 3\n\u2139 fail 0\n\u2139 cancelled 0\n",
+		},
+		{
+			name:    "node --test tap",
+			command: "node --test test/x.test.js",
+			output:  "TAP version 13\nok 1 - adds\n1..1\n# tests 1\n# pass 1\n# fail 0\n",
+		},
+		{
+			name:    "cargo test ok with zero failed",
+			command: "cargo test",
+			output:  "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			check := executionCase(t, tc.command, []domain.ToolExecution{bashExecution(1, tc.command, tc.output)})
+			assert.Equal(t, domain.AcceptanceHolds, check.Verdict, "code=%s detail=%s", check.Code, check.Detail)
+			assert.Empty(t, check.Code)
+		})
+	}
+}
+
+// Matching is token-for-token against the execution the child actually ran. A
+// compound recorded command is never the same invocation, and a later unrelated
+// success is not evidence for the declared command.
+func TestEvaluateAcceptanceTestsPassedMatching(t *testing.T) {
+	passGo := "ok  \texample.com/x\t0.002s\n"
+	tests := []struct {
+		name       string
+		command    string
+		executions []domain.ToolExecution
+		verdict    domain.AcceptanceResult
+		code       string
+	}{
+		{
+			name:    "or-true recorded run does not satisfy the plain command",
+			command: "pytest a.py",
+			executions: []domain.ToolExecution{
+				bashExecution(1, "pytest a.py || true", "1 failed in 0.1s\n"),
+			},
+			verdict: domain.AcceptanceUnverified, code: "evidence_no_execution",
+		},
+		{
+			name:    "cd && recorded run does not satisfy the plain command",
+			command: "pytest",
+			executions: []domain.ToolExecution{
+				bashExecution(1, "cd x && pytest", "2 passed in 0.1s\n"),
+			},
+			verdict: domain.AcceptanceUnverified, code: "evidence_no_execution",
+		},
+		{
+			name:    "a different working directory expressed as an argument matches",
+			command: "pytest tests/sub/test_x.py",
+			executions: []domain.ToolExecution{
+				bashExecution(1, "pytest tests/sub/test_x.py", "1 passed in 0.1s\n"),
+			},
+			verdict: domain.AcceptanceHolds,
+		},
+		{
+			name:    "substring of a larger invocation does not match",
+			command: "go test",
+			executions: []domain.ToolExecution{
+				bashExecution(1, "go test ./...", passGo),
+			},
+			verdict: domain.AcceptanceUnverified, code: "evidence_no_execution",
+		},
+		{
+			name:    "a later unrelated success never satisfies the criterion",
+			command: "go test ./pkg",
+			executions: []domain.ToolExecution{
+				bashExecution(1, "go test ./other", passGo),
+			},
+			verdict: domain.AcceptanceUnverified, code: "evidence_no_execution",
+		},
+		{
+			name:    "failed attempt then a passing re-run holds",
+			command: "go test ./...",
+			executions: []domain.ToolExecution{
+				{Seq: 1, Tool: "bash", Command: "go test ./...", ExitCode: 1, IsError: true,
+					Output: "--- FAIL: TestA (0.00s)\nFAIL\texample.com/x\t0.003s\n"},
+				bashExecution(2, "go test ./...", passGo),
+			},
+			verdict: domain.AcceptanceHolds,
+		},
+		{
+			name:    "passing run then a failing re-run does not hold",
+			command: "go test ./...",
+			executions: []domain.ToolExecution{
+				bashExecution(1, "go test ./...", passGo),
+				{Seq: 2, Tool: "bash", Command: "go test ./...", ExitCode: 1, IsError: true,
+					Output: "--- FAIL: TestA (0.00s)\nFAIL\texample.com/x\t0.003s\n"},
+			},
+			verdict: domain.AcceptanceDoesNotHold, code: "command_failed",
+		},
+		{
+			name:    "exec argv matches its own recorded vector",
+			command: "go test ./...",
+			executions: []domain.ToolExecution{
+				{Seq: 3, Tool: "exec", Argv: []string{"go", "test", "./..."}, ExitCode: 0, Output: passGo},
+			},
+			verdict: domain.AcceptanceHolds,
+		},
+		{
+			name:    "leading environment assignments are not part of the match key",
+			command: "GOFLAGS=-count=1 go test ./...",
+			executions: []domain.ToolExecution{
+				bashExecution(1, "go test ./...", passGo),
+			},
+			verdict: domain.AcceptanceHolds,
+		},
+		{
+			name:    "recorded env prefix is not part of the match key",
+			command: "go test ./...",
+			executions: []domain.ToolExecution{
+				bashExecution(1, "env GOCACHE=/tmp/cache go test ./...", passGo),
+			},
+			verdict: domain.AcceptanceHolds,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			check := executionCase(t, tc.command, tc.executions)
+			assert.Equal(t, tc.verdict, check.Verdict, "code=%s detail=%s", check.Code, check.Detail)
+			if tc.code != "" {
+				assert.Equal(t, tc.code, check.Code)
+			}
+		})
+	}
+}
+
+// The evidence can also be missing or unusable; every such case is unverified,
+// never a pass and never a failed check.
+func TestEvaluateAcceptanceTestsPassedUnverified(t *testing.T) {
+	passGo := "ok  \texample.com/x\t0.002s\n"
+
+	t.Run("nil executions", func(t *testing.T) {
+		spec := domain.FlowAcceptance{Check: "tests-passed", Command: "go test ./..."}
+		verdict := EvaluateAcceptance(context.Background(), []domain.FlowAcceptance{spec}, AcceptanceFacts{})
+		assert.Equal(t, domain.AcceptanceUnverified, verdict.Result)
+		assert.Equal(t, "evidence_unavailable", verdict.Checks[0].Code)
+	})
+
+	t.Run("nil execution slice", func(t *testing.T) {
+		spec := domain.FlowAcceptance{Check: "tests-passed", Command: "go test ./..."}
+		verdict := EvaluateAcceptance(context.Background(), []domain.FlowAcceptance{spec}, AcceptanceFacts{
+			Executions: fakeAcceptanceExecutions{nilSlice: true},
+		})
+		assert.Equal(t, domain.AcceptanceUnverified, verdict.Result)
+		assert.Equal(t, "evidence_no_execution", verdict.Checks[0].Code)
+	})
+
+	t.Run("no recorded execution of the command", func(t *testing.T) {
+		check := executionCase(t, "go test ./...", []domain.ToolExecution{
+			bashExecution(1, "ls -la", "a.go\n"),
+		})
+		assert.Equal(t, domain.AcceptanceUnverified, check.Verdict)
+		assert.Equal(t, "evidence_no_execution", check.Code)
+	})
+
+	t.Run("unsupported runner", func(t *testing.T) {
+		check := executionCase(t, "make test", []domain.ToolExecution{
+			bashExecution(1, "make test", "all good\n"),
+		})
+		assert.Equal(t, domain.AcceptanceUnverified, check.Verdict)
+		assert.Equal(t, "evidence_runner_unsupported", check.Code)
+	})
+
+	t.Run("truncated output without a summary", func(t *testing.T) {
+		execution := bashExecution(1, "go test ./...", "=== RUN   TestA\n")
+		execution.Truncated = true
+		check := executionCase(t, "go test ./...", []domain.ToolExecution{execution})
+		assert.Equal(t, domain.AcceptanceUnverified, check.Verdict)
+		assert.Equal(t, "evidence_truncated", check.Code)
+	})
+
+	t.Run("truncated output with a visible summary still holds", func(t *testing.T) {
+		execution := bashExecution(1, "go test ./...", passGo)
+		execution.Truncated = true
+		check := executionCase(t, "go test ./...", []domain.ToolExecution{execution})
+		assert.Equal(t, domain.AcceptanceHolds, check.Verdict)
+	})
+
+	t.Run("compound declared command is refused again at run time", func(t *testing.T) {
+		check := executionCase(t, "pytest a.py || true", []domain.ToolExecution{
+			bashExecution(1, "pytest a.py || true", "1 passed in 0.1s\n"),
+		})
+		assert.Equal(t, domain.AcceptanceUnverified, check.Verdict)
+		assert.Equal(t, "acceptance_command_compound", check.Code)
+	})
+
+	t.Run("empty declared command", func(t *testing.T) {
+		check := executionCase(t, "", []domain.ToolExecution{bashExecution(1, "go test ./...", passGo)})
+		assert.Equal(t, domain.AcceptanceUnverified, check.Verdict)
+		assert.Equal(t, "evidence_no_execution", check.Code)
+	})
+}
+
+// A passing summary in the visible prefix does not outvote a failed execution,
+// and an unrecorded exit status (-1) does not outvote a passing summary: the
+// recorded IsError is the failure fact, the exit column may simply be absent.
+func TestEvaluateAcceptanceTestsPassedExitStatus(t *testing.T) {
+	passGo := "ok  \texample.com/x\t0.002s\n"
+
+	errored := bashExecution(1, "go test ./...", passGo)
+	errored.IsError = true
+	errored.ExitCode = 1
+	check := executionCase(t, "go test ./...", []domain.ToolExecution{errored})
+	assert.Equal(t, domain.AcceptanceDoesNotHold, check.Verdict)
+	assert.Equal(t, "command_failed", check.Code)
+
+	recordedExitOnly := bashExecution(1, "go test ./...", "=== RUN TestA\n")
+	recordedExitOnly.ExitCode = 2
+	check = executionCase(t, "go test ./...", []domain.ToolExecution{recordedExitOnly})
+	assert.Equal(t, domain.AcceptanceDoesNotHold, check.Verdict)
+	assert.Equal(t, "command_failed", check.Code)
+
+	unrecorded := bashExecution(1, "go test ./...", passGo)
+	unrecorded.ExitCode = domain.ExitCodeUnrecorded
+	check = executionCase(t, "go test ./...", []domain.ToolExecution{unrecorded})
+	assert.Equal(t, domain.AcceptanceHolds, check.Verdict,
+		"an exit status the recorder never wrote is unknown, not a failure")
+}
+
+// A tests-passed clause decides on its own evidence and never asks for a
+// workspace reader; a file clause next to it stays unverified when the runtime
+// has no reader, and the aggregate follows the three-valued rule.
+func TestEvaluateAcceptanceMixedCommandAndFileLeaves(t *testing.T) {
+	specs := []domain.FlowAcceptance{
+		{Check: "tests-passed", Command: "go test ./..."},
+		{File: "outputs/report.md", Check: "non-empty"},
+	}
+	verdict := EvaluateAcceptance(context.Background(), specs, AcceptanceFacts{
+		Executions: fakeAcceptanceExecutions{executions: []domain.ToolExecution{
+			bashExecution(1, "go test ./...", "ok  \texample.com/x\t0.002s\n"),
+		}},
+	})
+	require.Len(t, verdict.Checks, 2)
+	assert.Equal(t, domain.AcceptanceHolds, verdict.Checks[0].Verdict)
+	assert.Equal(t, domain.AcceptanceUnverified, verdict.Checks[1].Verdict)
+	assert.Equal(t, "evidence_unavailable", verdict.Checks[1].Code)
+	assert.Equal(t, domain.AcceptanceUnverified, verdict.Result)
+}
+
+// needsWorkspaceEvidence stays false for the leaves that read another source:
+// opening a jail for a clause that never touches the workspace would turn an
+// unavailable jail into a false unverified.
+func TestNeedsWorkspaceEvidenceByLeaf(t *testing.T) {
+	assert.True(t, needsWorkspaceEvidence([]domain.FlowAcceptance{{File: "x", Check: "exists"}}))
+	assert.False(t, needsWorkspaceEvidence([]domain.FlowAcceptance{{Artifact: "x", Check: "artifact-published"}}))
+	assert.False(t, needsWorkspaceEvidence([]domain.FlowAcceptance{{Command: "go test", Check: "tests-passed"}}))
+	assert.True(t, needsExecutions([]domain.FlowAcceptance{{Command: "go test", Check: "tests-passed"}}))
+	assert.False(t, needsExecutions([]domain.FlowAcceptance{{File: "x", Check: "exists"}}))
 }

@@ -477,6 +477,12 @@ func startFlowOrchestrator(db *sql.DB, runID string,
 		ArtifactPresent: func(ctx context.Context, artifactID, sha256 string) (bool, error) {
 			return artifactPresent(ctx, db, artifactID, sha256)
 		},
+		// ChildExecutions reads the child Run's own tool_calls rows from the same
+		// Session database. A query failure is an error (the leaf stays unverified),
+		// never an empty list: "could not read" must not become "ran nothing".
+		ChildExecutions: func(ctx context.Context, childRunID string) ([]domain.ToolExecution, error) {
+			return (&store.CallRepo{DB: db}).ListToolExecutions(ctx, childRunID)
+		},
 		Enqueue: func(ctx context.Context, childRunID string) error {
 			return coordinator.Enqueue(ctx, childRunID)
 		},

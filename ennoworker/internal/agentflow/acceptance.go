@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -13,16 +15,16 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 )
 
-// Acceptance leaves. These five names are the whole vocabulary; there is no
-// shell/command leaf, so tests-passed is not expressible yet. Four leaves read
-// the workspace; artifact-published reads the child's recorded artifact refs and
-// the managed store instead.
+// Acceptance leaves. These six names are the whole vocabulary. Five read
+// recorded facts the child produced (workspace files, published artifacts, shell
+// executions); none of them executes anything at verification time.
 const (
 	acceptanceCheckExists            = "exists"
 	acceptanceCheckNonEmpty          = "non-empty"
 	acceptanceCheckCSVColumns        = "csv-columns"
 	acceptanceCheckJSONValid         = "json-valid"
 	acceptanceCheckArtifactPublished = "artifact-published"
+	acceptanceCheckTestsPassed       = "tests-passed"
 )
 
 // KnownChecks is the single source of truth for the acceptance leaf names. The
@@ -34,6 +36,7 @@ var KnownChecks = []string{
 	acceptanceCheckCSVColumns,
 	acceptanceCheckJSONValid,
 	acceptanceCheckArtifactPublished,
+	acceptanceCheckTestsPassed,
 }
 
 func knownAcceptanceCheck(check string) bool {
@@ -47,10 +50,23 @@ func knownAcceptanceCheck(check string) bool {
 
 // needsWorkspaceEvidence reports whether any declared leaf reads the workspace.
 // An artifact-only clause never does, so it never opens a workspace jail: the
-// verdict is decided from the child's own refs and the artifact store.
+// verdict is decided from the child's own refs and the artifact store. A
+// tests-passed clause is decided from recorded executions, which need no jail
+// either.
 func needsWorkspaceEvidence(specs []domain.FlowAcceptance) bool {
 	for _, spec := range specs {
-		if spec.Check != acceptanceCheckArtifactPublished {
+		if spec.Check != acceptanceCheckArtifactPublished && spec.Check != acceptanceCheckTestsPassed {
+			return true
+		}
+	}
+	return false
+}
+
+// needsExecutions reports whether any declared leaf reads the child's recorded
+// shell executions. Nothing else does, so nothing else pays for the query.
+func needsExecutions(specs []domain.FlowAcceptance) bool {
+	for _, spec := range specs {
+		if spec.Check == acceptanceCheckTestsPassed {
 			return true
 		}
 	}
@@ -84,10 +100,19 @@ const (
 	codeAcceptanceTooLarge = "evidence_too_large"
 	// codeAcceptanceUnavailable means the evidence seam of a leaf is unusable by
 	// this runtime: no workspace reader (every file leaf is unverified for this
-	// reason), no artifact store seam, or a store that could not answer. Never a
-	// pass, never a silent skip.
-	codeAcceptanceUnavailable    = "evidence_unavailable"
-	acceptanceJSONReadChunkBytes = 32 * 1024
+	// reason), no artifact store seam, no recorded executions, or a source that
+	// could not answer. Never a pass, never a silent skip.
+	codeAcceptanceUnavailable = "evidence_unavailable"
+	// The tests-passed leaf's codes. A declared command that names shell control
+	// syntax is refused at publish (acceptance_command_compound); the runtime
+	// repeat of that refusal is defence in depth for a clause frozen before the
+	// rule existed.
+	codeAcceptanceCommandCompound   = "acceptance_command_compound"
+	codeAcceptanceCommandFailed     = "command_failed"
+	codeAcceptanceNoExecution       = "evidence_no_execution"
+	codeAcceptanceRunnerUnsupported = "evidence_runner_unsupported"
+	codeAcceptanceNoPassSummary     = "evidence_no_pass_summary"
+	acceptanceJSONReadChunkBytes    = 32 * 1024
 	// AcceptanceJSONReadCapBytes is the hard ceiling on bytes json-valid will
 	// read for one leaf. It is not a semantic size limit: the leaf still has no
 	// total size cap for any document under it (a legal multi-MiB QC JSON
@@ -150,6 +175,26 @@ type AcceptanceArtifacts interface {
 	Present(ctx context.Context, artifactID, sha256 string) (bool, error)
 }
 
+// AcceptanceExecutions is the injected seam for the tests-passed leaf: the
+// child Run's own recorded shell executions, oldest first. A runtime that cannot
+// read them leaves the seam nil, which makes that leaf unverified.
+type AcceptanceExecutions interface {
+	// Executions are the child Run's recorded shell executions, oldest first.
+	Executions() []domain.ToolExecution
+}
+
+// AcceptanceFacts is everything a verdict may be decided from. Each member is a
+// separate evidence source and a nil member makes only the leaves that need it
+// unverified/evidence_unavailable: nothing becomes a silent pass, and a file-only
+// clause does not fail because the runtime cannot read executions (or the
+// reverse). One struct instead of a growing parameter list is what keeps that
+// promise readable.
+type AcceptanceFacts struct {
+	Evidence   AcceptanceEvidence
+	Artifacts  AcceptanceArtifacts
+	Executions AcceptanceExecutions
+}
+
 // AcceptanceFile is the stat answer for one evidence path. Missing and Regular
 // are returned as facts rather than as errors because exists must distinguish
 // "definitely absent" (does_not_hold) from "cannot be decided" (unverified).
@@ -192,19 +237,20 @@ func AggregateAcceptance(checks []AcceptanceCheck) domain.AcceptanceResult {
 }
 
 // EvaluateAcceptance evaluates every declared acceptance condition of one task
-// and aggregates the verdicts. It is pure with respect to filesystem effects:
-// all workspace evidence comes through the injected AcceptanceEvidence and all
-// published-artifact evidence through AcceptanceArtifacts. A nil seam never
-// passes: the leaves that need it are unverified. Every leaf is bounded by its
-// own deadline so a caller cannot forget one.
-func EvaluateAcceptance(ctx context.Context, specs []domain.FlowAcceptance,
-	evidence AcceptanceEvidence, artifacts AcceptanceArtifacts) AcceptanceVerdictValue {
+// and aggregates the verdicts. It is pure with respect to side effects: all
+// workspace evidence comes through the injected AcceptanceEvidence, all
+// published-artifact evidence through AcceptanceArtifacts, and all execution
+// evidence through AcceptanceExecutions. Nothing is executed or re-read from a
+// raw source here. A nil member never passes: the leaves that need it are
+// unverified. Every leaf is bounded by its own deadline so a caller cannot
+// forget one.
+func EvaluateAcceptance(ctx context.Context, specs []domain.FlowAcceptance, facts AcceptanceFacts) AcceptanceVerdictValue {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	checks := make([]AcceptanceCheck, 0, len(specs))
 	for _, spec := range specs {
-		checks = append(checks, evaluateAcceptanceLeaf(ctx, spec, evidence, artifacts))
+		checks = append(checks, evaluateAcceptanceLeaf(ctx, spec, facts))
 	}
 	return AcceptanceVerdictValue{Result: AggregateAcceptance(checks), Checks: checks}
 }
@@ -259,28 +305,31 @@ func renderAcceptanceCondition(spec domain.FlowAcceptance) string {
 		return spec.File + " must be valid JSON"
 	case acceptanceCheckArtifactPublished:
 		return "artifact " + spec.Artifact + " must be published and still retrievable from managed storage"
+	case acceptanceCheckTestsPassed:
+		return "you must run `" + spec.Command + "` and it must pass; this clause is read from your recorded shell executions, never from your report, and the command is matched word for word"
 	default:
 		return spec.File + " must satisfy the " + spec.Check + " check"
 	}
 }
 
 // evaluateAcceptanceLeaf evaluates one condition under its own deadline.
-func evaluateAcceptanceLeaf(ctx context.Context, spec domain.FlowAcceptance,
-	evidence AcceptanceEvidence, artifacts AcceptanceArtifacts) AcceptanceCheck {
+func evaluateAcceptanceLeaf(ctx context.Context, spec domain.FlowAcceptance, facts AcceptanceFacts) AcceptanceCheck {
 	check := spec.Check
 	leafCtx, cancel := context.WithTimeout(ctx, acceptanceLeafTimeout)
 	defer cancel()
 	switch check {
 	case acceptanceCheckArtifactPublished:
-		return evaluateAcceptanceArtifactPublished(leafCtx, check, spec, artifacts)
+		return evaluateAcceptanceArtifactPublished(leafCtx, check, spec, facts.Artifacts)
+	case acceptanceCheckTestsPassed:
+		return evaluateAcceptanceTestsPassed(leafCtx, check, spec, facts.Executions)
 	case acceptanceCheckExists:
-		return evaluateAcceptanceExistence(leafCtx, check, spec, evidence, false)
+		return evaluateAcceptanceExistence(leafCtx, check, spec, facts.Evidence, false)
 	case acceptanceCheckNonEmpty:
-		return evaluateAcceptanceExistence(leafCtx, check, spec, evidence, true)
+		return evaluateAcceptanceExistence(leafCtx, check, spec, facts.Evidence, true)
 	case acceptanceCheckCSVColumns:
-		return evaluateAcceptanceCSVColumns(leafCtx, check, spec, evidence)
+		return evaluateAcceptanceCSVColumns(leafCtx, check, spec, facts.Evidence)
 	case acceptanceCheckJSONValid:
-		return evaluateAcceptanceJSONValid(leafCtx, check, spec, evidence)
+		return evaluateAcceptanceJSONValid(leafCtx, check, spec, facts.Evidence)
 	default:
 		return newAcceptanceCheck(check, domain.AcceptanceUnverified, codeAcceptanceCheckUnknown,
 			fmt.Sprintf("unknown acceptance check %q", check))
@@ -809,5 +858,327 @@ func utf8SequenceLen(b byte) int {
 		return 4
 	default:
 		return 0
+	}
+}
+
+// ---------------------------------------------------------------------------
+// tests-passed: one recorded shell execution of a declared command.
+
+// acceptanceShellOperators are the shell control tokens ParseCheckCommand leaves
+// behind. A declared command containing one is refused at publish
+// (acceptance_command_compound), and this leaf refuses it again at run time:
+// two invocations can tokenize identically without meaning the same thing, and
+// `pytest a.py || true` would otherwise be reported as a passing run.
+var acceptanceShellOperators = []string{"&&", "||", "|", ";", "&", ">", ">>", "<", "<<"}
+
+// compoundCommandToken returns the first token of command that carries shell
+// control syntax, or "" when the command is a plain invocation. An operator
+// inside a quoted argument counts too: the recorded command is re-split into
+// tokens the same way, so `pytest -k "a && b"` cannot be told apart from a real
+// `&&` once the shell has run it.
+func compoundCommandToken(command string) string {
+	for _, token := range ParseCheckCommand(command) {
+		for _, operator := range acceptanceShellOperators {
+			if token == operator {
+				return token
+			}
+		}
+		if strings.Contains(token, "$(") || strings.Contains(token, "${") || strings.Contains(token, "`") {
+			return token
+		}
+		if strings.ContainsAny(token, "|&;<>") {
+			return token
+		}
+	}
+	return ""
+}
+
+// acceptanceInvocationKey normalises one invocation into its match key: the
+// tokens with a leading `env` and any leading VAR=value assignments dropped.
+// Environment is not part of the match key, so the same program with the same
+// arguments is the same execution whichever variable the caller exported.
+func acceptanceInvocationKey(tokens []string) []string {
+	start := 0
+	if start < len(tokens) && tokens[start] == "env" {
+		start++
+	}
+	for start < len(tokens) && isEnvironmentAssignment(tokens[start]) {
+		start++
+	}
+	return tokens[start:]
+}
+
+// isEnvironmentAssignment reports whether the token is a leading `NAME=value`
+// assignment the shell consumes before it starts the program.
+func isEnvironmentAssignment(token string) bool {
+	name, _, found := strings.Cut(token, "=")
+	if !found || name == "" {
+		return false
+	}
+	for i, r := range name {
+		switch {
+		case r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'):
+		case r >= '0' && r <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// executionTokens is the recorded token vector of one execution: exec records an
+// argv and bash records a command string, which is split with the same
+// ParseCheckCommand the check tasks use.
+func executionTokens(execution domain.ToolExecution) ([]string, bool) {
+	switch execution.Tool {
+	case "bash":
+		return ParseCheckCommand(execution.Command), strings.TrimSpace(execution.Command) != ""
+	case "exec":
+		return execution.Argv, len(execution.Argv) > 0
+	default:
+		return nil, false
+	}
+}
+
+// matchingExecution picks the execution a verdict is decided on: the match with
+// the highest seq. A failed attempt followed by a successful re-run is therefore
+// a pass, and the reverse is not. It never falls back to "some successful call":
+// an execution that does not match token for token is not evidence at all.
+func matchingExecution(executions []domain.ToolExecution, declared []string) (domain.ToolExecution, bool) {
+	var best domain.ToolExecution
+	found := false
+	for _, execution := range executions {
+		tokens, ok := executionTokens(execution)
+		if !ok {
+			continue
+		}
+		if !equalTokens(acceptanceInvocationKey(tokens), declared) {
+			continue
+		}
+		if !found || execution.Seq >= best.Seq {
+			best, found = execution, true
+		}
+	}
+	return best, found
+}
+
+func equalTokens(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// acceptanceRunner is the test runner a declared command drives. The runner is
+// inferred from the declared tokens by prefix, the same way every suffix of the
+// command is compared: no runner, no summary rule, no verdict.
+type acceptanceRunner string
+
+const (
+	runnerGoTest    acceptanceRunner = "go test"
+	runnerPytest    acceptanceRunner = "pytest"
+	runnerNodeTest  acceptanceRunner = "node --test"
+	runnerCargoTest acceptanceRunner = "cargo test"
+)
+
+func hasTokenPrefix(tokens []string, prefix ...string) bool {
+	if len(tokens) < len(prefix) {
+		return false
+	}
+	for i := range prefix {
+		if tokens[i] != prefix[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// acceptanceRunnerOf infers the runner from the declared tokens. The four
+// supported prefixes are `go test`, `pytest` / `python -m pytest` /
+// `python3 -m pytest`, `node --test` and `cargo test`; anything else has no
+// summary rule this Worker can decide, so its clause is unverified rather than
+// guessed.
+func acceptanceRunnerOf(tokens []string) acceptanceRunner {
+	switch {
+	case hasTokenPrefix(tokens, "go", "test"):
+		return runnerGoTest
+	case hasTokenPrefix(tokens, "pytest"):
+		return runnerPytest
+	case hasTokenPrefix(tokens, "python", "-m", "pytest"), hasTokenPrefix(tokens, "python3", "-m", "pytest"):
+		return runnerPytest
+	case hasTokenPrefix(tokens, "node", "--test"):
+		return runnerNodeTest
+	case hasTokenPrefix(tokens, "cargo", "test"):
+		return runnerCargoTest
+	default:
+		return ""
+	}
+}
+
+// acceptanceOutput is what a runner's recorded output says about the run. It is
+// three-valued on purpose: "the summary shows a failure", "the summary shows a
+// pass", or "neither is visible" - the last one is unverified, never a pass.
+type acceptanceOutput int
+
+const (
+	acceptanceOutputUnknown acceptanceOutput = iota
+	acceptanceOutputPassed
+	acceptanceOutputFailed
+)
+
+var (
+	// Signatures shared by more than one runner.
+	acceptanceFailLine     = regexp.MustCompile(`(?m)^FAIL`)                       // go test `FAIL pkg`, cargo/pytest `FAILED`
+	acceptanceNotOKLine    = regexp.MustCompile(`(?m)^[ \t]*not ok\b`)             // TAP test line
+	acceptanceErrorLine    = regexp.MustCompile(`(?im)^[ \t]*error(\[[^\]]*\])?:`) // rustc/pytest `error:` line
+	acceptanceGoSubtest    = regexp.MustCompile(`(?m)^[ \t]*--- FAIL`)
+	acceptanceGoOKLine     = regexp.MustCompile(`(?m)^ok[ \t]+\S`)
+	acceptanceGoPassLine   = regexp.MustCompile(`(?m)^[ \t]*--- PASS`)
+	acceptanceGoSkipLine   = regexp.MustCompile(`(?m)^[ \t]*--- SKIP`)
+	acceptancePytestFailed = regexp.MustCompile(`(?m)^[ \t]*(FAILED|ERRORS?)\b`)
+	acceptancePassCounter  = regexp.MustCompile(`\b(\d+) passed\b`)
+	acceptanceFailCounter  = regexp.MustCompile(`\b(\d+) (failed|errors?)\b`)
+	acceptanceNodeCounter  = regexp.MustCompile(`(?m)^[^A-Za-z0-9]*(pass|fail|cancelled)[ \t]+(\d+)`)
+	acceptanceCargoFailed  = regexp.MustCompile(`(?m)^test result: FAILED`)
+	acceptanceCargoPassed  = regexp.MustCompile(`(?m)^test result: ok\. (\d+) passed`)
+)
+
+// classifyAcceptanceOutput reports what one execution's projected output shows.
+// A failure signature takes precedence over any passing summary: an output that
+// prints both did not pass. `0 failed` / `0 errors` are not failure signatures -
+// they are the counters every passing summary carries.
+func classifyAcceptanceOutput(runner acceptanceRunner, output string) acceptanceOutput {
+	switch runner {
+	case runnerGoTest:
+		if acceptanceFailLine.MatchString(output) || acceptanceGoSubtest.MatchString(output) {
+			return acceptanceOutputFailed
+		}
+		if acceptanceErrorLine.MatchString(output) {
+			return acceptanceOutputFailed
+		}
+		if !acceptanceGoOKLine.MatchString(output) {
+			return acceptanceOutputUnknown
+		}
+		// `go test` prints `ok <pkg>` even when every test in the package was
+		// skipped, so a run whose only visible test lines are SKIP lines is not
+		// a pass. Without -v neither line exists and the ok line is all we have.
+		if acceptanceGoSkipLine.MatchString(output) && !acceptanceGoPassLine.MatchString(output) {
+			return acceptanceOutputUnknown
+		}
+		return acceptanceOutputPassed
+	case runnerPytest:
+		if acceptancePytestFailed.MatchString(output) || acceptanceErrorLine.MatchString(output) ||
+			positiveCounter(acceptanceFailCounter, output) {
+			return acceptanceOutputFailed
+		}
+		if positiveCounter(acceptancePassCounter, output) {
+			return acceptanceOutputPassed
+		}
+		return acceptanceOutputUnknown
+	case runnerNodeTest:
+		if acceptanceNotOKLine.MatchString(output) {
+			return acceptanceOutputFailed
+		}
+		passed, failed := 0, false
+		for _, match := range acceptanceNodeCounter.FindAllStringSubmatch(output, -1) {
+			count, err := strconv.Atoi(match[2])
+			if err != nil {
+				continue
+			}
+			switch match[1] {
+			case "pass":
+				passed += count
+			case "fail", "cancelled":
+				if count > 0 {
+					failed = true
+				}
+			}
+		}
+		if failed {
+			return acceptanceOutputFailed
+		}
+		if passed > 0 {
+			return acceptanceOutputPassed
+		}
+		return acceptanceOutputUnknown
+	case runnerCargoTest:
+		if acceptanceCargoFailed.MatchString(output) {
+			return acceptanceOutputFailed
+		}
+		if match := acceptanceCargoPassed.FindStringSubmatch(output); match != nil {
+			if count, err := strconv.Atoi(match[1]); err == nil && count > 0 {
+				return acceptanceOutputPassed
+			}
+		}
+		return acceptanceOutputUnknown
+	default:
+		return acceptanceOutputUnknown
+	}
+}
+
+// positiveCounter reports whether pattern matched with a count above zero.
+func positiveCounter(pattern *regexp.Regexp, output string) bool {
+	for _, match := range pattern.FindAllStringSubmatch(output, -1) {
+		if count, err := strconv.Atoi(match[1]); err == nil && count > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// evaluateAcceptanceTestsPassed decides tests-passed from recorded executions
+// only. The declared command must be anchored to one execution of the child Run;
+// nothing is executed here and the child's prose is never read.
+func evaluateAcceptanceTestsPassed(ctx context.Context, check string, spec domain.FlowAcceptance,
+	executions AcceptanceExecutions) AcceptanceCheck {
+	if executions == nil {
+		return newAcceptanceCheck(check, domain.AcceptanceUnverified, codeAcceptanceUnavailable,
+			"recorded shell executions are unavailable")
+	}
+	if token := compoundCommandToken(spec.Command); token != "" {
+		return newAcceptanceCheck(check, domain.AcceptanceUnverified, codeAcceptanceCommandCompound,
+			fmt.Sprintf("the declared command contains shell control syntax (%q) and cannot be anchored to a single recorded execution", token))
+	}
+	declared := acceptanceInvocationKey(ParseCheckCommand(spec.Command))
+	if len(declared) == 0 {
+		return newAcceptanceCheck(check, domain.AcceptanceUnverified, codeAcceptanceNoExecution,
+			"tests-passed declares no command to match")
+	}
+	runner := acceptanceRunnerOf(declared)
+	if runner == "" {
+		return newAcceptanceCheck(check, domain.AcceptanceUnverified, codeAcceptanceRunnerUnsupported,
+			fmt.Sprintf("%q is not a supported test runner (go test, pytest, python -m pytest, node --test, cargo test)", strings.Join(declared, " ")))
+	}
+	if err := ctx.Err(); err != nil {
+		return acceptanceEvidenceFailure(check, err)
+	}
+	execution, found := matchingExecution(executions.Executions(), declared)
+	if !found {
+		return newAcceptanceCheck(check, domain.AcceptanceUnverified, codeAcceptanceNoExecution,
+			fmt.Sprintf("the task recorded no shell execution of %q", strings.Join(declared, " ")))
+	}
+	outcome := classifyAcceptanceOutput(runner, execution.Output)
+	switch {
+	case outcome == acceptanceOutputFailed:
+		return newAcceptanceCheck(check, domain.AcceptanceDoesNotHold, codeAcceptanceCommandFailed,
+			fmt.Sprintf("the output of %q shows a failing test run", strings.Join(declared, " ")))
+	case execution.IsError || execution.ExitCode > 0:
+		// A recorded failure of the execution itself is not a pass even when the
+		// visible prefix of its output happens to contain a passing summary.
+		return newAcceptanceCheck(check, domain.AcceptanceDoesNotHold, codeAcceptanceCommandFailed,
+			fmt.Sprintf("the execution of %q ended in error", strings.Join(declared, " ")))
+	case outcome == acceptanceOutputPassed:
+		return newAcceptanceCheck(check, domain.AcceptanceHolds, "", "")
+	case execution.Truncated:
+		return newAcceptanceCheck(check, domain.AcceptanceUnverified, codeAcceptanceTruncated,
+			"the recorded output was truncated before a test summary was visible")
+	default:
+		return newAcceptanceCheck(check, domain.AcceptanceUnverified, codeAcceptanceNoPassSummary,
+			fmt.Sprintf("the recorded output of %q shows no passing test summary (an empty run, only skipped/todo tests, or a run that printed nothing)", strings.Join(declared, " ")))
 	}
 }

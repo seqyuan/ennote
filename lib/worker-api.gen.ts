@@ -219,13 +219,21 @@ export interface paths {
          *     (`flow_task_unknown_field`) instead of being dropped, and an acceptance
          *     clause is validated against the leaf vocabulary this Worker can decide
          *     (`exists`, `non-empty`, `csv-columns`, `json-valid`,
-         *     `artifact-published`): it is refused on check, terminal and fan_out
-         *     tasks, when the list is empty, when the operand the check needs (`file`
-         *     for the file leaves, `artifact` for `artifact-published`), `columns` or
-         *     the check name is missing or malformed, when a file leaf also declares
-         *     `artifact` (or the reverse), and when a path is absolute or escapes the
-         *     workspace. A Hero that declares `acceptanceKinds` restricts the leaves
-         *     its tasks may name: a declared kind outside that list is refused with
+         *     `artifact-published`, `tests-passed`): it is refused on check, terminal
+         *     and fan_out tasks, when the list is empty, when the operand the check
+         *     needs (`file` for the file leaves, `artifact` for `artifact-published`,
+         *     `command` for `tests-passed`), `columns` or the check name is missing or
+         *     malformed, when a leaf declares another leaf's operand (a file leaf with
+         *     `artifact` or `command`, `artifact-published` with `file` or `command`,
+         *     `tests-passed` with `file`, `artifact` or `columns`), and when a path is
+         *     absolute or escapes the workspace. `tests-passed` is also refused when
+         *     its `command` holds shell control syntax (`acceptance_command_compound`):
+         *     it is matched token for token against one recorded execution, so a
+         *     compound command (`pytest a.py || true`, `cd sub && pytest`) cannot be
+         *     anchored to a single run, and an operator inside a quoted argument counts
+         *     too because the recorded command is re-split the same way. A Hero that
+         *     declares `acceptanceKinds` restricts the leaves its tasks may name: a
+         *     declared kind outside that list is refused with
          *     `hero_acceptance_kind_unsupported`. An absent or empty `acceptanceKinds`
          *     means the whole vocabulary, so Heroes written before the field existed
          *     publish unchanged.
@@ -2439,13 +2447,26 @@ export interface components {
          *     `file`; `columns` is only taken by `csv-columns`. `artifact-published`
          *     decides against managed storage instead: it requires `artifact` (the
          *     artifact NAME the task must have published) and accepts neither `file`
-         *     nor `columns`.
+         *     nor `columns`. `tests-passed` decides against the child's own recorded
+         *     shell executions: it requires `command` (the invocation the child must
+         *     have run, matched token for token against one recorded execution) and
+         *     accepts neither `file`, `artifact` nor `columns`. Nothing is executed at
+         *     verification time.
          */
         FlowAcceptanceDecl: {
             check: string;
-            /** @description The artifact name `artifact-published` requires; refused on every file leaf */
+            /** @description The artifact name `artifact-published` requires; refused on every other leaf */
             artifact?: string;
             file?: string;
+            /**
+             * @description The shell command `tests-passed` requires the child to have executed;
+             *     refused on every other leaf. It is compared token for token with the
+             *     command or argv the child's tool call recorded, so a command holding
+             *     shell control syntax (`&&`, `||`, `|`, `;`, `&`, redirects, `$(...)`,
+             *     `${...}`, backticks) is refused at publish with
+             *     `acceptance_command_compound`
+             */
+            command?: string;
             columns?: string[];
         };
         AcceptanceCheck: {
@@ -3235,7 +3256,7 @@ export interface components {
              *     means the whole vocabulary, which is the behaviour of every Hero
              *     written before this field existed.
              */
-            acceptanceKinds?: ("exists" | "non-empty" | "csv-columns" | "json-valid" | "artifact-published")[];
+            acceptanceKinds?: ("exists" | "non-empty" | "csv-columns" | "json-valid" | "artifact-published" | "tests-passed")[];
             context: {
                 /** @enum {string} */
                 defaultMode: "room" | "reply" | "fresh" | "task_only";

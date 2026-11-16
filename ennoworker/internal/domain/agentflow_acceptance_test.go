@@ -49,11 +49,18 @@ func TestFlowAcceptanceJSONShape(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(plain), "acceptance")
 
-	// Acceptance without columns omits the key (no command field exists).
+	// Acceptance without columns omits the key; a leaf without a command omits
+	// that one too, so every clause written before tests-passed existed keeps its
+	// exact JSON form (and therefore its config digest).
 	noLeaf, err := json.Marshal(FlowAcceptance{File: "outputs/report.md", Check: "non-empty"})
 	require.NoError(t, err)
 	assert.NotContains(t, string(noLeaf), "columns")
 	assert.NotContains(t, string(noLeaf), "command")
+
+	// The command leaf carries its command and nothing else.
+	commandLeaf, err := json.Marshal(FlowAcceptance{Check: "tests-passed", Command: "go test ./..."})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"check":"tests-passed","command":"go test ./..."}`, string(commandLeaf))
 }
 
 // UnknownTaskFields is derived from the YAML text, so it must never be part of

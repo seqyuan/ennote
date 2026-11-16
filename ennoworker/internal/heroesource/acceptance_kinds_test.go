@@ -68,7 +68,7 @@ func TestEmptyAcceptanceKindsIsDigestStable(t *testing.T) {
 // A kind the kernel cannot decide is refused at write time, naming the field.
 // The read path stays lenient so an already-published revision still loads.
 func TestValidateForWriteRejectsUnknownAcceptanceKind(t *testing.T) {
-	input := heroMarkdownWithAcceptanceKinds("acceptanceKinds: [json-valid, tests-passed]")
+	input := heroMarkdownWithAcceptanceKinds("acceptanceKinds: [json-valid, no-such-leaf]")
 	document, err := heroesource.Parse([]byte(input))
 	require.NoError(t, err, "the read path must keep loading the document")
 	_, err = heroesource.SourceDigest(document)
@@ -77,13 +77,13 @@ func TestValidateForWriteRejectsUnknownAcceptanceKind(t *testing.T) {
 	err = heroesource.ValidateForWrite(document)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "acceptanceKinds[1]")
-	assert.Contains(t, err.Error(), "tests-passed")
+	assert.Contains(t, err.Error(), "no-such-leaf")
 	assert.Contains(t, err.Error(), "json-valid")
 }
 
 func TestValidateForWriteAcceptsKnownAcceptanceKinds(t *testing.T) {
 	document, err := heroesource.Parse([]byte(heroMarkdownWithAcceptanceKinds(
-		"acceptanceKinds: [exists, non-empty, csv-columns, json-valid, artifact-published]")))
+		"acceptanceKinds: [exists, non-empty, csv-columns, json-valid, artifact-published, tests-passed]")))
 	require.NoError(t, err)
 	require.NoError(t, heroesource.ValidateForWrite(document))
 

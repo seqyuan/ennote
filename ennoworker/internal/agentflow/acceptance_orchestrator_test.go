@@ -380,6 +380,14 @@ func TestRenderAcceptanceAssignment(t *testing.T) {
 	} {
 		assert.Contains(t, first, want)
 	}
+
+	// The command leaf is rendered too: a child that is never told which
+	// invocation will be checked is failing a contract it never saw.
+	command := renderAcceptanceAssignment("do the work", []domain.FlowAcceptance{
+		{Check: "tests-passed", Command: "go test ./..."},
+	})
+	assert.Contains(t, command, "`go test ./...`")
+	assert.Contains(t, command, "recorded shell executions")
 }
 
 // Crash recovery folds a child that already succeeded. When the task declares
@@ -721,4 +729,166 @@ func TestAcceptanceArtifactCrashRecoveryWithoutResultIsUnverified(t *testing.T) 
 	assert.Equal(t, domain.AcceptanceUnverified, verdict.Result)
 	require.Len(t, verdict.Checks, 1)
 	assert.Equal(t, "evidence_unavailable", verdict.Checks[0].Code)
+}
+
+// fakeExecutions is the ChildExecutions seam of the orchestrator: per child Run,
+// the executions the test decides the child recorded.
+type fakeExecutions struct {
+	mu    sync.Mutex
+	byRun map[string][]domain.ToolExecution
+	err   error
+	asked []string
+}
+
+func (f *fakeExecutions) seam(ctx context.Context, childRunID string) ([]domain.ToolExecution, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, childRunID)
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.byRun[childRunID], nil
+}
+
+func (f *fakeExecutions) children() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.asked...)
+}
+
+// testsPassedDef is a three-task flow whose producer must have run `go test`.
+func testsPassedDef() *domain.FlowDefinition {
+	def := threeTaskDef()
+	def.Tasks["producer"] = domain.FlowTask{
+		Type: domain.FlowTaskHero, Hero: "writer@1", Goal: "implement",
+		Acceptance: []domain.FlowAcceptance{{Check: "tests-passed", Command: "go test ./..."}},
+	}
+	return def
+}
+
+// holds: the child recorded the declared command and its projected output shows
+// a passing summary, so the node completes with a holds verdict.
+func TestAcceptanceTestsPassedHoldsThroughTheFold(t *testing.T) {
+	fake, err := newFakeStore(testsPassedDef())
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+	executions := &fakeExecutions{byRun: map[string][]domain.ToolExecution{
+		"child-producer": {{Seq: 4, Tool: "bash", Command: "go test ./...", ExitCode: 0,
+			Output: "ok  \texample.com/x\t0.002s\n"}},
+	}}
+
+	orch := acceptanceOrchestrator(t, fake, children, events, newFakeEvidence())
+	orch.ChildExecutions = executions.seam
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeCompleted, producer.TerminalState)
+	verdict := decodeVerdict(t, producer)
+	assert.Equal(t, domain.AcceptanceHolds, verdict.Result)
+	require.Len(t, verdict.Checks, 1)
+	assert.Equal(t, "tests-passed", verdict.Checks[0].Check)
+	assert.Contains(t, executions.children(), "child-producer")
+}
+
+// does_not_hold: the recorded output of the declared command shows a failing
+// run, so the task fails and the flow terminalizes as failed.
+func TestAcceptanceTestsPassedFailureFailsFlow(t *testing.T) {
+	fake, err := newFakeStore(testsPassedDef())
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+	executions := &fakeExecutions{byRun: map[string][]domain.ToolExecution{
+		"child-producer": {{Seq: 1, Tool: "bash", Command: "go test ./...", ExitCode: 1, IsError: true,
+			Output: "--- FAIL: TestA (0.00s)\nFAIL\texample.com/x\t0.003s\n"}},
+	}}
+
+	orch := acceptanceOrchestrator(t, fake, children, events, newFakeEvidence())
+	orch.ChildExecutions = executions.seam
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateFailed, waitTerminal(t, fake))
+
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeFailed, producer.TerminalState)
+	assert.Equal(t, "acceptance_failed", producer.ErrorCode)
+	verdict := decodeVerdict(t, producer)
+	assert.Equal(t, domain.AcceptanceDoesNotHold, verdict.Result)
+	assert.Equal(t, "command_failed", verdict.Checks[0].Code)
+	assert.Contains(t, events.types(), "flow_task_acceptance_failed")
+}
+
+// No execution seam: the leaf is unverified, the checkpoint records it, and the
+// flow still completes. A runtime that cannot read executions must not be able
+// to fail a task by omission, and must never report it as verified either.
+func TestAcceptanceTestsPassedWithoutExecutionSeamIsUnverified(t *testing.T) {
+	fake, err := newFakeStore(testsPassedDef())
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+
+	orch := newOrchestrator(fake, children, events) // no ChildExecutions
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeCompleted, producer.TerminalState)
+	verdict := decodeVerdict(t, producer)
+	assert.Equal(t, domain.AcceptanceUnverified, verdict.Result)
+	assert.Equal(t, "evidence_unavailable", verdict.Checks[0].Code)
+	assert.Contains(t, events.types(), "flow_task_unverified")
+}
+
+// A failing execution query is unverified, not "no execution": an infrastructure
+// failure must stay distinguishable from a child that never ran the command.
+func TestAcceptanceTestsPassedExecutionQueryFailureIsUnverified(t *testing.T) {
+	fake, err := newFakeStore(testsPassedDef())
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+	executions := &fakeExecutions{err: errors.New("database is locked")}
+
+	orch := acceptanceOrchestrator(t, fake, children, events, newFakeEvidence())
+	orch.ChildExecutions = executions.seam
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	verdict := decodeVerdict(t, nodesByHandle(t, fake)["producer"])
+	assert.Equal(t, domain.AcceptanceUnverified, verdict.Result)
+	assert.Equal(t, "evidence_unavailable", verdict.Checks[0].Code)
+}
+
+// Crash recovery passes the same facts: a node folded after a restart reads the
+// child's recorded executions instead of skipping the clause.
+func TestAcceptanceTestsPassedCrashRecoveryUsesRecordedExecutions(t *testing.T) {
+	fake, err := newFakeStore(testsPassedDef())
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+	children.status["child-producer"] = domain.RunSucceeded
+	children.results["producer"] = &domain.SubmitResult{Status: domain.SubmitCompleted,
+		Payload: json.RawMessage(`{"changedFiles":["folded.go"]}`)}
+	require.NoError(t, fake.UpdateNode(context.Background(), "flow-run-1", NodeUpdate{
+		TaskIndex: 0, ExpectedStates: []domain.FlowNodeState{domain.FlowNodePending},
+		SetState: domain.FlowNodeRunning, ChildRunID: "child-producer",
+	}))
+	fake.mu.Lock()
+	fake.run.State = domain.FlowStateRunning
+	fake.mu.Unlock()
+	executions := &fakeExecutions{byRun: map[string][]domain.ToolExecution{
+		"child-producer": {{Seq: 7, Tool: "exec", Argv: []string{"go", "test", "./..."}, ExitCode: 0,
+			Output: "ok  \texample.com/x\t0.002s\n"}},
+	}}
+
+	orch := acceptanceOrchestrator(t, fake, children, events, newFakeEvidence())
+	orch.ChildExecutions = executions.seam
+	orch.Recover(context.Background(), []string{"flow-run-1"})
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+
+	producer := nodesByHandle(t, fake)["producer"]
+	assert.Equal(t, domain.FlowNodeCompleted, producer.TerminalState)
+	verdict := decodeVerdict(t, producer)
+	assert.Equal(t, domain.AcceptanceHolds, verdict.Result)
+	assert.Equal(t, 0, countHandle(children, "producer"), "the succeeded child is folded, not re-run")
+	assert.Contains(t, executions.children(), "child-producer")
 }

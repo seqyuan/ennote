@@ -116,22 +116,33 @@ func validateHeroAcceptanceKind(add func(ValidationDiagnostic), taskName string,
 func validateAcceptanceEntry(add func(ValidationDiagnostic), taskName string, index int, entryField string, spec domain.FlowAcceptance) {
 	if !knownAcceptanceCheck(spec.Check) {
 		add(ValidationDiagnostic{Code: "acceptance_check_unknown",
-			Message: fmt.Sprintf("task %q acceptance[%d] check %q is unknown (supported: %s); tests-passed is not supported yet",
+			Message: fmt.Sprintf("task %q acceptance[%d] check %q is unknown (supported: %s)",
 				taskName, index, spec.Check, strings.Join(KnownChecks, ", ")),
 			Field: entryField + ".check"})
 		return
 	}
-	if spec.Check == acceptanceCheckArtifactPublished {
+	switch spec.Check {
+	case acceptanceCheckArtifactPublished:
 		validateArtifactAcceptanceEntry(add, taskName, index, entryField, spec)
 		return
+	case acceptanceCheckTestsPassed:
+		validateCommandAcceptanceEntry(add, taskName, index, entryField, spec)
+		return
 	}
-	// A file leaf names one workspace path. A path and a published artifact are
-	// two different evidences, so the two fields are mutually exclusive.
+	// A file leaf names one workspace path. A path, a published artifact and a
+	// recorded command are three different evidences, so the other operands are
+	// mutually exclusive.
 	if strings.TrimSpace(spec.Artifact) != "" {
 		add(ValidationDiagnostic{Code: "acceptance_artifact_forbidden",
 			Message: fmt.Sprintf("task %q acceptance[%d] check %q takes a file, not an artifact (only artifact-published declares an artifact)",
 				taskName, index, spec.Check),
 			Field: entryField + ".artifact"})
+	}
+	if strings.TrimSpace(spec.Command) != "" {
+		add(ValidationDiagnostic{Code: "acceptance_command_forbidden",
+			Message: fmt.Sprintf("task %q acceptance[%d] check %q does not take a command (only tests-passed declares one)",
+				taskName, index, spec.Check),
+			Field: entryField + ".command"})
 	}
 	if strings.TrimSpace(spec.File) == "" {
 		add(ValidationDiagnostic{Code: "acceptance_file_required",
@@ -179,6 +190,51 @@ func validateArtifactAcceptanceEntry(add func(ValidationDiagnostic), taskName st
 			Message: fmt.Sprintf("task %q acceptance[%d] check %q takes an artifact name, not a file path (artifact-published reads the published artifact, never the workspace)",
 				taskName, index, spec.Check),
 			Field: entryField + ".file"})
+	}
+	if len(spec.Columns) > 0 {
+		add(ValidationDiagnostic{Code: "acceptance_columns_forbidden",
+			Message: fmt.Sprintf("task %q acceptance[%d] check %q does not take columns", taskName, index, spec.Check),
+			Field:   entryField + ".columns"})
+	}
+	if strings.TrimSpace(spec.Command) != "" {
+		add(ValidationDiagnostic{Code: "acceptance_command_forbidden",
+			Message: fmt.Sprintf("task %q acceptance[%d] check %q does not take a command (only tests-passed declares one)",
+				taskName, index, spec.Check),
+			Field: entryField + ".command"})
+	}
+}
+
+// validateCommandAcceptanceEntry validates tests-passed: the only leaf whose
+// operand is a command the child must have executed. The command is matched
+// token for token against one recorded execution, so a compound command - two
+// invocations glued together - is refused here. Refusing at publish is what
+// keeps `pytest a.py || true` from being satisfiable by a run that never passed;
+// the operator is refused even inside a quoted argument, because the recorded
+// command is re-split into tokens the same way.
+func validateCommandAcceptanceEntry(add func(ValidationDiagnostic), taskName string, index int, entryField string, spec domain.FlowAcceptance) {
+	command := strings.TrimSpace(spec.Command)
+	if command == "" {
+		add(ValidationDiagnostic{Code: "acceptance_command_required",
+			Message: fmt.Sprintf("task %q acceptance[%d] check %q requires the command the task must have executed",
+				taskName, index, spec.Check),
+			Field: entryField + ".command"})
+	} else if token := compoundCommandToken(command); token != "" {
+		add(ValidationDiagnostic{Code: "acceptance_command_compound",
+			Message: fmt.Sprintf("task %q acceptance[%d] command %q contains shell control syntax (%q); tests-passed matches one recorded invocation token for token, so a compound command cannot be anchored to a single execution. This includes an operator inside a quoted argument. Declare the plain invocation instead",
+				taskName, index, command, token),
+			Field: entryField + ".command"})
+	}
+	if strings.TrimSpace(spec.File) != "" {
+		add(ValidationDiagnostic{Code: "acceptance_file_forbidden",
+			Message: fmt.Sprintf("task %q acceptance[%d] check %q reads a recorded execution, not a file path",
+				taskName, index, spec.Check),
+			Field: entryField + ".file"})
+	}
+	if strings.TrimSpace(spec.Artifact) != "" {
+		add(ValidationDiagnostic{Code: "acceptance_artifact_forbidden",
+			Message: fmt.Sprintf("task %q acceptance[%d] check %q reads a recorded execution, not a published artifact",
+				taskName, index, spec.Check),
+			Field: entryField + ".artifact"})
 	}
 	if len(spec.Columns) > 0 {
 		add(ValidationDiagnostic{Code: "acceptance_columns_forbidden",

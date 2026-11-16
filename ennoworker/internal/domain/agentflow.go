@@ -198,8 +198,9 @@ func (s *AcceptanceSummary) AddDeclared(result AcceptanceResult) {
 // their paths are workspace-relative. artifact-published is decided against the
 // managed artifact store instead: it names an artifact, never a path, and it
 // reads the child's recorded submit_result.artifactRefs rather than the
-// workspace. There is no command field: shell-based checks are out of scope for
-// this vocabulary.
+// workspace. tests-passed is decided against the child's recorded shell
+// executions: it names the command the child must have run, and nothing is
+// executed at verification time.
 type FlowAcceptance struct {
 	// Artifact is the artifact NAME the task must have published. It is the
 	// only operand of artifact-published and it is refused on every file leaf:
@@ -207,10 +208,17 @@ type FlowAcceptance struct {
 	// is matched against the recorded reference exactly, the way column names
 	// are: whitespace is significant, so nothing normalizes it behind the
 	// author's back.
-	Artifact string   `json:"artifact,omitempty" yaml:"artifact,omitempty"`
-	File     string   `json:"file,omitempty"     yaml:"file,omitempty"`
-	Check    string   `json:"check"              yaml:"check"`
-	Columns  []string `json:"columns,omitempty"  yaml:"columns,omitempty"`
+	Artifact string `json:"artifact,omitempty" yaml:"artifact,omitempty"`
+	File     string `json:"file,omitempty"     yaml:"file,omitempty"`
+	Check    string `json:"check"              yaml:"check"`
+	// Command is the shell command tests-passed requires the child to have
+	// executed. It is matched token-for-token against a recorded execution - never
+	// by substring, never by "some successful call" - and a command containing
+	// shell control syntax is refused at publish, because `pytest a.py || true`
+	// would otherwise be satisfiable by a run that never passed. It is refused on
+	// every other leaf, and it is never executed by the evaluator.
+	Command string   `json:"command,omitempty"  yaml:"command,omitempty"`
+	Columns []string `json:"columns,omitempty"  yaml:"columns,omitempty"`
 }
 
 // FlowTask is one task of a flow definition.

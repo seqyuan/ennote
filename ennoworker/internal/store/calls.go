@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
@@ -319,4 +321,107 @@ func boolInt(value bool) int {
 		return 1
 	}
 	return 0
+}
+
+// MaxToolExecutionOutputBytes bounds how much of one projected tool output the
+// execution reader pulls into memory. It is a read budget, not a semantic limit:
+// a longer output is read up to the budget and reported as truncated, so a
+// missing test summary in it is undecidable instead of absent.
+const MaxToolExecutionOutputBytes = 256 << 10
+
+// ListToolExecutions returns one Run's recorded shell executions, oldest first:
+// the completed bash and exec calls, their recorded invocation and their
+// projected output. It is the execution evidence of the tests-passed acceptance
+// leaf, so it reads the PROJECTED result columns only — raw_result_preview and
+// raw_result_path hold the pre-redaction text and must never be re-introduced
+// into a deterministic check.
+func (r *CallRepo) ListToolExecutions(ctx context.Context, runID string) ([]domain.ToolExecution, error) {
+	rows, err := r.DB.QueryContext(ctx, `SELECT seq, tool_call_id, tool_name, arguments_json, status, is_error,
+		COALESCE(exit_code, -1), projected_result_preview, projected_result_path
+		FROM tool_calls WHERE run_id = ? AND tool_name IN ('bash','exec') AND status = 'completed'
+		ORDER BY seq`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("list tool executions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var executions []domain.ToolExecution
+	for rows.Next() {
+		var (
+			execution   domain.ToolExecution
+			arguments   string
+			status      string
+			isError     int
+			preview     string
+			projectedTo sql.NullString
+		)
+		if err := rows.Scan(&execution.Seq, &execution.ToolCallID, &execution.Tool, &arguments, &status,
+			&isError, &execution.ExitCode, &preview, &projectedTo); err != nil {
+			return nil, fmt.Errorf("scan tool execution: %w", err)
+		}
+		if status != "completed" {
+			continue
+		}
+		execution.IsError = isError != 0
+		execution.Command, execution.Argv = recordedInvocation(execution.Tool, arguments)
+		execution.Output = preview
+		if projectedTo.Valid && projectedTo.String != "" {
+			// The projection spilled to a file: that file is the whole output, so
+			// it replaces the preview. A read that failed is truncated, never
+			// "no output": an unreadable file must not read as a passing summary
+			// that was not there.
+			output, truncated := readProjectedOutput(projectedTo.String, MaxToolExecutionOutputBytes)
+			execution.Truncated = truncated
+			if !truncated || output != "" {
+				execution.Output = output
+			}
+		}
+		executions = append(executions, execution)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list tool executions: %w", err)
+	}
+	return executions, nil
+}
+
+// recordedInvocation decodes the invocation of one recorded shell call: bash
+// records a command string, exec records an argument vector. A row whose
+// arguments do not decode keeps both empty, so it matches nothing.
+func recordedInvocation(tool, arguments string) (string, []string) {
+	switch tool {
+	case "bash":
+		var recorded struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal([]byte(arguments), &recorded) == nil {
+			return recorded.Command, nil
+		}
+	case "exec":
+		var recorded struct {
+			Argv []string `json:"argv"`
+		}
+		if json.Unmarshal([]byte(arguments), &recorded) == nil {
+			return "", recorded.Argv
+		}
+	}
+	return "", nil
+}
+
+// readProjectedOutput reads at most limit bytes of a projected output file.
+// truncated reports that the file was longer than the budget or could not be
+// read to the end: in both cases the caller must not conclude that the output
+// lacked a summary.
+func readProjectedOutput(path string, limit int64) (string, bool) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", true
+	}
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return string(data), true
+	}
+	if int64(len(data)) > limit {
+		return string(data[:limit]), true
+	}
+	return string(data), false
 }
