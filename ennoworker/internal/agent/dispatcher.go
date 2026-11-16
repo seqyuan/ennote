@@ -834,9 +834,11 @@ func (l *Loop) executeToolAttempts(ctx context.Context, runID string, call domai
 		// Support streaming output via ToolOutputSink.
 		var result domain.ToolResult
 		var execErr error
+		var panicValue any
 		func() {
 			defer func() {
 				if recovered := recover(); recovered != nil {
+					panicValue = recovered
 					result = domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name,
 						Content: fmt.Sprintf("tool panic: %v", recovered), IsError: true}
 					execErr = nil
@@ -859,6 +861,17 @@ func (l *Loop) executeToolAttempts(ctx context.Context, runID string, call domai
 			}
 			result, execErr = l.Tools.Execute(ctx, call)
 		}()
+
+		// This must precede the execErr check: the recover above clears execErr, so
+		// a panic is only distinguishable from a normal return through panicValue.
+		if panicValue != nil {
+			return domain.ToolExecutionOutcome{
+				Result:       result,
+				AttemptCount: attempt,
+				Kind:         domain.ToolPanicked,
+				Cause:        fmt.Errorf("tool panic: %v", panicValue),
+			}
+		}
 
 		if execErr == nil {
 			return domain.ToolExecutionOutcome{

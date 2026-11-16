@@ -278,3 +278,49 @@ func assertNoSignal(t *testing.T, channel <-chan string) {
 	case <-time.After(20 * time.Millisecond):
 	}
 }
+
+func TestExecuteToolAttemptsClassifiesPanic(t *testing.T) {
+	tools := &fakeTools{execute: func(context.Context, domain.ToolCall) (domain.ToolResult, error) {
+		panic("boom")
+	}}
+
+	outcome := callOnce(t, tools, 0)
+
+	assert.Equal(t, domain.ToolPanicked, outcome.Kind)
+	require.Error(t, outcome.Cause)
+	assert.True(t, outcome.Result.IsError)
+	assert.Equal(t, 1, outcome.AttemptCount)
+	// A panic is terminal: the retry budget is 2 here, so a second Execute call
+	// would mean a panicking tool is being retried.
+	require.Len(t, tools.calls, 1)
+}
+
+func TestExecuteToolAttemptsClassifiesNormalReturn(t *testing.T) {
+	tools := &fakeTools{result: domain.ToolResult{Content: "ok"}}
+
+	outcome := callOnce(t, tools, 0)
+
+	assert.Equal(t, domain.ToolReturned, outcome.Kind)
+	assert.NoError(t, outcome.Cause)
+	assert.False(t, outcome.Result.IsError)
+}
+
+func TestSequentialBatchRecordsAPanickedToolAsFailed(t *testing.T) {
+	tools := &fakeTools{execute: func(context.Context, domain.ToolCall) (domain.ToolResult, error) {
+		panic("boom")
+	}}
+	writer := &memoryWriter{}
+	loop := &Loop{Tools: tools, Events: writer, ToolExecution: domain.ToolExecutionConfig{Mode: "sequential"}}
+
+	results, err := loop.executeToolBatch(context.Background(), "panic-batch", 1, []domain.ToolCall{{ID: "call-1", Name: "read"}})
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.True(t, results[0].IsError)
+	failed := writer.payloads("tool_call_failed")
+	require.Len(t, failed, 1)
+	assert.Equal(t, float64(0), failed[0]["callIndex"])
+	for _, payload := range writer.payloads("tool_call_completed") {
+		assert.NotEqual(t, float64(0), payload["callIndex"], "a panicked call must never settle as completed")
+	}
+}
