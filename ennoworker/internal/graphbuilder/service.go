@@ -344,8 +344,8 @@ func applyOperations(definition *domain.FlowDefinition, operations []Operation) 
 		case "upsert_task":
 			if operation.Task != nil {
 				task := *operation.Task
-				if existing, exists := definition.Tasks[operation.TaskID]; exists && task.Depends == nil {
-					task.Depends = existing.Depends
+				if existing, exists := definition.Tasks[operation.TaskID]; exists {
+					task = mergeTask(existing, task)
 				}
 				definition.Tasks[operation.TaskID] = task
 			}
@@ -377,6 +377,89 @@ func applyOperations(definition *domain.FlowDefinition, operations []Operation) 
 			}
 		}
 	}
+}
+
+// mergeTask applies a partial upsert_task proposal to the Task it names.
+//
+// The rule, for every field of domain.FlowTask:
+//
+//   - absent            -> keep the value the definition already has.
+//   - present, non-empty -> replace it with the proposed value.
+//   - present, empty    -> clear it, for the two kinds of field that can say so.
+//
+// "Absent" and "present but empty" are the same Go value for a string, a bool,
+// a number or a pointer: a proposal has no way to write "hero: <nothing>" or
+// "optional: false", so those fields only ever replace, and a field that must be
+// cleared needs a dedicated operation kind (delete_task and set_dependencies are
+// the existing examples; none is added here). Collections are the exception,
+// because JSON tells them apart: an omitted list is nil, while an explicit `[]`
+// decodes to a non-nil empty slice, and `{}` to a non-nil empty map. So
+// `"acceptance": []` clears the acceptance clause and `"skills": []` unbinds
+// every Skill, while omitting the field keeps both. domain.FlowTask's
+// context_from is canonicalized on decode, so an explicitly empty contextFrom
+// list cannot be expressed and always keeps.
+//
+// The reason the rule exists: a Builder proposal that only changes a Task's
+// goal must not silently erase its acceptance clause, its writes scope or its
+// fan-out. Before this merge, every omitted field was reset to its zero value
+// and only `depends` survived.
+func mergeTask(existing, incoming domain.FlowTask) domain.FlowTask {
+	merged := existing
+	if incoming.Hero != "" {
+		merged.Hero = incoming.Hero
+	}
+	if incoming.Skills != nil {
+		merged.Skills = incoming.Skills
+	}
+	if incoming.Goal != "" {
+		merged.Goal = incoming.Goal
+	}
+	if incoming.Depends != nil {
+		merged.Depends = incoming.Depends
+	}
+	if incoming.Type != "" {
+		merged.Type = incoming.Type
+	}
+	if incoming.Command != "" {
+		merged.Command = incoming.Command
+	}
+	if incoming.FanOut != nil {
+		merged.FanOut = incoming.FanOut
+	}
+	if incoming.Budget != nil {
+		merged.Budget = incoming.Budget
+	}
+	if incoming.Terminal != nil {
+		merged.Terminal = incoming.Terminal
+	}
+	if incoming.Output != "" {
+		merged.Output = incoming.Output
+	}
+	if incoming.Next != nil {
+		merged.Next = incoming.Next
+	}
+	if incoming.Writes != nil {
+		merged.Writes = incoming.Writes
+	}
+	if incoming.Acceptance != nil {
+		merged.Acceptance = incoming.Acceptance
+	}
+	if incoming.ContextMode != "" {
+		merged.ContextMode = incoming.ContextMode
+	}
+	if incoming.ContextFrom != nil {
+		merged.ContextFrom = incoming.ContextFrom
+	}
+	if incoming.Retry != nil {
+		merged.Retry = incoming.Retry
+	}
+	if incoming.TimeoutMS != 0 {
+		merged.TimeoutMS = incoming.TimeoutMS
+	}
+	if incoming.Optional {
+		merged.Optional = true
+	}
+	return merged
 }
 
 func cloneDefinition(definition *domain.FlowDefinition) *domain.FlowDefinition {

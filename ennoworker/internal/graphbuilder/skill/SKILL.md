@@ -27,7 +27,7 @@ Return one JSON object and no markdown:
 
 Allowed operation kinds:
 
-- `upsert_task`: include `taskId` and the complete Task value.
+- `upsert_task`: include `taskId` and only the fields you intend to change. An omitted field keeps its current value (a proposal that edits `goal` cannot erase the task's acceptance clause or `writes`); a collection is cleared by sending `[]` / `{}`. Scalars (`optional`, `timeoutMs`, ...) can only be set, not cleared — say so in the summary when a proposal would leave one behind.
 - `delete_task`: include `taskId`.
 - `set_dependencies`: include `taskId` and the complete dependency list.
 - `update_graph`: include `name` and/or `description`.
