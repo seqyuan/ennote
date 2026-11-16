@@ -320,28 +320,59 @@ func (o *Orchestrator) nodeChildRunsSettled(ctx context.Context, node *domain.Ru
 // code records that the stop was not OBSERVED, not that it did not happen.
 const cancelCleanupIncompleteCode = "cancel_cleanup_incomplete"
 
-// cancelCleanupTimeout bounds the cleanup phase of a cancellation: how long the
-// flow waits for a cancelled child's stop to become observable. It is a plain
-// var so tests can shorten it.
+// cancelChildCompletedUnfoldedCode is the node error code of a cancellation
+// target whose child Run had SUCCEEDED but whose outcome could not be settled
+// through the ordinary fold, because the frozen flow row - the workspace an
+// acceptance clause is verified in - was unreadable. The node keeps the child's
+// payload in output_ref: the work is not discarded, only left unverified.
+const cancelChildCompletedUnfoldedCode = "cancel_child_completed_unfolded"
+
+// defaultCancelCleanupTimeout bounds the cleanup phase of a cancellation when
+// the Orchestrator does not override it: how long the flow waits for a cancelled
+// child's stop to become observable.
 //
 // The bound is measured on the wall clock, never on o.Now: it bounds how long
 // this process blocks, and a task's (possibly faked) ceiling clock must not be
-// able to stretch it or skip it.
-var cancelCleanupTimeout = 30 * time.Second
+// able to stretch it or skip it. It is per-orchestrator (o.CancelCleanupTimeout)
+// so two orchestrators - or two tests - never share one knob.
+const defaultCancelCleanupTimeout = 30 * time.Second
+
+// cancelCleanupBudget is the cleanup bound this orchestrator waits, defaulted
+// when unset so a directly constructed Orchestrator (a test calling
+// cancelRemaining without Start) still has one.
+func (o *Orchestrator) cancelCleanupBudget() time.Duration {
+	if o.CancelCleanupTimeout > 0 {
+		return o.CancelCleanupTimeout
+	}
+	return defaultCancelCleanupTimeout
+}
 
 // cancelTarget is one node facing cancellation, plus every child Run recorded on
 // it (a fan_out node records one per instance, a retried node one per attempt).
 type cancelTarget struct {
 	node     *domain.RunAgentFlowNode
 	childIDs []string
+	// stopOnly marks a target whose children must be stopped but whose node state
+	// must NOT change. A node left `interrupted` by reconcileCrashedNodes records
+	// "this attempt was never confirmed terminal", so its child may still be
+	// running and still needs the stop request; the node's own fact stays.
+	stopOnly bool
 }
 
 // cancelOutcome is what a cancellation actually observed. It is the only input
 // of the publish phase and of the terminal reason, so the words a cancelled flow
 // reports are the words this process saw.
 type cancelOutcome struct {
-	// stopped counts the child Runs observed terminal after the stop request.
+	// stopped counts the child Runs this process saw ALIVE at its first read and
+	// terminal after the stop request: the ones the cancel actually stopped.
 	stopped int
+	// alreadyTerminal counts the child Runs that were already settled when the
+	// first read happened. The cancel did not stop them; it found them stopped, so
+	// they are reported separately instead of inflating `stopped`.
+	alreadyTerminal int
+	// completed counts the child Runs that had SUCCEEDED and whose node was
+	// therefore settled from that outcome instead of being written cancelled.
+	completed int
 	// unconfirmed lists, in node/task order, the child Run ids whose stop was
 	// never observed (not terminal when the cleanup budget ran out, or the caller
 	// context ended first).
@@ -350,6 +381,20 @@ type cancelOutcome struct {
 	// child: the reason talks about tasks, the payload talks about child Runs, and
 	// one fan_out node can hold several unconfirmed instances.
 	unconfirmedNodes int
+	// ids is every child Run this cancellation examined, in node/task order and
+	// without duplicates: the order the counts and the usage accounting follow.
+	ids []string
+	// observed is the last status read per child Run id, which is what the node
+	// write and the ledger accounting are based on.
+	observed map[string]domain.RunStatus
+	// firstStatus is the status read BEFORE the stop request per child Run id. It
+	// is what separates "this cancel stopped it" from "it was already stopped":
+	// after the request the two look identical.
+	firstStatus map[string]domain.RunStatus
+	// folded marks the child Runs settled from their own succeeded outcome (see
+	// foldCompletedCancelTarget): they are already accounted, so no second usage
+	// is added for them.
+	folded map[string]bool
 	// stopErrors keeps each child's cancel error. A refused cancel (the child had
 	// already settled) and an undelivered one are indistinguishable from the
 	// return value alone; only the status read tells them apart. Kept for
@@ -373,13 +418,21 @@ func (o cancelOutcome) reasonSuffix() string {
 
 // payload is the `cleanup` object of flow_cancelled. The unconfirmed list is
 // always a list (never null) so a consumer can iterate it unconditionally, and
-// it is empty exactly when every child confirmed.
+// it is empty exactly when every child confirmed. The three counts say WHAT the
+// cancel saw instead of one blended number: `stopped` (alive, now stopped),
+// `alreadyTerminal` (settled before the cancel looked) and `completed` (its real
+// outcome was settled and recorded, not discarded).
 func (o cancelOutcome) payload() map[string]any {
 	unconfirmed := o.unconfirmed
 	if unconfirmed == nil {
 		unconfirmed = []string{}
 	}
-	return map[string]any{"stopped": o.stopped, "unconfirmed": unconfirmed}
+	return map[string]any{
+		"stopped":         o.stopped,
+		"alreadyTerminal": o.alreadyTerminal,
+		"completed":       o.completed,
+		"unconfirmed":     unconfirmed,
+	}
 }
 
 // cancelInflight cancels a set of in-flight children and marks their nodes
@@ -390,8 +443,10 @@ func (o cancelOutcome) payload() map[string]any {
 // It runs the SAME three phases as cancelRemaining (cancelNodes), so the node
 // write and the reason suffix can never drift from the observation. The caller
 // that terminalizes the flow appends outcome.reasonSuffix() to its reason and
-// writes the ledger total it already holds. The worst case adds
-// cancelCleanupTimeout to the caller's path, and never more.
+// writes the ledger total it already holds - and failKeepingUsage re-reads the
+// durable ledger, because this helper may have folded a sibling's usage after
+// that total was taken. The worst case adds the cleanup budget to the caller's
+// path, and never more.
 func (o *Orchestrator) cancelInflight(ctx context.Context, runID string, inFlight []inflightTask) cancelOutcome {
 	targets := make([]cancelTarget, 0, len(inFlight))
 	for _, task := range inFlight {
@@ -419,24 +474,43 @@ func (o *Orchestrator) cancelInflight(ctx context.Context, runID string, inFligh
 // error. Nothing is written - a cancel request is not a fact about the child yet.
 //
 // Phase 2, cleanup: poll each child until it is OBSERVABLY terminal, bounded by
-// cancelCleanupTimeout and polled with o.PollInterval. A terminal child counts as
+// the cleanup budget and polled with o.PollInterval. A terminal child counts as
 // stopped, the rest are unconfirmed. A cancelled caller context ends the wait and
-// keeps what is known: cancellation is best effort by definition.
+// keeps what is known: cancellation is best effort by definition. The status is
+// kept PER CHILD, because phase 3 has to tell a child that was stopped from one
+// that had already succeeded on its own.
 //
-// Phase 3, publish: write each node cancelled exactly once, carrying
-// cancel_cleanup_incomplete when one of its children is unconfirmed. The CAS
-// never overwrites a node that reached a terminal state on its own (a task that
-// finished keeps its own outcome and its result).
+// Phase 3, publish: a target whose children ALL succeeded is NOT cancelled - it
+// is settled through the same fold a normal dispatch settlement uses, so its
+// output_ref, verdict and usage are recorded instead of discarded
+// (foldCompletedCancelTarget). Anything else that is terminal keeps the
+// `cancelled` write, carrying cancel_cleanup_incomplete when one of its children
+// is unconfirmed. The CAS never overwrites a node that reached a terminal state
+// on its own (a task that finished keeps its own outcome and its result). Every
+// write runs on a NON-cancellable context: database/sql drops a write whose
+// context is done, and a cancelled caller context must not leave nodes `running`.
 //
 // A check task is NOT covered here: it runs synchronously inside the
 // orchestrator (runCheckTask), so it has no child Run to stop and no separate
 // lifecycle to observe. Cancelling a flow whose active task is a check is
 // handled by that call returning to the loop, not by this helper.
 func (o *Orchestrator) cancelNodes(ctx context.Context, runID string, targets []cancelTarget) cancelOutcome {
-	out := cancelOutcome{stopErrors: map[string]error{}}
+	out := cancelOutcome{
+		stopErrors:  map[string]error{},
+		observed:    map[string]domain.RunStatus{},
+		firstStatus: map[string]domain.RunStatus{},
+		folded:      map[string]bool{},
+	}
+	// Writes (the stop request, the node writes, the settlement) do not belong to
+	// the caller's lifetime any more: the observation is over, and a caller that
+	// gave up mid-cleanup must still leave a coherent state behind. Only the WAIT
+	// is bounded by the caller's context.
+	writeCtx := context.WithoutCancel(ctx)
 
-	// Phase 1 — stop: request, keep the error, publish nothing.
-	var ids []string
+	// Phase 1 — stop: read what is there, request the cancel, keep the error,
+	// publish nothing. The pre-read is what separates a child this cancel stopped
+	// from one that was already settled when the cancel arrived: once the request
+	// is delivered both look the same on the wire.
 	seen := make(map[string]bool, len(targets))
 	for _, target := range targets {
 		for _, childID := range target.childIDs {
@@ -444,17 +518,19 @@ func (o *Orchestrator) cancelNodes(ctx context.Context, runID string, targets []
 				continue
 			}
 			seen[childID] = true
-			ids = append(ids, childID)
-			out.stopErrors[childID] = o.Children.CancelChildRun(ctx, childID)
+			out.ids = append(out.ids, childID)
+			if status, err := o.Children.ChildRunStatus(writeCtx, childID); err == nil {
+				out.firstStatus[childID] = status
+			}
+			out.stopErrors[childID] = o.Children.CancelChildRun(writeCtx, childID)
 		}
 	}
 
 	// Phase 2 — cleanup: observe, bounded.
-	statuses := o.awaitCancelCleanup(ctx, ids)
-	unconfirmed := make(map[string]bool, len(ids))
-	for _, childID := range ids {
-		if statuses[childID].Terminal() {
-			out.stopped++
+	out.observed = o.awaitCancelCleanup(ctx, out.ids)
+	unconfirmed := make(map[string]bool, len(out.ids))
+	for _, childID := range out.ids {
+		if out.observed[childID].Terminal() {
 			continue
 		}
 		unconfirmed[childID] = true
@@ -470,13 +546,43 @@ func (o *Orchestrator) cancelNodes(ctx context.Context, runID string, targets []
 		}
 	}
 
+	// A target whose children ALL succeeded produced a real outcome this flow has
+	// not recorded yet. Writing it `cancelled` would discard the result of work
+	// that finished before the stop (B2: in a batch, the failure path folds one
+	// child per tick, so the other siblings are already RunSucceeded).
+	settle := make([]bool, len(targets))
+	for index, target := range targets {
+		if target.stopOnly || len(target.childIDs) == 0 {
+			continue
+		}
+		settle[index] = true
+		for _, childID := range target.childIDs {
+			if out.observed[childID] != domain.RunSucceeded {
+				settle[index] = false
+				break
+			}
+		}
+	}
+
 	// Phase 3 — publish: one write per node, CAS-guarded.
 	for index, target := range targets {
+		switch {
+		case settle[index]:
+			o.foldCompletedCancelTarget(writeCtx, runID, target)
+			for _, childID := range target.childIDs {
+				out.folded[childID] = true
+			}
+			continue
+		case target.stopOnly:
+			// The node keeps its own state (an interrupted attempt is not this
+			// cancel's to rewrite); only its children had to stop.
+			continue
+		}
 		code := ""
 		if unconfirmedTargets[index] {
 			code = cancelCleanupIncompleteCode
 		}
-		_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
+		_ = o.Store.UpdateNode(writeCtx, runID, NodeUpdate{
 			// The CAS is the observation that matters: pending/running is "not
 			// settled yet", every other state is somebody else's terminal fact
 			// (completed, failed, blocked, interrupted, already cancelled) and is
@@ -487,35 +593,154 @@ func (o *Orchestrator) cancelNodes(ctx context.Context, runID string, targets []
 			ErrorCode:      code,
 		})
 	}
+
+	// Classify each child exactly once: nothing unconfirmed, a folded outcome, a
+	// stop this cancel delivered to a child that was alive before it, or a child
+	// that was already settled before the stop request (S1).
+	for _, childID := range out.ids {
+		switch {
+		case unconfirmed[childID]:
+		case out.folded[childID]:
+			out.completed++
+		case out.firstStatus[childID].Terminal():
+			out.alreadyTerminal++
+		default:
+			out.stopped++
+		}
+	}
 	return out
+}
+
+// foldCompletedCancelTarget settles one cancellation target whose children ALL
+// succeeded, through the same steps the ordinary fold takes: the usage is
+// accounted, the Hero's report contract is checked, a declared acceptance clause
+// is verified, and only then is the checkpoint written with the child's
+// output_ref.
+//
+// It deliberately does not call foldHeroChild: that function's remaining branches
+// exist to RE-DISPATCH a failed attempt (retry), to let `optional` absorb it, or
+// to publish a second terminal state (budget exceeded) - none of which a flow the
+// user already stopped may do. What it shares with the ordinary fold is the part
+// that records a SUCCEEDED child, and that is the part called here.
+//
+// The one degradation: verifying an acceptance clause needs the workspace the
+// child ran in, i.e. the flow row. If that read fails, the node is still written
+// `completed` with the child's payload in output_ref and the code
+// cancel_child_completed_unfolded - the result survives and the code says it was
+// not folded, so "completed" never reads as "verified".
+func (o *Orchestrator) foldCompletedCancelTarget(ctx context.Context, runID string, target cancelTarget) {
+	node := target.node
+	payloads := make([]json.RawMessage, 0, len(target.childIDs))
+	results := make([]*domain.SubmitResult, 0, len(target.childIDs))
+	for _, childID := range target.childIDs {
+		// The accounting the ordinary fold does first (foldHeroChild, runFanOutTask):
+		// a settled child's tokens reach the ledger exactly once, here.
+		usage, _ := o.Children.ChildUsage(ctx, childID)
+		if usage.Tokens > 0 {
+			_, _ = o.Store.AddTokenUsage(ctx, runID, usage.Tokens)
+		}
+		result, _ := o.Children.ChildTerminalResult(ctx, childID)
+		results = append(results, result)
+		payload := json.RawMessage{}
+		switch {
+		case result != nil && len(result.Payload) > 0:
+			payload = result.Payload
+		case result != nil:
+			payload, _ = json.Marshal(map[string]any{"summary": result.Summary})
+		}
+		payloads = append(payloads, payload)
+	}
+	// A fan_out task aggregates its instances in instance order; a hero task has
+	// exactly one child and its own payload is the checkpoint.
+	output := payloads[0]
+	if len(payloads) > 1 {
+		output, _ = json.Marshal(payloads)
+	}
+	// The report contract comes first, as in the ordinary fold: a report that does
+	// not keep its promised shape is not evidence, and the violating instance's own
+	// payload is the checkpoint (an aggregate would hide which instance broke it).
+	if contract := heroReportContractOf(node); contract != nil {
+		for index, result := range results {
+			violation := domain.ValidateReportAgainstContract(result, contract)
+			if violation == nil {
+				continue
+			}
+			instancePayload := output
+			if len(payloads) > 1 {
+				instancePayload = payloads[index]
+			}
+			_ = o.foldReportContractViolation(ctx, runID, node, target.childIDs[index], instancePayload, violation)
+			return
+		}
+	}
+	if len(node.Acceptance) > 0 {
+		if len(target.childIDs) != 1 {
+			// A fan-out parent cannot declare acceptance (publish rejects it); a node
+			// that somehow carries both is recorded unverified rather than guessed at,
+			// the same degradation crash recovery uses.
+			verdict := unverifiedAcceptanceVerdict(node.Acceptance, codeAcceptanceUnavailable,
+				"a fan-out task cannot be verified from one child Run")
+			raw, _ := json.Marshal(verdict)
+			_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
+				TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
+				SetState: domain.FlowNodeCompleted, OutputRef: output,
+				AcceptanceVerdict: (*json.RawMessage)(&raw),
+			})
+			return
+		}
+		flow, err := o.Store.GetRun(ctx, runID)
+		if err != nil {
+			_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
+				TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
+				SetState: domain.FlowNodeCompleted, OutputRef: output,
+				ErrorCode: cancelChildCompletedUnfoldedCode,
+			})
+			return
+		}
+		_ = o.foldAcceptance(ctx, runID, flow, node, target.childIDs[0], payloads[0], results[0])
+		return
+	}
+	_ = o.Store.UpdateNode(ctx, runID, NodeUpdate{
+		TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodeRunning},
+		SetState: domain.FlowNodeCompleted, OutputRef: output,
+	})
+	payload := map[string]any{"flowRunId": runID, "task": node.Handle, "outputRef": string(output)}
+	if len(target.childIDs) > 1 {
+		payload["childRunIds"] = target.childIDs
+		payload["fanOut"] = true
+	} else {
+		payload["childRunId"] = target.childIDs[0]
+	}
+	_ = o.Events.PublishFlow(ctx, runID, "flow_task_completed", payload)
 }
 
 // awaitCancelCleanup polls the children a cancel was delivered to until each one
 // is observably terminal or the cleanup budget is spent.
 //
-// It returns the last status it read per child. A child that is absent from the
-// returned map was never readable, which the caller reads as unconfirmed:
-// "I could not see it stop" is not "it stopped".
+// It returns the last status it read per child, which is what the node write and
+// the ledger accounting are based on. A child that is absent from the returned
+// map was never readable, which the caller reads as unconfirmed: "I could not see
+// it stop" is not "it stopped".
 //
 // The budget is checked BETWEEN passes, so one pass of status reads may run past
 // it by the cost of that pass. That is deliberate: the alternative is a
 // per-child deadline, which would make the total wait grow with the fan-out.
 func (o *Orchestrator) awaitCancelCleanup(ctx context.Context, ids []string) map[string]domain.RunStatus {
-	statuses := make(map[string]domain.RunStatus, len(ids))
+	last := make(map[string]domain.RunStatus, len(ids))
 	if len(ids) == 0 {
-		return statuses
+		return last
 	}
 	pending := append([]string(nil), ids...)
-	deadline := time.Now().Add(cancelCleanupTimeout)
+	deadline := time.Now().Add(o.cancelCleanupBudget())
 	for {
 		if ctx.Err() != nil {
-			return statuses
+			return last
 		}
 		remaining := make([]string, 0, len(pending))
 		for _, childID := range pending {
 			status, err := o.Children.ChildRunStatus(ctx, childID)
 			if err == nil {
-				statuses[childID] = status
+				last[childID] = status
 			}
 			if err != nil || !status.Terminal() {
 				remaining = append(remaining, childID)
@@ -523,7 +748,7 @@ func (o *Orchestrator) awaitCancelCleanup(ctx context.Context, ids []string) map
 		}
 		pending = remaining
 		if len(pending) == 0 {
-			return statuses
+			return last
 		}
 		// One observation pass always happens, even with an exhausted budget: a
 		// child that is already terminal answers on the first read, and a zero
@@ -533,11 +758,11 @@ func (o *Orchestrator) awaitCancelCleanup(ctx context.Context, ids []string) map
 			wait = left
 		}
 		if wait <= 0 {
-			return statuses
+			return last
 		}
 		select {
 		case <-ctx.Done():
-			return statuses
+			return last
 		case <-time.After(wait):
 		}
 	}
@@ -784,9 +1009,23 @@ func (o *Orchestrator) fail(ctx context.Context, runID, reason string) {
 // accumulated. fail writes 0 (an existing defect at its other call sites); a
 // flow that runs tasks and then fails must not look like it consumed nothing.
 func (o *Orchestrator) failKeepingUsage(ctx context.Context, runID string, total int64, reason string) {
-	_ = o.Store.UpdateFlowState(ctx, runID, domain.FlowStateFailed, total, reason)
+	_ = o.updateFlowStateKeepingUsage(ctx, runID, domain.FlowStateFailed, total, reason)
 	_ = o.Events.PublishFlow(ctx, runID, "flow_failed", map[string]any{"flowRunId": runID, "reason": reason})
 	_ = o.Store.TerminateAnchor(ctx, runID, domain.RunFailed, "flow_failed", reason)
+}
+
+// updateFlowStateKeepingUsage writes a terminal state with a ledger total that
+// never loses an increment recorded after the caller's snapshot: several
+// settlements add usage through AddTokenUsage (which is a read-modify-write of
+// its own) before the total is written back, so the durable column can already be
+// ahead. The larger of the two wins; writing the snapshot back would clobber the
+// other writer's tokens.
+func (o *Orchestrator) updateFlowStateKeepingUsage(ctx context.Context, runID string,
+	state domain.FlowState, total int64, reason string) error {
+	if run, err := o.Store.GetRun(ctx, runID); err == nil && run.TotalTokensUsed > total {
+		total = run.TotalTokensUsed
+	}
+	return o.Store.UpdateFlowState(ctx, runID, state, total, reason)
 }
 
 // resolveGoalForTask resolves one ready task's goal, and it lives with the

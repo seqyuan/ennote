@@ -37,6 +37,24 @@ type fakeStore struct {
 	// cancelWrites counts the successful `cancelled` node writes per task index,
 	// which is how "write the state once per node" is observable.
 	cancelWrites map[int]int
+	// honourCtx makes every method respect the caller context the way
+	// database/sql does: a write on a cancelled context is dropped and returns an
+	// error. Without it a fake silently accepts writes a real store would lose.
+	honourCtx bool
+	// concurrentUsage simulates another writer's AddTokenUsage landing between
+	// one AddTokenUsage's read of the column and its return: the value returned
+	// is the pre-competitor snapshot a concurrent UPDATE leaves behind. A
+	// read-modify-write of total_tokens_used clobbers that increment.
+	concurrentUsage int64
+}
+
+// ctxErr models database/sql's behaviour on a cancelled context: the statement
+// never runs.
+func (f *fakeStore) ctxErr(ctx context.Context) error {
+	if !f.honourCtx {
+		return nil
+	}
+	return ctx.Err()
 }
 
 func newFakeStore(def *domain.FlowDefinition) (*fakeStore, error) {
@@ -83,6 +101,9 @@ func newFakeStore(def *domain.FlowDefinition) (*fakeStore, error) {
 func (f *fakeStore) GetRun(ctx context.Context, runID string) (*domain.RunAgentFlow, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.ctxErr(ctx); err != nil {
+		return nil, err
+	}
 	clone := *f.run
 	return &clone, nil
 }
@@ -94,6 +115,9 @@ func (f *fakeStore) GetVersion(ctx context.Context, versionID string) (*domain.A
 func (f *fakeStore) ListNodes(ctx context.Context, runID string) ([]*domain.RunAgentFlowNode, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.ctxErr(ctx); err != nil {
+		return nil, err
+	}
 	out := make([]*domain.RunAgentFlowNode, len(f.nodes))
 	for i := range f.nodes {
 		clone := *f.nodes[i]
@@ -105,6 +129,9 @@ func (f *fakeStore) ListNodes(ctx context.Context, runID string) ([]*domain.RunA
 func (f *fakeStore) UpdateNode(ctx context.Context, runID string, upd NodeUpdate) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.ctxErr(ctx); err != nil {
+		return err
+	}
 	for i := range f.nodes {
 		if f.nodes[i].TaskIndex != upd.TaskIndex {
 			continue
@@ -176,6 +203,9 @@ func (f *fakeStore) UpdateFlowState(ctx context.Context, runID string, state dom
 	totalTokens int64, reason string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.ctxErr(ctx); err != nil {
+		return err
+	}
 	f.run.State = state
 	f.run.TotalTokensUsed = totalTokens
 	f.run.TerminalReason = reason
@@ -185,13 +215,28 @@ func (f *fakeStore) UpdateFlowState(ctx context.Context, runID string, state dom
 func (f *fakeStore) AddTokenUsage(ctx context.Context, runID string, tokens int64) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.ctxErr(ctx); err != nil {
+		return 0, err
+	}
 	f.run.TotalTokensUsed += tokens
-	return f.run.TotalTokensUsed, nil
+	total := f.run.TotalTokensUsed
+	// A competing writer's increment lands after this call read the column, so a
+	// caller that writes `total` back clobbers it. Deterministic, not a race: the
+	// point is that the snapshot is stale, which is what the production upgrade
+	// also leaves behind.
+	if f.concurrentUsage > 0 {
+		f.run.TotalTokensUsed += f.concurrentUsage
+		f.concurrentUsage = 0
+	}
+	return total, nil
 }
 
 func (f *fakeStore) SetCancelRequested(ctx context.Context, runID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.ctxErr(ctx); err != nil {
+		return err
+	}
 	f.cancelRequested = true
 	return nil
 }
@@ -199,12 +244,18 @@ func (f *fakeStore) SetCancelRequested(ctx context.Context, runID string) error 
 func (f *fakeStore) IsCancelRequested(ctx context.Context, runID string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.ctxErr(ctx); err != nil {
+		return false, err
+	}
 	return f.cancelRequested, nil
 }
 
 func (f *fakeStore) SetAnchorRunning(ctx context.Context, runID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.ctxErr(ctx); err != nil {
+		return err
+	}
 	f.anchorStatus = domain.RunRunning
 	return nil
 }
@@ -212,6 +263,9 @@ func (f *fakeStore) SetAnchorRunning(ctx context.Context, runID string) error {
 func (f *fakeStore) TerminateAnchor(ctx context.Context, runID string, status domain.RunStatus, code, message string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.ctxErr(ctx); err != nil {
+		return err
+	}
 	f.anchorStatus = status
 	return nil
 }
@@ -277,6 +331,9 @@ type fakeChildren struct {
 	settleAt  map[string]time.Time
 	raceReads map[string]int
 	clock     func() time.Time
+	// onCreate is called once per created child, with the child registered and
+	// its status set: the only way a test can act at the instant a child exists.
+	onCreate func(handle string)
 }
 
 func newFakeChildren() *fakeChildren {
@@ -357,6 +414,9 @@ func (c *fakeChildren) CreateTaskChild(ctx context.Context, parentRunID, session
 	}
 	if c.usage[spec.Handle].Tokens == 0 {
 		c.usage[spec.Handle] = domain.RunBudgetUsage{Tokens: 1000}
+	}
+	if c.onCreate != nil {
+		c.onCreate(spec.Handle)
 	}
 	return ChildInfo{RunID: id, ItemID: "item-" + spec.Handle, GroupID: "group-" + spec.Handle}, nil
 }
@@ -504,6 +564,25 @@ func threeTaskDef() *domain.FlowDefinition {
 			"reviewer": {Type: domain.FlowTaskHero, Hero: "reader@1",
 				Goal: "Review {task.producer.output.changedFiles}", Depends: []string{"producer"}},
 			"accept": {Type: domain.FlowTaskHero, Depends: []string{"reviewer"},
+				Terminal: &domain.FlowTerminal{Status: "success", Output: "report"}},
+		},
+	}
+}
+
+// parallelBatchDef is three independent read-only hero tasks (one reader lane,
+// so they dispatch together) behind a terminal gate: the shape in which one
+// failure leaves its siblings already SUCCEEDED but not yet folded.
+func parallelBatchDef() *domain.FlowDefinition {
+	return &domain.FlowDefinition{
+		SchemaVersion: 1, ID: "batch",
+		Inputs:  map[string]domain.FlowPort{"target": {Type: domain.PortTypePath, Required: true}},
+		Outputs: map[string]domain.FlowPort{"report": {Type: domain.PortTypeString}},
+		Budget:  domain.FlowBudget{MaxTotalTokens: 100000},
+		Tasks: map[string]domain.FlowTask{
+			"alpha": {Type: domain.FlowTaskHero, Hero: "reader@1", Goal: "a"},
+			"beta":  {Type: domain.FlowTaskHero, Hero: "reader@1", Goal: "b"},
+			"gamma": {Type: domain.FlowTaskHero, Hero: "reader@1", Goal: "c"},
+			"accept": {Type: domain.FlowTaskHero, Depends: []string{"alpha", "beta", "gamma"},
 				Terminal: &domain.FlowTerminal{Status: "success", Output: "report"}},
 		},
 	}
@@ -669,13 +748,35 @@ func TestOrchestratorCancelPropagation(t *testing.T) {
 
 // --- Cancellation in three phases (stop -> cleanup -> publish) ---
 
-// shortenCancelCleanup bounds the cleanup phase for one test and restores the
-// package default afterwards. The timeout is a var exactly for this.
-func shortenCancelCleanup(t *testing.T, limit time.Duration) {
+// shortenCancelCleanup bounds the cleanup phase of ONE orchestrator. The bound is
+// a per-orchestrator field, not a package var, so a cancellation test cannot
+// change another orchestrator's behaviour or race a parallel test.
+func shortenCancelCleanup(t *testing.T, orch *Orchestrator, limit time.Duration) {
 	t.Helper()
-	previous := cancelCleanupTimeout
-	cancelCleanupTimeout = limit
-	t.Cleanup(func() { cancelCleanupTimeout = previous })
+	orch.CancelCleanupTimeout = limit
+}
+
+// S2: the cleanup bound is one orchestrator's, so two of them never share a knob
+// (which is also what keeps a shortened bound from racing a parallel test), and
+// Start defaults it next to PollInterval.
+func TestCancelCleanupBudgetIsPerOrchestrator(t *testing.T) {
+	def := threeTaskDef()
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+	shortened := newOrchestrator(fake, children, events)
+	shortenCancelCleanup(t, shortened, 55*time.Millisecond)
+	untouched := newOrchestrator(fake, children, events)
+
+	assert.Equal(t, 55*time.Millisecond, shortened.cancelCleanupBudget())
+	assert.Equal(t, defaultCancelCleanupTimeout, untouched.cancelCleanupBudget(),
+		"shortening one orchestrator's cleanup budget must not shorten another's")
+
+	untouched.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCompleted, waitTerminal(t, fake))
+	assert.Equal(t, defaultCancelCleanupTimeout, untouched.CancelCleanupTimeout,
+		"Start defaults the field, next to PollInterval")
 }
 
 // requestCancelWhenRunning requests the flow cancel once the named node has been
@@ -759,14 +860,14 @@ func TestCancelStopsEveryChildAndPublishesTheObservation(t *testing.T) {
 	run, err := fake.GetRun(context.Background(), "flow-run-1")
 	require.NoError(t, err)
 	assert.Equal(t, "cancelled by user", run.TerminalReason, "no suffix when every child confirmed")
-	assert.Equal(t, int64(1000), run.TotalTokensUsed, "a cancelled flow keeps its ledger")
+	assert.Equal(t, int64(2000), run.TotalTokensUsed,
+		"the folded producer's 1000 plus the stopped reviewer child's 1000: a cancelled flow keeps its ledger, including the child it just watched stop")
 }
 
 // A child that ignores the cancel is the whole point: the flow must still reach
 // a terminal state, bounded, and must say that the stop was not observed instead
 // of writing a plain `cancelled`.
 func TestCancelReportsUnconfirmedStopAndSuffixesTheReason(t *testing.T) {
-	shortenCancelCleanup(t, 60*time.Millisecond)
 	def := threeTaskDef()
 	fake, err := newFakeStore(def)
 	require.NoError(t, err)
@@ -775,6 +876,7 @@ func TestCancelReportsUnconfirmedStopAndSuffixesTheReason(t *testing.T) {
 	children.ignoreCancel["producer"] = true // DB-only cancel: the child keeps running
 	events := &fakeEvents{}
 	orch := newOrchestrator(fake, children, events)
+	shortenCancelCleanup(t, orch, 60*time.Millisecond)
 
 	go requestCancelWhenRunning(t, fake, "producer")
 	start := time.Now()
@@ -812,7 +914,7 @@ func TestCancelBetweenTasksCountsNoCleanup(t *testing.T) {
 	_, err = fake.AddTokenUsage(context.Background(), "flow-run-1", 250)
 	require.NoError(t, err)
 
-	require.NoError(t, orch.cancelRemaining(context.Background(), "flow-run-1", ""))
+	require.NoError(t, orch.cancelRemaining(context.Background(), "flow-run-1"))
 
 	for handle, node := range nodesByHandle(t, fake) {
 		assert.Equal(t, domain.FlowNodeCancelled, node.TerminalState, handle)
@@ -852,7 +954,7 @@ func TestCancelDoesNotOverwriteANodeThatFinishedFirst(t *testing.T) {
 	// ...and it settles on its own between the poll and the write.
 	fake.completeOnCancelWrite[producer.TaskIndex] = true
 
-	require.NoError(t, orch.cancelRemaining(context.Background(), "flow-run-1", ""))
+	require.NoError(t, orch.cancelRemaining(context.Background(), "flow-run-1"))
 
 	nodes := nodesByHandle(t, fake)
 	assert.Equal(t, domain.FlowNodeCompleted, nodes["producer"].TerminalState,
@@ -895,8 +997,8 @@ func TestCancelledFlowKeepsItsLedger(t *testing.T) {
 
 	run, err := fake.GetRun(context.Background(), "flow-run-1")
 	require.NoError(t, err)
-	assert.Equal(t, int64(1000), run.TotalTokensUsed,
-		"the ledger is the accumulated total (the producer's 1000), never 0")
+	assert.Equal(t, int64(3000), run.TotalTokensUsed,
+		"the producer's folded 1000 plus the two stopped instances' 1000 each: a cancelled flow never reports 0, and a child's usage is never lost")
 	assert.Equal(t, "cancelled by user", run.TerminalReason)
 	for _, id := range children.childIDsOf("scan-0") {
 		assert.Equal(t, domain.RunCancelled, children.status[id])
@@ -907,7 +1009,6 @@ func TestCancelledFlowKeepsItsLedger(t *testing.T) {
 // child that stopped, and an unconfirmed child is named by node for the reason
 // and by Run id for the payload.
 func TestCancelInflightReportsDeliveredButUnconfirmedStop(t *testing.T) {
-	shortenCancelCleanup(t, 40*time.Millisecond)
 	def := threeTaskDef()
 	fake, err := newFakeStore(def)
 	require.NoError(t, err)
@@ -916,6 +1017,7 @@ func TestCancelInflightReportsDeliveredButUnconfirmedStop(t *testing.T) {
 	children.ignoreCancel["producer"] = true
 	events := &fakeEvents{}
 	orch := newOrchestrator(fake, children, events)
+	shortenCancelCleanup(t, orch, 40*time.Millisecond)
 
 	producer := nodesByHandle(t, fake)["producer"]
 	require.NoError(t, fake.UpdateNode(context.Background(), "flow-run-1", NodeUpdate{
@@ -935,7 +1037,8 @@ func TestCancelInflightReportsDeliveredButUnconfirmedStop(t *testing.T) {
 	assert.Equal(t, []string{"child-producer"}, outcome.unconfirmed)
 	assert.Equal(t, 1, outcome.unconfirmedNodes)
 	assert.Equal(t, "; 1 task did not confirm stop", outcome.reasonSuffix())
-	assert.Equal(t, map[string]any{"stopped": 0, "unconfirmed": []string{"child-producer"}}, outcome.payload())
+	assert.Equal(t, map[string]any{"stopped": 0, "alreadyTerminal": 0, "completed": 0,
+		"unconfirmed": []string{"child-producer"}}, outcome.payload())
 
 	cancelled := nodesByHandle(t, fake)["producer"]
 	assert.Equal(t, domain.FlowNodeCancelled, cancelled.TerminalState)
@@ -947,12 +1050,16 @@ func TestCancelInflightReportsDeliveredButUnconfirmedStop(t *testing.T) {
 }
 
 // Cancellation is best effort: a caller context cancelled during the cleanup ends
-// the wait, keeps what is known, and still terminalises the flow.
+// the wait, keeps what is known, and still terminalises the flow. The store here
+// honours the caller context the way database/sql does, so a write issued on the
+// dead context is dropped: only the non-cancellable publish context can leave the
+// nodes and the flow terminal.
 func TestCancelTerminalisesWhenTheCallerContextIsCancelled(t *testing.T) {
-	shortenCancelCleanup(t, 30*time.Second) // the context, not the budget, must end the wait
+	// No shortened cleanup budget: the context, not the budget, must end the wait.
 	def := threeTaskDef()
 	fake, err := newFakeStore(def)
 	require.NoError(t, err)
+	fake.honourCtx = true
 	children := newFakeChildren()
 	children.blockedHandles["producer"] = true
 	children.ignoreCancel["producer"] = true
@@ -969,7 +1076,7 @@ func TestCancelTerminalisesWhenTheCallerContextIsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(30*time.Millisecond, cancel)
 	start := time.Now()
-	require.NoError(t, orch.cancelRemaining(ctx, "flow-run-1", ""))
+	require.NoError(t, orch.cancelRemaining(ctx, "flow-run-1"))
 	assert.Less(t, time.Since(start), 5*time.Second, "a cancelled caller context ends the cleanup wait")
 
 	run, err := fake.GetRun(context.Background(), "flow-run-1")
@@ -979,10 +1086,265 @@ func TestCancelTerminalisesWhenTheCallerContextIsCancelled(t *testing.T) {
 	assert.Equal(t, domain.RunCancelled, fake.anchorStatus)
 
 	node := nodesByHandle(t, fake)["producer"]
-	assert.Equal(t, domain.FlowNodeCancelled, node.TerminalState)
+	assert.Equal(t, domain.FlowNodeCancelled, node.TerminalState,
+		"a dead caller context must not leave the node running: the state write runs on a non-cancellable context")
 	assert.Equal(t, cancelCleanupIncompleteCode, node.ErrorCode,
 		"a stop nobody observed is recorded as unconfirmed")
 	assert.Equal(t, []string{"child-producer"}, cleanupOf(t, events)["unconfirmed"])
+}
+
+// B1: the child this cancel watched stop spent tokens, and the terminal write
+// must not report 0 for it. The accounting happens once: 1000, not 2000.
+func TestCancelAccountsTheUsageOfTheChildItStopped(t *testing.T) {
+	def := threeTaskDef()
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	children.blockedHandles["producer"] = true // in flight when the cancel lands
+	events := &fakeEvents{}
+	orch := newOrchestrator(fake, children, events)
+
+	go requestCancelWhenRunning(t, fake, "producer")
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCancelled, waitTerminal(t, fake))
+
+	cleanup := cleanupOf(t, events)
+	require.Equal(t, 1, cleanup["stopped"], "the child was running and is now observed stopped")
+
+	run, err := fake.GetRun(context.Background(), "flow-run-1")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1000), run.TotalTokensUsed,
+		"the stopped child's usage is in the ledger exactly once, never 0 and never twice")
+}
+
+// B2, batch-failure path: one task fails while its batch siblings have already
+// SUCCEEDED but are not folded yet. They are not cancelled - their outcome is
+// folded (checkpoint, output_ref, usage), because discarding it is the bug.
+func TestBatchFailureSettlesSucceededSiblingsInsteadOfCancellingThem(t *testing.T) {
+	def := parallelBatchDef()
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	readOnlyNodes(fake) // one reader lane, so all three dispatch in one batch
+	children := newFakeChildren()
+	children.failHandles["alpha"] = true // the first member of the batch fails
+	events := &fakeEvents{}
+	orch := newOrchestrator(fake, children, events)
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateFailed, waitTerminal(t, fake))
+
+	nodes := nodesByHandle(t, fake)
+	assert.Equal(t, domain.FlowNodeFailed, nodes["alpha"].TerminalState)
+	for _, handle := range []string{"beta", "gamma"} {
+		assert.Equal(t, domain.FlowNodeCompleted, nodes[handle].TerminalState,
+			"a sibling that SUCCEEDED before the failure is settled from its own outcome: %s", handle)
+		assert.NotEmpty(t, nodes[handle].OutputRef, "and keeps its payload: %s", handle)
+		assert.Equal(t, 0, fake.cancelWriteCount(nodes[handle].TaskIndex),
+			"the cancel write must never overwrite a succeeded child: %s", handle)
+	}
+
+	run, err := fake.GetRun(context.Background(), "flow-run-1")
+	require.NoError(t, err)
+	assert.Equal(t, int64(3000), run.TotalTokensUsed,
+		"all three children's usage is recorded: the failed one and the two folded siblings")
+}
+
+// B2, user-cancel path: a child that finished before the cancel is folded, not
+// written cancelled. Its result and usage survive the cancellation.
+func TestCancelSettlesAChildThatSucceededBeforeTheStop(t *testing.T) {
+	def := threeTaskDef()
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	children.results["producer"] = &domain.SubmitResult{
+		Status: domain.SubmitCompleted, Payload: json.RawMessage(`{"changedFiles":["done.go"]}`),
+	}
+	events := &fakeEvents{}
+	orch := newOrchestrator(fake, children, events)
+
+	producer := nodesByHandle(t, fake)["producer"]
+	require.NoError(t, fake.UpdateNode(context.Background(), "flow-run-1", NodeUpdate{
+		TaskIndex: producer.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodePending},
+		SetState: domain.FlowNodeRunning, ChildRunID: "child-producer",
+	}))
+	// The child succeeded, the orchestrator has not folded it yet.
+	children.status["child-producer"] = domain.RunSucceeded
+	children.usage["producer"] = domain.RunBudgetUsage{Tokens: 1000}
+
+	require.NoError(t, orch.cancelRemaining(context.Background(), "flow-run-1"))
+
+	nodes := nodesByHandle(t, fake)
+	assert.Equal(t, domain.FlowNodeCompleted, nodes["producer"].TerminalState,
+		"a child that already succeeded is settled from its outcome, not cancelled")
+	assert.JSONEq(t, `{"changedFiles":["done.go"]}`, string(nodes["producer"].OutputRef))
+	assert.Equal(t, 0, fake.cancelWriteCount(producer.TaskIndex))
+	assert.Equal(t, domain.FlowNodeCancelled, nodes["reviewer"].TerminalState)
+
+	cleanup := cleanupOf(t, events)
+	assert.Equal(t, 1, cleanup["completed"], "the payload says what was settled from a real outcome")
+	assert.Equal(t, 0, cleanup["stopped"])
+	assert.Equal(t, []string{}, cleanup["unconfirmed"])
+
+	run, err := fake.GetRun(context.Background(), "flow-run-1")
+	require.NoError(t, err)
+	assert.Equal(t, domain.FlowStateCancelled, run.State)
+	assert.Equal(t, int64(1000), run.TotalTokensUsed, "the settled child's usage is in the ledger")
+}
+
+// S1: a child that was already terminal when the cancel first looked was not
+// stopped by this cancel. It is published separately instead of inflating
+// `stopped`.
+func TestCancelSeparatesAlreadyTerminalChildrenFromStoppedOnes(t *testing.T) {
+	def := threeTaskDef()
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+	orch := newOrchestrator(fake, children, events)
+
+	byHandle := nodesByHandle(t, fake)
+	for _, seed := range []struct {
+		handle string
+		status domain.RunStatus
+	}{
+		{"producer", domain.RunCancelled}, // settled before the cancel arrived
+		{"reviewer", domain.RunRunning},   // alive when the cancel arrives
+	} {
+		node := byHandle[seed.handle]
+		require.NoError(t, fake.UpdateNode(context.Background(), "flow-run-1", NodeUpdate{
+			TaskIndex: node.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodePending},
+			SetState: domain.FlowNodeRunning, ChildRunID: "child-" + seed.handle,
+		}))
+		children.status["child-"+seed.handle] = seed.status
+	}
+
+	require.NoError(t, orch.cancelRemaining(context.Background(), "flow-run-1"))
+
+	cleanup := cleanupOf(t, events)
+	assert.Equal(t, 1, cleanup["stopped"], "only the child this cancel actually stopped")
+	assert.Equal(t, 1, cleanup["alreadyTerminal"], "and the one it found settled")
+	assert.Equal(t, []string{}, cleanup["unconfirmed"])
+}
+
+// B4: fan_out children are created one by one. A cancel inside that loop must
+// still find and stop the children already created - they are recorded on the
+// node as they are created - and the payload must never claim a clean stop with
+// zero ids.
+func TestFanOutCancelDuringCreationStopsAndReportsEveryCreatedChild(t *testing.T) {
+	def := fanOutDef(3)
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	children.blockedHandles["scan-0"] = true // still running when the cancel lands
+	children.onCreate = func(handle string) {
+		if handle == "scan-0" {
+			if err := fake.SetCancelRequested(context.Background(), "flow-run-1"); err != nil {
+				t.Errorf("request cancel: %v", err)
+			}
+		}
+	}
+	events := &fakeEvents{}
+	orch := newOrchestrator(fake, children, events)
+
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCancelled, waitTerminal(t, fake))
+
+	node := nodesByHandle(t, fake)["scan"]
+	assert.Equal(t, []string{"child-scan-0"}, node.ChildRunIDs,
+		"the child created before the cancel is recorded on the node, so the cancel path can find it")
+	assert.Equal(t, domain.RunCancelled, children.status["child-scan-0"],
+		"and it is stopped instead of being leaked")
+
+	cleanup := cleanupOf(t, events)
+	assert.Equal(t, 1, cleanup["stopped"], "the created child is reported as stopped")
+	assert.Equal(t, []string{}, cleanup["unconfirmed"],
+		"and never omitted from the observation: 0/[] would claim a clean stop it did not have")
+}
+
+// N1: the terminal write must not clobber a token increment recorded after the
+// cancel path read the ledger.
+func TestCancelLedgerWriteKeepsAConcurrentIncrement(t *testing.T) {
+	def := threeTaskDef()
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	children.blockedHandles["producer"] = true
+	events := &fakeEvents{}
+	orch := newOrchestrator(fake, children, events)
+	// A competing writer adds 7 tokens between this path's accounting and its
+	// terminal write.
+	fake.concurrentUsage = 7
+
+	go requestCancelWhenRunning(t, fake, "producer")
+	orch.Start(context.Background(), "flow-run-1")
+	require.Equal(t, domain.FlowStateCancelled, waitTerminal(t, fake))
+
+	run, err := fake.GetRun(context.Background(), "flow-run-1")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1007), run.TotalTokensUsed,
+		"the terminal write carries the durable total, so a concurrent increment is not lost")
+}
+
+// N2: `interrupted` means the child was NOT confirmed terminal (that is what
+// reconcileCrashedNodes records). Such a node must still have its child stopped
+// even though its own state cannot change.
+func TestCancelStopsTheChildOfAnInterruptedNode(t *testing.T) {
+	def := threeTaskDef()
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+	orch := newOrchestrator(fake, children, events)
+
+	producer := nodesByHandle(t, fake)["producer"]
+	require.NoError(t, fake.UpdateNode(context.Background(), "flow-run-1", NodeUpdate{
+		TaskIndex: producer.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodePending},
+		SetState: domain.FlowNodeInterrupted, ChildRunID: "child-producer",
+	}))
+	children.status["child-producer"] = domain.RunRunning
+
+	require.NoError(t, orch.cancelRemaining(context.Background(), "flow-run-1"))
+
+	assert.Equal(t, domain.RunCancelled, children.status["child-producer"],
+		"an interrupted node's child is stopped with the flow")
+	assert.Equal(t, domain.FlowNodeInterrupted, nodesByHandle(t, fake)["producer"].TerminalState,
+		"and the node keeps the fact that its attempt was interrupted")
+	cleanup := cleanupOf(t, events)
+	assert.Equal(t, 1, cleanup["stopped"])
+	assert.Equal(t, []string{}, cleanup["unconfirmed"])
+}
+
+// N3: a flow already marked cancelled whose node write never happened is
+// repaired instead of skipped: returning early leaves a `running` node behind a
+// cancelled flow. The observation is not republished.
+func TestCancelRepairsAHalfWrittenCancellation(t *testing.T) {
+	def := threeTaskDef()
+	fake, err := newFakeStore(def)
+	require.NoError(t, err)
+	children := newFakeChildren()
+	events := &fakeEvents{}
+	orch := newOrchestrator(fake, children, events)
+
+	producer := nodesByHandle(t, fake)["producer"]
+	require.NoError(t, fake.UpdateNode(context.Background(), "flow-run-1", NodeUpdate{
+		TaskIndex: producer.TaskIndex, ExpectedStates: []domain.FlowNodeState{domain.FlowNodePending},
+		SetState: domain.FlowNodeRunning, ChildRunID: "child-producer",
+	}))
+	children.status["child-producer"] = domain.RunRunning
+	// A previous cancellation committed the terminal state and then lost the node
+	// writes (a dropped write, a crash).
+	fake.run.State = domain.FlowStateCancelled
+	fake.run.TerminalReason = "cancelled by user"
+
+	require.NoError(t, orch.cancelRemaining(context.Background(), "flow-run-1"))
+
+	nodes := nodesByHandle(t, fake)
+	assert.Equal(t, domain.FlowNodeCancelled, nodes["producer"].TerminalState,
+		"the half-written cancellation is repaired, not skipped")
+	assert.Equal(t, domain.RunCancelled, children.status["child-producer"])
+	assert.Equal(t, domain.RunCancelled, fake.anchorStatus, "and the anchor is terminal")
+	assert.NotContains(t, events.types(), "flow_cancelled",
+		"the repair publishes no second observation it did not make")
 }
 
 // Matrix 12: budget exceeded -> budget_exceeded terminal state.
