@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"time"
+	"unicode/utf8"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 )
@@ -324,10 +325,16 @@ func boolInt(value bool) int {
 }
 
 // MaxToolExecutionOutputBytes bounds how much of one projected tool output the
-// execution reader pulls into memory. It is a read budget, not a semantic limit:
-// a longer output is read up to the budget and reported as truncated, so a
-// missing test summary in it is undecidable instead of absent.
+// execution reader pulls into memory, per row. It is a read budget, not a
+// semantic limit: a longer output is read up to the budget and reported as
+// truncated, so a missing test summary in it is undecidable instead of absent.
 const MaxToolExecutionOutputBytes = 256 << 10
+
+// MaxToolExecutionRows bounds how many recorded executions one reader returns.
+// The tests-passed leaf decides on the highest matching seq, so the LAST rows of
+// a Run are the ones that can still matter: a Run with thousands of shell calls
+// must not load all of them (with every preview) into one fold.
+const MaxToolExecutionRows = 200
 
 // ListToolExecutions returns one Run's recorded shell executions, oldest first:
 // the completed bash and exec calls, their recorded invocation and their
@@ -335,11 +342,26 @@ const MaxToolExecutionOutputBytes = 256 << 10
 // leaf, so it reads the PROJECTED result columns only — raw_result_preview and
 // raw_result_path hold the pre-redaction text and must never be re-introduced
 // into a deterministic check.
+//
+// The read is bounded twice: the last MaxToolExecutionRows rows (by seq, the
+// window the leaf can still decide on) and MaxToolExecutionOutputBytes of
+// preview per row, capped in SQL so the driver never materialises a full
+// preview. A capped preview is reported as truncated.
+//
+// projected_result_path is read here but is never written today (the projection
+// step populates projected_result_preview only), so the branch below is dead in
+// practice. Whatever writer lands must confine the path to the session runtime
+// directory before this reader trusts it: an absolute path out of a recorded row
+// would otherwise let a run point the leaf at any file on the host.
 func (r *CallRepo) ListToolExecutions(ctx context.Context, runID string) ([]domain.ToolExecution, error) {
 	rows, err := r.DB.QueryContext(ctx, `SELECT seq, tool_call_id, tool_name, arguments_json, status, is_error,
-		COALESCE(exit_code, -1), projected_result_preview, projected_result_path
+		COALESCE(exit_code, -1),
+		substr(CAST(projected_result_preview AS BLOB), 1, ?),
+		COALESCE(length(CAST(projected_result_preview AS BLOB)) > ?, 0),
+		projected_result_path
 		FROM tool_calls WHERE run_id = ? AND tool_name IN ('bash','exec') AND status = 'completed'
-		ORDER BY seq`, runID)
+		ORDER BY seq DESC LIMIT ?`,
+		MaxToolExecutionOutputBytes, MaxToolExecutionOutputBytes, runID, MaxToolExecutionRows)
 	if err != nil {
 		return nil, fmt.Errorf("list tool executions: %w", err)
 	}
@@ -351,11 +373,12 @@ func (r *CallRepo) ListToolExecutions(ctx context.Context, runID string) ([]doma
 			arguments   string
 			status      string
 			isError     int
-			preview     string
+			preview     []byte
+			wasCapped   int
 			projectedTo sql.NullString
 		)
 		if err := rows.Scan(&execution.Seq, &execution.ToolCallID, &execution.Tool, &arguments, &status,
-			&isError, &execution.ExitCode, &preview, &projectedTo); err != nil {
+			&isError, &execution.ExitCode, &preview, &wasCapped, &projectedTo); err != nil {
 			return nil, fmt.Errorf("scan tool execution: %w", err)
 		}
 		if status != "completed" {
@@ -363,7 +386,10 @@ func (r *CallRepo) ListToolExecutions(ctx context.Context, runID string) ([]doma
 		}
 		execution.IsError = isError != 0
 		execution.Command, execution.Argv = recordedInvocation(execution.Tool, arguments)
-		execution.Output = preview
+		// The SQL cap is byte-based, so it can cut a multi-byte sequence in half;
+		// drop the partial tail rather than hand invalid UTF-8 to the leaf.
+		execution.Output = string(trimPartialUTF8Tail(preview))
+		execution.Truncated = wasCapped != 0
 		if projectedTo.Valid && projectedTo.String != "" {
 			// The projection spilled to a file: that file is the whole output, so
 			// it replaces the preview. A read that failed is truncated, never
@@ -380,7 +406,23 @@ func (r *CallRepo) ListToolExecutions(ctx context.Context, runID string) ([]doma
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list tool executions: %w", err)
 	}
+	// The query reads the newest rows first; the seam promises oldest first.
+	for i, j := 0, len(executions)-1; i < j; i, j = i+1, j-1 {
+		executions[i], executions[j] = executions[j], executions[i]
+	}
 	return executions, nil
+}
+
+// trimPartialUTF8Tail drops up to three trailing bytes of an incomplete UTF-8
+// sequence, so a byte-capped preview does not end in the middle of a rune.
+func trimPartialUTF8Tail(data []byte) []byte {
+	for n := 0; n < 3 && len(data) > 0; n++ {
+		if r, size := utf8.DecodeLastRune(data); r != utf8.RuneError || size > 1 {
+			break
+		}
+		data = data[:len(data)-1]
+	}
+	return data
 }
 
 // recordedInvocation decodes the invocation of one recorded shell call: bash

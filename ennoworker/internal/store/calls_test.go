@@ -4,8 +4,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
@@ -141,4 +143,56 @@ func TestListToolExecutionsEmptyRun(t *testing.T) {
 	executions, err := (&store.CallRepo{DB: repo.DB}).ListToolExecutions(context.Background(), submission.Run.ID)
 	require.NoError(t, err)
 	assert.Empty(t, executions)
+}
+
+// The read is bounded to the newest rows: the leaf decides on the highest
+// matching seq, so an old execution is not evidence, and a Run with thousands of
+// shell calls must not load all of them into one fold.
+func TestListToolExecutionsCapsRowsToTheNewest(t *testing.T) {
+	repo, submission := setupSubmittedRun(t, "calls-row-cap")
+	ctx := context.Background()
+	calls := &store.CallRepo{DB: repo.DB}
+	total := store.MaxToolExecutionRows + 5
+	for seq := 1; seq <= total; seq++ {
+		insertToolCall(t, calls, submission.Run.ID, "call-"+strconv.Itoa(seq), int64(seq), "bash",
+			`{"command":"go test -v ./..."}`, "completed", false, nil, "ok", "", "")
+	}
+
+	executions, err := calls.ListToolExecutions(ctx, submission.Run.ID)
+	require.NoError(t, err)
+	require.Len(t, executions, store.MaxToolExecutionRows)
+	assert.Equal(t, int64(total-store.MaxToolExecutionRows+1), executions[0].Seq,
+		"the window is the newest rows, still oldest first")
+	assert.Equal(t, int64(total), executions[len(executions)-1].Seq)
+}
+
+// One row's preview is capped too: a 1 MiB preview must not be materialised whole
+// per row, and a capped preview is truncated so its missing tail is undecidable.
+func TestListToolExecutionsCapsPreviewBytes(t *testing.T) {
+	repo, submission := setupSubmittedRun(t, "calls-preview-cap")
+	ctx := context.Background()
+	calls := &store.CallRepo{DB: repo.DB}
+	withoutSummary := strings.Repeat("x", store.MaxToolExecutionOutputBytes+1024)
+	// A multi-byte preview proves the byte cap does not leave half a rune.
+	multiByte := strings.Repeat("\u00e9", store.MaxToolExecutionOutputBytes)
+	insertToolCall(t, calls, submission.Run.ID, "call-long", 1, "bash",
+		`{"command":"go test -v ./..."}`, "completed", false, nil, withoutSummary, "", "")
+	insertToolCall(t, calls, submission.Run.ID, "call-multibyte", 2, "bash",
+		`{"command":"go test -v ./..."}`, "completed", false, nil, multiByte, "", "")
+
+	executions, err := calls.ListToolExecutions(ctx, submission.Run.ID)
+	require.NoError(t, err)
+	require.Len(t, executions, 2)
+	assert.Len(t, executions[0].Output, store.MaxToolExecutionOutputBytes)
+	assert.True(t, executions[0].Truncated, "a capped preview is not the whole output")
+	assert.True(t, utf8.ValidString(executions[1].Output), "the byte cap must not split a rune")
+	assert.True(t, executions[1].Truncated)
+
+	// The cap hides whatever summary followed it, so the clause is undecidable
+	// rather than "no pass summary was printed".
+	verdict := agentflow.EvaluateAcceptance(ctx, []domain.FlowAcceptance{
+		{Check: "tests-passed", Command: "go test -v ./..."},
+	}, agentflow.AcceptanceFacts{Executions: executionsSeam{executions: executions[:1]}})
+	assert.Equal(t, domain.AcceptanceUnverified, verdict.Result)
+	assert.Equal(t, "evidence_truncated", verdict.Checks[0].Code)
 }

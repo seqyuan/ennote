@@ -101,14 +101,19 @@ func TestValidationAcceptanceValid(t *testing.T) {
 	)))
 	assert.True(t, result.Valid, "%v", result.Diagnostics)
 
-	// tests-passed takes a plain invocation and nothing else; a quoted argument
-	// without shell control syntax stays legal.
+	// tests-passed takes a plain invocation and nothing else. A `go test` clause
+	// must be verbose, since a zero-test run is indistinguishable from a real one
+	// without per-test lines; an operator INSIDE one argument is a single
+	// legitimate invocation (`-k "a && b"`, `-run "TestA|TestB"`).
 	for _, entry := range []string{
-		`{check: tests-passed, command: "go test ./..."}`,
+		`{check: tests-passed, command: "go test -v ./..."}`,
+		`{check: tests-passed, command: "go test -json ./..."}`,
+		`{check: tests-passed, command: "go test -run 'TestA|TestB' -v ./..."}`,
 		`{check: tests-passed, command: "python -m pytest tests/test_qc.py -q"}`,
 		`{check: tests-passed, command: "node --test"}`,
 		`{check: tests-passed, command: "cargo test --all"}`,
 		`{check: tests-passed, command: "pytest -k 'not slow'"}`,
+		`{check: tests-passed, command: "pytest -k 'a && b'"}`,
 	} {
 		result := validateAcceptanceYAML(t, acceptanceProducerYAML(acceptanceBlock(entry)))
 		assert.True(t, result.Valid, "%s: %v", entry, result.Diagnostics)
@@ -279,7 +284,7 @@ tasks:
 			yaml:            acceptanceProducerYAML(acceptanceBlock(`{check: tests-passed, command: "pytest a.py || true"}`)),
 			code:            "acceptance_command_compound",
 			field:           "tasks.producer.acceptance[0].command",
-			messageContains: []string{"producer", "shell control syntax", "quoted"},
+			messageContains: []string{"producer", "shell control syntax", "bare operator"},
 		},
 		{
 			name:            "compound command with cd &&",
@@ -310,11 +315,38 @@ tasks:
 			messageContains: []string{"producer", "shell control syntax"},
 		},
 		{
-			name:            "operator inside a quoted argument",
-			yaml:            acceptanceProducerYAML(acceptanceBlock(`{check: tests-passed, command: "pytest -k 'a && b'"}`)),
+			// F6: a newline joins two invocations without leaving an operator
+			// token behind, so it is refused on its own rule.
+			name:            "newline-joined command",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{check: tests-passed, command: "pytest a.py\ntrue"}`)),
 			code:            "acceptance_command_compound",
 			field:           "tasks.producer.acceptance[0].command",
-			messageContains: []string{"producer", "quoted argument"},
+			messageContains: []string{"producer", "shell control syntax", "newline"},
+		},
+		{
+			name:            "redirect attached to its target",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{check: tests-passed, command: "go test -v ./... >out.log"}`)),
+			code:            "acceptance_command_compound",
+			field:           "tasks.producer.acceptance[0].command",
+			messageContains: []string{"producer", "shell control syntax", ">out.log"},
+		},
+		{
+			// F1: a non-verbose `go test` clause could never be decided.
+			name:            "go test without verbose output",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{check: tests-passed, command: "go test ./..."}`)),
+			code:            "acceptance_command_needs_verbose",
+			field:           "tasks.producer.acceptance[0].command",
+			messageContains: []string{"producer", "-v", "Add -v"},
+		},
+		{
+			// F7: a runner the kernel has no summary rule for can never be
+			// decided, so publishing it would create a permanently unverified
+			// clause.
+			name:            "unsupported runner",
+			yaml:            acceptanceProducerYAML(acceptanceBlock(`{check: tests-passed, command: "make test"}`)),
+			code:            "acceptance_runner_unsupported",
+			field:           "tasks.producer.acceptance[0].command",
+			messageContains: []string{"producer", "make test", "stay unverified forever"},
 		},
 		{
 			name:            "csv-columns requires columns",

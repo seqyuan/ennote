@@ -208,9 +208,13 @@ func validateArtifactAcceptanceEntry(add func(ValidationDiagnostic), taskName st
 // operand is a command the child must have executed. The command is matched
 // token for token against one recorded execution, so a compound command - two
 // invocations glued together - is refused here. Refusing at publish is what
-// keeps `pytest a.py || true` from being satisfiable by a run that never passed;
-// the operator is refused even inside a quoted argument, because the recorded
-// command is re-split into tokens the same way.
+// keeps `pytest a.py || true` from being satisfiable by a run that never passed.
+//
+// Two further gates keep a clause from being published when the kernel could
+// never decide it: a runner without a summary rule (acceptance_runner_unsupported,
+// e.g. `make test`) and a `go test` clause without per-test output
+// (acceptance_command_needs_verbose: without -v/-json a zero-test run and a real
+// one print the same `ok <pkg>` banner).
 func validateCommandAcceptanceEntry(add func(ValidationDiagnostic), taskName string, index int, entryField string, spec domain.FlowAcceptance) {
 	command := strings.TrimSpace(spec.Command)
 	if command == "" {
@@ -219,10 +223,12 @@ func validateCommandAcceptanceEntry(add func(ValidationDiagnostic), taskName str
 				taskName, index, spec.Check),
 			Field: entryField + ".command"})
 	} else if token := compoundCommandToken(command); token != "" {
-		add(ValidationDiagnostic{Code: "acceptance_command_compound",
-			Message: fmt.Sprintf("task %q acceptance[%d] command %q contains shell control syntax (%q); tests-passed matches one recorded invocation token for token, so a compound command cannot be anchored to a single execution. This includes an operator inside a quoted argument. Declare the plain invocation instead",
+		add(ValidationDiagnostic{Code: codeAcceptanceCommandCompound,
+			Message: fmt.Sprintf("task %q acceptance[%d] command %q contains shell control syntax (%q); tests-passed matches one recorded invocation token for token, so a compound command cannot be anchored to a single execution (a leading `>`/`<`/`|`/`&`, a bare operator, a command or variable substitution, a backtick, or a newline that joins two commands). Declare the plain invocation instead",
 				taskName, index, command, token),
 			Field: entryField + ".command"})
+	} else {
+		validateCommandRunner(add, taskName, index, entryField, command)
 	}
 	if strings.TrimSpace(spec.File) != "" {
 		add(ValidationDiagnostic{Code: "acceptance_file_forbidden",
@@ -241,6 +247,45 @@ func validateCommandAcceptanceEntry(add func(ValidationDiagnostic), taskName str
 			Message: fmt.Sprintf("task %q acceptance[%d] check %q does not take columns", taskName, index, spec.Check),
 			Field:   entryField + ".columns"})
 	}
+}
+
+// validateCommandRunner refuses a command the execution leaf can never decide,
+// reusing the runtime's own runner inference (acceptanceRunnerOf) so publish and
+// verdict cannot disagree about which runner a command drives. `go test`
+// additionally needs per-test output: without -v (or -json) a package with no
+// tests prints the same `ok <pkg>` banner as a real passing run, so a clause
+// without it could only ever be unverified.
+func validateCommandRunner(add func(ValidationDiagnostic), taskName string, index int, entryField, command string) {
+	tokens := acceptanceInvocationKey(ParseCheckCommand(command))
+	if len(tokens) == 0 {
+		return
+	}
+	switch runner := acceptanceRunnerOf(tokens); {
+	case runner == "":
+		add(ValidationDiagnostic{Code: codeAcceptanceRunnerUnsupportedPublish,
+			Message: fmt.Sprintf("task %q acceptance[%d] command %q does not drive a runner this Worker can decide (supported: go test, pytest, python -m pytest, node --test, cargo test); a clause it cannot decide would stay unverified forever",
+				taskName, index, command),
+			Field: entryField + ".command"})
+	case runner == runnerGoTest && !goTestVerbose(tokens):
+		add(ValidationDiagnostic{Code: codeAcceptanceNeedsVerbose,
+			Message: fmt.Sprintf("task %q acceptance[%d] command %q must pass -v (or -json): without per-test output a `go test` run that executed no tests prints the same `ok <pkg>` summary as a real one, so the verdict could never be decided. Add -v",
+				taskName, index, command),
+			Field: entryField + ".command"})
+	}
+}
+
+// goTestVerbose reports whether the declared tokens ask `go test` for per-test
+// output. -json implies -v and is accepted for that reason.
+func goTestVerbose(tokens []string) bool {
+	for _, token := range tokens {
+		switch {
+		case token == "-v", token == "-json", token == "-test.v":
+			return true
+		case strings.HasPrefix(token, "-json="):
+			return true
+		}
+	}
+	return false
 }
 
 // validAcceptancePath rejects absolute paths and any .. segment. Paths are

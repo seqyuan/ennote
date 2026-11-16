@@ -963,8 +963,31 @@ func TestEvaluateAcceptanceTestsPassedNotAPass(t *testing.T) {
 	}{
 		{
 			name:    "go test with only no test files",
-			command: "go test ./...",
+			command: "go test -v ./...",
 			output:  "?   \texample.com/x\t[no test files]\n?   \texample.com/y\t[no test files]\n",
+			code:    "evidence_no_pass_summary",
+		},
+		{
+			// F1: the documented consequence. Without -v there is no per-test
+			// line at all, so the ok banner cannot distinguish a zero-test run
+			// from a real one. Never a pass.
+			name:    "go test without verbose output",
+			command: "go test ./...",
+			output:  "ok  \texample.com/x\t0.006s\n",
+			code:    "evidence_no_pass_summary",
+		},
+		{
+			// F1: `ok <pkg> 0.006s [no tests to run]` is the zero-test banner.
+			name:    "go test with no tests to run",
+			command: "go test -v -run NoSuchTest ./...",
+			output:  "ok  \texample.com/x\t0.006s [no tests to run]\n",
+			code:    "evidence_no_pass_summary",
+		},
+		{
+			// F1: even a visible PASS line does not outvote the zero-test marker.
+			name:    "go test with a pass line but no tests to run",
+			command: "go test -v ./...",
+			output:  "=== RUN   TestA\n--- PASS: TestA (0.00s)\nok  \texample.com/x\t0.006s [no tests to run]\n",
 			code:    "evidence_no_pass_summary",
 		},
 		{
@@ -974,16 +997,25 @@ func TestEvaluateAcceptanceTestsPassedNotAPass(t *testing.T) {
 			code:    "evidence_no_pass_summary",
 		},
 		{
-			name:    "go test with an empty banner",
-			command: "go test ./...",
+			name:    "go test with no output",
+			command: "go test -v ./...",
 			output:  "",
 			code:    "evidence_no_pass_summary",
 		},
 		{
 			name:    "go test failure",
-			command: "go test ./...",
+			command: "go test -v ./...",
 			output:  "--- FAIL: TestA (0.00s)\nFAIL\texample.com/x\t0.003s\nFAIL\n",
 			code:    "command_failed",
+		},
+		{
+			// F1: with -json the package-level pass event is printed even when
+			// the package executed no test, so it is not a pass on its own.
+			name:    "go test -json with only a package pass event",
+			command: "go test -json ./...",
+			output: "{\"Time\":\"2026-11-15T00:00:00Z\",\"Action\":\"run\",\"Package\":\"example.com/x\"}\n" +
+				"{\"Time\":\"2026-11-15T00:00:00Z\",\"Action\":\"pass\",\"Package\":\"example.com/x\",\"Elapsed\":0.006}\n",
+			code: "evidence_no_pass_summary",
 		},
 		{
 			name:    "pytest with zero passed",
@@ -1004,16 +1036,60 @@ func TestEvaluateAcceptanceTestsPassedNotAPass(t *testing.T) {
 			code:    "command_failed",
 		},
 		{
+			// F4: an `error:` line is the tests' own stdout, not a failure fact.
+			// A run with no pass counter stays unverified, not does_not_hold.
+			name:    "pytest with a stray error line and no summary",
+			command: "pytest -q",
+			output:  "error: retrying connection\n2 skipped in 0.03s\n",
+			code:    "evidence_no_pass_summary",
+		},
+		{
+			name:    "pytest with a real failure summary next to a stray error line",
+			command: "pytest -q",
+			output:  "error: retrying connection\nFAILED tests/test_a.py::test_x\n1 failed in 0.05s\n",
+			code:    "command_failed",
+		},
+		{
 			name:    "node --test with only todos",
 			command: "node --test",
 			output:  "TAP version 13\n# tests 0\n# pass 0\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 2\n1..0\n",
 			code:    "evidence_no_pass_summary",
 		},
 		{
+			// F2: a test printing `# pass 1` must not add itself to the summary.
+			name:    "node --test with a console.log pass injection",
+			command: "node --test",
+			output: "TAP version 13\nok 1 - prints\n" +
+				"console.log(\"# pass 1\")\n# pass 1\n1..1\n# tests 1\n# pass 0\n# fail 0\n# cancelled 0\n",
+			code: "evidence_no_pass_summary",
+		},
+		{
+			name:    "node --test with a printed pass counter next to a real failure",
+			command: "node --test",
+			output:  "TAP version 13\nnot ok 1 - adds\n# pass 1\n# tests 1\n# pass 0\n# fail 1\n# cancelled 0\n",
+			code:    "command_failed",
+		},
+		{
 			name:    "node --test with a failing test line",
 			command: "node --test",
 			output:  "TAP version 13\nnot ok 1 - adds\n# pass 0\n# fail 1\n",
 			code:    "command_failed",
+		},
+		{
+			// F2: the counters are read as one summary block, and the block must
+			// be complete: a missing counter is not 0.
+			name:    "node --test with a partial summary block",
+			command: "node --test",
+			output:  "TAP version 13\nok 1 - adds\n# tests 1\n# pass 1\n",
+			code:    "evidence_no_pass_summary",
+		},
+		{
+			// F2: pass <= tests, so a summary that claims more passes than tests
+			// is not a pass.
+			name:    "node --test with more passes than tests",
+			command: "node --test",
+			output:  "TAP version 13\n# tests 1\n# pass 2\n# fail 0\n# cancelled 0\n",
+			code:    "evidence_no_pass_summary",
 		},
 		{
 			name:    "cargo test with zero tests",
@@ -1026,6 +1102,14 @@ func TestEvaluateAcceptanceTestsPassedNotAPass(t *testing.T) {
 			command: "cargo test",
 			output:  "test result: FAILED. 1 passed; 1 failed; 0 ignored\n",
 			code:    "command_failed",
+		},
+		{
+			// F5: any FAILED result line fails the run, not just the first one.
+			name:    "cargo test where a later target fails",
+			command: "cargo test",
+			output: "test result: ok. 2 passed; 0 failed; 0 ignored\n\n" +
+				"test result: FAILED. 0 passed; 1 failed; 0 ignored\n",
+			code: "command_failed",
 		},
 	}
 	for _, tc := range tests {
@@ -1051,9 +1135,9 @@ func TestEvaluateAcceptanceTestsPassedHolds(t *testing.T) {
 		output  string
 	}{
 		{
-			name:    "go test ok",
-			command: "go test ./...",
-			output:  "ok  \texample.com/x\t0.002s\n?   \texample.com/y\t[no test files]\n",
+			name:    "go test verbose ok",
+			command: "go test -v ./...",
+			output:  "=== RUN   TestA\n--- PASS: TestA (0.00s)\nPASS\nok  \texample.com/x\t0.002s\n?   \texample.com/y\t[no test files]\n",
 		},
 		{
 			name:    "go test mixed skip and pass",
@@ -1061,9 +1145,32 @@ func TestEvaluateAcceptanceTestsPassedHolds(t *testing.T) {
 			output:  "--- PASS: TestA (0.00s)\n--- SKIP: TestB (0.00s)\nok  \texample.com/x\t0.002s\n",
 		},
 		{
+			// F4: go test replays the tests' own stdout, so a stray `error:`
+			// line in a passing suite is not a failure.
+			name:    "go test verbose ok with a stray error line",
+			command: "go test -v ./...",
+			output:  "=== RUN   TestA\n    a_test.go:9: error: retrying\n--- PASS: TestA (0.00s)\nok  \texample.com/x\t0.002s\n",
+		},
+		{
+			// F1: -json is what publish accepts instead of -v, so it is decided
+			// here too: a pass event that names a Test is a passing test.
+			name:    "go test -json",
+			command: "go test -json ./...",
+			output: "{\"Time\":\"2026-11-15T00:00:00Z\",\"Action\":\"run\",\"Package\":\"example.com/x\",\"Test\":\"TestA\"}\n" +
+				"{\"Time\":\"2026-11-15T00:00:00Z\",\"Action\":\"output\",\"Package\":\"example.com/x\",\"Test\":\"TestA\",\"Output\":\"=== RUN   TestA\\n\"}\n" +
+				"{\"Time\":\"2026-11-15T00:00:00Z\",\"Action\":\"pass\",\"Package\":\"example.com/x\",\"Test\":\"TestA\",\"Elapsed\":0}\n" +
+				"{\"Time\":\"2026-11-15T00:00:00Z\",\"Action\":\"pass\",\"Package\":\"example.com/x\",\"Elapsed\":0.006}\n",
+		},
+		{
 			name:    "pytest passed",
 			command: "pytest tests/test_qc.py -q",
 			output:  "....\n4 passed in 0.12s\n",
+		},
+		{
+			// F4: a passing suite that prints `error:` holds.
+			name:    "pytest passed with a stray error line",
+			command: "pytest -q",
+			output:  "retrying\nerror: connection reset\nerror: retrying\n.\n4 passed in 0.12s\n",
 		},
 		{
 			name:    "python -m pytest passed",
@@ -1078,12 +1185,20 @@ func TestEvaluateAcceptanceTestsPassedHolds(t *testing.T) {
 		{
 			name:    "node --test tap",
 			command: "node --test test/x.test.js",
-			output:  "TAP version 13\nok 1 - adds\n1..1\n# tests 1\n# pass 1\n# fail 0\n",
+			output:  "TAP version 13\nok 1 - adds\n1..1\n# tests 1\n# pass 1\n# fail 0\n# cancelled 0\n",
 		},
 		{
 			name:    "cargo test ok with zero failed",
 			command: "cargo test",
 			output:  "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out\n",
+		},
+		{
+			// F5: one `test result:` line per target, so an empty first target
+			// must not hide a later target's pass.
+			name:    "cargo test with an empty first target",
+			command: "cargo test",
+			output: "running 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored\n\n" +
+				"running 5 tests\n\ntest result: ok. 5 passed; 0 failed; 0 ignored\n",
 		},
 	}
 	for _, tc := range tests {
@@ -1099,7 +1214,7 @@ func TestEvaluateAcceptanceTestsPassedHolds(t *testing.T) {
 // compound recorded command is never the same invocation, and a later unrelated
 // success is not evidence for the declared command.
 func TestEvaluateAcceptanceTestsPassedMatching(t *testing.T) {
-	passGo := "ok  \texample.com/x\t0.002s\n"
+	passGo := "=== RUN   TestA\n--- PASS: TestA (0.00s)\nok  \texample.com/x\t0.002s\n"
 	tests := []struct {
 		name       string
 		command    string
@@ -1206,7 +1321,7 @@ func TestEvaluateAcceptanceTestsPassedMatching(t *testing.T) {
 // The evidence can also be missing or unusable; every such case is unverified,
 // never a pass and never a failed check.
 func TestEvaluateAcceptanceTestsPassedUnverified(t *testing.T) {
-	passGo := "ok  \texample.com/x\t0.002s\n"
+	passGo := "=== RUN   TestA\n--- PASS: TestA (0.00s)\nok  \texample.com/x\t0.002s\n"
 
 	t.Run("nil executions", func(t *testing.T) {
 		spec := domain.FlowAcceptance{Check: "tests-passed", Command: "go test ./..."}
@@ -1241,18 +1356,41 @@ func TestEvaluateAcceptanceTestsPassedUnverified(t *testing.T) {
 	})
 
 	t.Run("truncated output without a summary", func(t *testing.T) {
-		execution := bashExecution(1, "go test ./...", "=== RUN   TestA\n")
+		execution := bashExecution(1, "go test -v ./...", "=== RUN   TestA\n")
 		execution.Truncated = true
-		check := executionCase(t, "go test ./...", []domain.ToolExecution{execution})
+		check := executionCase(t, "go test -v ./...", []domain.ToolExecution{execution})
 		assert.Equal(t, domain.AcceptanceUnverified, check.Verdict)
 		assert.Equal(t, "evidence_truncated", check.Code)
 	})
 
-	t.Run("truncated output with a visible summary still holds", func(t *testing.T) {
-		execution := bashExecution(1, "go test ./...", passGo)
+	// F3: the opposite of what this test used to assert. Only the head of the
+	// output was kept, so a visible passing head is not the whole run.
+	t.Run("truncated output with a visible passing summary is truncated, not a pass", func(t *testing.T) {
+		execution := bashExecution(1, "go test -v ./...", passGo)
 		execution.Truncated = true
-		check := executionCase(t, "go test ./...", []domain.ToolExecution{execution})
-		assert.Equal(t, domain.AcceptanceHolds, check.Verdict)
+		check := executionCase(t, "go test -v ./...", []domain.ToolExecution{execution})
+		assert.Equal(t, domain.AcceptanceUnverified, check.Verdict,
+			"a truncated run is undecidable, never a pass")
+		assert.Equal(t, "evidence_truncated", check.Code)
+	})
+
+	// F3: the recorder never sets Truncated from the preview, so the tool's own
+	// marker is the signal real truncation leaves behind.
+	t.Run("output ending in the tool truncation marker is truncated", func(t *testing.T) {
+		execution := bashExecution(1, "go test -v ./...", passGo+"\n[output truncated]")
+		check := executionCase(t, "go test -v ./...", []domain.ToolExecution{execution})
+		assert.Equal(t, domain.AcceptanceUnverified, check.Verdict)
+		assert.Equal(t, "evidence_truncated", check.Code)
+	})
+
+	// Truncation does not excuse a visible failure: the head that was kept says
+	// the run failed, so the clause does not hold.
+	t.Run("truncated output whose visible head shows a failure still fails", func(t *testing.T) {
+		execution := bashExecution(1, "go test -v ./...",
+			"--- FAIL: TestA (0.00s)\nFAIL\texample.com/x\t0.003s\n\n[output truncated]")
+		check := executionCase(t, "go test -v ./...", []domain.ToolExecution{execution})
+		assert.Equal(t, domain.AcceptanceDoesNotHold, check.Verdict)
+		assert.Equal(t, "command_failed", check.Code)
 	})
 
 	t.Run("compound declared command is refused again at run time", func(t *testing.T) {
@@ -1274,7 +1412,7 @@ func TestEvaluateAcceptanceTestsPassedUnverified(t *testing.T) {
 // and an unrecorded exit status (-1) does not outvote a passing summary: the
 // recorded IsError is the failure fact, the exit column may simply be absent.
 func TestEvaluateAcceptanceTestsPassedExitStatus(t *testing.T) {
-	passGo := "ok  \texample.com/x\t0.002s\n"
+	passGo := "=== RUN   TestA\n--- PASS: TestA (0.00s)\nok  \texample.com/x\t0.002s\n"
 
 	errored := bashExecution(1, "go test ./...", passGo)
 	errored.IsError = true
@@ -1289,11 +1427,21 @@ func TestEvaluateAcceptanceTestsPassedExitStatus(t *testing.T) {
 	assert.Equal(t, domain.AcceptanceDoesNotHold, check.Verdict)
 	assert.Equal(t, "command_failed", check.Code)
 
-	unrecorded := bashExecution(1, "go test ./...", passGo)
+	unrecorded := bashExecution(1, "go test -v ./...", passGo)
 	unrecorded.ExitCode = domain.ExitCodeUnrecorded
-	check = executionCase(t, "go test ./...", []domain.ToolExecution{unrecorded})
+	check = executionCase(t, "go test -v ./...", []domain.ToolExecution{unrecorded})
 	assert.Equal(t, domain.AcceptanceHolds, check.Verdict,
 		"an exit status the recorder never wrote is unknown, not a failure")
+
+	// F9: any non-zero status that is not the "unrecorded" sentinel is a
+	// failure, including a negative signal code a future writer may record.
+	for _, code := range []int{-9, 137, 1} {
+		terminated := bashExecution(1, "go test -v ./...", passGo)
+		terminated.ExitCode = code
+		check = executionCase(t, "go test -v ./...", []domain.ToolExecution{terminated})
+		assert.Equal(t, domain.AcceptanceDoesNotHold, check.Verdict, "exit status %d", code)
+		assert.Equal(t, "command_failed", check.Code)
+	}
 }
 
 // A tests-passed clause decides on its own evidence and never asks for a
@@ -1301,12 +1449,12 @@ func TestEvaluateAcceptanceTestsPassedExitStatus(t *testing.T) {
 // has no reader, and the aggregate follows the three-valued rule.
 func TestEvaluateAcceptanceMixedCommandAndFileLeaves(t *testing.T) {
 	specs := []domain.FlowAcceptance{
-		{Check: "tests-passed", Command: "go test ./..."},
+		{Check: "tests-passed", Command: "go test -v ./..."},
 		{File: "outputs/report.md", Check: "non-empty"},
 	}
 	verdict := EvaluateAcceptance(context.Background(), specs, AcceptanceFacts{
 		Executions: fakeAcceptanceExecutions{executions: []domain.ToolExecution{
-			bashExecution(1, "go test ./...", "ok  \texample.com/x\t0.002s\n"),
+			bashExecution(1, "go test -v ./...", "=== RUN   TestA\n--- PASS: TestA (0.00s)\nok  \texample.com/x\t0.002s\n"),
 		}},
 	})
 	require.Len(t, verdict.Checks, 2)

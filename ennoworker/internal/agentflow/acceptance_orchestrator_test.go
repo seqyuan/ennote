@@ -756,12 +756,15 @@ func (f *fakeExecutions) children() []string {
 	return append([]string(nil), f.asked...)
 }
 
-// testsPassedDef is a three-task flow whose producer must have run `go test`.
+// testsPassedDef is a three-task flow whose producer must have run `go test -v`.
+// The clause is verbose because a non-verbose `go test` clause is refused at
+// publish: without per-test output a zero-test run prints the same banner as a
+// real one.
 func testsPassedDef() *domain.FlowDefinition {
 	def := threeTaskDef()
 	def.Tasks["producer"] = domain.FlowTask{
 		Type: domain.FlowTaskHero, Hero: "writer@1", Goal: "implement",
-		Acceptance: []domain.FlowAcceptance{{Check: "tests-passed", Command: "go test ./..."}},
+		Acceptance: []domain.FlowAcceptance{{Check: "tests-passed", Command: "go test -v ./..."}},
 	}
 	return def
 }
@@ -774,8 +777,8 @@ func TestAcceptanceTestsPassedHoldsThroughTheFold(t *testing.T) {
 	children := newFakeChildren()
 	events := &fakeEvents{}
 	executions := &fakeExecutions{byRun: map[string][]domain.ToolExecution{
-		"child-producer": {{Seq: 4, Tool: "bash", Command: "go test ./...", ExitCode: 0,
-			Output: "ok  \texample.com/x\t0.002s\n"}},
+		"child-producer": {{Seq: 4, Tool: "bash", Command: "go test -v ./...", ExitCode: 0,
+			Output: "=== RUN   TestA\n--- PASS: TestA (0.00s)\nok  \texample.com/x\t0.002s\n"}},
 	}}
 
 	orch := acceptanceOrchestrator(t, fake, children, events, newFakeEvidence())
@@ -800,7 +803,7 @@ func TestAcceptanceTestsPassedFailureFailsFlow(t *testing.T) {
 	children := newFakeChildren()
 	events := &fakeEvents{}
 	executions := &fakeExecutions{byRun: map[string][]domain.ToolExecution{
-		"child-producer": {{Seq: 1, Tool: "bash", Command: "go test ./...", ExitCode: 1, IsError: true,
+		"child-producer": {{Seq: 1, Tool: "bash", Command: "go test -v ./...", ExitCode: 1, IsError: true,
 			Output: "--- FAIL: TestA (0.00s)\nFAIL\texample.com/x\t0.003s\n"}},
 	}}
 
@@ -876,8 +879,8 @@ func TestAcceptanceTestsPassedCrashRecoveryUsesRecordedExecutions(t *testing.T) 
 	fake.run.State = domain.FlowStateRunning
 	fake.mu.Unlock()
 	executions := &fakeExecutions{byRun: map[string][]domain.ToolExecution{
-		"child-producer": {{Seq: 7, Tool: "exec", Argv: []string{"go", "test", "./..."}, ExitCode: 0,
-			Output: "ok  \texample.com/x\t0.002s\n"}},
+		"child-producer": {{Seq: 7, Tool: "exec", Argv: []string{"go", "test", "-v", "./..."}, ExitCode: 0,
+			Output: "=== RUN   TestA\n--- PASS: TestA (0.00s)\nok  \texample.com/x\t0.002s\n"}},
 	}}
 
 	orch := acceptanceOrchestrator(t, fake, children, events, newFakeEvidence())
