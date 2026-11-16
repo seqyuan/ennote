@@ -314,3 +314,41 @@ func TestListToolExecutionsRetainsHeadAndTail(t *testing.T) {
 	assert.Equal(t, domain.AcceptanceHolds, verdict.Result, verdict.Checks[0].Detail)
 	assert.Empty(t, verdict.Checks[0].Code)
 }
+
+// A failed call keeps its result: the durable payload carries the content the
+// client renders, and the row settles with is_error set on the column the per-tool
+// telemetry aggregation reads. (That aggregation currently drops its whole payload
+// on a Scan error — see the run_telemetry fix — so this pins the column, not the
+// ErrorCount the consumer would compute.)
+func TestToolFailedKeepsResultAndCountsAsError(t *testing.T) {
+	repo, submission := setupSubmittedRun(t, "calls-failed-result")
+	ctx := context.Background()
+	calls := &store.CallRepo{DB: repo.DB}
+	runID := submission.Run.ID
+	invocation := domain.ToolCall{ID: "provider-bash", Name: "bash",
+		Arguments: json.RawMessage(`{"command":"go test ./..."}`)}
+	require.NoError(t, calls.ToolStarted(ctx, domain.ToolCallStart{ID: "record-panic", RunID: runID,
+		Iteration: 1, CallIndex: 0, Call: invocation}))
+	result := domain.ToolResult{ToolCallID: invocation.ID, ToolName: invocation.Name,
+		Content: "tool panic: boom", IsError: true}
+	require.NoError(t, calls.ToolFailed(ctx, domain.ToolCallFinish{ID: "record-panic", RunID: runID,
+		Iteration: 1, CallIndex: 0, Call: invocation, RawResult: result, Result: result,
+		Status: "failed", Policy: domain.ToolPolicyMetadata{Code: "tool_panicked"}, AttemptCount: 1}))
+
+	var payloadJSON string
+	require.NoError(t, repo.DB.QueryRow(`SELECT payload_json FROM run_events
+		WHERE run_id = ? AND event_type = 'tool_call_failed'`, runID).Scan(&payloadJSON))
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(payloadJSON), &payload))
+	assert.Equal(t, "tool panic: boom", payload["content"])
+	assert.Equal(t, true, payload["isError"])
+	assert.Equal(t, float64(1), payload["attemptCount"])
+
+	var status, preview string
+	var isError int
+	require.NoError(t, repo.DB.QueryRow(`SELECT status, is_error, result_preview FROM tool_calls WHERE id = ?`,
+		"record-panic").Scan(&status, &isError, &preview))
+	assert.Equal(t, "failed", status)
+	assert.Equal(t, 1, isError, "a failed call is an error result, not just a non-completed row")
+	assert.Equal(t, "tool panic: boom", preview)
+}

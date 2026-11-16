@@ -430,6 +430,12 @@ func settlementCases() []settlementCase {
 				require.Len(t, failed, 1)
 				assert.Equal(t, "tool_panicked", failed[0]["category"],
 					"a panicked call must never settle as completed or with a blank category")
+				// The failed payload carries the result too: the client renders the
+				// content, and without it a panic card falls back to a generic line.
+				content, _ := failed[0]["content"].(string)
+				assert.Contains(t, content, "tool panic")
+				assert.Equal(t, true, failed[0]["isError"])
+				assert.Equal(t, float64(1), failed[0]["attemptCount"])
 			},
 		},
 		{
@@ -471,6 +477,7 @@ func settlementCases() []settlementCase {
 				failed := run.payloadsFor("tool_call_failed", 0)
 				require.Len(t, failed, 1)
 				assert.Equal(t, "tool_cancelled", failed[0]["category"])
+				assert.Equal(t, float64(1), failed[0]["attemptCount"], "the call had started when it was cancelled")
 				assert.Equal(t, int32(1), probe.executed.Load(), "a cancelled call must not be retried")
 			},
 		},
@@ -511,6 +518,9 @@ func settlementCases() []settlementCase {
 					queued := run.payloadsFor("tool_call_failed", callIndex)
 					require.Len(t, queued, 1)
 					assert.Equal(t, "tool_cancelled", queued[0]["category"])
+					// The failed call here is the one that never reached Execute, so its
+					// attempt count is the documented "never started" zero.
+					assert.Equal(t, float64(0), queued[0]["attemptCount"])
 					// Two cancellation texts are legitimate: under load the queued call can
 					// win the semaphore and be cancelled inside the attempt loop instead.
 					assert.Contains(t, run.results[callIndex].Content, "cancelled")

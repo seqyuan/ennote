@@ -115,6 +115,7 @@ func (l *Loop) recordToolFailed(ctx context.Context, call domain.ToolCallFinish)
 	return l.appendEvent(ctx, call.RunID, "tool_call_failed", map[string]any{
 		"recordId": call.ID, "iteration": call.Iteration, "callIndex": call.CallIndex,
 		"toolCallId": call.Call.ID, "toolName": call.Call.Name, "category": call.Policy.Code,
+		"content": call.Result.Content, "isError": call.Result.IsError, "attemptCount": call.AttemptCount,
 	})
 }
 

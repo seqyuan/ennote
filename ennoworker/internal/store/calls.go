@@ -194,11 +194,18 @@ func (r *CallRepo) ToolFailed(ctx context.Context, call domain.ToolCallFinish) e
 	payload, _ := json.Marshal(map[string]any{
 		"recordId": call.ID, "iteration": call.Iteration, "callIndex": call.CallIndex,
 		"toolCallId": call.Call.ID, "toolName": call.Call.Name, "category": call.Policy.Code,
+		"content": call.Result.Content, "isError": call.Result.IsError, "attemptCount": call.AttemptCount,
 	})
 	return r.transact(ctx, call.RunID, domain.PendingEvent{EventType: "tool_call_failed", Payload: payload}, func(tx *sql.Tx, now string) error {
+		// result_preview is the RAW text here, not a projection: the failed paths either
+		// never ran policy post-projection or the projection itself threw. A future reader
+		// must not assume this column is redacted on a failed row the way it is on a
+		// completed one.
 		result, err := tx.ExecContext(ctx, `UPDATE tool_calls SET status='failed',raw_result_preview=?,
-			raw_artifact_refs_json=?,policy_code=?,exit_code=?,finished_at=? WHERE id=? AND run_id=? AND status='started'`,
-			call.RawResult.Content, string(rawArtifacts), call.Policy.Code, exitStatusColumn(call), now, call.ID, call.RunID)
+			raw_artifact_refs_json=?,policy_code=?,exit_code=?,is_error=?,result_preview=?,
+			finished_at=? WHERE id=? AND run_id=? AND status='started'`,
+			call.RawResult.Content, string(rawArtifacts), call.Policy.Code, exitStatusColumn(call),
+			boolInt(call.Result.IsError), call.Result.Content, now, call.ID, call.RunID)
 		if err != nil {
 			return err
 		}
