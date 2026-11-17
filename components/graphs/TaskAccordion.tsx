@@ -1,42 +1,72 @@
 "use client";
 
 import { ChevronDown, ChevronRight, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { FlowTask } from "@/components/graphs/types";
 
-// The form mounts on the Task's CONTENT, not on its id alone. Changing the id
-// would remount on every save and steal focus from the field being edited;
-// keying on the content remounts only when the stored Task really changed -- a
-// Builder apply, or the Worker normalising the document -- so the form shows the
-// new value instead of a stale defaultValue.
-export function taskFingerprint(task: FlowTask): string {
-  return JSON.stringify(task);
+/**
+ * A comma-separated list field that types like a text input.
+ *
+ * The task holds a list, but re-parsing and re-joining on every keystroke would
+ * eat the comma the user is in the middle of typing ("a, " becomes ["a"] and
+ * renders back as "a"). The field therefore keeps the raw text locally and only
+ * re-syncs when the draft's list changes from somewhere else — a Worker
+ * normalisation or a Builder apply — never from its own echo.
+ */
+function ListField({ id, label, value, placeholder, hint, onChange }: {
+  id: string;
+  label: string;
+  value: string[];
+  placeholder: string;
+  hint?: string;
+  onChange: (next: string[]) => void;
+}) {
+  const parse = (text: string) => text.split(",").map((entry) => entry.trim()).filter(Boolean);
+  const [text, setText] = useState(value.join(", "));
+  const committed = useRef(value.join("\u0000"));
+
+  useEffect(() => {
+    const incoming = value.join("\u0000");
+    if (incoming === committed.current) return;
+    committed.current = incoming;
+    setText(value.join(", "));
+  }, [value]);
+
+  return (
+    <label>{label}
+      <input
+        id={id}
+        value={text}
+        placeholder={placeholder}
+        onChange={(event) => {
+          setText(event.target.value);
+          committed.current = parse(event.target.value).join("\u0000");
+          onChange(parse(event.target.value));
+        }}
+        onBlur={() => setText(parse(text).join(", "))}
+      />
+      {hint && <span>{hint}</span>}
+    </label>
+  );
 }
 
-// A blur is not a request. Treat an unchanged value, and an empty list that was
-// already absent, as no change so the editor stops sending a PATCH per field tab.
-export function taskFieldChanged(before: unknown, after: unknown): boolean {
-  if (Array.isArray(before) || Array.isArray(after)) {
-    const left = Array.isArray(before) ? before : [];
-    const right = Array.isArray(after) ? after : [];
-    return left.length !== right.length || left.some((value, index) => value !== right[index]);
-  }
-  return before !== after;
-}
-
-export function TaskAccordion({ id, task, expanded, busy, onToggle, onSave, onRemove }: {
+/**
+ * One Task's form, controlled by the editor's draft.
+ *
+ * It writes nothing itself: every change goes to the parent, which turns it into a
+ * queued op. The previous version saved on blur and returned silently when a save
+ * was already running, so an edit typed during a save was dropped with no error
+ * and no marker; there is no equivalent state here, because an edit is a queue
+ * entry rather than a request.
+ */
+export function TaskAccordion({ id, task, expanded, onToggle, onChange, onRemove }: {
   id: string;
   task: FlowTask;
   expanded: boolean;
-  busy: boolean;
   onToggle: () => void;
-  onSave: (task: FlowTask) => void;
+  onChange: (task: FlowTask) => void;
   onRemove: () => void;
 }) {
-  const saveField = <K extends keyof FlowTask>(key: K, value: FlowTask[K]) => {
-    if (!taskFieldChanged(task[key], value)) return;
-    onSave({ ...task, [key]: value });
-  };
-
   return (
     <section className="graph-task" data-task-id={id}>
       <button type="button" className="graph-task-summary" onClick={onToggle} aria-expanded={expanded}>
@@ -47,27 +77,24 @@ export function TaskAccordion({ id, task, expanded, busy, onToggle, onSave, onRe
       {expanded && (
         <div className="graph-task-form">
           <label>Hero
-            <input defaultValue={task.hero} placeholder="local/alignment or global/reviewer" onBlur={(event) => saveField("hero", event.target.value)} />
+            <input value={task.hero ?? ""} placeholder="local/alignment or global/reviewer"
+              onChange={(event) => onChange({ ...task, hero: event.target.value })} />
             <span>Local Heroes belong only to this Graph. Global Heroes are shared and read-only here.</span>
           </label>
-          <label>Skills
-            <input
-              defaultValue={(task.skills ?? []).join(", ")}
-              placeholder="local/alignment, global/report-writing"
-              onBlur={(event) => saveField("skills", event.target.value.split(",").map((value) => value.trim()).filter(Boolean))}
-            />
-            <span>Use explicit local/ or global/ references.</span>
-          </label>
+          <ListField id={`${id}-skills`} label="Skills" value={task.skills ?? []}
+            placeholder="local/alignment, global/report-writing"
+            hint="Use explicit local/ or global/ references."
+            onChange={(skills) => onChange({ ...task, skills })} />
           <label className="graph-task-goal">Goal
-            <textarea defaultValue={task.goal} onBlur={(event) => saveField("goal", event.target.value)} />
+            <textarea value={task.goal ?? ""} onChange={(event) => onChange({ ...task, goal: event.target.value })} />
           </label>
           <details>
             <summary>Advanced</summary>
-            <label>Writes
-              <input defaultValue={(task.writes ?? []).join(", ")} onBlur={(event) => saveField("writes", event.target.value.split(",").map((value) => value.trim()).filter(Boolean))} />
-            </label>
+            <ListField id={`${id}-writes`} label="Writes" value={task.writes ?? []}
+              placeholder="data/**, reports/*.md"
+              onChange={(writes) => onChange({ ...task, writes })} />
           </details>
-          <button type="button" className="graph-task-remove" onClick={onRemove} disabled={busy}>
+          <button type="button" className="graph-task-remove" onClick={onRemove}>
             <Trash2 size={15} /> Remove Task
           </button>
         </div>
