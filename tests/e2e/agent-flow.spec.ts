@@ -90,8 +90,9 @@ async function mockGraphAuthoring(page: Page) {
       digest = "sha256:" + "b".repeat(64);
       return fulfill(route, { id: "rna-seq", name: definition.name, path: "/home/graphs/rna-seq/graph.yaml", digest, latestVersion: 1, definition });
     }
-    if (path === "/v1/graphs/rna-seq/versions") return fulfill(route, [{ id: "graph-v1", profileId: "profile-1", version: 1, configDigest: "c".repeat(64), definition: {}, publishedAt: now }]);
-    if (path === "/v1/graphs/rna-seq/publish") return fulfill(route, { id: "graph-v2", profileId: "profile-1", version: 2, configDigest: "d".repeat(64), definition: {}, publishedAt: now }, 201);
+    if (path === "/v1/graphs/rna-seq/bindings") return fulfill(route, []);
+    if (path === "/v1/graphs/rna-seq/versions") return fulfill(route, [{ id: "graph-v1", resourceId: "rna-seq", sourceKind: "graph", version: 1, digest: "sha256:" + "c".repeat(64), publishedAt: now }]);
+    if (path === "/v1/graphs/rna-seq/publish") return fulfill(route, { id: "graph-v2", resourceId: "rna-seq", sourceKind: "graph", version: 2, digest: "sha256:" + "d".repeat(64), publishedAt: now }, 201);
     if (path === "/v1/graphs/rna-seq/builder" && method === "GET") return fulfill(route, builderThread);
     if (path === "/v1/graphs/rna-seq/builder/messages") {
       builderThread = { graphId: "rna-seq", modelProfileId: model.id, messages: [

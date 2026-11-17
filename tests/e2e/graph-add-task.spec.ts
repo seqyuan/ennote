@@ -51,6 +51,7 @@ async function mockAddTask(page: Page) {
     if (path === "/v1/graphs/rna-seq" && method === "GET") {
       return fulfill(route, { id: "rna-seq", name: state.definition.name, path: "/home/graphs/rna-seq/graph.yaml", digest: state.digest, latestVersion: 0, definition: state.definition });
     }
+    if (path === "/v1/graphs/rna-seq/bindings") return fulfill(route, []);
     if (path === "/v1/graphs/rna-seq/versions") return fulfill(route, []);
     if (path === "/v1/graphs/rna-seq" && method === "PATCH") {
       const body = JSON.parse(route.request().postData() ?? "{}") as GraphPatch;

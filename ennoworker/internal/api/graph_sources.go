@@ -221,6 +221,26 @@ func (s *Server) runGlobalGraph(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusCreated, run)
 }
 
+// listGraphBindings answers "which Projects would run this Graph, and at which
+// revision". The editor needs it to say what a Publish actually reaches: a draft
+// is never what runs, a published revision is only runnable where it is bound, and
+// a binding can be disabled or pinned to an older version.
+func (s *Server) listGraphBindings(w http.ResponseWriter, r *http.Request) {
+	if s.Projects == nil || s.Projects.Files == nil {
+		writeError(w, r, http.StatusServiceUnavailable, "project_store_unavailable", "project store is unavailable", true)
+		return
+	}
+	if s.sourceStore(w, r) == nil {
+		return
+	}
+	refs, err := s.Projects.Files.BindingsByGraph(r.PathValue("graphID"))
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "project_bindings_failed", err.Error(), true)
+		return
+	}
+	writeData(w, http.StatusOK, refs)
+}
+
 func (s *Server) updateGlobalGraph(w http.ResponseWriter, r *http.Request) {
 	sources := s.sourceStore(w, r)
 	if sources == nil {

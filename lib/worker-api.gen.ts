@@ -305,6 +305,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/graphs/{graphID}/bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                graphID: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Which Projects reference this Graph, and at which revision
+         * @description The reverse of a Project's own bindings: the editor asks what a Publish
+         *     actually reaches. A disabled binding is reported too, because "bound but
+         *     off" and "never bound" are different answers to the reader.
+         */
+        get: operations["listGraphBindings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/graphs/{graphID}/heroes/{heroID}": {
         parameters: {
             query?: never;
@@ -3341,6 +3365,11 @@ export interface components {
             digest: string;
             document: components["schemas"]["PortableHeroDocument"];
         };
+        GraphBindingRef: {
+            projectId: string;
+            revision: string;
+            enabled: boolean;
+        };
         GraphLocalHeroDetail: {
             id: string;
             name: string;
@@ -5183,6 +5212,32 @@ export interface operations {
                     };
                 };
             };
+        };
+    };
+    listGraphBindings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                graphID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Graph binding references */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["GraphBindingRef"][];
+                    };
+                };
+            };
+            500: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
     getGraphLocalHero: {

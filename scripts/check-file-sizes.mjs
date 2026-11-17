@@ -44,6 +44,11 @@ export const RECORDED_CEILINGS = {
   "hooks/useChatComposer.ts": 520, // turn Skills/graph pill state + submit gates
   "lib/session-store.ts": 600,
   "lib/chat-messages.ts": 600,
+  // The Graph editor carries a save session (a queue, a conflict choice, a
+  // published/binding identity). Three presentational pieces already moved out —
+  // TaskList, GraphHeader, GraphSaveBanners — and the next honest step is to
+  // extract the session itself, not to shave eight lines by splitting markup.
+  "components/settings/GraphSettings.tsx": 508,
   "components/Composer.tsx": 550,
   "ennoworker/cmd/ennoworker/main.go": 2200,
   "ennoworker/cmd/ennogate/main.go": 1050,

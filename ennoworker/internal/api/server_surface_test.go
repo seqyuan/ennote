@@ -55,7 +55,7 @@ var serverSurface = map[string][]string{
 	"graph_builder.go":          {"GlobalSources", "GraphBuilder"},
 	"graph_check_approvals.go":  {"CheckRunner"},
 	"graph_runs.go":             {"Control", "GraphRunResume", "SessionStores"},
-	"graph_sources.go":          {"CheckAllowlist", "CheckAllowlistAllowsAll", "GlobalSources", "GraphRuns", "Models", "Sessions", "SkillCatalog"},
+	"graph_sources.go":          {"CheckAllowlist", "CheckAllowlistAllowsAll", "GlobalSources", "GraphRuns", "Models", "Projects", "Sessions", "SkillCatalog"},
 	"host_directories.go":       {"HostHome", "HostRoots"},
 	"local_heroes.go":           {"Models"},
 	"mcp.go":                    {"MCP", "Projects"},

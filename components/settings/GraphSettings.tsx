@@ -4,6 +4,7 @@ import { Check, Loader2, Plus, Workflow } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GraphBuilderPanel } from "@/components/graphs/GraphBuilderPanel";
 import { AddTaskForm } from "@/components/graphs/AddTaskForm";
+import { GraphHeader } from "@/components/graphs/GraphHeader";
 import { GraphSaveBanners } from "@/components/graphs/GraphSaveBanners";
 import { TaskList } from "@/components/graphs/TaskList";
 import { confirmAction } from "@/components/ui/confirm";
@@ -18,6 +19,8 @@ import {
   type ImmutableFileRevision,
 } from "@/components/graphs/types";
 import { applyOps, diffTaskIDs, mergeQueuedOp, opToBody, removalNotice, sameTarget, type QueuedOp } from "@/lib/graph-ops";
+import { summariseGraphIdentity, type PublishedRevision } from "@/lib/graph-identity";
+import type { components } from "@/lib/worker-api.gen";
 import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { apiFetch, isSourceDigestConflict } from "@/lib/worker-api.client";
@@ -61,7 +64,9 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
   const [saveError, setSaveError] = useState<{ message: string; graphId: string } | null>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [diskPreview, setDiskPreview] = useState<{ graphId: string; name: string; changed: string[] } | null>(null);
-  const [latestVersion, setLatestVersion] = useState(0);
+  const [published, setPublished] = useState<PublishedRevision>(null);
+  const [bindings, setBindings] = useState<components["schemas"]["GraphBindingRef"][]>([]);
+  const [draftDigest, setDraftDigest] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
 
   useOverlayLayer(createOpen, () => setCreateOpen(false));
@@ -104,9 +109,13 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
     setSelected(id);
     setExpanded(null);
     try {
-      const [next, versions] = await Promise.all([
+      const [next, versions, boundTo] = await Promise.all([
         apiFetch<GraphDetail>(`/v1/graphs/${encodeURIComponent(id)}`),
         apiFetch<ImmutableFileRevision[]>(`/v1/graphs/${encodeURIComponent(id)}/versions`),
+        // A failed bindings read must not blank the editor: it degrades the header
+        // to "not bound", which is wrong but recoverable, unlike losing the draft.
+        apiFetch<components["schemas"]["GraphBindingRef"][]>(`/v1/graphs/${encodeURIComponent(id)}/bindings`)
+          .catch(() => [] as components["schemas"]["GraphBindingRef"][]),
       ]);
       if (openRequestId.current !== requestId) return;
       if (!reloading) {
@@ -117,8 +126,12 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
       digest.current = next.digest;
       setDetail(next);
       setDraft(next.definition ?? null);
+      setDraftDigest(next.digest);
       setPendingOps(0);
-      setLatestVersion(versions.reduce((latest, version) => Math.max(latest, version.version), 0));
+      const newest = versions.reduce<ImmutableFileRevision | null>(
+        (latest, version) => latest === null || version.version > latest.version ? version : latest, null);
+      setPublished(newest === null ? null : { version: newest.version, digest: newest.digest, publishedAt: newest.publishedAt });
+      setBindings(boundTo);
       setConflict(null);
       setSaveError(null);
       setDiskPreview(null);
@@ -194,6 +207,7 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
         digest.current = updated.digest;
         latestDraft.current = applyOps(base, target.ops.slice(target.sent));
         setDraft(latestDraft.current);
+        setDraftDigest(updated.digest);
         setPendingOps(target.ops.length - target.sent);
         setGraphs((current) => current.map((graph) =>
           graph.id === updated.id ? { ...graph, name: updated.name, digest: updated.digest, error: undefined } : graph));
@@ -301,7 +315,7 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
     setBusy("publishing");
     try {
       const version = await apiFetch<ImmutableFileRevision>(`/v1/graphs/${encodeURIComponent(draft.id)}/publish`, { method: "POST" });
-      setLatestVersion(version.version);
+      setPublished({ version: version.version, digest: version.digest, publishedAt: version.publishedAt });
       setError(null);
     } catch (reason) {
       setError((reason as Error).message);
@@ -395,6 +409,9 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
   };
 
   const definition = draft;
+  // The draft digest is the Graph detail's own digest, which is state: reading the
+  // ref here would be a ref access during render.
+  const identity = summariseGraphIdentity({ draftDigest: draftDigest, published, bindings });
   // Compare against the rendered Graph, not the session ref: a ref read during
   // render is invisible to React's scheduler and would not re-run on change.
   const activeGraphId = detail?.id ?? null;
@@ -428,18 +445,14 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
 
       {detail && definition && (
         <div className="graph-document">
-          <header className="graph-document-header">
-            <div><span>Graph</span><h2>{definition.name ?? definition.id}</h2><code>{definition.id}</code></div>
-            <div className="graph-document-actions">
-              {latestVersion > 0 && <span>v{latestVersion}</span>}
-              <div className={`graph-save-state is-${saveState}`} role="status">{saveState === "saving"
-                ? <><Loader2 className="spin" size={14} /> Saving</>
-                : saveState === "unsaved"
-                  ? <>Unsaved changes</>
-                  : <><Check size={14} /> Draft saved</>}</div>
-              <button type="button" onClick={() => void publishGraph()} disabled={Boolean(busy) || saving || Boolean(conflictForThisGraph) || Object.keys(definition.tasks).length === 0}>{busy === "publishing" ? "Publishing…" : "Publish"}</button>
-            </div>
-          </header>
+          <GraphHeader
+            definition={definition}
+            identity={identity}
+            saveState={saveState}
+            publishing={busy === "publishing"}
+            publishDisabled={Boolean(busy) || saving || Boolean(conflictForThisGraph) || Object.keys(definition.tasks).length === 0}
+            onPublish={() => void publishGraph()}
+          />
 
           <GraphSaveBanners
             saveError={saveErrorForThisGraph}

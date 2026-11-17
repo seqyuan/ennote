@@ -336,6 +336,61 @@ func (s *Store) FindGraphBinding(_ context.Context, projectID, sourceKind, graph
 	return nil, os.ErrNotExist
 }
 
+// GraphBindingRef is one Project's reference to a Graph revision. It is the
+// reverse view of GraphBinding: the reader starts at the Graph and asks which
+// Projects would run it.
+type GraphBindingRef struct {
+	ProjectID string `json:"projectId"`
+	Revision  string `json:"revision"`
+	Enabled   bool   `json:"enabled"`
+}
+
+// BindingsByGraph answers "who would run this Graph, and at which revision".
+//
+// It walks the manifests once rather than keeping a reverse index: Projects are a
+// handful of files, and an index would be a second copy of the bindings that could
+// drift from the manifests the Runs actually read.
+func (s *Store) BindingsByGraph(graphID string) ([]GraphBindingRef, error) {
+	manifests, err := s.listManifests()
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]GraphBindingRef, 0, len(manifests))
+	for _, manifest := range manifests {
+		for _, binding := range manifest.GraphBindings {
+			kind := binding.SourceKind
+			if kind == "" {
+				kind = SourceKindGraph
+			}
+			if kind != SourceKindGraph || binding.GraphID != graphID {
+				continue
+			}
+			refs = append(refs, GraphBindingRef{
+				ProjectID: manifest.Project.ID, Revision: binding.Revision, Enabled: binding.Enabled,
+			})
+		}
+	}
+	// Runnable first, then by revision, then by id: the reader asks "who would run
+	// this", so an enabled binding outranks a disabled one. Sorting by the id alone
+	// would be stable only per installation — the ids are random UUIDs, which made
+	// the endpoint's contract sample flip between runs.
+	sort.Slice(refs, func(i, j int) bool {
+		if refs[i].Enabled != refs[j].Enabled {
+			return refs[i].Enabled
+		}
+		// Inside each group, a binding that pins a revision comes before one that
+		// pins nothing: it is the actionable answer to "what would run".
+		if (refs[i].Revision == "") != (refs[j].Revision == "") {
+			return refs[i].Revision != ""
+		}
+		if refs[i].Revision != refs[j].Revision {
+			return refs[i].Revision < refs[j].Revision
+		}
+		return refs[i].ProjectID < refs[j].ProjectID
+	})
+	return refs, nil
+}
+
 func (s *Store) UpdateMCPBindings(_ context.Context, projectID string, mutate func(*[]MCPBinding) error) (*Manifest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

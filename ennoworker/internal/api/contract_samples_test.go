@@ -21,6 +21,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/fileconfig"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
+	"github.com/seqyuan/ennote/ennoworker/internal/projectstore"
 	"github.com/seqyuan/ennote/ennoworker/internal/skillsmgmt"
 	"github.com/stretchr/testify/require"
 	"github.com/xuri/excelize/v2"
@@ -904,6 +905,35 @@ func TestContractSamples(t *testing.T) {
 		method: http.MethodGet, route: "/v1/sessions/{sessionID}/graph-runs/{runID}", auth: true,
 		values: map[string]string{"sessionID": graphSession.ID, "runID": sampleGraphRunID},
 		status: http.StatusOK,
+	})
+	// Which Projects would run this Graph. The bindings are written straight to the
+	// store: a sampled PUT would collide with the createProject sample above
+	// (one sample per operation and status), and only the read shape matters here.
+	// The second Project carries a disabled, revision-less binding — "bound but off"
+	// is a different answer for the reader, and an empty revision is legal, so the
+	// sample has to prove it serializes.
+	secondProject, _, err := server.Projects.Files.CreateWithWorkspace(context.Background(),
+		domain.CreateProjectInput{Name: "contract-2", HostPath: hostPath})
+	require.NoError(t, err)
+	_, err = server.Projects.Files.UpdateGraphBindings(context.Background(), project.Project.ID,
+		func(list *[]projectstore.GraphBinding) error {
+			*list = append(*list, projectstore.GraphBinding{
+				SourceKind: projectstore.SourceKindGraph, GraphID: "qc", Revision: "v000001", Enabled: true,
+			})
+			return nil
+		})
+	require.NoError(t, err)
+	_, err = server.Projects.Files.UpdateGraphBindings(context.Background(), secondProject.ID,
+		func(list *[]projectstore.GraphBinding) error {
+			*list = append(*list, projectstore.GraphBinding{
+				SourceKind: projectstore.SourceKindGraph, GraphID: "qc", Enabled: false,
+			})
+			return nil
+		})
+	require.NoError(t, err)
+	samples.record(contractSampleRequest{
+		method: http.MethodGet, route: "/v1/graphs/{graphID}/bindings", auth: true,
+		values: map[string]string{"graphID": "qc"}, status: http.StatusOK,
 	})
 	// The Graph-private Hero draft behind a local/<id> reference. Recorded last:
 	// the sample normaliser numbers stand-ins in encounter order, and inserting

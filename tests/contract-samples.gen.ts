@@ -538,6 +538,22 @@ export const listGlobalHeroes200: WorkerOperationResponse<"listGlobalHeroes", 20
   ]
 };
 
+/** listGraphBindings answering 200. */
+export const listGraphBindings200: WorkerOperationResponse<"listGraphBindings", 200> = {
+  "data": [
+    {
+      "enabled": false,
+      "projectId": "00000000-0000-0000-0000-000000000016",
+      "revision": ""
+    },
+    {
+      "enabled": true,
+      "projectId": "00000000-0000-0000-0000-000000000002",
+      "revision": "v000001"
+    }
+  ]
+};
+
 /** listGraphVersions answering 200. */
 export const listGraphVersions200: WorkerOperationResponse<"listGraphVersions", 200> = {
   "data": [

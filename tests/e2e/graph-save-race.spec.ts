@@ -63,6 +63,7 @@ async function mockGraph(page: Page, options: { delayMs?: number; statuses?: num
     if (path === "/v1/graphs/rna-seq" && method === "GET") {
       return fulfill(route, { id: "rna-seq", name: state.definition.name, path: "/home/graphs/rna-seq/graph.yaml", digest: state.digest, latestVersion: 1, definition: state.definition });
     }
+    if (path === "/v1/graphs/rna-seq/bindings") return fulfill(route, []);
     if (path === "/v1/graphs/rna-seq/versions") {
       return fulfill(route, [{ id: "graph-v1", resourceId: "rna-seq", sourceKind: "graph", version: 1, digest: "sha256:" + "c".repeat(64), publishedAt: now }]);
     }

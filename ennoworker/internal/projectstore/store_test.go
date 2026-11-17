@@ -209,3 +209,46 @@ func TestGraphBindingRejectsMalformedRevision(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "vNNNNNN")
 }
+
+func TestBindingsByGraphPutsRunnableFirst(t *testing.T) {
+	store := &projectstore.Store{Root: t.TempDir()}
+	ctx := context.Background()
+	expected := []struct {
+		revision string
+		enabled  bool
+		graph    string
+	}{
+		{revision: "v000007", enabled: false, graph: "qc"},
+		{revision: "", enabled: true, graph: "qc"},
+		{revision: "v000006", enabled: true, graph: "qc"},
+		{revision: "v000007", enabled: true, graph: "other"},
+	}
+	ids := make([]string, 0, len(expected))
+	for _, binding := range expected {
+		project, _, err := store.CreateWithWorkspace(ctx, domain.CreateProjectInput{
+			Name: "p-" + binding.revision + binding.graph, HostPath: t.TempDir(),
+		})
+		require.NoError(t, err)
+		ids = append(ids, project.ID)
+		_, err = store.UpdateGraphBindings(ctx, project.ID, func(list *[]projectstore.GraphBinding) error {
+			*list = append(*list, projectstore.GraphBinding{
+				SourceKind: projectstore.SourceKindGraph, GraphID: binding.graph,
+				Revision: binding.revision, Enabled: binding.enabled,
+			})
+			return nil
+		})
+		require.NoError(t, err)
+	}
+
+	refs, err := store.BindingsByGraph("qc")
+	require.NoError(t, err)
+	require.Len(t, refs, 3, "another Graph's binding is not this Graph's answer")
+	// Runnable first, then by revision: an enabled binding outranks a disabled one,
+	// and the order must not depend on the random project ids.
+	assert.True(t, refs[0].Enabled)
+	assert.Equal(t, "v000006", refs[0].Revision)
+	assert.True(t, refs[1].Enabled)
+	assert.Equal(t, "", refs[1].Revision)
+	assert.False(t, refs[2].Enabled)
+	assert.Equal(t, "v000007", refs[2].Revision)
+}

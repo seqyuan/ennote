@@ -404,6 +404,28 @@ paths:
                   - $ref: "#/components/schemas/Envelope"
                   - type: object
                     properties: { data: { type: array, items: { $ref: "#/components/schemas/ImmutableFileRevision" } } }
+  /v1/graphs/{graphID}/bindings:
+    parameters:
+      - { name: graphID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listGraphBindings
+      summary: Which Projects reference this Graph, and at which revision
+      description: |
+        The reverse of a Project's own bindings: the editor asks what a Publish
+        actually reaches. A disabled binding is reported too, because "bound but
+        off" and "never bound" are different answers to the reader.
+      responses:
+        "200":
+          description: Graph binding references
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { type: array, items: { $ref: "#/components/schemas/GraphBindingRef" } } }
+        "500": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /v1/graphs/{graphID}/heroes/{heroID}:
     parameters:
       - { name: graphID, in: path, required: true, schema: { type: string } }
@@ -4973,6 +4995,17 @@ components:
           properties:
             digest: { type: string }
             document: { $ref: "#/components/schemas/PortableHeroDocument" }
+    GraphBindingRef:
+      type: object
+      additionalProperties: false
+      required: [projectId, revision, enabled]
+      properties:
+        projectId: { type: string }
+        # Empty is legal and means "no revision pinned": a disabled binding keeps
+        # the empty string it was created with, and the same pattern the Project
+        # binding schema uses keeps the two shapes interchangeable.
+        revision: { type: string, pattern: "^(v[0-9]{6})?$" }
+        enabled: { type: boolean }
     GraphLocalHeroDetail:
       type: object
       additionalProperties: false
