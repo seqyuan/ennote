@@ -125,3 +125,38 @@ export function mergeQueuedOp(prior: QueuedOp | undefined, next: QueuedOp): Queu
   if (prior?.kind !== "task") return next;
   return { ...next, localHero: next.localHero ?? prior.localHero };
 }
+
+/**
+ * diffTaskIDs names the Tasks whose stored value differs between two definitions.
+ *
+ * It backs the conflict bar's "what actually changed" line. Comparing serialised
+ * tasks rather than merging them is deliberate: the reader is being asked to choose
+ * a whole version, so the UI only has to say which Tasks disagree, not how.
+ */
+export function diffTaskIDs(mine: FlowDefinition | null, disk: FlowDefinition | null): string[] {
+  const mineTasks = mine?.tasks ?? {};
+  const diskTasks = disk?.tasks ?? {};
+  const ids = new Set([...Object.keys(mineTasks), ...Object.keys(diskTasks)]);
+  return [...ids]
+    .filter((id) => JSON.stringify(mineTasks[id]) !== JSON.stringify(diskTasks[id]))
+    .sort();
+}
+
+/**
+ * removalNotice is the sentence the confirm dialog shows before a Task is deleted.
+ *
+ * It names the Tasks whose depends would be pruned, because the Worker removes
+ * those edges on the same mutation and the reader should not discover it after the
+ * fact. Kept pure so the phrasing is testable without mounting the dialog.
+ */
+export function removalNotice(definition: FlowDefinition | null, taskID: string): string {
+  const downstream = Object.entries(definition?.tasks ?? {})
+    .filter(([, task]) => (task.depends ?? []).includes(taskID))
+    .map(([id]) => id);
+  if (downstream.length === 0) {
+    return "This removes the task from the graph draft. Published versions are unaffected.";
+  }
+  const listed = downstream.slice(0, 3).map((id) => `“${id}”`).join(", ")
+    + (downstream.length > 3 ? ` and ${downstream.length - 3} more` : "");
+  return `Removing “${taskID}” also removes it from the dependencies of ${listed}. Published versions are unaffected.`;
+}

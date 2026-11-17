@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown, ChevronRight, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { FlowTask } from "@/components/graphs/types";
 
 /**
@@ -59,13 +59,19 @@ function ListField({ id, label, value, placeholder, hint, onChange }: {
  * and no marker; there is no equivalent state here, because an edit is a queue
  * entry rather than a request.
  */
-export function TaskAccordion({ id, task, expanded, onToggle, onChange, onRemove }: {
+export function TaskAccordion({ id, task, expanded, onToggle, onChange, onRemove, heroPanel }: {
   id: string;
   task: FlowTask;
   expanded: boolean;
   onToggle: () => void;
   onChange: (task: FlowTask) => void;
   onRemove: () => void;
+  /**
+   * The Graph-local Hero editor for this Task, when its Hero has one. Passed as a
+   * node rather than as data: the form is presentational and knows nothing about
+   * the Hero endpoints.
+   */
+  heroPanel?: ReactNode;
 }) {
   return (
     <section className="graph-task" data-task-id={id}>
@@ -88,6 +94,7 @@ export function TaskAccordion({ id, task, expanded, onToggle, onChange, onRemove
           <label className="graph-task-goal">Goal
             <textarea value={task.goal ?? ""} onChange={(event) => onChange({ ...task, goal: event.target.value })} />
           </label>
+          {heroPanel}
           <details>
             <summary>Advanced</summary>
             <ListField id={`${id}-writes`} label="Writes" value={task.writes ?? []}

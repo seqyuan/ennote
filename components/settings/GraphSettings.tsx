@@ -3,11 +3,12 @@
 import { Check, Loader2, Plus, Workflow } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GraphBuilderPanel } from "@/components/graphs/GraphBuilderPanel";
+import { AddTaskForm } from "@/components/graphs/AddTaskForm";
 import { GraphSaveBanners } from "@/components/graphs/GraphSaveBanners";
+import { TaskList } from "@/components/graphs/TaskList";
 import { confirmAction } from "@/components/ui/confirm";
 import { GraphDependencies } from "@/components/graphs/GraphDependencies";
 import { GraphTabs } from "@/components/graphs/GraphTabs";
-import { TaskAccordion } from "@/components/graphs/TaskAccordion";
 import {
   modelOptions,
   type FlowDefinition,
@@ -16,7 +17,7 @@ import {
   type GraphSummary,
   type ImmutableFileRevision,
 } from "@/components/graphs/types";
-import { applyOps, mergeQueuedOp, opToBody, sameTarget, type QueuedOp } from "@/lib/graph-ops";
+import { applyOps, diffTaskIDs, mergeQueuedOp, opToBody, removalNotice, sameTarget, type QueuedOp } from "@/lib/graph-ops";
 import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import { apiFetch, isSourceDigestConflict } from "@/lib/worker-api.client";
@@ -66,7 +67,6 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
   useOverlayLayer(createOpen, () => setCreateOpen(false));
   const [newGraph, setNewGraph] = useState({ id: "", name: "" });
   const [addTaskOpen, setAddTaskOpen] = useState(false);
-  const [newTaskId, setNewTaskId] = useState("");
   const [mobileView, setMobileView] = useState<"tasks" | "graph" | "build">("tasks");
   // Pairs with the sequence number in openGraph: a tab switched quickly answers
   // out of order, and only the newest read may write the panel.
@@ -316,18 +316,9 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
   };
 
   const removeTask = async (id: string) => {
-    const definition = draft;
-    const downstreamIds = Object.entries(definition?.tasks ?? {})
-      .filter(([, task]) => (task.depends ?? []).includes(id))
-      .map(([taskId]) => taskId);
-    const listed = downstreamIds.slice(0, 3).map((taskId) => `“${taskId}”`).join(", ")
-      + (downstreamIds.length > 3 ? ` and ${downstreamIds.length - 3} more` : "");
-    const description = downstreamIds.length > 0
-      ? `Removing “${id}” also removes it from the dependencies of ${listed}. Published versions are unaffected.`
-      : "This removes the task from the graph draft. Published versions are unaffected.";
     if (!(await confirmAction({
       title: `Remove Task “${id}”?`,
-      description,
+      description: removalNotice(draft, id),
       confirmLabel: "Remove task",
       tone: "danger",
     }))) return;
@@ -335,13 +326,11 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
     enqueue({ graphId: detail.id, kind: "task", id, value: null });
   };
 
-  const addTask = () => {
-    const id = newTaskId.trim();
-    if (!id || !detail) return;
-    enqueue({ graphId: detail.id, kind: "task", id, value: { hero: `local/${id}`, goal: "Describe the outcome this Task must produce." } });
-    setNewTaskId("");
+  const addTask = (added: { id: string; value: FlowTask; localHero?: Record<string, unknown> }) => {
+    if (!detail) return;
+    enqueue({ graphId: detail.id, kind: "task", id: added.id, value: added.value, localHero: added.localHero });
     setAddTaskOpen(false);
-    setExpanded(id);
+    setExpanded(added.id);
   };
 
   const setTaskDependencies = (taskId: string, depends: string[]) => {
@@ -358,12 +347,11 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
     if (!target) return;
     try {
       const disk = await apiFetch<GraphDetail>(`/v1/graphs/${encodeURIComponent(target.graphId)}`);
-      const diskTasks = disk.definition?.tasks ?? {};
-      const mineTasks = latestDraft.current?.tasks ?? {};
-      const changed = [...new Set([...Object.keys(diskTasks), ...Object.keys(mineTasks)])]
-        .filter((id) => JSON.stringify(diskTasks[id]) !== JSON.stringify(mineTasks[id]))
-        .sort();
-      setDiskPreview({ graphId: target.graphId, name: disk.definition?.name ?? disk.name, changed });
+      setDiskPreview({
+        graphId: target.graphId,
+        name: disk.definition?.name ?? disk.name,
+        changed: diffTaskIDs(latestDraft.current, disk.definition ?? null),
+      });
     } catch (reason) {
       setError((reason as Error).message);
     }
@@ -467,13 +455,25 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
           <main className={`graph-editor-view is-${mobileView}`}>
             <section className="graph-tasks-pane">
               <div className="graph-section-heading"><div><span>Tasks</span><p>Execution configuration. Tasks are collapsed by default.</p></div><button type="button" onClick={() => setAddTaskOpen((value) => !value)}><Plus size={16} /> Add Task</button></div>
-              {addTaskOpen && <div className="graph-add-task"><input value={newTaskId} onChange={(event) => setNewTaskId(event.target.value)} placeholder="task_id" /><button type="button" onClick={addTask}>Add</button></div>}
-              <div className="graph-task-list">
-                {Object.keys(definition.tasks).sort().map((id) => (
-                  <TaskAccordion key={id} id={id} task={definition.tasks[id]} expanded={expanded === id} onToggle={() => setExpanded((value) => value === id ? null : id)} onChange={(task) => updateTask(id, task)} onRemove={() => void removeTask(id)} />
-                ))}
-                {Object.keys(definition.tasks).length === 0 && <div className="graph-empty-state">No Tasks yet. Add one or ask Builder to draft the Graph.</div>}
-              </div>
+              {addTaskOpen && (
+                <AddTaskForm
+                  takenIds={Object.keys(definition.tasks)}
+                  defaultGoal="Describe the outcome this Task must produce."
+                  modelRef={models[0]?.ref ?? ""}
+                  onAdd={addTask}
+                  onCancel={() => setAddTaskOpen(false)}
+                />
+              )}
+              <TaskList
+                graphId={detail.id}
+                definition={definition}
+                expanded={expanded}
+                models={models}
+                setError={setError}
+                onToggle={(id) => setExpanded((value) => value === id ? null : id)}
+                onChange={updateTask}
+                onRemove={(id) => void removeTask(id)}
+              />
             </section>
 
             <section className="graph-dependencies-pane">

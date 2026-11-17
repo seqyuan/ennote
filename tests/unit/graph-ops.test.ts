@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyOps, mergeQueuedOp, opToBody, sameTarget, type QueuedOp } from "@/lib/graph-ops";
+import { applyOps, diffTaskIDs, mergeQueuedOp, opToBody, removalNotice, sameTarget, type QueuedOp } from "@/lib/graph-ops";
 import type { FlowDefinition, FlowTask } from "@/components/graphs/types";
 
 function definition(tasks: Record<string, FlowTask> = {}): FlowDefinition {
@@ -170,5 +170,40 @@ describe("mergeQueuedOp", () => {
       { graphId: "g", kind: "task", id: "producer", value: producer, localHero: { handle: "other" } },
     );
     expect(merged).toMatchObject({ localHero: { handle: "other" } });
+  });
+});
+
+describe("removalNotice", () => {
+  it("says published versions are unaffected when nothing depends on the task", () => {
+    expect(removalNotice(definition({ producer }), "producer"))
+      .toContain("Published versions are unaffected.");
+  });
+
+  it("names the Tasks whose depends the deletion prunes", () => {
+    const notice = removalNotice(definition({
+      producer,
+      reviewer: { hero: "global/reviewer", depends: ["producer"] },
+    }), "producer");
+    expect(notice).toContain("“reviewer”");
+    expect(notice).toContain("removes it from the dependencies");
+  });
+
+  it("summarises a long dependant list instead of listing every id", () => {
+    const tasks: Record<string, FlowTask> = { producer };
+    for (const id of ["a1", "a2", "a3", "a4", "a5"]) tasks[id] = { hero: "global/x", depends: ["producer"] };
+    expect(removalNotice(definition(tasks), "producer")).toContain("and 2 more");
+  });
+});
+
+describe("diffTaskIDs", () => {
+  it("reports added, removed and edited Tasks, sorted", () => {
+    const mine = definition({ producer, reviewer: { hero: "global/r", goal: "mine" } });
+    const disk = definition({ producer: { ...producer, goal: "theirs" }, gate: { type: "check", command: "true" } });
+    expect(diffTaskIDs(mine, disk)).toEqual(["gate", "producer", "reviewer"]);
+  });
+
+  it("reports nothing when the two definitions agree", () => {
+    expect(diffTaskIDs(definition({ producer }), definition({ producer }))).toEqual([]);
+    expect(diffTaskIDs(null, definition({ producer }))).toEqual(["producer"]);
   });
 });
