@@ -281,8 +281,9 @@ func toolResultsOf(t *testing.T, messages []domain.ChatMessage) []domain.ToolRes
 // results slice. Writing survivors at their hook-filtered positions instead left a
 // zero-value ToolResult (empty toolCallId) at the end of the slice, and the loop
 // appended that as a tool message: the next provider request then failed protocol
-// validation, and the blocked call and its surviving neighbour both recorded
-// callIndex 0.
+// validation. The callIndex assertions below only discriminate when the blocked
+// call comes first (see TestHookBlockedFirstCallKeepsBothIndexSpaces); with the
+// survivor first, both index spaces agree.
 func TestPreToolUseBlockKeepsResultsInModelOrder(t *testing.T) {
 	life := preToolUseBashBlock(t)
 	tools := hookBlockTools()
@@ -330,6 +331,36 @@ func TestPreToolUseBlockKeepsResultsInModelOrder(t *testing.T) {
 	assert.Equal(t, "call-read", toolResults[0].ToolCallID)
 	assert.Equal(t, "call-bash", toolResults[1].ToolCallID)
 	require.NoError(t, llm.ValidateToolMessageSequence(run.Messages))
+}
+
+// A blocked call ahead of a survivor is the shape that separates the two index
+// spaces: the survivor is second in the model's batch (callIndex 1) but first in
+// the hook-filtered plans (index 0). Before the fix it recorded 0 while the
+// blocked call recorded 1, so the two owners swapped.
+func TestHookBlockedFirstCallKeepsBothIndexSpaces(t *testing.T) {
+	life := preToolUseBashBlock(t)
+	calls := []domain.ToolCall{
+		{ID: "call-bash", Name: "bash", Arguments: json.RawMessage(`{"command":"rm -rf /"}`)},
+		{ID: "call-read", Name: "read", Arguments: json.RawMessage(`{"path":"a.txt"}`)},
+	}
+
+	writer := &memoryWriter{}
+	loop := &Loop{Tools: hookBlockTools(), Events: writer, HookLife: life, ToolPolicy: &preflightOnlyPolicy{}}
+	results, err := loop.executeToolBatch(context.Background(), "run-blocks", 1, calls)
+	require.NoError(t, err)
+
+	require.Len(t, results, len(calls))
+	assert.Equal(t, "call-bash", results[0].ToolCallID, "the blocked call keeps slot 0")
+	assert.True(t, results[0].IsError)
+	assert.Equal(t, "call-read", results[1].ToolCallID, "the survivor keeps the slot it was called in")
+	assert.False(t, results[1].IsError)
+
+	started := writer.payloads("tool_call_started")
+	require.Len(t, started, 1)
+	assert.Equal(t, float64(1), started[0]["callIndex"], "the survivor is the model's second call")
+	skipped := writer.payloads("tool_call_skipped")
+	require.Len(t, skipped, 1)
+	assert.Equal(t, float64(0), skipped[0]["callIndex"], "the blocked call is the model's first call")
 }
 
 // When every call is blocked the batch is empty, but the results are not: the
@@ -393,6 +424,14 @@ func TestSafeParallelReadGroupUsesOriginalCallIndexesAfterHookFiltering(t *testi
 	require.NoError(t, err)
 
 	require.Len(t, results, len(calls))
+	// Events and results are written by different loops, so pin the results too:
+	// mapping them by group offset instead of originalIndex keeps the event
+	// assertions above green while the transcript slides out of order.
+	assert.Equal(t, "read-a", results[0].ToolCallID)
+	assert.Equal(t, "bash-b", results[1].ToolCallID)
+	assert.True(t, results[1].IsError)
+	assert.Equal(t, "read-c", results[2].ToolCallID)
+	assert.Equal(t, "read-d", results[3].ToolCallID)
 	recorded := make(map[int][]string, len(calls))
 	for _, event := range writer.payloadsOfEveryType() {
 		recorded[event.callIndex] = append(recorded[event.callIndex], event.eventType)
