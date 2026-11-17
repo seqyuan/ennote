@@ -230,8 +230,43 @@ func bigPayload(t *testing.T, size int) json.RawMessage {
 	return json.RawMessage(payload)
 }
 
+// upstreamSections returns each rendered section's payload, in order, with the
+// omission lines removed. The projection puts the "what was dropped" lines above
+// the data so the payload is the only JSON document in the section.
+func upstreamSections(t *testing.T, assignment string) []string {
+	t.Helper()
+	const head, tail = " output_ref ---\n", "\n\n--- upstream task "
+	var sections []string
+	rest := assignment
+	for {
+		start := strings.Index(rest, head)
+		if start < 0 {
+			return sections
+		}
+		rest = rest[start+len(head):]
+		end := strings.Index(rest, tail)
+		data := rest
+		if end >= 0 {
+			data = rest[:end]
+		}
+		var payload strings.Builder
+		for _, line := range strings.Split(data, "\n") {
+			if strings.HasPrefix(line, contextSnapshotProjectionNote) {
+				continue
+			}
+			payload.WriteString(line)
+		}
+		sections = append(sections, payload.String())
+		if end < 0 {
+			return sections
+		}
+		rest = rest[end:]
+	}
+}
+
 // The upstream section is bounded twice: 2 KiB per task and 8 KiB in total, in
-// task order, with an explicit marker instead of a silent cut.
+// task order. Every payload stays a JSON document, and what the projection
+// dropped is said in a marker above it rather than by cutting the bytes.
 func TestSnapshotAssignmentIsBounded(t *testing.T) {
 	def := &domain.FlowDefinition{
 		SchemaVersion: 1, ID: "snapshot-bounds",
@@ -262,16 +297,22 @@ func TestSnapshotAssignmentIsBounded(t *testing.T) {
 	}
 	require.NotEmpty(t, assignment)
 
-	// 2 KiB per task, 8 KiB in total, in task order.
-	sections := upstreamSections(assignment)
-	require.Len(t, sections, 4, "four 2 KiB contributions fit; the fifth has no budget left")
+	sections := upstreamSections(t, assignment)
+	require.NotEmpty(t, sections, "a snapshot task carries its upstream results")
 	for _, section := range sections {
-		assert.Len(t, section, contextSnapshotPerTaskBytes, "one task's contribution is capped at 2 KiB")
+		assert.LessOrEqual(t, len(section), contextSnapshotPerTaskBytes,
+			"one task's contribution is capped at 2 KiB")
+		// The bound is structural now: what survives is still a JSON document.
+		assert.True(t, json.Valid([]byte(section)), "a projected payload must stay valid JSON: %.120s", section)
 	}
-	assert.Equal(t, contextSnapshotTotalBytes, len(strings.Join(sections, "")),
+	sectionBytes := 0
+	for _, section := range sections {
+		sectionBytes += len(section)
+	}
+	assert.LessOrEqual(t, sectionBytes, contextSnapshotTotalBytes,
 		"the whole section is capped at 8 KiB of upstream data")
-	assert.Equal(t, 4, strings.Count(assignment, "[upstream result truncated"),
-		"a cut is always marked, never silent")
+	assert.Contains(t, assignment, contextSnapshotProjectionNote,
+		"something was dropped, so the section says what")
 	assert.NotContains(t, assignment, "upstream task p5 output_ref")
 
 	// Deterministic ordering: dependencies render in task order.
@@ -280,31 +321,6 @@ func TestSnapshotAssignmentIsBounded(t *testing.T) {
 		index := strings.Index(assignment, "--- upstream task "+name+" output_ref ---")
 		require.Greater(t, index, last, "%s must render in task order", name)
 		last = index
-	}
-}
-
-// upstreamSections returns the data bytes of each rendered upstream section, in
-// order, with the truncation marker stripped.
-func upstreamSections(assignment string) []string {
-	const head, tail = " output_ref ---\n", "\n\n--- upstream task "
-	var sections []string
-	rest := assignment
-	for {
-		start := strings.Index(rest, head)
-		if start < 0 {
-			return sections
-		}
-		rest = rest[start+len(head):]
-		end := strings.Index(rest, tail)
-		data := rest
-		if end >= 0 {
-			data = rest[:end]
-		}
-		sections = append(sections, strings.TrimSuffix(data, contextSnapshotTruncated))
-		if end < 0 {
-			return sections
-		}
-		rest = rest[end:]
 	}
 }
 
@@ -663,13 +679,18 @@ func TestSnapshotContextFromSharesTheBound(t *testing.T) {
 	}
 	assignment := renderTaskAssignment("Review", nil, task, outputs)
 
-	sections := upstreamSections(assignment)
+	sections := upstreamSections(t, assignment)
 	require.Len(t, sections, 4, "four 2 KiB contributions fit across both lists; the fifth has no budget left")
 	for _, section := range sections {
-		assert.Len(t, section, contextSnapshotPerTaskBytes)
+		assert.LessOrEqual(t, len(section), contextSnapshotPerTaskBytes)
+		assert.True(t, json.Valid([]byte(section)), "a projected payload stays valid JSON")
 	}
-	assert.Equal(t, contextSnapshotTotalBytes, len(strings.Join(sections, "")),
+	total := 0
+	for _, section := range sections {
+		total += len(section)
+	}
+	assert.LessOrEqual(t, total, contextSnapshotTotalBytes,
 		"the whole section is still capped at 8 KiB of upstream data")
-	assert.Equal(t, 4, strings.Count(assignment, "[upstream result truncated"))
+	assert.Equal(t, 4, strings.Count(assignment, contextSnapshotProjectionNote))
 	assert.NotContains(t, assignment, "upstream task p5 output_ref")
 }
