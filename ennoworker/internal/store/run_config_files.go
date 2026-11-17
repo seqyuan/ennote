@@ -678,6 +678,11 @@ func resolveChildPermissionCeiling(parentMode, heroCeiling domain.PermissionMode
 // Run's parent. A delegated child is only created after its parent froze an
 // effective config, so a missing or unreadable snapshot is an inconsistent
 // child state rather than a reason to fall back to the looser Hero ceiling.
+//
+// The one parent that never froze a tool policy is a Graph flow anchor: it is an
+// orchestration vehicle with no agent loop, so it has no permission mode for a
+// child to converge on. parentToolPolicyMode states that instead of decoding an
+// empty snapshot.
 func parentFrozenToolPolicyModeTx(ctx context.Context, tx *sql.Tx, parentRunID string) (domain.PermissionMode, error) {
 	var effectiveJSON string
 	if err := tx.QueryRowContext(ctx, `SELECT effective_config_json FROM agent_runs WHERE id=?`, parentRunID).
@@ -694,12 +699,11 @@ func parentFrozenToolPolicyModeTx(ctx context.Context, tx *sql.Tx, parentRunID s
 		return "", domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
 			fmt.Errorf("decode parent Run effective config: %w", err))
 	}
-	var toolPolicy domain.ToolPolicyConfig
-	if err := json.Unmarshal(effective.ToolPolicy.Config, &toolPolicy); err != nil {
-		return "", domain.NewCodedError(domain.ErrorProviderConfigurationInvalid,
-			fmt.Errorf("decode parent Run tool policy: %w", err))
+	anchor, err := flowAnchorParentTx(ctx, tx, parentRunID)
+	if err != nil {
+		return "", err
 	}
-	return domain.PermissionMode(toolPolicy.Mode), nil
+	return parentToolPolicyMode(anchor, effective.ToolPolicy.Config)
 }
 
 func freezeFileDelegationPolicyTx(ctx context.Context, tx *sql.Tx, policies *fileconfig.PolicyStore, runID string) (*domain.DelegationPolicySnapshot, error) {
