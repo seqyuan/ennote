@@ -335,8 +335,9 @@ func TestPreToolUseBlockKeepsResultsInModelOrder(t *testing.T) {
 
 // A blocked call ahead of a survivor is the shape that separates the two index
 // spaces: the survivor is second in the model's batch (callIndex 1) but first in
-// the hook-filtered plans (index 0). Before the fix it recorded 0 while the
-// blocked call recorded 1, so the two owners swapped.
+// the hook-filtered plans (index 0). Before the fix the survivor recorded 0 as
+// well, so both calls claimed the batch's first slot and the second slot held no
+// result at all.
 func TestHookBlockedFirstCallKeepsBothIndexSpaces(t *testing.T) {
 	life := preToolUseBashBlock(t)
 	calls := []domain.ToolCall{
@@ -426,7 +427,7 @@ func TestSafeParallelReadGroupUsesOriginalCallIndexesAfterHookFiltering(t *testi
 	require.Len(t, results, len(calls))
 	// Events and results are written by different loops, so pin the results too:
 	// mapping them by group offset instead of originalIndex keeps the event
-	// assertions above green while the transcript slides out of order.
+	// assertions below green while the transcript slides out of order.
 	assert.Equal(t, "read-a", results[0].ToolCallID)
 	assert.Equal(t, "bash-b", results[1].ToolCallID)
 	assert.True(t, results[1].IsError)

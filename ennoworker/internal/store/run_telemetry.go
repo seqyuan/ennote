@@ -81,7 +81,10 @@ func (r *RunRepo) buildRunTelemetryTx(ctx context.Context, tx *sql.Tx, runID, ti
 	}
 
 	// Max context utilization: parse the frozen effective config's context
-	// window and use peak billed input / window. Best-effort; 0 when unknown.
+	// window and use peak billed input / window. Best-effort on purpose: this is a
+	// derived ratio with a usable fallback (0), not a field a consumer can be
+	// misled by, so a read or decode failure here does not degrade the payload the
+	// way a failed started_at read does.
 	var windowText string
 	if err := tx.QueryRowContext(ctx, `SELECT effective_config_json FROM agent_runs WHERE id = ?`, runID).Scan(&windowText); err == nil && windowText != "" {
 		var effective domain.EffectiveRunConfig

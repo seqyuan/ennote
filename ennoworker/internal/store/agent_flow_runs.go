@@ -132,9 +132,9 @@ func (r *AgentFlowRunRepo) CreateFlowRun(ctx context.Context, input CreateFlowRu
 	// for delegation children, events, and SSE. The anchor freezes a model
 	// profile id so child Runs with mode=inherit resolve their model from the
 	// parent (the delegation substrate contract), matching the production
-	// parent effective-config semantics. started_at is written here rather than
-	// left to a claim: the anchor is born running, and run_telemetry derives a
-	// flow's duration from it.
+	// parent effective-config semantics. The anchor is born running, so it records
+	// its start here instead of taking a claim: a row with an end and no beginning
+	// is not a self-consistent Run.
 	var modelProfileID string
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(default_model_profile_id, '') FROM sessions WHERE id=?`,
 		input.SessionID).Scan(&modelProfileID); err != nil {

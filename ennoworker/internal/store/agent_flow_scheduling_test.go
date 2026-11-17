@@ -58,8 +58,12 @@ func TestFlowAnchorRunRecordsItsStart(t *testing.T) {
 	var startedAt sql.NullString
 	require.NoError(t, flowRuns.DB.QueryRow(`SELECT started_at FROM agent_runs WHERE id = ?`, runID).Scan(&startedAt))
 	require.True(t, startedAt.Valid, "a flow anchor starts when it is created")
+
+	var createdAt string
+	require.NoError(t, flowRuns.DB.QueryRow(`SELECT created_at FROM agent_runs WHERE id = ?`, runID).Scan(&createdAt))
+	assert.Equal(t, createdAt, startedAt.String, "the anchor starts when it is created, not when it is claimed")
 	_, err := time.Parse(time.RFC3339Nano, startedAt.String)
-	require.NoError(t, err, "started_at must be the same RFC3339Nano stamp as every other Run")
+	require.NoError(t, err, "started_at uses the same stamp family as every other Run")
 }
 
 // `optional` is frozen onto the node row, and a fresh node has spent no attempt.
