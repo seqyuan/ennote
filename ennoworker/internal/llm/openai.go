@@ -330,6 +330,14 @@ func toOpenAIMessages(messages []domain.ChatMessage) ([]openAIMessage, error) {
 	return result, nil
 }
 
+// ValidateToolMessageSequence exposes the chat-completions tool-call protocol
+// check to callers outside this package. The providers call it before every
+// request; the agent package uses it to prove that the tool messages it just
+// built for a model batch are acceptable to that same check.
+func ValidateToolMessageSequence(messages []domain.ChatMessage) error {
+	return validateOpenAIToolMessageSequence(messages)
+}
+
 // validateOpenAIToolMessageSequence enforces the chat-completions protocol
 // before making a network request. Every tool result must immediately follow
 // the assistant tool_calls message and reference one of its LLM-assigned IDs.

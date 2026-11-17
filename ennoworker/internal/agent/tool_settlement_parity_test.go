@@ -223,7 +223,7 @@ func TestToolSettlementTerminationCodeBeatsApprovalDecisionCode(t *testing.T) {
 		AttemptCount: 1, Kind: domain.ToolCancelled, Cause: context.Canceled,
 	}
 
-	_, stop, err := loop.settleToolPlan(context.Background(), "run-approval-cancel", 1, 0, "record-0", plan, outcome)
+	_, stop, err := loop.settleToolPlan(context.Background(), "run-approval-cancel", 1, "record-0", plan, outcome)
 
 	require.NoError(t, err)
 	assert.False(t, stop)

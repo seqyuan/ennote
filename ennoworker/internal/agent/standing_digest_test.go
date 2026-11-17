@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -71,23 +72,26 @@ func TestApprovalDigestV2SurvivesCheckpointJSONRoundTrip(t *testing.T) {
 func TestStandingAuthorizationSnapshotCapturesReleasedCalls(t *testing.T) {
 	plans := []plannedToolCall{
 		{ // released by standing rule — must be captured
-			original:  domain.ToolCall{ID: "a", Name: "web_fetch"},
-			effective: domain.ToolCall{ID: "a", Name: "web_fetch"},
+			originalIndex: 0,
+			original:      domain.ToolCall{ID: "a", Name: "web_fetch"},
+			effective:     domain.ToolCall{ID: "a", Name: "web_fetch"},
 			decision: ToolDecision{Action: ToolAllow, RiskClass: domain.RiskExternal, RuleID: "r1",
 				StandingScopeKind: "origin", StandingScopeVersion: 1, StandingScopeKey: "https://a.com:443"},
 			allowed: true,
 		},
 		{ // still requiring approval — must NOT be captured
+			originalIndex:    1,
 			original:         domain.ToolCall{ID: "b", Name: "web_fetch"},
 			effective:        domain.ToolCall{ID: "b", Name: "web_fetch"},
 			decision:         ToolDecision{Action: ToolRequireApproval, RiskClass: domain.RiskExternal},
 			requiresApproval: true,
 		},
 		{ // read-only allowed — must NOT be captured
-			original:  domain.ToolCall{ID: "c", Name: "read"},
-			effective: domain.ToolCall{ID: "c", Name: "read"},
-			decision:  ToolDecision{Action: ToolAllow, RiskClass: domain.RiskReadOnly},
-			allowed:   true,
+			originalIndex: 2,
+			original:      domain.ToolCall{ID: "c", Name: "read"},
+			effective:     domain.ToolCall{ID: "c", Name: "read"},
+			decision:      ToolDecision{Action: ToolAllow, RiskClass: domain.RiskReadOnly},
+			allowed:       true,
 		},
 	}
 
@@ -103,16 +107,21 @@ func TestStandingAuthorizationSnapshotCapturesReleasedCalls(t *testing.T) {
 // never leak the canonical scope key.
 func TestAttachStandingScopes(t *testing.T) {
 	resolver := &fakeScopeResolver{}
+	// originalIndex is part of a plan's identity: the callIndex that leaves the
+	// dispatcher is the position in the model's batch, not the position in this
+	// hook-filtered slice.
 	plans := []plannedToolCall{
 		{
-			original:  domain.ToolCall{ID: "x", Name: "web_fetch", Arguments: json.RawMessage(`{"url":"https://example.com/"}`)},
-			effective: domain.ToolCall{ID: "x", Name: "web_fetch", Arguments: json.RawMessage(`{"url":"https://example.com/"}`)},
-			decision:  ToolDecision{Action: ToolRequireApproval, RiskClass: domain.RiskExternal}, requiresApproval: true,
+			originalIndex: 0,
+			original:      domain.ToolCall{ID: "x", Name: "web_fetch", Arguments: json.RawMessage(`{"url":"https://example.com/"}`)},
+			effective:     domain.ToolCall{ID: "x", Name: "web_fetch", Arguments: json.RawMessage(`{"url":"https://example.com/"}`)},
+			decision:      ToolDecision{Action: ToolRequireApproval, RiskClass: domain.RiskExternal}, requiresApproval: true,
 		},
 		{
-			original:  domain.ToolCall{ID: "y", Name: "write", Arguments: json.RawMessage(`{"path":"a"}`)},
-			effective: domain.ToolCall{ID: "y", Name: "write", Arguments: json.RawMessage(`{"path":"a"}`)},
-			decision:  ToolDecision{Action: ToolRequireApproval, RiskClass: domain.RiskLocalWrite}, requiresApproval: true,
+			originalIndex: 1,
+			original:      domain.ToolCall{ID: "y", Name: "write", Arguments: json.RawMessage(`{"path":"a"}`)},
+			effective:     domain.ToolCall{ID: "y", Name: "write", Arguments: json.RawMessage(`{"path":"a"}`)},
+			decision:      ToolDecision{Action: ToolRequireApproval, RiskClass: domain.RiskLocalWrite}, requiresApproval: true,
 		},
 	}
 	items := approvalItems(plans, nil)
@@ -137,4 +146,38 @@ func (f *fakeScopeResolver) ResolveStandingApprovalScope(toolName string, argume
 		Key:     "https://example.com:443",
 		Display: "example.com (all paths)",
 	}, true, nil
+}
+
+type fakeStandingMatcher struct{}
+
+func (fakeStandingMatcher) MatchActive(context.Context, string, []domain.StandingScopeRef) (map[domain.StandingScopeRef]domain.StandingApproval, error) {
+	return nil, nil
+}
+
+// A frozen standing grant names a call by its position in the model's batch. On
+// resume a PreToolUse hook may block that batch's earlier calls again, so the
+// surviving plan is not at that position in the compacted plans slice: replay
+// must find the plan by originalIndex, or the resumed Run re-asks for an approval
+// the user already granted.
+func TestStandingSnapshotReplayFindsTheCallByOriginalIndex(t *testing.T) {
+	loop := &Loop{
+		ToolPolicy:            permissionPolicy(t, domain.ToolPolicyConfig{Mode: string(domain.PermissionAsk)}),
+		StandingApprovals:     fakeStandingMatcher{},
+		StandingScopeResolver: &fakeScopeResolver{},
+		StandingAuthorizationSnapshot: []domain.StandingAuthorizationSnapshot{{
+			CallIndex: 1, ToolCallID: "call-web", ToolName: "web_fetch", ScopeKind: "origin",
+			ScopeVersion: 1, ScopeKey: "https://example.com:443", RuleID: "rule-1",
+		}},
+	}
+	// The model's batch was [read, web_fetch] and the hook blocked the read, so the
+	// single surviving plan sits at plans[0] while belonging to originalIndex 1.
+	calls := []domain.ToolCall{{ID: "call-web", Name: "web_fetch", Arguments: json.RawMessage(`{"url":"https://example.com/"}`)}}
+	plans, terminate, err := loop.planToolBatch(context.Background(), "run-resume", 1, calls, []int{1})
+
+	require.NoError(t, err)
+	assert.False(t, terminate)
+	require.Len(t, plans, 1)
+	assert.True(t, plans[0].allowed, "the frozen grant must be replayed onto the call it was granted for")
+	assert.Equal(t, "rule-1", plans[0].decision.RuleID)
+	assert.Equal(t, "call-web", plans[0].original.ID)
 }

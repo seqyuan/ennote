@@ -123,12 +123,12 @@ func approvalBatchDigest(plans []plannedToolCall, policy domain.PolicySnapshot, 
 // calls already released by the standing gate carry a non-empty RuleID.
 func standingAuthorizationSnapshot(plans []plannedToolCall) []domain.StandingAuthorizationSnapshot {
 	var snapshots []domain.StandingAuthorizationSnapshot
-	for index, plan := range plans {
+	for _, plan := range plans {
 		if plan.decision.RuleID == "" {
 			continue
 		}
 		snapshots = append(snapshots, domain.StandingAuthorizationSnapshot{
-			CallIndex:    index,
+			CallIndex:    plan.originalIndex,
 			ToolCallID:   plan.effective.ID,
 			ToolName:     plan.effective.Name,
 			ScopeKind:    plan.decision.StandingScopeKind,
@@ -144,7 +144,7 @@ func approvalItems(plans []plannedToolCall, policy ToolPolicy) []domain.Approval
 	items := make([]domain.ApprovalItem, 0)
 	previewer, _ := policy.(approvalPreviewer)
 	delegationPreviewer, _ := policy.(delegationApprovalPreviewer)
-	for index, plan := range plans {
+	for _, plan := range plans {
 		if !plan.requiresApproval {
 			continue
 		}
@@ -152,7 +152,7 @@ func approvalItems(plans []plannedToolCall, policy ToolPolicy) []domain.Approval
 		if previewer != nil {
 			preview = previewer.ApprovalPreview(plan.effective)
 		}
-		item := domain.ApprovalItem{CallIndex: index, ToolCallID: plan.original.ID,
+		item := domain.ApprovalItem{CallIndex: plan.originalIndex, ToolCallID: plan.original.ID,
 			ToolName: plan.effective.Name, RiskClass: plan.decision.RiskClass, ArgumentsPreview: preview}
 		if delegationPreviewer != nil && domain.IsDelegationToolName(plan.effective.Name) {
 			item.Delegations = delegationPreviewer.DelegationApprovalPreview(plan.effective)
@@ -170,11 +170,11 @@ func attachStandingScopes(items []domain.ApprovalItem, plans []plannedToolCall,
 		return
 	}
 	for i := range items {
-		index := items[i].CallIndex
-		if index < 0 || index >= len(plans) {
+		planIndex := planIndexOf(plans, items[i].CallIndex)
+		if planIndex < 0 {
 			continue
 		}
-		plan := plans[index]
+		plan := plans[planIndex]
 		if plan.decision.RiskClass != domain.RiskExternal {
 			continue
 		}

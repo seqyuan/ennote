@@ -470,6 +470,11 @@ func (l *Loop) Run(ctx context.Context, input RunInput) (RunResult, error) {
 		hasToolCalls := len(completion.ToolCalls) > 0
 		stopAfterToolBatch := false
 		var toolResults []domain.ToolResult
+		// submit_result is intercepted before executeToolBatchWithPolicy, so it
+		// never enters preflightToolBatch: the PreToolUse hooks and ToolPolicy do
+		// not see this tool, and the started/completed events below are recorded
+		// here instead of by the dispatcher. The terminal contract is gated
+		// separately by interceptSubmitResult.
 		if hasToolCalls && l.SubmitResultGate != nil {
 			result, intercepted, err := interceptSubmitResult(completion.ToolCalls)
 			if intercepted {

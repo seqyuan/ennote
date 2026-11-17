@@ -13,11 +13,48 @@ import (
 )
 
 type plannedToolCall struct {
+	// originalIndex is the call's position in the model's tool_calls batch. It is
+	// the one callIndex that leaves the dispatcher (tool events, approval items,
+	// standing snapshots, the results slice), because it is the only identity a
+	// PreToolUse hook cannot renumber by blocking a neighbour. preflightToolBatch
+	// builds plans compacted by those blocks, so a plan's own position in plans
+	// is a grouping detail, never an index.
+	originalIndex    int
 	original         domain.ToolCall
 	effective        domain.ToolCall
 	decision         ToolDecision
 	allowed          bool
 	requiresApproval bool
+}
+
+// blockedToolResult is a call a PreToolUse hook refused before the batch ran.
+// The call still owes the model a tool result: the transcript keeps the
+// assistant tool_calls message, so a missing result for one of its IDs makes the
+// next provider request fail protocol validation.
+type blockedToolResult struct {
+	originalIndex int
+	result        domain.ToolResult
+}
+
+// toolBatchPreflight is one model batch after the PreToolUse hooks and
+// ToolPolicy ran: the surviving plans, the results already settled for blocked
+// calls, and whether policy terminated the batch.
+type toolBatchPreflight struct {
+	plans     []plannedToolCall
+	blocked   []blockedToolResult
+	terminate bool
+}
+
+// planIndexOf returns the position in plans of the call that occupied
+// originalIndex in the model's batch, or -1 when that call never reached a plan
+// (a PreToolUse hook blocked it, or it was never in the batch).
+func planIndexOf(plans []plannedToolCall, originalIndex int) int {
+	for index := range plans {
+		if plans[index].originalIndex == originalIndex {
+			return index
+		}
+	}
+	return -1
 }
 
 func (l *Loop) executeToolBatch(ctx context.Context, runID string, iteration int, calls []domain.ToolCall) ([]domain.ToolResult, error) {
@@ -34,20 +71,26 @@ func (l *Loop) executeToolBatchWithPolicy(ctx context.Context, runID string, ite
 	if mode != "sequential" && mode != "safe_parallel" {
 		return nil, false, domain.NewCodedError(domain.ErrorToolBatchFailed, fmt.Errorf("invalid tool execution mode %q", mode))
 	}
-	plans, terminate, err := l.preflightToolBatch(ctx, runID, iteration, calls)
+	preflight, err := l.preflightToolBatch(ctx, runID, iteration, calls)
 	if err != nil {
 		return nil, false, err
 	}
+	plans, terminate := preflight.plans, preflight.terminate
+	// results is indexed by the call's position in the model's batch, so a call a
+	// PreToolUse hook blocked keeps its own slot next to the calls that ran.
 	results := make([]domain.ToolResult, len(calls))
+	for _, blocked := range preflight.blocked {
+		results[blocked.originalIndex] = blocked.result
+	}
 	if terminate {
-		for index, plan := range plans {
+		for _, plan := range plans {
 			decision := plan.decision
 			if decision.Action != ToolTerminateBatch {
 				decision = ToolDecision{Action: ToolTerminateBatch, Code: "batch_terminated", Reason: "tool batch terminated by policy"}
 			}
 			result := policyDeniedResult(plan.original, decision.Reason)
-			results[index] = result
-			if err := l.recordToolSkipped(ctx, runID, iteration, index, plan.original, result, decision.Reason,
+			results[plan.originalIndex] = result
+			if err := l.recordToolSkipped(ctx, runID, iteration, plan.originalIndex, plan.original, result, decision.Reason,
 				l.policyMetadata(decision, false)); err != nil {
 				return results, false, err
 			}
@@ -91,7 +134,7 @@ func (l *Loop) executeToolBatchWithPolicy(ctx context.Context, runID string, ite
 		if len(resolutions) == 0 {
 			var candidates []domain.StandingGrantCandidate
 			// Collect standing candidates for require_approval + external calls.
-			for index, plan := range plans {
+			for _, plan := range plans {
 				if !plan.requiresApproval || plan.decision.RiskClass != domain.RiskExternal {
 					continue
 				}
@@ -99,7 +142,7 @@ func (l *Loop) executeToolBatchWithPolicy(ctx context.Context, runID string, ite
 					scope, ok, _ := l.StandingScopeResolver.ResolveStandingApprovalScope(plan.effective.Name, plan.effective.Arguments)
 					if ok {
 						candidates = append(candidates, domain.StandingGrantCandidate{
-							CallIndex:    index,
+							CallIndex:    plan.originalIndex,
 							ToolCallID:   plan.effective.ID,
 							ToolName:     plan.effective.Name,
 							ScopeKind:    scope.Kind,
@@ -146,13 +189,13 @@ func (l *Loop) executeToolBatchWithPolicy(ctx context.Context, runID string, ite
 		}
 	}
 
-	for index, plan := range plans {
+	for _, plan := range plans {
 		if plan.allowed {
 			continue
 		}
 		result := policyDeniedResult(plan.original, plan.decision.Reason)
-		results[index] = result
-		if err := l.recordToolSkipped(ctx, runID, iteration, index, plan.original, result, plan.decision.Reason,
+		results[plan.originalIndex] = result
+		if err := l.recordToolSkipped(ctx, runID, iteration, plan.originalIndex, plan.original, result, plan.decision.Reason,
 			l.policyMetadata(plan.decision, false)); err != nil {
 			return results, false, err
 		}
@@ -171,23 +214,25 @@ func (l *Loop) executeToolBatchWithPolicy(ctx context.Context, runID string, ite
 	}
 
 	stopAfterBatch := false
+	// index walks plans (grouping adjacent read-only calls); every result is
+	// stored at plan.originalIndex so the batch keeps the model's call order.
 	for index := 0; index < len(plans); {
 		if !plans[index].allowed {
 			index++
 			continue
 		}
 		if result, ok := precomputed[index]; ok {
-			if err := l.completePrecomputedToolCall(ctx, runID, iteration, index, plans[index], result); err != nil {
-				results[index] = result
+			if err := l.completePrecomputedToolCall(ctx, runID, iteration, plans[index], result); err != nil {
+				results[plans[index].originalIndex] = result
 				return results, stopAfterBatch, err
 			}
-			results[index] = result
+			results[plans[index].originalIndex] = result
 			index++
 			continue
 		}
 		if mode == "sequential" || l.executionClass(plans[index].effective.Name) != domain.ExecutionReadOnly {
-			result, stop, err := l.executeOneToolPlan(ctx, runID, iteration, index, plans[index])
-			results[index] = result
+			result, stop, err := l.executeOneToolPlan(ctx, runID, iteration, plans[index])
+			results[plans[index].originalIndex] = result
 			stopAfterBatch = stopAfterBatch || stop
 			if err != nil {
 				return results, stopAfterBatch, err
@@ -199,8 +244,11 @@ func (l *Loop) executeToolBatchWithPolicy(ctx context.Context, runID string, ite
 		for end < len(plans) && plans[end].allowed && l.executionClass(plans[end].effective.Name) == domain.ExecutionReadOnly {
 			end++
 		}
-		groupResults, stop, err := l.executeReadPlanGroup(ctx, runID, iteration, index, plans[index:end])
-		copy(results[index:end], groupResults)
+		group := plans[index:end]
+		groupResults, stop, err := l.executeReadPlanGroup(ctx, runID, iteration, group)
+		for offset, result := range groupResults {
+			results[group[offset].originalIndex] = result
+		}
 		stopAfterBatch = stopAfterBatch || stop
 		if err != nil {
 			return results, stopAfterBatch, err
@@ -305,27 +353,33 @@ func denyQuestionPlan(plan *plannedToolCall, code, reason string) {
 	plan.decision = ToolDecision{Action: ToolDeny, Code: code, Reason: reason, RiskClass: plan.decision.RiskClass}
 }
 
-func (l *Loop) completePrecomputedToolCall(ctx context.Context, runID string, iteration, index int,
+func (l *Loop) completePrecomputedToolCall(ctx context.Context, runID string, iteration int,
 	plan plannedToolCall, result domain.ToolResult) error {
 	startID := uuid.NewString()
 	if err := l.recordToolStarted(ctx, domain.ToolCallStart{
-		ID: startID, RunID: runID, Iteration: iteration, CallIndex: index, Call: plan.original,
+		ID: startID, RunID: runID, Iteration: iteration, CallIndex: plan.originalIndex, Call: plan.original,
 	}); err != nil {
 		return err
 	}
 	return l.recordToolCompleted(ctx, domain.ToolCallFinish{
-		ID: startID, RunID: runID, Iteration: iteration, CallIndex: index,
+		ID: startID, RunID: runID, Iteration: iteration, CallIndex: plan.originalIndex,
 		Call: plan.original, Result: result, Status: "completed", AttemptCount: 1,
 	})
 }
 
-func (l *Loop) preflightToolBatch(ctx context.Context, runID string, iteration int, calls []domain.ToolCall) ([]plannedToolCall, bool, error) {
+func (l *Loop) preflightToolBatch(ctx context.Context, runID string, iteration int, calls []domain.ToolCall) (toolBatchPreflight, error) {
 	// PreToolUse hooks run BEFORE ToolPolicy: they may block a call (recorded
 	// as skipped) or rewrite its arguments. Rewritten arguments flow through
 	// the full ToolPolicy + approval path below, so a hook can never smuggle
 	// schema-invalid or approval-worthy arguments past the policy gate.
+	originalIndexes := make([]int, len(calls))
+	for index := range calls {
+		originalIndexes[index] = index
+	}
+	var blocked []blockedToolResult
 	if l.HookLife != nil {
 		filtered := make([]domain.ToolCall, 0, len(calls))
+		keptIndexes := make([]int, 0, len(calls))
 		for index, call := range calls {
 			dec := l.HookLife.PreToolUse(ctx, call.Name, call.Arguments)
 			if dec.Block {
@@ -333,37 +387,55 @@ func (l *Loop) preflightToolBatch(ctx context.Context, runID string, iteration i
 				if reason == "" {
 					reason = "tool " + call.Name + " blocked by PreToolUse hook"
 				}
-				result := domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name, Content: reason, IsError: true}
+				result := domain.ToolResult{ToolCallID: call.ID, ToolName: call.Name,
+					Content: "hook_blocked: " + reason, IsError: true}
 				metadata := l.policyMetadata(ToolDecision{Action: ToolDeny, Code: "hook_blocked", Reason: reason}, false)
 				if err := l.recordToolSkipped(ctx, runID, iteration, index, call, result, "hook_blocked", metadata); err != nil {
-					return nil, false, err
+					return toolBatchPreflight{}, err
 				}
+				blocked = append(blocked, blockedToolResult{originalIndex: index, result: result})
 				continue
 			}
 			if len(dec.UpdatedInput) > 0 {
 				call.Arguments = append(json.RawMessage(nil), dec.UpdatedInput...)
 				// Validate the rewritten args before they reach ToolPolicy.
 				if err := l.validateToolArguments(call); err != nil {
-					return nil, false, domain.NewCodedError(domain.ErrorToolPolicyFailed,
+					return toolBatchPreflight{}, domain.NewCodedError(domain.ErrorToolPolicyFailed,
 						fmt.Errorf("hook rewritten arguments for %s failed schema validation: %w", call.Name, err))
 				}
 			}
 			filtered = append(filtered, call)
+			keptIndexes = append(keptIndexes, index)
 		}
 		// Always replace the batch with the hook-processed list: even a rewrite
 		// changes the argument bytes, so the original `calls` slice is stale.
 		calls = filtered
+		originalIndexes = keptIndexes
+		// A fully blocked batch still owes each call its own result; only the
+		// planning below skips it.
 		if len(calls) == 0 {
-			return nil, false, nil
+			return toolBatchPreflight{blocked: blocked}, nil
 		}
 	}
 
+	plans, terminate, err := l.planToolBatch(ctx, runID, iteration, calls, originalIndexes)
+	if err != nil {
+		return toolBatchPreflight{}, err
+	}
+	return toolBatchPreflight{plans: plans, blocked: blocked, terminate: terminate}, nil
+}
+
+// planToolBatch runs ToolPolicy and the standing-approval gate over the calls
+// that survived PreToolUse. originalIndexes keeps each call's position in the
+// model's batch, which is the callIndex the plan carries from here on.
+func (l *Loop) planToolBatch(ctx context.Context, runID string, iteration int, calls []domain.ToolCall,
+	originalIndexes []int) ([]plannedToolCall, bool, error) {
 	execs := make([]*ToolExecution, len(calls))
 	for index, call := range calls {
 		execs[index] = &ToolExecution{
 			RunID:       runID,
 			Iteration:   iteration,
-			CallIndex:   index,
+			CallIndex:   originalIndexes[index],
 			Original:    call,
 			Effective:   call,
 			Policy:      l.ToolPolicySnapshot,
@@ -414,7 +486,7 @@ func (l *Loop) preflightToolBatch(ctx context.Context, runID string, iteration i
 		if decision.Action == "" {
 			decision.Action = ToolAllow
 		}
-		plan := plannedToolCall{original: call, effective: call, decision: decision}
+		plan := plannedToolCall{originalIndex: originalIndexes[index], original: call, effective: call, decision: decision}
 		if len(plan.effective.Arguments) == 0 {
 			plan.effective.Arguments = json.RawMessage(`{}`)
 		}
@@ -488,10 +560,11 @@ func (l *Loop) preflightToolBatch(ctx context.Context, runID string, iteration i
 				seenCallID[snap.ToolCallID] = true
 			}
 			for _, snap := range l.StandingAuthorizationSnapshot {
-				if snap.CallIndex >= len(plans) {
+				planIndex := planIndexOf(plans, snap.CallIndex)
+				if planIndex < 0 {
 					continue
 				}
-				plan := &plans[snap.CallIndex]
+				plan := &plans[planIndex]
 				if !plan.requiresApproval || plan.decision.RiskClass != domain.RiskExternal {
 					continue
 				}
@@ -554,28 +627,31 @@ func (l *Loop) preflightToolBatch(ctx context.Context, runID string, iteration i
 }
 
 func (l *Loop) executeOneTool(ctx context.Context, runID string, iteration, callIndex int, call domain.ToolCall) (domain.ToolResult, error) {
-	result, _, err := l.executeOneToolPlan(ctx, runID, iteration, callIndex,
-		plannedToolCall{original: call, effective: call, decision: ToolDecision{Action: ToolAllow}, allowed: true})
+	result, _, err := l.executeOneToolPlan(ctx, runID, iteration,
+		plannedToolCall{originalIndex: callIndex, original: call, effective: call,
+			decision: ToolDecision{Action: ToolAllow}, allowed: true})
 	return result, err
 }
 
-func (l *Loop) executeOneToolPlan(ctx context.Context, runID string, iteration, callIndex int, plan plannedToolCall) (domain.ToolResult, bool, error) {
+func (l *Loop) executeOneToolPlan(ctx context.Context, runID string, iteration int, plan plannedToolCall) (domain.ToolResult, bool, error) {
 	recordID := uuid.NewString()
 
-	start := l.toolCallStart(recordID, runID, iteration, callIndex, plan)
+	start := l.toolCallStart(recordID, runID, iteration, plan)
 	if err := l.recordToolStarted(ctx, start); err != nil {
 		return domain.ToolResult{}, false, err
 	}
 	outcome := l.executeToolAttempts(ctx, runID, plan.effective)
-	return l.settleToolPlan(ctx, runID, iteration, callIndex, recordID, plan, outcome)
+	return l.settleToolPlan(ctx, runID, iteration, recordID, plan, outcome)
 }
 
 // settleToolPlan is the single producer of a settled tool outcome; the mode decides
 // how an outcome is obtained, never how it settles. The no-execution transcript paths
 // (completePrecomputedToolCall, submit_result in loop.go) record their own completion.
-func (l *Loop) settleToolPlan(ctx context.Context, runID string, iteration, callIndex int, recordID string,
+// Every event it records belongs to plan.originalIndex.
+func (l *Loop) settleToolPlan(ctx context.Context, runID string, iteration int, recordID string,
 	plan plannedToolCall, outcome domain.ToolExecutionOutcome) (domain.ToolResult, bool, error) {
 	raw := BudgetToolResult(outcome.Result, defaultToolResultBudget)
+	callIndex := plan.originalIndex
 
 	// A panic or a cancellation is never a completed call: record it as failed so
 	// event terminal state does not depend on which dispatch path ran.
@@ -594,7 +670,7 @@ func (l *Loop) settleToolPlan(ctx context.Context, runID string, iteration, call
 		return raw, false, nil
 	}
 
-	projected, stop, policyCode, policyErr := l.projectToolResult(context.WithoutCancel(ctx), runID, iteration, callIndex, plan, raw)
+	projected, stop, policyCode, policyErr := l.projectToolResult(context.WithoutCancel(ctx), runID, iteration, plan, raw)
 
 	// PostToolUse hook: feedback appended to the projected result (cannot undo execution).
 	if l.HookLife != nil {
@@ -642,16 +718,7 @@ func terminationCode(kind domain.ToolOutcomeKind) (code string, failed bool) {
 	}
 }
 
-func (l *Loop) executeReadGroup(ctx context.Context, runID string, iteration, baseIndex int, calls []domain.ToolCall) ([]domain.ToolResult, error) {
-	plans := make([]plannedToolCall, len(calls))
-	for index, call := range calls {
-		plans[index] = plannedToolCall{original: call, effective: call, decision: ToolDecision{Action: ToolAllow}, allowed: true}
-	}
-	results, _, err := l.executeReadPlanGroup(ctx, runID, iteration, baseIndex, plans)
-	return results, err
-}
-
-func (l *Loop) executeReadPlanGroup(ctx context.Context, runID string, iteration, baseIndex int, plans []plannedToolCall) ([]domain.ToolResult, bool, error) {
+func (l *Loop) executeReadPlanGroup(ctx context.Context, runID string, iteration int, plans []plannedToolCall) ([]domain.ToolResult, bool, error) {
 	limit := l.ToolExecution.MaxConcurrentReadTools
 	if limit <= 0 {
 		limit = 4
@@ -659,7 +726,7 @@ func (l *Loop) executeReadPlanGroup(ctx context.Context, runID string, iteration
 	recordIDs := make([]string, len(plans))
 	for index, plan := range plans {
 		recordIDs[index] = uuid.NewString()
-		if err := l.recordToolStarted(ctx, l.toolCallStart(recordIDs[index], runID, iteration, baseIndex+index, plan)); err != nil {
+		if err := l.recordToolStarted(ctx, l.toolCallStart(recordIDs[index], runID, iteration, plan)); err != nil {
 			return nil, false, err
 		}
 	}
@@ -692,7 +759,7 @@ func (l *Loop) executeReadPlanGroup(ctx context.Context, runID string, iteration
 	stopAfterBatch := false
 	var firstErr error
 	for index, plan := range plans {
-		result, stop, err := l.settleToolPlan(ctx, runID, iteration, baseIndex+index, recordIDs[index], plan, <-outcomes[index])
+		result, stop, err := l.settleToolPlan(ctx, runID, iteration, recordIDs[index], plan, <-outcomes[index])
 		results[index] = result
 		stopAfterBatch = stopAfterBatch || stop
 		if err != nil && firstErr == nil {
@@ -709,13 +776,14 @@ func (l *Loop) executeReadPlanGroup(ctx context.Context, runID string, iteration
 	return results, stopAfterBatch, nil
 }
 
-func (l *Loop) toolCallStart(recordID, runID string, iteration, callIndex int, plan plannedToolCall) domain.ToolCallStart {
-	return domain.ToolCallStart{ID: recordID, RunID: runID, Iteration: iteration, CallIndex: callIndex,
+func (l *Loop) toolCallStart(recordID, runID string, iteration int, plan plannedToolCall) domain.ToolCallStart {
+	return domain.ToolCallStart{ID: recordID, RunID: runID, Iteration: iteration, CallIndex: plan.originalIndex,
 		Call: plan.effective, OriginalArguments: plan.original.Arguments,
 		EffectiveArguments: plan.effective.Arguments, Policy: l.policyMetadata(plan.decision, false)}
 }
 
-func (l *Loop) projectToolResult(ctx context.Context, runID string, iteration, callIndex int, plan plannedToolCall, raw domain.ToolResult) (domain.ToolResult, bool, string, error) {
+func (l *Loop) projectToolResult(ctx context.Context, runID string, iteration int, plan plannedToolCall, raw domain.ToolResult) (domain.ToolResult, bool, string, error) {
+	callIndex := plan.originalIndex
 	if l.PolicyChain != nil {
 		exec := &ToolExecution{
 			RunID:       runID,
