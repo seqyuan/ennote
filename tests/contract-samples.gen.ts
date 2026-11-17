@@ -213,6 +213,63 @@ export const getGlobalHero200: WorkerOperationResponse<"getGlobalHero", 200> = {
   }
 };
 
+/** getGraphLocalHero answering 200. */
+export const getGraphLocalHero200: WorkerOperationResponse<"getGraphLocalHero", 200> = {
+  "data": {
+    "digest": "sha256:6924d24224de5bda36dcdab73bb06bed98b2e5d5180ba0fd3ad981a0ea1edbe1",
+    "document": {
+      "allowedTools": [],
+      "authority": "read_only",
+      "color": "blue",
+      "context": {
+        "allowedModes": [
+          "task_only"
+        ],
+        "defaultMode": "task_only",
+        "ownExecutionContinuity": "none"
+      },
+      "delegation": {
+        "admission": "auto_within_budget",
+        "allowedCallerKinds": [
+          "host"
+        ],
+        "allowedStrategies": [
+          "single"
+        ],
+        "budgetCeiling": {
+          "maxCostUsdMicros": 0,
+          "maxModelCalls": 4,
+          "maxOutputTokens": 4000,
+          "maxToolCalls": 16,
+          "maxTotalTokens": 20000,
+          "maxWallTimeMs": 120000
+        },
+        "maxConcurrentInstances": 1,
+        "maxInvocationsPerParentRun": 1
+      },
+      "description": "checks QC",
+      "handle": "qc-check",
+      "icon": "user",
+      "maxLoopIterations": 8,
+      "model": {
+        "fallbacks": [],
+        "ref": "anthropic/claude-sonnet-4",
+        "thinkingEffort": "default"
+      },
+      "name": "QC check",
+      "outputContract": "text-v1",
+      "permissionCeiling": "ask",
+      "positioning": "qc",
+      "prompt": "Check the QC report and submit a verdict.",
+      "schemaVersion": 1,
+      "skills": []
+    },
+    "id": "qc-check",
+    "name": "QC check",
+    "path": "<temp-path>"
+  }
+};
+
 /** getLiveness answering 200. */
 export const getLiveness200: WorkerOperationResponse<"getLiveness", 200> = {
   "data": {
@@ -485,7 +542,10 @@ export const listGlobalHeroes200: WorkerOperationResponse<"listGlobalHeroes", 20
 export const listGraphVersions200: WorkerOperationResponse<"listGraphVersions", 200> = {
   "data": [
     {
-      "digest": "sha256:d83b9f826c046d30fe62b796498093795b01729344f048c1aa39e2eb950f6d16",
+      "digest": "sha256:3f24a2d34d9850ba6d5db86eb9f00b8f9a5d7c18ecebd640636b00fa7cc8e145",
+      "heroDigests": {
+        "qc-check": "sha256:6924d24224de5bda36dcdab73bb06bed98b2e5d5180ba0fd3ad981a0ea1edbe1"
+      },
       "publishedAt": "2026-01-01T00:00:09Z",
       "resourceId": "qc",
       "schemaVersion": 1,
@@ -742,7 +802,10 @@ export const publishGlobalHero201: WorkerOperationResponse<"publishGlobalHero", 
 /** publishGraph answering 201. */
 export const publishGraph201: WorkerOperationResponse<"publishGraph", 201> = {
   "data": {
-    "digest": "sha256:d83b9f826c046d30fe62b796498093795b01729344f048c1aa39e2eb950f6d16",
+    "digest": "sha256:3f24a2d34d9850ba6d5db86eb9f00b8f9a5d7c18ecebd640636b00fa7cc8e145",
+    "heroDigests": {
+      "qc-check": "sha256:6924d24224de5bda36dcdab73bb06bed98b2e5d5180ba0fd3ad981a0ea1edbe1"
+    },
     "publishedAt": "2026-01-01T00:00:09Z",
     "resourceId": "qc",
     "schemaVersion": 1,
@@ -899,15 +962,72 @@ export const updateGraph200: WorkerOperationResponse<"updateGraph", 200> = {
       "tasks": {
         "qc-check": {
           "goal": "Review the QC report.",
-          "hero": "global/reviewer",
+          "hero": "local/qc-check",
           "type": "hero"
         }
       }
     },
-    "digest": "sha256:d83b9f826c046d30fe62b796498093795b01729344f048c1aa39e2eb950f6d16",
+    "digest": "sha256:3f24a2d34d9850ba6d5db86eb9f00b8f9a5d7c18ecebd640636b00fa7cc8e145",
     "id": "qc",
     "latestVersion": 0,
     "name": "QC",
+    "path": "<temp-path>"
+  }
+};
+
+/** updateGraphLocalHero answering 200. */
+export const updateGraphLocalHero200: WorkerOperationResponse<"updateGraphLocalHero", 200> = {
+  "data": {
+    "digest": "sha256:7a5d7733c8491cb50a646dee262a6cf0af495c2b8f3b923cd8ffb5d352eb0b20",
+    "document": {
+      "allowedTools": [],
+      "authority": "read_only",
+      "color": "blue",
+      "context": {
+        "allowedModes": [
+          "task_only"
+        ],
+        "defaultMode": "task_only",
+        "ownExecutionContinuity": "none"
+      },
+      "delegation": {
+        "admission": "auto_within_budget",
+        "allowedCallerKinds": [
+          "host"
+        ],
+        "allowedStrategies": [
+          "single"
+        ],
+        "budgetCeiling": {
+          "maxCostUsdMicros": 0,
+          "maxModelCalls": 4,
+          "maxOutputTokens": 4000,
+          "maxToolCalls": 16,
+          "maxTotalTokens": 20000,
+          "maxWallTimeMs": 120000
+        },
+        "maxConcurrentInstances": 1,
+        "maxInvocationsPerParentRun": 1
+      },
+      "description": "checks QC",
+      "handle": "qc-check",
+      "icon": "user",
+      "maxLoopIterations": 8,
+      "model": {
+        "fallbacks": [],
+        "ref": "anthropic/claude-sonnet-4",
+        "thinkingEffort": "default"
+      },
+      "name": "QC check",
+      "outputContract": "text-v1",
+      "permissionCeiling": "ask",
+      "positioning": "qc",
+      "prompt": "Check the QC report, then submit a verdict with the failing checks.",
+      "schemaVersion": 1,
+      "skills": []
+    },
+    "id": "qc-check",
+    "name": "QC check",
     "path": "<temp-path>"
   }
 };

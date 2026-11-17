@@ -1,7 +1,10 @@
 {
   "data": [
     {
-      "digest": "sha256:d83b9f826c046d30fe62b796498093795b01729344f048c1aa39e2eb950f6d16",
+      "digest": "sha256:3f24a2d34d9850ba6d5db86eb9f00b8f9a5d7c18ecebd640636b00fa7cc8e145",
+      "heroDigests": {
+        "qc-check": "sha256:6924d24224de5bda36dcdab73bb06bed98b2e5d5180ba0fd3ad981a0ea1edbe1"
+      },
       "publishedAt": "2026-01-01T00:00:09Z",
       "resourceId": "qc",
       "schemaVersion": 1,

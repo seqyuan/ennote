@@ -305,6 +305,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/graphs/{graphID}/heroes/{heroID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                graphID: string;
+                heroID: string;
+            };
+            cookie?: never;
+        };
+        /** Read the Graph-private Hero draft a local/<id> reference resolves to */
+        get: operations["getGraphLocalHero"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update a Graph-private Hero draft
+         * @description A whole-document CAS update. A Graph Run freezes the Heroes of the
+         *     revision it published, so editing this draft changes the next publish and
+         *     never a Run that already exists.
+         */
+        patch: operations["updateGraphLocalHero"];
+        trace?: never;
+    };
     "/v1/graphs/{graphID}/runs": {
         parameters: {
             query?: never;
@@ -3315,6 +3341,13 @@ export interface components {
             digest: string;
             document: components["schemas"]["PortableHeroDocument"];
         };
+        GraphLocalHeroDetail: {
+            id: string;
+            name: string;
+            path: string;
+            digest: string;
+            document: components["schemas"]["PortableHeroDocument"];
+        };
         ResolvedGlobalHero: {
             heroId: string;
             source: string;
@@ -3444,6 +3477,12 @@ export interface components {
                 taskId: string;
                 depends: string[];
             };
+            /**
+             * @description Creates the Graph-private Hero draft the task mutation refers to, in
+             *     the same write. The task value must reference exactly local/<handle>;
+             *     a delete cannot carry one.
+             */
+            localHero?: components["schemas"]["PortableHeroDocument"];
         };
         GraphBuilderMessage: {
             id: string;
@@ -5144,6 +5183,67 @@ export interface operations {
                     };
                 };
             };
+        };
+    };
+    getGraphLocalHero: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                graphID: string;
+                heroID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Graph-local Hero source */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["GraphLocalHeroDetail"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    updateGraphLocalHero: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                graphID: string;
+                heroID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedDigest: string;
+                    document: components["schemas"]["PortableHeroDocument"];
+                };
+            };
+        };
+        responses: {
+            /** @description Updated Graph-local Hero source */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["GraphLocalHeroDetail"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
         };
     };
     runGraph: {

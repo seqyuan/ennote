@@ -767,8 +767,35 @@ func TestContractSamples(t *testing.T) {
 			"task": map[string]any{
 				"id": "qc-check",
 				"value": map[string]any{
-					"hero": "global/reviewer", "goal": "Review the QC report.",
+					"hero": "local/qc-check", "goal": "Review the QC report.",
 				},
+			},
+			// The Add Task shape: the Task and the Graph-private Hero it references
+			// are created in one write, so the reference can never dangle.
+			"localHero": map[string]any{
+				"schemaVersion": 1, "handle": "qc-check", "name": "QC check",
+				"description": "checks QC", "positioning": "qc", "icon": "user", "color": "blue",
+				"model": map[string]any{
+					"ref": "anthropic/claude-sonnet-4", "thinkingEffort": "default", "fallbacks": []string{},
+				},
+				"skills":            []any{},
+				"authority":         "read_only",
+				"permissionCeiling": "ask",
+				"allowedTools":      []string{},
+				"context": map[string]any{
+					"defaultMode": "task_only", "allowedModes": []string{"task_only"}, "ownExecutionContinuity": "none",
+				},
+				"delegation": map[string]any{
+					"admission": "auto_within_budget", "allowedCallerKinds": []string{"host"},
+					"allowedStrategies": []string{"single"}, "maxInvocationsPerParentRun": 1,
+					"maxConcurrentInstances": 1,
+					"budgetCeiling": map[string]any{
+						"maxModelCalls": 4, "maxToolCalls": 16, "maxTotalTokens": 20000,
+						"maxOutputTokens": 4000, "maxCostUsdMicros": 0, "maxWallTimeMs": 120000,
+					},
+				},
+				"outputContract": "text-v1", "maxLoopIterations": 8,
+				"prompt": "Check the QC report and submit a verdict.",
 			},
 		},
 		status: http.StatusOK,
@@ -876,6 +903,30 @@ func TestContractSamples(t *testing.T) {
 	samples.record(contractSampleRequest{
 		method: http.MethodGet, route: "/v1/sessions/{sessionID}/graph-runs/{runID}", auth: true,
 		values: map[string]string{"sessionID": graphSession.ID, "runID": sampleGraphRunID},
+		status: http.StatusOK,
+	})
+	// The Graph-private Hero draft behind a local/<id> reference. Recorded last:
+	// the sample normaliser numbers stand-ins in encounter order, and inserting
+	// these earlier would renumber every sample recorded after them.
+	localHeroSample := samples.record(contractSampleRequest{
+		method: http.MethodGet, route: "/v1/graphs/{graphID}/heroes/{heroID}", auth: true,
+		values: map[string]string{"graphID": "qc", "heroID": "qc-check"}, status: http.StatusOK,
+	})
+	var localHeroDetail struct {
+		Digest   string         `json:"digest"`
+		Document map[string]any `json:"document"`
+	}
+	decodeData(t, localHeroSample, &localHeroDetail)
+	require.NotEmpty(t, localHeroDetail.Digest)
+	editedLocalHero := map[string]any{}
+	for key, value := range localHeroDetail.Document {
+		editedLocalHero[key] = value
+	}
+	editedLocalHero["prompt"] = "Check the QC report, then submit a verdict with the failing checks."
+	samples.record(contractSampleRequest{
+		method: http.MethodPatch, route: "/v1/graphs/{graphID}/heroes/{heroID}", auth: true,
+		values: map[string]string{"graphID": "qc", "heroID": "qc-check"},
+		body:   map[string]any{"expectedDigest": localHeroDetail.Digest, "document": editedLocalHero},
 		status: http.StatusOK,
 	})
 

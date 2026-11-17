@@ -404,6 +404,55 @@ paths:
                   - $ref: "#/components/schemas/Envelope"
                   - type: object
                     properties: { data: { type: array, items: { $ref: "#/components/schemas/ImmutableFileRevision" } } }
+  /v1/graphs/{graphID}/heroes/{heroID}:
+    parameters:
+      - { name: graphID, in: path, required: true, schema: { type: string } }
+      - { name: heroID, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getGraphLocalHero
+      summary: Read the Graph-private Hero draft a local/<id> reference resolves to
+      responses:
+        "200":
+          description: Graph-local Hero source
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/GraphLocalHeroDetail" } }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateGraphLocalHero
+      summary: Update a Graph-private Hero draft
+      description: |
+        A whole-document CAS update. A Graph Run freezes the Heroes of the
+        revision it published, so editing this draft changes the next publish and
+        never a Run that already exists.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedDigest, document]
+              properties:
+                expectedDigest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+                document: { $ref: "#/components/schemas/PortableHeroDocument" }
+      responses:
+        "200":
+          description: Updated Graph-local Hero source
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties: { data: { $ref: "#/components/schemas/GraphLocalHeroDetail" } }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
   /v1/graphs/{graphID}/runs:
     parameters:
       - { name: graphID, in: path, required: true, schema: { type: string } }
@@ -4924,6 +4973,16 @@ components:
           properties:
             digest: { type: string }
             document: { $ref: "#/components/schemas/PortableHeroDocument" }
+    GraphLocalHeroDetail:
+      type: object
+      additionalProperties: false
+      required: [id, name, path, digest, document]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        path: { type: string }
+        digest: { type: string }
+        document: { $ref: "#/components/schemas/PortableHeroDocument" }
     ResolvedGlobalHero:
       type: object
       additionalProperties: false
@@ -5091,6 +5150,13 @@ components:
           properties:
             taskId: { type: string }
             depends: { type: array, uniqueItems: true, items: { type: string } }
+        localHero:
+          allOf:
+            - $ref: "#/components/schemas/PortableHeroDocument"
+          description: |
+            Creates the Graph-private Hero draft the task mutation refers to, in
+            the same write. The task value must reference exactly local/<handle>;
+            a delete cannot carry one.
     GraphBuilderMessage:
       type: object
       additionalProperties: false

@@ -1,0 +1,55 @@
+{
+  "data": {
+    "digest": "sha256:7a5d7733c8491cb50a646dee262a6cf0af495c2b8f3b923cd8ffb5d352eb0b20",
+    "document": {
+      "allowedTools": [],
+      "authority": "read_only",
+      "color": "blue",
+      "context": {
+        "allowedModes": [
+          "task_only"
+        ],
+        "defaultMode": "task_only",
+        "ownExecutionContinuity": "none"
+      },
+      "delegation": {
+        "admission": "auto_within_budget",
+        "allowedCallerKinds": [
+          "host"
+        ],
+        "allowedStrategies": [
+          "single"
+        ],
+        "budgetCeiling": {
+          "maxCostUsdMicros": 0,
+          "maxModelCalls": 4,
+          "maxOutputTokens": 4000,
+          "maxToolCalls": 16,
+          "maxTotalTokens": 20000,
+          "maxWallTimeMs": 120000
+        },
+        "maxConcurrentInstances": 1,
+        "maxInvocationsPerParentRun": 1
+      },
+      "description": "checks QC",
+      "handle": "qc-check",
+      "icon": "user",
+      "maxLoopIterations": 8,
+      "model": {
+        "fallbacks": [],
+        "ref": "anthropic/claude-sonnet-4",
+        "thinkingEffort": "default"
+      },
+      "name": "QC check",
+      "outputContract": "text-v1",
+      "permissionCeiling": "ask",
+      "positioning": "qc",
+      "prompt": "Check the QC report, then submit a verdict with the failing checks.",
+      "schemaVersion": 1,
+      "skills": []
+    },
+    "id": "qc-check",
+    "name": "QC check",
+    "path": "<temp-path>"
+  }
+}

@@ -290,6 +290,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("PATCH /v1/graphs/{graphID}", s.updateGlobalGraph)
 	mux.HandleFunc("POST /v1/graphs/{graphID}/publish", s.publishGlobalGraph)
 	mux.HandleFunc("GET /v1/graphs/{graphID}/versions", s.listGlobalGraphVersions)
+	mux.HandleFunc("GET /v1/graphs/{graphID}/heroes/{heroID}", s.getGraphLocalHero)
+	mux.HandleFunc("PATCH /v1/graphs/{graphID}/heroes/{heroID}", s.updateGraphLocalHero)
 	mux.HandleFunc("POST /v1/graphs/{graphID}/runs", s.runGlobalGraph)
 	// V2 session-scoped Graph Run activity surface (list/detail/cancel/resume).
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/graph-runs", s.listSessionGraphRuns)

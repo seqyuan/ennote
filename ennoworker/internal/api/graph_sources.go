@@ -10,6 +10,7 @@ import (
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
 	"github.com/seqyuan/ennote/ennoworker/internal/globalsource"
 	"github.com/seqyuan/ennote/ennoworker/internal/graphbuilder"
+	"github.com/seqyuan/ennote/ennoworker/internal/heroesource"
 	"github.com/seqyuan/ennote/ennoworker/internal/store"
 )
 
@@ -237,15 +238,23 @@ func (s *Server) updateGlobalGraph(w http.ResponseWriter, r *http.Request) {
 			TaskID  string   `json:"taskId"`
 			Depends []string `json:"depends"`
 		} `json:"dependencies"`
+		// LocalHero creates the Graph-private Hero draft this mutation refers to,
+		// in the same write. It is what makes "Add Task (new local Hero)" a single
+		// step instead of a Task pointing at a hero.md nobody wrote.
+		LocalHero *heroesource.Document `json:"localHero"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if body.Name == nil && body.Description == nil && body.Task == nil && body.Dependencies == nil {
+	if body.Name == nil && body.Description == nil && body.Task == nil && body.Dependencies == nil && body.LocalHero == nil {
 		writeError(w, r, http.StatusBadRequest, "graph_mutation_required", "at least one semantic Graph change is required", false)
 		return
 	}
-	definition, digest, err := sources.UpdateGraphDefinition(r.PathValue("graphID"), body.ExpectedDigest, func(definition *domain.FlowDefinition) error {
+	if err := validateLocalHeroMutation(body.LocalHero, body.Task); err != nil {
+		writeError(w, r, http.StatusUnprocessableEntity, "graph_invalid", err.Error(), false)
+		return
+	}
+	_, definition, digest, err := sources.MutateGraphWithLocalHero(r.PathValue("graphID"), body.ExpectedDigest, body.LocalHero, func(definition *domain.FlowDefinition) error {
 		// Refuse before the rewrite. The editor saves by rewriting graph.yaml from
 		// the parsed definition, which silently deletes the task keys the lenient
 		// parser dropped; publish would then succeed *without* the clause.
@@ -291,6 +300,29 @@ func (s *Server) updateGlobalGraph(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeData(w, http.StatusOK, s.graphDefinitionDetailFor(sources, definition, digest))
+}
+
+// validateLocalHeroMutation keeps the Hero payload and the Task mutation in the
+// one relation the Worker can honour: the Task being created references exactly
+// the Hero being created. A payload that merely accompanies some other change
+// would leave either an orphan Hero or a dangling local/ reference.
+func validateLocalHeroMutation(hero *heroesource.Document, task *struct {
+	ID    string           `json:"id"`
+	Value *domain.FlowTask `json:"value"`
+}) error {
+	if hero == nil {
+		return nil
+	}
+	if task == nil {
+		return errors.New("localHero requires the task mutation that references it")
+	}
+	if task.Value == nil {
+		return errors.New("localHero cannot accompany a task deletion")
+	}
+	if strings.TrimSpace(task.Value.Hero) != "local/"+hero.Handle {
+		return fmt.Errorf("the task must reference the local Hero it creates: local/%s", hero.Handle)
+	}
+	return nil
 }
 
 // writeUnknownTaskFieldError answers a save refused because the draft on disk
