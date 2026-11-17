@@ -74,8 +74,9 @@ func TestRunTelemetryDurationMS(t *testing.T) {
 
 	// Pin the start: FinalizeSuccess stamps finished_at from its own clock and
 	// hands the same value to the aggregation, so started_at is the only end a
-	// test can choose.
-	const startedAt = "2026-01-01T00:00:00.000Z"
+	// test can choose. Relative to now, so the assertion cannot depend on the
+	// host clock being later than a literal date.
+	startedAt := time.Now().UTC().Add(-90 * time.Minute).Format(time.RFC3339Nano)
 	_, err = repo.DB.Exec(`UPDATE agent_runs SET started_at = ? WHERE id = ?`, startedAt, submission.Run.ID)
 	require.NoError(t, err)
 

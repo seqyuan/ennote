@@ -63,9 +63,11 @@ func (r *RunRepo) buildRunTelemetryTx(ctx context.Context, tx *sql.Tx, runID, ti
 	// Wall-clock Run duration: started_at is TEXT RFC3339Nano and may be NULL for
 	// a Run that never left 'queued'. Parse both ends instead of using julianday:
 	// julianday is REAL and loses precision, the same reason the tool aggregate
-	// above rounds instead of CASTing. Missing or unparseable ends leave 0.
+	// above rounds instead of CASTing. Missing or unparseable ends leave 0; a read
+	// that actually failed is an aggregation error, not a duration of zero.
 	var startedAt sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT started_at FROM agent_runs WHERE id = ?`, runID).Scan(&startedAt); err == nil && startedAt.Valid {
+	switch err := tx.QueryRowContext(ctx, `SELECT started_at FROM agent_runs WHERE id = ?`, runID).Scan(&startedAt); {
+	case err == nil && startedAt.Valid:
 		started, startErr := time.Parse(time.RFC3339Nano, startedAt.String)
 		finished, finishErr := time.Parse(time.RFC3339Nano, timestamp)
 		// A clock that moved backwards clamps to 0 rather than reporting a negative.
@@ -74,6 +76,8 @@ func (r *RunRepo) buildRunTelemetryTx(ctx context.Context, tx *sql.Tx, runID, ti
 				telemetry.DurationMS = elapsed.Round(time.Millisecond).Milliseconds()
 			}
 		}
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return telemetry, err
 	}
 
 	// Max context utilization: parse the frozen effective config's context
