@@ -38,8 +38,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:go": "cd ennoworker && go test ./...",
-    "test:e2e": "playwright test",
+    "test:go": "node scripts/check-toolchain.mjs --go && cd ennoworker && go test ./...",
+    "test:e2e": "node scripts/check-toolchain.mjs --node && playwright test",
     "check:file-sizes": "node scripts/check-file-sizes.mjs",
     "check:repo-hygiene": "node scripts/check-repo-hygiene.mjs",
     "migrate:to-heroes": "node scripts/migrate-roles-to-heroes.mjs",
@@ -54,7 +54,14 @@
     "release:build-worker": "node scripts/build-workers.mjs",
     "release:prepare": "npm run build:web && npm run release:build-worker && npm run pack:check",
     "pack:check": "node scripts/check-npm-pack.mjs",
-    "smoke:installed": "node scripts/smoke-installed-package.mjs"
+    "smoke:installed": "node scripts/smoke-installed-package.mjs",
+    "pretest": "node scripts/check-toolchain.mjs --node",
+    "prebuild": "node scripts/check-toolchain.mjs --node",
+    "check:toolchain": "node scripts/check-toolchain.mjs --node --go"
+  },
+  "engines": {
+    "node": ">=22 <23",
+    "npm": ">=10"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
