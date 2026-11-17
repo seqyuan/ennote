@@ -7,9 +7,11 @@ package store_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/seqyuan/ennote/ennoworker/internal/agentflow"
 	"github.com/seqyuan/ennote/ennoworker/internal/domain"
@@ -45,6 +47,19 @@ func schedulingRunFixture(t *testing.T) (*store.AgentFlowRunRepo, string) {
 	}, freeze)
 	require.NoError(t, err)
 	return flowRuns, run.RunID
+}
+
+// The anchor Run is born running, so it must record when. Without started_at a
+// finished flow row has an end and no beginning, and any duration derived from
+// the pair silently reads zero.
+func TestFlowAnchorRunRecordsItsStart(t *testing.T) {
+	flowRuns, runID := schedulingRunFixture(t)
+
+	var startedAt sql.NullString
+	require.NoError(t, flowRuns.DB.QueryRow(`SELECT started_at FROM agent_runs WHERE id = ?`, runID).Scan(&startedAt))
+	require.True(t, startedAt.Valid, "a flow anchor starts when it is created")
+	_, err := time.Parse(time.RFC3339Nano, startedAt.String)
+	require.NoError(t, err, "started_at must be the same RFC3339Nano stamp as every other Run")
 }
 
 // `optional` is frozen onto the node row, and a fresh node has spent no attempt.

@@ -132,7 +132,9 @@ func (r *AgentFlowRunRepo) CreateFlowRun(ctx context.Context, input CreateFlowRu
 	// for delegation children, events, and SSE. The anchor freezes a model
 	// profile id so child Runs with mode=inherit resolve their model from the
 	// parent (the delegation substrate contract), matching the production
-	// parent effective-config semantics.
+	// parent effective-config semantics. started_at is written here rather than
+	// left to a claim: the anchor is born running, and run_telemetry derives a
+	// flow's duration from it.
 	var modelProfileID string
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(default_model_profile_id, '') FROM sessions WHERE id=?`,
 		input.SessionID).Scan(&modelProfileID); err != nil {
@@ -146,9 +148,9 @@ func (r *AgentFlowRunRepo) CreateFlowRun(ctx context.Context, input CreateFlowRu
 	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_runs
 		(id, turn_id, session_id, run_kind, base_message_id, attempt, status, requested_config_json,
 		 effective_config_json, speaker_snapshot_json, root_run_id, execution_depth, publish_mode,
-		 commit_format_version, context_snapshot_json, created_at)
-		VALUES (?, ?, ?, 'agent', ?, 1, 'running', '{}', ?, '{"kind":"host","displayName":"Host"}', ?, 0, 'private_to_parent', 2, '{}', ?)`,
-		runID, turnID, input.SessionID, messageID, string(anchorConfigJSON), runID, timestamp); err != nil {
+		 commit_format_version, context_snapshot_json, created_at, started_at)
+		VALUES (?, ?, ?, 'agent', ?, 1, 'running', '{}', ?, '{"kind":"host","displayName":"Host"}', ?, 0, 'private_to_parent', 2, '{}', ?, ?)`,
+		runID, turnID, input.SessionID, messageID, string(anchorConfigJSON), runID, timestamp, timestamp); err != nil {
 		return nil, fmt.Errorf("create flow anchor run: %w", err)
 	}
 	inputsJSON := input.InputsJSON
