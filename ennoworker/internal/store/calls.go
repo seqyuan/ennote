@@ -240,23 +240,67 @@ func (r *CallRepo) ToolSkipped(ctx context.Context, call domain.ToolCallFinish) 
 	} else if call.Policy.Action == "terminate_batch" {
 		eventType = "tool_policy_terminated"
 	}
-	return r.transact(ctx, call.RunID, domain.PendingEvent{EventType: eventType, Payload: payload}, func(tx *sql.Tx, now string) error {
-		var seq int
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq), 0) + 1 FROM tool_calls WHERE run_id = ?`, call.RunID).Scan(&seq); err != nil {
-			return err
-		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO tool_calls
+	// A suspended batch re-runs PreToolUse when it resumes, so the same call is
+	// skipped again at the same (run, iteration, callIndex) - a key the tool_calls
+	// unique index already holds. Recording it twice would either fail the resume
+	// outright or double the event, so the second attempt is a no-op.
+	return r.transactOnce(ctx, call.RunID, domain.PendingEvent{EventType: eventType, Payload: payload},
+		func(tx *sql.Tx, now string) (bool, error) {
+			var seq int
+			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq), 0) + 1 FROM tool_calls WHERE run_id = ?`, call.RunID).Scan(&seq); err != nil {
+				return false, err
+			}
+			result, err := tx.ExecContext(ctx, `INSERT INTO tool_calls
 			(id, run_id, seq, tool_call_id, tool_name, arguments_json, status, result_preview,
 			is_error, started_at, finished_at, iteration, call_index, arguments_fragment,
 			original_arguments_json,effective_arguments_json,policy_id,policy_version,policy_action,
 			policy_code,risk_class,projected_result_preview,stop_after_batch)
-			VALUES (?, ?, ?, ?, ?, ?, 'skipped', ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, call.ID, call.RunID, seq,
-			call.Call.ID, call.Call.Name, string(arguments), call.Result.Content, now, now, call.Iteration,
-			call.CallIndex, nullableStr(call.Call.ArgumentsFragment), string(arguments), string(arguments),
-			call.Policy.PolicyID, call.Policy.PolicyVersion, call.Policy.Action, call.Policy.Code, call.Policy.RiskClass,
-			call.Result.Content, boolInt(call.Policy.StopAfterBatch))
+			VALUES (?, ?, ?, ?, ?, ?, 'skipped', ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(run_id, iteration, call_index) DO NOTHING`, call.ID, call.RunID, seq,
+				call.Call.ID, call.Call.Name, string(arguments), call.Result.Content, now, now, call.Iteration,
+				call.CallIndex, nullableStr(call.Call.ArgumentsFragment), string(arguments), string(arguments),
+				call.Policy.PolicyID, call.Policy.PolicyVersion, call.Policy.Action, call.Policy.Code, call.Policy.RiskClass,
+				call.Result.Content, boolInt(call.Policy.StopAfterBatch))
+			if err != nil {
+				return false, err
+			}
+			inserted, err := result.RowsAffected()
+			if err != nil {
+				return false, err
+			}
+			return inserted == 1, nil
+		})
+}
+
+// transactOnce is transact for a mutation that may already have happened: when
+// mutate reports it wrote nothing, the event it would have announced is dropped
+// too, so a replayed batch leaves one row and one event rather than two.
+func (r *CallRepo) transactOnce(ctx context.Context, runID string, event domain.PendingEvent,
+	mutate func(*sql.Tx, string) (bool, error)) error {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
 		return err
-	})
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	written, err := mutate(tx, now)
+	if err != nil {
+		return err
+	}
+	if !written {
+		return nil
+	}
+	committed, err := appendEventsTx(ctx, tx, runID, event)
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if r.Publisher != nil {
+		r.Publisher.Publish(committed...)
+	}
+	return nil
 }
 
 func (r *CallRepo) transact(ctx context.Context, runID string, event domain.PendingEvent, mutate func(*sql.Tx, string) error) error {
