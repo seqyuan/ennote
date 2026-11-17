@@ -221,7 +221,6 @@ type RunTelemetryPayload struct {
 type ToolTiming struct {
 	Count      int   `json:"count"`
 	ErrorCount int   `json:"errorCount"`
-	Attempts   int   `json:"attempts"`
 	TotalMS    int64 `json:"totalMs"`
 }
 
