@@ -542,14 +542,14 @@ export const listGlobalHeroes200: WorkerOperationResponse<"listGlobalHeroes", 20
 export const listGraphBindings200: WorkerOperationResponse<"listGraphBindings", 200> = {
   "data": [
     {
-      "enabled": false,
-      "projectId": "00000000-0000-0000-0000-000000000016",
-      "revision": ""
-    },
-    {
       "enabled": true,
       "projectId": "00000000-0000-0000-0000-000000000002",
       "revision": "v000001"
+    },
+    {
+      "enabled": false,
+      "projectId": "00000000-0000-0000-0000-000000000016",
+      "revision": ""
     }
   ]
 };
