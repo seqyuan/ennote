@@ -626,13 +626,6 @@ func (l *Loop) planToolBatch(ctx context.Context, runID string, iteration int, c
 	return plans, terminate, nil
 }
 
-func (l *Loop) executeOneTool(ctx context.Context, runID string, iteration, callIndex int, call domain.ToolCall) (domain.ToolResult, error) {
-	result, _, err := l.executeOneToolPlan(ctx, runID, iteration,
-		plannedToolCall{originalIndex: callIndex, original: call, effective: call,
-			decision: ToolDecision{Action: ToolAllow}, allowed: true})
-	return result, err
-}
-
 func (l *Loop) executeOneToolPlan(ctx context.Context, runID string, iteration int, plan plannedToolCall) (domain.ToolResult, bool, error) {
 	recordID := uuid.NewString()
 
