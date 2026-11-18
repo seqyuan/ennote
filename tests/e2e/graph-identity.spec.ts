@@ -83,8 +83,9 @@ test("the header separates the draft from the published revision", async ({ page
   await expect(identity.getByText("v7", { exact: true })).toBeVisible();
   await expect(identity).toContainText("proj-a");
   await expect(identity).toContainText("v000007");
-  // There is no assembly digest yet, and the header says so instead of implying it.
-  await expect(identity).toContainText("Assembly not recorded");
+  // The header names no Run: a Graph is global and its Runs live in each Session,
+  // so "which assembly ran" is answered on the Run, not here.
+  await expect(identity).not.toContainText("Last run");
 });
 
 test("an edit keeps the draft unpublished until it is published", async ({ page }) => {

@@ -10,13 +10,12 @@ import { shortDigest, type GraphIdentity } from "@/lib/graph-identity";
  * "Saved v7" — a save state wearing a version number — so a reader could not tell
  * whether the edits on screen were in v7, or what any Project would actually run.
  *
- * "Last run" stays a placeholder until the Worker records an assembly digest; it
- * says so rather than showing the binding and letting the reader assume the Run
- * was the same assembly.
+ * There is no "last run" row on purpose: a Graph is a global object and its Runs
+ * live in each Session's database, so this header has no run to name. Which
+ * revision a Run used belongs on the Run, where GraphActivityPanel reads it.
  */
-export function GraphIdentityRows({ identity, runsChannelName }: {
+export function GraphIdentityRows({ identity }: {
   identity: GraphIdentity;
-  runsChannelName?: string;
 }) {
   return (
     <dl className="graph-identity">
@@ -60,10 +59,6 @@ export function GraphIdentityRows({ identity, runsChannelName }: {
             </span>
           ))}
         </dd>
-      </div>
-      <div>
-        <dt>Last run</dt>
-        <dd><small>{runsChannelName ? `Assembly not recorded — see ${runsChannelName}` : "Assembly not recorded"}</small></dd>
       </div>
     </dl>
   );

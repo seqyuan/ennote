@@ -238,6 +238,7 @@ function RunCard({ run, nodes, expanded, onToggle, nodesLoading, t }: {
         <div className={styles.details}>
           <div className={styles.meta}>
             <span>{t("graph.stateLabel", { state: flowLabel })}</span>
+            {run.flowVersionId ? <span>{t("graph.revision", { revision: run.flowVersionId })}</span> : null}
             {run.totalTokensUsed ? <span>{t("graph.tokens", { count: String(run.totalTokensUsed) })}</span> : null}
             {run.createdAt ? <span>{formatTime(run.createdAt, t)}</span> : null}
           </div>

@@ -24,7 +24,7 @@ export function GraphHeader({ definition, identity, saveState, publishing, publi
   return (
     <header className="graph-document-header">
       <div><span>Graph</span><h2>{definition.name ?? definition.id}</h2><code>{definition.id}</code></div>
-      <GraphIdentityRows identity={identity} runsChannelName="the Graphs channel" />
+      <GraphIdentityRows identity={identity} />
       <div className="graph-document-actions">
         <div className={`graph-save-state is-${saveState}`} role="status">{saveState === "saving"
           ? <><Loader2 className="spin" size={14} /> Saving</>
