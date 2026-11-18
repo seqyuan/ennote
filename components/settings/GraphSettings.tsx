@@ -18,7 +18,8 @@ import {
   type GraphSummary,
   type ImmutableFileRevision,
 } from "@/components/graphs/types";
-import { applyOps, diffTaskIDs, mergeQueuedOp, opToBody, removalNotice, sameTarget, type QueuedOp } from "@/lib/graph-ops";
+import { applyOps, mergeQueuedOp, opToBody, removalNotice, sameTarget, type FlushSession, type GraphConflict, type QueuedOp } from "@/lib/graph-ops";
+import { useDiskConflictChoice } from "@/hooks/useDiskConflictChoice";
 import { summariseGraphIdentity, type PublishedRevision } from "@/lib/graph-identity";
 import type { components } from "@/lib/worker-api.gen";
 import { useSettingsProfiles } from "@/hooks/useSettingsProfiles";
@@ -30,23 +31,6 @@ import { apiFetch, isSourceDigestConflict } from "@/lib/worker-api.client";
 // by a slow save, a fast keystroke, or a dialog closing.
 const flushDelayMs = 300;
 
-/**
- * One save session: a Graph, its queue, and whether a drain is running.
- *
- * The session is an object rather than a set of module-level refs so switching
- * Graphs replaces it wholesale. A drain from the previous Graph keeps writing to
- * the object it captured and stops at every `session.current !== target` check,
- * instead of mutating the new Graph's queue counters.
- */
-type FlushSession = {
-  graphId: string;
-  ops: QueuedOp[];
-  /** ops[0, sent) have been accepted by the Worker. */
-  sent: number;
-  running: boolean;
-};
-
-type Conflict = { graphId: string; reason: "conflict" | "reload" };
 
 export function GraphSettings({ setError }: { setError: (value: string | null) => void }) {
   const settings = useSettingsProfiles();
@@ -59,12 +43,16 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
   const [draft, setDraft] = useState<FlowDefinition | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [busy, setBusy] = useState<"loading" | "creating" | "publishing" | null>(null);
-  const [saving, setSaving] = useState(false);
+  // The Graph whose drain is in flight, not a global flag: a save that belongs to
+  // the Graph the reader switched away from must not report the new Graph as
+  // saving, and must not disable its Publish.
+  const [savingGraph, setSavingGraph] = useState<string | null>(null);
   const [pendingOps, setPendingOps] = useState(0);
   const [saveError, setSaveError] = useState<{ message: string; graphId: string } | null>(null);
-  const [conflict, setConflict] = useState<Conflict | null>(null);
-  const [diskPreview, setDiskPreview] = useState<{ graphId: string; name: string; changed: string[] } | null>(null);
-  const [published, setPublished] = useState<PublishedRevision>(null);
+  const [conflict, setConflict] = useState<GraphConflict | null>(null);
+  // Tagged with its Graph for the same reason: a publish that finishes after the
+  // reader switched Graphs is that Graph's revision, not this one's.
+  const [publishedFor, setPublishedFor] = useState<{ graphId: string; revision: PublishedRevision } | null>(null);
   const [bindings, setBindings] = useState<components["schemas"]["GraphBindingRef"][]>([]);
   const [draftDigest, setDraftDigest] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -82,6 +70,9 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
   const digest = useRef<string | null>(null);
   const flushTimer = useRef<number | null>(null);
   const flushInFlight = useRef<Promise<boolean> | null>(null);
+  // openGraph has to drain the Graph it is leaving, and flush is declared below
+  // it: the reader stays the caller and reaches the drainer through this ref.
+  const flushPending = useRef<(target: FlushSession) => Promise<boolean>>(async () => true);
 
   const refreshCatalog = useCallback(async (preferred?: string) => {
     const next = await apiFetch<GraphSummary[]>("/v1/graphs");
@@ -102,6 +93,12 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
     if (reloading && (unsent > 0 || current.running)) {
       setConflict({ graphId: id, reason: "reload" });
       return;
+    }
+    // Switching away from another Graph replaces the session object, so an unsent
+    // edit or a drain in flight would go with it. Land it first, and stay put if
+    // it cannot land: the reader gets the save error instead of a silent loss.
+    if (!reloading && current && (current.ops.length > current.sent || current.running)) {
+      if (!(await flushPending.current(current))) return;
     }
 
     const requestId = ++openRequestId.current;
@@ -130,11 +127,11 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
       setPendingOps(0);
       const newest = versions.reduce<ImmutableFileRevision | null>(
         (latest, version) => latest === null || version.version > latest.version ? version : latest, null);
-      setPublished(newest === null ? null : { version: newest.version, digest: newest.digest, publishedAt: newest.publishedAt });
+      setPublishedFor({ graphId: id, revision: newest === null ? null
+        : { version: newest.version, digest: newest.digest, publishedAt: newest.publishedAt } });
       setBindings(boundTo);
       setConflict(null);
       setSaveError(null);
-      setDiskPreview(null);
       setError(null);
     } catch (reason) {
       if (openRequestId.current !== requestId) return;
@@ -234,16 +231,18 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
     if (session.current !== target) return Promise.resolve(false);
     if (target.running) return flushInFlight.current ?? Promise.resolve(false);
     target.running = true;
-    setSaving(true);
+    setSavingGraph(target.graphId);
     setSaveError(null);
     const running = drainQueue(target).finally(() => {
       target.running = false;
       flushInFlight.current = null;
-      if (session.current === target) setSaving(false);
+      setSavingGraph((current) => (current === target.graphId ? null : current));
     });
     flushInFlight.current = running;
     return running;
   }, [drainQueue]);
+
+  useEffect(() => { flushPending.current = flush; }, [flush]);
 
   const scheduleFlush = useCallback((target: FlushSession) => {
     if (flushTimer.current !== null) window.clearTimeout(flushTimer.current);
@@ -312,15 +311,22 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
       if (!drained) return;
     }
     if (conflict) return;
+    const publishedID = draft.id;
     setBusy("publishing");
     try {
-      const version = await apiFetch<ImmutableFileRevision>(`/v1/graphs/${encodeURIComponent(draft.id)}/publish`, { method: "POST" });
-      setPublished({ version: version.version, digest: version.digest, publishedAt: version.publishedAt });
-      setError(null);
+      const version = await apiFetch<ImmutableFileRevision>(`/v1/graphs/${encodeURIComponent(publishedID)}/publish`, { method: "POST" });
+      // The reader may have switched Graphs while this was in flight; the revision
+      // belongs to the Graph that was published, not the one on screen.
+      if (session.current?.graphId === publishedID) {
+        setPublishedFor({ graphId: publishedID,
+          revision: { version: version.version, digest: version.digest, publishedAt: version.publishedAt } });
+        setError(null);
+      }
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
-      setBusy(null);
+      // Only clear the state this call set: a Graph opened meanwhile owns "loading".
+      setBusy((current) => (current === "publishing" ? null : current));
     }
   };
 
@@ -355,68 +361,29 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
     enqueue({ graphId: detail.id, kind: "task", id: taskId, value: { ...task, depends } });
   };
 
-  /** Re-fetch the Graph the conflict is about and describe how it differs. */
-  const viewDiskVersion = async () => {
-    const target = session.current;
-    if (!target) return;
-    try {
-      const disk = await apiFetch<GraphDetail>(`/v1/graphs/${encodeURIComponent(target.graphId)}`);
-      setDiskPreview({
-        graphId: target.graphId,
-        name: disk.definition?.name ?? disk.name,
-        changed: diffTaskIDs(latestDraft.current, disk.definition ?? null),
-      });
-    } catch (reason) {
-      setError((reason as Error).message);
-    }
-  };
-
-  const keepMine = async () => {
-    const target = session.current;
-    if (!target || target.running) return;
-    try {
-      const disk = await apiFetch<GraphDetail>(`/v1/graphs/${encodeURIComponent(target.graphId)}`);
-      // Rebase onto the disk definition so the next CAS carries its digest; my
-      // queue is unchanged and goes out on top of it.
-      const base = disk.definition ?? serverDef.current!;
-      serverDef.current = base;
-      digest.current = disk.digest;
-      latestDraft.current = applyOps(base, target.ops.slice(target.sent));
-      setDraft(latestDraft.current);
-      setConflict(null);
-      setDiskPreview(null);
-      if (target.sent < target.ops.length) void flush(target);
-    } catch (reason) {
-      setError((reason as Error).message);
-    }
-  };
-
-  const takeTheirs = async () => {
-    const target = session.current;
-    if (!target || target.running) return;
-    try {
-      const disk = await apiFetch<GraphDetail>(`/v1/graphs/${encodeURIComponent(target.graphId)}`);
-      target.ops = [];
-      target.sent = 0;
-      adoptServerDefinition(disk);
-      setPendingOps(0);
-      setConflict(null);
-      setSaveError(null);
-      setDiskPreview(null);
-    } catch (reason) {
-      setError((reason as Error).message);
-    }
-  };
+  // The disk side of a conflict is its own hook: read-then-write, guarded by the
+  // session it started from.
+  const { diskPreview, clearDiskPreview, viewDiskVersion, keepMine, discardMine } = useDiskConflictChoice({
+    sessionRef: session, serverDefRef: serverDef, latestDraftRef: latestDraft, digestRef: digest,
+    flush, adoptServerDefinition, setDraft, setPendingOps, setConflict, setSaveError, setError,
+  });
+  // The preview describes one Graph's disk version, so it cannot outlive the
+  // Graph it was read for.
+  const shownGraphID = detail?.id ?? null;
+  useEffect(() => { clearDiskPreview(); }, [shownGraphID, clearDiskPreview]);
 
   const definition = draft;
-  // The draft digest is the Graph detail's own digest, which is state: reading the
-  // ref here would be a ref access during render.
-  const identity = summariseGraphIdentity({ draftDigest: draftDigest, published, bindings });
   // Compare against the rendered Graph, not the session ref: a ref read during
   // render is invisible to React's scheduler and would not re-run on change.
   const activeGraphId = detail?.id ?? null;
+  // The draft digest is the Graph detail's own digest, which is state: reading the
+  // ref here would be a ref access during render.
+  const publishedForThisGraph = publishedFor && publishedFor.graphId === activeGraphId
+    ? publishedFor.revision : null;
+  const identity = summariseGraphIdentity({ draftDigest: draftDigest, published: publishedForThisGraph, bindings });
   const conflictForThisGraph = conflict && conflict.graphId === activeGraphId ? conflict : null;
   const saveErrorForThisGraph = saveError && saveError.graphId === activeGraphId ? saveError : null;
+  const saving = savingGraph === activeGraphId;
   const saveState = saving ? "saving" : pendingOps > 0 ? "unsaved" : "saved";
 
   return (
@@ -462,7 +429,7 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
             onRetry={() => { const target = session.current; if (target) void flush(target); }}
             onViewDisk={() => void viewDiskVersion()}
             onKeepMine={() => void keepMine()}
-            onDiscardMine={() => void takeTheirs()}
+            onDiscardMine={() => void discardMine()}
           />
 
           <main className={`graph-editor-view is-${mobileView}`}>

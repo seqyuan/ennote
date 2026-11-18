@@ -11,6 +11,29 @@
 import type { FlowDefinition, FlowTask } from "@/components/graphs/types";
 
 /**
+ * One save session: a Graph, its queue, and whether a drain is running.
+ *
+ * The session is an object rather than a set of module-level refs so switching
+ * Graphs replaces it wholesale. A drain from the previous Graph keeps writing to
+ * the object it captured and stops at every `session.current !== target` check,
+ * instead of mutating the new Graph's queue counters.
+ */
+export type FlushSession = {
+  graphId: string;
+  ops: QueuedOp[];
+  /** ops[0, sent) have been accepted by the Worker. */
+  sent: number;
+  running: boolean;
+};
+
+/**
+ * A save conflict put to the reader instead of resolved for them: the disk moved
+ * under an unsent queue (conflict), or the Graph they are re-opening has edits
+ * that a reload would adopt the disk definition over (reload).
+ */
+export type GraphConflict = { graphId: string; reason: "conflict" | "reload" };
+
+/**
  * A Graph-local Hero draft.
  *
  * The contract's own Hero document type arrives with the local-Hero endpoints
