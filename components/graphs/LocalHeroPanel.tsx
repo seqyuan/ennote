@@ -4,7 +4,7 @@ import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ModelOption } from "@/components/graphs/types";
 import { parseToolList, type PortableHeroDocument } from "@/lib/local-hero";
-import { apiFetch } from "@/lib/worker-api.client";
+import { apiFetch, isSourceDigestConflict } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
 
 type GraphLocalHeroDetail = components["schemas"]["GraphLocalHeroDetail"];
@@ -38,6 +38,10 @@ export function LocalHeroPanel({ graphId, heroId, models, onError, onSaved }: {
 }) {
   const [detail, setDetail] = useState<GraphLocalHeroDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Set when the Worker refused the save because the file moved. The form stays:
+  // the reader's text is the only copy of what they typed, and the choice between
+  // it and the disk belongs to them.
+  const [stale, setStale] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const document = useRef<PortableHeroDocument | null>(null);
@@ -115,13 +119,49 @@ export function LocalHeroPanel({ graphId, heroId, models, onError, onSaved }: {
         // Otherwise keep the reader's text and save again with the newer digest.
       }
     } catch (reason) {
-      setError((reason as Error).message);
+      if (isSourceDigestConflict(reason)) {
+        setStale(true);
+        setError(null);
+      } else {
+        setError((reason as Error).message);
+      }
       setDirty(true);
     } finally {
       savingRef.current = false;
       setSaving(false);
     }
   }, [graphId, heroId, onError, onSaved]);
+
+  /** Adopt the disk's document, dropping what the reader typed. */
+  const reloadFromDisk = useCallback(async () => {
+    try {
+      const loaded = await apiFetch<GraphLocalHeroDetail>(
+        `/v1/graphs/${encodeURIComponent(graphId)}/heroes/${encodeURIComponent(heroId)}`);
+      document.current = loaded.document;
+      digest.current = loaded.digest;
+      revision.current = 0;
+      setDetail(loaded);
+      setDirty(false);
+      setStale(false);
+      setError(null);
+      onSaved?.();
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }, [graphId, heroId, onSaved]);
+
+  /** Take the disk's digest, then write the reader's text over it on purpose. */
+  const overwriteDisk = useCallback(async () => {
+    try {
+      const loaded = await apiFetch<GraphLocalHeroDetail>(
+        `/v1/graphs/${encodeURIComponent(graphId)}/heroes/${encodeURIComponent(heroId)}`);
+      digest.current = loaded.digest;
+      setStale(false);
+      await save();
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }, [graphId, heroId, save]);
 
   const update = (mutate: (current: PortableHeroDocument) => PortableHeroDocument) => {
     if (!document.current) return;
@@ -132,9 +172,6 @@ export function LocalHeroPanel({ graphId, heroId, models, onError, onSaved }: {
     timer.current = window.setTimeout(() => { timer.current = null; void save(); }, saveDelayMs);
   };
 
-  if (error) {
-    return <div className="graph-local-hero" role="alert"><span>{error}</span></div>;
-  }
   if (!detail || !document.current) {
     return <div className="graph-local-hero"><span><Loader2 className="spin" size={13} /> Waiting for Hero {heroId}…</span></div>;
   }
@@ -167,6 +204,18 @@ export function LocalHeroPanel({ graphId, heroId, models, onError, onSaved }: {
         </select>
       </label>
       <p>Context, delegation limits and the report contract keep the defaults this Hero was created with.</p>
+      {stale ? (
+        <div className="graph-local-hero-error" role="alert">
+          <span>This Hero changed on disk. Your text is not saved.</span>
+          <button type="button" onClick={() => void reloadFromDisk()}>Use disk version</button>
+          <button type="button" onClick={() => void overwriteDisk()}>Save mine over it</button>
+        </div>
+      ) : error && (
+        <div className="graph-local-hero-error" role="alert">
+          <span>{error}</span>
+          <button type="button" onClick={() => { setError(null); void save(); }}>Retry save</button>
+        </div>
+      )}
     </div>
   );
 }

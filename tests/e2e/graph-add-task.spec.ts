@@ -34,6 +34,8 @@ async function mockAddTask(page: Page) {
     graphPatches: [] as GraphPatch[],
     heroPatches: [] as HeroPatch[],
     hero: null as null | { id: string; name: string; path: string; digest: string; document: Record<string, unknown> },
+    /** How many Hero PATCHes to refuse as "the file moved" before accepting one. */
+    heroConflicts: 0,
   };
 
   await page.route("**/api/worker/v1/**", async (route) => {
@@ -75,6 +77,13 @@ async function mockAddTask(page: Page) {
       }
       if (method === "PATCH") {
         const body = JSON.parse(route.request().postData() ?? "{}") as HeroPatch;
+        if (state.heroConflicts > 0) {
+          state.heroConflicts -= 1;
+          // Somebody else wrote the file: the digest on disk is no longer ours.
+          state.hero = { ...state.hero, digest: "sha256:" + "e".repeat(64) };
+          return route.fulfill({ status: 409, contentType: "application/json",
+            body: JSON.stringify({ error: { code: "source_digest_conflict", message: "the file changed since it was loaded; reload before saving" } }) });
+        }
         state.heroPatches.push(body);
         state.hero = { ...state.hero, document: body.document, digest: "sha256:" + "d".repeat(64) };
       }
@@ -134,6 +143,30 @@ test("the local Hero panel edits the document the Task runs", async ({ page }) =
   await expect.poll(() => state.heroPatches.length).toBeGreaterThan(0);
   expect(state.heroPatches.at(-1)?.document).toMatchObject({ prompt: "Check the QC report." });
   await expect(task.locator(".graph-local-hero")).toContainText("Saved");
+});
+
+test("a Hero save the Worker refused keeps the text and offers the choice", async ({ page }) => {
+  const state = await mockAddTask(page);
+  state.heroConflicts = 1;
+  await openGraphs(page);
+
+  await page.getByRole("button", { name: "Add Task" }).click();
+  await page.getByPlaceholder("task_id").fill("review");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+
+  const panel = page.locator('[data-task-id="review"] .graph-local-hero');
+  await expect(panel).toBeVisible({ timeout: 5_000 });
+  await panel.getByLabel("Prompt").fill("Keep this text");
+
+  // The form stays: the reader's text is the only copy of it.
+  const conflict = panel.getByRole("alert");
+  await expect(conflict).toContainText("changed on disk");
+  await expect(panel.getByLabel("Prompt")).toHaveValue("Keep this text");
+
+  await conflict.getByRole("button", { name: "Save mine over it" }).click();
+  await expect.poll(() => state.heroPatches.length).toBe(1);
+  expect(state.heroPatches.at(-1)?.document).toMatchObject({ prompt: "Keep this text" });
+  await expect(panel).toContainText("Saved");
 });
 
 test("a shared Hero needs no local document and refuses an unusable id", async ({ page }) => {
