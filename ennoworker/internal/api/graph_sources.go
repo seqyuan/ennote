@@ -31,6 +31,11 @@ type globalGraphDetail struct {
 	Digest        string                 `json:"digest"`
 	LatestVersion int                    `json:"latestVersion"`
 	Definition    *domain.FlowDefinition `json:"definition,omitempty"`
+	// HeroDigests is the draft digest of each Graph-local Hero the definition
+	// references. The definition digest cannot speak for them: a Hero's body lives
+	// in its own file, so editing a Hero changes what a Run would do without
+	// changing the Graph definition at all.
+	HeroDigests map[string]string `json:"heroDigests,omitempty"`
 }
 
 // graphDefinitionDetailFor builds the detail response for a definition-shaped
@@ -43,6 +48,9 @@ func (s *Server) graphDefinitionDetailFor(sources *globalsource.Store, definitio
 	}
 	if revisions, err := sources.ListGraphRevisions(definition.ID); err == nil && len(revisions) > 0 {
 		detail.LatestVersion = revisions[len(revisions)-1].Version
+	}
+	if digests, err := sources.GraphHeroDigests(definition); err == nil && len(digests) > 0 {
+		detail.HeroDigests = digests
 	}
 	return detail
 }

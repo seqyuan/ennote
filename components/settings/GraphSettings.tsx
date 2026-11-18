@@ -52,7 +52,11 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
   const [conflict, setConflict] = useState<GraphConflict | null>(null);
   // Tagged with its Graph for the same reason: a publish that finishes after the
   // reader switched Graphs is that Graph's revision, not this one's.
-  const [publishedFor, setPublishedFor] = useState<{ graphId: string; revision: PublishedRevision } | null>(null);
+  const [publishedFor, setPublishedFor] = useState<{ graphId: string; revision: PublishedRevision;
+    heroDigests?: Record<string, string> } | null>(null);
+  // The draft's Hero digests, so the header can tell "published" from "published
+  // before I edited a Hero": the definition digest cannot see a Hero's body.
+  const [draftHeroDigests, setDraftHeroDigests] = useState<Record<string, string> | null>(null);
   const [bindings, setBindings] = useState<components["schemas"]["GraphBindingRef"][]>([]);
   const [draftDigest, setDraftDigest] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -127,8 +131,10 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
       setPendingOps(0);
       const newest = versions.reduce<ImmutableFileRevision | null>(
         (latest, version) => latest === null || version.version > latest.version ? version : latest, null);
-      setPublishedFor({ graphId: id, revision: newest === null ? null
-        : { version: newest.version, digest: newest.digest, publishedAt: newest.publishedAt } });
+      setPublishedFor({ graphId: id, heroDigests: newest?.heroDigests,
+        revision: newest === null ? null
+          : { version: newest.version, digest: newest.digest, publishedAt: newest.publishedAt } });
+      setDraftHeroDigests(next.heroDigests ?? {});
       setBindings(boundTo);
       setConflict(null);
       setSaveError(null);
@@ -372,6 +378,20 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
   const shownGraphID = detail?.id ?? null;
   useEffect(() => { clearDiskPreview(); }, [shownGraphID, clearDiskPreview]);
 
+  // A Hero save does not change the definition digest, so the header has to re-read
+  // the digests it compares; nothing else in the detail is adopted.
+  const refreshDraftHeroDigests = useCallback(async () => {
+    const graphID = session.current?.graphId;
+    if (!graphID) return;
+    try {
+      const next = await apiFetch<GraphDetail>(`/v1/graphs/${encodeURIComponent(graphID)}`);
+      if (session.current?.graphId !== graphID) return;
+      setDraftHeroDigests(next.heroDigests ?? {});
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }, [setError]);
+
   const definition = draft;
   // Compare against the rendered Graph, not the session ref: a ref read during
   // render is invisible to React's scheduler and would not re-run on change.
@@ -380,7 +400,13 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
   // ref here would be a ref access during render.
   const publishedForThisGraph = publishedFor && publishedFor.graphId === activeGraphId
     ? publishedFor.revision : null;
-  const identity = summariseGraphIdentity({ draftDigest: draftDigest, published: publishedForThisGraph, bindings });
+  const identity = summariseGraphIdentity({
+    draftDigest: draftDigest,
+    published: publishedForThisGraph,
+    bindings,
+    draftHeroDigests,
+    publishedHeroDigests: publishedFor && publishedFor.graphId === activeGraphId ? publishedFor.heroDigests : null,
+  });
   const conflictForThisGraph = conflict && conflict.graphId === activeGraphId ? conflict : null;
   const saveErrorForThisGraph = saveError && saveError.graphId === activeGraphId ? saveError : null;
   const saving = savingGraph === activeGraphId;
@@ -450,6 +476,7 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
                 expanded={expanded}
                 models={models}
                 setError={setError}
+                onHeroSaved={() => void refreshDraftHeroDigests()}
                 onToggle={(id) => setExpanded((value) => value === id ? null : id)}
                 onChange={updateTask}
                 onRemove={(id) => void removeTask(id)}

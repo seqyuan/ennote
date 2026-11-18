@@ -61,6 +61,58 @@ describe("summariseGraphIdentity", () => {
   });
 });
 
+describe("heroesInPublished", () => {
+  // The definition digest cannot see a local Hero's body: only the handle is in
+  // the definition, so a Hero edit leaves draftIsPublished true while what a Run
+  // would do has changed. These cases pin the second question.
+  const heroDigest = (salt: string) => "sha256:" + salt.repeat(64);
+
+  it("is true when every Hero the draft references is the published one", () => {
+    const identity = summariseGraphIdentity({
+      draftDigest: published.digest, published, bindings: [],
+      draftHeroDigests: { reviewer: heroDigest("c") },
+      publishedHeroDigests: { reviewer: heroDigest("c") },
+    });
+    expect(identity.draftIsPublished).toBe(true);
+    expect(identity.heroesInPublished).toBe(true);
+  });
+
+  it("is false when a Hero was edited and the definition digest still matches", () => {
+    const identity = summariseGraphIdentity({
+      draftDigest: published.digest, published, bindings: [],
+      draftHeroDigests: { reviewer: heroDigest("d") },
+      publishedHeroDigests: { reviewer: heroDigest("c") },
+    });
+    expect(identity.draftIsPublished).toBe(true);
+    expect(identity.heroesInPublished).toBe(false);
+  });
+
+  it("is false when the draft uses a Hero the revision never froze", () => {
+    const identity = summariseGraphIdentity({
+      draftDigest: published.digest, published, bindings: [],
+      draftHeroDigests: { reviewer: heroDigest("c") },
+      publishedHeroDigests: {},
+    });
+    expect(identity.heroesInPublished).toBe(false);
+  });
+
+  it("has no answer without a published revision", () => {
+    const identity = summariseGraphIdentity({
+      draftDigest: draft, published: null, bindings: [],
+      draftHeroDigests: { reviewer: heroDigest("c") }, publishedHeroDigests: {},
+    });
+    expect(identity.heroesInPublished).toBeNull();
+  });
+
+  it("has no answer when a side is unknown rather than reporting a difference", () => {
+    const identity = summariseGraphIdentity({
+      draftDigest: published.digest, published, bindings: [],
+      draftHeroDigests: null, publishedHeroDigests: { reviewer: heroDigest("c") },
+    });
+    expect(identity.heroesInPublished).toBeNull();
+  });
+});
+
 describe("shortDigest", () => {
   it("keeps the first eight hex characters and drops the algorithm", () => {
     expect(shortDigest(draft)).toBe("aaaaaaaa");

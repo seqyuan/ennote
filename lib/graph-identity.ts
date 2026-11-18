@@ -9,6 +9,15 @@ export type GraphIdentity = {
   draftDigest: string;
   /** True when the draft is exactly the latest published revision. */
   draftIsPublished: boolean;
+  /**
+   * True when every Graph-local Hero the draft references has the same digest in
+   * the latest published revision. Null when either side is unknown.
+   *
+   * The definition digest cannot answer this: a Hero's body lives in its own file
+   * (the definition only holds a `local/<handle>` reference), so editing a Hero
+   * changes what a Run would do while `draftIsPublished` stays true.
+   */
+  heroesInPublished: boolean | null;
   published: { version: number; digest: string } | null;
   /** Bindings that would actually run something: enabled, with a pinned revision. */
   runnable: { projectId: string; revision: string }[];
@@ -33,6 +42,8 @@ export function summariseGraphIdentity(input: {
   draftDigest: string | null;
   published: PublishedRevision;
   bindings: readonly GraphBindingRef[];
+  draftHeroDigests?: Readonly<Record<string, string>> | null;
+  publishedHeroDigests?: Readonly<Record<string, string>> | null;
 }): GraphIdentity {
   const runnable: GraphIdentity["runnable"] = [];
   const unpinned: string[] = [];
@@ -55,6 +66,8 @@ export function summariseGraphIdentity(input: {
     // header either.
     draftIsPublished: (input.published?.digest ?? "") !== ""
       && input.published?.digest === input.draftDigest,
+    heroesInPublished: heroesMatch(
+      input.draftHeroDigests ?? null, input.publishedHeroDigests ?? null, input.published !== null),
     published: input.published === null
       ? null
       : { version: input.published.version, digest: input.published.digest ?? "" },
@@ -62,6 +75,24 @@ export function summariseGraphIdentity(input: {
     unpinned,
     bound,
   };
+}
+
+/**
+ * heroesMatch compares the two Hero digest sets.
+ *
+ * Unknown on either side is "no answer", not "different": a Worker that has not
+ * published yet, or a draft whose Hero is still being created, must not produce a
+ * warning the reader cannot act on. A published revision that froze no Heroes
+ * while the draft references one is a real difference.
+ */
+function heroesMatch(draft: Readonly<Record<string, string>> | null,
+  published: Readonly<Record<string, string>> | null, hasPublished: boolean): boolean | null {
+  if (!hasPublished || draft === null || published === null) return null;
+  const handles = new Set([...Object.keys(draft), ...Object.keys(published)]);
+  for (const handle of handles) {
+    if (draft[handle] !== published[handle]) return false;
+  }
+  return true;
 }
 
 /**

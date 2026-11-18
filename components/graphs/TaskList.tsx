@@ -14,12 +14,13 @@ import { localHeroId } from "@/lib/local-hero";
  * per (Graph, Hero) — switching Tasks or Graphs remounts it rather than leaving a
  * stale document on screen.
  */
-export function TaskList({ graphId, definition, expanded, models, setError, onToggle, onChange, onRemove }: {
+export function TaskList({ graphId, definition, expanded, models, setError, onHeroSaved, onToggle, onChange, onRemove }: {
   graphId: string;
   definition: FlowDefinition;
   expanded: string | null;
   models: ModelOption[];
   setError: (value: string | null) => void;
+  onHeroSaved: () => void;
   onToggle: (id: string) => void;
   onChange: (id: string, task: FlowTask) => void;
   onRemove: (id: string) => void;
@@ -48,6 +49,7 @@ export function TaskList({ graphId, definition, expanded, models, setError, onTo
                 heroId={heroId}
                 models={models}
                 onError={setError}
+                onSaved={onHeroSaved}
               />
             )}
           />

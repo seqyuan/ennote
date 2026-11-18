@@ -28,11 +28,13 @@ const waitingDelayMs = 300;
  * so a keystroke made during a round trip is the next save rather than a value the
  * response overwrites.
  */
-export function LocalHeroPanel({ graphId, heroId, models, onError }: {
+export function LocalHeroPanel({ graphId, heroId, models, onError, onSaved }: {
   graphId: string;
   heroId: string;
   models: ModelOption[];
   onError: (value: string | null) => void;
+  /** Called once a save has landed: the Graph header's Hero digest is now stale. */
+  onSaved?: () => void;
 }) {
   const [detail, setDetail] = useState<GraphLocalHeroDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -101,6 +103,7 @@ export function LocalHeroPanel({ graphId, heroId, models, onError }: {
         digest.current = updated.digest;
         setError(null);
         onError(null);
+        onSaved?.();
         if (revision.current === sent) {
           // Nothing was typed during the round trip, so the Worker's answer is what
           // is on screen; adopting it shows any value it normalised.
@@ -118,7 +121,7 @@ export function LocalHeroPanel({ graphId, heroId, models, onError }: {
       savingRef.current = false;
       setSaving(false);
     }
-  }, [graphId, heroId, onError]);
+  }, [graphId, heroId, onError, onSaved]);
 
   const update = (mutate: (current: PortableHeroDocument) => PortableHeroDocument) => {
     if (!document.current) return;

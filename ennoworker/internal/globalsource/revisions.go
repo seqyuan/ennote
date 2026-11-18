@@ -202,7 +202,30 @@ func (s Store) definitionSkillFiles(id string, definition *domain.FlowDefinition
 	return skillDigests, files, nil
 }
 
-// localHeroHandles returns every graph-local Hero a definition references: an
+// GraphHeroDigests reports the digest of every Graph-local Hero the definition
+// references, keyed by handle. A handle whose document does not exist yet is
+// absent rather than an error: Add Task shows the Task and its panel before the
+// write that creates the Hero has landed.
+func (s Store) GraphHeroDigests(definition *domain.FlowDefinition) (map[string]string, error) {
+	handles, err := s.localHeroHandles(definition)
+	if err != nil {
+		return nil, err
+	}
+	digests := make(map[string]string, len(handles))
+	for _, handle := range handles {
+		_, digest, readErr := s.ReadGraphHero(definition.ID, handle)
+		if errors.Is(readErr, os.ErrNotExist) {
+			continue
+		}
+		if readErr != nil {
+			return nil, readErr
+		}
+		digests[handle] = digest
+	}
+	return digests, nil
+}
+
+// localHeroHandles returns every Graph-local Hero a definition references: an
 // explicit local/<handle>, or a bare handle that exists below the flow's heroes/
 // directory. Version-pinned and global/ references are never bundled.
 func (s Store) localHeroHandles(definition *domain.FlowDefinition) ([]string, error) {

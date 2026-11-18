@@ -3493,6 +3493,10 @@ export interface components {
             definition?: {
                 [key: string]: unknown;
             };
+            /** @description Draft digest of each Graph-local Hero the definition references, keyed by handle. Editing a Hero changes it without changing the definition digest. */
+            heroDigests?: {
+                [key: string]: string;
+            };
         };
         GraphMutation: {
             expectedDigest: string;

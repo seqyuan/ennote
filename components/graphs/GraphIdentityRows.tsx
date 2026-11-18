@@ -25,6 +25,9 @@ export function GraphIdentityRows({ identity, runsChannelName }: {
         <dd>
           <code>{identity.draftDigest ? shortDigest(identity.draftDigest) : "—"}</code>
           <small>{identity.draftIsPublished ? "In published revision" : "Not published"}</small>
+          {identity.heroesInPublished === false && (
+            <small>Hero edited — not in published revision</small>
+          )}
         </dd>
       </div>
       <div>

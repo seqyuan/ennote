@@ -5161,6 +5161,10 @@ components:
               type: object
               additionalProperties: true
               description: The canonical Graph definition (schemaVersion, id, budget, tasks, convergence, parallelism)
+            heroDigests:
+              type: object
+              additionalProperties: { type: string }
+              description: Draft digest of each Graph-local Hero the definition references, keyed by handle. Editing a Hero changes it without changing the definition digest.
     GraphMutation:
       type: object
       additionalProperties: false
