@@ -141,26 +141,30 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
   }, []);
 
   const tabs: TabItem[] = [
-    { id: "general", label: "General", description: "Appearance and theme", icon: tabIcon("general") },
-    { id: "models", label: "Models", description: "Providers, API keys, and model profiles", icon: tabIcon("models") },
-    { id: "policies", label: "Policies", description: "Tool permission and routing policies", icon: tabIcon("policies") },
-    { id: "context", label: "Context & session", description: session ? "Session defaults and compaction" : "Compaction policy defaults", icon: tabIcon("context") },
-    { id: "templates", label: "Templates", description: "Slash-command prompt templates", icon: tabIcon("templates") },
-    { id: "mcp", label: "MCP", description: "MCP servers and project bindings", icon: tabIcon("mcp") },
-    { id: "skills", label: "Skills", description: "Skill catalog, marketplace, and updates", icon: tabIcon("skills") },
-    { id: "packs", label: "Packs", description: "Agent Packs: inspect, install, and remove", icon: tabIcon("packs") },
+    { id: "general", label: t("settings.tabs.general.label"), description: t("settings.tabs.general.description"), icon: tabIcon("general") },
+    { id: "models", label: t("settings.tabs.models.label"), description: t("settings.tabs.models.description"), icon: tabIcon("models") },
+    { id: "policies", label: t("settings.tabs.policies.label"), description: t("settings.tabs.policies.description"), icon: tabIcon("policies") },
+    { id: "context", label: t("settings.tabs.context.label"), description: t(session ? "settings.tabs.context.descriptionWithSession" : "settings.tabs.context.description"), icon: tabIcon("context") },
+    { id: "templates", label: t("settings.tabs.templates.label"), description: t("settings.tabs.templates.description"), icon: tabIcon("templates") },
+    { id: "mcp", label: t("settings.tabs.mcp.label"), description: t("settings.tabs.mcp.description"), icon: tabIcon("mcp") },
+    { id: "skills", label: t("settings.tabs.skills.label"), description: t("settings.tabs.skills.description"), icon: tabIcon("skills") },
+    { id: "packs", label: t("settings.tabs.packs.label"), description: t("settings.tabs.packs.description"), icon: tabIcon("packs") },
   ];
 
+  // Search reads the translated text, so a query in any shipped locale finds
+  // its section instead of only matching the English labels.
+  const matchesQuery = (tab: TabItem, needle: string) =>
+    `${tab.label} ${tab.description}`.toLowerCase().includes(needle);
   const normalizedQuery = query.trim().toLowerCase();
   const visibleTabs = normalizedQuery === ""
     ? tabs
-    : tabs.filter((tab) => `${tab.label} ${tab.description}`.toLowerCase().includes(normalizedQuery));
+    : tabs.filter((tab) => matchesQuery(tab, normalizedQuery));
 
   const onSearchChange = (value: string) => {
     setQuery(value);
     const needle = value.trim().toLowerCase();
     if (needle === "") return;
-    const matches = tabs.filter((tab) => `${tab.label} ${tab.description}`.toLowerCase().includes(needle));
+    const matches = tabs.filter((tab) => matchesQuery(tab, needle));
     if (matches.length > 0 && !matches.some((tab) => tab.id === activeTab)) {
       setActiveTab(matches[0].id);
     }
@@ -172,13 +176,13 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
       className="settings-dialog-shell"
       role="dialog"
       aria-modal="true"
-      aria-label="Settings"
+      aria-label={t("settings.dialog.title")}
     >
         {/* Body */}
         <div className="settings-dialog-body">
           {/* Tabs (dsh nav rail: section title on top, cells below) */}
-          <div className="settings-dialog-tabs" role="tablist" aria-label="Settings sections">
-            <div id="settings-dialog-title" className="settings-dialog-navtitle">Settings</div>
+          <div className="settings-dialog-tabs" role="tablist" aria-label={t("settings.dialog.sectionsAria")}>
+            <div id="settings-dialog-title" className="settings-dialog-navtitle">{t("settings.dialog.title")}</div>
             <label className="settings-dialog-search">
               <Search size={14} aria-hidden="true" />
               <input
@@ -254,7 +258,7 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
                   {tabs.find((tab) => tab.id === activeTab)?.label}
                 </span>
               </div>
-              <button ref={closeRef} type="button" className="settings-dialog-close" title="Close settings" aria-label="Close settings" onClick={onClose}>
+              <button ref={closeRef} type="button" className="settings-dialog-close" title={t("settings.dialog.close")} aria-label={t("settings.dialog.close")} onClick={onClose}>
                 <X size={14} aria-hidden="true" />
               </button>
             </div>
