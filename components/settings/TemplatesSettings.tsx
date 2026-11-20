@@ -46,8 +46,6 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
   const [editHint, setEditHint] = useState("");
   const [editBody, setEditBody] = useState("");
 
-  // Expand/collapse body preview.
-  const [expandedBody, setExpandedBody] = useState<string | null>(null);
   // Inline delete confirmation (per name).
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
@@ -294,11 +292,6 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
                   <span className="template-manual-cleanup">Manual cleanup required in $ENNOTE_HOME/prompts/</span>
                 )}
               </div>
-
-              {/* Body preview for expanded entries */}
-              {entry.valid && expandedBody === entry.name && (
-                <LoadBodyPreview name={entry.name} onClose={() => setExpandedBody(null)} />
-              )}
             </li>
           ))}
         </ul>
@@ -308,21 +301,5 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
         <p className="templates-empty">No global templates yet. Create one above.</p>
       )}
     </section>
-  );
-}
-
-function LoadBodyPreview({ name, onClose }: { name: string; onClose: () => void }) {
-  const [body, setBody] = useState<string | null>(null);
-  useEffect(() => {
-    apiFetch<{ body: string }>(`/v1/prompt-templates/${encodeURIComponent(name)}`)
-      .then((t) => setBody(t.body))
-      .catch(() => setBody("Failed to load"));
-  }, [name]);
-  if (body === null) return <div className="template-body-preview">Loading…</div>;
-  return (
-    <div className="template-body-preview">
-      <pre>{body}</pre>
-      <button type="button" className="settings-btn" onClick={onClose}>Close</button>
-    </div>
   );
 }

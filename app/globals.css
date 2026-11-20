@@ -1440,22 +1440,6 @@ button:disabled { cursor: default; }
 .settings-btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
 .settings-btn.danger { border-color: var(--danger); color: var(--danger); }
 .settings-btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 10%, transparent); }
-.template-body-preview {
-  width: 100%;
-  margin-top: 6px;
-  padding: 8px;
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-  border: 1px solid var(--border);
-}
-.template-body-preview pre {
-  margin: 0 0 6px;
-  font-size: 0.8em;
-  font-family: var(--font-mono);
-  white-space: pre-wrap;
-  overflow-x: auto;
-  color: var(--text);
-}
 
 /* ── Project files ── */
 .file-tree-panel, .file-viewer { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
