@@ -25,15 +25,17 @@ export function ContextSettings({ policies, models, session, refresh, setError, 
   onSessionUpdated: (session: Session) => void;
 }) {
   const { markSaving, markSaved } = useSettingsStatus();
-  async function createCompactionPolicy(name: string, config: Record<string, unknown>) {
+  async function createCompactionPolicy(name: string, config: Record<string, unknown>): Promise<boolean> {
     markSaving();
     try {
       await apiFetch("/v1/policy-profiles", { method: "POST", body: JSON.stringify({ name, kind: "compaction", config }) });
       setError(null);
       await refresh();
       markSaved();
+      return true;
     } catch (reason) {
       setError((reason as Error).message);
+      return false;
     }
   }
 
@@ -91,7 +93,7 @@ export function ContextSettings({ policies, models, session, refresh, setError, 
 function CompactionPolicyEditor({ policies, models, onCreate, onDefault }: {
   policies: PolicyProfile[];
   models: ModelProfile[];
-  onCreate: (name: string, config: Record<string, unknown>) => Promise<void>;
+  onCreate: (name: string, config: Record<string, unknown>) => Promise<boolean>;
   onDefault: (policyId: string) => Promise<void>;
 }) {
   const t = useT();
@@ -115,7 +117,9 @@ function CompactionPolicyEditor({ policies, models, onCreate, onDefault }: {
         ...(row.tailMaxTokens !== undefined ? { tailMaxTokens: row.tailMaxTokens } : {}),
         ...(row.summaryMaxOutputTokens !== undefined ? { summaryMaxOutputTokens: row.summaryMaxOutputTokens } : {}),
       }));
-    await onCreate(String(data.get("name")), {
+    // A refused create keeps every field: the name, the ratios and the per-model
+    // overrides are cleared only once the Worker accepted the version.
+    const created = await onCreate(String(data.get("name")), {
       mode,
       triggerRatio: Number(data.get("triggerRatio")),
       keepRecentTurns: Number(data.get("keepRecentTurns")),
@@ -135,6 +139,7 @@ function CompactionPolicyEditor({ policies, models, onCreate, onDefault }: {
       failureCooldownSeconds: Number(data.get("failureCooldownSeconds")),
       promptVersion: "v1",
     });
+    if (!created) return;
     form.reset();
     setModelPolicies([]);
   }
