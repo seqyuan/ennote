@@ -264,7 +264,7 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
             {error && (
               <div className="error-bar" role="alert">
                 <span>{error}</span>
-                <button type="button" onClick={() => setError(null)} aria-label="Dismiss error">
+                <button type="button" onClick={() => setError(null)} aria-label={t("settings.dialog.dismissError")}>
                   <X size={15} aria-hidden="true" />
                 </button>
               </div>
