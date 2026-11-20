@@ -129,6 +129,14 @@ export function heroSaveState(saving: boolean, dirtyTick: number): HeroSaveState
   return dirtyTick > 0 ? "unsaved" : "saved";
 }
 
+// A refused save leaves the screen showing a value the Worker does not hold. The
+// select and checkbox controls save without touching the edit counter, so the
+// failure itself has to raise it — otherwise the header falls back to the green
+// "Saved" the next render while the form still shows the rejected value.
+export function dirtyAfterRefusal(dirtyTick: number): number {
+  return Math.max(dirtyTick, 1);
+}
+
 export function HeroesSettings({ models, setError }: {
   models: ModelProfile[];
   setError: (value: string | null) => void;
@@ -252,6 +260,7 @@ export function HeroesSettings({ models, setError }: {
     } catch (reason) {
       setConflict(isSourceDigestConflict(reason));
       setError((reason as Error).message);
+      setDirtyTick(dirtyAfterRefusal);
     } finally {
       gate.leave();
       setBusy(null);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSaveGate, heroSaveState, mergeSavedDetail } from "@/components/settings/HeroesSettings";
+import { createSaveGate, dirtyAfterRefusal, heroSaveState, mergeSavedDetail } from "@/components/settings/HeroesSettings";
 
 // Regression: the editor returned early whenever a save was in flight, so an
 // edit made during that round trip was thrown away while the header still said
@@ -57,6 +57,26 @@ describe("heroSaveState", () => {
   });
 
   it("reports saved only when nothing is pending", () => {
+    expect(heroSaveState(false, 0)).toBe("saved");
+  });
+});
+
+// A refused save is the one path where the screen is ahead of the disk without
+// anyone typing. The select and checkbox controls skip the edit counter, so the
+// failure has to raise it or the header goes back to "Saved" over a value the
+// Worker rejected.
+describe("dirtyAfterRefusal", () => {
+  it("marks a failed save as unsaved", () => {
+    expect(dirtyAfterRefusal(0)).toBe(1);
+  });
+
+  it("keeps an existing edit count", () => {
+    expect(dirtyAfterRefusal(2)).toBe(2);
+  });
+
+  it("settles back to saved once a later save lands", () => {
+    const afterRefusal = dirtyAfterRefusal(0);
+    expect(heroSaveState(false, afterRefusal)).toBe("unsaved");
     expect(heroSaveState(false, 0)).toBe("saved");
   });
 });
