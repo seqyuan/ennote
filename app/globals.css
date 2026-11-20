@@ -1271,6 +1271,7 @@ button:disabled { cursor: default; }
   .role-editor-actions { width: 100%; justify-content: flex-start; }
   .model-runtime-control, .role-segmented-row { grid-template-columns: 1fr; }
   .role-editor-sections > section { padding: 14px; }
+}
 
 /* Templates settings */
 .templates-diag-banner {
@@ -1349,6 +1350,12 @@ button:disabled { cursor: default; }
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+/* Source tiers: builtin keeps the quiet base badge (the engine ships it),
+   settings comes from config.json, global from the user store, and project
+   is a file in the workspace that overrides both. */
+.template-source.source-settings { background: var(--accent-soft); color: var(--accent); }
+.template-source.source-global { background: var(--surface-selected); color: var(--content-1); }
+.template-source.source-project { background: var(--info-soft); color: var(--info); }
 .template-desc {
   width: 100%;
   font-size: 0.82em;
@@ -1448,7 +1455,6 @@ button:disabled { cursor: default; }
   white-space: pre-wrap;
   overflow-x: auto;
   color: var(--text);
-}
 }
 
 /* ── Project files ── */

@@ -201,7 +201,7 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
                 <li key={t.name} className="template-row">
                   <span className="template-name">/{t.name}</span>
                   {t.argumentHint && <span className="template-hint">{t.argumentHint}</span>}
-                  <span className="template-source source-{t.source}">{t.source}</span>
+                  <span className={`template-source source-${t.source}`}>{t.source}</span>
                   <span className="template-desc">{t.description}</span>
                 </li>
               ))}
