@@ -19,6 +19,12 @@ interface ProfileVersionPayload {
   networkPolicy?: string;
 }
 
+export interface McpActionOutcome {
+  action: "test" | "refresh";
+  ok: boolean;
+  message: string;
+}
+
 export function useMcpSettings(projectId: string | null, setError: (value: string | null) => void) {
   const [profiles, setProfiles] = useState<MCPServerProfile[]>([]);
   const [candidates, setCandidates] = useState<MCPCandidate[]>([]);
@@ -30,6 +36,10 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
   const [credEnv, setCredEnv] = useState<Record<string, string>>({});
   const [credRef, setCredRef] = useState<Record<string, string>>({});
   const [diffView, setDiffView] = useState<{ slug: string; lines: string[]; digestTo: string } | null>(null);
+  // Per-binding in-flight action and its last outcome. Keyed by binding so two
+  // cards can be busy at once and each card keeps its own visible result.
+  const [bindingActions, setBindingActions] = useState<Record<string, "test" | "refresh">>({});
+  const [actionResults, setActionResults] = useState<Record<string, McpActionOutcome>>({});
   const { markSaving, markSaved } = useSettingsStatus();
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -309,27 +319,63 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
     await updateBinding(binding, { credentialRefs: next });
   };
 
+  const startAction = (bindingId: string, action: "test" | "refresh") =>
+    setBindingActions((prev) => ({ ...prev, [bindingId]: action }));
+  const finishAction = (bindingId: string) =>
+    setBindingActions((prev) => {
+      const next = { ...prev };
+      delete next[bindingId];
+      return next;
+    });
+  const recordOutcome = (bindingId: string, outcome: McpActionOutcome) =>
+    setActionResults((prev) => ({ ...prev, [bindingId]: outcome }));
+
   const testBinding = async (binding: MCPProjectBinding) => {
     if (!projectId) return;
+    const bindingId = binding.id!;
+    startAction(bindingId, "test");
     try {
-      await apiFetch(`/v1/projects/${projectId}/mcp/bindings/${binding.id}/test`, { method: "POST" });
+      const result = await apiFetch<{ transport?: string }>(
+        `/v1/projects/${projectId}/mcp/bindings/${bindingId}/test`,
+        { method: "POST" },
+      );
       setError(null);
+      recordOutcome(bindingId, {
+        action: "test",
+        ok: true,
+        message: result?.transport ? `Connected over ${result.transport}` : "Connected",
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Test failed");
+      const message = err instanceof Error ? err.message : "Test failed";
+      setError(message);
+      recordOutcome(bindingId, { action: "test", ok: false, message });
+    } finally {
+      finishAction(bindingId);
     }
   };
 
   const refreshCatalog = async (binding: MCPProjectBinding) => {
     if (!projectId) return;
+    const bindingId = binding.id!;
+    startAction(bindingId, "refresh");
     try {
       const entries = await apiFetch<MCPCatalogEntry[]>(
-        `/v1/projects/${projectId}/mcp/bindings/${binding.id}/catalog/refresh`,
+        `/v1/projects/${projectId}/mcp/bindings/${bindingId}/catalog/refresh`,
         { method: "POST" },
       );
-      setCatalogs((prev) => ({ ...prev, [binding.id!]: entries }));
+      setCatalogs((prev) => ({ ...prev, [bindingId]: entries }));
       setError(null);
+      recordOutcome(bindingId, {
+        action: "refresh",
+        ok: true,
+        message: `${entries.length} ${entries.length === 1 ? "tool" : "tools"} discovered`,
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Catalog refresh failed");
+      const message = err instanceof Error ? err.message : "Catalog refresh failed";
+      setError(message);
+      recordOutcome(bindingId, { action: "refresh", ok: false, message });
+    } finally {
+      finishAction(bindingId);
     }
   };
 
@@ -355,6 +401,7 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
     profiles, candidates, bindings, catalogs, versions,
     toolSearch, setToolSearch, showCreds, setShowCreds, credEnv, setCredEnv, credRef, setCredRef,
     diffView, loading,
+    bindingActions, actionResults,
     showCreate, setShowCreate, transport, setTransport, displayName, setDisplayName,
     slug, setSlug, executable, setExecutable, argv, setArgv, endpoint, setEndpoint,
     versionFor, openProfileDiff,

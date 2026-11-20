@@ -1,9 +1,9 @@
 "use client";
 
-import { Archive } from "lucide-react";
+import { Archive, Loader2 } from "lucide-react";
 import type { MCPCatalogEntry, MCPProjectBinding } from "@/components/settings/types";
 import { confirmAction } from "@/components/ui/confirm";
-import type { useMcpSettings } from "@/hooks/useMcpSettings";
+import type { McpActionOutcome, useMcpSettings } from "@/hooks/useMcpSettings";
 import styles from "./McpPanels.module.css";
 
 const TRANSPORT_LABELS: Record<string, string> = {
@@ -77,6 +77,7 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
   const {
     profiles, catalogs, toolSearch, setToolSearch, showCreds, setShowCreds, credEnv, setCredEnv, credRef, setCredRef,
     versionFor, updateBinding, toggleTool, selectAllTools, addCredential, removeCredential, testBinding, refreshCatalog, removeBinding,
+    bindingActions, actionResults,
   } = mcp;
   const catalog = catalogs[binding.id!] ?? [];
   const selected = binding.selectedRemoteToolNames ?? [];
@@ -91,6 +92,8 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
   // identity, and the transport label is the last resort.
   const profile = version ? profiles.find((entry) => entry.id === version.profileId) : undefined;
   const title = profile?.displayName || commandSummary || (version ? TRANSPORT_LABELS[version.transport] ?? version.transport : "MCP server");
+  const runningAction = bindingActions[binding.id!];
+  const outcome: McpActionOutcome | undefined = actionResults[binding.id!];
 
   return (
     <div key={binding.id} className={styles.card}>
@@ -103,6 +106,11 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
                 <span className={styles.transportBadge}>{TRANSPORT_LABELS[version.transport] ?? version.transport}</span>
               )}
               rev {binding.revision ?? 0} · {selected.length} tools selected
+              {outcome && (
+                <span className={styles.resultBadge} data-ok={outcome.ok ? "true" : "false"} title={outcome.message}>
+                  {outcome.action === "test" ? "Test" : "Refresh"} {outcome.ok ? "ok" : "failed"}
+                </span>
+              )}
             </span>
           </div>
           {commandSummary && (
@@ -152,11 +160,23 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
           >
             {binding.desiredEnabled ? "Enabled" : "Disabled"}
           </button>
-          <button type="button" title="Test connection" onClick={() => testBinding(binding)} className={styles.ghostButton}>
-            Test
+          <button
+            type="button"
+            title="Test connection"
+            onClick={() => testBinding(binding)}
+            disabled={Boolean(runningAction)}
+            className={styles.ghostButton}
+          >
+            {runningAction === "test" ? <Loader2 size={12} className="spin" aria-hidden="true" /> : "Test"}
           </button>
-          <button type="button" title="Refresh tool catalog" onClick={() => refreshCatalog(binding)} className={styles.ghostButton}>
-            Refresh
+          <button
+            type="button"
+            title="Refresh tool catalog"
+            onClick={() => refreshCatalog(binding)}
+            disabled={Boolean(runningAction)}
+            className={styles.ghostButton}
+          >
+            {runningAction === "refresh" ? <Loader2 size={12} className="spin" aria-hidden="true" /> : "Refresh"}
           </button>
           <button type="button" title="Remove binding" onClick={() => removeBinding(binding)}
             className={`${styles.ghostButton} ${styles.danger}`}>

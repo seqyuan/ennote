@@ -72,6 +72,16 @@
   font-size: var(--text-xs);
   font-weight: 400;
 }
+.resultBadge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--success-soft);
+  color: var(--success);
+  font-size: var(--text-xs);
+  font-weight: 400;
+}
+.resultBadge[data-ok="false"] { background: var(--danger-soft); color: var(--danger); }
 .commandSummary {
   max-width: 360px;
   margin-top: 2px;
