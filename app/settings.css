@@ -278,6 +278,16 @@
   cursor: pointer;
 }
 
+/* Field-level error: it belongs to the control that failed, unlike the
+   dialog-wide error bar. */
+.settings-dialog-shell .settings-field-error {
+  margin: 0;
+  color: var(--stg-danger);
+  font-size: var(--text-sm);
+  line-height: 18px;
+}
+.settings-dialog-shell .settings-form [aria-invalid="true"] { border-color: var(--stg-danger); }
+
 /* ---- Secondary capsule buttons ---- */
 .settings-dialog-shell .secondary-btn {
   min-height: 36px;

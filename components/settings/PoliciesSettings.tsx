@@ -1,7 +1,7 @@
 "use client";
 
 import { Archive } from "lucide-react";
-import type { FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import type { PolicyProfile } from "@/components/settings/types";
 import { confirmAction } from "@/components/ui/confirm";
 import { useSettingsStatus } from "@/components/settings/SettingsStatus";
@@ -13,6 +13,23 @@ const policySections: Array<{ kind: PolicyProfile["kind"]; title: string; descri
   { kind: "turn", title: "Turn routing", description: "Model routing candidates and upgrade thresholds.", defaultConfig: '{"mode":"context_upgrade","threshold":0.7,"candidateModelProfileIds":[]}' },
   { kind: "vision", title: "Vision", description: "Native image handling and descriptor fallback boundaries.", defaultConfig: '{"mode":"reject","maxImageBytes":10485760,"maxPixels":40000000}' },
 ];
+
+/** A policy config is a JSON object. Validation is shared by the textarea's
+ *  blur and by submit so both report the same message for the same text. */
+export function validatePolicyConfig(raw: string): string | null {
+  const text = raw.trim();
+  if (text === "") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (reason) {
+    return `Invalid JSON: ${(reason as Error).message}`;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return "Configuration must be a JSON object.";
+  }
+  return null;
+}
 
 export function PoliciesSettings({ policies, refresh, setError }: {
   policies: PolicyProfile[];
@@ -85,10 +102,27 @@ function PolicyEditor({ kind, title, description, policies, defaultConfig, onSub
   onDefault: (policyId: string) => Promise<void>;
   onDeactivate: (policy: PolicyProfile) => Promise<void>;
 }) {
+  const [configError, setConfigError] = useState<string | null>(null);
+
+  // Validate where the user types; submit re-reads the same field so a request
+  // never carries a config the form already knows is unparseable.
+  function checkConfig(form: HTMLFormElement): boolean {
+    const error = validatePolicyConfig(String(new FormData(form).get("config") ?? ""));
+    setConfigError(error);
+    return error === null;
+  }
+
   return <SettingsSection title={title} description={description}>
-    <form className="settings-form policy-form" onSubmit={event => onSubmit(event, kind)}>
+    <form className="settings-form policy-form" onSubmit={(event) => {
+      if (!checkConfig(event.currentTarget)) { event.preventDefault(); return; }
+      void onSubmit(event, kind);
+    }}>
       <label>Name<input name="name" required /></label>
-      <label>Configuration JSON<textarea name="config" required defaultValue={defaultConfig} /></label>
+      <label>Configuration JSON<textarea name="config" required defaultValue={defaultConfig}
+        aria-invalid={configError ? true : undefined}
+        onChange={() => { if (configError) setConfigError(null); }}
+        onBlur={(event) => setConfigError(validatePolicyConfig(event.target.value))} /></label>
+      {configError && <p className="settings-field-error" role="alert">{configError}</p>}
       <button type="submit">Create version</button>
     </form>
     <SettingsList>
