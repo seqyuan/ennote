@@ -63,6 +63,15 @@
 .cardIdentity { min-width: 0; }
 .cardTitle { color: var(--text); font-size: var(--text-sm); font-weight: 700; }
 .cardMeta { margin-left: 6px; color: var(--text-dim); font-weight: 400; }
+.transportBadge {
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--surface-selected);
+  color: var(--content-2);
+  font-size: var(--text-xs);
+  font-weight: 400;
+}
 .commandSummary {
   max-width: 360px;
   margin-top: 2px;

@@ -75,7 +75,7 @@ export function McpCreateForm({ mcp }: { mcp: ReturnType<typeof useMcpSettings> 
 
 export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcpSettings>; binding: MCPProjectBinding }) {
   const {
-    catalogs, toolSearch, setToolSearch, showCreds, setShowCreds, credEnv, setCredEnv, credRef, setCredRef,
+    profiles, catalogs, toolSearch, setToolSearch, showCreds, setShowCreds, credEnv, setCredEnv, credRef, setCredRef,
     versionFor, updateBinding, toggleTool, selectAllTools, addCredential, removeCredential, testBinding, refreshCatalog, removeBinding,
   } = mcp;
   const catalog = catalogs[binding.id!] ?? [];
@@ -86,14 +86,22 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
       ? `${version.executable ?? ""} ${(version.argv ?? []).join(" ")}`.trim()
       : version.endpoint ?? ""
     : "";
+  // A binding carries no display name (contract), so the profile behind its
+  // frozen version names the card; the connection target is the next best
+  // identity, and the transport label is the last resort.
+  const profile = version ? profiles.find((entry) => entry.id === version.profileId) : undefined;
+  const title = profile?.displayName || commandSummary || (version ? TRANSPORT_LABELS[version.transport] ?? version.transport : "MCP server");
 
   return (
     <div key={binding.id} className={styles.card}>
       <div className={styles.cardHead}>
         <div className={styles.cardIdentity}>
           <div className={styles.cardTitle}>
-            {version ? TRANSPORT_LABELS[version.transport] ?? version.transport : "MCP server"}
+            {title}
             <span className={styles.cardMeta}>
+              {version && (
+                <span className={styles.transportBadge}>{TRANSPORT_LABELS[version.transport] ?? version.transport}</span>
+              )}
               rev {binding.revision ?? 0} · {selected.length} tools selected
             </span>
           </div>
