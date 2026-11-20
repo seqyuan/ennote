@@ -4,6 +4,7 @@ import { Database, FileText, Layers, Package, Plug, Search, Settings2, Shield, S
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useT } from "@/components/LocaleProvider";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
+import { filterSettingsTabs, settingsTabSearch, type SettingsTabSearch } from "@/lib/settings-search";
 import { ContextSettings } from "@/components/settings/ContextSettings";
 import { GeneralSettings } from "@/components/settings/GeneralSettings";
 import { PacksPanel } from "./PacksPanel";
@@ -15,10 +16,8 @@ import { TemplatesSettings } from "@/components/settings/TemplatesSettings";
 import { SettingsStatusBadge, SettingsStatusProvider, useSettingsStatus } from "@/components/settings/SettingsStatus";
 import type { ModelProfile, PolicyProfile, ProviderProfile, Session, SettingsTab } from "@/components/settings/types";
 
-interface TabItem {
+interface TabItem extends SettingsTabSearch {
   id: SettingsTab;
-  label: string;
-  description: string;
   icon: React.ReactNode;
 }
 
@@ -140,31 +139,31 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
     };
   }, []);
 
+  // Every row carries its English text as well as the localized text, so a
+  // query in either language finds the section (see lib/settings-search.ts).
+  const tabItem = (id: SettingsTab, descriptionKey = `settings.tabs.${id}.description`): TabItem => ({
+    id,
+    ...settingsTabSearch(t, `settings.tabs.${id}.label`, descriptionKey),
+    icon: tabIcon(id),
+  });
   const tabs: TabItem[] = [
-    { id: "general", label: t("settings.tabs.general.label"), description: t("settings.tabs.general.description"), icon: tabIcon("general") },
-    { id: "models", label: t("settings.tabs.models.label"), description: t("settings.tabs.models.description"), icon: tabIcon("models") },
-    { id: "policies", label: t("settings.tabs.policies.label"), description: t("settings.tabs.policies.description"), icon: tabIcon("policies") },
-    { id: "context", label: t("settings.tabs.context.label"), description: t(session ? "settings.tabs.context.descriptionWithSession" : "settings.tabs.context.description"), icon: tabIcon("context") },
-    { id: "templates", label: t("settings.tabs.templates.label"), description: t("settings.tabs.templates.description"), icon: tabIcon("templates") },
-    { id: "mcp", label: t("settings.tabs.mcp.label"), description: t("settings.tabs.mcp.description"), icon: tabIcon("mcp") },
-    { id: "skills", label: t("settings.tabs.skills.label"), description: t("settings.tabs.skills.description"), icon: tabIcon("skills") },
-    { id: "packs", label: t("settings.tabs.packs.label"), description: t("settings.tabs.packs.description"), icon: tabIcon("packs") },
+    tabItem("general"),
+    tabItem("models"),
+    tabItem("policies"),
+    tabItem("context", session ? "settings.tabs.context.descriptionWithSession" : "settings.tabs.context.description"),
+    tabItem("templates"),
+    tabItem("mcp"),
+    tabItem("skills"),
+    tabItem("packs"),
   ];
 
-  // Search reads the translated text, so a query in any shipped locale finds
-  // its section instead of only matching the English labels.
-  const matchesQuery = (tab: TabItem, needle: string) =>
-    `${tab.label} ${tab.description}`.toLowerCase().includes(needle);
-  const normalizedQuery = query.trim().toLowerCase();
-  const visibleTabs = normalizedQuery === ""
-    ? tabs
-    : tabs.filter((tab) => matchesQuery(tab, normalizedQuery));
+  const visibleTabs = filterSettingsTabs(tabs, query);
 
   const onSearchChange = (value: string) => {
     setQuery(value);
     const needle = value.trim().toLowerCase();
     if (needle === "") return;
-    const matches = tabs.filter((tab) => matchesQuery(tab, needle));
+    const matches = filterSettingsTabs(tabs, value);
     if (matches.length > 0 && !matches.some((tab) => tab.id === activeTab)) {
       setActiveTab(matches[0].id);
     }
