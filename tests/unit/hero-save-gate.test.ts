@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSaveGate, mergeSavedDetail } from "@/components/settings/HeroesSettings";
+import { createSaveGate, heroSaveState, mergeSavedDetail } from "@/components/settings/HeroesSettings";
 
 // Regression: the editor returned early whenever a save was in flight, so an
 // edit made during that round trip was thrown away while the header still said
@@ -40,6 +40,24 @@ describe("createSaveGate", () => {
 
     expect(gate.takeEdited()).toBe(false);
     expect(gate.enter()).toBe(true);
+  });
+});
+
+// Text fields write locally and save on blur, so the header had only two states:
+// a keystroke left it showing the same green "Saved" as a settled file. The third
+// state is derived from a counter of unsaved local edits.
+describe("heroSaveState", () => {
+  it("says saving while a save is in flight, even with local edits", () => {
+    expect(heroSaveState(true, 0)).toBe("saving");
+    expect(heroSaveState(true, 3)).toBe("saving");
+  });
+
+  it("reports unsaved changes once typing outruns the save", () => {
+    expect(heroSaveState(false, 1)).toBe("unsaved");
+  });
+
+  it("reports saved only when nothing is pending", () => {
+    expect(heroSaveState(false, 0)).toBe("saved");
   });
 });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Bot, Check, FileText, Loader2, Plus, Search } from "lucide-react";
+import { ArrowLeft, Bot, Check, FileText, Loader2, Pencil, Plus, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { modelOptions } from "@/components/graphs/types";
 import { useT } from "@/components/LocaleProvider";
@@ -118,6 +118,17 @@ export function mergeSavedDetail(updated: HeroDetail, editedWhileSaving: HeroDoc
   return editedWhileSaving ? { ...updated, document: editedWhileSaving } : updated;
 }
 
+// Text fields update locally and only save on blur. Between those two events the
+// file on disk is older than the screen, and the header must say so instead of
+// showing the same green "Saved" as a settled document. A counter of local edits
+// (reset when a save lands) is enough: no per-keystroke document comparison.
+export type HeroSaveState = "saving" | "unsaved" | "saved";
+
+export function heroSaveState(saving: boolean, dirtyTick: number): HeroSaveState {
+  if (saving) return "saving";
+  return dirtyTick > 0 ? "unsaved" : "saved";
+}
+
 export function HeroesSettings({ models, setError }: {
   models: ModelProfile[];
   setError: (value: string | null) => void;
@@ -129,6 +140,8 @@ export function HeroesSettings({ models, setError }: {
   const [detail, setDetail] = useState<HeroDetail | null>(null);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState<"loading" | "saving" | "creating" | "publishing" | null>(null);
+  // Counts local-only text edits since the last accepted save; see heroSaveState.
+  const [dirtyTick, setDirtyTick] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [newHero, setNewHero] = useState({ id: "", name: "" });
   const [conflict, setConflict] = useState(false);
@@ -154,6 +167,7 @@ export function HeroesSettings({ models, setError }: {
       latestDocument.current = loaded.document;
       saveGate.current = createSaveGate();
       setDetail(loaded);
+      setDirtyTick(0);
       setConflict(false);
       setDiskDetail(null);
       setError(null);
@@ -191,6 +205,7 @@ export function HeroesSettings({ models, setError }: {
       latestDocument.current = created.document;
       saveGate.current = createSaveGate();
       setDetail(created);
+      setDirtyTick(0);
       setSelected(created.id);
       await refresh();
       setError(null);
@@ -228,7 +243,10 @@ export function HeroesSettings({ models, setError }: {
         setConflict(false);
         setDiskDetail(null);
         setError(null);
-        if (!editedWhileSaving) break;
+        if (!editedWhileSaving) {
+          setDirtyTick(0);
+          break;
+        }
         pending = editedWhileSaving;
       }
     } catch (reason) {
@@ -269,6 +287,7 @@ export function HeroesSettings({ models, setError }: {
     // Tell the in-flight save that the text on screen moved on.
     saveGate.current.markEdited();
     setDetail({ ...detail, document });
+    setDirtyTick((tick) => tick + 1);
   };
   const updateAndSave = (update: (document: HeroDocument) => HeroDocument) => {
     if (!detail) return;
@@ -291,6 +310,7 @@ export function HeroesSettings({ models, setError }: {
   };
 
   const visible = heroes.filter((hero) => `${hero.name} ${hero.id}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const saveState = heroSaveState(busy === "saving", dirtyTick);
 
   return (
     <div className={`global-heroes ${selected ? "has-selection" : ""}`}>
@@ -316,7 +336,9 @@ export function HeroesSettings({ models, setError }: {
                 <span className="hero-conflict-state">File changed on disk</span>
                 <button type="button" onClick={() => void showDiff()}>Diff</button>
                 <button type="button" onClick={() => void openHero(detail.id)}>Reload</button>
-              </> : <span className={busy === "saving" ? "is-saving" : ""}>{busy === "saving" ? <><Loader2 className="spin" size={14} /> Saving</> : <><Check size={14} /> Saved</>}</span>}
+              </> : saveState === "saving" ? <span className="is-saving"><Loader2 className="spin" size={14} /> Saving</span>
+                : saveState === "unsaved" ? <span className="is-dirty"><Pencil size={14} /> Unsaved changes</span>
+                : <span><Check size={14} /> Saved</span>}
               <button type="button" onClick={() => void publish()} disabled={Boolean(busy) || conflict}>{busy === "publishing" ? "Publishing…" : "Publish"}</button>
             </div>
           </header>

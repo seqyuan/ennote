@@ -2041,6 +2041,7 @@ html.dark .file-code .shiki span { color: var(--shiki-dark); }
 .global-hero-command-actions { display: flex; align-items: center; gap: 8px; }
 .global-hero-command-actions > span { display: inline-flex; align-items: center; gap: 5px; color: var(--success); font-size: var(--text-xs); }
 .global-hero-command-actions > span.is-saving { color: var(--text-muted); }
+.global-hero-command-actions > span.is-dirty { color: var(--warning); }
 .global-hero-command-actions button { min-height: 36px; padding: 0 11px; border: 0; border-radius: var(--radius-xs); background: var(--accent); color: var(--content-inverse); cursor: pointer; font-size: var(--text-xs); font-weight: 700; }
 .global-hero-command-actions button:disabled { opacity: .5; cursor: default; }
 .global-hero-back { display: none; }
