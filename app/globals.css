@@ -1368,14 +1368,6 @@ button:disabled { cursor: default; }
   margin-left: auto;
 }
 .template-actions .settings-btn { font-size: 0.78em; padding: 3px 8px; }
-.template-confirm {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.78em;
-  color: var(--text);
-}
-.template-confirm .settings-btn { font-size: 0.78em; padding: 3px 8px; }
 .template-manual-cleanup {
   font-size: 0.78em;
   color: var(--text-dim);

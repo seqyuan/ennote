@@ -3,6 +3,7 @@
 import { AlertTriangle, Info, Plus, Save, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
+import { confirmAction } from "@/components/ui/confirm";
 import { useSettingsStatus } from "@/components/settings/SettingsStatus";
 import type { components } from "@/lib/worker-api.gen";
 
@@ -45,9 +46,6 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
   const [editDesc, setEditDesc] = useState("");
   const [editHint, setEditHint] = useState("");
   const [editBody, setEditBody] = useState("");
-
-  // Inline delete confirmation (per name).
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -109,10 +107,15 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
   }
 
   async function doDelete(name: string) {
+    if (!(await confirmAction({
+      title: `Delete template “/${name}”?`,
+      description: "The template's markdown file is deleted from the global prompt store. Builtin and project templates are untouched.",
+      confirmLabel: "Delete",
+      tone: "danger",
+    }))) return;
     markSaving();
     try {
       await apiFetch(`/v1/prompt-templates/${encodeURIComponent(name)}`, { method: "DELETE" });
-      setConfirmDelete(null);
       await load();
       markSaved();
     } catch (err) { setError((err as Error).message); }
@@ -272,22 +275,15 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
                     </div>
                   </div>
                 ) : entry.editable ? (
-                  confirmDelete === entry.name ? (
-                    <span className="template-confirm">
-                      <span>Delete /{entry.name}?</span>
-                      <button type="button" className="settings-btn danger" onClick={() => doDelete(entry.name)} disabled={saving}>Delete</button>
-                      <button type="button" className="settings-btn" onClick={() => setConfirmDelete(null)}>Cancel</button>
-                    </span>
-                  ) : (
-                    <>
-                      <button type="button" className="settings-btn" onClick={() => startEdit(entry)}>
-                        {entry.valid ? "Edit" : "Repair"}
-                      </button>
-                      <button type="button" className="settings-btn danger" onClick={() => setConfirmDelete(entry.name)}>
-                        <Trash2 size={14} />
-                      </button>
-                    </>
-                  )
+                  <>
+                    <button type="button" className="settings-btn" onClick={() => startEdit(entry)}>
+                      {entry.valid ? "Edit" : "Repair"}
+                    </button>
+                    <button type="button" className="settings-btn danger" aria-label={`Delete template /${entry.name}`}
+                      onClick={() => void doDelete(entry.name)} disabled={saving}>
+                      <Trash2 size={14} aria-hidden="true" />
+                    </button>
+                  </>
                 ) : (
                   <span className="template-manual-cleanup">Manual cleanup required in $ENNOTE_HOME/prompts/</span>
                 )}
