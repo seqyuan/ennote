@@ -25,7 +25,7 @@
   align-items: center;
   justify-content: center;
   padding: 22px;
-  background: color-mix(in srgb, #000 42%, transparent);
+  background: var(--scrim);
 }
 
 /* ---- Shell: centered 800px, panel radius, 188px rail. ---- */
@@ -53,14 +53,14 @@
   flex-direction: column;
   gap: 18px;
   width: 188px;
-  padding: 22px 12px 0;
+  padding: 22px var(--space-3) 0;
   border-right: none;
   background: transparent;
   box-sizing: border-box;
 }
 
 .settings-dialog-navtitle {
-  padding: 0 12px;
+  padding: 0 var(--space-3);
   font-size: var(--text-lg);
   line-height: 24px;
   font-weight: 500;
@@ -73,8 +73,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 32px;
-  margin: 0 8px 6px;
+  height: var(--control-h-lg);
+  margin: 0 var(--space-2) 6px;
   padding: 0 9px;
   border: 1px solid var(--stg-border-l2);
   border-radius: var(--radius-sm);
@@ -109,16 +109,16 @@
 }
 .settings-dialog-search button:hover { background: var(--stg-hover); color: var(--stg-text-primary); }
 .settings-dialog-empty {
-  padding: 14px 12px;
+  padding: 14px var(--space-3);
   color: var(--stg-text-tertiary);
   font-size: var(--text-sm);
   line-height: 1.5;
 }
 
 .settings-dialog-tab {
-  height: 40px;
-  padding: 9px 16px 9px 12px;
-  gap: 8px;
+  height: var(--control-h-2xl);
+  padding: 9px var(--space-4) 9px var(--space-3);
+  gap: var(--space-2);
   border-radius: var(--radius-md);
   color: var(--stg-text-primary);
   font-size: var(--text-base);
@@ -153,9 +153,9 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
   height: 54px;
-  padding: 20px 14px 8px 10px;
+  padding: 20px 14px var(--space-2) 10px;
   box-sizing: border-box;
 }
 
@@ -164,7 +164,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-2);
   margin-left: auto;
 }
 
@@ -179,8 +179,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
   padding: 0;
   border: none;
   border-radius: var(--radius-full);
@@ -199,7 +199,7 @@
   gap: 5px;
   max-width: 220px;
   min-height: 26px;
-  padding: 0 8px;
+  padding: 0 var(--space-2);
   border-radius: var(--radius-full);
   color: var(--stg-text-tertiary);
   font-size: var(--text-xs);
@@ -223,7 +223,7 @@
 
 /* ---- Section & forms ---- */
 .settings-dialog-shell .settings-tab-section {
-  padding: 20px 24px 24px;
+  padding: 20px var(--space-5) var(--space-5);
   max-width: 720px;
 }
 .settings-dialog-shell .settings-tab-section > header h2 {
@@ -238,7 +238,7 @@
 }
 
 .settings-dialog-shell .settings-form {
-  gap: 12px;
+  gap: var(--space-3);
   max-width: 720px;
   align-items: stretch;
 }
@@ -252,7 +252,7 @@
 .settings-dialog-shell .settings-form input,
 .settings-dialog-shell .settings-form select,
 .settings-dialog-shell .settings-form textarea {
-  height: 32px;
+  height: var(--control-h-lg);
   padding: 0 10px;
   border: 1px solid var(--stg-border-l2);
   border-radius: var(--radius-sm);
@@ -260,7 +260,7 @@
   color: var(--stg-text-primary);
   font: var(--text-base)/22px var(--font-sans);
 }
-.settings-dialog-shell .settings-form textarea { height: 68px; padding: 8px 10px; }
+.settings-dialog-shell .settings-form textarea { height: 68px; padding: var(--space-2) 10px; }
 .settings-dialog-shell .settings-form input:focus,
 .settings-dialog-shell .settings-form select:focus,
 .settings-dialog-shell .settings-form textarea:focus {
@@ -268,7 +268,7 @@
   border-color: var(--stg-brand);
 }
 .settings-dialog-shell .settings-form button {
-  min-height: 36px;
+  min-height: var(--control-h-xl);
   padding: 0 14px;
   border: none;
   border-radius: var(--radius-full);
@@ -290,7 +290,7 @@
 
 /* ---- Secondary capsule buttons ---- */
 .settings-dialog-shell .secondary-btn {
-  min-height: 36px;
+  min-height: var(--control-h-xl);
   padding: 0 14px;
   border: 1px solid var(--stg-border-l2);
   border-radius: var(--radius-full);
@@ -307,7 +307,7 @@
 .settings-dialog-shell .compaction-model-policies {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
   padding: 10px 0 0;
   border-top: 1px solid var(--stg-border-l2);
 }
@@ -331,8 +331,8 @@
   align-items: center;
 }
 .settings-dialog-shell .model-policy-row .secondary-btn {
-  min-height: 30px;
-  height: 30px;
+  min-height: var(--control-h-md);
+  height: var(--control-h-md);
   padding: 0 10px;
   border-radius: var(--radius-full);
 }
@@ -343,19 +343,19 @@
 .settings-dialog-shell .language-group {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
   padding: 14px 0;
 }
 .settings-dialog-shell .appearance-cubes {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .settings-dialog-shell .appearance-cube {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 32px;
-  padding: 0 12px;
+  height: var(--control-h-lg);
+  padding: 0 var(--space-3);
   border: 1px solid var(--stg-border-l2);
   border-radius: var(--radius-sm);
   background: transparent;
@@ -382,11 +382,11 @@
 
 .settings-models-rows {
   list-style: none;
-  margin: 12px 0 0;
+  margin: var(--space-3) 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 /* A configured provider: outlined on the panel fill, so the filled editor
@@ -394,10 +394,10 @@
 .settings-models-rowcard {
   border: 1px solid var(--stg-border-l2);
   border-radius: var(--radius-md);
-  padding: 12px 14px;
+  padding: var(--space-3) 14px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .settings-models-rowhead {
@@ -434,7 +434,7 @@
 .settings-models-rowactions {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   margin-left: auto;
 }
 
@@ -444,8 +444,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  height: 28px;
+  gap: var(--space-1);
+  height: var(--control-h-sm);
   padding: 0 10px;
   border: 1px solid var(--stg-border-l2);
   border-radius: var(--radius-full);
@@ -477,7 +477,7 @@
 .settings-models-addcard {
   border-radius: var(--radius-md);
   background: var(--stg-module);
-  padding: 14px 16px;
+  padding: 14px var(--space-4);
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -487,8 +487,8 @@
 .settings-models-addblock {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-top: 12px;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
 }
 
 /* The two ways to gain a provider, as equal siblings spanning the same width
@@ -507,7 +507,7 @@
   gap: 6px;
   flex: 1 1 0;
   min-width: 180px;
-  height: 44px;
+  height: var(--control-h-touch);
   border: 1px dashed var(--stg-border-l3);
   border-radius: var(--radius-md);
   background: transparent;
@@ -542,7 +542,7 @@
 .settings-models-input {
   box-sizing: border-box;
   width: 100%;
-  height: 32px;
+  height: var(--control-h-lg);
   padding: 0 10px;
   border: 1px solid var(--stg-border-l2);
   border-radius: var(--radius-sm);
@@ -562,11 +562,26 @@
   appearance: none;
   max-width: 240px;
   cursor: pointer;
-  padding-right: 32px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%2381858C' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  background-size: 12px 12px;
+  padding-right: var(--space-6);
+}
+
+/* The chevron is a mask painted with a text token, because an SVG in
+   background-image cannot read currentColor or a custom property: its stroke
+   colour would be baked into the data URI and blind to the theme. The mask
+   hangs off the field (a select cannot render a pseudo-element) and is centred
+   on the control, which is the field's last child. */
+.settings-models-field:has(> .settings-models-select) { position: relative; }
+.settings-models-field:has(> .settings-models-select)::after {
+  content: "";
+  position: absolute;
+  right: 12px;
+  bottom: calc((var(--control-h-lg) - 12px) / 2);
+  width: 12px;
+  height: 12px;
+  background-color: var(--stg-text-tertiary);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px 12px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px 12px no-repeat;
+  pointer-events: none;
 }
 
 .settings-models-input::placeholder { color: var(--stg-text-tertiary); }
@@ -597,7 +612,7 @@
 .settings-models-editor-header {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .settings-models-editor-title {
   font-size: var(--text-base);
@@ -628,7 +643,7 @@
 .settings-models-editor-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .settings-models-primary {
@@ -636,7 +651,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 36px;
+  height: var(--control-h-xl);
   padding: 0 14px;
   border: none;
   border-radius: var(--radius-full);
@@ -658,7 +673,7 @@
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
-  height: 28px;
+  height: var(--control-h-sm);
   padding: 0 10px;
   border: none;
   border-radius: var(--radius-full);
@@ -687,8 +702,8 @@
   align-items: center;
   gap: 6px;
   width: fit-content;
-  padding: 2px 4px;
-  margin-left: -4px;
+  padding: 2px var(--space-1);
+  margin-left: calc(-1 * var(--space-1));
   border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: var(--text-sm);
@@ -714,22 +729,22 @@
 .settings-models-customized-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding-top: 12px;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
 }
 
 .settings-models-catalog {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding-top: 12px;
+  padding-top: var(--space-3);
   border-top: 1px solid var(--stg-border-l2);
 }
 .settings-models-list-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
 }
 .settings-models-catalog-heading {
   display: flex;
@@ -748,7 +763,7 @@
   color: var(--stg-text-tertiary);
   font-size: var(--text-sm);
   line-height: 18px;
-  padding: 12px;
+  padding: var(--space-3);
   border: 1px dashed var(--stg-border-l3);
   border-radius: var(--radius-sm);
   text-align: center;
@@ -768,13 +783,13 @@
 .settings-models-entry-advanced {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 8px;
-  padding: 8px 4px 2px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-1) 2px;
 }
 .settings-models-entry-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
 }
 .settings-models-entry-field-label {
   color: var(--stg-text-tertiary);
@@ -787,8 +802,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -813,8 +828,8 @@
   align-self: flex-start;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: 28px;
+  gap: var(--space-1);
+  height: var(--control-h-sm);
   padding: 0 10px;
   border: 1px solid var(--stg-border-l2);
   border-radius: var(--radius-full);
@@ -834,14 +849,14 @@
 .settings-models-secret {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   min-width: 0;
 }
 .settings-models-secret input {
   box-sizing: border-box;
   flex: 1;
   min-width: 0;
-  height: 32px;
+  height: var(--control-h-lg);
   padding: 0 10px;
   border: 1px solid var(--stg-border-l2);
   border-radius: var(--radius-sm);
@@ -860,8 +875,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
   padding: 0;
   border: none;
   border-radius: var(--radius-sm);
@@ -899,8 +914,8 @@
 .settings-models-candidate-label {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: var(--space-2);
+  padding: 6px var(--space-2);
   cursor: pointer;
 }
 .settings-models-candidate-id {
@@ -920,7 +935,7 @@
   border: none;
   border-radius: var(--radius-md);
   background: var(--stg-module);
-  padding: 14px 16px;
+  padding: 14px var(--space-4);
   min-height: 0;
 }
 .settings-dialog-shell .settings-models-setupcard > .provider-settings-row,
@@ -969,7 +984,7 @@
     height: auto;
     min-height: 52px;
     align-items: center;
-    padding: max(8px, env(safe-area-inset-top)) 12px 6px 16px;
+    padding: max(var(--space-2), env(safe-area-inset-top)) var(--space-3) 6px var(--space-4);
     border-bottom: 1px solid var(--stg-border-l2);
   }
   .settings-dialog-actions {
@@ -985,8 +1000,8 @@
     text-transform: none;
   }
   .settings-dialog-close {
-    width: 40px;
-    height: 40px;
+    width: var(--control-h-2xl);
+    height: var(--control-h-2xl);
   }
 
   /* Tab strip: horizontal scrollable pills docked at the sheet bottom. */
@@ -996,7 +1011,7 @@
     width: auto;
     flex-direction: row;
     gap: 6px;
-    padding: 8px max(10px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    padding: var(--space-2) max(10px, env(safe-area-inset-right)) max(var(--space-2), env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
     overflow-x: auto;
     overflow-y: hidden;
     border-right: none;
@@ -1012,7 +1027,7 @@
   .settings-dialog-tab {
     flex: 0 0 auto;
     width: auto;
-    height: 40px;
+    height: var(--control-h-2xl);
     margin: 0;
     padding: 0 14px;
     border-radius: var(--radius-full);
@@ -1027,7 +1042,7 @@
   /* Panel: comfortable padding; the docked strip covers the safe area. */
   .settings-dialog-panel { flex: 1; }
   .settings-dialog-shell .settings-tab-section {
-    padding: 18px 16px 24px;
+    padding: 18px var(--space-4) var(--space-5);
   }
 
   /* Context tab: the five-column per-model policy grid collapses to rows. */
@@ -1037,8 +1052,8 @@
 
   /* Heroes/Graphs pages: keep the back affordance touch-friendly. */
   .settings-view-back {
-    min-height: 44px;
-    min-width: 44px;
+    min-height: var(--control-h-touch);
+    min-width: var(--control-h-touch);
     justify-content: center;
   }
 }
@@ -1071,7 +1086,7 @@
 }
 .settings-section-header p {
   max-width: 72ch;
-  margin: 4px 0 0;
+  margin: var(--space-1) 0 0;
   color: var(--content-3);
   font-size: var(--text-sm);
   line-height: 1.5;
@@ -1142,5 +1157,5 @@
 .model-editor-chevron { transition: transform 120ms ease; }
 .model-editor-chevron[data-open="true"] { transform: rotate(90deg); }
 
-.templates-diag-block { margin-bottom: 12px; }
+.templates-diag-block { margin-bottom: var(--space-3); }
 .template-edit-form-inline { width: 100%; margin-top: 6px; }

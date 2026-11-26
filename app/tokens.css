@@ -81,6 +81,19 @@
   --space-6: 32px;
   --space-7: 40px;
 
+  /* Control heights: one ladder, so a row of buttons, inputs, and selects
+     lines up instead of each control declaring its own height. Values are the
+     ones the settings surfaces already use — 28 dense row controls, 30 the
+     compact capsule in the per-model policy grid, 32 fields and selects,
+     36 form actions — plus the two tall ones (40 the nav rail's tab cell and
+     the mobile top bar, 44 the minimum touch target). */
+  --control-h-sm: 28px;
+  --control-h-md: 30px;
+  --control-h-lg: 32px;
+  --control-h-xl: 36px;
+  --control-h-2xl: 40px;
+  --control-h-touch: 44px;
+
   /* Type scale */
   --text-xs: 11px;
   --text-sm: 12px;
@@ -99,6 +112,9 @@
   --elevation-2: 0 0 0 0.5px var(--stroke-hairline), 0 8px 24px rgba(24, 24, 27, 0.10);
   --elevation-3: 0 0 0 0.5px var(--stroke-hairline), 0 16px 40px rgba(24, 24, 27, 0.16);
   --elevation-soft: 0 0 0 0.5px var(--stroke-hairline), 0 2px 8px rgba(24, 24, 27, 0.05);
+
+  /* Scrim behind a modal surface. Neutral black in both themes. */
+  --scrim: color-mix(in srgb, #000 42%, transparent);
 
   /* Global stacking layers. Surfaces that sit above other surfaces must use
      these names instead of literal z-index values. Panel-local stacking

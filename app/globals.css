@@ -1084,7 +1084,7 @@ button:disabled { cursor: default; }
 .settings-overlay {
   /* Local: nested modal inside .settings-dialog-backdrop (--layer-modal). */
   position: fixed; z-index: 60; inset: 0; display: grid; place-items: center;
-  padding: 24px; background: color-mix(in srgb, #000 42%, transparent);
+  padding: 24px; background: var(--scrim);
 }
 .settings-tab-section { padding: 22px 24px 36px; }
 .settings-tab-section > header { margin-bottom: 18px; }
