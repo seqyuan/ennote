@@ -46,7 +46,9 @@ test("skills tab lists installed and catalog skills with install annotations", a
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("tab", { name: /Skills/ }).click();
 
-  await expect(page.getByRole("heading", { name: "Skills" })).toBeVisible();
+  // The tab's own title, not "Skills roots": the boards now share one section
+  // primitive, so a loose name match also hits the first section heading.
+  await expect(page.getByRole("heading", { level: 2, name: "Skills", exact: true })).toBeVisible();
   // Installed group shows package + version + scope + skills.sh link.
   await expect(page.getByText("badlogic/pi-skills@web-search")).toBeVisible();
   await expect(page.getByText("079a8cb0")).toBeVisible();

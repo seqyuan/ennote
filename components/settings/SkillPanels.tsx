@@ -1,7 +1,7 @@
 "use client";
 
 import { ExternalLink, RefreshCw, Search, X } from "lucide-react";
-import { SettingsEmpty, SettingsLoading } from "@/components/settings/SettingsPrimitives";
+import { SettingsEmpty, SettingsLoading, SettingsSection } from "@/components/settings/SettingsPrimitives";
 import type { AnnotatedSkill, SkillInstallInfo, SkillRoot, SkillSearchResult, SkillUpdateResult } from "@/components/settings/types";
 import type { useSkillRoots } from "@/hooks/useSkillRoots";
 import styles from "./SkillPanels.module.css";
@@ -18,13 +18,10 @@ export function SkillRootsPanel(props: {
   } = control;
 
   return (
-    <>
-      <div className={styles.sectionHeader}>
-        Skills roots <span className={styles.sectionCount}>{roots.length} additional</span>
-      </div>
-      <div className={styles.note}>
-        Resolution paths are on the Worker host. Remote clients (Tauri) read the same configured roots — no per-client setup.
-      </div>
+    <SettingsSection
+      title={<>Skills roots <span className={styles.sectionCount}>{roots.length} additional</span></>}
+      description="Resolution paths are on the Worker host. Remote clients (Tauri) read the same configured roots — no per-client setup."
+    >
       <div className={styles.stack}>
         {roots.length === 0 && !loading && (
           <SettingsEmpty>
@@ -103,7 +100,7 @@ export function SkillRootsPanel(props: {
           </div>
         )}
       </div>
-    </>
+    </SettingsSection>
   );
 }
 
@@ -127,8 +124,7 @@ export function SkillMarketplace(props: {
   } = props;
 
   return (
-    <div className={styles.market}>
-      <div className={styles.marketTitle}>Marketplace</div>
+    <SettingsSection title="Marketplace">
       <div className={styles.searchRow}>
         <input
           type="search"
@@ -178,7 +174,7 @@ export function SkillMarketplace(props: {
           </button>
         </div>
       ))}
-    </div>
+    </SettingsSection>
   );
 }
 
@@ -198,10 +194,7 @@ export function SkillInstalledList(props: {
   const { installed, loading, updateKey, updates, checking, toggling, removing, onCheck, onUpdate, onToggle, onRemove } = props;
 
   return (
-    <>
-      <div className={styles.sectionHeader}>
-        Installed <span className={styles.sectionCount}>{installed.length}</span>
-      </div>
+    <SettingsSection title={<>Installed <span className={styles.sectionCount}>{installed.length}</span></>}>
       {loading && <SettingsLoading label="Loading…" />}
       {!loading && installed.length === 0 && (
         <SettingsEmpty>No installed skills yet — search the marketplace above.</SettingsEmpty>
@@ -280,17 +273,14 @@ export function SkillInstalledList(props: {
           })}
         </div>
       )}
-    </>
+    </SettingsSection>
   );
 }
 
 export function SkillCatalogList({ local }: { local: AnnotatedSkill[] }) {
   if (local.length === 0) return null;
   return (
-    <>
-      <div className={styles.sectionHeader}>
-        Catalog <span className={styles.sectionCount}>{local.length}</span>
-      </div>
+    <SettingsSection title={<>Catalog <span className={styles.sectionCount}>{local.length}</span></>}>
       <div className={styles.stack}>
         {local.map((skill) => (
           <div key={`${skill.relPath}:${skill.skillId}`} className={styles.catalogRow}>
@@ -304,7 +294,7 @@ export function SkillCatalogList({ local }: { local: AnnotatedSkill[] }) {
           </div>
         ))}
       </div>
-    </>
+    </SettingsSection>
   );
 }
 

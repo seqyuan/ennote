@@ -7,7 +7,8 @@ function cx(...values: Array<string | false | null | undefined>): string {
   return values.filter(Boolean).join(" ");
 }
 
-/** A titled block inside a settings tab. */
+/** A titled block inside a settings tab. The third heading level: a tab's own
+ *  title is its h2 and a card sits below this one as an h4. */
 export function SettingsSection({
   title,
   description,
@@ -68,7 +69,9 @@ export function SettingsList({ children, className }: { children: ReactNode; cla
   return <div className={cx("settings-list", className)}>{children}</div>;
 }
 
-/** A bordered card for a grouped editor or a dense sub-section. */
+/** A bordered card for a grouped editor or a dense sub-section. Its title is
+ *  an h4 rather than a fifth level chosen by the caller: a card only ever sits
+ *  inside a section, so the level is known here and cannot drift out of order. */
 export function SettingsCard({
   title,
   description,
@@ -87,8 +90,8 @@ export function SettingsCard({
       {(title || description || actions) && (
         <div className="settings-card-header">
           <div>
-            {title && <div className="settings-card-title">{title}</div>}
-            {description && <div className="settings-card-description">{description}</div>}
+            {title && <h4 className="settings-card-title">{title}</h4>}
+            {description && <p className="settings-card-description">{description}</p>}
           </div>
           {actions && <div className="settings-section-actions">{actions}</div>}
         </div>

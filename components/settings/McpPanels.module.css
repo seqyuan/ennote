@@ -135,12 +135,6 @@
 .credentialEnvInput { flex: 0 0 140px; width: 140px; }
 .credentialRefInput { flex: 1; min-width: 0; }
 
-.sectionHeader {
-  margin-bottom: 6px;
-  color: var(--text);
-  font-size: var(--text-sm);
-  font-weight: 700;
-}
 .list { display: flex; flex-direction: column; gap: 6px; }
 .candidateGroup { display: flex; flex-direction: column; gap: 4px; }
 .candidateRow {

@@ -15,6 +15,7 @@ import {
   type PackStateSummary,
 } from "@/lib/packs";
 import { confirmAction } from "@/components/ui/confirm";
+import { SettingsSection } from "@/components/settings/SettingsPrimitives";
 import styles from "./PacksPanel.module.css";
 
 /**
@@ -144,11 +145,13 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
 
   return (
     <section className="settings-tab-section" aria-labelledby="settings-packs-heading">
-      <h3 id="settings-packs-heading" className={styles.heading}>Agent Packs</h3>
-      <p className={styles.note}>
-        A pack ships Heroes, Skills, and optionally a Graph. Installing one only creates
-        disabled drafts on this Worker — nothing runs until a revision is published and bound.
-      </p>
+      <header>
+        <h2 id="settings-packs-heading">Agent Packs</h2>
+        <p>
+          A pack ships Heroes, Skills, and optionally a Graph. Installing one only creates
+          disabled drafts on this Worker — nothing runs until a revision is published and bound.
+        </p>
+      </header>
 
       <div className={styles.installer}>
         <label className={styles.pathLabel}>
@@ -215,13 +218,14 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
         </div>
       )}
 
-      <div className={styles.sectionHeader}>
-        Installed <span className={styles.sectionCount}>{installed.length}</span>
-        <button type="button" className={styles.iconButton} aria-label="Refresh installed packs" onClick={() => void load()}>
-          <RefreshCw size={13} aria-hidden="true" />
-        </button>
-      </div>
-
+      <SettingsSection
+        title={<>Installed <span className={styles.sectionCount}>{installed.length}</span></>}
+        actions={(
+          <button type="button" className={styles.iconButton} aria-label="Refresh installed packs" onClick={() => void load()}>
+            <RefreshCw size={13} aria-hidden="true" />
+          </button>
+        )}
+      >
       {loading ? (
         <div className={styles.empty}>Loading…</div>
       ) : installed.length === 0 ? (
@@ -262,6 +266,7 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
           ))}
         </div>
       )}
+      </SettingsSection>
     </section>
   );
 }

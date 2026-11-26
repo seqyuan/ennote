@@ -20,10 +20,10 @@ export function McpSettings({ projectId, setError }: {
       {/* Section header */}
       <div className={styles.settingsHeader}>
         <div>
-          <div className={styles.settingsTitle}>MCP servers</div>
-          <div className={styles.settingsDescription}>
+          <h2 id="settings-mcp-heading" className={styles.settingsTitle}>MCP servers</h2>
+          <p className={styles.settingsDescription}>
             Tools-first client. Servers are discovered, tested, then explicitly enabled per project.
-          </div>
+          </p>
         </div>
         <button
           type="button"

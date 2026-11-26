@@ -1,18 +1,7 @@
-.sectionHeader {
-  margin: 12px 0 6px;
-  color: var(--text);
-  font-size: var(--text-sm);
-  font-weight: 700;
-}
 .sectionCount {
   margin-left: 4px;
   color: var(--text-dim);
   font-weight: 400;
-}
-.note {
-  margin-bottom: 6px;
-  color: var(--text-dim);
-  font-size: var(--text-xs);
 }
 .stack {
   display: flex;
@@ -73,15 +62,6 @@
 .inputName { flex: 0 0 140px; min-width: 140px; }
 .inputScope { flex: 0 0 110px; min-width: 110px; }
 
-.market {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-.marketTitle { color: var(--text); font-size: var(--text-sm); font-weight: 700; }
 .searchRow { display: flex; flex-wrap: wrap; gap: 6px; }
 .resultRow {
   display: flex;

@@ -2,6 +2,7 @@
 
 import { Archive, Loader2 } from "lucide-react";
 import type { MCPCatalogEntry, MCPProjectBinding } from "@/components/settings/types";
+import { SettingsSection } from "@/components/settings/SettingsPrimitives";
 import { confirmAction } from "@/components/ui/confirm";
 import type { McpActionOutcome, useMcpSettings } from "@/hooks/useMcpSettings";
 import styles from "./McpPanels.module.css";
@@ -296,8 +297,7 @@ export function McpCandidateSection({ mcp }: { mcp: ReturnType<typeof useMcpSett
 
   if (candidates.length === 0 && profiles.length === 0) return null;
   return (
-    <div>
-      <div className={styles.sectionHeader}>Discovered servers</div>
+    <SettingsSection title="Discovered servers">
       <div className={styles.list}>
         {candidates.map((candidate) => (
           <div key={`${candidate.sourceKind}:${candidate.slug}`} className={styles.candidateGroup}>
@@ -417,6 +417,6 @@ export function McpCandidateSection({ mcp }: { mcp: ReturnType<typeof useMcpSett
           );
         })}
       </div>
-    </div>
+    </SettingsSection>
   );
 }

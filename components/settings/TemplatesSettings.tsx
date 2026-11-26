@@ -4,6 +4,7 @@ import { AlertTriangle, Info, Plus, Save, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
 import { confirmAction } from "@/components/ui/confirm";
+import { SettingsSection } from "@/components/settings/SettingsPrimitives";
 import { useSettingsStatus } from "@/components/settings/SettingsStatus";
 import type { components } from "@/lib/worker-api.gen";
 
@@ -190,10 +191,7 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
 
       {/* Effective templates */}
       {displayCatalog && (
-        <>
-          <header className="templates-section-header">
-            <h3>Effective templates {projectId ? "(project)" : "(global)"}</h3>
-          </header>
+        <SettingsSection title={`Effective templates ${projectId ? "(project)" : "(global)"}`}>
           {displayCatalog.templates.length === 0 ? (
             <p className="templates-empty">No templates available. Create a global template below or add markdown files to your project&apos;s <code>.ennote/prompts/</code> directory.</p>
           ) : (
@@ -208,18 +206,18 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
               ))}
             </ul>
           )}
-        </>
+        </SettingsSection>
       )}
 
       {/* Global templates management */}
-      <header className="templates-section-header">
-        <h3>My global templates</h3>
-        {!recoveryMode && (
+      <SettingsSection
+        title="My global templates"
+        actions={!recoveryMode ? (
           <button type="button" className="settings-btn" onClick={() => setShowCreate(!showCreate)}>
             <Plus size={14} /> New
           </button>
-        )}
-      </header>
+        ) : undefined}
+      >
 
       {recoveryMode && (
         <div className="templates-diag diag-warn templates-diag-block">
@@ -296,6 +294,7 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
       {(!mgmt?.globalTemplates || mgmt.globalTemplates.length === 0) && !recoveryMode && (
         <p className="templates-empty">No global templates yet. Create one above.</p>
       )}
+      </SettingsSection>
     </section>
   );
 }

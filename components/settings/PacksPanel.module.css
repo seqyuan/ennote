@@ -2,20 +2,6 @@
  * Agent Packs panel. Sizes and colours come from app/tokens.css.
  */
 
-.heading {
-  margin: 0 0 4px;
-  color: var(--text);
-  font-size: var(--text-sm);
-  font-weight: 700;
-}
-
-.note {
-  margin: 0 0 10px;
-  color: var(--text-dim);
-  font-size: var(--text-xs);
-  line-height: 1.5;
-}
-
 .installer {
   display: flex;
   flex-direction: column;
@@ -129,16 +115,6 @@
 }
 
 .issueRow[data-severity="error"] { color: var(--danger); }
-
-.sectionHeader {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 16px 0 6px;
-  color: var(--text);
-  font-size: var(--text-sm);
-  font-weight: 700;
-}
 
 .sectionCount { color: var(--text-dim); font-weight: 400; }
 
