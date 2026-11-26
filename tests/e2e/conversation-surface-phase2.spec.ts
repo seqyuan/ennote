@@ -96,13 +96,24 @@ test("Settings tabs use arrow navigation, retain Chat, and restore focus", async
   const models = page.getByRole("tab", { name: "Models" });
   await models.click();
   await expect(models).toHaveAttribute("aria-selected", "true");
+  // Roving tabindex: only the active tab sits in the tab order, and only it
+  // names a panel — the other seven panels are not mounted, so an
+  // aria-controls on an inactive tab would dangle.
+  await expect(models).toHaveAttribute("tabindex", "0");
+  await expect(page.getByRole("tab", { name: "Policies" })).toHaveAttribute("tabindex", "-1");
+  await expect(page.getByRole("tab", { name: "Policies" })).not.toHaveAttribute("aria-controls", /settings-panel-/);
+  expect(await page.evaluate(() =>
+    Array.from(document.querySelectorAll('[role="tab"][aria-controls]'))
+      .map((tab) => tab.getAttribute("aria-controls") ?? "")
+      .filter((id) => document.getElementById(id) === null),
+  )).toEqual([]);
   const closeSettings = page.getByRole("button", { name: "Close settings" });
   await closeSettings.focus();
-  // Shift+Tab wraps to the previous focusable in DOM order: the last nav
-  // cell (the rail precedes the content column, dsh layout).
+  // Shift+Tab moves back into the nav rail (it precedes the content column,
+  // dsh layout) and lands on the active tab, the rail's only tab stop.
   await closeSettings.press("Shift+Tab");
-  await expect(page.getByRole("tab", { name: "Packs" })).toBeFocused();
-  await page.getByRole("tab", { name: "Packs" }).press("Tab");
+  await expect(models).toBeFocused();
+  await models.press("Tab");
   await expect(closeSettings).toBeFocused();
   await models.press("ArrowRight");
   await expect(page.getByRole("tab", { name: "Policies" })).toHaveAttribute("aria-selected", "true");

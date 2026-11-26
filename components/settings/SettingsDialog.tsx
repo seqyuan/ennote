@@ -118,8 +118,11 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
         return;
       }
       if (event.key !== "Tab" || !dialogRef.current) return;
+      // Roving tabindex leaves the inactive tabs out of the tab order, so the
+      // cycle has to agree with it: a trap that counted them would wrap from a
+      // tab the browser already skips.
       const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
-        'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
+        'button:not(:disabled):not([tabindex="-1"]), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
       ));
       if (focusable.length === 0) return;
       const first = focusable[0];
@@ -158,6 +161,10 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
   ];
 
   const visibleTabs = filterSettingsTabs(tabs, query);
+  const activeTabIndex = Math.max(0, visibleTabs.findIndex((tab) => tab.id === activeTab));
+  // A query that matches nothing renders no rail at all, so the panel has no
+  // tab left to name itself after.
+  const activeTabRendered = visibleTabs.some((tab) => tab.id === activeTab);
 
   const onSearchChange = (value: string) => {
     setQuery(value);
@@ -211,7 +218,7 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
               )}
             </label>
             {visibleTabs.length === 0 && <div className="settings-dialog-empty">{t("settings.search.empty", { query: query.trim() })}</div>}
-            {visibleTabs.map((tab, index) => {
+            {visibleTabs.map((tab) => {
               const active = activeTab === tab.id;
               return (
                 <button
@@ -219,9 +226,11 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
                   onKeyDown={(event) => {
+                    // Keys move from the active tab, the only tab in the tab
+                    // order, never from whichever node happened to get focus.
                     let nextIndex: number | null = null;
-                    if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = (index + 1) % visibleTabs.length;
-                    if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = (index - 1 + visibleTabs.length) % visibleTabs.length;
+                    if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = (activeTabIndex + 1) % visibleTabs.length;
+                    if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = (activeTabIndex - 1 + visibleTabs.length) % visibleTabs.length;
                     if (event.key === "Home") nextIndex = 0;
                     if (event.key === "End") nextIndex = visibleTabs.length - 1;
                     if (nextIndex === null) return;
@@ -234,7 +243,11 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
                   role="tab"
                   id={`settings-tab-${tab.id}`}
                   aria-selected={active}
-                  aria-controls={`settings-panel-${tab.id}`}
+                  // Only the active tab's panel is mounted, so only it can name
+                  // a target: an aria-controls on an inactive tab would point
+                  // at an element that does not exist.
+                  aria-controls={active ? `settings-panel-${tab.id}` : undefined}
+                  tabIndex={active ? 0 : -1}
                 >
                   <span className="settings-tab-icon">
                     {tab.icon}
@@ -273,7 +286,7 @@ function SettingsBody({ onClose, initialTab, providers, models, policies, sessio
               className="settings-dialog-panel"
               role="tabpanel"
               id={`settings-panel-${activeTab}`}
-              aria-labelledby={`settings-tab-${activeTab}`}
+              aria-labelledby={activeTabRendered ? `settings-tab-${activeTab}` : undefined}
             >
             {activeTab === "general" && (
               <div className="settings-tab-scroll">
