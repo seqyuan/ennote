@@ -1421,8 +1421,11 @@ button:disabled { cursor: default; }
   justify-content: center;
   gap: var(--space-1);
   /* 30px: the height these buttons already had, so the icon-only ones line up
-     with the labelled ones instead of centring a 24px box in a 30px row. */
-  min-height: var(--control-h-md);
+     with the labelled ones instead of centring a 24px box in a 30px row.
+     A definite height, not a minimum: a button sharing a flex row with a taller
+     control was stretched by `align-items: stretch` and rendered 33px (Skills'
+     search button beside the install-scope select). One family means one height. */
+  height: var(--control-h-md);
   padding: 5px 11px;
   white-space: nowrap;
   border: 1px solid var(--border);
