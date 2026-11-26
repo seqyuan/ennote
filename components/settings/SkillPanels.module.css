@@ -49,66 +49,6 @@
   white-space: nowrap;
 }
 
-.toggle {
-  flex-shrink: 0;
-  padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-  color: var(--text);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-.toggle[data-enabled="true"] {
-  background: var(--accent);
-  color: var(--accent-contrast);
-}
-.toggle[data-disabled="true"] {
-  background: var(--bg-selected);
-  color: var(--text-dim);
-}
-
-.ghostButton {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-.ghostButton:disabled { opacity: 0.5; cursor: default; }
-.ghostButton.danger { color: var(--danger); }
-.ghostButton.warning { color: var(--warning); border-color: var(--warning); }
-.primaryButton {
-  padding: 4px 12px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: var(--accent-contrast);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-.primaryButton:disabled { opacity: 0.5; cursor: default; }
-.installButton {
-  flex-shrink: 0;
-  padding: 3px 10px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: var(--accent-contrast);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-.installButton[data-busy="true"] {
-  background: var(--bg-selected);
-  color: var(--text);
-}
-.installButton:disabled { opacity: 0.6; cursor: default; }
-
 .rootForm {
   display: flex;
   flex-direction: column;

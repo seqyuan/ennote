@@ -63,7 +63,7 @@ export function McpCreateForm({ mcp }: { mcp: ReturnType<typeof useMcpSettings> 
             type="button"
             onClick={createProfile}
             disabled={!displayName.trim() || !slug.trim() || (transport === "stdio" ? !executable.trim() : !endpoint.trim())}
-            className={styles.createButton}
+            className="settings-btn primary"
           >
             Create profile
           </button>
@@ -124,7 +124,7 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
             type="button"
             title={binding.required ? "Server is required: Run start fails when unreachable" : "Server is optional: Run start continues when unreachable"}
             onClick={() => updateBinding(binding, { required: !binding.required })}
-            className={styles.requiredButton}
+            className="settings-btn ghost"
             data-required={binding.required || undefined}
           >
             {binding.required ? "required" : "optional"}
@@ -133,7 +133,7 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
             type="button"
             title="Edit credential references for this binding"
             onClick={() => setShowCreds((prev) => ({ ...prev, [binding.id!]: !prev[binding.id!] }))}
-            className={styles.ghostButton}
+            className="settings-btn"
           >
             Credentials
           </button>
@@ -155,8 +155,7 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
               }
               await updateBinding(binding, { desiredEnabled: next });
             }}
-            className={styles.enableButton}
-            data-enabled={binding.desiredEnabled || undefined}
+            className={binding.desiredEnabled ? "settings-btn primary" : "settings-btn"}
           >
             {binding.desiredEnabled ? "Enabled" : "Disabled"}
           </button>
@@ -165,7 +164,7 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
             title="Test connection"
             onClick={() => testBinding(binding)}
             disabled={Boolean(runningAction)}
-            className={styles.ghostButton}
+            className="settings-btn"
           >
             {runningAction === "test" ? <Loader2 size={12} className="spin" aria-hidden="true" /> : "Test"}
           </button>
@@ -174,12 +173,12 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
             title="Refresh tool catalog"
             onClick={() => refreshCatalog(binding)}
             disabled={Boolean(runningAction)}
-            className={styles.ghostButton}
+            className="settings-btn"
           >
             {runningAction === "refresh" ? <Loader2 size={12} className="spin" aria-hidden="true" /> : "Refresh"}
           </button>
           <button type="button" title="Remove binding" onClick={() => removeBinding(binding)}
-            className={`${styles.ghostButton} ${styles.danger}`}>
+            className="settings-btn danger">
             Remove
           </button>
         </div>
@@ -189,7 +188,7 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
           <div className={styles.toolsHeader}>
             <span className={styles.toolsHint}>Selected tools (exact, frozen per Run)</span>
             {catalog.length > 0 && (
-              <button type="button" onClick={() => selectAllTools(binding, catalog)} className={styles.ghostButton}>
+              <button type="button" onClick={() => selectAllTools(binding, catalog)} className="settings-btn">
                 Select all current
               </button>
             )}
@@ -254,7 +253,7 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
             <div key={env} className={styles.credentialRow}>
               <code className={styles.credentialEnv}>{env}</code>
               <code className={styles.credentialRef}>{ref}</code>
-              <button type="button" onClick={() => removeCredential(binding, env)} className={styles.ghostButton}>
+              <button type="button" onClick={() => removeCredential(binding, env)} className="settings-btn">
                 Remove
               </button>
             </div>
@@ -281,7 +280,7 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
               type="button"
               onClick={() => addCredential(binding)}
               disabled={!(credEnv[binding.id!] ?? "").trim() || !(credRef[binding.id!] ?? "").trim()}
-              className={styles.ghostButton}
+              className="settings-btn"
             >
               Add
             </button>
@@ -320,7 +319,7 @@ export function McpCandidateSection({ mcp }: { mcp: ReturnType<typeof useMcpSett
                   Bound
                 </span>
               ) : (
-                <button type="button" onClick={() => bindCandidate(candidate)} className={styles.ghostButton}>
+                <button type="button" onClick={() => bindCandidate(candidate)} className="settings-btn">
                   Bind
                 </button>
               )}
@@ -329,7 +328,7 @@ export function McpCandidateSection({ mcp }: { mcp: ReturnType<typeof useMcpSett
                   type="button"
                   title="Project file changed; rebind to the new immutable version"
                   onClick={() => bindCandidate(candidate)}
-                  className={`${styles.ghostButton} ${styles.accent}`}
+                  className="settings-btn primary"
                 >
                   Update available
                 </button>
@@ -339,7 +338,7 @@ export function McpCandidateSection({ mcp }: { mcp: ReturnType<typeof useMcpSett
                   type="button"
                   title="Show the read-only diff between the bound version and the project file"
                   onClick={() => openProfileDiff(candidate)}
-                  className={styles.ghostButton}
+                  className="settings-btn"
                 >
                   View diff
                 </button>
@@ -350,7 +349,7 @@ export function McpCandidateSection({ mcp }: { mcp: ReturnType<typeof useMcpSett
                   <button type="button" title="Archive MCP profile"
                     aria-label={`Archive MCP profile ${profile.displayName ?? profile.slug}`}
                     onClick={() => archiveProfile(profile)}
-                    className={`${styles.ghostButton} ${styles.danger} ${styles.archiveButton}`}>
+                    className="settings-btn danger">
                     <Archive size={14} aria-hidden="true" />
                   </button>
                 ) : null;
@@ -409,7 +408,7 @@ export function McpCandidateSection({ mcp }: { mcp: ReturnType<typeof useMcpSett
                   <button type="button" title="Archive MCP profile"
                     aria-label={`Archive MCP profile ${profile.displayName ?? profile.slug}`}
                     onClick={() => archiveProfile(profile)}
-                    className={`${styles.ghostButton} ${styles.danger} ${styles.archiveButton}`}>
+                    className="settings-btn danger">
                     <Archive size={14} aria-hidden="true" />
                   </button>
                 )}

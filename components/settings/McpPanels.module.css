@@ -39,17 +39,6 @@
   cursor: pointer;
 }
 .transportButton[data-active="true"] { background: var(--bg-selected); color: var(--text); }
-.createButton {
-  align-self: flex-start;
-  padding: 6px 12px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: var(--accent-contrast);
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-.createButton:disabled { opacity: 0.5; cursor: default; }
 
 .card {
   display: flex;
@@ -91,43 +80,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.actions { display: flex; align-items: center; gap: 6px; }
-.ghostButton {
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-.ghostButton:disabled { opacity: 0.5; cursor: default; }
-.ghostButton.danger { color: var(--danger); }
-.ghostButton.accent { color: var(--accent); border-color: var(--accent); }
-.archiveButton { padding: 4px; }
-.requiredButton {
-  padding: 1px 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xs);
-  background: var(--bg);
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-.requiredButton[data-required="true"] { color: var(--text); }
-.enableButton {
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-  color: var(--text);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-.enableButton[data-enabled="true"] {
-  background: var(--accent);
-  color: var(--accent-contrast);
-}
+/* The card's controls keep their own width and the binding's identity takes
+   what is left: a shrunk action row would wrap two lines on a desktop card. */
+.actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 6px; }
 
 .toolsHeader {
   display: flex;
@@ -251,7 +206,6 @@
 @media (max-width: 640px) {
   .formGrid { grid-template-columns: minmax(0, 1fr); }
   .cardHead { align-items: flex-start; flex-direction: column; }
-  .actions { flex-wrap: wrap; }
   .candidateRow { align-items: flex-start; flex-direction: column; }
   .candidateActions { flex-wrap: wrap; }
 }
@@ -265,13 +219,4 @@
 }
 .settingsTitle { color: var(--text); font-size: var(--text-md); font-weight: 700; }
 .settingsDescription { margin-top: 2px; color: var(--text-dim); font-size: var(--text-xs); }
-.addButton {
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-  color: var(--text);
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
 .bindings { display: flex; flex-direction: column; gap: 8px; }

@@ -161,15 +161,15 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
           />
         </label>
         <div className={styles.actions}>
-          <button type="button" className={styles.button} disabled={busy || path.trim() === ""} onClick={inspect}>
+          <button type="button" className="settings-btn" disabled={busy || path.trim() === ""} onClick={inspect}>
             Inspect
           </button>
-          <button type="button" className={styles.button} disabled={busy || path.trim() === ""} onClick={dryRun}>
+          <button type="button" className="settings-btn" disabled={busy || path.trim() === ""} onClick={dryRun}>
             Check install
           </button>
           <button
             type="button"
-            className={`${styles.button} ${styles.primary}`}
+            className="settings-btn primary"
             disabled={busy || path.trim() === "" || blocked}
             onClick={apply}
           >
@@ -242,7 +242,7 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
               {forceOffer === pack.pack.id && (
                 <button
                   type="button"
-                  className={styles.button}
+                  className="settings-btn"
                   disabled={busy || removing === pack.pack.id}
                   onClick={() => void uninstall(pack, true)}
                 >

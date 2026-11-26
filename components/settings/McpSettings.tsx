@@ -28,7 +28,7 @@ export function McpSettings({ projectId, setError }: {
         <button
           type="button"
           onClick={() => mcp.setShowCreate((value) => !value)}
-          className={styles.addButton}
+          className="settings-btn"
         >
           {mcp.showCreate ? "Cancel" : "+ Add server"}
         </button>

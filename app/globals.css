@@ -1414,11 +1414,24 @@ button:disabled { cursor: default; }
   display: flex;
   gap: 6px;
 }
+/* Settings buttons: one set for every board inside the settings dialog. The
+   four levels — primary (filled accent), secondary (the default), danger
+   (destructive) and ghost (an action with no chrome) — share the height,
+   padding, radius, and disabled treatment, so a row of them lines up whichever
+   board draws it. `warning` is a tone on secondary, for the one action that is
+   neither routine nor destructive (an update is waiting).
+   Boards pass these names from JSX instead of declaring their own metrics. */
 .settings-btn {
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  gap: var(--space-1);
+  /* 30px: the height these buttons already had, so the icon-only ones line up
+     with the labelled ones instead of centring a 24px box in a 30px row. */
+  min-height: var(--control-h-md);
   padding: 5px 11px;
+  white-space: nowrap;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
@@ -1433,6 +1446,10 @@ button:disabled { cursor: default; }
 .settings-btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
 .settings-btn.danger { border-color: var(--danger); color: var(--danger); }
 .settings-btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.settings-btn.warning { border-color: var(--warning); color: var(--warning); }
+.settings-btn.warning:hover:not(:disabled) { background: color-mix(in srgb, var(--warning) 12%, transparent); }
+.settings-btn.ghost { border-color: transparent; background: transparent; color: var(--text-muted); }
+.settings-btn.ghost:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 
 /* ── Project files ── */
 .file-tree-panel, .file-viewer { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }

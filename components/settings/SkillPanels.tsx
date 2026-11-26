@@ -45,20 +45,19 @@ export function SkillRootsPanel(props: {
               type="button"
               onClick={() => void toggleRoot(root)}
               disabled={rootBusy !== null}
-              className={styles.toggle}
-              data-enabled={root.enabled || undefined}
+              className={root.enabled ? "settings-btn primary" : "settings-btn"}
             >
               {root.enabled ? "Enabled" : "Disabled"}
             </button>
             <button type="button" onClick={() => void removeRoot(root)} disabled={rootBusy !== null}
               title={`Stop reading skills from ${root.path}`}
-              className={`${styles.ghostButton} ${styles.danger}`}>
+              className="settings-btn danger">
               <X size={12} aria-hidden="true" />
             </button>
           </div>
         ))}
         {!showRootForm ? (
-          <button type="button" onClick={() => setShowRootForm(true)} className={styles.ghostButton}>
+          <button type="button" onClick={() => setShowRootForm(true)} className="settings-btn">
             + Add skills root
           </button>
         ) : (
@@ -94,10 +93,10 @@ export function SkillRootsPanel(props: {
             </div>
             <div className={styles.actionRow}>
               <button type="button" onClick={() => void addRoot()} disabled={rootBusy !== null}
-                className={styles.primaryButton}>
+                className="settings-btn primary">
                 {rootBusy === "add" ? "Adding…" : "Add root"}
               </button>
-              <button type="button" onClick={() => setShowRootForm(false)} className={styles.ghostButton}>
+              <button type="button" onClick={() => setShowRootForm(false)} className="settings-btn">
                 Cancel
               </button>
             </div>
@@ -128,7 +127,7 @@ export function SkillMarketplace(props: {
   } = props;
 
   return (
-    <div className={`skills-market-panel ${styles.market}`}>
+    <div className={styles.market}>
       <div className={styles.marketTitle}>Marketplace</div>
       <div className={styles.searchRow}>
         <input
@@ -150,7 +149,7 @@ export function SkillMarketplace(props: {
           <option value="project" disabled={!projectId || !projectTrusted}>Project{!projectTrusted && projectId ? " (needs trust)" : ""}</option>
         </select>
         <button type="button" onClick={() => void onSearch()} disabled={searching || !query.trim()}
-          className={styles.ghostButton}>
+          className="settings-btn">
           <Search size={13} aria-hidden="true" /> {searching ? "Searching…" : "Search"}
         </button>
       </div>
@@ -173,8 +172,7 @@ export function SkillMarketplace(props: {
             type="button"
             disabled={installing !== null}
             onClick={() => void onInstall(result.package)}
-            className={styles.installButton}
-            data-busy={installing === result.package || undefined}
+            className="settings-btn primary"
           >
             {installing === result.package ? "Installing…" : "Install"}
           </button>
@@ -246,18 +244,17 @@ export function SkillInstalledList(props: {
                       title="Allow or block model invocation for this skill"
                       onClick={() => void onToggle(skill)}
                       disabled={toggling === skill.relPath}
-                      className={styles.toggle}
-                      data-disabled={skill.disableModelInvocation || undefined}
+                      className={skill.disableModelInvocation ? "settings-btn" : "settings-btn primary"}
                     >
                       {skill.disableModelInvocation ? "Disabled" : "Enabled"}
                     </button>
                     <button type="button" title="Check for updates" onClick={() => void onCheck(install)}
-                      disabled={checking !== null} className={styles.ghostButton}>
+                      disabled={checking !== null} className="settings-btn">
                       {checking === key ? <RefreshCw size={12} aria-hidden="true" className="delivery-spinner" /> : "Check"}
                     </button>
                     {updateState?.state === "update-available" && (
                       <button type="button" onClick={() => void onUpdate(install)} disabled={checking !== null}
-                        className={`${styles.ghostButton} ${styles.warning}`}>
+                        className="settings-btn warning">
                         Update
                       </button>
                     )}
@@ -273,7 +270,7 @@ export function SkillInstalledList(props: {
                       <span className={styles.statusText} title={updateState.message ?? ""}>No updates</span>
                     )}
                     <button type="button" title="Remove skill" onClick={() => void onRemove(skill)} disabled={removing !== null}
-                      className={`${styles.ghostButton} ${styles.danger}`}>
+                      className="settings-btn danger">
                       {removing === skill.relPath ? "Removing…" : <X size={12} aria-hidden="true" />}
                     </button>
                   </div>

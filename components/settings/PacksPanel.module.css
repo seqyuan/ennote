@@ -48,20 +48,6 @@
   gap: 6px;
 }
 
-.button {
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-panel);
-  color: var(--text);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-
-.button:hover:not(:disabled) { background: var(--bg-hover); }
-.button:disabled { color: var(--text-dim); cursor: default; }
-.primary { border-color: var(--accent); color: var(--accent); }
-
 .card {
   display: flex;
   flex-direction: column;
