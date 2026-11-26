@@ -275,5 +275,3 @@
   cursor: pointer;
 }
 .bindings { display: flex; flex-direction: column; gap: 8px; }
-.emptyText { color: var(--text-dim); font-size: var(--text-sm); }
-.loadingText { color: var(--text-dim); font-size: var(--text-xs); }

@@ -1,6 +1,7 @@
 "use client";
 
 import { ExternalLink, RefreshCw, Search, X } from "lucide-react";
+import { SettingsEmpty, SettingsLoading } from "@/components/settings/SettingsPrimitives";
 import type { AnnotatedSkill, SkillInstallInfo, SkillRoot, SkillSearchResult, SkillUpdateResult } from "@/components/settings/types";
 import type { useSkillRoots } from "@/hooks/useSkillRoots";
 import styles from "./SkillPanels.module.css";
@@ -26,9 +27,9 @@ export function SkillRootsPanel(props: {
       </div>
       <div className={styles.stack}>
         {roots.length === 0 && !loading && (
-          <div className={styles.empty}>
+          <SettingsEmpty>
             No additional roots. Ennote reads <code>$ENNOTE_HOME/skills</code> on the Worker host by default; add pi, Claude Code, Codex, or Cursor skill directories here.
-          </div>
+          </SettingsEmpty>
         )}
         {roots.map((root) => (
           <div key={root.id} className={styles.rootRow}>
@@ -154,7 +155,7 @@ export function SkillMarketplace(props: {
         </button>
       </div>
       {searched && results.length === 0 && !searching && (
-        <div className={styles.empty}>No skills match &quot;{query.trim()}&quot;.</div>
+        <SettingsEmpty>No skills match &quot;{query.trim()}&quot;.</SettingsEmpty>
       )}
       {results.map((result) => (
         <div key={result.package} className={styles.resultRow}>
@@ -203,9 +204,9 @@ export function SkillInstalledList(props: {
       <div className={styles.sectionHeader}>
         Installed <span className={styles.sectionCount}>{installed.length}</span>
       </div>
-      {loading && <div className={styles.empty}>Loading…</div>}
+      {loading && <SettingsLoading label="Loading…" />}
       {!loading && installed.length === 0 && (
-        <div className={styles.empty}>No installed skills yet — search the marketplace above.</div>
+        <SettingsEmpty>No installed skills yet — search the marketplace above.</SettingsEmpty>
       )}
       {!loading && installed.length > 0 && (
         <div className={styles.stack}>

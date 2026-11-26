@@ -1121,6 +1121,7 @@ button:disabled { cursor: default; }
 .settings-row .diagnostic-summary.diagnostic-failed { color: var(--danger); }
 .settings-row .diagnostic-failure { color: var(--danger); font-size: var(--text-xs); }
 .settings-empty { padding: 10px 12px; color: var(--text-dim); font-size: var(--text-xs); }
+.settings-loading { display: flex; align-items: center; gap: 6px; padding: 10px 12px; color: var(--text-dim); font-size: var(--text-xs); }
 .settings-row .provider-settings-row { align-items: flex-start; }
 .settings-list .provider-settings-row { flex-wrap: wrap; }
 

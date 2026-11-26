@@ -5,7 +5,7 @@ import { useState, type FormEvent } from "react";
 import type { PolicyProfile } from "@/components/settings/types";
 import { confirmAction } from "@/components/ui/confirm";
 import { useSettingsStatus } from "@/components/settings/SettingsStatus";
-import { SettingsList, SettingsRow, SettingsSection } from "@/components/settings/SettingsPrimitives";
+import { SettingsEmpty, SettingsList, SettingsRow, SettingsSection } from "@/components/settings/SettingsPrimitives";
 import { apiFetch } from "@/lib/worker-api.client";
 
 const policySections: Array<{ kind: PolicyProfile["kind"]; title: string; description: string; defaultConfig: string }> = [
@@ -103,6 +103,7 @@ function PolicyEditor({ kind, title, description, policies, defaultConfig, onSub
   onDeactivate: (policy: PolicyProfile) => Promise<void>;
 }) {
   const [configError, setConfigError] = useState<string | null>(null);
+  const versions = policies.filter(policy => policy.kind === kind);
 
   // Validate where the user types; submit re-reads the same field so a request
   // never carries a config the form already knows is unparseable.
@@ -126,7 +127,8 @@ function PolicyEditor({ kind, title, description, policies, defaultConfig, onSub
       <button type="submit">Create version</button>
     </form>
     <SettingsList>
-      {policies.filter(policy => policy.kind === kind).map(policy => <SettingsRow
+      {versions.length === 0 && <SettingsEmpty>No versions yet. Create one above.</SettingsEmpty>}
+      {versions.map(policy => <SettingsRow
         key={policy.id}
         title={policy.name}
         meta={`v${policy.version} · ${String(policy.config.mode ?? "configured")}`}

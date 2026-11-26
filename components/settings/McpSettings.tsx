@@ -1,6 +1,7 @@
 "use client";
 
 import { useMcpSettings } from "@/hooks/useMcpSettings";
+import { SettingsEmpty, SettingsLoading } from "@/components/settings/SettingsPrimitives";
 import { McpBindingCard, McpCandidateSection, McpCreateForm } from "./McpPanels";
 import styles from "./McpPanels.module.css";
 
@@ -11,7 +12,7 @@ export function McpSettings({ projectId, setError }: {
   const mcp = useMcpSettings(projectId, setError);
 
   if (!projectId) {
-    return <div className={styles.emptyText}>Open a project to manage MCP servers.</div>;
+    return <SettingsEmpty>Open a project to manage MCP servers.</SettingsEmpty>;
   }
 
   return (
@@ -38,7 +39,7 @@ export function McpSettings({ projectId, setError }: {
       {/* Bindings */}
       <div className={styles.bindings}>
         {mcp.bindings.length === 0 && !mcp.loading && (
-          <div className={styles.emptyText}>No MCP servers bound to this project yet.</div>
+          <SettingsEmpty>No MCP servers bound to this project yet.</SettingsEmpty>
         )}
         {mcp.bindings.map((binding) => (
           <McpBindingCard key={binding.id} mcp={mcp} binding={binding} />
@@ -47,7 +48,7 @@ export function McpSettings({ projectId, setError }: {
 
       {/* Discovered candidates (project file, bundled, managed) */}
       <McpCandidateSection mcp={mcp} />
-      {mcp.loading && <div className={styles.loadingText}>Loading…</div>}
+      {mcp.loading && <SettingsLoading label="Loading…" />}
     </div>
   );
 }

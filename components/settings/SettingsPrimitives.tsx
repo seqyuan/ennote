@@ -1,5 +1,6 @@
 "use client";
 
+import { Loader2 } from "lucide-react";
 import { useId, type ReactNode } from "react";
 
 function cx(...values: Array<string | false | null | undefined>): string {
@@ -99,4 +100,20 @@ export function SettingsCard({
 
 export function SettingsActions({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cx("settings-actions", className)}>{children}</div>;
+}
+
+/** A block that is still fetching. Announced once as a status; the label is the
+ *  only text, so a caller that already says "Loading …" keeps its wording. */
+export function SettingsLoading({ label, className }: { label: ReactNode; className?: string }) {
+  return (
+    <div className={cx("settings-loading", className)} role="status">
+      <Loader2 className="spin" size={14} aria-hidden="true" />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+/** A block that has nothing to list. Plain text, no extra semantics. */
+export function SettingsEmpty({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cx("settings-empty", className)}>{children}</div>;
 }

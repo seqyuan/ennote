@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Loader2, Plus, Workflow } from "lucide-react";
+import { Check, Plus, Workflow } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GraphBuilderPanel } from "@/components/graphs/GraphBuilderPanel";
 import { AddTaskForm } from "@/components/graphs/AddTaskForm";
@@ -8,6 +8,7 @@ import { GraphHeader } from "@/components/graphs/GraphHeader";
 import { GraphSaveBanners } from "@/components/graphs/GraphSaveBanners";
 import { TaskList } from "@/components/graphs/TaskList";
 import { confirmAction } from "@/components/ui/confirm";
+import { SettingsLoading } from "@/components/settings/SettingsPrimitives";
 import { GraphDependencies } from "@/components/graphs/GraphDependencies";
 import { GraphTabs } from "@/components/graphs/GraphTabs";
 import {
@@ -431,7 +432,7 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
         ))}
       </div>
 
-      {!detail && busy === "loading" && <div className="graph-loading"><Loader2 className="spin" size={18} /> Loading Graph…</div>}
+      {!detail && busy === "loading" && <div className="graph-loading"><SettingsLoading label="Loading Graph…" /></div>}
       {!detail && busy !== "loading" && graphs.length === 0 && (
         <div className="graph-welcome"><Workflow size={28} /><h2>Create your first Graph</h2><p>Compose reusable Tasks and their dependencies without choosing a Project.</p><button type="button" onClick={() => setCreateOpen(true)}><Plus size={16} /> Add Graph</button></div>
       )}

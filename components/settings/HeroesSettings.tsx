@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { modelOptions } from "@/components/graphs/types";
 import { useT } from "@/components/LocaleProvider";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
+import { SettingsLoading } from "@/components/settings/SettingsPrimitives";
 import type { ModelProfile } from "@/components/settings/types";
 import { apiFetch, isSourceDigestConflict } from "@/lib/worker-api.client";
 
@@ -334,7 +335,7 @@ export function HeroesSettings({ models, setError }: {
       </aside>
 
       <section className="global-hero-detail">
-        {!detail && busy === "loading" && <div className="heroes-detail-empty"><Loader2 className="spin" size={18} /> Loading Hero…</div>}
+        {!detail && busy === "loading" && <div className="heroes-detail-empty"><SettingsLoading label="Loading Hero…" /></div>}
         {!detail && busy !== "loading" && <div className="heroes-detail-empty"><Bot size={26} /> Select or create a Hero</div>}
         {detail && <>
           <header className="global-hero-commandbar">
