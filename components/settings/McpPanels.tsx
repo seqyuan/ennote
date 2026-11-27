@@ -4,6 +4,7 @@ import { Archive, Loader2 } from "lucide-react";
 import type { MCPCatalogEntry, MCPProjectBinding } from "@/components/settings/types";
 import { SettingsSection } from "@/components/settings/SettingsPrimitives";
 import { confirmAction } from "@/components/ui/confirm";
+import { useT } from "@/components/LocaleProvider";
 import type { McpActionOutcome, useMcpSettings } from "@/hooks/useMcpSettings";
 import styles from "./McpPanels.module.css";
 
@@ -14,6 +15,7 @@ const TRANSPORT_LABELS: Record<string, string> = {
 };
 
 export function McpCreateForm({ mcp }: { mcp: ReturnType<typeof useMcpSettings> }) {
+  const t = useT();
   const {
     showCreate, transport, setTransport, displayName, setDisplayName,
     slug, setSlug, executable, setExecutable, argv, setArgv, endpoint, setEndpoint, createProfile,
@@ -24,10 +26,10 @@ export function McpCreateForm({ mcp }: { mcp: ReturnType<typeof useMcpSettings> 
       {showCreate && (
         <div className={styles.form}>
           <div className={styles.formGrid}>
-            <label className={styles.field}>Display name
+            <label className={styles.field}>{t("settings.mcp.displayName")}
               <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={styles.input} placeholder="PubMed" />
             </label>
-            <label className={styles.field}>Slug (fixed once bound)
+            <label className={styles.field}>{t("settings.mcp.slug")}
               <input value={slug} onChange={(e) => setSlug(e.target.value)} className={styles.input} placeholder="pubmed" />
             </label>
           </div>
@@ -47,15 +49,15 @@ export function McpCreateForm({ mcp }: { mcp: ReturnType<typeof useMcpSettings> 
             </div>
             {transport === "stdio" ? (
               <>
-                <label className={styles.field}>Executable
+                <label className={styles.field}>{t("settings.mcp.executable")}
                   <input value={executable} onChange={(e) => setExecutable(e.target.value)} className={styles.input} placeholder="/usr/bin/python3" />
                 </label>
-                <label className={styles.field}>Arguments (space-separated)
+                <label className={styles.field}>{t("settings.mcp.arguments")}
                   <input value={argv} onChange={(e) => setArgv(e.target.value)} className={styles.input} placeholder="/path/to/server.py" />
                 </label>
               </>
             ) : (
-              <label className={styles.field}>Endpoint URL
+              <label className={styles.field}>{t("settings.mcp.endpoint")}
                 <input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} className={styles.input} placeholder="https://example.com/mcp" />
               </label>
             )}
@@ -66,7 +68,7 @@ export function McpCreateForm({ mcp }: { mcp: ReturnType<typeof useMcpSettings> 
             disabled={!displayName.trim() || !slug.trim() || (transport === "stdio" ? !executable.trim() : !endpoint.trim())}
             className="settings-btn primary"
           >
-            Create profile
+            {t("settings.mcp.createProfile")}
           </button>
         </div>
       )}
@@ -75,6 +77,7 @@ export function McpCreateForm({ mcp }: { mcp: ReturnType<typeof useMcpSettings> 
 }
 
 export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcpSettings>; binding: MCPProjectBinding }) {
+  const t = useT();
   const {
     profiles, catalogs, toolSearch, setToolSearch, showCreds, setShowCreds, credEnv, setCredEnv, credRef, setCredRef,
     versionFor, updateBinding, toggleTool, selectAllTools, addCredential, removeCredential, testBinding, refreshCatalog, removeBinding,
@@ -92,7 +95,7 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
   // frozen version names the card; the connection target is the next best
   // identity, and the transport label is the last resort.
   const profile = version ? profiles.find((entry) => entry.id === version.profileId) : undefined;
-  const title = profile?.displayName || commandSummary || (version ? TRANSPORT_LABELS[version.transport] ?? version.transport : "MCP server");
+  const title = profile?.displayName || commandSummary || (version ? TRANSPORT_LABELS[version.transport] ?? version.transport : t("settings.mcp.serverFallback"));
   const runningAction = bindingActions[binding.id!];
   const outcome: McpActionOutcome | undefined = actionResults[binding.id!];
 
@@ -109,7 +112,7 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
               rev {binding.revision ?? 0} · {selected.length} tools selected
               {outcome && (
                 <span className={styles.resultBadge} data-ok={outcome.ok ? "true" : "false"} title={outcome.message}>
-                  {outcome.action === "test" ? "Test" : "Refresh"} {outcome.ok ? "ok" : "failed"}
+                  {outcome.action === "test" ? t("settings.mcp.badge.test") : t("settings.mcp.badge.refresh")} {outcome.ok ? t("settings.mcp.badge.ok") : t("settings.mcp.badge.failed")}
                 </span>
               )}
             </span>
@@ -123,20 +126,20 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
         <div className={styles.actions}>
           <button
             type="button"
-            title={binding.required ? "Server is required: Run start fails when unreachable" : "Server is optional: Run start continues when unreachable"}
+            title={binding.required ? t("settings.mcp.requiredTitle") : t("settings.mcp.optionalTitle")}
             onClick={() => updateBinding(binding, { required: !binding.required })}
             className="settings-btn ghost"
             data-required={binding.required || undefined}
           >
-            {binding.required ? "required" : "optional"}
+            {binding.required ? t("settings.mcp.required") : t("settings.mcp.optional")}
           </button>
           <button
             type="button"
-            title="Edit credential references for this binding"
+            title={t("settings.mcp.credentialsTitle")}
             onClick={() => setShowCreds((prev) => ({ ...prev, [binding.id!]: !prev[binding.id!] }))}
             className="settings-btn"
           >
-            Credentials
+            {t("settings.mcp.credentials")}
           </button>
           <button
             type="button"
@@ -145,64 +148,64 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
               if (next) {
                 const summary = version
                   ? version.transport === "stdio"
-                    ? `Command: ${commandSummary}`
-                    : `Endpoint: ${version.endpoint ?? ""}`
+                    ? t("settings.mcp.summary.command", { command: commandSummary })
+                    : t("settings.mcp.summary.endpoint", { endpoint: version.endpoint ?? "" })
                   : "";
                 if (!(await confirmAction({
-                  title: "Enable this MCP server?",
-                  description: `${summary}\n\nOnly selected tools will be exposed to Runs.`,
-                  confirmLabel: "Enable server",
+                  title: t("settings.mcp.confirm.enableTitle"),
+                  description: t("settings.mcp.confirm.enableDescription", { summary }),
+                  confirmLabel: t("settings.mcp.confirm.enableLabel"),
                 }))) return;
               }
               await updateBinding(binding, { desiredEnabled: next });
             }}
             className={binding.desiredEnabled ? "settings-btn primary" : "settings-btn"}
           >
-            {binding.desiredEnabled ? "Enabled" : "Disabled"}
+            {binding.desiredEnabled ? t("settings.mcp.enabled") : t("settings.mcp.disabled")}
           </button>
           <button
             type="button"
-            title="Test connection"
+            title={t("settings.mcp.testTitle")}
             onClick={() => testBinding(binding)}
             disabled={Boolean(runningAction)}
             className="settings-btn"
           >
-            {runningAction === "test" ? <Loader2 size={12} className="spin" aria-hidden="true" /> : "Test"}
+            {runningAction === "test" ? <Loader2 size={12} className="spin" aria-hidden="true" /> : t("settings.mcp.test")}
           </button>
           <button
             type="button"
-            title="Refresh tool catalog"
+            title={t("settings.mcp.refreshTitle")}
             onClick={() => refreshCatalog(binding)}
             disabled={Boolean(runningAction)}
             className="settings-btn"
           >
-            {runningAction === "refresh" ? <Loader2 size={12} className="spin" aria-hidden="true" /> : "Refresh"}
+            {runningAction === "refresh" ? <Loader2 size={12} className="spin" aria-hidden="true" /> : t("settings.mcp.refresh")}
           </button>
-          <button type="button" title="Remove binding" onClick={() => removeBinding(binding)}
+          <button type="button" title={t("settings.mcp.removeTitle")} onClick={() => removeBinding(binding)}
             className="settings-btn danger">
-            Remove
+            {t("settings.mcp.remove")}
           </button>
         </div>
       </div>
       {binding.desiredEnabled && (
         <div>
           <div className={styles.toolsHeader}>
-            <span className={styles.toolsHint}>Selected tools (exact, frozen per Run)</span>
+            <span className={styles.toolsHint}>{t("settings.mcp.toolsHint")}</span>
             {catalog.length > 0 && (
               <button type="button" onClick={() => selectAllTools(binding, catalog)} className="settings-btn">
-                Select all current
+                {t("settings.mcp.selectAll")}
               </button>
             )}
           </div>
           {catalog.length === 0 ? (
             <div className={styles.catalogEmpty}>
-              No catalog yet — press Refresh to discover tools from the server.
+              {t("settings.mcp.noCatalog")}
             </div>
           ) : (
             <div>
               <input
                 type="search"
-                placeholder="Search tools…"
+                placeholder={t("settings.mcp.searchTools")}
                 value={toolSearch[binding.id!] ?? ""}
                 onChange={(e) => setToolSearch((prev) => ({ ...prev, [binding.id!]: e.target.value }))}
                 className={`${styles.input} ${styles.toolSearch}`}
@@ -248,20 +251,20 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
       {showCreds[binding.id!] && (
         <div className={styles.credentials}>
           <div className={styles.credentialNote}>
-            Credential references (env: / file: / keyring: refs only — values never stored or shown)
+            {t("settings.mcp.credentialNote")}
           </div>
           {(Object.entries(binding.credentialRefs ?? {}) as [string, string][]).map(([env, ref]) => (
             <div key={env} className={styles.credentialRow}>
               <code className={styles.credentialEnv}>{env}</code>
               <code className={styles.credentialRef}>{ref}</code>
               <button type="button" onClick={() => removeCredential(binding, env)} className="settings-btn">
-                Remove
+                {t("settings.mcp.remove")}
               </button>
             </div>
           ))}
           {Object.keys(binding.credentialRefs ?? {}).length === 0 && (
             <div className={styles.credentialNote}>
-              No binding-level credentials. The profile version&apos;s defaults apply.
+              {t("settings.mcp.noBindingCredentials")}
             </div>
           )}
           <div className={styles.credentialInputRow}>
@@ -283,7 +286,7 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
               disabled={!(credEnv[binding.id!] ?? "").trim() || !(credRef[binding.id!] ?? "").trim()}
               className="settings-btn"
             >
-              Add
+              {t("settings.mcp.add")}
             </button>
           </div>
         </div>
@@ -293,11 +296,12 @@ export function McpBindingCard({ mcp, binding }: { mcp: ReturnType<typeof useMcp
 }
 
 export function McpCandidateSection({ mcp }: { mcp: ReturnType<typeof useMcpSettings> }) {
+  const t = useT();
   const { profiles, candidates, bindings, versions, diffView, bindCandidate, openProfileDiff, archiveProfile } = mcp;
 
   if (candidates.length === 0 && profiles.length === 0) return null;
   return (
-    <SettingsSection title="Discovered servers">
+    <SettingsSection title={t("settings.mcp.discovered")}>
       <div className={styles.list}>
         {candidates.map((candidate) => (
           <div key={`${candidate.sourceKind}:${candidate.slug}`} className={styles.candidateGroup}>
@@ -316,38 +320,38 @@ export function McpCandidateSection({ mcp }: { mcp: ReturnType<typeof useMcpSett
             <div className={styles.candidateActions}>
               {candidate.alreadyBound ? (
                 <span className={styles.boundBadge}>
-                  Bound
+                  {t("settings.mcp.bound")}
                 </span>
               ) : (
                 <button type="button" onClick={() => bindCandidate(candidate)} className="settings-btn">
-                  Bind
+                  {t("settings.mcp.bind")}
                 </button>
               )}
               {candidate.alreadyBound && candidate.updateAvailable && (
                 <button
                   type="button"
-                  title="Project file changed; rebind to the new immutable version"
+                  title={t("settings.mcp.changedTitle")}
                   onClick={() => bindCandidate(candidate)}
                   className="settings-btn primary"
                 >
-                  Update available
+                  {t("settings.mcp.updateAvailable")}
                 </button>
               )}
               {candidate.alreadyBound && candidate.updateAvailable && (
                 <button
                   type="button"
-                  title="Show the read-only diff between the bound version and the project file"
+                  title={t("settings.mcp.diffTitle")}
                   onClick={() => openProfileDiff(candidate)}
                   className="settings-btn"
                 >
-                  View diff
+                  {t("settings.mcp.viewDiff")}
                 </button>
               )}
               {candidate.sourceKind === "managed" && !candidate.alreadyBound && (() => {
                 const profile = profiles.find(entry => entry.slug === candidate.slug && entry.lifecycleStatus === "active");
                 return profile ? (
-                  <button type="button" title="Archive MCP profile"
-                    aria-label={`Archive MCP profile ${profile.displayName ?? profile.slug}`}
+                  <button type="button" title={t("settings.mcp.archiveTitle")}
+                    aria-label={t("settings.mcp.archiveAria", { name: profile.displayName ?? profile.slug ?? "" })}
                     onClick={() => archiveProfile(profile)}
                     className="settings-btn danger">
                     <Archive size={14} aria-hidden="true" />
@@ -405,8 +409,8 @@ export function McpCandidateSection({ mcp }: { mcp: ReturnType<typeof useMcpSett
                     Bound
                   </span>
                 ) : (
-                  <button type="button" title="Archive MCP profile"
-                    aria-label={`Archive MCP profile ${profile.displayName ?? profile.slug}`}
+                  <button type="button" title={t("settings.mcp.archiveTitle")}
+                    aria-label={t("settings.mcp.archiveAria", { name: profile.displayName ?? profile.slug ?? "" })}
                     onClick={() => archiveProfile(profile)}
                     className="settings-btn danger">
                     <Archive size={14} aria-hidden="true" />

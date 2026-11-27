@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
 import { confirmAction } from "@/components/ui/confirm";
+import { useLocale } from "@/components/LocaleProvider";
+import { translate } from "@/lib/messages";
 import { useSettingsStatus } from "@/components/settings/SettingsStatus";
 import { diffText } from "@/lib/text-diff";
 import type { MCPCatalogEntry, MCPCandidate, MCPProjectBinding, MCPServerProfile, MCPServerProfileVersion } from "@/components/settings/types";
@@ -26,6 +28,13 @@ export interface McpActionOutcome {
 }
 
 export function useMcpSettings(projectId: string | null, setError: (value: string | null) => void) {
+  // The hook builds strings the boards show (error fallbacks, confirm copy), so
+  // it translates them here rather than leaving English behind a translated tab.
+  const { locale } = useLocale();
+  const t = useCallback(
+    (key: string, params?: Record<string, string | number>) => translate(locale, key, params),
+    [locale],
+  );
   const [profiles, setProfiles] = useState<MCPServerProfile[]>([]);
   const [candidates, setCandidates] = useState<MCPCandidate[]>([]);
   const [bindings, setBindings] = useState<MCPProjectBinding[]>([]);
@@ -139,7 +148,7 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
       }
       setCatalogs(catalogMap);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load MCP settings");
+      setError(err instanceof Error ? err.message : t("settings.mcp.error.load"));
     } finally {
       setLoading(false);
     }
@@ -152,7 +161,7 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
       apiFetch<MCPServerProfile[]>("/v1/mcp/server-profiles"),
       apiFetch<MCPProjectBinding[]>(`/v1/projects/${projectId}/mcp/bindings`),
       apiFetch<MCPCandidate[]>(`/v1/projects/${projectId}/mcp/candidates`).catch(() => {
-        throw new Error("Failed to load discovered servers");
+        throw new Error(t("settings.mcp.error.loadServers"));
       }),
     ])
       .then(async ([profileList, bindingList, candidateList]) => {
@@ -177,7 +186,7 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load MCP settings");
+        setError(err instanceof Error ? err.message : t("settings.mcp.error.load"));
       });
     return () => {
       cancelled = true;
@@ -187,9 +196,9 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
   const archiveProfile = async (profile: MCPServerProfile) => {
     if (!profile.id) return;
     if (!(await confirmAction({
-      title: `Archive MCP profile “${profile.displayName ?? profile.slug}”?`,
-      description: "Bindings that reference this profile will stop resolving for new Runs.",
-      confirmLabel: "Archive profile",
+      title: t("settings.mcp.confirm.archiveTitle", { name: profile.displayName ?? profile.slug ?? "" }),
+      description: t("settings.mcp.confirm.archiveDescription"),
+      confirmLabel: t("settings.mcp.confirm.archiveLabel"),
       tone: "danger",
     }))) return;
     markSaving();
@@ -199,7 +208,7 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
       await refresh();
       markSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to archive MCP profile");
+      setError(err instanceof Error ? err.message : t("settings.mcp.error.archive"));
     }
   };
 
@@ -233,7 +242,7 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
       await refresh();
       markSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create MCP profile");
+      setError(err instanceof Error ? err.message : t("settings.mcp.error.create"));
     }
   };
 
@@ -267,7 +276,7 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
       await refresh();
       markSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to bind MCP candidate");
+      setError(err instanceof Error ? err.message : t("settings.mcp.error.bind"));
     }
   };
 
@@ -286,7 +295,7 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
       await refresh();
       markSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update MCP binding");
+      setError(err instanceof Error ? err.message : t("settings.mcp.error.update"));
     }
   };
 
@@ -343,10 +352,10 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
       recordOutcome(bindingId, {
         action: "test",
         ok: true,
-        message: result?.transport ? `Connected over ${result.transport}` : "Connected",
+        message: result?.transport ? t("settings.mcp.result.connectedOver", { transport: result.transport }) : t("settings.mcp.result.connected"),
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Test failed";
+      const message = err instanceof Error ? err.message : t("settings.mcp.error.test");
       setError(message);
       recordOutcome(bindingId, { action: "test", ok: false, message });
     } finally {
@@ -368,10 +377,10 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
       recordOutcome(bindingId, {
         action: "refresh",
         ok: true,
-        message: `${entries.length} ${entries.length === 1 ? "tool" : "tools"} discovered`,
+        message: t("settings.mcp.result.tools", { count: entries.length }),
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Catalog refresh failed";
+      const message = err instanceof Error ? err.message : t("settings.mcp.error.refresh");
       setError(message);
       recordOutcome(bindingId, { action: "refresh", ok: false, message });
     } finally {
@@ -382,9 +391,9 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
   const removeBinding = async (binding: MCPProjectBinding) => {
     if (!projectId) return;
     if (!(await confirmAction({
-      title: "Remove this MCP binding?",
-      description: "Tools from this server will no longer be available to Runs in this project.",
-      confirmLabel: "Remove binding",
+      title: t("settings.mcp.confirm.removeTitle"),
+      description: t("settings.mcp.confirm.removeDescription"),
+      confirmLabel: t("settings.mcp.confirm.removeLabel"),
       tone: "danger",
     }))) return;
     markSaving();
@@ -393,7 +402,7 @@ export function useMcpSettings(projectId: string | null, setError: (value: strin
       await refresh();
       markSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to remove binding");
+      setError(err instanceof Error ? err.message : t("settings.mcp.error.remove"));
     }
   };
 
