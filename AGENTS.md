@@ -50,6 +50,13 @@ constraints, not a replacement for the local roadmap or detailed design plans.
 
 ## Repository Hygiene
 
+- User-visible copy comes from `t("namespace.key")`, never straight into JSX.
+  `npm run lint` enforces this through `scripts/check-hardcoded-copy.mjs`
+  against `scripts/hardcoded-copy-allowlist.json`, a recorded-ceiling ratchet:
+  wrap a panel's strings, add the keys to both locales, and lower its number.
+  `npm run check:copy:list` prints what is still counted where. A new panel
+  starts at zero rather than adding an entry.
+
 - Never commit credentials, Provider keys, passwords, activation/reset codes,
   Connect Token plaintext, signing material, or decrypted user content.
 - `/docs/` and `/doc/` are local-only design/history directories in this

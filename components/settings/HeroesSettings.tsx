@@ -336,7 +336,7 @@ export function HeroesSettings({ models, setError }: {
 
       <section className="global-hero-detail">
         {!detail && busy === "loading" && <div className="heroes-detail-empty"><SettingsLoading label="Loading Hero…" /></div>}
-        {!detail && busy !== "loading" && <div className="heroes-detail-empty"><Bot size={26} /> Select or create a Hero</div>}
+        {!detail && busy !== "loading" && <div className="heroes-detail-empty"><Bot size={26} /> {t("settings.heroes.selectOrCreate")}</div>}
         {detail && <>
           <header className="global-hero-commandbar">
             <button type="button" className="global-hero-back" onClick={() => { setSelected(null); setDetail(null); }}><ArrowLeft size={17} /> {t("settings.heroes.back")}</button>
