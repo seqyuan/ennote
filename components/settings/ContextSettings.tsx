@@ -66,22 +66,24 @@ export function ContextSettings({ policies, models, session, refresh, setError, 
     }
   }
 
+  const t = useT();
+
   return <section className="settings-tab-section" aria-labelledby="settings-context-heading">
-    <header><h2 id="settings-context-heading">Context &amp; session</h2>
-      <p>Compaction policy versions and defaults frozen into the next Session Run.</p></header>
+    <header><h2 id="settings-context-heading">{t("settings.context.title")}</h2>
+      <p>{t("settings.context.desc")}</p></header>
     <CompactionPolicyEditor policies={policies} models={models} onCreate={createCompactionPolicy} onDefault={setDefault} />
-    <SettingsSection title="Current session" description={session ? session.title : "Select a Session to configure its defaults."} className="current-session-settings">
+    <SettingsSection title={t("settings.context.currentSession")} description={session ? session.title : t("settings.context.selectSession")} className="current-session-settings">
       <div className="session-default-grid">
-        <label className="session-model-select">Default model<select disabled={!session}
+        <label className="session-model-select">{t("settings.context.defaultModel")}<select disabled={!session}
           value={session?.defaultModelProfileId ?? ""}
           onChange={event => void patchSession({ defaultModelProfileId: event.target.value || null })}>
-          <option value="">Use global default</option>{models.map(model =>
+          <option value="">{t("settings.context.useGlobalDefault")}</option>{models.map(model =>
             <option key={model.id} value={model.id}>{model.displayName || model.modelName}</option>)}
         </select></label>
-        <label className="session-model-select">Context compaction<select disabled={!session}
+        <label className="session-model-select">{t("settings.context.compaction")}<select disabled={!session}
           value={session?.compactionPolicyProfileId ?? ""}
           onChange={event => void patchSession({ compactionPolicyProfileId: event.target.value || null })}>
-          <option value="">Use global default</option>{policies.filter(policy => policy.kind === "compaction" && policy.status === "active").map(policy =>
+          <option value="">{t("settings.context.useGlobalDefault")}</option>{policies.filter(policy => policy.kind === "compaction" && policy.status === "active").map(policy =>
             <option key={policy.id} value={policy.id}>{policy.name} v{policy.version}</option>)}
         </select></label>
       </div>
@@ -144,57 +146,58 @@ function CompactionPolicyEditor({ policies, models, onCreate, onDefault }: {
     setModelPolicies([]);
   }
 
-  return <SettingsSection title="Context compaction" description="Manual and bounded automatic context checkpoint behavior.">
+  return <SettingsSection title={t("settings.context.editorTitle")} description={t("settings.context.editorDescription")}>
     <form className="settings-form compaction-form" onSubmit={submit}>
-      <label>Name<input name="name" required /></label>
-      <label>Mode<select name="mode" defaultValue="manual_only"><option value="disabled">Disabled</option>
-        <option value="manual_only">Manual only</option><option value="manual_and_auto">Manual and automatic</option></select></label>
-      <label>Summary model<select name="compactionModelProfileId" defaultValue=""><option value="">Use run model</option>
+      <label>{t("settings.context.name")}<input name="name" required /></label>
+      <label>{t("settings.context.mode")}<select name="mode" defaultValue="manual_only"><option value="disabled">{t("settings.context.mode.disabled")}</option>
+        <option value="manual_only">{t("settings.context.mode.manualOnly")}</option><option value="manual_and_auto">{t("settings.context.mode.manualAndAuto")}</option></select></label>
+      <label>{t("settings.context.summaryModel")}<select name="compactionModelProfileId" defaultValue=""><option value="">{t("settings.context.useRunModel")}</option>
         {models.map(model => <option key={model.id} value={model.id}>{model.displayName || model.modelName}</option>)}</select></label>
-      <label>Trigger ratio<input name="triggerRatio" type="number" min="0.01" max="0.99" step="0.01" defaultValue="0.75" required /></label>
-      <label>Recent turns<input name="keepRecentTurns" type="number" min="1" step="1" defaultValue="2" required /></label>
-      <label>Tail ratio<input name="tailTokenRatio" type="number" min="0.01" max="0.99" step="0.01" defaultValue="0.2" required /></label>
-      <label>Tail minimum<input name="tailMinTokens" type="number" min="1" step="1" defaultValue="8000" required /></label>
-      <label>Tail maximum<input name="tailMaxTokens" type="number" min="1" step="1" defaultValue="32000" required /></label>
-      <label>Summary input ratio<input name="summaryInputRatio" type="number" min="0.01" max="0.99" step="0.01" defaultValue="0.7" required /></label>
-      <label>Summary output<input name="summaryMaxOutputTokens" type="number" min="1" step="1" defaultValue="4096" required /></label>
-      <label>Cooldown seconds<input name="failureCooldownSeconds" type="number" min="0" step="1" defaultValue="600" required /></label>
-      <label>Ineffective ratio<input name="ineffectiveReclaimRatio" type="number" min="0" max="0.99" step="0.01" defaultValue="0.1" required /></label>
-      <label>Ineffective limit<input name="ineffectiveLimit" type="number" min="1" step="1" defaultValue="3" required /></label>
+      <label>{t("settings.context.triggerRatio")}<input name="triggerRatio" type="number" min="0.01" max="0.99" step="0.01" defaultValue="0.75" required /></label>
+      <label>{t("settings.context.recentTurns")}<input name="keepRecentTurns" type="number" min="1" step="1" defaultValue="2" required /></label>
+      <label>{t("settings.context.tailRatio")}<input name="tailTokenRatio" type="number" min="0.01" max="0.99" step="0.01" defaultValue="0.2" required /></label>
+      <label>{t("settings.context.tailMinimum")}<input name="tailMinTokens" type="number" min="1" step="1" defaultValue="8000" required /></label>
+      <label>{t("settings.context.tailMaximum")}<input name="tailMaxTokens" type="number" min="1" step="1" defaultValue="32000" required /></label>
+      <label>{t("settings.context.summaryInputRatio")}<input name="summaryInputRatio" type="number" min="0.01" max="0.99" step="0.01" defaultValue="0.7" required /></label>
+      <label>{t("settings.context.summaryOutput")}<input name="summaryMaxOutputTokens" type="number" min="1" step="1" defaultValue="4096" required /></label>
+      <label>{t("settings.context.cooldownSeconds")}<input name="failureCooldownSeconds" type="number" min="0" step="1" defaultValue="600" required /></label>
+      <label>{t("settings.context.ineffectiveRatio")}<input name="ineffectiveReclaimRatio" type="number" min="0" max="0.99" step="0.01" defaultValue="0.1" required /></label>
+      <label>{t("settings.context.ineffectiveLimit")}<input name="ineffectiveLimit" type="number" min="1" step="1" defaultValue="3" required /></label>
       <div className="settings-toggles compaction-toggles">
-        <label><input name="allowHistoryLookup" type="checkbox" defaultChecked /> History lookup</label>
-        <label><input name="allowOverflowRecovery" type="checkbox" defaultChecked /> Overflow recovery</label>
-        <label><input name="includeReasoning" type="checkbox" /> Include reasoning</label>
+        <label><input name="allowHistoryLookup" type="checkbox" defaultChecked /> {t("settings.context.allowHistoryLookup")}</label>
+        <label><input name="allowOverflowRecovery" type="checkbox" defaultChecked /> {t("settings.context.allowOverflowRecovery")}</label>
+        <label><input name="includeReasoning" type="checkbox" /> {t("settings.context.includeReasoning")}</label>
       </div>
       <div className="settings-subsection compaction-model-policies">
-        <header><h4>Per-model overrides</h4><p>Optional budget overrides for a specific model.</p></header>
+        <header><h4>{t("settings.context.overridesTitle")}</h4><p>{t("settings.context.overridesDescription")}</p></header>
         {modelPolicies.map((row, index) => (
           <div key={index} className="model-policy-row">
-            <select value={row.modelProfileId} onChange={(event) => updateOverride(index, { modelProfileId: event.target.value })} aria-label={`Override model ${index + 1}`}>
-              <option value="">Select model…</option>
+            <select value={row.modelProfileId} onChange={(event) => updateOverride(index, { modelProfileId: event.target.value })} aria-label={t("settings.context.overrideModelAria", { index: String(index + 1) })}>
+              <option value="">{t("settings.context.selectModel")}</option>
               {models.map((model) => <option key={model.id} value={model.id}>{model.displayName || model.modelName}</option>)}
             </select>
-            <input type="number" step="0.01" min="0.01" max="0.99" placeholder="Trigger ratio" value={row.triggerRatio ?? ""}
+            <input type="number" step="0.01" min="0.01" max="0.99" placeholder={t("settings.context.triggerRatio")} value={row.triggerRatio ?? ""}
               onChange={(event) => updateOverride(index, { triggerRatio: event.target.value === "" ? undefined : Number(event.target.value) })} />
-            <input type="number" step="1" min="1" placeholder="Tail max tokens" value={row.tailMaxTokens ?? ""}
+            <input type="number" step="1" min="1" placeholder={t("settings.context.overrideTailMax")} value={row.tailMaxTokens ?? ""}
               onChange={(event) => updateOverride(index, { tailMaxTokens: event.target.value === "" ? undefined : Number(event.target.value) })} />
-            <input type="number" step="1" min="1" placeholder="Summary output" value={row.summaryMaxOutputTokens ?? ""}
+            <input type="number" step="1" min="1" placeholder={t("settings.context.overrideSummaryOutput")} value={row.summaryMaxOutputTokens ?? ""}
               onChange={(event) => updateOverride(index, { summaryMaxOutputTokens: event.target.value === "" ? undefined : Number(event.target.value) })} />
             <button type="button" className="secondary-btn" onClick={() => removeOverride(index)} aria-label={t("settings.context.removeOverride", { index: String(index + 1) })}><X size={12} aria-hidden="true" /></button>
           </div>
         ))}
-        <button type="button" className="secondary-btn" onClick={addOverride}>+ Add override</button>
+        <button type="button" className="secondary-btn" onClick={addOverride}>{t("settings.context.addOverride")}</button>
       </div>
-      <button type="submit">Create version</button>
+      <button type="submit">{t("settings.context.createVersion")}</button>
     </form>
     <div className="settings-list">{policies.filter(policy => policy.kind === "compaction").map(policy => <div className="settings-row" key={policy.id}>
       <div><strong>{policy.name}</strong><span>v{policy.version} · {String(policy.config.mode ?? "configured")}</span></div>
-      <button className="secondary-btn" disabled={policy.status !== "active"} onClick={() => onDefault(policy.id)}>Use as default</button>
+      <button className="secondary-btn" disabled={policy.status !== "active"} onClick={() => onDefault(policy.id)}>{t("settings.context.useAsDefault")}</button>
     </div>)}</div>
   </SettingsSection>;
 }
 
 function StandingApprovalsSection({ sessionId }: { sessionId: string | null }) {
+  const t = useT();
   const { markSaving, markSaved } = useSettingsStatus();
   const [rules, setRules] = useState<StandingApproval[]>([]);
   const [loadedSessionID, setLoadedSessionID] = useState<string | null>(null);
@@ -239,17 +242,17 @@ function StandingApprovalsSection({ sessionId }: { sessionId: string | null }) {
 
   if (!sessionId) return null;
 
-  return <SettingsSection title="Standing approvals" description="Tools automatically authorised for this session. Revoke to require approval again." className="standing-approvals-section">
-    {loading && <div className="settings-empty">Loading…</div>}
+  return <SettingsSection title={t("settings.context.approvalsTitle")} description={t("settings.context.approvalsDescription")} className="standing-approvals-section">
+    {loading && <div className="settings-empty">{t("settings.common.loading")}</div>}
     {!loading && error && <div className="settings-error">{error}</div>}
     {!loading && !error && visibleRules.length === 0 &&
-      <div className="settings-empty">No standing approvals for this session.</div>}
+      <div className="settings-empty">{t("settings.context.approvalsEmpty")}</div>}
     {!loading && visibleRules.length > 0 && <SettingsList>
       {visibleRules.map(rule => <SettingsRow
         key={rule.id}
         title={rule.toolName}
         meta={rule.scopeDisplay}
-        actions={<button className="secondary-btn" onClick={() => revoke(rule.id)}>Revoke</button>}
+        actions={<button className="secondary-btn" onClick={() => revoke(rule.id)}>{t("settings.context.revoke")}</button>}
       />)}
     </SettingsList>}
   </SettingsSection>;
