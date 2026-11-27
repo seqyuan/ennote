@@ -8,6 +8,7 @@ import { GraphHeader } from "@/components/graphs/GraphHeader";
 import { GraphSaveBanners } from "@/components/graphs/GraphSaveBanners";
 import { TaskList } from "@/components/graphs/TaskList";
 import { confirmAction } from "@/components/ui/confirm";
+import { useT } from "@/components/LocaleProvider";
 import { SettingsLoading } from "@/components/settings/SettingsPrimitives";
 import { GraphDependencies } from "@/components/graphs/GraphDependencies";
 import { GraphTabs } from "@/components/graphs/GraphTabs";
@@ -34,6 +35,7 @@ const flushDelayMs = 300;
 
 
 export function GraphSettings({ setError }: { setError: (value: string | null) => void }) {
+  const t = useT();
   const settings = useSettingsProfiles();
   const models = useMemo(() => modelOptions(settings.models), [settings.models]);
   const [graphs, setGraphs] = useState<GraphSummary[]>([]);
@@ -418,23 +420,23 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
       <GraphTabs graphs={graphs} selected={selected} onSelect={(id) => void openGraph(id)} onAdd={() => setCreateOpen(true)} />
 
       {createOpen && (
-        <div className="graph-create-strip" role="dialog" aria-label="Add Graph">
-          <label>ID<input autoFocus value={newGraph.id} onChange={(event) => setNewGraph((value) => ({ ...value, id: event.target.value }))} placeholder="rna-seq" /></label>
-          <label>Name<input value={newGraph.name} onChange={(event) => setNewGraph((value) => ({ ...value, name: event.target.value }))} placeholder="RNA-seq" /></label>
+        <div className="graph-create-strip" role="dialog" aria-label={t("settings.graph.addAria")}>
+          <label>{t("settings.graph.id")}<input autoFocus value={newGraph.id} onChange={(event) => setNewGraph((value) => ({ ...value, id: event.target.value }))} placeholder="rna-seq" /></label>
+          <label>{t("settings.graph.name")}<input value={newGraph.name} onChange={(event) => setNewGraph((value) => ({ ...value, name: event.target.value }))} placeholder="RNA-seq" /></label>
           <button type="button" onClick={() => void createGraph()} disabled={busy === "creating"}>{busy === "creating" ? "Creating…" : "Create Graph"}</button>
-          <button type="button" onClick={() => setCreateOpen(false)}>Cancel</button>
+          <button type="button" onClick={() => setCreateOpen(false)}>{t("settings.graph.cancel")}</button>
         </div>
       )}
 
-      <div className="graph-mobile-segments" role="tablist" aria-label="Graph views">
+      <div className="graph-mobile-segments" role="tablist" aria-label={t("settings.graph.viewsAria")}>
         {(["tasks", "graph", "build"] as const).map((view) => (
-          <button key={view} type="button" role="tab" aria-selected={mobileView === view} onClick={() => setMobileView(view)}>{view}</button>
+          <button key={view} type="button" role="tab" aria-selected={mobileView === view} onClick={() => setMobileView(view)}>{t(`settings.graph.view.${view}`)}</button>
         ))}
       </div>
 
       {!detail && busy === "loading" && <div className="graph-loading"><SettingsLoading label="Loading Graph…" /></div>}
       {!detail && busy !== "loading" && graphs.length === 0 && (
-        <div className="graph-welcome"><Workflow size={28} /><h2>Create your first Graph</h2><p>Compose reusable Tasks and their dependencies without choosing a Project.</p><button type="button" onClick={() => setCreateOpen(true)}><Plus size={16} /> Add Graph</button></div>
+        <div className="graph-welcome"><Workflow size={28} /><h2>{t("settings.graph.welcomeTitle")}</h2><p>{t("settings.graph.welcomeDesc")}</p><button type="button" onClick={() => setCreateOpen(true)}><Plus size={16} /> {t("settings.graph.add")}</button></div>
       )}
 
       {detail && definition && (
@@ -461,7 +463,7 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
 
           <main className={`graph-editor-view is-${mobileView}`}>
             <section className="graph-tasks-pane">
-              <div className="graph-section-heading"><div><span>Tasks</span><p>Execution configuration. Tasks are collapsed by default.</p></div><button type="button" onClick={() => setAddTaskOpen((value) => !value)}><Plus size={16} /> Add Task</button></div>
+              <div className="graph-section-heading"><div><span>{t("settings.graph.tasksSection")}</span><p>{t("settings.graph.tasksDesc")}</p></div><button type="button" onClick={() => setAddTaskOpen((value) => !value)}><Plus size={16} /> {t("settings.graph.addTask")}</button></div>
               {addTaskOpen && (
                 <AddTaskForm
                   takenIds={Object.keys(definition.tasks)}
@@ -485,7 +487,7 @@ export function GraphSettings({ setError }: { setError: (value: string | null) =
             </section>
 
             <section className="graph-dependencies-pane">
-              <div className="graph-section-heading"><div><span>Graph</span><p>Dependency orchestration. Hero details stay inside Tasks.</p></div></div>
+              <div className="graph-section-heading"><div><span>{t("settings.graph.graphSection")}</span><p>{t("settings.graph.graphDesc")}</p></div></div>
               <GraphDependencies definition={definition} busy={Boolean(busy)} onOpenTask={(id) => { setExpanded(id); setMobileView("tasks"); requestAnimationFrame(() => document.querySelector(`[data-task-id="${CSS.escape(id)}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" })); }} onChange={(taskId, depends) => setTaskDependencies(taskId, depends)} />
             </section>
 

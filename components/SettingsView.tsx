@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowLeft, Menu, X } from "lucide-react";
+import { useT } from "@/components/LocaleProvider";
 import { useState, type RefObject } from "react";
 import { HeroesSettings } from "@/components/settings/HeroesSettings";
 import { GraphSettings } from "@/components/settings/GraphSettings";
@@ -28,15 +29,14 @@ export function SettingsView({
   onOpenMobileNav: () => void;
   menuTriggerRef: RefObject<HTMLButtonElement | null>;
 }) {
+  const t = useT();
   const [error, setError] = useState<string | null>(null);
-  const title = view === "heroes" ? "Heroes" : "Graphs";
-  const description = view === "heroes"
-    ? "Global reusable execution presets for Chat and Graph Tasks."
-    : "Global Task graphs. Every published Graph can run in any Session.";
+  const title = view === "heroes" ? t("settings.view.heroes") : t("settings.view.graphs");
+  const description = view === "heroes" ? t("settings.view.heroesDesc") : t("settings.view.graphsDesc");
 
   return (
     <div className="settings-view" data-testid={view === "heroes" ? "heroes-page" : "graphs-page"}>
-      <button ref={menuTriggerRef} type="button" className="workspace-mobile-menu" onClick={onOpenMobileNav} aria-label="Open navigation">
+      <button ref={menuTriggerRef} type="button" className="workspace-mobile-menu" onClick={onOpenMobileNav} aria-label={t("settings.view.openNav")}>
         <Menu size={20} />
       </button>
 
@@ -46,14 +46,14 @@ export function SettingsView({
           <p>{description}</p>
         </div>
         <button type="button" className="settings-view-back" onClick={onBackToChat}>
-          <ArrowLeft size={15} /> Chat
+          <ArrowLeft size={15} /> {t("settings.view.backToChat")}
         </button>
       </header>
 
       {error && (
         <div className="error-bar workspace-page-error" role="alert">
           <span>{error}</span>
-          <button type="button" onClick={() => setError(null)} aria-label="Dismiss error">
+          <button type="button" onClick={() => setError(null)} aria-label={t("settings.view.dismissError")}>
             <X size={16} />
           </button>
         </div>

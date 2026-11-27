@@ -325,12 +325,12 @@ export function HeroesSettings({ models, setError }: {
   return (
     <div className={`global-heroes ${selected ? "has-selection" : ""}`}>
       <aside className="global-heroes-list">
-        <header><div><strong>Hero catalog</strong><span>{heroes.length} global Heroes</span></div><button type="button" onClick={() => setCreateOpen((value) => !value)} aria-label="Add Hero"><Plus size={18} /></button></header>
-        {createOpen && <div className="global-hero-create"><input value={newHero.id} onChange={(event) => setNewHero((value) => ({ ...value, id: event.target.value }))} placeholder="hero-id" /><input value={newHero.name} onChange={(event) => setNewHero((value) => ({ ...value, name: event.target.value }))} placeholder="Hero name" /><button type="button" onClick={() => void createHero()} disabled={busy === "creating"}>{busy === "creating" ? "Creating…" : "Create"}</button></div>}
-        <label className="global-hero-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search Heroes" /></label>
-        <div role="listbox" aria-label="Global Heroes">
+        <header><div><strong>{t("settings.heroes.catalog")}</strong><span>{t("settings.heroes.globalCount", { count: heroes.length })}</span></div><button type="button" onClick={() => setCreateOpen((value) => !value)} aria-label={t("settings.heroes.addAria")}><Plus size={18} /></button></header>
+        {createOpen && <div className="global-hero-create"><input value={newHero.id} onChange={(event) => setNewHero((value) => ({ ...value, id: event.target.value }))} placeholder={t("settings.heroes.idPlaceholder")} /><input value={newHero.name} onChange={(event) => setNewHero((value) => ({ ...value, name: event.target.value }))} placeholder={t("settings.heroes.namePlaceholder")} /><button type="button" onClick={() => void createHero()} disabled={busy === "creating"}>{busy === "creating" ? t("settings.heroes.creating") : t("settings.heroes.create")}</button></div>}
+        <label className="global-hero-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("settings.heroes.searchPlaceholder")} /></label>
+        <div role="listbox" aria-label={t("settings.heroes.listAria")}>
           {visible.map((hero) => <button key={hero.id} type="button" role="option" aria-selected={selected === hero.id} onClick={() => void openHero(hero.id)}><Bot size={17} /><span><strong>{hero.name}</strong><code>{hero.id}</code>{hero.error && <small>{hero.error}</small>}</span><FileText size={14} /></button>)}
-          {visible.length === 0 && <div className="heroes-empty">No global Heroes</div>}
+          {visible.length === 0 && <div className="heroes-empty">{t("settings.heroes.empty")}</div>}
         </div>
       </aside>
 
@@ -339,51 +339,51 @@ export function HeroesSettings({ models, setError }: {
         {!detail && busy !== "loading" && <div className="heroes-detail-empty"><Bot size={26} /> Select or create a Hero</div>}
         {detail && <>
           <header className="global-hero-commandbar">
-            <button type="button" className="global-hero-back" onClick={() => { setSelected(null); setDetail(null); }}><ArrowLeft size={17} /> Heroes</button>
+            <button type="button" className="global-hero-back" onClick={() => { setSelected(null); setDetail(null); }}><ArrowLeft size={17} /> {t("settings.heroes.back")}</button>
             <div><strong>{detail.document.name}</strong><code>{detail.path}</code></div>
             <div className="global-hero-command-actions">
               {conflict ? <>
-                <span className="hero-conflict-state">File changed on disk</span>
-                <button type="button" onClick={() => void showDiff()}>Diff</button>
-                <button type="button" onClick={() => void openHero(detail.id)}>Reload</button>
-              </> : saveState === "saving" ? <span className="is-saving"><Loader2 className="spin" size={14} /> Saving</span>
-                : saveState === "unsaved" ? <span className="is-dirty"><Pencil size={14} /> Unsaved changes</span>
-                : <span><Check size={14} /> Saved</span>}
-              <button type="button" onClick={() => void publish()} disabled={Boolean(busy) || conflict}>{busy === "publishing" ? "Publishing…" : "Publish"}</button>
+                <span className="hero-conflict-state">{t("settings.heroes.fileChanged")}</span>
+                <button type="button" onClick={() => void showDiff()}>{t("settings.heroes.diff")}</button>
+                <button type="button" onClick={() => void openHero(detail.id)}>{t("settings.heroes.reload")}</button>
+              </> : saveState === "saving" ? <span className="is-saving"><Loader2 className="spin" size={14} /> {t("settings.heroes.saving")}</span>
+                : saveState === "unsaved" ? <span className="is-dirty"><Pencil size={14} /> {t("settings.heroes.unsaved")}</span>
+                : <span><Check size={14} /> {t("settings.heroes.saved")}</span>}
+              <button type="button" onClick={() => void publish()} disabled={Boolean(busy) || conflict}>{busy === "publishing" ? t("settings.heroes.publishing") : t("settings.heroes.publish")}</button>
             </div>
           </header>
           <div className="global-hero-form">
-            <section><h3>Identity</h3><div className="global-hero-grid">
-              <label>Name<input value={detail.document.name} onChange={(event) => updateLocal((document) => ({ ...document, name: event.target.value }))} onBlur={() => void save(detail.document)} /></label>
-              <label>Handle<input value={detail.document.handle} disabled /></label>
-              <label className="wide">Description<input value={detail.document.description} onChange={(event) => updateLocal((document) => ({ ...document, description: event.target.value }))} onBlur={() => void save(detail.document)} /></label>
+            <section><h3>{t("settings.heroes.identity")}</h3><div className="global-hero-grid">
+              <label>{t("settings.heroes.name")}<input value={detail.document.name} onChange={(event) => updateLocal((document) => ({ ...document, name: event.target.value }))} onBlur={() => void save(detail.document)} /></label>
+              <label>{t("settings.heroes.handle")}<input value={detail.document.handle} disabled /></label>
+              <label className="wide">{t("settings.heroes.description")}<input value={detail.document.description} onChange={(event) => updateLocal((document) => ({ ...document, description: event.target.value }))} onBlur={() => void save(detail.document)} /></label>
             </div></section>
-            <section><h3>Runtime</h3><div className="global-hero-grid">
-              <label className="wide">Model<select value={detail.document.model.ref} onChange={(event) => updateAndSave((document) => ({ ...document, model: { ...document.model, ref: event.target.value } }))}>{options.map((option) => <option key={option.ref} value={option.ref}>{option.label} · {option.ref}</option>)}</select></label>
-              <label>Thinking<select value={detail.document.model.thinkingEffort} onChange={(event) => updateAndSave((document) => ({ ...document, model: { ...document.model, thinkingEffort: event.target.value as ThinkingEffort } }))}>{(["default", "low", "medium", "high"] as const).map((effort) => <option key={effort}>{effort}</option>)}</select></label>
+            <section><h3>{t("settings.heroes.runtime")}</h3><div className="global-hero-grid">
+              <label className="wide">{t("settings.heroes.model")}<select value={detail.document.model.ref} onChange={(event) => updateAndSave((document) => ({ ...document, model: { ...document.model, ref: event.target.value } }))}>{options.map((option) => <option key={option.ref} value={option.ref}>{option.label} · {option.ref}</option>)}</select></label>
+              <label>{t("settings.heroes.thinking")}<select value={detail.document.model.thinkingEffort} onChange={(event) => updateAndSave((document) => ({ ...document, model: { ...document.model, thinkingEffort: event.target.value as ThinkingEffort } }))}>{(["default", "low", "medium", "high"] as const).map((effort) => <option key={effort}>{effort}</option>)}</select></label>
               {/* Ordered by strictness, and labelled with the same names the composer chip uses:
                 a Hero's ceiling and a Run's mode are the same three values. */}
-              <label>Permission ceiling<select value={detail.document.permissionCeiling} onChange={(event) => updateAndSave((document) => ({ ...document, permissionCeiling: event.target.value as HeroDocument["permissionCeiling"] }))}>{PERMISSION_CEILINGS.map((mode) => <option key={mode} value={mode}>{t(`permission.${mode}`)}</option>)}</select></label>
-              <label className="wide">Skills<input value={detail.document.skills.map((skill) => skill.id).join(", ")} onChange={(event) => updateLocal((document) => ({ ...document, skills: mergeSkillBindings(event.target.value.split(",").map((id) => id.trim()).filter(Boolean), document.skills) }))} onBlur={() => void save(detail.document)} placeholder="report-writing, code-review" /></label>
+              <label>{t("settings.heroes.permissionCeiling")}<select value={detail.document.permissionCeiling} onChange={(event) => updateAndSave((document) => ({ ...document, permissionCeiling: event.target.value as HeroDocument["permissionCeiling"] }))}>{PERMISSION_CEILINGS.map((mode) => <option key={mode} value={mode}>{t(`permission.${mode}`)}</option>)}</select></label>
+              <label className="wide">{t("settings.heroes.skills")}<input value={detail.document.skills.map((skill) => skill.id).join(", ")} onChange={(event) => updateLocal((document) => ({ ...document, skills: mergeSkillBindings(event.target.value.split(",").map((id) => id.trim()).filter(Boolean), document.skills) }))} onBlur={() => void save(detail.document)} placeholder="report-writing, code-review" /></label>
             </div></section>
-            <section><h3>Execution context</h3><div className="global-hero-grid">
-              <label>Default mode<select aria-label="Default context mode" value={detail.document.context.defaultMode} onChange={(event) => updateAndSave((document) => ({ ...document, context: { ...document.context, defaultMode: event.target.value as HeroContextMode } }))}>{detail.document.context.allowedModes.map((mode) => <option key={mode} value={mode}>{ROLE_CONTEXT_LABELS[mode]}</option>)}</select></label>
+            <section><h3>{t("settings.heroes.executionContext")}</h3><div className="global-hero-grid">
+              <label>{t("settings.heroes.defaultMode")}<select aria-label={t("settings.heroes.defaultModeAria")} value={detail.document.context.defaultMode} onChange={(event) => updateAndSave((document) => ({ ...document, context: { ...document.context, defaultMode: event.target.value as HeroContextMode } }))}>{detail.document.context.allowedModes.map((mode) => <option key={mode} value={mode}>{ROLE_CONTEXT_LABELS[mode]}</option>)}</select></label>
               <div className="global-hero-modes wide">
-                <span>Allowed modes</span>
-                <div role="group" aria-label="Allowed context modes">
+                <span>{t("settings.heroes.allowedModes")}</span>
+                <div role="group" aria-label={t("settings.heroes.allowedModesAria")}>
                   {ROLE_CONTEXT_MODES.map((mode) => {
                     const checked = detail.document.context.allowedModes.includes(mode);
                     return <label key={mode} className="global-hero-mode"><input type="checkbox" checked={checked} disabled={checked && detail.document.context.allowedModes.length === 1} onChange={(event) => toggleContextMode(mode, event.target.checked)} />{ROLE_CONTEXT_LABELS[mode]}</label>;
                   })}
                 </div>
-                <p className="global-hero-hint">Task only is required for Heroes that run as delegated children. Reply enables addressing a specific message; Room shares the session lineage; Fresh starts from the addressed request.</p>
+                <p className="global-hero-hint">{t("settings.heroes.modesHint")}</p>
               </div>
             </div></section>
-            <section><h3>Hero prompt</h3><label className="global-hero-prompt"><textarea aria-label="Hero prompt" value={detail.document.prompt} onChange={(event) => updateLocal((document) => ({ ...document, prompt: event.target.value }))} onBlur={() => void save(detail.document)} /></label></section>
+            <section><h3>{t("settings.heroes.prompt")}</h3><label className="global-hero-prompt"><textarea aria-label={t("settings.heroes.promptAria")} value={detail.document.prompt} onChange={(event) => updateLocal((document) => ({ ...document, prompt: event.target.value }))} onBlur={() => void save(detail.document)} /></label></section>
           </div>
-          {diskDetail && <div className="hero-conflict-dialog" role="dialog" aria-modal="true" aria-label="Hero file diff">
-            <div><header><strong>Local edits</strong><button type="button" onClick={() => setDiskDetail(null)}>Close</button></header><pre>{JSON.stringify(detail.document, null, 2)}</pre></div>
-            <div><header><strong>File on disk</strong></header><pre>{JSON.stringify(diskDetail.document, null, 2)}</pre></div>
+          {diskDetail && <div className="hero-conflict-dialog" role="dialog" aria-modal="true" aria-label={t("settings.heroes.diffDialogAria")}>
+            <div><header><strong>{t("settings.heroes.localEdits")}</strong><button type="button" onClick={() => setDiskDetail(null)}>{t("settings.heroes.close")}</button></header><pre>{JSON.stringify(detail.document, null, 2)}</pre></div>
+            <div><header><strong>{t("settings.heroes.fileOnDisk")}</strong></header><pre>{JSON.stringify(diskDetail.document, null, 2)}</pre></div>
           </div>}
         </>}
       </section>

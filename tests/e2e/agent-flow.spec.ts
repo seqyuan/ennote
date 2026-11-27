@@ -134,7 +134,9 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
       await page.getByRole("button", { name: "Open navigation" }).click();
       await expect(page.getByRole("dialog", { name: "Navigation" })).toBeVisible();
       await page.locator(".sidebar-close-nav").click();
-      await page.getByRole("tab", { name: "graph", exact: true }).click();
+      // The mobile segment used to render the view's raw key ("graph"); it is
+      // a label now, so the spec asks for what a reader sees.
+      await page.getByRole("tab", { name: "Graph", exact: true }).click();
     }
     await expect(page.getByText("Level 1", { exact: true })).toBeVisible();
     await expect(page.getByText("Level 2", { exact: true })).toBeVisible();
