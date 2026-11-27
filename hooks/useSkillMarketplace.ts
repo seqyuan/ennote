@@ -2,6 +2,8 @@
 
 import { useCallback, useState } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
+import { useLocale } from "@/components/LocaleProvider";
+import { translate } from "@/lib/messages";
 import type { SkillSearchResult } from "@/components/settings/types";
 
 export function useSkillMarketplace(
@@ -21,6 +23,14 @@ export function useSkillMarketplace(
   search: () => Promise<void>;
   install: (pkg: string) => Promise<void>;
 } {
+  // The hook builds user-visible fallbacks and confirm copy, so it translates
+  // them itself; a board translated only at the JSX layer would answer in
+  // English the moment an operation failed.
+  const { locale } = useLocale();
+  const t = useCallback(
+    (key: string, params?: Record<string, string | number>) => translate(locale, key, params),
+    [locale],
+  );
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SkillSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -40,7 +50,7 @@ export function useSkillMarketplace(
       setSearched(true);
       setError(null);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Search failed");
+      setError(reason instanceof Error ? reason.message : t("settings.skills.error.search"));
     } finally {
       setSearching(false);
     }
@@ -48,7 +58,7 @@ export function useSkillMarketplace(
 
   const install = useCallback(async (pkg: string) => {
     if (installScope === "project" && !projectTrusted) {
-      setError("Project resources must be trusted before installing project skills.");
+      setError(t("settings.skills.error.untrusted"));
       return;
     }
     setInstalling(pkg);
@@ -65,7 +75,7 @@ export function useSkillMarketplace(
       setResults((current) => current.filter((item) => item.package !== pkg));
       await reload();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Install failed");
+      setError(reason instanceof Error ? reason.message : t("settings.skills.error.install"));
     } finally {
       setInstalling(null);
     }

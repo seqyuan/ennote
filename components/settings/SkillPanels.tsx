@@ -2,6 +2,7 @@
 
 import { ExternalLink, RefreshCw, Search, X } from "lucide-react";
 import { SettingsEmpty, SettingsLoading, SettingsSection } from "@/components/settings/SettingsPrimitives";
+import { useT } from "@/components/LocaleProvider";
 import type { AnnotatedSkill, SkillInstallInfo, SkillRoot, SkillSearchResult, SkillUpdateResult } from "@/components/settings/types";
 import type { useSkillRoots } from "@/hooks/useSkillRoots";
 import styles from "./SkillPanels.module.css";
@@ -11,6 +12,7 @@ export function SkillRootsPanel(props: {
   loading: boolean;
   control: ReturnType<typeof useSkillRoots>;
 }) {
+  const t = useT();
   const { roots, loading, control } = props;
   const {
     showRootForm, setShowRootForm, rootName, setRootName, rootPreset, setRootPreset,
@@ -19,13 +21,13 @@ export function SkillRootsPanel(props: {
 
   return (
     <SettingsSection
-      title={<>Skills roots <span className={styles.sectionCount}>{roots.length} additional</span></>}
-      description="Resolution paths are on the Worker host. Remote clients (Tauri) read the same configured roots — no per-client setup."
+      title={<>{t("settings.skills.rootsTitle")} <span className={styles.sectionCount}>{t("settings.skills.rootsAdditional", { count: roots.length })}</span></>}
+      description={t("settings.skills.rootsDescription")}
     >
       <div className={styles.stack}>
         {roots.length === 0 && !loading && (
           <SettingsEmpty>
-            No additional roots. Ennote reads <code>$ENNOTE_HOME/skills</code> on the Worker host by default; add pi, Claude Code, Codex, or Cursor skill directories here.
+            {t("settings.skills.rootsEmpty", { path: "$ENNOTE_HOME/skills" })}
           </SettingsEmpty>
         )}
         {roots.map((root) => (
@@ -44,10 +46,10 @@ export function SkillRootsPanel(props: {
               disabled={rootBusy !== null}
               className={root.enabled ? "settings-btn primary" : "settings-btn"}
             >
-              {root.enabled ? "Enabled" : "Disabled"}
+              {root.enabled ? t("settings.skills.enabled") : t("settings.skills.disabled")}
             </button>
             <button type="button" onClick={() => void removeRoot(root)} disabled={rootBusy !== null}
-              title={`Stop reading skills from ${root.path}`}
+              title={t("settings.skills.stopReadingTitle", { path: root.path })}
               className="settings-btn danger">
               <X size={12} aria-hidden="true" />
             </button>
@@ -55,7 +57,7 @@ export function SkillRootsPanel(props: {
         ))}
         {!showRootForm ? (
           <button type="button" onClick={() => setShowRootForm(true)} className="settings-btn">
-            + Add skills root
+            {t("settings.skills.addRootLink")}
           </button>
         ) : (
           <div className={styles.rootForm}>
@@ -63,7 +65,7 @@ export function SkillRootsPanel(props: {
               <select
                 value={rootPreset}
                 onChange={(event) => setRootPreset(event.target.value)}
-                aria-label="Ecosystem preset"
+                aria-label={t("settings.skills.ecosystemPreset")}
                 className={`${styles.input} ${styles.inputPreset}`}
                 disabled={Boolean(rootPath.trim())}
               >
@@ -71,30 +73,30 @@ export function SkillRootsPanel(props: {
                 <option value="claude">Claude Code</option>
                 <option value="codex">Codex</option>
                 <option value="cursor">Cursor</option>
-                <option value="generic">Custom path</option>
+                <option value="generic">{t("settings.skills.preset.custom")}</option>
               </select>
               <input
                 value={rootName}
                 onChange={(event) => setRootName(event.target.value)}
-                placeholder="Name (defaults to preset)"
-                aria-label="Root name"
+                placeholder={t("settings.skills.namePlaceholder")}
+                aria-label={t("settings.skills.rootName")}
                 className={`${styles.input} ${styles.inputName}`}
               />
               <input
                 value={rootPath}
                 onChange={(event) => setRootPath(event.target.value)}
-                placeholder={rootPreset === "generic" ? "/absolute/path/to/skills" : "Optional explicit path (else preset)"}
-                aria-label="Root path"
+                placeholder={rootPreset === "generic" ? t("settings.skills.pathPlaceholder") : t("settings.skills.explicitPathPlaceholder")}
+                aria-label={t("settings.skills.rootPath")}
                 className={styles.input}
               />
             </div>
             <div className={styles.actionRow}>
               <button type="button" onClick={() => void addRoot()} disabled={rootBusy !== null}
                 className="settings-btn primary">
-                {rootBusy === "add" ? "Adding…" : "Add root"}
+                {rootBusy === "add" ? t("settings.skills.adding") : t("settings.skills.addRoot")}
               </button>
               <button type="button" onClick={() => setShowRootForm(false)} className="settings-btn">
-                Cancel
+                {t("settings.skills.cancel")}
               </button>
             </div>
           </div>
@@ -118,39 +120,40 @@ export function SkillMarketplace(props: {
   onSearch: () => Promise<void>;
   onInstall: (pkg: string) => Promise<void>;
 }) {
+  const t = useT();
   const {
     projectId, projectTrusted, query, setQuery, results, searching, searched,
     installScope, setInstallScope, installing, onSearch, onInstall,
   } = props;
 
   return (
-    <SettingsSection title="Marketplace">
+    <SettingsSection title={t("settings.skills.marketplace")}>
       <div className={styles.searchRow}>
         <input
           type="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => { if (event.key === "Enter") void onSearch(); }}
-          placeholder="Search skills.sh…"
-          aria-label="Search skills.sh"
+          placeholder={t("settings.skills.searchPlaceholder")}
+          aria-label={t("settings.skills.searchAria")}
           className={styles.input}
         />
         <select
           value={installScope}
           onChange={(event) => setInstallScope(event.target.value as "global" | "project")}
-          aria-label="Install scope"
+          aria-label={t("settings.skills.installScope")}
           className={`${styles.input} ${styles.inputScope}`}
         >
-          <option value="global">Global</option>
-          <option value="project" disabled={!projectId || !projectTrusted}>Project{!projectTrusted && projectId ? " (needs trust)" : ""}</option>
+          <option value="global">{t("settings.skills.scope.global")}</option>
+          <option value="project" disabled={!projectId || !projectTrusted}>{t("settings.skills.scope.project")}{!projectTrusted && projectId ? t("settings.skills.scope.needsTrust") : ""}</option>
         </select>
         <button type="button" onClick={() => void onSearch()} disabled={searching || !query.trim()}
           className="settings-btn">
-          <Search size={13} aria-hidden="true" /> {searching ? "Searching…" : "Search"}
+          <Search size={13} aria-hidden="true" /> {searching ? t("settings.skills.searching") : t("settings.skills.search")}
         </button>
       </div>
       {searched && results.length === 0 && !searching && (
-        <SettingsEmpty>No skills match &quot;{query.trim()}&quot;.</SettingsEmpty>
+        <SettingsEmpty>{t("settings.skills.noMatch", { query: query.trim() })}</SettingsEmpty>
       )}
       {results.map((result) => (
         <div key={result.package} className={styles.resultRow}>
@@ -161,7 +164,7 @@ export function SkillMarketplace(props: {
           {result.url && (
             <a href={result.url} target="_blank" rel="noreferrer" title={result.url} className={`${styles.link} ${styles.linkIcon}`}>
               <ExternalLink size={13} aria-hidden="true" />
-              <span className="sr-only">Open {result.package}</span>
+              <span className="sr-only">{t("settings.skills.open", { package: result.package })}</span>
             </a>
           )}
           <button
@@ -170,7 +173,7 @@ export function SkillMarketplace(props: {
             onClick={() => void onInstall(result.package)}
             className="settings-btn primary"
           >
-            {installing === result.package ? "Installing…" : "Install"}
+            {installing === result.package ? t("settings.skills.installing") : t("settings.skills.install")}
           </button>
         </div>
       ))}
@@ -191,13 +194,14 @@ export function SkillInstalledList(props: {
   onToggle: (skill: AnnotatedSkill) => Promise<void>;
   onRemove: (skill: AnnotatedSkill) => Promise<void>;
 }) {
+  const t = useT();
   const { installed, loading, updateKey, updates, checking, toggling, removing, onCheck, onUpdate, onToggle, onRemove } = props;
 
   return (
-    <SettingsSection title={<>Installed <span className={styles.sectionCount}>{installed.length}</span></>}>
+    <SettingsSection title={<>{t("settings.skills.installed")} <span className={styles.sectionCount}>{installed.length}</span></>}>
       {loading && <SettingsLoading label="Loading…" />}
       {!loading && installed.length === 0 && (
-        <SettingsEmpty>No installed skills yet — search the marketplace above.</SettingsEmpty>
+        <SettingsEmpty>{t("settings.skills.installedEmpty")}</SettingsEmpty>
       )}
       {!loading && installed.length > 0 && (
         <div className={styles.stack}>
@@ -213,7 +217,7 @@ export function SkillInstalledList(props: {
                       <strong className={styles.installedName}>{skill.name}</strong>
                       <span className={`skill-row-scope ${styles.badge}`}>{install.scope}</span>
                       {updateState?.state === "update-available" && (
-                        <span className={styles.updateBadge}>Update available</span>
+                        <span className={styles.updateBadge}>{t("settings.skills.updateAvailable")}</span>
                       )}
                     </div>
                     {skill.description && (
@@ -234,25 +238,25 @@ export function SkillInstalledList(props: {
                   <div className={styles.installedActions}>
                     <button
                       type="button"
-                      title="Allow or block model invocation for this skill"
+                      title={t("settings.skills.invocationTitle")}
                       onClick={() => void onToggle(skill)}
                       disabled={toggling === skill.relPath}
                       className={skill.disableModelInvocation ? "settings-btn" : "settings-btn primary"}
                     >
-                      {skill.disableModelInvocation ? "Disabled" : "Enabled"}
+                      {skill.disableModelInvocation ? t("settings.skills.disabled") : t("settings.skills.enabled")}
                     </button>
-                    <button type="button" title="Check for updates" onClick={() => void onCheck(install)}
+                    <button type="button" title={t("settings.skills.checkTitle")} onClick={() => void onCheck(install)}
                       disabled={checking !== null} className="settings-btn">
-                      {checking === key ? <RefreshCw size={12} aria-hidden="true" className="delivery-spinner" /> : "Check"}
+                      {checking === key ? <RefreshCw size={12} aria-hidden="true" className="delivery-spinner" /> : t("settings.skills.check")}
                     </button>
                     {updateState?.state === "update-available" && (
                       <button type="button" onClick={() => void onUpdate(install)} disabled={checking !== null}
                         className="settings-btn warning">
-                        Update
+                        {t("settings.skills.update")}
                       </button>
                     )}
                     {updateState?.state === "up-to-date" && (
-                      <span className={styles.statusText}>Up to date</span>
+                      <span className={styles.statusText}>{t("settings.skills.upToDate")}</span>
                     )}
                     {updateState?.state === "error" && updateState.message && (
                       <span className={styles.statusError} title={updateState.message}>
@@ -260,11 +264,11 @@ export function SkillInstalledList(props: {
                       </span>
                     )}
                     {updateState?.state === "unsupported" && (
-                      <span className={styles.statusText} title={updateState.message ?? ""}>No updates</span>
+                      <span className={styles.statusText} title={updateState.message ?? ""}>{t("settings.skills.noUpdates")}</span>
                     )}
-                    <button type="button" title="Remove skill" onClick={() => void onRemove(skill)} disabled={removing !== null}
+                    <button type="button" title={t("settings.skills.removeTitle")} onClick={() => void onRemove(skill)} disabled={removing !== null}
                       className="settings-btn danger">
-                      {removing === skill.relPath ? "Removing…" : <X size={12} aria-hidden="true" />}
+                      {removing === skill.relPath ? t("settings.skills.removing") : <X size={12} aria-hidden="true" />}
                     </button>
                   </div>
                 </div>
@@ -278,9 +282,10 @@ export function SkillInstalledList(props: {
 }
 
 export function SkillCatalogList({ local }: { local: AnnotatedSkill[] }) {
+  const t = useT();
   if (local.length === 0) return null;
   return (
-    <SettingsSection title={<>Catalog <span className={styles.sectionCount}>{local.length}</span></>}>
+    <SettingsSection title={<>{t("settings.skills.catalog")} <span className={styles.sectionCount}>{local.length}</span></>}>
       <div className={styles.stack}>
         {local.map((skill) => (
           <div key={`${skill.relPath}:${skill.skillId}`} className={styles.catalogRow}>
@@ -288,9 +293,9 @@ export function SkillCatalogList({ local }: { local: AnnotatedSkill[] }) {
               {skill.name}
             </span>
             <span className={styles.badge}>
-              {skill.sourceInfo.scope ?? "local"}
+              {skill.sourceInfo.scope ?? t("settings.skills.catalogLocal")}
             </span>
-            {skill.disableModelInvocation && <span className={styles.statusText}>invocation disabled</span>}
+            {skill.disableModelInvocation && <span className={styles.statusText}>{t("settings.skills.invocationDisabled")}</span>}
           </div>
         ))}
       </div>
@@ -301,10 +306,11 @@ export function SkillCatalogList({ local }: { local: AnnotatedSkill[] }) {
 export function SkillDiagnostics({ diagnostics }: {
   diagnostics: { level?: string; message?: string; relPath?: string; source?: string }[];
 }) {
+  const t = useT();
   if (diagnostics.length === 0) return null;
   return (
     <div className={styles.diagnostics}>
-      <div className={styles.diagTitle}>Catalog diagnostics</div>
+      <div className={styles.diagTitle}>{t("settings.skills.diagnostics")}</div>
       <div className={styles.diagList}>
         {diagnostics.map((diag, index) => (
           <div key={index} className={styles.diagRow} data-level={diag.level === "skip" ? "skip" : undefined}>

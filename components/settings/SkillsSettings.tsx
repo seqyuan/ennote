@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "@/components/LocaleProvider";
 import { useSkillCatalog } from "@/hooks/useSkillCatalog";
 import { useSkillRoots } from "@/hooks/useSkillRoots";
 import { useSkillMarketplace } from "@/hooks/useSkillMarketplace";
@@ -19,6 +20,7 @@ export function SkillsSettings({ projectId, setError }: {
   projectId: string | null;
   setError: (value: string | null) => void;
 }) {
+  const t = useT();
   const catalog = useSkillCatalog(projectId, setError);
   const roots = useSkillRoots(catalog.setRoots, catalog.load, setError);
   const marketplace = useSkillMarketplace(projectId, catalog.projectTrusted, catalog.load, setError);
@@ -29,8 +31,8 @@ export function SkillsSettings({ projectId, setError }: {
 
   return <section className="settings-tab-section" aria-labelledby="settings-skills-heading">
     <header>
-      <h2 id="settings-skills-heading">Skills</h2>
-      <p>Marketplace installs, catalog browsing, and per-skill invocation control.</p>
+      <h2 id="settings-skills-heading">{t("settings.skills.title")}</h2>
+      <p>{t("settings.skills.desc")}</p>
     </header>
 
     {/* Skills roots (additional resolution paths) */}

@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
+import { useLocale } from "@/components/LocaleProvider";
+import { translate } from "@/lib/messages";
 import type { AnnotatedSkill, SkillListResult, SkillRoot } from "@/components/settings/types";
 
 type SkillDiagnostic = { level?: string; message?: string; relPath?: string; source?: string };
@@ -22,6 +24,15 @@ export function useSkillCatalog(projectId: string | null, setError: (value: stri
   const [loading, setLoading] = useState(false);
   const [roots, setRoots] = useState<SkillRoot[]>([]);
 
+  // The hook builds user-visible fallbacks and confirm copy, so it translates
+  // them itself; a board translated only at the JSX layer would answer in
+  // English the moment an operation failed.
+  const { locale } = useLocale();
+  const t = useCallback(
+    (key: string, params?: Record<string, string | number>) => translate(locale, key, params),
+    [locale],
+  );
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -34,7 +45,7 @@ export function useSkillCatalog(projectId: string | null, setError: (value: stri
       setRoots(rootsData.items ?? []);
       setError(null);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to load skills");
+      setError(reason instanceof Error ? reason.message : t("settings.skills.error.load"));
     } finally {
       setLoading(false);
     }

@@ -4,6 +4,8 @@ import { useCallback, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
 import { confirmAction } from "@/components/ui/confirm";
+import { useLocale } from "@/components/LocaleProvider";
+import { translate } from "@/lib/messages";
 import { useSettingsStatus } from "@/components/settings/SettingsStatus";
 import type { AnnotatedSkill, SkillInstallInfo, SkillUpdateResult } from "@/components/settings/types";
 
@@ -28,6 +30,14 @@ export function useSkillRowActions(
   const [toggling, setToggling] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const { markSaving, markSaved } = useSettingsStatus();
+  const { locale } = useLocale();
+  // The hook builds user-visible fallbacks and confirm copy, so it translates
+  // them itself; a board translated only at the JSX layer would answer in
+  // English the moment an operation failed.
+  const t = useCallback(
+    (key: string, params?: Record<string, string | number>) => translate(locale, key, params),
+    [locale],
+  );
 
   const updateKey = useCallback((install: { package: string; scope: string }) => `${install.scope}\u0000${install.package}`, []);
 
@@ -50,7 +60,7 @@ export function useSkillRowActions(
       });
       setError(null);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Update check failed");
+      setError(reason instanceof Error ? reason.message : t("settings.skills.error.updateCheck"));
     } finally {
       setChecking(null);
     }
@@ -78,7 +88,7 @@ export function useSkillRowActions(
       await reload();
       markSaved();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Update failed");
+      setError(reason instanceof Error ? reason.message : t("settings.skills.error.update"));
     } finally {
       setChecking(null);
     }
@@ -98,7 +108,7 @@ export function useSkillRowActions(
       setError(null);
       markSaved();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Toggle failed");
+      setError(reason instanceof Error ? reason.message : t("settings.skills.error.toggle"));
     } finally {
       setToggling(null);
     }
@@ -106,9 +116,9 @@ export function useSkillRowActions(
 
   const remove = useCallback(async (skill: AnnotatedSkill) => {
     if (!(await confirmAction({
-      title: `Remove the skill "${skill.name}"?`,
-      description: "The skill files are removed from the managed catalog.",
-      confirmLabel: "Remove skill",
+      title: t("settings.skills.confirm.removeTitle", { name: skill.name }),
+      description: t("settings.skills.confirm.removeDescription"),
+      confirmLabel: t("settings.skills.confirm.removeLabel"),
       tone: "danger",
     }))) return;
     setRemoving(skill.relPath);
@@ -119,7 +129,7 @@ export function useSkillRowActions(
       setError(null);
       markSaved();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Remove failed");
+      setError(reason instanceof Error ? reason.message : t("settings.skills.error.remove"));
     } finally {
       setRemoving(null);
     }

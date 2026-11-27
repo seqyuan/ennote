@@ -4,6 +4,8 @@ import { useCallback, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { apiFetch } from "@/lib/worker-api.client";
 import { confirmAction } from "@/components/ui/confirm";
+import { useLocale } from "@/components/LocaleProvider";
+import { translate } from "@/lib/messages";
 import { useSettingsStatus } from "@/components/settings/SettingsStatus";
 import type { SkillRoot } from "@/components/settings/types";
 
@@ -31,6 +33,14 @@ export function useSkillRoots(
   const [rootPath, setRootPath] = useState("");
   const [rootBusy, setRootBusy] = useState<string | null>(null);
   const { markSaving, markSaved } = useSettingsStatus();
+  const { locale } = useLocale();
+  // The hook builds user-visible fallbacks and confirm copy, so it translates
+  // them itself; a board translated only at the JSX layer would answer in
+  // English the moment an operation failed.
+  const t = useCallback(
+    (key: string, params?: Record<string, string | number>) => translate(locale, key, params),
+    [locale],
+  );
 
   const addRoot = useCallback(async () => {
     setRootBusy("add");
@@ -52,7 +62,7 @@ export function useSkillRoots(
       await reload();
       markSaved();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to add skill root");
+      setError(reason instanceof Error ? reason.message : t("settings.skills.error.addRoot"));
     } finally {
       setRootBusy(null);
     }
@@ -72,7 +82,7 @@ export function useSkillRoots(
       await reload();
       markSaved();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Toggle failed");
+      setError(reason instanceof Error ? reason.message : t("settings.skills.error.toggle"));
     } finally {
       setRootBusy(null);
     }
@@ -80,9 +90,9 @@ export function useSkillRoots(
 
   const removeRoot = useCallback(async (root: SkillRoot) => {
     if (!(await confirmAction({
-      title: `Stop reading skills from "${root.path}"?`,
-      description: "Installed skills under this root are no longer discovered.",
-      confirmLabel: "Stop reading",
+      title: t("settings.skills.confirm.stopTitle", { path: root.path }),
+      description: t("settings.skills.confirm.stopDescription"),
+      confirmLabel: t("settings.skills.confirm.stopLabel"),
       tone: "danger",
     }))) return;
     setRootBusy(root.id);
@@ -94,7 +104,7 @@ export function useSkillRoots(
       await reload();
       markSaved();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Remove failed");
+      setError(reason instanceof Error ? reason.message : t("settings.skills.error.removeRoot"));
     } finally {
       setRootBusy(null);
     }
