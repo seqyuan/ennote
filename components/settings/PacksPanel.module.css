@@ -135,13 +135,16 @@
 .titleRow { display: flex; align-items: center; gap: 6px; }
 .name { color: var(--text); font-size: var(--text-sm); font-weight: 600; }
 
+/* A 24px square was the settings surface's smallest target (§2.3). It now takes
+   the shared control height, so a mouse target is 30px, and a coarse pointer
+   gets the 44px touch minimum without changing the row's look on a desktop. */
 .iconButton {
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 24px;
-  height: 24px;
+  width: var(--control-h-md);
+  height: var(--control-h-md);
   padding: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -150,5 +153,8 @@
   cursor: pointer;
 }
 
+@media (pointer: coarse) {
+  .iconButton { width: var(--control-h-touch); height: var(--control-h-touch); }
+}
 .iconButton:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 .iconButton:disabled { color: var(--text-dim); cursor: default; }
