@@ -2,6 +2,7 @@
 
 import { AlertTriangle, Plus } from "lucide-react";
 import type { GraphSummary } from "@/components/graphs/types";
+import { useT } from "@/components/LocaleProvider";
 
 export function GraphTabs({ graphs, selected, onSelect, onAdd }: {
   graphs: GraphSummary[];
@@ -9,6 +10,7 @@ export function GraphTabs({ graphs, selected, onSelect, onAdd }: {
   onSelect: (id: string) => void;
   onAdd: () => void;
 }) {
+  const t = useT();
   return (
     <div className="graph-tabs-row">
       <div className="graph-tabs" role="tablist" aria-label="Graphs">
@@ -26,7 +28,7 @@ export function GraphTabs({ graphs, selected, onSelect, onAdd }: {
           </button>
         ))}
       </div>
-      <button type="button" className="graph-add-tab" onClick={onAdd} aria-label="Add Graph" title="Add Graph">
+      <button type="button" className="graph-add-tab" onClick={onAdd} aria-label={t("graph.tabs.addAria")} title={t("graph.tabs.addAria")}>
         <Plus size={18} />
       </button>
     </div>

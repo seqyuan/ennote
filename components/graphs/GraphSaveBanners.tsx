@@ -8,6 +8,8 @@
  * GraphSettings stay under its layer budget while the queue logic reads
  * top-to-bottom.
  */
+import { useT } from "@/components/LocaleProvider";
+
 export type SaveErrorBanner = { message: string };
 export type ConflictBanner = { reason: "conflict" | "reload" };
 export type DiskPreview = { name: string; changed: string[] };
@@ -22,12 +24,13 @@ export function GraphSaveBanners({ saveError, conflict, saving, diskPreview, onR
   onKeepMine: () => void;
   onDiscardMine: () => void;
 }) {
+  const t = useT();
   return (
     <>
       {saveError && (
         <div className="graph-save-error" role="alert">
           <span>{saveError.message}</span>
-          <button type="button" onClick={onRetry}>Retry save</button>
+          <button type="button" onClick={onRetry}>{t("graph.save.retry")}</button>
         </div>
       )}
 
@@ -35,14 +38,14 @@ export function GraphSaveBanners({ saveError, conflict, saving, diskPreview, onR
         <div className="graph-conflict-bar" role="status">
           <span>{conflict.reason === "reload"
             ? "This Graph changed while you had unsaved edits."
-            : "The file changed on disk."}</span>
+            : t("graph.save.fileChanged")}</span>
           {/* A conflict is decided once the save in flight has landed: until then
               the disk read is stale and the in-flight answer would overwrite the
               base the decision just chose. */}
-          <button type="button" disabled={saving} onClick={onViewDisk}>View disk version</button>
-          <button type="button" disabled={saving} onClick={onKeepMine}>Keep mine</button>
-          <button type="button" disabled={saving} onClick={onDiscardMine}>Discard mine</button>
-          {saving && <small>A save is still in flight — decide when it finishes.</small>}
+          <button type="button" disabled={saving} onClick={onViewDisk}>{t("graph.save.viewDisk")}</button>
+          <button type="button" disabled={saving} onClick={onKeepMine}>{t("graph.save.keepMine")}</button>
+          <button type="button" disabled={saving} onClick={onDiscardMine}>{t("graph.save.discardMine")}</button>
+          {saving && <small>{t("graph.save.inFlight")}</small>}
           {diskPreview && (
             <div className="graph-conflict-preview">
               <span>On disk: {diskPreview.name}</span>

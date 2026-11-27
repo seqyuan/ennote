@@ -2,6 +2,7 @@
 
 import { ChevronRight } from "lucide-react";
 import type { FlowDefinition } from "@/components/graphs/types";
+import { useT } from "@/components/LocaleProvider";
 
 function levelsFor(definition: FlowDefinition): string[][] {
   const remaining = new Set(Object.keys(definition.tasks));
@@ -22,13 +23,14 @@ export function GraphDependencies({ definition, busy, onOpenTask, onChange }: {
   onOpenTask: (id: string) => void;
   onChange: (taskId: string, dependencies: string[]) => void;
 }) {
+  const t = useT();
   const taskIds = Object.keys(definition.tasks).sort();
   if (taskIds.length === 0) {
-    return <div className="graph-empty-state">Add a Task to start the Graph.</div>;
+    return <div className="graph-empty-state">{t("graph.dependencies.empty")}</div>;
   }
   return (
     <div className="graph-dependency-editor">
-      <div className="graph-levels" aria-label="Task dependency levels">
+      <div className="graph-levels" aria-label={t("graph.dependencies.levelsAria")}>
         {levelsFor(definition).map((level, index) => (
           <div className="graph-level" key={index}>
             <span className="graph-level-label">Level {index + 1}</span>
@@ -60,7 +62,7 @@ export function GraphDependencies({ definition, busy, onOpenTask, onChange }: {
                     {candidate}
                   </label>
                 ))}
-                {taskIds.length === 1 && <span>No other Tasks</span>}
+                {taskIds.length === 1 && <span>{t("graph.dependencies.noOthers")}</span>}
               </div>
             </fieldset>
           );

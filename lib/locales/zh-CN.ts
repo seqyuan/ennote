@@ -6,6 +6,7 @@
  * there rather than falling back silently at runtime.
  */
 import { settingsZhCN } from "./settings/zh-CN";
+import { graphZhCN } from "./graph/zh-CN";
 
 export const zhCN: Record<string, string> = {
   "general.title": "通用",
@@ -336,6 +337,7 @@ export const zhCN: Record<string, string> = {
   "welcome.headline": "探索未至之境",
   "welcome.preview": "预览版",
   ...settingsZhCN,
+  ...graphZhCN,
 
   "conversation.toolBatch.ariaOne": "包含 1 个操作的工具批次",
   "conversation.toolBatch.ariaMany": "包含 {count} 个操作的工具批次",

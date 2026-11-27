@@ -3,6 +3,7 @@
 import { ChevronDown, ChevronRight, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { FlowTask } from "@/components/graphs/types";
+import { useT } from "@/components/LocaleProvider";
 
 /**
  * A comma-separated list field that types like a text input.
@@ -73,6 +74,7 @@ export function TaskAccordion({ id, task, expanded, onToggle, onChange, onRemove
    */
   heroPanel?: ReactNode;
 }) {
+  const t = useT();
   return (
     <section className="graph-task" data-task-id={id}>
       <button type="button" className="graph-task-summary" onClick={onToggle} aria-expanded={expanded}>
@@ -85,7 +87,7 @@ export function TaskAccordion({ id, task, expanded, onToggle, onChange, onRemove
           <label>Hero
             <input value={task.hero ?? ""} placeholder="local/alignment or global/reviewer"
               onChange={(event) => onChange({ ...task, hero: event.target.value })} />
-            <span>Local Heroes belong only to this Graph. Global Heroes are shared and read-only here.</span>
+            <span>{t("graph.task.localHeroNote")}</span>
           </label>
           <ListField id={`${id}-skills`} label="Skills" value={task.skills ?? []}
             placeholder="local/alignment, global/report-writing"

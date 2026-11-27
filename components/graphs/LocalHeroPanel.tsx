@@ -6,6 +6,7 @@ import type { ModelOption } from "@/components/graphs/types";
 import { parseToolList, type PortableHeroDocument } from "@/lib/local-hero";
 import { apiFetch, isSourceDigestConflict } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
+import { useT } from "@/components/LocaleProvider";
 
 type GraphLocalHeroDetail = components["schemas"]["GraphLocalHeroDetail"];
 
@@ -36,6 +37,7 @@ export function LocalHeroPanel({ graphId, heroId, models, onError, onSaved }: {
   /** Called once a save has landed: the Graph header's Hero digest is now stale. */
   onSaved?: () => void;
 }) {
+  const t = useT();
   const [detail, setDetail] = useState<GraphLocalHeroDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Set when the Worker refused the save because the file moved. The form stays:
@@ -180,7 +182,7 @@ export function LocalHeroPanel({ graphId, heroId, models, onError, onSaved }: {
   return (
     <div className="graph-local-hero">
       <header>
-        <span>Graph-local Hero</span>
+        <span>{t("graph.localHero.title")}</span>
         <code>{heroId}</code>
         {saving ? <small>Saving…</small> : dirty ? <small>Unsaved</small> : <small>Saved</small>}
       </header>
@@ -203,17 +205,17 @@ export function LocalHeroPanel({ graphId, heroId, models, onError, onSaved }: {
           <option value="write_workspace">write_workspace</option>
         </select>
       </label>
-      <p>Context, delegation limits and the report contract keep the defaults this Hero was created with.</p>
+      <p>{t("graph.localHero.defaultsNote")}</p>
       {stale ? (
         <div className="graph-local-hero-error" role="alert">
-          <span>This Hero changed on disk. Your text is not saved.</span>
+          <span>{t("graph.localHero.changedOnDisk")}</span>
           <button type="button" onClick={() => void reloadFromDisk()}>Use disk version</button>
           <button type="button" onClick={() => void overwriteDisk()}>Save mine over it</button>
         </div>
       ) : error && (
         <div className="graph-local-hero-error" role="alert">
           <span>{error}</span>
-          <button type="button" onClick={() => { setError(null); void save(); }}>Retry save</button>
+          <button type="button" onClick={() => { setError(null); void save(); }}>{t("graph.save.retry")}</button>
         </div>
       )}
     </div>

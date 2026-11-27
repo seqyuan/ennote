@@ -1,6 +1,7 @@
 "use client";
 
 import { shortDigest, type GraphIdentity } from "@/lib/graph-identity";
+import { useT } from "@/components/LocaleProvider";
 
 /**
  * The four facts a Graph header has to keep apart.
@@ -17,6 +18,7 @@ import { shortDigest, type GraphIdentity } from "@/lib/graph-identity";
 export function GraphIdentityRows({ identity }: {
   identity: GraphIdentity;
 }) {
+  const t = useT();
   return (
     <dl className="graph-identity">
       <div>
@@ -25,7 +27,7 @@ export function GraphIdentityRows({ identity }: {
           <code>{identity.draftDigest ? shortDigest(identity.draftDigest) : "—"}</code>
           <small>{identity.draftIsPublished ? "In published revision" : "Not published"}</small>
           {identity.heroesInPublished === false && (
-            <small>Hero edited — not in published revision</small>
+            <small>{t("graph.identity.heroEdited")}</small>
           )}
         </dd>
       </div>
@@ -33,7 +35,7 @@ export function GraphIdentityRows({ identity }: {
         <dt>Published</dt>
         <dd>
           {identity.published === null
-            ? <small>Never published</small>
+            ? <small>{t("graph.identity.neverPublished")}</small>
             : <>
                 {/* The version is its own element: "v7" is a fact, not a prefix of
                     the digest, and the tests and screen readers read it alone. */}
@@ -43,9 +45,9 @@ export function GraphIdentityRows({ identity }: {
         </dd>
       </div>
       <div>
-        <dt>Runs from</dt>
+        <dt>{t("graph.identity.runsFrom")}</dt>
         <dd>
-          {!identity.bound && <small>Not bound to any Project</small>}
+          {!identity.bound && <small>{t("graph.identity.notBound")}</small>}
           {identity.runnable.map((binding) => (
             <span key={binding.projectId}>
               <code>{binding.projectId}</code>

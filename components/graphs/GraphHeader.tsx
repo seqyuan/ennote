@@ -4,6 +4,7 @@ import { Check, Loader2 } from "lucide-react";
 import { GraphIdentityRows } from "@/components/graphs/GraphIdentityRows";
 import type { FlowDefinition } from "@/components/graphs/types";
 import type { GraphIdentity } from "@/lib/graph-identity";
+import { useT } from "@/components/LocaleProvider";
 
 /**
  * The Graph editor's header: which Graph this is, the four identity facts, and the
@@ -21,16 +22,17 @@ export function GraphHeader({ definition, identity, saveState, publishing, publi
   publishDisabled: boolean;
   onPublish: () => void;
 }) {
+  const t = useT();
   return (
     <header className="graph-document-header">
       <div><span>Graph</span><h2>{definition.name ?? definition.id}</h2><code>{definition.id}</code></div>
       <GraphIdentityRows identity={identity} />
       <div className="graph-document-actions">
         <div className={`graph-save-state is-${saveState}`} role="status">{saveState === "saving"
-          ? <><Loader2 className="spin" size={14} /> Saving</>
+          ? <><Loader2 className="spin" size={14} /> {t("graph.header.saving")}</>
           : saveState === "unsaved"
-            ? <>Unsaved changes</>
-            : <><Check size={14} /> Draft saved</>}</div>
+            ? <>{t("graph.header.unsaved")}</>
+            : <><Check size={14} /> {t("graph.header.draftSaved")}</>}</div>
         <button type="button" onClick={onPublish} disabled={publishDisabled}>{publishing ? "Publishing…" : "Publish"}</button>
       </div>
     </header>

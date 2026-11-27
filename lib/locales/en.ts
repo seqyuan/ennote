@@ -5,6 +5,7 @@
  * stays inside the `lib/` size budget (scripts/check-file-sizes.mjs).
  */
 import { settingsEn } from "./settings/en";
+import { graphEn } from "./graph/en";
 
 export const en: Record<string, string> = {
   "general.title": "General",
@@ -338,6 +339,7 @@ export const en: Record<string, string> = {
   "welcome.headline": "Into the Unknown",
   "welcome.preview": "Preview",
   ...settingsEn,
+  ...graphEn,
 
   "conversation.toolBatch.ariaOne": "Tool batch with 1 action",
   "conversation.toolBatch.ariaMany": "Tool batch with {count} actions",

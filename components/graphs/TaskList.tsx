@@ -4,6 +4,7 @@ import { LocalHeroPanel } from "@/components/graphs/LocalHeroPanel";
 import { TaskAccordion } from "@/components/graphs/TaskAccordion";
 import type { FlowDefinition, FlowTask, ModelOption } from "@/components/graphs/types";
 import { localHeroId } from "@/lib/local-hero";
+import { useT } from "@/components/LocaleProvider";
 
 /**
  * The Task list of the Graph editor.
@@ -25,9 +26,10 @@ export function TaskList({ graphId, definition, expanded, models, setError, onHe
   onChange: (id: string, task: FlowTask) => void;
   onRemove: (id: string) => void;
 }) {
+  const t = useT();
   const ids = Object.keys(definition.tasks).sort();
   if (ids.length === 0) {
-    return <div className="graph-empty-state">No Tasks yet. Add one or ask Builder to draft the Graph.</div>;
+    return <div className="graph-empty-state">{t("graph.task.empty")}</div>;
   }
   return (
     <div className="graph-task-list">

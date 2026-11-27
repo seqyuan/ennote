@@ -88,7 +88,7 @@ export function GraphBuilderPanel({ graphId, models, onApplied, setError }: {
 
   return (
     <aside className="graph-builder-pane">
-      <div className="graph-section-heading"><div><span>Builder</span><p>Persistent conversation for this Graph.</p></div><Bot size={18} /></div>
+      <div className="graph-section-heading"><div><span>{t("graph.builder.title")}</span><p>{t("graph.builder.desc")}</p></div><Bot size={18} /></div>
       <div className="graph-builder-content">
         <label className="graph-builder-model">Builder model
           <select value={modelId} onChange={(event) => setModelId(event.target.value)} disabled={Boolean(busy)}>
@@ -98,7 +98,7 @@ export function GraphBuilderPanel({ graphId, models, onApplied, setError }: {
         <div className="graph-builder-messages" aria-live="polite">
           {busy === "loading" && <div className="graph-builder-loading"><Loader2 className="spin" size={16} /> Loading conversation…</div>}
           {thread?.messages.map((message) => <div key={message.id} className={`graph-builder-message is-${message.role}`}><span>{message.role === "user" ? "You" : "Builder"}</span><p>{message.content}</p></div>)}
-          {!busy && (thread?.messages.length ?? 0) === 0 && <div className="graph-builder-intro"><Bot size={22} /><p>Describe Tasks, execution choices, and dependencies. Builder will return a validated proposal.</p></div>}
+          {!busy && (thread?.messages.length ?? 0) === 0 && <div className="graph-builder-intro"><Bot size={22} /><p>{t("graph.builder.hint")}</p></div>}
         </div>
         {thread?.proposal && <div className={`graph-builder-proposal ${thread.proposal.diagnostics.length ? "is-invalid" : ""}`}>
           <header>{thread.proposal.diagnostics.length ? <AlertTriangle size={15} /> : <Check size={15} />}<strong>Proposal</strong><span>{thread.proposal.operations.length} changes</span></header>
@@ -120,7 +120,7 @@ export function GraphBuilderPanel({ graphId, models, onApplied, setError }: {
           <button type="button" onClick={() => void apply()} disabled={thread.proposal.diagnostics.length > 0 || Boolean(busy)}>{busy === "applying" ? "Applying…" : "Apply proposal"}</button>
         </div>}
         <div className="graph-builder-composer">
-          <textarea value={instruction} onChange={(event) => setInstruction(event.target.value)} aria-label="Graph Builder instruction" placeholder="Describe the Graph change…" disabled={Boolean(busy) || !modelId} onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void send(); }} />
+          <textarea value={instruction} onChange={(event) => setInstruction(event.target.value)} aria-label={t("graph.builder.inputAria")} placeholder={t("graph.builder.placeholder")} disabled={Boolean(busy) || !modelId} onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void send(); }} />
           <button type="button" onClick={() => void send()} disabled={!instruction.trim() || !modelId || Boolean(busy)} aria-label="Send Builder instruction">{busy === "sending" ? <Loader2 className="spin" size={17} /> : <Send size={17} />}</button>
         </div>
       </div>

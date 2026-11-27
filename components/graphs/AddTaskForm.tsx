@@ -6,6 +6,7 @@ import type { FlowTask } from "@/components/graphs/types";
 import { defaultLocalHero, localHeroHandleFor } from "@/lib/local-hero";
 import { apiFetch } from "@/lib/worker-api.client";
 import type { components } from "@/lib/worker-api.gen";
+import { useT } from "@/components/LocaleProvider";
 
 type GlobalHeroSummary = components["schemas"]["GlobalHeroSummary"];
 
@@ -25,6 +26,7 @@ export function AddTaskForm({ takenIds, defaultGoal, modelRef, onAdd, onCancel }
   onAdd: (task: { id: string; value: FlowTask; localHero?: Record<string, unknown> }) => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const [taskID, setTaskID] = useState("");
   const [mode, setMode] = useState<"local" | "global">("local");
   const [heroes, setHeroes] = useState<GlobalHeroSummary[] | null>(null);
@@ -58,7 +60,7 @@ export function AddTaskForm({ takenIds, defaultGoal, modelRef, onAdd, onCancel }
     }
     const handle = localHeroHandleFor(id);
     if (!handle) {
-      setError("A Graph-local Hero needs an id that starts with a letter and uses only a-z, 0-9, - or _ (2–32 characters).");
+      setError(t("graph.task.invalidHeroId"));
       return;
     }
     if (!modelRef) {
@@ -73,11 +75,11 @@ export function AddTaskForm({ takenIds, defaultGoal, modelRef, onAdd, onCancel }
   };
 
   return (
-    <div className="graph-add-task" role="group" aria-label="Add Task">
+    <div className="graph-add-task" role="group" aria-label={t("graph.task.addAria")}>
       <input autoFocus value={taskID} onChange={(event) => { setTaskID(event.target.value); setError(null); }} placeholder="task_id" />
       <label>
         <input type="radio" name="graph-add-task-hero" checked={mode === "local"} onChange={() => { setMode("local"); setError(null); }} />
-        New Graph-local Hero
+        {t("graph.task.newHero")}
       </label>
       <label>
         <input type="radio" name="graph-add-task-hero" checked={mode === "global"} onChange={() => { setMode("global"); setError(null); }} />
