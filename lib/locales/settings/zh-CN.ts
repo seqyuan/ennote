@@ -80,7 +80,7 @@ export const settingsZhCN: Record<string, string> = {
   "settings.models.customAdd": "添加自定义提供方",
   "settings.models.customTitle": "自定义提供方",
   "settings.models.customTag": "自定义",
-  "settings.models.customRoute": "Provider ID",
+  "settings.models.customRoute": "\u63d0\u4f9b\u65b9 ID",
   "settings.models.customRouteHint": "以小写字母开头的标识，在请求中唯一标识该提供方，并用于派生凭据名。",
   "settings.models.customRouteInvalid": "需以小写字母开头，之后可用小写字母、数字和短横线。",
   "settings.models.customRouteTaken": "已有提供方使用了这个 ID。",
