@@ -15,6 +15,7 @@ import {
   type PackStateSummary,
 } from "@/lib/packs";
 import { confirmAction } from "@/components/ui/confirm";
+import { useT } from "@/components/LocaleProvider";
 import { SettingsSection } from "@/components/settings/SettingsPrimitives";
 import styles from "./PacksPanel.module.css";
 
@@ -27,6 +28,7 @@ import styles from "./PacksPanel.module.css";
  * blockers, because the Worker refuses an install that still has any.
  */
 export function PacksPanel({ setError }: { setError: (value: string | null) => void }) {
+  const t = useT();
   const [installed, setInstalled] = useState<PackStateSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [path, setPath] = useState("");
@@ -146,16 +148,13 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
   return (
     <section className="settings-tab-section" aria-labelledby="settings-packs-heading">
       <header>
-        <h2 id="settings-packs-heading">Agent Packs</h2>
-        <p>
-          A pack ships Heroes, Skills, and optionally a Graph. Installing one only creates
-          disabled drafts on this Worker — nothing runs until a revision is published and bound.
-        </p>
+        <h2 id="settings-packs-heading">{t("settings.packs.title")}</h2>
+        <p>{t("settings.packs.desc")}</p>
       </header>
 
       <div className={styles.installer}>
         <label className={styles.pathLabel}>
-          <span>Pack path on the Worker host</span>
+          <span>{t("settings.packs.pathLabel")}</span>
           <input
             className={styles.pathInput}
             value={path}
@@ -165,10 +164,10 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
         </label>
         <div className={styles.actions}>
           <button type="button" className="settings-btn" disabled={busy || path.trim() === ""} onClick={inspect}>
-            Inspect
+            {t("settings.packs.inspect")}
           </button>
           <button type="button" className="settings-btn" disabled={busy || path.trim() === ""} onClick={dryRun}>
-            Check install
+            {t("settings.packs.checkInstall")}
           </button>
           <button
             type="button"
@@ -176,7 +175,7 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
             disabled={busy || path.trim() === "" || blocked}
             onClick={apply}
           >
-            Install
+            {t("settings.packs.install")}
           </button>
         </div>
       </div>
@@ -188,13 +187,17 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
             <span className={styles.cardName}>{inspected.pack.name}</span>
             <span className={styles.badge}>{inspected.pack.version}</span>
             <span className={styles.badge}>{inspected.pack.id}</span>
-            {!inspected.signed && <span className={styles.badge}>unsigned</span>}
+            {!inspected.signed && <span className={styles.badge}>{t("settings.packs.unsigned")}</span>}
           </div>
           <div className={styles.counts}>
-            {inspected.flows.length} flows · {inspected.heroes.length} heroes · {inspected.skills.length} skills
-            · {inspected.filesTotal} files
+            {t("settings.packs.counts", {
+              flows: inspected.flows.length,
+              heroes: inspected.heroes.length,
+              skills: inspected.skills.length,
+              files: inspected.filesTotal,
+            })}
           </div>
-          <div className={styles.digest}>pack digest {inspected.packDigest.slice(0, 16)}…</div>
+          <div className={styles.digest}>{t("settings.packs.digest", { digest: inspected.packDigest.slice(0, 16) })}</div>
           <IssueList issues={inspected.warnings} />
         </div>
       )}
@@ -202,8 +205,8 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
       {plan && (
         <div className={styles.card} data-testid="pack-plan" data-blocked={blocked || undefined}>
           <div className={styles.cardHead}>
-            <span className={styles.cardName}>Install plan</span>
-            <span className={styles.badge}>{plan.actions.length} actions</span>
+            <span className={styles.cardName}>{t("settings.packs.installPlan")}</span>
+            <span className={styles.badge}>{t("settings.packs.actionsCount", { count: plan.actions.length })}</span>
           </div>
           <ul className={styles.actionList}>
             {plan.actions.map((action) => (
@@ -219,17 +222,17 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
       )}
 
       <SettingsSection
-        title={<>Installed <span className={styles.sectionCount}>{installed.length}</span></>}
+        title={<>{t("settings.packs.installed")} <span className={styles.sectionCount}>{installed.length}</span></>}
         actions={(
-          <button type="button" className={styles.iconButton} aria-label="Refresh installed packs" onClick={() => void load()}>
+          <button type="button" className={styles.iconButton} aria-label={t("settings.packs.refreshAria")} onClick={() => void load()}>
             <RefreshCw size={13} aria-hidden="true" />
           </button>
         )}
       >
       {loading ? (
-        <div className={styles.empty}>Loading…</div>
+        <div className={styles.empty}>{t("settings.common.loading")}</div>
       ) : installed.length === 0 ? (
-        <div className={styles.empty}>No packs installed.</div>
+        <div className={styles.empty}>{t("settings.packs.empty")}</div>
       ) : (
         <div className={styles.stack}>
           {installed.map((pack) => (
@@ -240,7 +243,7 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
                   <span className={styles.badge}>{pack.pack.version}</span>
                 </div>
                 <div className={styles.meta}>
-                  {pack.flowCount} flows · {pack.heroCount} heroes · {pack.skillCount} skills
+                  {t("settings.packs.installedMeta", { flows: pack.flowCount, heroes: pack.heroCount, skills: pack.skillCount })}
                 </div>
               </div>
               {forceOffer === pack.pack.id && (
@@ -250,13 +253,13 @@ export function PacksPanel({ setError }: { setError: (value: string | null) => v
                   disabled={busy || removing === pack.pack.id}
                   onClick={() => void uninstall(pack, true)}
                 >
-                  Force remove
+                  {t("settings.packs.forceRemove")}
                 </button>
               )}
               <button
                 type="button"
                 className={styles.iconButton}
-                aria-label={`Remove ${pack.pack.name}`}
+                aria-label={t("settings.packs.removeAria", { name: pack.pack.name })}
                 disabled={busy || removing === pack.pack.id}
                 onClick={() => void uninstall(pack, false)}
               >

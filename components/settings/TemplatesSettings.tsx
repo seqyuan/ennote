@@ -6,6 +6,7 @@ import { apiFetch } from "@/lib/worker-api.client";
 import { confirmAction } from "@/components/ui/confirm";
 import { SettingsSection } from "@/components/settings/SettingsPrimitives";
 import { useSettingsStatus } from "@/components/settings/SettingsStatus";
+import { useT } from "@/components/LocaleProvider";
 import type { components } from "@/lib/worker-api.gen";
 
 type TemplateSummary = components["schemas"]["PromptTemplateSummary"];
@@ -29,6 +30,7 @@ function fetchTemplateCatalogs(projectId: string | null) {
 }
 
 export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProps) {
+  const t = useT();
   const [mgmt, setMgmt] = useState<ManagementCatalog | null>(null);
   const [project, setProject] = useState<ProjectCatalog | null>(null);
   const [loadedProjectId, setLoadedProjectId] = useState<string | null | undefined>(undefined);
@@ -57,9 +59,9 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
       setError(null);
     } catch {
       setLoadedProjectId(projectId);
-      setError("Failed to load prompt templates");
+      setError(t("settings.templates.loadFailed"));
     }
-  }, [projectId, setError]);
+  }, [projectId, setError, t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,10 +76,10 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
       .catch(() => {
         if (cancelled) return;
         setLoadedProjectId(projectId);
-        setError("Failed to load prompt templates");
+        setError(t("settings.templates.loadFailed"));
       });
     return () => { cancelled = true; };
-  }, [projectId, setError]);
+  }, [projectId, setError, t]);
 
   const loading = loadedProjectId !== projectId;
   const displayCatalog = project ?? mgmt;
@@ -109,9 +111,9 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
 
   async function doDelete(name: string) {
     if (!(await confirmAction({
-      title: `Delete template “/${name}”?`,
-      description: "The template's markdown file is deleted from the global prompt store. Builtin and project templates are untouched.",
-      confirmLabel: "Delete",
+      title: t("settings.templates.deleteTitle", { name: `/${name}` }),
+      description: t("settings.templates.deleteDescription"),
+      confirmLabel: t("settings.templates.deleteConfirm"),
       tone: "danger",
     }))) return;
     markSaving();
@@ -163,15 +165,15 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
 
   // ——— render ———
 
-  if (loading && !mgmt) return <div className="settings-tab-section"><p>Loading…</p></div>;
+  if (loading && !mgmt) return <div className="settings-tab-section"><p>{t("settings.common.loading")}</p></div>;
 
   const diagnostics = [...(mgmt?.diagnostics ?? []), ...(project?.diagnostics ?? [])];
   const recoveryMode = mgmt?.globalRecoveryMode ?? false;
 
   return (
     <section className="settings-tab-section" aria-labelledby="settings-templates-heading">
-      <header><h2 id="settings-templates-heading">Prompt templates</h2>
-        <p>Manage slash-command prompt templates across builtin, settings, global, and project sources.</p></header>
+      <header><h2 id="settings-templates-heading">{t("settings.templates.title")}</h2>
+        <p>{t("settings.templates.desc")}</p></header>
 
       {/* Diagnostics banner */}
       {diagnostics.length > 0 && (
@@ -191,17 +193,17 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
 
       {/* Effective templates */}
       {displayCatalog && (
-        <SettingsSection title={`Effective templates ${projectId ? "(project)" : "(global)"}`}>
+        <SettingsSection title={t("settings.templates.effective", { scope: projectId ? t("settings.templates.scopeProject") : t("settings.templates.scopeGlobal") })}>
           {displayCatalog.templates.length === 0 ? (
-            <p className="templates-empty">No templates available. Create a global template below or add markdown files to your project&apos;s <code>.ennote/prompts/</code> directory.</p>
+            <p className="templates-empty">{t("settings.templates.emptyCatalog", { dir: ".ennote/prompts/" })}</p>
           ) : (
             <ul className="templates-list">
-              {displayCatalog.templates.map((t) => (
-                <li key={t.name} className="template-row">
-                  <span className="template-name">/{t.name}</span>
-                  {t.argumentHint && <span className="template-hint">{t.argumentHint}</span>}
-                  <span className={`template-source source-${t.source}`}>{t.source}</span>
-                  <span className="template-desc">{t.description}</span>
+              {displayCatalog.templates.map((entry) => (
+                <li key={entry.name} className="template-row">
+                  <span className="template-name">/{entry.name}</span>
+                  {entry.argumentHint && <span className="template-hint">{entry.argumentHint}</span>}
+                  <span className={`template-source source-${entry.source}`}>{entry.source}</span>
+                  <span className="template-desc">{entry.description}</span>
                 </li>
               ))}
             </ul>
@@ -211,10 +213,10 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
 
       {/* Global templates management */}
       <SettingsSection
-        title="My global templates"
+        title={t("settings.templates.globalSection")}
         actions={!recoveryMode ? (
           <button type="button" className="settings-btn" onClick={() => setShowCreate(!showCreate)}>
-            <Plus size={14} /> New
+            <Plus size={14} /> {t("settings.templates.new")}
           </button>
         ) : undefined}
       >
@@ -222,22 +224,22 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
       {recoveryMode && (
         <div className="templates-diag diag-warn templates-diag-block">
           <AlertTriangle size={14} />
-          <span>Global store is in recovery mode. Delete some entries to restore normal operation. Create is disabled.</span>
+          <span>{t("settings.templates.recoveryMode")}</span>
         </div>
       )}
 
       {/* Create form */}
       {showCreate && (
         <form className="template-edit-form" onSubmit={doCreate}>
-          <label>Name <input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="my-command" required disabled={saving} /></label>
-          <label>Description <input value={formDesc} onChange={(e) => setFormDesc(e.target.value)} placeholder="Optional" disabled={saving} /></label>
-          <label>Argument hint <input value={formHint} onChange={(e) => setFormHint(e.target.value)} placeholder="&lt;path&gt; [focus]" disabled={saving} /></label>
-          <label>Body <textarea value={formBody} onChange={(e) => setFormBody(e.target.value)} rows={4} placeholder="Template body with $1, $@, etc." required disabled={saving} /></label>
+          <label>{t("settings.templates.name")} <input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder={t("settings.templates.namePlaceholder")} required disabled={saving} /></label>
+          <label>{t("settings.templates.description")} <input value={formDesc} onChange={(e) => setFormDesc(e.target.value)} placeholder={t("settings.templates.descriptionPlaceholder")} disabled={saving} /></label>
+          <label>{t("settings.templates.argumentHint")} <input value={formHint} onChange={(e) => setFormHint(e.target.value)} placeholder={t("settings.templates.argumentHintPlaceholder")} disabled={saving} /></label>
+          <label>{t("settings.templates.body")} <textarea value={formBody} onChange={(e) => setFormBody(e.target.value)} rows={4} placeholder={t("settings.templates.bodyPlaceholder")} required disabled={saving} /></label>
           <div className="template-form-actions">
             <button type="submit" className="settings-btn primary" disabled={saving || !formName.trim() || !formBody.trim()}>
-              <Save size={14} /> {saving ? "Saving…" : "Create"}
+              <Save size={14} /> {saving ? t("settings.templates.saving") : t("settings.templates.create")}
             </button>
-            <button type="button" className="settings-btn" onClick={() => setShowCreate(false)}>Cancel</button>
+            <button type="button" className="settings-btn" onClick={() => setShowCreate(false)}>{t("settings.templates.cancel")}</button>
           </div>
         </form>
       )}
@@ -261,29 +263,29 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
                 {entry.editable && editing === entry.name ? (
                   // Edit/repair inline form.
                   <div className="template-edit-form template-edit-form-inline">
-                    {entry.valid && <div className="template-edit-readonly">Name: {entry.name}</div>}
-                    <label>Description <input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} disabled={saving} /></label>
-                    <label>Argument hint <input value={editHint} onChange={(e) => setEditHint(e.target.value)} disabled={saving} /></label>
-                    <label>Body <textarea value={editBody} onChange={(e) => setEditBody(e.target.value)} rows={4} disabled={saving} /></label>
+                    {entry.valid && <div className="template-edit-readonly">{t("settings.templates.readonlyName", { name: entry.name })}</div>}
+                    <label>{t("settings.templates.description")} <input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} disabled={saving} /></label>
+                    <label>{t("settings.templates.argumentHint")} <input value={editHint} onChange={(e) => setEditHint(e.target.value)} disabled={saving} /></label>
+                    <label>{t("settings.templates.body")} <textarea value={editBody} onChange={(e) => setEditBody(e.target.value)} rows={4} disabled={saving} /></label>
                     <div className="template-form-actions">
                       <button type="button" className="settings-btn primary" onClick={() => doSaveEdit(entry.name)} disabled={saving || !editBody.trim()}>
-                        <Save size={14} /> {saving ? "Saving…" : entry.valid ? "Update" : "Repair"}
+                        <Save size={14} /> {saving ? t("settings.templates.saving") : entry.valid ? t("settings.templates.update") : t("settings.templates.repair")}
                       </button>
-                      <button type="button" className="settings-btn" onClick={() => setEditing(null)}>Cancel</button>
+                      <button type="button" className="settings-btn" onClick={() => setEditing(null)}>{t("settings.templates.cancel")}</button>
                     </div>
                   </div>
                 ) : entry.editable ? (
                   <>
                     <button type="button" className="settings-btn" onClick={() => startEdit(entry)}>
-                      {entry.valid ? "Edit" : "Repair"}
+                      {entry.valid ? t("settings.templates.edit") : t("settings.templates.repair")}
                     </button>
-                    <button type="button" className="settings-btn danger" aria-label={`Delete template /${entry.name}`}
+                    <button type="button" className="settings-btn danger" aria-label={t("settings.templates.deleteAria", { name: `/${entry.name}` })}
                       onClick={() => void doDelete(entry.name)} disabled={saving}>
                       <Trash2 size={14} aria-hidden="true" />
                     </button>
                   </>
                 ) : (
-                  <span className="template-manual-cleanup">Manual cleanup required in $ENNOTE_HOME/prompts/</span>
+                  <span className="template-manual-cleanup">{t("settings.templates.manualCleanup")}</span>
                 )}
               </div>
             </li>
@@ -292,7 +294,7 @@ export function TemplatesSettings({ projectId, setError }: TemplatesSettingsProp
       )}
 
       {(!mgmt?.globalTemplates || mgmt.globalTemplates.length === 0) && !recoveryMode && (
-        <p className="templates-empty">No global templates yet. Create one above.</p>
+        <p className="templates-empty">{t("settings.templates.noGlobals")}</p>
       )}
       </SettingsSection>
     </section>
